@@ -57,5 +57,4 @@ unit gain; every probe therefore runs at the reference's **ambiance-1** point,
 where the probe's irradiance *is* the ambient and no flat fill is added — which
 is what `suppress_global_ambient` already arranges. The reference's
 **automatic** exposure (its luminance-driven `exposureMap` scaling
-`RenderExposure`) is not ported — see
-[viewer-tonemap-auto-exposure](../done/viewer-tonemap-auto-exposure.md).
+`RenderExposure`) is not ported — see [[viewer-tonemap-auto-exposure]].

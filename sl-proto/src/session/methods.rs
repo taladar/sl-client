@@ -2131,6 +2131,40 @@ impl Session {
                         .collect(),
                 });
             }
+            // The generic method-name + parameter envelope, surfaced verbatim
+            // from a neighbour as it is from the root region. A neighbour
+            // region is entitled to speak a `GenericMessage` feature at a child
+            // agent, and dropping one here is the same kind of gap the coarse
+            // locations, the parcel overlay and the neighbour sounds above were
+            // each added to close: the consumer never learns the region next
+            // door said anything.
+            //
+            // The `emptymutelist` special case of the root arm is deliberately
+            // **not** mirrored: the mute list is the agent's, not a region's,
+            // and only the region hosting the agent has one to report.
+            AnyMessage::GenericMessage(generic) => {
+                self.events.push_back(Event::GenericMessage(GenericMessage {
+                    method: trimmed_string(&generic.method_data.method),
+                    invoice: InvoiceId::from(generic.method_data.invoice),
+                    params: generic
+                        .param_list
+                        .iter()
+                        .map(|block| block.parameter.clone())
+                        .collect(),
+                }));
+            }
+            AnyMessage::LargeGenericMessage(generic) => {
+                self.events
+                    .push_back(Event::LargeGenericMessage(GenericMessage {
+                        method: trimmed_string(&generic.method_data.method),
+                        invoice: InvoiceId::from(generic.method_data.invoice),
+                        params: generic
+                            .param_list
+                            .iter()
+                            .map(|block| block.parameter.clone())
+                            .collect(),
+                    }));
+            }
             _ => {
                 self.push_diagnostic(Diagnostic::UnhandledMessage {
                     id: message.id(),

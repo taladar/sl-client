@@ -47,8 +47,7 @@ The sibling density in `water.rs:550` (the water-surface shader's uniform) is
 the *unmodified* one, where the reference's `lldrawpoolwater.cpp:242` passes the
 modified one. That cannot `NaN` today, because `water.wgsl` declares
 `water_fog_density` and never samples it — but only because of a second, larger
-divergence underneath it, filed as
-[viewer-water-surface-fog-fallback-flat](../bugs/viewer-water-surface-fog-fallback-flat.md):
+divergence underneath it, filed as [[viewer-water-surface-fog-fallback-flat]]:
 the surface's deep-water colour is a flat authored tint where the reference
 computes it from that density. Whoever fixes that must feed it through
 `modified_water_fog_density`, which is why this lives in a named function rather

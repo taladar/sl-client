@@ -9,16 +9,19 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use sl_proto::{InMemoryAssetSource, RegionIdentity, ServerEvent, SimCaps, SimSession, Transmit};
+use sl_proto::{RegionIdentity, ServerEvent, SimCaps, SimSession, Transmit};
 use tokio::net::UdpSocket;
 use tokio::sync::{Mutex, Notify, broadcast, watch};
 
-use crate::runtime::SessionIds;
+use crate::assets::GridAssets;
+use crate::runtime::{SessionIds, SessionRole};
 use crate::scenario::{SimEventHook, SimHook};
 use crate::terrain::TerrainFixture;
 use crate::time::Now;
 use crate::udp_assets::{UdpAssetFixtures, answer_from_fixtures};
-use crate::world::{AvatarIdentity, SceneFixtures, answer_world_request, push_arrival_world};
+use crate::world::{
+    AvatarIdentity, SceneFixtures, answer_world_request, push_arrival_world, push_child_world,
+};
 
 /// The lockable state of one logged-in session: the protocol machine, its
 /// CAPS surface, and the pieces the driver's auto-behaviours need.
@@ -27,8 +30,10 @@ pub(crate) struct SimState {
     pub(crate) sim: SimSession,
     /// The CAPS dispatch surface granted to this session's seed.
     pub(crate) caps: SimCaps,
-    /// The binary asset store served by the session-free asset caps.
-    pub(crate) assets: InMemoryAssetSource,
+    /// The **grid-wide** binary asset store served by the session-free asset
+    /// caps ([`crate::assets`]). Every session shares one; an asset id names
+    /// a blob the whole grid knows, not one region's.
+    pub(crate) assets: GridAssets,
     /// The region identity sent in the automatic `RegionHandshake` greeting
     /// (on `UseCircuitCode`, before the agent's movement completes).
     pub(crate) identity: RegionIdentity,
@@ -58,6 +63,14 @@ pub(crate) struct SimState {
     /// other circuit of the same login (a teleport destination reuses it: the
     /// client opens every circuit with its login `UseCircuitCode` triple).
     pub(crate) ids: SessionIds,
+    /// What this session was opened as, which decides the burst its circuit
+    /// gets on `CircuitOpened` (see [`SessionRole`]).
+    pub(crate) role: SessionRole,
+    /// This session's seed capability URL — what an announcement of it hands
+    /// the client (`EstablishAgentCommunication`, `CrossedRegion`).
+    pub(crate) seed_url: url::Url,
+    /// This session's loopback UDP address, announced alongside the seed.
+    pub(crate) udp_addr: std::net::SocketAddr,
 }
 
 /// One live session's shared handle: the lockable state plus its I/O anchors
@@ -137,10 +150,23 @@ impl SharedSim {
             // `RegionHandshake` before it sends `CompleteAgentMovement`, and
             // the client discards a handshake that arrives after its
             // `AgentMovementComplete` already completed the arrival.
-            if matches!(event, ServerEvent::CircuitOpened { .. })
-                && let Err(error) = state.sim.send_region_handshake(&state.identity, now)
-            {
-                tracing::warn!("auto region handshake failed: {error}");
+            if matches!(event, ServerEvent::CircuitOpened { .. }) {
+                if let Err(error) = state.sim.send_region_handshake(&state.identity, now) {
+                    tracing::warn!("auto region handshake failed: {error}");
+                }
+                // A neighbour's circuit never sees a `CompleteAgentMovement`,
+                // so its scene has to go out now or never: a child agent is
+                // exactly a circuit that streams a region the avatar is not
+                // standing in.
+                if matches!(state.role, SessionRole::Child) {
+                    push_child_world(
+                        &state.world,
+                        &state.terrain,
+                        &state.identity,
+                        &mut state.sim,
+                        now,
+                    );
+                }
             }
             if matches!(event, ServerEvent::AgentArrived) {
                 // A voice-enabled region tells the arriving viewer which
@@ -165,7 +191,7 @@ impl SharedSim {
                     &state.world,
                     &state.terrain,
                     &state.avatar,
-                    &mut state.assets,
+                    &state.assets,
                     &mut state.sim,
                     now,
                 );

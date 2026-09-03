@@ -1162,6 +1162,56 @@ mod test {
         Ok(())
     }
 
+    /// A neighbour region's `GenericMessage`, arriving on the child-agent
+    /// circuit, is surfaced exactly like the root circuit's.
+    ///
+    /// A region is entitled to speak a `GenericMessage` feature at a child
+    /// agent, and dropping one there is the same gap that once left a
+    /// neighbour's coarse dots, parcel overlay and sounds unreported: the
+    /// consumer never learns the region next door said anything.
+    #[test]
+    fn child_circuit_generic_message_is_surfaced() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        enable_neighbour_b(&mut session, 9, now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let message = AnyMessage::GenericMessage(GenericMessage {
+            agent_data: GenericMessageAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::from_u128(2),
+                transaction_id: uuid::Uuid::nil(),
+            },
+            method_data: GenericMessageMethodDataBlock {
+                method: b"sl-fake-grid-marker\0".to_vec(),
+                invoice: uuid::Uuid::nil(),
+            },
+            param_list: vec![GenericMessageParamListBlock {
+                parameter: b"neighbour:Fake Region East".to_vec(),
+            }],
+        });
+        // Delivered from the NEIGHBOUR (child circuit), not the root.
+        session.handle_datagram(sim_b(), &server_message(&message, 11, true)?, now)?;
+        let received = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::GenericMessage(generic) => Some(generic),
+                _ => None,
+            })
+            .ok_or("expected a GenericMessage event from the child circuit")?;
+        assert_eq!(
+            received,
+            sl_proto::GenericMessage {
+                method: "sl-fake-grid-marker".to_owned(),
+                invoice: sl_proto::InvoiceId::default(),
+                params: vec![b"neighbour:Fake Region East".to_vec()],
+            }
+        );
+        Ok(())
+    }
+
     #[test]
     fn large_generic_message_surfaces_method_and_params() -> Result<(), TestError> {
         let now = Instant::now();

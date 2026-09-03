@@ -42,6 +42,19 @@ pub enum Error {
     /// session was abandoned.
     #[error("the client did not arrive in the teleport destination in time")]
     TeleportTimedOut,
+    /// A crossing named a region that does not border the one the agent is in
+    /// (an avatar walks over a border; it does not walk across a grid).
+    #[error("{to:?} is not a neighbour of {from:?}")]
+    NotAdjacent {
+        /// The region the agent is in.
+        from: String,
+        /// The region the crossing asked for.
+        to: String,
+    },
+    /// The client never completed its movement into the region across the
+    /// border; the agent stays the root agent of the region it was in.
+    #[error("the client did not arrive across the border in time")]
+    CrossingTimedOut,
     /// The session the teleport started from is not a registered account's
     /// (cannot happen for a session the grid minted).
     #[error("no account owns the teleporting agent")]

@@ -9,8 +9,7 @@ refs: [viewer-facelight-too-bright]
 
 Context: [context/viewer.md](../context/viewer.md).
 
-On the captured avatar replayed for
-[viewer-facelight-too-bright](../done/viewer-facelight-too-bright.md) (bundle
+On the captured avatar replayed for [[viewer-facelight-too-bright]] (bundle
 agent `52ed4c6a`), the avatar's head shows a **dark brown "shell"** over/among
 the ginger mesh hair — a dark band at the forehead/hairline and a darker region
 down the back — that looks like it shouldn't be there.

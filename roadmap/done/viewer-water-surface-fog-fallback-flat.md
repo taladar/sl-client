@@ -48,8 +48,7 @@ The fog math is already ported once, in `underwater_fog.wgsl:96` — same `kd` /
 Two things not to lose in the port:
 
 - The density the surface shader gets must be the **eye-state-modified** one
-  (`modified_water_fog_density`, ported in
-  [viewer-audit-underwater-fog-nan](../done/viewer-audit-underwater-fog-nan.md)):
+  (`modified_water_fog_density`, ported in [[viewer-audit-underwater-fog-nan]]):
   the reference feeds the water shader `getModifiedWaterFogDensity(underwater)`
   at `lldrawpoolwater.cpp:242`, and `water.rs:550` currently passes the raw
   frame value. Skipping the modified one would also reintroduce the `NaN`, since
@@ -122,10 +121,9 @@ The reference's water is opaque and samples a copy of the screen instead.
 Matching Firestorm's sea is the stated goal, and that dilution is what stands in
 the way of it — while most of the pixel is not the water shader's output, no
 correctness in the shading can close the gap. Filed as
-[viewer-water-surface-alpha-not-refraction](../bugs/viewer-water-surface-alpha-not-refraction.md),
-which is the larger of the two and the one to do next; this one is a
-prerequisite of it either way, since the refraction path shades on top of the
-same fog.
+[[viewer-water-surface-alpha-not-refraction]], which is the larger of the two
+and the one to do next; this one is a prerequisite of it either way, since the
+refraction path shades on top of the same fog.
 
 ### Tests
 

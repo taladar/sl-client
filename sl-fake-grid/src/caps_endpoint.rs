@@ -41,8 +41,12 @@ pub(crate) async fn dispatch_caps(
         let dispatch = {
             let mut guard = shared.state.lock().await;
             if guard.caps.assets().handles_path(path) {
-                // Session-free binary asset serving; no sim state touched.
-                return guard.caps.assets().dispatch(&guard.assets, &request);
+                // Session-free binary asset serving out of the **grid-wide**
+                // store: no sim state touched, and no region's content is
+                // unreachable from another region's capability. The read guard
+                // never outlives this block, so no await ever happens under it.
+                let store = guard.assets.read();
+                return guard.caps.assets().dispatch(&*store, &request);
             }
             let SimState { sim, caps, .. } = &mut *guard;
             let dispatch = caps.dispatch(sim, &request);

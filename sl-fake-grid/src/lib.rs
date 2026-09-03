@@ -1,7 +1,9 @@
 #![doc = include_str!("../README.md")]
 
 pub mod accounts;
+mod assets;
 mod caps_endpoint;
+pub mod crossing;
 mod driver;
 mod economy_endpoint;
 pub mod economy_policy;
@@ -12,6 +14,7 @@ mod http_service;
 mod login_endpoint;
 mod map_tiles;
 pub mod marker;
+pub mod neighbours;
 pub mod runtime;
 pub mod scenario;
 mod teleport;
@@ -21,6 +24,7 @@ pub mod udp_assets;
 pub mod world;
 
 pub use accounts::AccountConfig;
+pub use crossing::CROSSING_ARRIVAL_TIMEOUT;
 pub use economy_policy::{EconomyConfig, EconomyEvent};
 pub use error::Error;
 pub use fixtures::{
@@ -28,9 +32,14 @@ pub use fixtures::{
     PrimFixture, RegionFixture, SculptKind, catalogue, linkset,
 };
 pub use map_tiles::STOCK_TILE_JPEG;
-pub use marker::{MARKER_METHOD, marker, marker_name};
+pub use marker::{
+    MARKER_METHOD, NEIGHBOUR_MARKER_PREFIX, marker, marker_name, neighbour_marker,
+    neighbour_marker_region,
+};
+pub use neighbours::NeighbourPolicy;
 pub use runtime::{
-    FakeAgent, FakeGrid, FakeGridBuilder, GridIdentity, LoginNotice, RegionConfig, TeleportNotice,
+    CrossingNotice, FakeAgent, FakeGrid, FakeGridBuilder, GridIdentity, LoginNotice, RegionConfig,
+    TeleportNotice,
 };
 pub use scenario::{Scenario, SimEventHook, SimHook};
 pub use teleport::TELEPORT_ARRIVAL_TIMEOUT;

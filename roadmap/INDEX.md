@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 310 |
-| blocked | 58 |
+| ready | 313 |
+| blocked | 56 |
 | in-progress | 18 |
 | bugs | 70 |
-| done | 965 |
+| done | 966 |
 | deferred | 24 |
 | wont-do | 14 |
-| **total** | **1557** |
+| **total** | **1559** |
 
 ## ideas (98)
 
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (310)
+## ready (313)
 
 ### protocol
 
@@ -485,6 +485,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-experiences-floater`](ready/viewer-experiences-floater.md) —
   Experiences floater — lists, profile, search (blocked by
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
+- [`viewer-fake-grid-render-catalogue`](ready/viewer-fake-grid-render-catalogue.md)
+  — The full-stack test catalogue — NPCs, attachments, teleport, crossing,
+  parcels, environment (blocked by `test-fake-grid-neighbours-crossing` (done))
 - [`viewer-floater-registry`](ready/viewer-floater-registry.md) — A FLOATERS
   registry, so floaters can be swept at all
 - [`viewer-floater-update-in-place`](ready/viewer-floater-update-in-place.md) —
@@ -955,6 +958,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   The built-in UI sounds the viewer plays on arrival 404
 - [`test-fake-grid-object-sounds`](ready/test-fake-grid-object-sounds.md) — The
   fake grid can serve a sound but cannot play one
+- [`test-fake-grid-seated-crossing`](ready/test-fake-grid-seated-crossing.md) —
+  Crossing a border seated on a vehicle, alone and with other riders
+- [`test-fake-grid-teleport-shapes`](ready/test-fake-grid-teleport-shapes.md) —
+  The teleport matrix — same region, neighbour, distant, and each one failing
 - [`test-fake-grid-timeline`](ready/test-fake-grid-timeline.md) — Scripted
   scenario timelines with markers (blocked by `test-fake-grid-determinism`
   (done), `viewer-fake-grid-render-harness` (done))
@@ -967,7 +974,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-binary-duplication`](ready/repl-audit-binary-duplication.md) —
   The two REPL binaries share ~400 near-verbatim lines and have already drifted
 
-## blocked (58)
+## blocked (56)
 
 ### viewer
 
@@ -978,9 +985,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Day-cycle editor (blocked by `viewer-environment-fixed-editor`)
 - [`viewer-environment-my-environments`](blocked/viewer-environment-my-environments.md)
   — My Environments library (blocked by `viewer-environment-fixed-editor`)
-- [`viewer-fake-grid-render-catalogue`](blocked/viewer-fake-grid-render-catalogue.md)
-  — The full-stack test catalogue — NPCs, attachments, teleport, crossing,
-  parcels, environment (blocked by `test-fake-grid-neighbours-crossing`)
 - [`viewer-floater-interaction-tests`](blocked/viewer-floater-interaction-tests.md)
   — Floater chrome under a real pointer (blocked by
   `viewer-ui-interaction-harness` (done), `viewer-floater-registry`)
@@ -1130,9 +1134,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-assets-unify-rigged-fixtures`](blocked/test-assets-unify-rigged-fixtures.md)
   — Two generators make a rigged fixture; there should be one (blocked by
   `viewer-audit-render-fixtures-crate`)
-- [`test-fake-grid-neighbours-crossing`](blocked/test-fake-grid-neighbours-crossing.md)
-  — Neighbour child agents and a scripted region crossing (blocked by
-  `test-fake-grid-npc-avatars` (done), `test-fake-grid-timeline`)
 - [`test-voice-account`](blocked/test-voice-account-provision-a-voice-account.md)
   — provision a voice account (blocked by `viewer-voice-audio`)
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
@@ -1355,7 +1356,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (965)
+## done (966)
 
 ### protocol
 
@@ -3175,6 +3176,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   injectable clock and seeded ids for sl-fake-grid
 - [`test-fake-grid-fixed-port-scenario`](done/test-fake-grid-fixed-port-scenario.md)
   — Named scenarios and a fixed-port launcher for the fake grid
+- [`test-fake-grid-neighbours-crossing`](done/test-fake-grid-neighbours-crossing.md)
+  — Neighbour child agents and a scripted region crossing (blocked by
+  `test-fake-grid-npc-avatars` (done))
 - [`test-fake-grid-npc-avatars`](done/test-fake-grid-npc-avatars.md) — NPC
   avatars with appearance, animations and attachments (blocked by
   `test-fake-grid-render-fixtures` (done))

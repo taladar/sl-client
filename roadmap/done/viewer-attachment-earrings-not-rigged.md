@@ -10,8 +10,7 @@ refs: [viewer-facelight-too-bright]
 
 Context: [context/viewer.md](../context/viewer.md).
 
-On the captured avatar replayed for
-[viewer-facelight-too-bright](../done/viewer-facelight-too-bright.md) (bundle
+On the captured avatar replayed for [[viewer-facelight-too-bright]] (bundle
 agent `52ed4c6a`), a pair of **earrings** — plus a small **brand-label mesh**
 between them — rendered beside the head, drifting ~2 heads off and **not moving
 with the head as the avatar swayed** (sitting where the ears are in the T-pose).
@@ -47,4 +46,4 @@ joint, not the rest global) and confirmed live in replay: the earrings now track
 the head as it sways.
 
 An unrelated hair transparency issue observed on the same avatar is tracked by
-[mesh-hair-and-hairbase](../deferred/viewer-avatar-mesh-hair-and-hairbase-both-render.md).
+[[viewer-avatar-mesh-hair-and-hairbase-both-render]].

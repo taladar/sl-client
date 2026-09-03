@@ -30,18 +30,17 @@ Worth doing once there is content — a scripted interior, a night region — wh
 the static exposure visibly gives up. Not a prerequisite for anything.
 
 **Progress (2026-08-04) — most of this landed via the sun-disc work**
-([viewer-sun-disc-grey-aditi-hdr-scale](../done/viewer-sun-disc-grey-aditi-hdr-scale.md)):
-`exposure.rs` + `exposure.wgsl` port the reference's dynamic exposure — a
-fullscreen pass reduces the composited scene's average luminance (grid-sample
-over the reference central crop, standing in for the mip chain) and evaluates
-the `exposureF` curve `s = mix(exp_max, exp_min, pow(clamp(L/coeff,0,1),2))`
-into a 1×1 exposure map the tone mapper samples
-(`final_exposure = RenderExposure · s`), with `RenderDynamicExposureEnabled` /
-`RenderDynamicExposureCoefficient` registered. The `exp_min/exp_max` range is
-`generateExposure`'s default (`RenderUseExposureSkySettings = false`) path:
-`[1/hdr_scale, hdr_scale]` for an EEP `reflection_probe_ambiance` sky, `(1, 1)`
-(inert) for a legacy sky — so, like the reference default, adaptation is only
-visible on EEP skies.
+([[viewer-sun-disc-grey-aditi-hdr-scale]]): `exposure.rs` + `exposure.wgsl` port
+the reference's dynamic exposure — a fullscreen pass reduces the composited
+scene's average luminance (grid-sample over the reference central crop, standing
+in for the mip chain) and evaluates the `exposureF` curve `s = mix(exp_max,
+exp_min, pow(clamp(L/coeff,0,1),2))` into a 1×1 exposure map the tone mapper
+samples (`final_exposure = RenderExposure · s`), with
+`RenderDynamicExposureEnabled` / `RenderDynamicExposureCoefficient` registered.
+The `exp_min/exp_max` range is `generateExposure`'s default
+(`RenderUseExposureSkySettings = false`) path: `[1/hdr_scale, hdr_scale]` for an
+EEP `reflection_probe_ambiance` sky, `(1, 1)` (inert) for a legacy sky — so,
+like the reference default, adaptation is only visible on EEP skies.
 
 **Done (2026-08-04) — both remaining pieces landed.**
 

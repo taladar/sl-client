@@ -44,14 +44,15 @@ while holding the state.
 
 ## Session lifetime
 
-A session lives exactly as long as its machine is open. Four tasks
-attend it — the UDP pump, the timer, the teleport responder and a reaper
-— and all four exit on the per-session closed watch the flush rule flips
+A session lives exactly as long as its machine is open. Five tasks
+attend it — the UDP pump, the timer, the teleport responder, the
+neighbour announcer and a reaper — and all five exit on the per-session
+closed watch the flush rule flips
 (logout, inactivity, retirement after a teleport away, abandonment) or on
 the grid's shutdown watch. The reaper is what removes the session from
-the grid's table, so a logout frees its socket, its clone of the
-scenario's assets and its terrain instead of holding them for the life of
-the process, and `/sim/<n>/…` stops resolving. Until it does, a closed
+the grid's table, so a logout frees its socket, its world fixtures and
+its terrain instead of holding them for the life of the process, and
+`/sim/<n>/…` stops resolving. Until it does, a closed
 session is skipped anyway when the grid looks for the circuit hosting an
 agent: `SimSession` never resets its `agent_presence`, so a logged-out
 circuit still reports itself the root agent, and after a relogin a lure
@@ -140,11 +141,13 @@ teleport between the regions from its map — see below.
 ### Named scenarios
 
 `--scenario <name>` picks the scene every region shows, from the registry
-in `fixtures::scenarios`. Two exist today: `stock` (the default — one
-region-wide parcel, one scripted box, an arrival greeting) and
-`catalogue` (the named prim catalogue: one prim per rendering feature,
-plus two NPCs — one standing, one sitting on a bench — with every asset
-they reference served — see below).
+in `fixtures::scenarios`. Three exist today: `stock` (the default — one
+region-wide parcel, one scripted box, an arrival greeting), `catalogue`
+(the named prim catalogue: one prim per rendering feature, plus two NPCs
+— one standing, one sitting on a bench — with every asset they reference
+served — see below), and `border` (one checkered marker pillar floating
+just inside the region's west edge, which with two adjacent `--region`s
+is a scene for looking across — and walking over — a border).
 
 A scene is *named* so that a harness photographing it can say which one
 it photographed, and so the next scene is a registry entry rather than a
@@ -725,6 +728,112 @@ destination `FakeAgent`.
 The real-client tests in `tests/client_end_to_end.rs` cover each path;
 with the binary, `sl-repl-tokio`'s `teleport <handle> <x,y,z>` (handle =
 `grid_x*256 << 32 | grid_y*256`) shows the whole sequence as events.
+
+## Neighbours: the region next door
+
+A simulator does not wait for an avatar to reach a border. The moment the
+agent is rooted it announces every region within view, the client opens a
+**child** circuit to each, and those regions start streaming. That is why
+the region across a border is already drawn before you walk into it, and
+it is what makes a crossing a *promotion* of an open circuit rather than
+a connection made on the spot.
+
+`neighbours.rs` does the same with the one thing a fixture can state:
+which regions touch. `RegionConfig::neighbours` is a `NeighbourPolicy` —
+`Adjacent` (the default: the eight surrounding grid slots, of however
+many the grid actually serves), `None`, or `Named` for a topology the
+coordinates do not describe. A per-session announcer task watches for
+`AgentArrived` — a login's, a teleport's or a crossing's, so a region
+announces its own neighbours however the agent got there — and for each
+one that the agent has no session in yet, prepares a `SessionRole::Child`
+session and enqueues `EnableSimulator` + `EstablishAgentCommunication` on
+the root circuit. It is a task rather than part of the driver's flush
+rule because announcing binds a socket per neighbour, which is async
+work, and the flush rule runs under the session lock.
+
+A child session never sees a `CompleteAgentMovement`, so its scene has to
+go out on `CircuitOpened` or never: `world::push_child_world` sends the
+region's objects, its NPCs, its ground and its parcel overlay — the
+arrival burst *minus the agent*, because the agent is standing next door.
+It ends with a `neighbour:<region name>` marker, which is how a test
+waits for "the region next door has finished streaming" without sleeping
+(`sl_fake_grid::neighbour_marker_region`, and the viewer harness's
+`wait_neighbour`).
+
+Announcing is idempotent by construction: a region the agent already has
+a session in is skipped. That matters most right after a crossing, when
+the region walked out of is a neighbour of the one walked into and its
+circuit is still open — announcing it again would hand the client two
+simulators for one region handle. The same lookup is why
+`teleport_session` reuses an announced child rather than opening a second
+session in the destination.
+
+### Assets are grid-wide
+
+An asset id on a real grid names a blob the whole grid knows: textures,
+meshes, animations and settings live behind every region, and a viewer
+fetches all of them over its **root** region's `GetTexture` / `GetMesh2` /
+`ViewerAsset` — including ids only a neighbour's content references.
+
+`assets.rs` keeps one store per grid, and `FakeGridBuilder::start` folds
+every region's fixture assets into it in builder order (a later region
+wins a colliding id). A `RegionFixture` still *states* what its own
+content needs — that is where a fixture author declares it — but it does
+not own a store. The arriving agent's own bakes go in there too, which is
+what lets a second avatar's viewer fetch the first's.
+
+It is a plain `std::sync::RwLock`, because the one writer runs inside the
+driver's synchronous flush rule; every path takes the session lock before
+the asset lock, never the reverse.
+
+This was per region until 2026-09-03, and the symptom was thoroughly
+misleading: the marker pillar across a border rendered untextured, so a
+checker oracle read "the neighbour region was never streamed" when the
+only thing that had not arrived was one JPEG2000 blob.
+
+## Walking over a border
+
+`crossing.rs` is the teleport's quiet sibling, and it differs in three
+ways that all matter to a viewer:
+
+- **No teleport screen.** One `CrossedRegion` event and the client
+  promotes a circuit it already holds. The scene is *kept* and re-based
+  onto the new origin rather than torn down and rebuilt, which is what
+  the client reports as `RegionChanged { world_reset: false }`.
+- **The destination is already open**, as the neighbour announcement left
+  it. Only a crossing into a region the announcement missed opens one on
+  the spot.
+- **The source is not retired.** It becomes a child agent
+  (`SimSession::make_child_agent`, OpenSim's `MakeChildAgent`) and keeps
+  streaming, because the region you just walked out of is still in front
+  of you. Only the children that have dropped out of view are retired
+  (`retire_distant_children`).
+
+The departing avatar's object is deliberately **not** killed on the
+source circuit. The reference simulator kills it only for *other* viewers
+that cannot see the region the avatar walked into, never for the crossing
+agent's own client — and killing it here would be worse than merely
+unfaithful: this viewer keys avatars by agent, not by circuit, so a kill
+arriving on the old circuit after the new one has streamed the body
+despawns the avatar outright.
+
+The event body is the full reference record
+(`sl_proto::CrossedRegionInfo`): `AgentData` (agent and session id),
+`Info` (position and "look at") and `RegionData` (handle, seed, address,
+region size). All three blocks, because the reference viewer's
+event-queue translation feeds the body straight into the legacy
+`CrossedRegion` message and `process_crossed_region` *rejects* one whose
+`AgentData` does not name its own agent — a body carrying `RegionData`
+alone reaches this workspace's client, which reads only that block, and
+is thrown away by Firestorm. The `Info.LookAt` field is named for the
+wire and not for its contents: OpenSim puts the crossing agent's
+horizontal **velocity** there, so the client keeps its momentum.
+
+Because the fake grid claims no movement authority, a crossing is asked
+for rather than noticed: `FakeGrid::cross_agent(&agent, "Region",
+position, velocity)`, which refuses a destination that does not border
+the agent's region (`Error::NotAdjacent`) and publishes a
+`CrossingNotice` on `FakeGrid::crossings()`.
 
 ## The Bevy smoke tier
 

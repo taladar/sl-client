@@ -16,6 +16,7 @@
 //!
 //! [`into_region`]: RegionFixture::into_region
 
+pub mod border;
 pub mod catalogue;
 pub mod npcs;
 pub mod prims;
@@ -32,6 +33,7 @@ use crate::scenario::Scenario;
 use crate::terrain::TerrainFixture;
 use crate::world::SceneFixtures;
 
+pub use border::border;
 pub use catalogue::{CatalogueEntry, catalogue};
 pub use npcs::{NpcAppearance, NpcBake, NpcFixture};
 pub use prims::{DEFAULT_FACE_COUNT, FaceStyle, PrimFixture, SculptKind, blank_texture, linkset};
@@ -51,7 +53,9 @@ pub struct RegionFixture {
     /// request.
     pub world: SceneFixtures,
     /// The binary assets the objects reference: textures, sculpt maps, meshes,
-    /// GLTF materials.
+    /// GLTF materials. Folded into the grid-wide store when the grid starts
+    /// (`assets.rs`) — a fixture states what its content needs, and every
+    /// region then serves it.
     pub assets: InMemoryAssetSource,
     /// The legacy (`LLMaterial`) materials the object faces name, by material
     /// id — what the `RenderMaterials` capability answers with.
@@ -74,7 +78,8 @@ impl RegionFixture {
     }
 
     /// The fixture as a [`Scenario`]: the world as it is, the assets plus
-    /// every NPC's bakes, and a setup hook that installs the region materials,
+    /// every NPC's bakes (which the builder then folds into the grid-wide
+    /// store), and a setup hook that installs the region materials,
     /// the object media and the environment on every fresh session.
     ///
     /// An NPC's baked textures are registered here rather than by the caller

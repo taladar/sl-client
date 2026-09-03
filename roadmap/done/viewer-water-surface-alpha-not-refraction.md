@@ -229,11 +229,10 @@ enough for the precision to hold. The same pose renders seamless afterwards. The
 per-region planes are 256 m and left as single quads — the effect scales with
 the triangle's `w` range, and theirs is three orders of magnitude smaller.
 
-Worth re-checking against
-[viewer-water-wave-phase-jumps-far-from-origin](../bugs/viewer-water-wave-phase-jumps-far-from-origin.md):
-the same interpolation error moves as the camera moves, so some of the phase
-jumping may be this rather than the texcoord precision that task blames, and may
-already be gone.
+Worth re-checking against [[viewer-water-wave-phase-jumps-far-from-origin]]: the
+same interpolation error moves as the camera moves, so some of the phase jumping
+may be this rather than the texcoord precision that task blames, and may already
+be gone.
 
 ### Tests
 
@@ -257,5 +256,5 @@ it. Plus a unit test that the eye state picks the reference's `scaleAbove` /
   which is where the reference does it. The end state is the same and it costs
   one pass instead of a fogged variant of every translucent material.
 - The wave phase quantises far from the origin:
-  [viewer-water-wave-phase-jumps-far-from-origin](../bugs/viewer-water-wave-phase-jumps-far-from-origin.md),
-  found while reviewing this, but not caused by it.
+  [[viewer-water-wave-phase-jumps-far-from-origin]], found while reviewing this,
+  but not caused by it.

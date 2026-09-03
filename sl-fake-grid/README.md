@@ -40,7 +40,31 @@ answer, ICE trickle, parcel channel, logout — no media plane) and
 advertises it the way a Second Life region does (`voice-config`,
 `SimulatorFeatures.VoiceServerType`, `RequiredVoiceVersion`).
 
+## Neighbours, teleports and crossings
+
+A grid with more than one region behaves like a real one about its
+**neighbours**: the moment an agent is rooted, every region touching its
+own (`RegionConfig::neighbours`, `NeighbourPolicy::Adjacent` by default)
+is announced over the event queue, the client opens a child circuit, and
+that circuit is handed the neighbour's objects, avatars and ground. This
+is why the region across a border is drawn before you reach it.
+
+`FakeGrid::teleport_agent` and `FakeGrid::cross_agent` are the two ways
+an agent moves between regions, and they are deliberately different:
+a teleport puts up the teleport screen, hands the client a
+`TeleportFinish` and retires the source circuit; a crossing sends one
+`CrossedRegion`, promotes the child circuit the client already holds
+without any screen at all, and leaves the source open as a child. The
+grid claims no movement authority, so a crossing is asked for rather than
+noticed.
+
 ## Content fixtures
+
+Assets are **grid-wide**. A `RegionFixture` states the ids its own content
+references, and the builder folds every region's into one store when the
+grid starts — because an asset id names a blob the whole grid knows, and a
+viewer fetches every one of them over its *root* region's capability,
+including the textures of the neighbour it can see across a border.
 
 `fixtures::PrimFixture` builds the `Object` records a region pushes:
 every builder method sets a typed value and packs it into the raw wire
@@ -60,10 +84,18 @@ catalogue` load the same fixture, so "the mesh prim" is the same object
 with the same id in a unit test, a full-stack capture and a Firestorm
 session.
 
-`fixtures::scenarios` names the scenes — `stock` and `catalogue` today —
-so a harness selects one by name and the next one is a registry entry
-rather than a change to the harness. Each scene names its landmarks (a
-name and a region position per thing worth aiming a camera at).
+`fixtures::border()` is the **border** scene: one checkered marker pillar
+floating just inside the region's west edge. It exists for the questions
+that need two regions — is the region across the border drawn at all, and
+does it stay put when the avatar walks into it — because both are only
+decidable in pixels if the subject's position is stated relative to a
+border rather than to the middle of a region.
+
+`fixtures::scenarios` names the scenes — `stock`, `catalogue` and
+`border` today — so a harness selects one by name and the next one is a
+registry entry rather than a change to the harness. Each scene names its
+landmarks (a name and a region position per thing worth aiming a camera
+at).
 `scripts/fake-grid.sh` starts the binary on a fixed port with a named
 scenario and prints, once the grid answers `get_grid_info`, the login URI
 as an IPv4 literal plus the `--grid` argument Firestorm wants.

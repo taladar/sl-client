@@ -43,6 +43,33 @@ pub fn marker(name: &str) -> GenericMessage {
     }
 }
 
+/// The prefix a neighbouring region's own marker carries, ahead of the region
+/// name: `neighbour:Fake Region East`.
+///
+/// A child circuit ends its scene burst with one, so a test can wait for "the
+/// region next door has finished streaming" the same way it waits for anything
+/// else the grid did — and can tell *which* neighbour finished.
+pub const NEIGHBOUR_MARKER_PREFIX: &str = "neighbour:";
+
+/// The marker a child circuit ends its burst with, naming its region.
+#[must_use]
+#[expect(
+    clippy::module_name_repetitions,
+    reason = "re-exported at the crate root, where `sl_fake_grid::neighbour_marker` reads clearly"
+)]
+pub fn neighbour_marker(region_name: &str) -> GenericMessage {
+    marker(&format!("{NEIGHBOUR_MARKER_PREFIX}{region_name}"))
+}
+
+/// The name of the region whose child burst `generic` ends, or `None` if it is
+/// not a neighbour marker.
+#[must_use]
+pub fn neighbour_marker_region(generic: &GenericMessage) -> Option<String> {
+    marker_name(generic)?
+        .strip_prefix(NEIGHBOUR_MARKER_PREFIX)
+        .map(ToOwned::to_owned)
+}
+
 /// The name `generic` marks, or `None` if it is not a marker at all.
 ///
 /// A marker whose name is not UTF-8 is not one this grid sent, so it reads as
@@ -80,6 +107,18 @@ mod tests {
             params: vec![b"killed".to_vec()],
         };
         assert_eq!(marker_name(&other), None);
+    }
+
+    /// A neighbour's marker names its region, and an ordinary marker is not
+    /// one.
+    #[test]
+    fn a_neighbour_marker_names_its_region() {
+        let neighbour = super::neighbour_marker("Fake Region East");
+        assert_eq!(
+            super::neighbour_marker_region(&neighbour).as_deref(),
+            Some("Fake Region East")
+        );
+        assert_eq!(super::neighbour_marker_region(&marker("killed")), None);
     }
 
     /// A marker with no parameter names nothing, rather than naming the empty

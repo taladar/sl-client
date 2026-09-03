@@ -201,13 +201,15 @@ async fn handle_request(
             if method != "GET" {
                 return Ok(plain_status(HttpStatusCode::METHOD_NOT_ALLOWED));
             }
-            let answer = {
-                let guard = shared.state.lock().await;
-                guard
-                    .assets
-                    .get(AssetKey::from(texture))
-                    .map(|bytes| ranged_asset(bytes, range.as_deref(), J2C_CONTENT_TYPE))
-            };
+            // Straight from the grid-wide store: the session was only ever
+            // looked up to decide whether this path resolves at all, and a
+            // bake's bytes belong to the grid rather than to the circuit that
+            // happens to be asking (see [`crate::assets`]).
+            let answer = core
+                .assets
+                .read()
+                .get(AssetKey::from(texture))
+                .map(|bytes| ranged_asset(bytes, range.as_deref(), J2C_CONTENT_TYPE));
             return Ok(match answer {
                 Some(answer) => answer_response(answer),
                 None => plain_status(HttpStatusCode::NOT_FOUND),

@@ -68,7 +68,11 @@ Still **pending live verification on aditi**: OpenSim has
 **no scripted vehicle** to sit on and carry across a border, so the end-to-end
 seated-vehicle crossing (seamless placement, no permission churn) can only be
 exercised on aditi — to be done after the rest of the teleport/crossing work is
-solid. (A separate walk-crossing movement lockup surfaced live —
+solid. (Qualified 2026-09-03: what needs a *scripted* vehicle is the permission
+churn. The **handover** — the vehicle killed in one region and rezzed in the
+next under new local ids, with its riders re-parented — is scriptable offline,
+and [[test-fake-grid-seated-crossing]] is the task for it.) (A separate
+walk-crossing movement lockup surfaced live —
 [[viewer-crossing-movement-locks-up]].)
 
 ## Parity-audit addendum (2026-08-19)

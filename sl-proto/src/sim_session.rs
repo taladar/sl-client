@@ -152,8 +152,8 @@ use crate::error::Error;
 use crate::extra_params::decode_extra_param_blocks;
 use crate::object_update::TerseUpdate;
 use crate::session::{
-    SERVER_HISTORY_CAP, STANDARD_REGION_SIZE_METRES, ServerHistoryMessage, TeleportFinishInfo,
-    XFER_STALL_TIMEOUT, XFER_TIMEOUT_RESULT, agent_drop_group_to_llsd,
+    CrossedRegionInfo, SERVER_HISTORY_CAP, STANDARD_REGION_SIZE_METRES, ServerHistoryMessage,
+    TeleportFinishInfo, XFER_STALL_TIMEOUT, XFER_TIMEOUT_RESULT, agent_drop_group_to_llsd,
     agent_list_voice_updates_to_llsd, agent_state_update_to_llsd, build_map_block_reply,
     build_map_item_reply, build_map_layer_reply, build_task_inventory,
     chatterbox_invitation_to_llsd, chatterbox_session_start_reply_to_llsd,
@@ -7657,13 +7657,29 @@ impl SimSession {
     }
 
     /// Enqueues a CAPS `CrossedRegion` event — the avatar walked over a region
-    /// border; the client promotes its pre-opened child circuit to `dest` to
-    /// root (no teleport screen).
-    pub fn enqueue_crossed_region(&mut self, handle: RegionHandle, dest: SocketAddr, seed: &str) {
-        self.enqueue_caps_event(
-            "CrossedRegion",
-            crossed_region_to_caps_llsd(handle.0, dest, seed),
-        );
+    /// border; the client promotes its pre-opened child circuit to
+    /// `info.dest` to root (no teleport screen). See [`CrossedRegionInfo`] for
+    /// why the announcement names the agent and its landing spot as well as
+    /// the destination simulator.
+    pub fn enqueue_crossed_region(&mut self, info: &CrossedRegionInfo) {
+        self.enqueue_caps_event("CrossedRegion", crossed_region_to_caps_llsd(info));
+    }
+
+    /// Demotes this circuit's root agent back to a **child** agent: the avatar
+    /// left for another region and this one only streams its scene from now
+    /// on. OpenSim's `ScenePresence.MakeChildAgent`, which is what the source
+    /// simulator does once a border crossing has been handed over — unlike a
+    /// teleport, whose source circuit is retired outright
+    /// ([`retire_circuit`](Self::retire_circuit)).
+    ///
+    /// Nothing is sent: the client already knows, because it asked the
+    /// destination to promote its own circuit. In particular the departing
+    /// avatar's object is **not** killed on this circuit — the reference
+    /// simulator kills it only for *other* viewers that cannot see the region
+    /// the avatar walked into, never for the crossing agent's own client,
+    /// whose avatar is one object across every circuit it holds.
+    pub const fn make_child_agent(&mut self) {
+        self.agent_presence = AgentPresence::Child;
     }
 
     /// Queues a `ChatterBoxInvitation` on the event queue — invites this

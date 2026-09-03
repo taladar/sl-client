@@ -4476,17 +4476,77 @@ pub fn enable_simulator_to_caps_llsd(
     llsd_map(vec![("SimulatorInfo", Llsd::Array(vec![info]))])
 }
 
-/// Serializes the destination region handle, address and seed capability as a
-/// CAPS `CrossedRegion` event body (inverse of `crossed_region_from_caps_llsd`).
+/// What a simulator hands the client in a CAPS `CrossedRegion` — the avatar
+/// walked over a region border, and the client promotes its pre-opened child
+/// circuit to the destination without a teleport screen.
+///
+/// The crossing counterpart of [`TeleportFinishInfo`], and the complete record
+/// the reference event-queue builder emits
+/// (OpenSim `EventQueueGetHandlers.CrossRegion`): three blocks, because the
+/// reference viewer's event-queue translation feeds the body straight into the
+/// legacy `CrossedRegion` message and its handler *rejects* the message when
+/// `AgentData` does not name the viewer's own agent and session
+/// (`process_crossed_region`). A body carrying `RegionData` alone therefore
+/// reaches this workspace's client (which reads only that block) and is thrown
+/// away by Firestorm.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct CrossedRegionInfo {
+    /// The crossing agent (`AgentData.AgentID`); the reference viewer drops an
+    /// event naming someone else.
+    pub agent_id: AgentKey,
+    /// The agent's session id (`AgentData.SessionID`), checked the same way.
+    pub session_id: Uuid,
+    /// The destination region's handle (`RegionData.RegionHandle`).
+    pub region_handle: RegionHandle,
+    /// The destination simulator's UDP address (`SimIP` + `SimPort`).
+    pub dest: SocketAddr,
+    /// The destination region's seed capability URL (`SeedCapability`).
+    pub seed: String,
+    /// Where in the destination region the avatar lands (`Info.Position`).
+    pub position: RegionCoordinates,
+    /// The `Info.LookAt` field.
+    ///
+    /// Named for the wire, not for its contents: OpenSim passes the crossing
+    /// agent's horizontal **velocity** here rather than a facing (the
+    /// `EntityTransferModule` hands `vel2` to the event builder's `lookAt`
+    /// parameter), so the client keeps its momentum over the border. The
+    /// reference viewer reads neither field.
+    pub look_at: Vector,
+    /// The destination region's size in metres (`RegionSizeX`, `RegionSizeY`).
+    pub region_size: (u32, u32),
+}
+
+/// Serializes a CAPS `CrossedRegion` event body: the `AgentData`, `Info` and
+/// `RegionData` blocks the reference servers send (see [`CrossedRegionInfo`]).
+/// The `RegionData` half is the inverse of `crossed_region_from_caps_llsd`,
+/// which is all this workspace's client reads.
 #[must_use]
-pub fn crossed_region_to_caps_llsd(handle: u64, dest: SocketAddr, seed: &str) -> Llsd {
-    let region = llsd_map(vec![
-        ("RegionHandle", u64_to_llsd(handle)),
-        ("SimIP", Llsd::Binary(ipv4_octets(dest).to_vec())),
-        ("SimPort", Llsd::Integer(i32::from(dest.port()))),
-        ("SeedCapability", Llsd::String(seed.to_owned())),
+pub fn crossed_region_to_caps_llsd(info: &CrossedRegionInfo) -> Llsd {
+    let (size_x, size_y) = info.region_size;
+    let agent = llsd_map(vec![
+        ("AgentID", Llsd::Uuid(info.agent_id.uuid())),
+        ("SessionID", Llsd::Uuid(info.session_id)),
     ]);
-    llsd_map(vec![("RegionData", Llsd::Array(vec![region]))])
+    let placement = llsd_map(vec![
+        (
+            "LookAt",
+            vec3_to_llsd((info.look_at.x, info.look_at.y, info.look_at.z)),
+        ),
+        ("Position", region_coords_to_llsd(info.position)),
+    ]);
+    let region = llsd_map(vec![
+        ("RegionHandle", u64_to_llsd(info.region_handle.0)),
+        ("SeedCapability", Llsd::String(info.seed.clone())),
+        ("SimIP", Llsd::Binary(ipv4_octets(info.dest).to_vec())),
+        ("SimPort", Llsd::Integer(i32::from(info.dest.port()))),
+        ("RegionSizeX", u32_to_llsd(size_x)),
+        ("RegionSizeY", u32_to_llsd(size_y)),
+    ]);
+    llsd_map(vec![
+        ("AgentData", Llsd::Array(vec![agent])),
+        ("Info", Llsd::Array(vec![placement])),
+        ("RegionData", Llsd::Array(vec![region])),
+    ])
 }
 
 /// Serializes a child region's address and seed capability as a CAPS
@@ -6253,11 +6313,11 @@ mod caps_serializer_tests {
 
     use super::ServerHistoryMessage;
     use super::{
-        CapsTeleportFinish, agent_list_voice_updates_from_llsd, agent_list_voice_updates_to_llsd,
-        ais_inventory_update_from_llsd, ais_inventory_update_to_llsd,
-        ais_updated_category_versions, bulk_update_inventory_from_llsd,
-        bulk_update_inventory_to_llsd, chat_session_request_body, chat_session_request_from_llsd,
-        chat_session_roster_from_llsd, chat_session_roster_to_llsd,
+        CapsTeleportFinish, CrossedRegionInfo, agent_list_voice_updates_from_llsd,
+        agent_list_voice_updates_to_llsd, ais_inventory_update_from_llsd,
+        ais_inventory_update_to_llsd, ais_updated_category_versions,
+        bulk_update_inventory_from_llsd, bulk_update_inventory_to_llsd, chat_session_request_body,
+        chat_session_request_from_llsd, chat_session_roster_from_llsd, chat_session_roster_to_llsd,
         chatterbox_invitation_from_llsd, chatterbox_invitation_to_llsd, created_category_from_llsd,
         created_category_to_llsd, crossed_region_from_caps_llsd, crossed_region_to_caps_llsd,
         enable_simulator_from_caps_llsd, enable_simulator_to_caps_llsd,
@@ -6271,12 +6331,13 @@ mod caps_serializer_tests {
     };
     use super::{
         STANDARD_REGION_SIZE_METRES, TELEPORT_FINISH_LOCATION_ID, TeleportFinishInfo, ipv4_octets,
-        llsd_map, llsd_u32, u64_to_llsd,
+        llsd_map, llsd_u32, region_coords_to_llsd, u32_to_llsd, u64_to_llsd, vec3_to_llsd,
     };
     use crate::types::{
         Event, GroupMember, GroupMembership, ImDialog, InstantMessage, InventoryFolder,
         InventoryItem, LandingType, ParcelCategory, ParcelInfo, ParcelRequestResult, ParcelStatus,
     };
+    use sl_types::lsl::Vector;
     use sl_wire::RegionHandle;
     use sl_wire::{Llsd, Permissions, Permissions5};
 
@@ -6808,15 +6869,59 @@ mod caps_serializer_tests {
         assert_eq!(enable_simulator_from_caps_llsd(&llsd), Some((handle, sim)));
     }
 
+    /// The `RegionData` half round-trips through this workspace's own parser,
+    /// and the two blocks only the reference viewer reads — `AgentData` (which
+    /// it checks against its own agent before accepting the message at all)
+    /// and `Info` — carry what they were given.
     #[test]
-    fn crossed_region_round_trips() -> Result<(), url::ParseError> {
+    fn crossed_region_round_trips() -> Result<(), Box<dyn std::error::Error>> {
         let dest = addr(10, 0, 0, 6, 9001);
-        let handle = 0x0003_ec00_0003_e800;
-        let llsd = crossed_region_to_caps_llsd(handle, dest, "https://seed/x");
+        let handle = RegionHandle(0x0003_ec00_0003_e800);
+        let agent_id = AgentKey::from(Uuid::from_u128(0xc0551));
+        let session_id = Uuid::from_u128(0x005e_5510);
+        let info = CrossedRegionInfo {
+            agent_id,
+            session_id,
+            region_handle: handle,
+            dest,
+            seed: "https://seed/x".to_owned(),
+            position: RegionCoordinates::new(4.0, 128.0, 31.0),
+            look_at: Vector {
+                x: 0.0,
+                y: -1.5,
+                z: 0.0,
+            },
+            region_size: (256, 256),
+        };
+        let llsd = crossed_region_to_caps_llsd(&info);
         assert_eq!(
             crossed_region_from_caps_llsd(&llsd),
-            Some((handle, dest, "https://seed/x".parse()?))
+            Some((handle.0, dest, "https://seed/x".parse()?))
         );
+        let agent = llsd
+            .get("AgentData")
+            .and_then(|block| block.index(0))
+            .ok_or("the AgentData block")?;
+        assert_eq!(agent.get("AgentID"), Some(&Llsd::Uuid(agent_id.uuid())));
+        assert_eq!(agent.get("SessionID"), Some(&Llsd::Uuid(session_id)));
+        let placement = llsd
+            .get("Info")
+            .and_then(|block| block.index(0))
+            .ok_or("the Info block")?;
+        assert_eq!(
+            placement.get("Position"),
+            Some(&region_coords_to_llsd(info.position))
+        );
+        assert_eq!(
+            placement.get("LookAt"),
+            Some(&vec3_to_llsd((0.0, -1.5, 0.0)))
+        );
+        let region = llsd
+            .get("RegionData")
+            .and_then(|block| block.index(0))
+            .ok_or("the RegionData block")?;
+        assert_eq!(region.get("RegionSizeX"), Some(&u32_to_llsd(256)));
+        assert_eq!(region.get("RegionSizeY"), Some(&u32_to_llsd(256)));
         Ok(())
     }
 

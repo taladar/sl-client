@@ -16,9 +16,8 @@ the reference viewer shows the same thing, and for the same reason — so this i
 one to fix rather than to port.
 
 Not caused by the refraction work
-([viewer-water-surface-alpha-not-refraction](../done/viewer-water-surface-alpha-not-refraction.md)),
-which does not touch the wave normals; it was simply noticed while looking hard
-at the water.
+([[viewer-water-surface-alpha-not-refraction]]), which does not touch the wave
+normals; it was simply noticed while looking hard at the water.
 
 The cause is float precision in the texcoords, in
 `sl-client-bevy/src/water.wgsl`:
@@ -49,11 +48,11 @@ what makes the substitution legal.
 `view.world_position` is already in the shader, so this needs no new uniform.
 
 Check first whether it is still there. The ocean plane was one 40 km quad until
-[viewer-water-surface-alpha-not-refraction](../done/viewer-water-surface-alpha-not-refraction.md)
-subdivided it, and the interpolation error that fixed — a fragment's world
-position, disagreed on across a triangle with an enormous `w` range — moves as
-the camera moves. That is also a phase jump, from the other end of the same
-pipeline, and it may have been most of this one.
+[[viewer-water-surface-alpha-not-refraction]] subdivided it, and the
+interpolation error that fixed — a fragment's world position, disagreed on
+across a triangle with an enormous `w` range — moves as the camera moves. That
+is also a phase jump, from the other end of the same pipeline, and it may have
+been most of this one.
 
 Verify by camming out a region or two over open water and watching the ripples,
 which is how it was found; a screenshot pair cannot show a phase jump.

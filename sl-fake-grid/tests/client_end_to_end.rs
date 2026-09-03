@@ -225,6 +225,44 @@ mod test {
         ) -> Result<T, TestError> {
             wait_on(&mut self.events, pick).await
         }
+
+        /// Receives client events until `pick` answers `true`, with **one**
+        /// deadline for the whole wait and a dump of what did arrive when it
+        /// expires.
+        ///
+        /// [`wait_for`](Self::wait_for) restarts its timeout on every event it
+        /// receives, so a session that keeps chattering — pings, coarse
+        /// locations, the agent's own updates — keeps a wait for something that
+        /// will never arrive alive indefinitely. That is fine for waiting on
+        /// one thing that is about to happen, and useless for waiting on a set
+        /// of things that may not.
+        async fn wait_until(
+            &mut self,
+            what: &str,
+            mut pick: impl FnMut(&Event) -> bool,
+        ) -> Result<(), TestError> {
+            let mut seen: Vec<String> = Vec::new();
+            let events = &mut self.events;
+            let waited = tokio::time::timeout(WAIT, async {
+                loop {
+                    let Some(event) = events.recv().await else {
+                        return Err::<(), TestError>("client event stream ended early".into());
+                    };
+                    seen.push(format!("{event:?}").chars().take(140).collect());
+                    if pick(&event) {
+                        return Ok(());
+                    }
+                }
+            })
+            .await;
+            match waited {
+                Ok(inner) => inner,
+                Err(_elapsed) => {
+                    let tail: Vec<&String> = seen.iter().rev().take(24).collect();
+                    Err(format!("timed out waiting for {what}; last events: {tail:#?}").into())
+                }
+            }
+        }
     }
 
     /// Receives events from `events` until `pick` returns a value (the
@@ -987,6 +1025,271 @@ mod test {
                 _ => None,
             })
             .await?;
+        Ok(())
+    }
+
+    /// The region bordering the start region to the east: the crossing tests'
+    /// destination, and — unlike [`east_region`] — close enough that the start
+    /// region announces it as a neighbour.
+    fn adjacent_east_region() -> RegionConfig {
+        RegionConfig {
+            name: "Fake Region East".to_owned(),
+            grid_x: RegionConfig::default().grid_x.saturating_add(1),
+            grid_y: RegionConfig::default().grid_y,
+            ..RegionConfig::default()
+        }
+    }
+
+    /// **A neighbour is announced on arrival and streams its own scene.**
+    ///
+    /// The reason a region across a border is already drawn before you walk
+    /// into it, and the precondition for a crossing being a *promotion* rather
+    /// than a connection: the moment the agent is rooted, the region tells the
+    /// client about the one next door (`EnableSimulator` +
+    /// `EstablishAgentCommunication`), the client opens a child circuit, and
+    /// that circuit is handed the neighbour's objects and ground — labelled
+    /// with the neighbour's handle, not the root region's.
+    #[tokio::test]
+    async fn a_neighbour_is_announced_and_streams_its_scene() -> Result<(), TestError> {
+        let mut running = start_in(vec![RegionConfig::default(), adjacent_east_region()]).await?;
+        let east = running
+            ._grid
+            .region_handle("Fake Region East")
+            .ok_or("no east region")?;
+        assert_eq!(
+            running._grid.neighbours_of("Fake Region"),
+            vec!["Fake Region East".to_owned()],
+            "an adjacent region is a neighbour"
+        );
+
+        let mut announced = None;
+        let mut seeded = None;
+        running
+            .wait_until("the east region to be announced and seeded", |event| {
+                match event {
+                    Event::NeighborDiscovered(info) if info.region_handle == east => {
+                        announced = Some(info.sim);
+                    }
+                    Event::NeighborSeed { sim, .. } => seeded = Some(*sim),
+                    _other => {}
+                }
+                announced.is_some() && seeded.is_some()
+            })
+            .await?;
+        assert!(announced.is_some_and(|sim| sim.ip().is_loopback()));
+        assert_eq!(seeded, announced, "the seed names the announced simulator");
+
+        // The child circuit's own burst: the neighbour's ground and objects,
+        // labelled with the neighbour's handle rather than the root region's,
+        // and the marker that says the burst is complete.
+        let mut ground = false;
+        let mut objects = false;
+        let mut marked = false;
+        running
+            .wait_until("the east region's scene on its child circuit", |event| {
+                match event {
+                    Event::TerrainPatch(patch) if patch.region_handle == east => ground = true,
+                    Event::ObjectAdded(object) | Event::ObjectUpdated(object)
+                        if object.region_handle == east =>
+                    {
+                        // The neighbour's own content, and no avatar: a child
+                        // agent has no body in the region it is only watching.
+                        assert_ne!(object.pcode, sl_proto::pcode::AVATAR);
+                        objects = true;
+                    }
+                    Event::GenericMessage(generic) => {
+                        marked |= sl_fake_grid::neighbour_marker_region(generic).as_deref()
+                            == Some("Fake Region East");
+                    }
+                    _other => {}
+                }
+                ground && objects && marked
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// **An asset id is the whole grid's, not one region's.**
+    ///
+    /// A viewer fetches every asset over its **root** region's capability,
+    /// including ids only another region's content references — the texture of
+    /// the neighbour it can see across a border, most obviously. So a texture
+    /// declared by the eastern region's fixture alone must be fetchable from
+    /// the western region the agent is standing in.
+    #[tokio::test]
+    async fn an_asset_of_one_region_is_served_by_another() -> Result<(), TestError> {
+        // The border fixture's checker is declared by the east region only.
+        let marker = sl_fake_grid::fixtures::border::MARKER_TEXTURE;
+        let east = sl_fake_grid::fixtures::border::border().into_region(adjacent_east_region());
+        let mut running = start_in(vec![RegionConfig::default(), east]).await?;
+        assert_eq!(running.region_name.as_deref(), Some("Fake Region"));
+
+        running
+            .commands
+            .send(Command::FetchTexture {
+                texture_id: marker,
+                discard_level: sl_proto::j2c::DiscardLevel::FULL,
+            })
+            .await?;
+        let bytes = running
+            .wait_for(|event| match event {
+                Event::TextureReceived(fetched) if fetched.id == marker => {
+                    Some(fetched.data.clone())
+                }
+                _ => None,
+            })
+            .await?;
+        let decoded = sl_texture::decode_j2c(&bytes, sl_proto::j2c::DiscardLevel::FULL)
+            .map_err(|error| format!("the neighbour's checker did not decode: {error}"))?;
+        assert!(decoded.width > 0 && decoded.height > 0);
+        Ok(())
+    }
+
+    /// **A border crossing promotes the child circuit, and keeps the world.**
+    ///
+    /// The whole point of the crossing path next to the teleport one: no
+    /// teleport screen, a `RegionChanged` that does *not* reset the world, the
+    /// destination rooting the agent where it was told, and — unlike a teleport
+    /// — the source circuit still open, now as the child of the region walked
+    /// out of.
+    #[tokio::test]
+    async fn a_border_crossing_promotes_the_child_circuit() -> Result<(), TestError> {
+        let mut running = start_in(vec![RegionConfig::default(), adjacent_east_region()]).await?;
+        let east = running
+            ._grid
+            .region_handle("Fake Region East")
+            .ok_or("no east region")?;
+        let source = running.agent.clone();
+        let source_seq = source.session_seq().await;
+        let mut crossings = running._grid.crossings();
+
+        // Wait for the neighbour's circuit to be up before crossing, so the
+        // test exercises the reuse path rather than the announce-on-the-spot
+        // fallback.
+        running
+            .wait_until("the east region's child circuit", |event| match event {
+                Event::GenericMessage(generic) => {
+                    sl_fake_grid::neighbour_marker_region(generic).as_deref()
+                        == Some("Fake Region East")
+                }
+                _ => false,
+            })
+            .await?;
+
+        let landing = RegionCoordinates::new(2.0, 128.0, 26.0);
+        let walking = Vector {
+            x: 3.2,
+            y: 0.0,
+            z: 0.0,
+        };
+        let destination = running
+            ._grid
+            .cross_agent(&source, "Fake Region East", landing, walking)
+            .await?;
+
+        let (changed, world_reset) = running
+            .wait_for(|event| match event {
+                Event::RegionChanged {
+                    region_handle,
+                    world_reset,
+                    ..
+                } => Some((*region_handle, *world_reset)),
+                _ => None,
+            })
+            .await?;
+        assert_eq!(changed, east);
+        assert!(
+            !world_reset,
+            "a crossing re-bases the scene it has; it does not throw it away"
+        );
+
+        let notice = tokio::time::timeout(WAIT, crossings.recv()).await??;
+        assert_eq!(notice.from_seq, source_seq);
+        assert_eq!(notice.region_name, "Fake Region East");
+        assert_eq!(notice.agent_id, source.agent_id());
+        assert_eq!(notice.to_seq, destination.session_seq().await);
+
+        assert!(destination.with_sim(|sim| sim.is_root_agent()).await);
+        assert_eq!(
+            destination
+                .with_sim(|sim| sim.arrival_position().position)
+                .await,
+            landing
+        );
+        assert!(
+            !source.is_closed(),
+            "the region walked out of keeps streaming as a child, unlike a teleport's source"
+        );
+        assert!(
+            !source.with_sim(|sim| sim.is_root_agent()).await,
+            "the source demoted itself to a child agent"
+        );
+
+        // The promoted circuit talks: a chat line from the destination reaches
+        // the client, which is what "the client is rooted there now" means.
+        destination
+            .with_sim(|sim| {
+                sim.send_chat_from_simulator(
+                    "East",
+                    sl_proto::ChatSource::System,
+                    sl_proto::Uuid::nil(),
+                    ChatType::Normal,
+                    1,
+                    sl_proto::Camera::region_center().center,
+                    "walked in",
+                    destination.now(),
+                )
+            })
+            .await?;
+        running
+            .wait_for(|event| match event {
+                Event::ChatReceived(message) if message.message == "walked in" => Some(()),
+                _ => None,
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// An avatar walks over a border; it does not walk across a grid. A region
+    /// the agent does not border is refused, and a region policy of
+    /// [`NeighbourPolicy::None`] borders nothing at all.
+    #[tokio::test]
+    async fn a_crossing_is_refused_where_there_is_no_border() -> Result<(), TestError> {
+        let running = start_in(vec![RegionConfig::default(), east_region()]).await?;
+        assert!(
+            running._grid.neighbours_of("Fake Region").is_empty(),
+            "ten regions east is not next door"
+        );
+        let error = running
+            ._grid
+            .cross_agent(
+                &running.agent,
+                "Fake Region East",
+                RegionCoordinates::new(2.0, 128.0, 26.0),
+                Vector {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            )
+            .await
+            .err()
+            .ok_or("a distant region is not a border")?;
+        assert!(matches!(error, sl_fake_grid::Error::NotAdjacent { .. }));
+        assert!(
+            !running.agent.is_closed(),
+            "the refusal costs the session nothing"
+        );
+
+        let hermit = RegionConfig {
+            neighbours: sl_fake_grid::NeighbourPolicy::None,
+            ..RegionConfig::default()
+        };
+        let alone = start_in(vec![hermit, adjacent_east_region()]).await?;
+        assert!(
+            alone._grid.neighbours_of("Fake Region").is_empty(),
+            "a region that announces no neighbours has none to cross into"
+        );
         Ok(())
     }
 

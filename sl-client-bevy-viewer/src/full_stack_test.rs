@@ -358,22 +358,7 @@ impl ViewerHarness {
     /// count says whether the session is working or stuck, the events say how
     /// far it got, and the warnings often say why it got no further.
     fn timeout_report(&self, what: &str) -> String {
-        let outstanding = self.app.world().resource::<SceneWork>().outstanding;
-        let events: Vec<String> = self
-            .app
-            .world()
-            .resource::<Recorded>()
-            .events
-            .iter()
-            .rev()
-            .take(12)
-            .map(|event| format!("{event:?}").chars().take(160).collect::<String>())
-            .collect();
-        let warnings: Vec<String> = self.logs.events().into_iter().rev().take(8).collect();
-        format!(
-            "timed out waiting for {what}\n  outstanding asset work: {outstanding}\n  last \
-             events: {events:#?}\n  last warnings: {warnings:#?}"
-        )
+        timeout_report(&self.app, &self.logs, what)
     }
 
     /// Step frames until an event matching `pick` has been recorded.
@@ -535,6 +520,12 @@ impl ViewerHarness {
         self.app.world()
     }
 
+    /// The handle of the grid region called `name`, for an assertion about
+    /// which region a streamed object or patch came from.
+    pub(crate) fn region_handle(&self, name: &str) -> Option<sl_proto::RegionHandle> {
+        self.grid.region_handle(name)
+    }
+
     /// The grid-side handle onto this session, after [`login`](Self::login).
     pub(crate) fn agent(&self) -> Result<FakeAgent, TestError> {
         self.agent
@@ -645,6 +636,117 @@ impl ViewerHarness {
         Ok(())
     }
 
+    /// Walk the avatar over the border into `region_name`, landing at
+    /// `position`, and wait until the client is rooted there.
+    ///
+    /// The grid's path, not the client's: a crossing is something a simulator
+    /// decides, and the fake grid — which simulates no movement — is told to
+    /// decide it ([`sl_fake_grid::FakeGrid::cross_agent`]). Unlike
+    /// [`teleport_to`](Self::teleport_to) nothing is waited for afterwards
+    /// except the arrival itself: the destination's ground was streamed to the
+    /// child circuit long before, which is the property this exists to test.
+    ///
+    /// The grid future is stepped *between viewer frames* rather than blocked
+    /// on. The crossing waits for the client's `CompleteAgentMovement`, and the
+    /// client only sends one when the app steps a frame, so
+    /// [`grid`](Self::grid) — which blocks the whole thread — would deadlock
+    /// the two halves against each other.
+    pub(crate) fn cross_to(
+        &mut self,
+        region_name: &str,
+        position: sl_proto::RegionCoordinates,
+    ) -> Result<(), TestError> {
+        let handle = self
+            .grid
+            .region_handle(region_name)
+            .ok_or_else(|| format!("the grid serves no region called {region_name:?}"))?;
+        let before = self
+            .app
+            .world()
+            .resource::<Recorded>()
+            .events
+            .len()
+            .saturating_sub(1);
+        let agent = self.agent()?;
+        let deadline = Instant::now().checked_add(WAIT).ok_or("clock overflow")?;
+        // A block, so the future borrowing `self.grid` is dropped before the
+        // wait below borrows `self` whole; destructured inside it, so the
+        // borrow checker sees the future, the app and the log capture as the
+        // disjoint fields they are.
+        let destination = {
+            let Self {
+                runtime,
+                grid,
+                app,
+                logs,
+                ..
+            } = self;
+            let mut crossing = Box::pin(grid.cross_agent(
+                &agent,
+                region_name,
+                position,
+                // Placed, not walking: the fake grid runs no physics, so there
+                // is no momentum to carry over the border.
+                sl_proto::Vector {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            ));
+            loop {
+                app.update();
+                // The timeout is built *inside* `block_on`: `tokio::time::timeout`
+                // arms a timer against the ambient runtime, and constructing it in
+                // the argument position — outside the runtime — panics with "there
+                // is no reactor running".
+                let slice = runtime
+                    .block_on(async { tokio::time::timeout(FRAME_PAUSE, &mut crossing).await });
+                match slice {
+                    Ok(result) => break result?,
+                    Err(_still_going) => {}
+                }
+                if Instant::now() >= deadline {
+                    let what = format!("the grid to hand the agent over to {region_name}");
+                    return Err(timeout_report(app, logs, &what).into());
+                }
+            }
+        };
+        self.agent = Some(destination);
+        // The client's own account of the handover: a `RegionChanged` naming
+        // the destination that did **not** reset the world.
+        self.run_until(&format!("the arrival in {region_name}"), |harness| {
+            harness
+                .app
+                .world()
+                .resource::<Recorded>()
+                .events
+                .iter()
+                .skip(before)
+                .any(|event| {
+                    matches!(
+                        event,
+                        SlSessionEvent::RegionChanged { region_handle, world_reset: false, .. }
+                            if *region_handle == handle
+                    )
+                })
+                .then_some(())
+        })
+    }
+
+    /// Step frames until the neighbouring region called `name` has finished
+    /// streaming its scene to its child circuit
+    /// ([`sl_fake_grid::neighbour_marker`]).
+    pub(crate) fn wait_neighbour(&mut self, name: &str) -> Result<(), TestError> {
+        let wanted = name.to_owned();
+        self.wait_event(&format!("the neighbour {name}"), move |event| match event {
+            SlSessionEvent::GenericMessage(generic) => {
+                (sl_fake_grid::neighbour_marker_region(generic).as_ref() == Some(&wanted))
+                    .then_some(())
+            }
+            _ => None,
+        })
+    }
+
     /// Log out cleanly and wait for the client to say so.
     pub(crate) fn logout(&mut self) -> Result<(), TestError> {
         self.command(Command::Logout);
@@ -652,6 +754,31 @@ impl ViewerHarness {
             matches!(event, SlSessionEvent::LoggedOut).then_some(())
         })
     }
+}
+
+/// What a timeout has to say for itself, from the two fields that know: how
+/// much the scene still owes and how far the session got ([`Recorded`],
+/// [`SceneWork`]), and what it warned about on the way ([`LogCapture`]).
+///
+/// A free function rather than only a method because
+/// [`ViewerHarness::cross_to`] holds a future borrowing one field of the
+/// harness while it needs a report out of two others.
+fn timeout_report(app: &App, logs: &LogCapture, what: &str) -> String {
+    let outstanding = app.world().resource::<SceneWork>().outstanding;
+    let events: Vec<String> = app
+        .world()
+        .resource::<Recorded>()
+        .events
+        .iter()
+        .rev()
+        .take(12)
+        .map(|event| format!("{event:?}").chars().take(160).collect::<String>())
+        .collect();
+    let warnings: Vec<String> = logs.events().into_iter().rev().take(8).collect();
+    format!(
+        "timed out waiting for {what}\n  outstanding asset work: {outstanding}\n  last events: \
+         {events:#?}\n  last warnings: {warnings:#?}"
+    )
 }
 
 /// Build the headless viewer: the readback base (no window, no winit, no log,
@@ -820,7 +947,7 @@ fn build_viewer_app(params: LoginParams) -> (App, Captured) {
 
 #[cfg(test)]
 mod tests {
-    use super::{FRAME, ViewerHarness, stock_fixture};
+    use super::{FRAME, Recorded, ViewerHarness, stock_fixture};
 
     use bevy::prelude::*;
     use sl_fake_grid::RegionConfig;
@@ -1180,12 +1307,20 @@ mod tests {
     /// scene that was rebuilt from one that was merely emptied — the catalogue's
     /// checker is in the *destination*, so it can only be on screen if the
     /// arrival built it.
+    ///
+    /// The destination is deliberately **ten regions away** rather than next
+    /// door. An adjacent region is announced as a neighbour on login and
+    /// streams its scene to a child circuit long before any teleport, so its
+    /// checker would be on screen whether the arrival rebuilt anything or not
+    /// — which is the claim this test makes, and would then no longer be
+    /// making. (What a *neighbour* renders is
+    /// [`a_neighbour_region_is_rendered_across_the_border`]'s question.)
     #[test]
     fn a_teleport_renders_the_destination_region() -> Result<(), TestError> {
         let subject = entry("checker-box").ok_or("the catalogue has no checker-box")?;
         let destination = sl_fake_grid::catalogue().into_region(RegionConfig {
             name: "Fake Region East".to_owned(),
-            grid_x: RegionConfig::default().grid_x.saturating_add(1),
+            grid_x: RegionConfig::default().grid_x.saturating_add(10),
             ..RegionConfig::default()
         });
         let mut harness = ViewerHarness::start_in(vec![
@@ -1211,5 +1346,276 @@ mod tests {
             );
         }
         harness.logout()
+    }
+
+    /// The two-region grid the border tests run on: a plain western region the
+    /// account logs into, and the border scene to its east, whose marker pillar
+    /// stands a few metres past the shared edge.
+    ///
+    /// The east region alone declares the pillar's checker, and the viewer
+    /// fetches it over the **west** region's `GetTexture` — which works because
+    /// the grid's asset store is grid-wide, as a real one's is. It was not
+    /// always: this pair is what found that, with the pillar rendering
+    /// untextured and the checker oracle reading it as "the neighbour was never
+    /// streamed" when what had not arrived was one JPEG2000 blob.
+    fn border_grid() -> Vec<RegionConfig> {
+        let west = RegionConfig {
+            name: WEST_REGION.to_owned(),
+            ..RegionConfig::default()
+        };
+        let east = RegionConfig {
+            name: EAST_REGION.to_owned(),
+            grid_x: RegionConfig::default().grid_x.saturating_add(1),
+            ..RegionConfig::default()
+        };
+        vec![
+            stock_fixture().into_region(west),
+            sl_fake_grid::fixtures::border::border().into_region(east),
+        ]
+    }
+
+    /// Step frames until the eastern region's marker pillar has reached the
+    /// client, streamed on the child circuit and stamped with the east
+    /// region's own handle.
+    ///
+    /// Waited for separately from the picture so a failure says which half
+    /// broke: the object never arriving is a grid or child-circuit fault, and
+    /// its arriving but not being drawn is a rendering one.
+    fn wait_for_the_marker(harness: &mut ViewerHarness) -> Result<(), TestError> {
+        let east = harness
+            .region_handle(EAST_REGION)
+            .ok_or("the grid serves no eastern region")?;
+        harness.wait_event("the eastern region's marker pillar", |event| match event {
+            sl_client_bevy::SlSessionEvent::ObjectAdded(object)
+            | sl_client_bevy::SlSessionEvent::ObjectUpdated(object)
+                if object.local_id == sl_fake_grid::fixtures::border::MARKER_LOCAL_ID
+                    && object.region_handle == east =>
+            {
+                Some(())
+            }
+            _ => None,
+        })
+    }
+
+    /// The region the border tests log into.
+    const WEST_REGION: &str = "Fake Region West";
+
+    /// The region the border tests look into, and then walk into.
+    const EAST_REGION: &str = "Fake Region East";
+
+    /// Where in the **western** region the camera stands to frame the eastern
+    /// region's marker pillar: this far west of the shared border.
+    ///
+    /// Twelve metres, so a three metre pillar four metres the other side of the
+    /// border covers a disc of a couple of dozen pixels — big enough to
+    /// classify, small enough that the framing has room around it.
+    const BORDER_CAMERA_WEST: f32 = 12.0;
+
+    /// The eye height the border framing uses: the stock ground, aiming up at
+    /// the floating pillar, so the horizon is below its disc.
+    const BORDER_EYE_Z: f32 = 25.0;
+
+    /// The offset from the marker's centre used to size its disc, in metres —
+    /// half its body, so the disc is inscribed in the pillar rather than
+    /// bounding it.
+    const BORDER_DISC_EDGE: f32 = sl_fake_grid::fixtures::border::MARKER_SIZE / 2.0;
+
+    /// How far, in pixels, the marker's projected centre may move across the
+    /// crossing.
+    ///
+    /// Two, as the task states it. Not zero: the projection is float maths over
+    /// a coordinate frame whose origin moved by 256 metres, and a pixel of
+    /// rounding at that magnitude is not a viewer bug.
+    const BORDER_DRIFT_PX: f32 = 2.0;
+
+    /// The marker pillar's position in the frame of the region called `region`
+    /// — its own region-local position, or that shifted a whole region east
+    /// when read from the region to the west.
+    fn marker_seen_from(region: &str) -> Vector {
+        let at = sl_fake_grid::fixtures::border::marker_position();
+        if region == EAST_REGION {
+            at
+        } else {
+            Vector {
+                x: at.x + 256.0,
+                ..at
+            }
+        }
+    }
+
+    /// The disc the marker pillar covers, projected through the camera that
+    /// drew the current frame, with the pillar's position stated in the frame
+    /// of `region` — which is the region the session is rooted in, and
+    /// therefore the scene origin.
+    fn marker_disc(harness: &mut ViewerHarness, region: &str) -> Result<Silhouette, TestError> {
+        let at = marker_seen_from(region);
+        let edge = Vector {
+            z: at.z + BORDER_DISC_EDGE,
+            ..at
+        };
+        disc_from(&harness.project(&[at, edge]))
+    }
+
+    /// **The region across the border is drawn before you walk into it.**
+    ///
+    /// What a neighbour announcement is *for*: on arrival the grid tells the
+    /// client about the region next door, the client opens a child circuit, and
+    /// that circuit streams the neighbour's scene. Everything downstream of it
+    /// is under test at once — the event-queue announcement, the child circuit,
+    /// the neighbour's own object update, and the region offset that puts a
+    /// neighbour's object on the neighbour's ground rather than on top of the
+    /// root region's.
+    ///
+    /// The subject is the *eastern* region's pillar seen from the *western*
+    /// region, so it can only be on screen if all of that ran: a viewer that
+    /// ignored the neighbour draws nothing there, and one that placed it
+    /// without the offset draws it 256 metres away.
+    #[test]
+    fn a_neighbour_region_is_rendered_across_the_border() -> Result<(), TestError> {
+        let mut harness = ViewerHarness::start_in(border_grid())?;
+        harness.login()?;
+        harness.wait_neighbour(EAST_REGION)?;
+        wait_for_the_marker(&mut harness)?;
+        frame_the_border(&mut harness);
+        let Some(frame) = harness.capture()? else {
+            no_adapter("the neighbour check");
+            return Ok(());
+        };
+        let disc = marker_disc(&mut harness, WEST_REGION)?;
+        for marker in [Marker::Red, Marker::Green] {
+            let share = coverage(&frame, disc, marker);
+            assert!(
+                share > CHECKER_SHARE,
+                "the neighbour's marker paints only {share} of its own disc in {} — the region \
+                 across the border was not streamed, or was not placed on its own ground",
+                marker.name()
+            );
+        }
+        harness.logout()
+    }
+
+    /// **Walking over a border does not move the world.**
+    ///
+    /// The claim a crossing exists to keep, and the one a teleport deliberately
+    /// breaks: the scene is *kept* and re-based onto the new origin, so
+    /// everything a camera was looking at is still where it was. The camera is
+    /// framed once, before the crossing, and never touched again — what moves
+    /// underneath it is the origin, by a whole region, and the viewer's
+    /// recentering has to cancel that out exactly.
+    ///
+    /// Three things are asserted, because each alone would pass for the wrong
+    /// reason: the marker's projected centre has not moved (the re-basing is
+    /// right), its disc still carries its checker (it is still *drawn*, not
+    /// merely still projected), and the session took no teleport and no
+    /// disconnect on the way (it was a crossing, not the scene being rebuilt by
+    /// something else).
+    #[test]
+    fn a_border_crossing_keeps_the_picture_still() -> Result<(), TestError> {
+        let mut harness = ViewerHarness::start_in(border_grid())?;
+        harness.login()?;
+        harness.wait_neighbour(EAST_REGION)?;
+        wait_for_the_marker(&mut harness)?;
+        frame_the_border(&mut harness);
+        let Some(before) = harness.capture()? else {
+            no_adapter("the crossing continuity check");
+            return Ok(());
+        };
+        let disc_before = marker_disc(&mut harness, WEST_REGION)?;
+        for marker in [Marker::Red, Marker::Green] {
+            let share = coverage(&before, disc_before, marker);
+            assert!(
+                share > CHECKER_SHARE,
+                "the neighbour's marker is not in the picture to begin with ({share} of its disc \
+                 in {}), so its staying put would prove nothing",
+                marker.name()
+            );
+        }
+        let crossed_at = harness
+            .world()
+            .resource::<Recorded>()
+            .events
+            .len()
+            .saturating_sub(1);
+
+        // Over the border, landing just past it — and the camera is left
+        // exactly where it was.
+        harness.cross_to(
+            EAST_REGION,
+            sl_proto::RegionCoordinates::new(
+                2.0,
+                sl_fake_grid::fixtures::border::MARKER_Y,
+                BORDER_EYE_Z + 1.0,
+            ),
+        )?;
+        let after = harness
+            .capture()?
+            .ok_or("the adapter answered the first capture and not the second")?;
+        let disc_after = marker_disc(&mut harness, EAST_REGION)?;
+
+        let drift = Vec2::new(
+            disc_after.centre.x - disc_before.centre.x,
+            disc_after.centre.y - disc_before.centre.y,
+        )
+        .length();
+        assert!(
+            drift <= BORDER_DRIFT_PX,
+            "the marker moved {drift} px across the crossing ({:?} -> {:?}) — the scene was not \
+             re-based onto the new origin, or the camera was not",
+            disc_before.centre,
+            disc_after.centre
+        );
+        for marker in [Marker::Red, Marker::Green] {
+            let share = coverage(&after, disc_after, marker);
+            assert!(
+                share > CHECKER_SHARE,
+                "after the crossing the marker paints only {share} of its disc in {} — the object \
+                 survived the handover in the world state but not in the picture",
+                marker.name()
+            );
+        }
+
+        // A crossing is not a teleport and not a reconnection: nothing between
+        // the framing and here said otherwise.
+        let interrupted: Vec<String> = harness
+            .world()
+            .resource::<Recorded>()
+            .events
+            .iter()
+            .skip(crossed_at)
+            .filter(|event| {
+                matches!(
+                    event,
+                    sl_client_bevy::SlSessionEvent::TeleportStarted
+                        | sl_client_bevy::SlSessionEvent::TeleportFinished { .. }
+                        | sl_client_bevy::SlSessionEvent::TeleportFailed { .. }
+                        | sl_client_bevy::SlSessionEvent::Disconnected { .. }
+                        | sl_client_bevy::SlSessionEvent::LoggedOut
+                )
+            })
+            .map(|event| format!("{event:?}").chars().take(120).collect())
+            .collect();
+        assert!(
+            interrupted.is_empty(),
+            "a border crossing must raise no teleport and no disconnect, but the session saw \
+             {interrupted:#?}"
+        );
+        harness.logout()
+    }
+
+    /// Aim the camera from inside the western region at the eastern region's
+    /// marker pillar, across the shared border.
+    ///
+    /// Stated once and used by both border tests, because the whole point of
+    /// the continuity one is that this framing is never repeated.
+    fn frame_the_border(harness: &mut ViewerHarness) {
+        let at = marker_seen_from(WEST_REGION);
+        harness.look_from(
+            Vector {
+                x: at.x - BORDER_CAMERA_WEST,
+                y: at.y,
+                z: BORDER_EYE_Z,
+            },
+            at,
+        );
     }
 }

@@ -25,10 +25,10 @@ agent's, and the two cases do not fare the same:
   pattern.
 - **Lower** than the agent's: the ocean is *over* that region's plane and wins.
   The region's sea is simply not visible. This got worse with
-  [viewer-water-surface-alpha-not-refraction](../done/viewer-water-surface-alpha-not-refraction.md):
-  the water used to be alpha-blended, so the overlap read as a faint double
-  surface (which the module docs called an accepted trade), and it is now opaque
-  and depth-writing, so the lower one is hidden outright.
+  [[viewer-water-surface-alpha-not-refraction]]: the water used to be
+  alpha-blended, so the overlap read as a faint double surface (which the module
+  docs called an accepted trade), and it is now opaque and depth-writing, so the
+  lower one is hidden outright.
 
 ## What the reference does
 
@@ -61,9 +61,8 @@ Port that footprint rule. Every loaded region gets a plane at its own height
 (not only the differing ones), and the endless ocean becomes hole / edge water
 that stops at loaded footprints — either the reference's 256 m cell grid, or one
 plane with the footprints punched out. The cell grid is the simpler port and the
-subdivided ocean mesh
-([viewer-water-surface-alpha-not-refraction](../done/viewer-water-surface-alpha-not-refraction.md)
-cut it into ~625 m cells already) shows the triangle count is not the concern.
+subdivided ocean mesh ([[viewer-water-surface-alpha-not-refraction]] cut it into
+~625 m cells already) shows the triangle count is not the concern.
 
 `OCEAN_DEPTH_BIAS` goes with it: with no overlap there is nothing to bias apart,
 and the 2 cm is itself the cause of the grazing-angle parallax above.
@@ -126,12 +125,10 @@ patched:
   made large enough to quantise the scroll. Measured after this change, at a
   parked camera over open water: consecutive frames differ by 14.0 to 14.5 grey
   levels in the near water, a 3% spread, which is a smooth scroll. It does not
-  settle
-  [viewer-water-wave-phase-jumps-far-from-origin](../bugs/viewer-water-wave-phase-jumps-far-from-origin.md)
-  — a parked camera cannot show a jump that depends on moving — but the
-  mechanism that task blames is much reduced, and the shader can now go
-  region-local cheaply if any of it remains: each cell's model matrix *is* its
-  origin.
+  settle [[viewer-water-wave-phase-jumps-far-from-origin]] — a parked camera
+  cannot show a jump that depends on moving — but the mechanism that task blames
+  is much reduced, and the shader can now go region-local cheaply if any of it
+  remains: each cell's model matrix *is* its origin.
 
 ### Tests
 

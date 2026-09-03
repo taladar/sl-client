@@ -23,10 +23,12 @@ use tokio::net::{TcpListener, UdpSocket};
 use tokio::sync::{Mutex, broadcast, watch};
 
 use crate::accounts::{Account, AccountConfig};
+use crate::assets::GridAssets;
 use crate::driver::{SharedSim, SimState, new_shared_sim, run_timer, run_udp_pump};
 use crate::economy_policy::{EconomyConfig, EconomyEvent};
 use crate::error::Error;
 use crate::map_tiles::MapTileStore;
+use crate::neighbours::NeighbourPolicy;
 use crate::scenario::Scenario;
 use crate::terrain::TerrainFixture;
 use crate::time::{Now, system_clock};
@@ -85,6 +87,10 @@ pub struct RegionConfig {
     pub environment: Option<EnvironmentSettings>,
     /// A scenario overriding the grid-wide one for this region.
     pub scenario: Option<Scenario>,
+    /// Which other regions this one announces to a newly rooted agent, so the
+    /// client opens a child circuit to each and can walk over the border into
+    /// them ([`crate::neighbours`]).
+    pub neighbours: NeighbourPolicy,
 }
 
 impl Default for RegionConfig {
@@ -103,8 +109,31 @@ impl Default for RegionConfig {
             terrain: TerrainFixture::default(),
             environment: None,
             scenario: None,
+            neighbours: NeighbourPolicy::default(),
         }
     }
+}
+
+/// What a session was opened as, which decides what its circuit is handed the
+/// moment it opens.
+///
+/// A [`Root`](Self::Root) session waits for the client's
+/// `CompleteAgentMovement` and then pushes the full arrival burst — the agent's
+/// own avatar first of all. A [`Child`](Self::Child) session was announced as a
+/// neighbour: it streams the region's scene as soon as the circuit is open, and
+/// rezzes no avatar at all, because the agent is standing next door.
+///
+/// This is how the session *started*, not where the agent is now: a child
+/// promoted by a crossing pushes the arrival burst on its `AgentArrived` like
+/// any other root.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SessionRole {
+    /// The agent's own circuit: the login region, or a teleport / crossing
+    /// destination it is about to be rooted in.
+    Root,
+    /// A neighbouring region announced to the client, streaming its scene to a
+    /// child agent.
+    Child,
 }
 
 /// A registered region after the grid started: its config, minted id, and
@@ -253,6 +282,22 @@ pub struct TeleportNotice {
     pub region_name: String,
 }
 
+/// A record of one completed border crossing, published on
+/// [`FakeGrid::crossings`]: the agent now lives in session `to_seq`, and
+/// session `from_seq` — unlike a teleport's source — is **still open**, as the
+/// child circuit of the region the avatar walked out of.
+#[derive(Debug, Clone)]
+pub struct CrossingNotice {
+    /// The agent that crossed.
+    pub agent_id: AgentKey,
+    /// The session the agent was rooted in, now a child.
+    pub from_seq: u64,
+    /// The session the agent is now rooted in.
+    pub to_seq: u64,
+    /// The name of the region walked into.
+    pub region_name: String,
+}
+
 /// A record of one successful login, published on
 /// [`FakeGrid::logins`].
 #[derive(Debug, Clone)]
@@ -281,6 +326,10 @@ pub(crate) struct GridCore {
     pub(crate) honor_options: bool,
     /// The identifier source every login and capability grant draws from.
     pub(crate) minter: IdMinter,
+    /// The **grid-wide** binary asset store: every region's fixture assets
+    /// folded into one, because an asset id names a blob the whole grid knows
+    /// (see [`crate::assets`]).
+    pub(crate) assets: GridAssets,
     /// The clock every session machine is stamped from.
     pub(crate) clock: Now,
     /// How long an empty `EventQueueGet` poll is held before the 502.
@@ -309,6 +358,8 @@ pub(crate) struct GridCore {
     pub(crate) economy_tx: broadcast::Sender<EconomyEvent>,
     /// Publishes completed inter-region teleports.
     pub(crate) teleports_tx: broadcast::Sender<TeleportNotice>,
+    /// Publishes completed border crossings.
+    pub(crate) crossings_tx: broadcast::Sender<CrossingNotice>,
 }
 
 /// Everything a successful login mints before the response is built. The
@@ -363,6 +414,34 @@ impl GridCore {
             .position(|entry| entry.region_id == region_id)
     }
 
+    /// The indices of the regions the region at `index` announces as
+    /// neighbours, in builder order (see [`NeighbourPolicy`]). Empty for an
+    /// unknown index.
+    pub(crate) fn neighbours_of(&self, index: usize) -> Vec<usize> {
+        let Some(entry) = self.region(index) else {
+            return Vec::new();
+        };
+        match &entry.config.neighbours {
+            NeighbourPolicy::None => Vec::new(),
+            NeighbourPolicy::Adjacent => {
+                let here = (entry.config.grid_x, entry.config.grid_y);
+                self.regions
+                    .iter()
+                    .enumerate()
+                    .filter(|(_index, other)| {
+                        crate::neighbours::touches(here, (other.config.grid_x, other.config.grid_y))
+                    })
+                    .map(|(index, _other)| index)
+                    .collect()
+            }
+            NeighbourPolicy::Named(names) => names
+                .iter()
+                .filter_map(|name| self.region_by_name(name))
+                .filter(|other| *other != index)
+                .collect(),
+        }
+    }
+
     /// The registered account owning `agent_id`.
     pub(crate) fn account_by_agent(&self, agent_id: AgentKey) -> Option<&Account> {
         self.accounts
@@ -384,7 +463,7 @@ impl GridCore {
             region: region_index.to_string(),
         })?;
         let prepared = self
-            .prepare_region_session(account, region_index, ids, None)
+            .prepare_region_session(account, region_index, ids, None, SessionRole::Root)
             .await?;
         let mut success = Box::new(LoginSuccess::minimal(
             account.agent_id,
@@ -419,14 +498,17 @@ impl GridCore {
     /// Creates one region session for an agent: binds the session's UDP
     /// socket, seeds a fresh [`SimSession`] with the region's scenario under
     /// the login's identity, and mints its CAPS surface. Shared by the login
-    /// (the start region) and a teleport (the destination, with the arrival
-    /// placed where the teleport asked). Nothing is registered yet.
+    /// (the start region), a teleport (the destination, with the arrival
+    /// placed where the teleport asked) and a neighbour announcement (a
+    /// [`SessionRole::Child`] with no placement of its own). Nothing is
+    /// registered yet.
     pub(crate) async fn prepare_region_session(
         self: &Arc<Self>,
         account: &Account,
         region_index: usize,
         ids: SessionIds,
         arrival: Option<ArrivalPlacement>,
+        role: SessionRole,
     ) -> Result<PreparedSession, Error> {
         let region = self.region(region_index).ok_or(Error::UnknownRegion {
             region: region_index.to_string(),
@@ -509,7 +591,7 @@ impl GridCore {
         let state = SimState {
             sim,
             caps,
-            assets: region.scenario.assets.clone(),
+            assets: self.assets.clone(),
             identity: region.identity(),
             on_agent_arrived: region.scenario.on_agent_arrived.clone(),
             on_event: region.scenario.on_event.clone(),
@@ -524,6 +606,9 @@ impl GridCore {
             seq,
             region: region_index,
             ids,
+            role,
+            seed_url: seed_url.clone(),
+            udp_addr,
         };
         let shared = new_shared_sim(
             state,
@@ -551,6 +636,10 @@ impl GridCore {
         tokio::spawn(run_udp_pump(prepared.shared.clone()));
         tokio::spawn(run_timer(prepared.shared.clone()));
         tokio::spawn(crate::teleport::run_teleport_responder(
+            Arc::clone(self),
+            prepared.shared.clone(),
+        ));
+        tokio::spawn(crate::neighbours::run_neighbour_announcer(
             Arc::clone(self),
             prepared.shared.clone(),
         ));
@@ -589,6 +678,39 @@ impl GridCore {
             let state = shared.state.lock().await;
             if state.avatar.agent_id == agent_id && state.sim.is_root_agent() {
                 drop(state);
+                return Some(shared);
+            }
+        }
+        None
+    }
+
+    /// Every live (not closed) session of `agent_id`, root and child alike.
+    pub(crate) async fn sessions_of(&self, agent_id: AgentKey) -> Vec<SharedSim> {
+        let sessions: Vec<SharedSim> = self.sessions.lock().await.values().cloned().collect();
+        let mut owned = Vec::new();
+        for shared in sessions {
+            if shared.is_closed() {
+                continue;
+            }
+            let mine = shared.state.lock().await.avatar.agent_id == agent_id;
+            if mine {
+                owned.push(shared);
+            }
+        }
+        owned
+    }
+
+    /// The agent's live session in `region_index`, root or child, if it has
+    /// one. What makes an announcement idempotent and a crossing reuse the
+    /// child circuit the client already holds.
+    pub(crate) async fn session_of(
+        &self,
+        agent_id: AgentKey,
+        region_index: usize,
+    ) -> Option<SharedSim> {
+        for shared in self.sessions_of(agent_id).await {
+            let here = shared.state.lock().await.region == region_index;
+            if here {
                 return Some(shared);
             }
         }
@@ -948,6 +1070,7 @@ impl FakeGridBuilder {
         let (logins_tx, _) = broadcast::channel(LOGINS_CHANNEL_CAPACITY);
         let (economy_tx, _) = broadcast::channel(LOGINS_CHANNEL_CAPACITY);
         let (teleports_tx, _) = broadcast::channel(LOGINS_CHANNEL_CAPACITY);
+        let (crossings_tx, _) = broadcast::channel(LOGINS_CHANNEL_CAPACITY);
         let mut map_tiles = self.map_tiles;
         for region in &self.regions {
             map_tiles.seed_region(region.grid_x, region.grid_y);
@@ -969,7 +1092,16 @@ impl FakeGridBuilder {
                     scenario,
                 }
             })
-            .collect();
+            .collect::<Vec<RegionEntry>>();
+        // One asset store for the whole grid, folded from every region's
+        // fixture in builder order (a later region wins a colliding id). A
+        // viewer fetches every asset over its **root** region's capability,
+        // including ids only a neighbour's content references, so a per-region
+        // store would 404 exactly the textures a border crossing needs.
+        let assets = GridAssets::default();
+        for region in &regions {
+            assets.extend(&region.scenario.assets);
+        }
         let core = Arc::new(GridCore {
             accounts: self
                 .accounts
@@ -980,6 +1112,7 @@ impl FakeGridBuilder {
             gates: self.gates,
             honor_options: self.honor_options,
             minter: minter.clone(),
+            assets,
             clock: self.clock,
             eq_hold: self.eq_hold,
             http_port,
@@ -994,6 +1127,7 @@ impl FakeGridBuilder {
             logins_tx,
             economy_tx,
             teleports_tx,
+            crossings_tx,
         });
         tokio::spawn(crate::http_service::run_http(Arc::clone(&core), listener));
         Ok(FakeGrid { core })
@@ -1171,6 +1305,70 @@ impl FakeGrid {
                 agent_id: agent.agent_id,
             }),
         }
+    }
+
+    /// Subscribes to completed border crossings ([`FakeGrid::cross_agent`]).
+    #[must_use]
+    pub fn crossings(&self) -> broadcast::Receiver<CrossingNotice> {
+        self.core.crossings_tx.subscribe()
+    }
+
+    /// The neighbouring regions of the region called `name`, in builder order
+    /// — what an agent rooted there is announced ([`NeighbourPolicy`]), and
+    /// therefore what [`cross_agent`](Self::cross_agent) will accept. Empty for
+    /// a region the grid does not serve.
+    #[must_use]
+    pub fn neighbours_of(&self, name: &str) -> Vec<String> {
+        self.core
+            .region_by_name(name)
+            .map(|index| self.core.neighbours_of(index))
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|index| self.core.region(index))
+            .map(|entry| entry.config.name.clone())
+            .collect()
+    }
+
+    /// Walks a logged-in agent over the border into `region_name`, landing at
+    /// `position` with `velocity` — the scripted stand-in for movement the fake
+    /// grid does not simulate (see [`crate::crossing`]).
+    ///
+    /// Unlike [`teleport_agent`](Self::teleport_agent) there is no teleport
+    /// screen and no torn-down scene: the client promotes the child circuit it
+    /// already holds for the neighbour, keeps every object and patch it has,
+    /// and re-bases them onto the new origin. `agent`'s own session stays open
+    /// as a child of the region it walked out of, so the handle passed in
+    /// remains usable — the returned handle is the one the avatar is now in.
+    ///
+    /// `velocity` is the agent's motion across the border, in metres per
+    /// second. It travels in the `CrossedRegion` event's `LookAt` field,
+    /// because that is where OpenSim puts it (see
+    /// [`CrossedRegionInfo::look_at`](sl_proto::CrossedRegionInfo::look_at));
+    /// pass a zero vector for an agent that is being placed rather than moved.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownRegion`] for a region the grid does not serve,
+    /// [`Error::NotAdjacent`] when it is not a neighbour of the one the agent
+    /// is in, [`Error::NotRootAgent`] when the agent has not arrived in its
+    /// current region, [`Error::CrossingTimedOut`] when the client never
+    /// completed its movement across the border, and socket errors binding a
+    /// destination that had not been announced.
+    pub async fn cross_agent(
+        &self,
+        agent: &FakeAgent,
+        region_name: &str,
+        position: RegionCoordinates,
+        velocity: Vector,
+    ) -> Result<FakeAgent, Error> {
+        let region = crate::neighbours::region_index(&self.core, region_name)?;
+        let shared =
+            crate::crossing::cross_session(&self.core, &agent.shared, region, position, velocity)
+                .await?;
+        Ok(FakeAgent {
+            shared,
+            agent_id: agent.agent_id,
+        })
     }
 
     /// Shuts the grid down: the accept loop, every session pump, and every

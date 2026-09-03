@@ -7238,11 +7238,24 @@ mod test {
         drain_server(&mut dest);
         assert_eq!(dest.agent_presence(), AgentPresence::Child);
 
-        source.enqueue_crossed_region(
-            RegionHandle(DEST_HANDLE),
-            dest_sim_addr(),
-            "http://127.0.0.1:9001/seed",
-        );
+        let agent_id = source.agent_id().ok_or("the source has no agent")?;
+        source.enqueue_crossed_region(&sl_proto::CrossedRegionInfo {
+            agent_id,
+            session_id: source.session_id().unwrap_or_default(),
+            region_handle: RegionHandle(DEST_HANDLE),
+            dest: dest_sim_addr(),
+            seed: "http://127.0.0.1:9001/seed".to_owned(),
+            position: sl_types::map::RegionCoordinates::new(4.0, 128.0, 26.0),
+            look_at: sl_types::lsl::Vector {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            region_size: (
+                sl_proto::STANDARD_REGION_SIZE_METRES,
+                sl_proto::STANDARD_REGION_SIZE_METRES,
+            ),
+        });
         deliver_caps(&mut client, &mut source, now)?;
         pump_multi(
             &mut client,
@@ -7265,6 +7278,15 @@ mod test {
                     if *region_handle == RegionHandle(DEST_HANDLE) && *sim == dest_sim_addr()
             )),
             "expected a non-resetting RegionChanged, got {client_events:?}"
+        );
+        // The source simulator demotes itself once the handover is done: the
+        // avatar is next door, but the circuit stays open as a child so the
+        // region it walked out of keeps streaming.
+        source.make_child_agent();
+        assert_eq!(source.agent_presence(), AgentPresence::Child);
+        assert!(
+            !source.is_closed(),
+            "a crossing's source circuit stays open as a child, unlike a teleport's"
         );
         Ok(())
     }

@@ -495,7 +495,7 @@ pub(crate) fn push_arrival_world(
     world: &SceneFixtures,
     terrain: &TerrainFixture,
     identity: &AvatarIdentity,
-    assets: &mut sl_proto::InMemoryAssetSource,
+    assets: &crate::assets::GridAssets,
     sim: &mut SimSession,
     now: Instant,
 ) {
@@ -534,6 +534,53 @@ pub(crate) fn push_arrival_world(
     }
     push_npcs(&world.npcs, sim, now);
     push_object_animations(&world.object_animations, sim, now);
+}
+
+/// Pushes what a **child** circuit is shown: the region's objects, its other
+/// avatars, its ground and its parcel overlay — everything the arrival burst
+/// carries except the agent, because the agent is standing in another region.
+///
+/// A simulator streams its scene to a child agent exactly as it does to a root
+/// one; the only difference is that there is no avatar of its own to rez, no
+/// appearance or animation to send for it, and no "the parcel you are standing
+/// on" record, because it is not standing on one. Objects go first (an
+/// `ObjectUpdate` carries the region handle, a `LayerData` does not), then the
+/// ground, so a client that somehow missed the `EnableSimulator` still labels
+/// the patches with the right region.
+///
+/// It ends with a [marker](crate::marker) named after the region, which is how
+/// a test waits for a neighbour's scene to have arrived without sleeping.
+/// Send failures are logged, never fatal.
+pub(crate) fn push_child_world(
+    world: &SceneFixtures,
+    terrain: &TerrainFixture,
+    identity: &sl_proto::RegionIdentity,
+    sim: &mut SimSession,
+    now: Instant,
+) {
+    if !world.objects.is_empty()
+        && let Err(error) = sim.send_object_update(&world.objects, REAL_TIME_DILATION, now)
+    {
+        tracing::warn!("rezzing a neighbour's objects failed: {error}");
+    }
+    push_npcs(&world.npcs, sim, now);
+    push_object_animations(&world.object_animations, sim, now);
+    push_terrain(terrain, sim, now);
+    // The overlay is the whole region's parcel layout, which a neighbouring
+    // region draws on the minimap; it needs no viewer to be standing on it.
+    // `overlay_for` colours the cells by owner, and a child agent owns nothing
+    // here, so the nil key asks for the "somebody else's land" colouring.
+    let nobody = AgentKey::from(uuid::Uuid::nil());
+    if let Err(error) = sim.send_parcel_overlay(&world.overlay_for(nobody), now) {
+        tracing::warn!("sending a neighbour's parcel overlay failed: {error}");
+    }
+    let name = identity
+        .sim_name
+        .as_ref()
+        .map_or_else(String::new, ToString::to_string);
+    if let Err(error) = sim.send_generic_message(&crate::marker::neighbour_marker(&name), now) {
+        tracing::warn!("marking a neighbour's burst failed: {error}");
+    }
 }
 
 /// Pushes each animated object's `ObjectAnimation` — the animesh counterpart
@@ -587,13 +634,16 @@ pub const AVATAR_CENTRE_ABOVE_GROUND_M: f32 = 0.95;
 /// *this session's* asset store, because the agent id is only known now.
 fn push_own_appearance(
     identity: &AvatarIdentity,
-    assets: &mut sl_proto::InMemoryAssetSource,
+    assets: &crate::assets::GridAssets,
     sim: &mut SimSession,
     now: Instant,
 ) {
     let appearance = NpcAppearance::solid(identity.agent_id, OWN_AVATAR_BAKE_COLOR);
-    for (key, bytes) in appearance.bake_assets() {
-        let _previous = assets.insert(key, bytes);
+    {
+        let mut store = assets.write();
+        for (key, bytes) in appearance.bake_assets() {
+            let _previous = store.insert(key, bytes);
+        }
     }
     if let Err(error) =
         sim.send_avatar_appearance(&appearance.record(identity.agent_id, Vec::new()), now)

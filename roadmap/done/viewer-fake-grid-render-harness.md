@@ -39,7 +39,9 @@ marker empties the disc. The subprocess route (`--login-uri` +
 
 Done (2026-09-03): `sl-client-bevy-viewer/src/full_stack_test.rs`, five
 tests, all passing on RADV. `cross_to` is the one part of the planned API
-that is **not** here — see below.
+that is **not** here — see below. (Added 2026-09-03 by
+[[test-fake-grid-neighbours-crossing]], together with `wait_neighbour`,
+once there was a crossing to call.)
 
 **What the tests decide.** The band classification came out stronger than
 "terrain, water, sky are on screen": from 60 m over the middle of a flat
@@ -65,7 +67,13 @@ Four things the plan did not settle.
 fake grid has no region crossing — no `CrossedRegion`, no neighbour child
 agents — and adding one is [[test-fake-grid-neighbours-crossing]], which
 is blocked on this task. `teleport_to` is here and tested; the crossing
-half belongs to the task that builds the crossing.
+half belongs to the task that builds the crossing. *(It did, on
+2026-09-03. One thing it found: `cross_to` cannot use `grid(fut)` the way
+`teleport_to` uses the client's command path, because a grid-initiated
+crossing waits on the client's `CompleteAgentMovement` and the client
+only sends one when the app steps a frame — `grid(fut)` blocks the thread
+and deadlocks the two halves. It steps the grid future **between** viewer
+frames instead.)*
 
 **A marker needed a sender.** The plan has the harness *waiting* for a
 timeline `Marker`, and the timeline ([[test-fake-grid-timeline]]) is

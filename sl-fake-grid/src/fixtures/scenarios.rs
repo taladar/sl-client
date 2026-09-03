@@ -74,8 +74,21 @@ impl NamedScenario {
 /// region had before scenarios were named at all.
 pub const DEFAULT: &str = "stock";
 
+/// The border scene: the region's content replaced by [`super::border()`].
+fn border(region: RegionConfig) -> RegionConfig {
+    super::border().into_region(region)
+}
+
+/// The one thing standing in the border scene: its marker pillar.
+fn border_landmarks() -> Vec<Landmark> {
+    vec![Landmark {
+        name: "border-marker".to_owned(),
+        position: super::border::marker_position(),
+    }]
+}
+
 /// Every named scene, in the order the binary's help lists them.
-const ALL: [NamedScenario; 2] = [
+const ALL: [NamedScenario; 3] = [
     NamedScenario {
         name: "stock",
         summary: "the standard region: one region-wide parcel, one scripted box, \
@@ -89,6 +102,14 @@ const ALL: [NamedScenario; 2] = [
                   west-to-east row, an NPC avatar, every asset they reference",
         dress: catalogue,
         landmarks: catalogue_landmarks,
+    },
+    NamedScenario {
+        name: "border",
+        summary: "one checkered marker pillar floating just inside the region's \
+                  west edge, for looking at (and walking into) the region next \
+                  door",
+        dress: border,
+        landmarks: border_landmarks,
     },
 ];
 
@@ -287,6 +308,12 @@ mod test {
                 entry.name
             );
         }
+        let border = scenario("border").ok_or("the border scene is not in the registry")?;
+        assert_eq!(
+            border.landmark("border-marker").map(|found| found.position),
+            Some(super::super::border::marker_position()),
+            "the border scene's landmark is not where its marker pillar is"
+        );
         let stock = scenario("stock").ok_or("the stock scene is not in the registry")?;
         assert_eq!(
             stock.landmark("scripted-box").map(|found| found.position),

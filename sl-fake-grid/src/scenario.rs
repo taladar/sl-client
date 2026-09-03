@@ -49,7 +49,13 @@ pub struct Scenario {
     pub on_agent_arrived: Option<SimHook>,
     /// Runs for every drained [`ServerEvent`], after the stock behaviour.
     pub on_event: Option<SimEventHook>,
-    /// The binary assets served by the asset-delivery caps.
+    /// The binary assets this region's content references, folded into the
+    /// **grid-wide** store when the grid starts (`assets.rs`).
+    ///
+    /// A region states what its own content needs; it does not own a store.
+    /// An asset id names a blob the whole grid knows, and a viewer fetches
+    /// every one of them over its root region's capability — including the
+    /// textures of the neighbour it can see across a border.
     pub assets: sl_proto::InMemoryAssetSource,
     /// The content behind the legacy UDP asset paths.
     pub udp_assets: UdpAssetFixtures,

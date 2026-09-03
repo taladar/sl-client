@@ -124,23 +124,58 @@ pub(crate) async fn teleport_session(
         })
         .await?;
 
-    // The destination session, registered before it is announced: the
-    // client POSTs the seed the moment `EstablishAgentCommunication`
-    // arrives, and an unregistered `/sim/<seq>/…` answers 404.
-    let prepared = core
-        .prepare_region_session(&account, request.region, ids, Some(request.arrival))
-        .await?;
-    core.activate_session(&prepared).await;
-    let dest = prepared.shared.clone();
+    // The destination session. A neighbour of the source is already open as a
+    // child circuit ([`crate::neighbours`]) — reuse it, or the client is handed
+    // two simulators for one region handle and streams the destination's scene
+    // twice. Otherwise a fresh one, registered before it is announced: the
+    // client POSTs the seed the moment `EstablishAgentCommunication` arrives,
+    // and an unregistered `/sim/<seq>/…` answers 404.
+    let (dest, dest_seq, dest_addr, dest_seed, opened_here) =
+        match core.session_of(agent_id, request.region).await {
+            Some(shared) => {
+                let (seq, addr, seed) = {
+                    let state = shared.state.lock().await;
+                    (state.seq, state.udp_addr, state.seed_url.to_string())
+                };
+                shared
+                    .with_sim(|sim| {
+                        sim.set_arrival_position(
+                            request.arrival.position,
+                            request.arrival.look_at.clone(),
+                        );
+                    })
+                    .await;
+                (shared, seq, addr, seed, false)
+            }
+            None => {
+                let prepared = core
+                    .prepare_region_session(
+                        &account,
+                        request.region,
+                        ids,
+                        Some(request.arrival.clone()),
+                        crate::runtime::SessionRole::Root,
+                    )
+                    .await?;
+                core.activate_session(&prepared).await;
+                (
+                    prepared.shared.clone(),
+                    prepared.seq,
+                    prepared.udp_addr,
+                    prepared.seed_url.to_string(),
+                    true,
+                )
+            }
+        };
     // Subscribe before announcing, or the arrival can slip past.
     let mut dest_events = dest.subscribe_events();
 
     let finish = TeleportFinishInfo {
         agent_id,
         location_id: sl_proto::TELEPORT_FINISH_LOCATION_ID,
-        dest: prepared.udp_addr,
+        dest: dest_addr,
         region_handle: dest_handle,
-        seed: prepared.seed_url.to_string(),
+        seed: dest_seed.clone(),
         sim_access,
         teleport_flags: request.flags,
         region_size: (
@@ -151,11 +186,12 @@ pub(crate) async fn teleport_session(
     source
         .with_sim(|sim| {
             let now = source.now();
-            sim.enqueue_enable_simulator(dest_handle, prepared.udp_addr);
-            sim.enqueue_establish_agent_communication(
-                prepared.udp_addr,
-                prepared.seed_url.as_str(),
-            );
+            // Re-announced even for a circuit the client already holds: the
+            // announcement is idempotent (the client keeps one child circuit
+            // per address) and a destination it somehow lost is one the
+            // `TeleportFinish` below could not promote.
+            sim.enqueue_enable_simulator(dest_handle, dest_addr);
+            sim.enqueue_establish_agent_communication(dest_addr, &dest_seed);
             sim.send_teleport_progress(teleport_strings::ARRIVING, request.flags, now)?;
             sim.enqueue_teleport_finish(&finish);
             Ok::<(), sl_proto::Error>(())
@@ -165,11 +201,16 @@ pub(crate) async fn teleport_session(
     let mut shutdown_rx = dest.shutdown_rx.clone();
     if !wait_for_arrival(&mut dest_events, &mut shutdown_rx, TELEPORT_ARRIVAL_TIMEOUT).await {
         tracing::warn!(
-            "teleport of session {source_seq} to {dest_name:?} timed out; abandoning session {}",
-            prepared.seq
+            "teleport of session {source_seq} to {dest_name:?} timed out; abandoning session \
+             {dest_seq}"
         );
-        core.remove_session(prepared.seq).await;
-        dest.with_sim(SimSession::abandon).await;
+        // Only a session opened for this teleport is abandoned. A child circuit
+        // that was already there is a neighbour the client still holds, and
+        // tearing it down would punish it for a teleport that failed.
+        if opened_here {
+            core.remove_session(dest_seq).await;
+            dest.with_sim(SimSession::abandon).await;
+        }
         if let Err(error) = source
             .with_sim(|sim| sim.send_teleport_failed(teleport_strings::TIMEOUT_TPORT, source.now()))
             .await
@@ -189,16 +230,15 @@ pub(crate) async fn teleport_session(
     }
     core.remove_session(source_seq).await;
     tracing::info!(
-        "teleport: {} {} moved from session {source_seq} to {dest_name} (session {})",
+        "teleport: {} {} moved from session {source_seq} to {dest_name} (session {dest_seq})",
         account.config.first_name,
         account.config.last_name,
-        prepared.seq
     );
     // Only lagging subscribers error; the teleport is complete regardless.
     drop(core.teleports_tx.send(TeleportNotice {
         agent_id,
         from_seq: source_seq,
-        to_seq: prepared.seq,
+        to_seq: dest_seq,
         region_name: dest_name,
     }));
     Ok(TeleportOutcome::Moved(dest))
@@ -249,13 +289,14 @@ async fn resolve_request(
         ServerEvent::TeleportViaLandmark {
             landmark: Some(landmark),
         } => {
-            let body = {
-                let state = source.state.lock().await;
-                state
-                    .assets
-                    .get(*landmark)
-                    .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
-            };
+            // The grid-wide store: a landmark is an asset like any other, and
+            // the region the agent happens to be standing in has nothing to do
+            // with whether the grid holds it.
+            let body = core
+                .assets
+                .read()
+                .get(*landmark)
+                .map(|bytes| String::from_utf8_lossy(bytes).into_owned());
             let parsed = body.and_then(|text| sl_wire::parse_landmark(&text).ok());
             let resolved = parsed.and_then(|asset| {
                 let region = match &asset {

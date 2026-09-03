@@ -45,8 +45,10 @@ struct Options {
     /// `catalogue` rezzes the named prim catalogue (one prim per rendering
     /// feature in a west-to-east row a few metres north of the arrival point,
     /// an NPC avatar, every asset they reference), which is the same fixture
-    /// the automated tiers load. A scene is named so a harness photographing
-    /// it can say which one it photographed.
+    /// the automated tiers load; `border` rezzes one marker pillar inside the
+    /// west edge, which with two adjacent `--region`s is a scene for looking
+    /// across a border. A scene is named so a harness photographing it can say
+    /// which one it photographed.
     #[arg(
         long,
         default_value = scenarios::DEFAULT,
@@ -182,8 +184,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut logins = grid.logins();
     let mut teleports = grid.teleports();
+    let mut crossings = grid.crossings();
     loop {
         tokio::select! {
+            notice = crossings.recv() => {
+                match notice {
+                    Ok(notice) => tracing::info!(
+                        "avatar {} walked into {} (session {} -> {}, the old one kept as a child)",
+                        notice.agent_id,
+                        notice.region_name,
+                        notice.from_seq,
+                        notice.to_seq
+                    ),
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(missed)) => {
+                        tracing::warn!("missed {missed} crossing notices");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
             notice = teleports.recv() => {
                 match notice {
                     Ok(notice) => tracing::info!(
