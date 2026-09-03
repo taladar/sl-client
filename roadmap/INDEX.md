@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 311 |
 | blocked | 56 |
 | in-progress | 18 |
-| bugs | 70 |
-| done | 970 |
+| bugs | 68 |
+| done | 972 |
 | deferred | 24 |
 | wont-do | 14 |
 | **total** | **1561** |
@@ -1183,7 +1183,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (70)
+## bugs (68)
 
 ### viewer
 
@@ -1303,9 +1303,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A blocked resident's chat and IMs are still shown
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
-- [`viewer-object-face-entity-respawn-churn`](bugs/viewer-object-face-entity-respawn-churn.md)
-  — Object face entities are despawned + respawned same-frame (despawn-race
-  churn)
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
   — Own avatar looks broken after a teleport
 - [`viewer-own-avatar-facing-drifts-idle`](bugs/viewer-own-avatar-facing-drifts-idle.md)
@@ -1314,8 +1311,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 - [`viewer-prim-attachment-worn-but-not-rendered`](bugs/viewer-prim-attachment-worn-but-not-rendered.md)
   — A plain prim attachment reads "(worn)" in inventory but never appears on
-- [`viewer-prim-rebuild-drops-a-click`](bugs/viewer-prim-rebuild-drops-a-click.md)
-  — A prim's re-tessellation frame swallows any click on it
 - [`viewer-profile-floater-single-instance`](bugs/viewer-profile-floater-single-instance.md)
   — A second resident profile replaces the first instead of opening its own
 - [`viewer-rigged-attachments-wearer-not-resolved`](bugs/viewer-rigged-attachments-wearer-not-resolved.md)
@@ -1350,7 +1345,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (970)
+## done (972)
 
 ### protocol
 
@@ -2116,6 +2111,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-object-edit-floater-shell`](done/viewer-object-edit-floater-shell.md)
   — Object edit-floater / tool shell (blocked by `viewer-object-selection-core`
   (done), `viewer-ui-floater-basic` (done))
+- [`viewer-object-face-entity-respawn-churn`](done/viewer-object-face-entity-respawn-churn.md)
+  — Object face entities are despawned + respawned same-frame (despawn-race
+  churn)
 - [`viewer-object-selection-core`](done/viewer-object-selection-core.md) —
   Object selection core (select set + protocol) (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -2472,6 +2470,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-input-action-map` (done))
 - [`viewer-prim-parameter-editing`](done/viewer-prim-parameter-editing.md) —
   Prim parameter editing (blocked by `viewer-object-edit-floater-shell` (done))
+- [`viewer-prim-rebuild-drops-a-click`](done/viewer-prim-rebuild-drops-a-click.md)
+  — A prim's re-tessellation frame swallows any click on it
 - [`viewer-prim-texture-editing`](done/viewer-prim-texture-editing.md) — Prim
   texture / material editing (blocked by `viewer-object-edit-floater-shell`
   (done), `viewer-edit-face-selection` (done))

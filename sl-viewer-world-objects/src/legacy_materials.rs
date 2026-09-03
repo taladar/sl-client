@@ -306,7 +306,7 @@ fn legacy_log_enabled() -> bool {
     std::env::var_os("SL_VIEWER_LOG_LEGACY_MATERIALS").is_some()
 }
 
-/// Register each newly-spawned face carrying a legacy `TextureEntry` material id
+/// Register each newly-built face carrying a legacy `TextureEntry` material id
 /// with the [`LegacyMaterialManager`], skipping any face that already has a PBR
 /// GLTF material (which supersedes the legacy material, as in the reference
 /// viewer) and any face whose id is nil.
@@ -317,6 +317,11 @@ fn legacy_log_enabled() -> bool {
 /// mostly looks rather than builds. The FIRE-35138 build-preview fetches it
 /// **on-demand** instead, only when a face actually enters the preview
 /// ([`crate::materials::apply_blinn_phong_hide`] → [`preview_legacy_material`]).
+///
+/// Keyed on [`Changed<PrimFaceEntity>`] rather than `Added`: a rebuild re-describes
+/// the face entity it already had (`FaceReuse`) instead of spawning a new one, so
+/// the marker is written on every build but added only on the first — and a
+/// re-tessellated face must re-register against its new material handle.
 pub fn register_legacy_materials(
     mut manager: ResMut<LegacyMaterialManager>,
     new_faces: Query<
@@ -326,7 +331,7 @@ pub fn register_legacy_materials(
             &FaceTextureDebug,
             &ChildOf,
         ),
-        Added<PrimFaceEntity>,
+        Changed<PrimFaceEntity>,
     >,
     pbr_holders: Query<&ObjectRenderMaterials>,
 ) {

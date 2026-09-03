@@ -214,7 +214,7 @@ impl BumpManager {
     }
 }
 
-/// Register each newly-spawned face carrying a legacy bump code with the
+/// Register each newly-built face carrying a legacy bump code with the
 /// [`BumpManager`], parking its material on the texture the normal is derived from
 /// (its own diffuse for brightness / darkness, the fixed standard-emboss texture
 /// for codes ≥ 3) and requesting that texture so the normal map is generated once
@@ -227,6 +227,11 @@ impl BumpManager {
 ///   map — bump is superseded), or
 /// * has a PBR GLTF material (P27.1, which supersedes the legacy surface flags as
 ///   in the reference viewer).
+///
+/// Keyed on [`Changed<PrimFaceEntity>`] rather than `Added`: a rebuild re-describes
+/// the face entity it already had (`FaceReuse`) instead of spawning a new one, so
+/// the marker is written on every build but added only on the first — and a
+/// re-tessellated face's bump must re-register against its new material handle.
 pub fn register_bump_faces(
     mut manager: ResMut<BumpManager>,
     mut textures: ResMut<TextureManager>,
@@ -237,7 +242,7 @@ pub fn register_bump_faces(
             &FaceTextureDebug,
             &ChildOf,
         ),
-        Added<PrimFaceEntity>,
+        Changed<PrimFaceEntity>,
     >,
     pbr_holders: Query<&ObjectRenderMaterials>,
 ) {

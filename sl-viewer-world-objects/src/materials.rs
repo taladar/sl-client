@@ -742,19 +742,25 @@ pub fn update_material_caps(
     manager.retry_pending();
 }
 
-/// Join each newly-spawned face entity to its object's [`ObjectRenderMaterials`]
+/// Join each newly-built face entity to its object's [`ObjectRenderMaterials`]
 /// holder (its geometry-holder parent), and, when the face's index carries a PBR
 /// material, register the face with the [`MaterialManager`] (keyed by its scoped
 /// object id + face index) and recompose it — the base material (P27.1) plus any
 /// override already received for the face (P27.2). A face with no PBR material
 /// keeps its diffuse material.
+///
+/// "Newly built" is [`Changed<PrimFaceEntity>`], not `Added`: a rebuild
+/// re-describes the face entity it already had rather than spawning a new one
+/// (`FaceReuse`), so the marker is *written* on every build but only *added* on
+/// the first. Registration keyed on `Added` would leave a re-tessellated face
+/// registered against the material handle of the geometry it no longer draws.
 pub fn register_pbr_materials(
     mut manager: ResMut<MaterialManager>,
     mut textures: ResMut<TextureManager>,
     mut materials: ResMut<Assets<FaceMaterial>>,
     new_faces: Query<
         (&MeshMaterial3d<FaceMaterial>, &PrimFaceEntity, &ChildOf),
-        Added<PrimFaceEntity>,
+        Changed<PrimFaceEntity>,
     >,
     holders: Query<&ObjectRenderMaterials>,
 ) {
@@ -789,8 +795,8 @@ pub fn register_pbr_materials(
 /// (Re)register a face's PBR material when its object's [`ObjectRenderMaterials`]
 /// **changes** — a render material assigned to (or changed on) an *existing* prim
 /// that does not re-tessellate its faces (the build tool's material assignment, an
-/// in-world retexture). [`register_pbr_materials`] only sees freshly-**spawned**
-/// faces (`Added<PrimFaceEntity>`), so without this a material dropped onto a prim
+/// in-world retexture). [`register_pbr_materials`] only sees freshly-**built**
+/// faces (`Changed<PrimFaceEntity>`), so without this a material dropped onto a prim
 /// already in the scene would refresh the holder but never actually render — the
 /// face stayed Blinn-Phong. Recomposes only the faces whose material genuinely
 /// changed (`refresh_face_material`
@@ -1083,7 +1089,7 @@ pub fn apply_blinn_phong_hide(
     mode: Res<MatModeState>,
     selection: Res<SelectionSet>,
     objects: Res<ObjectState>,
-    new_faces: Query<(), Added<PrimFaceEntity>>,
+    new_faces: Query<(), Changed<PrimFaceEntity>>,
     mut manager: ResMut<MaterialManager>,
     mut textures: ResMut<TextureManager>,
     store: Res<DecodedTextures>,

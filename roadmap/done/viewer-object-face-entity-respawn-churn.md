@@ -2,7 +2,7 @@
 id: viewer-object-face-entity-respawn-churn
 title: Object face entities are despawned + respawned same-frame (despawn-race churn)
 topic: viewer
-status: bugs
+status: done
 origin: gpu_pick despawn-race panic during camera-collision live testing (2026-08-15)
 refs: [viewer-physics-static-prim-colliders]
 ---
@@ -46,3 +46,36 @@ can trip on — `gpu_pick` is just the one that happened to panic.
 
 Compare with the UI floater fix — "don't despawn+respawn per update; build once,
 set values in place" — which addressed exactly this shape of churn for widgets.
+
+## Outcome (2026-09-04): rebuilds update in place
+
+Fixed with [[viewer-prim-rebuild-drops-a-click]], which is the user-visible half
+of this same churn. Every rebuild site in `objects.rs` now hands its existing
+face entities to its own replacement geometry through a `FaceReuse` pool keyed
+by Linden face id, so a re-tessellation, an LOD swap, a mesh or sculpt arrival
+and a tree tier change all **update the face entity in place** — swapping its
+mesh, material and `TextureFace` — instead of despawning it and spawning a
+successor. Entities are only spawned for a face that had none and only despawned
+for a face the new geometry does not have.
+
+So the smell this task named is gone at its source: an entity queried as new is
+no longer already dead, `PickId` and every other per-face component survive a
+rebuild, and the entity allocations a rez used to burn are not spent. The four
+`gpu_pick` `try_insert` guards stay — they cost nothing and still cover the
+genuine remaining despawns (an object removed, a region purged).
+
+The audit half is done too: the one-shot consumers of freshly-built faces
+(`register_pbr_materials`, `apply_blinn_phong_hide`, `register_bump_faces`,
+`register_legacy_materials`) were moved from `Added<PrimFaceEntity>` to
+`Changed<PrimFaceEntity>`, since an in-place rebuild writes the marker without
+adding it. `collect_pick_warm_set` already keyed on `Changed<Mesh3d>`, and
+Bevy's own `calculate_bounds` refreshes a changed mesh handle's `Aabb` in the
+same frame, so culling and the ray cast track the new geometry.
+
+One path is deliberately left as it was: the rigged-attachment bind
+(`rigged_attachments.rs`), which replaces a worn mesh's `face_entities` with
+submeshes skinned to the wearer's skeleton. That is a **first** build, not a
+rebuild — the object was pending on its asset and had no faces — so there is
+nothing to hand back and no churn to remove. A texture edit on a worn rigged
+mesh still routes through `apply_object`, whose pool despawns the old submeshes
+before the bind rebuilds them, exactly as before.

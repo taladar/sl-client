@@ -171,8 +171,9 @@ multi-region offsets, in-flight asset leaks, NPC appearance delivery.
   observer, and that pick runs at ~15 Hz off the 16 ms fixture clock and
   answers a frame later — so a drag rests on its target for a couple of
   dozen frames before it releases or is read. That rest also carries it
-  past the frame a prim re-tessellates with no faces at all
-  ([[viewer-prim-rebuild-drops-a-click]]), where a pick answers `None`.
+  past a prim's re-tessellation — which used to leave it with no faces at
+  all for a frame, and a pick answering `None`, until a rebuild started
+  keeping its face entities ([[viewer-prim-rebuild-drops-a-click]]).
 - **a context-menu dispatch test**: open the pie with a **real
   right-click** (`world_test::right_click_at`), so the stashed target is
   the one the classifier resolved, then write the `UiAction` the slice

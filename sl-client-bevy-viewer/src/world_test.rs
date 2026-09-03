@@ -804,6 +804,70 @@ mod tests {
     /// `unwrap` / `expect`.
     type TestError = Box<dyn core::error::Error>;
 
+    /// **A re-tessellation is no longer a hole in the world**
+    /// ([[viewer-prim-rebuild-drops-a-click]]).
+    ///
+    /// The fixture prim re-tessellates about ten frames after the camera
+    /// lands — the pixel-area driver picks a level and the geometry is
+    /// rebuilt. That used to despawn every face entity and spawn fresh
+    /// ones, and since `assign_object_face_pick_tags` only reaches a face a
+    /// frame *after* it spawns, the world had no pickable geometry at all
+    /// on the rebuild frame: any click there resolved to nothing and was
+    /// dropped with no pie, no touch and no word about why.
+    ///
+    /// So this is a per-frame census of the pick-tagged prim faces, the
+    /// measurement the bug was found by: once the prim is tagged it stays
+    /// tagged, on the very same entities, for the rest of the run. The set
+    /// is compared by identity rather than by count, because a rebuild that
+    /// spawned replacements would keep the count and still lose everything
+    /// attached to the old ids.
+    #[test]
+    fn a_prim_keeps_its_pick_tagged_faces_across_its_rebuild() -> Result<(), TestError> {
+        let mut app = world_app();
+        let _scoped = seed_prim(
+            &mut app,
+            Vector {
+                x: 128.0,
+                y: 128.0,
+                z: 30.0,
+            },
+        );
+        settle(&mut app, 5);
+        // On screen and close, so the pixel-area driver actually wants a
+        // different level for it and the rebuild this watches for happens.
+        let target =
+            first_tagged_face_position(&mut app).ok_or("the fixture prim never built a face")?;
+        install_camera(&mut app, target + Vec3::new(0.0, 0.0, 10.0), target);
+
+        let mut census: Vec<Vec<Entity>> = Vec::new();
+        for _frame in 0..40 {
+            app.update();
+            let mut faces = app.world_mut().query_filtered::<Entity, (
+                With<bevy::mesh::MeshTag>,
+                With<crate::objects::PrimFaceEntity>,
+            )>();
+            let mut tagged: Vec<Entity> = faces.iter(app.world()).collect();
+            tagged.sort_unstable();
+            census.push(tagged);
+        }
+
+        let (first_tagged, expected) = census
+            .iter()
+            .enumerate()
+            .find(|(_frame, faces)| !faces.is_empty())
+            .ok_or("no prim face was ever pick-tagged")?;
+        for (frame, faces) in census.iter().enumerate().skip(first_tagged) {
+            pretty_assertions::assert_eq!(
+                faces,
+                expected,
+                "frame {frame}: the prim's pick-tagged faces changed — a rebuild that \
+                 despawns and respawns them leaves the world unpickable for a frame, \
+                 and the click that lands there is silently dropped"
+            );
+        }
+        Ok(())
+    }
+
     /// **The first pie-target test** ([[viewer-world-pie-target-tests]]): a
     /// right-click on an in-world prim resolves through the real pick
     /// pipeline (CPU resolver) and asks for the object pie — and a
@@ -2516,12 +2580,12 @@ mod tests {
             "this prim IS right-clickable, or the drag below proves nothing"
         );
 
-        // Off the rebuild frame first ([[viewer-prim-rebuild-drops-a-click]]):
-        // the fixture prim re-tessellates a few frames after the camera lands,
-        // despawning and respawning its faces, and for that one frame the world
-        // is unpickable — a release landing there is dropped whatever the
-        // gesture was, which would make this negative pass for the wrong
-        // reason.
+        // Let the prim reach its settled level of detail: it re-tessellates a
+        // few frames after the camera lands, and the negative below should be
+        // read on a steady scene. That frame is no longer a hole in the world —
+        // a rebuild keeps the face entities and their pick tags
+        // ([[viewer-prim-rebuild-drops-a-click]]) — but there is no reason to
+        // aim a negative at it either.
         settle(&mut app, 6);
 
         // The orbit: press, swing far past the slop, come back, release.
@@ -2577,10 +2641,9 @@ mod tests {
                 Name::new("blocking-panel"),
             ))
             .id();
-        // Past the prim's re-tessellation frame, where the world is briefly
-        // unpickable and a click is dropped whatever is over it
-        // ([[viewer-prim-rebuild-drops-a-click]]) — a negative that landed
-        // there would pass without the panel doing anything.
+        // Past the prim's re-tessellation, so the negative is read on a settled
+        // scene. The rebuild itself no longer drops a click
+        // ([[viewer-prim-rebuild-drops-a-click]]).
         settle(&mut app, 8);
 
         let centre = Vec2::new(400.0, 300.0);
@@ -3570,8 +3633,8 @@ mod hud_click_tests {
             target + Vec3::new(0.0, 0.0, 10.0),
             Vec3::new(target.x + 3.0, target.y, target.z),
         );
-        // Past the prim's re-tessellation frame, where its faces are despawned
-        // and respawned and the world is briefly unpickable
+        // Past the prim's re-tessellation, so the pick below is read on a
+        // settled scene; the rebuild keeps its faces and their pick tags
         // ([[viewer-prim-rebuild-drops-a-click]]).
         settle(&mut app, 12);
         let beside = world_to_viewport(&mut app, target).ok_or("the prim projects nowhere")?;
@@ -3626,8 +3689,8 @@ mod hud_click_tests {
         fn aim_at_the_prim(app: &mut App, prim: ScopedObjectId) -> Result<(), TestError> {
             let target = scene_position_of(app, prim).ok_or("the fixture prim has no entity")?;
             install_camera(app, target + Vec3::new(0.0, 0.0, 10.0), target);
-            // Past the prim's re-tessellation frame
-            // ([[viewer-prim-rebuild-drops-a-click]]).
+            // Past the prim's re-tessellation, so the pick is read on a settled
+            // scene ([[viewer-prim-rebuild-drops-a-click]]).
             settle(app, 12);
             Ok(())
         }
@@ -5224,10 +5287,11 @@ mod drag_drop_tests {
     /// 16 ms clock and the CPU resolver answers a frame later still, so a drop
     /// released the instant the pointer arrives resolves against wherever the
     /// pointer *was*. And a prim re-tessellates about ten frames after the
-    /// camera lands, spending one frame with no face entities at all
-    /// ([[viewer-prim-rebuild-drops-a-click]]); a pick that lands on that frame
-    /// answers `None`, which here reads as "the drag is over nothing". Resting
-    /// past both is what the pie negatives do, for the same reason.
+    /// camera lands; that used to spend a frame with no face entities at all
+    /// and answer a pick `None` — "the drag is over nothing" — until the
+    /// rebuild started keeping its faces ([[viewer-prim-rebuild-drops-a-click]]),
+    /// but the drop is still worth reading on settled geometry. Resting past
+    /// both is what the pie negatives do, for the same reason.
     const REST_FRAMES: u32 = 24;
 
     /// The fixture world for this tier: the inventory window standing over a
