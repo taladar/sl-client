@@ -206,7 +206,7 @@ impl SharedSim {
                 &event,
                 now,
             );
-            answer_world_request(&state.world, &mut state.sim, &event, now);
+            answer_world_request(&state.world, &state.avatar, &mut state.sim, &event, now);
             if let Some(hook) = &state.on_event {
                 hook(&mut state.sim, &event, now);
             }

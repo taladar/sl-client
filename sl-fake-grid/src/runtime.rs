@@ -10,7 +10,8 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use sl_proto::{
     ArrivalPlacement, EnvironmentSettings, Maturity, OpenSimExtras, ProductType, RegionHandle,
-    RegionIdentity, SimSession, SimulatorFeatures, Uuid, VoiceConfig, region_name_from_wire,
+    RegionIdentity, RegionLocalObjectId, SimSession, SimulatorFeatures, Uuid, VoiceConfig,
+    region_name_from_wire,
 };
 use sl_types::key::AgentKey;
 use sl_types::lsl::Vector;
@@ -1484,6 +1485,69 @@ impl FakeAgent {
     /// `set_*` / `enqueue_*` on it.
     pub async fn with_sim<R>(&self, f: impl FnOnce(&mut SimSession) -> R) -> R {
         self.shared.with_sim(f).await
+    }
+
+    /// Runs `f` against this session's **world fixtures** and its machine
+    /// together, then flushes — how a test changes what a region contains
+    /// after it has started.
+    ///
+    /// The two go together because a change to the world that is not sent is
+    /// invisible, and a send that the fixtures do not agree with is undone by
+    /// the next refetch: rez an object by pushing it onto
+    /// [`SceneFixtures::objects`](crate::SceneFixtures::objects) *and* sending its
+    /// `ObjectUpdate`, kill one by
+    /// dropping it *and* sending the `KillObject`. Holding one lock over both
+    /// is what keeps a concurrent refetch from seeing half of it.
+    ///
+    /// The fixtures are this session's own copy: changing them changes what
+    /// this circuit shows, not the region's other sessions. That is exactly
+    /// what a handover wants — the region an object left and the region it
+    /// arrived in are two sessions, and they disagree for a moment by design.
+    pub async fn with_world<R>(
+        &self,
+        f: impl FnOnce(&mut crate::world::SceneFixtures, &mut SimSession) -> R,
+    ) -> R {
+        let mut guard = self.shared.state.lock().await;
+        let state = &mut *guard;
+        let result = f(&mut state.world, &mut state.sim);
+        let outcome = self.shared.flush_locked(&mut guard);
+        drop(guard);
+        self.shared.finish_flush(outcome).await;
+        result
+    }
+
+    /// Re-sends this session's own avatar **seated** on `seat` (a region-local
+    /// id) at `offset` from it, and records the sit grid-side.
+    ///
+    /// What a destination simulator does for an agent that arrived riding
+    /// something: on the wire a seated avatar is one whose object update
+    /// carries its seat's `ParentID` and whose position is the offset from the
+    /// seat rather than a place in the region. The seat's **region-local id
+    /// differs** either side of a border, which is the whole difficulty a
+    /// ridden crossing puts in front of a viewer.
+    pub async fn seat_on(&self, seat: RegionLocalObjectId, offset: Vector) {
+        let mut guard = self.shared.state.lock().await;
+        let state = &mut *guard;
+        if let Some(riding) = state
+            .world
+            .all_objects()
+            .into_iter()
+            .find(|object| object.local_id == seat)
+        {
+            state.sim.seat_agent(riding.full_id);
+        }
+        let now = self.shared.now();
+        crate::world::push_seated_avatar(
+            &state.world,
+            &state.avatar,
+            seat,
+            offset,
+            &mut state.sim,
+            now,
+        );
+        let outcome = self.shared.flush_locked(&mut guard);
+        drop(guard);
+        self.shared.finish_flush(outcome).await;
     }
 
     /// Subscribes to the session's [`sl_proto::ServerEvent`] broadcast.

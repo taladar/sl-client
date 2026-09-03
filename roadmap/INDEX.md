@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 312 |
+| ready | 311 |
 | blocked | 56 |
 | in-progress | 18 |
 | bugs | 70 |
-| done | 967 |
+| done | 968 |
 | deferred | 24 |
 | wont-do | 14 |
 | **total** | **1559** |
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (312)
+## ready (311)
 
 ### protocol
 
@@ -958,8 +958,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   The built-in UI sounds the viewer plays on arrival 404
 - [`test-fake-grid-object-sounds`](ready/test-fake-grid-object-sounds.md) — The
   fake grid can serve a sound but cannot play one
-- [`test-fake-grid-seated-crossing`](ready/test-fake-grid-seated-crossing.md) —
-  Crossing a border seated on a vehicle, alone and with other riders
 - [`test-fake-grid-timeline`](ready/test-fake-grid-timeline.md) — Scripted
   scenario timelines with markers (blocked by `test-fake-grid-determinism`
   (done), `viewer-fake-grid-render-harness` (done))
@@ -1354,7 +1352,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (967)
+## done (968)
 
 ### protocol
 
@@ -3186,6 +3184,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Typed prim fixtures — textured, mesh, sculpt, PBR, light, particles, linksets
   (blocked by `test-fake-grid-terrain-layerdata` (done),
   `test-shared-test-assets` (done))
+- [`test-fake-grid-seated-crossing`](done/test-fake-grid-seated-crossing.md) —
+  Crossing a border seated on a vehicle, alone and with other riders
 - [`test-fake-grid-self-avatar-baked-textures-rejected`](done/test-fake-grid-self-avatar-baked-textures-rejected.md)
   — The agent's own head, upper and lower bakes are fetched, served, and then
   discarded

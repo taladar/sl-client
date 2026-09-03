@@ -95,7 +95,10 @@ floating just inside the region's west edge. It exists for the questions
 that need two regions — is the region across the border drawn at all, and
 does it stay put when the avatar walks into it — because both are only
 decidable in pixels if the subject's position is stated relative to a
-border rather than to the middle of a region.
+border rather than to the middle of a region. `border_with_vehicle`
+adds a rideable platform against the border for a *ridden* crossing, with
+`BorderSide` deciding which side of the line a region is on so its ids and
+its position cannot be mispaired.
 
 `fixtures::scenarios` names the scenes — `stock`, `catalogue` and
 `border` today — so a harness selects one by name and the next one is a

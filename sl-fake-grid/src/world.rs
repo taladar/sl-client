@@ -376,6 +376,29 @@ const ZERO: Vector = Vector {
     z: 0.0,
 };
 
+/// The identity rotation, for a fixture that turns nothing.
+const UNROTATED: Rotation = Rotation {
+    x: 0.0,
+    y: 0.0,
+    z: 0.0,
+    s: 1.0,
+};
+
+/// Where a seat puts an avatar: this far above the seat's own centre, and
+/// facing the way the seat faces.
+///
+/// The fake grid's stand-in for `llSitTarget`, and the reason a sit here
+/// ignores the point the client clicked. A real vehicle sets a sit target, so
+/// the avatar snaps to the seat rather than to wherever the pointer landed,
+/// and a fixture that answered the click offset would seat two riders in the
+/// same place only by luck. It is the offset the scripted riders already use
+/// ([`SEATED_NPC_SIT_OFFSET_Z`](crate::fixtures::catalogue::SEATED_NPC_SIT_OFFSET_Z)).
+pub const SIT_TARGET_OFFSET: Vector = Vector {
+    x: 0.0,
+    y: 0.0,
+    z: 0.55,
+};
+
 /// The skeleton every fixture object shares: a root object with no sound,
 /// text, media, particles, or extra params; the caller sets the identity,
 /// geometry and motion.
@@ -749,11 +772,82 @@ fn push_terrain(terrain: &TerrainFixture, sim: &mut SimSession, now: Instant) {
 /// drops a stale refetch).
 pub(crate) fn answer_world_request(
     world: &SceneFixtures,
+    identity: &AvatarIdentity,
     sim: &mut SimSession,
     event: &ServerEvent,
     now: Instant,
 ) {
     match event {
+        // The agent asked to sit on something. A simulator answers a sit on an
+        // object it has with an `AvatarSitResponse` and simply does not answer
+        // one it does not (the client's own sit timeout recovers that), so an
+        // unknown target is dropped rather than refused.
+        ServerEvent::SitRequested { target, offset } => {
+            let Some(seat) = world
+                .all_objects()
+                .into_iter()
+                .find(|object| object.full_id == *target)
+            else {
+                tracing::debug!("a sit was requested on {target}, which this region does not have");
+                return;
+            };
+            // The seat has a sit target, so the click point is ignored — see
+            // [`SIT_TARGET_OFFSET`]. The `offset` the client sent is where it
+            // touched the object, which a scripted seat never honours either.
+            let _clicked = offset;
+            let transform = sl_proto::SitTransform {
+                autopilot: false,
+                sit_position: SIT_TARGET_OFFSET,
+                sit_rotation: UNROTATED,
+                camera_eye_offset: ZERO,
+                camera_at_offset: ZERO,
+                force_mouselook: false,
+            };
+            if let Err(error) = sim.send_avatar_sit_response(seat.full_id, &transform, now) {
+                tracing::warn!("answering a sit request failed: {error}");
+            }
+        }
+        // The handshake completed: the avatar is on the seat, which on the wire
+        // means its object update carries the seat's **region-local** id as its
+        // `ParentID` and a position that is the offset from the seat rather
+        // than a region position. That is the one case where an avatar's
+        // position is not region-local, and re-sending the body is how every
+        // client learns it (`NpcFixture::seated_on` says the same thing
+        // statically for a scripted rider).
+        ServerEvent::SitConfirmed { on: Some(seat) } => {
+            let Some(parent) = world
+                .all_objects()
+                .into_iter()
+                .find(|object| object.full_id == *seat)
+            else {
+                return;
+            };
+            push_seated_avatar(
+                world,
+                identity,
+                parent.local_id,
+                SIT_TARGET_OFFSET,
+                sim,
+                now,
+            );
+        }
+        // Standing up puts the avatar back in the region's own frame, at the
+        // place the driver last knew it.
+        ServerEvent::StoodUp => {
+            let placement = sim.arrival_position().position;
+            let avatar = avatar_prim(
+                world.avatar_local_id,
+                identity,
+                Vector {
+                    x: placement.x(),
+                    y: placement.y(),
+                    z: placement.z(),
+                },
+            );
+            if let Err(error) = sim.send_object_update(&[avatar], REAL_TIME_DILATION, now) {
+                tracing::warn!("standing the agent up failed: {error}");
+            }
+        }
         ServerEvent::RequestParcelProperties {
             west,
             south,
@@ -799,6 +893,24 @@ pub(crate) fn answer_world_request(
             }
         }
         _other => {}
+    }
+}
+
+/// Rezzes the agent's own avatar **seated**: parented to `seat` (a
+/// region-local id) at `offset` from it, which is how a seated avatar travels
+/// on the wire.
+pub(crate) fn push_seated_avatar(
+    world: &SceneFixtures,
+    identity: &AvatarIdentity,
+    seat: RegionLocalObjectId,
+    offset: Vector,
+    sim: &mut SimSession,
+    now: Instant,
+) {
+    let mut avatar = avatar_prim(world.avatar_local_id, identity, offset);
+    avatar.parent_id = seat;
+    if let Err(error) = sim.send_object_update(&[avatar], REAL_TIME_DILATION, now) {
+        tracing::warn!("seating the agent's avatar failed: {error}");
     }
 }
 

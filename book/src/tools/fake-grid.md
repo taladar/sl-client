@@ -843,6 +843,31 @@ position, velocity)`, which refuses a destination that does not border
 the agent's region (`Error::NotAdjacent`) and publishes a
 `CrossingNotice` on `FakeGrid::crossings()`.
 
+### Sitting, and riding across a border
+
+A sit is a conversation: the client's `AgentRequestSit`, the region's
+`AvatarSitResponse`, the client's completing `AgentSit`. The fake grid
+answers one for any object it has (`world::answer_world_request`) and then
+does the visible half — re-sending the agent's own avatar object with the
+seat's **region-local id as its `ParentID`** and a position that is the
+offset from the seat rather than a place in the region. That is the one
+case where an avatar's position is not region-local, and it is how every
+client learns someone is aboard something.
+
+The offset is a fixed `SIT_TARGET_OFFSET`, not the point the client
+clicked: a real vehicle sets an `llSitTarget`, so riders snap to the seat.
+
+A **ridden** crossing is the interesting case, because the vehicle is
+handed over too and everything about it is renumbered. An object keeps its
+grid-wide `ObjectKey` across a border and takes the destination's own
+region-local id, so a viewer that keyed a rider's seat by local id alone
+would lose the seat at the line. `fixtures::border::BorderSide` builds the
+pair: `Leaving` stands the vehicle against its region's east edge,
+`Arriving` against the next region's west edge, a few metres apart across
+one border, same full id and different local ids. `FakeAgent::with_world`
+(mutate a session's fixtures *and* send, under one lock) and
+`FakeAgent::seat_on` are what a test drives the handover with.
+
 ## The Bevy smoke tier
 
 `sl-client-bevy/tests/fake_grid_login_smoke.rs` logs the real

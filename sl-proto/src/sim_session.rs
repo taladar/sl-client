@@ -7603,6 +7603,25 @@ impl SimSession {
         self.close(ServerEvent::Disconnected);
     }
 
+    /// Records that the agent is already **seated** on `seat`, with no sit
+    /// handshake — what a destination simulator is told about an agent that
+    /// arrives riding something.
+    ///
+    /// A sit is normally a conversation (`AgentRequestSit` →
+    /// `AvatarSitResponse` → `AgentSit`), but a ridden region crossing has
+    /// none: the agent was already sitting in the region it came from, and the
+    /// destination inherits that as part of the agent data rather than asking
+    /// for it again. Without this the destination would believe an arriving
+    /// rider is standing, and the first thing it sent about them would say so.
+    ///
+    /// Sending nothing is deliberate — the client is not being asked to sit,
+    /// it is being agreed with. The visible half is the avatar's own object
+    /// update, whose `ParentID` names the seat.
+    pub const fn seat_agent(&mut self, seat: ObjectKey) {
+        self.sit = SimSitState::Seated { on: seat };
+        self.sit_expires = None;
+    }
+
     /// Places the agent's arrival: the position and facing the
     /// `AgentMovementComplete` reply carries when the client completes its
     /// movement into this region. A teleport destination sets this to the

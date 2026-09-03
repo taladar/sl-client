@@ -259,6 +259,16 @@ mod test {
         /// will never arrive alive indefinitely. That is fine for waiting on
         /// one thing that is about to happen, and useless for waiting on a set
         /// of things that may not.
+        ///
+        /// **A wait consumes what it reads.** Anything that arrived before it
+        /// started, or that it stepped over on the way to what it was looking
+        /// for, is gone. So a test that wants several things must ask for them
+        /// in **one** wait, accumulating as they arrive, rather than waiting
+        /// for each in turn: the wire order of independent messages is not
+        /// something a test may assume — a real link reorders, and even here a
+        /// second wait for something the first already stepped past hangs until
+        /// the deadline. Waiting for one thing *after an action that causes it*
+        /// is the case where sequencing is safe.
         async fn wait_until(
             &mut self,
             what: &str,
@@ -1097,32 +1107,22 @@ mod test {
             "an adjacent region is a neighbour"
         );
 
+        // Everything in one pass. The announcement and the burst it triggers
+        // are causally ordered, but the messages *within* each are not
+        // something a test may assume the order of, and a second wait would
+        // consume what the first stepped over.
         let mut announced = None;
         let mut seeded = None;
+        let mut ground = false;
+        let mut objects = false;
+        let mut marked = false;
         running
-            .wait_until("the east region to be announced and seeded", |event| {
+            .wait_until("the east region announced, seeded and streaming", |event| {
                 match event {
                     Event::NeighborDiscovered(info) if info.region_handle == east => {
                         announced = Some(info.sim);
                     }
                     Event::NeighborSeed { sim, .. } => seeded = Some(*sim),
-                    _other => {}
-                }
-                announced.is_some() && seeded.is_some()
-            })
-            .await?;
-        assert!(announced.is_some_and(|sim| sim.ip().is_loopback()));
-        assert_eq!(seeded, announced, "the seed names the announced simulator");
-
-        // The child circuit's own burst: the neighbour's ground and objects,
-        // labelled with the neighbour's handle rather than the root region's,
-        // and the marker that says the burst is complete.
-        let mut ground = false;
-        let mut objects = false;
-        let mut marked = false;
-        running
-            .wait_until("the east region's scene on its child circuit", |event| {
-                match event {
                     Event::TerrainPatch(patch) if patch.region_handle == east => ground = true,
                     Event::ObjectAdded(object) | Event::ObjectUpdated(object)
                         if object.region_handle == east =>
@@ -1138,9 +1138,11 @@ mod test {
                     }
                     _other => {}
                 }
-                ground && objects && marked
+                announced.is_some() && seeded.is_some() && ground && objects && marked
             })
             .await?;
+        assert!(announced.is_some_and(|sim| sim.ip().is_loopback()));
+        assert_eq!(seeded, announced, "the seed names the announced simulator");
         Ok(())
     }
 
@@ -1166,17 +1168,87 @@ mod test {
                 discard_level: sl_proto::j2c::DiscardLevel::FULL,
             })
             .await?;
-        let bytes = running
-            .wait_for(|event| match event {
-                Event::TextureReceived(fetched) if fetched.id == marker => {
-                    Some(fetched.data.clone())
+        let mut bytes = None;
+        running
+            .wait_until("the neighbour's texture over this region's cap", |event| {
+                if let Event::TextureReceived(fetched) = event
+                    && fetched.id == marker
+                {
+                    bytes = Some(fetched.data.clone());
                 }
-                _ => None,
+                bytes.is_some()
             })
             .await?;
+        let bytes = bytes.ok_or("no texture")?;
         let decoded = sl_texture::decode_j2c(&bytes, sl_proto::j2c::DiscardLevel::FULL)
             .map_err(|error| format!("the neighbour's checker did not decode: {error}"))?;
         assert!(decoded.width > 0 && decoded.height > 0);
+        Ok(())
+    }
+
+    /// **The grid answers a sit, and the avatar rides its seat.**
+    ///
+    /// The prerequisite for anything about a *ridden* vehicle: the client's
+    /// `AgentRequestSit`, the grid's `AvatarSitResponse`, the client's
+    /// completing `AgentSit`, and then the thing that makes it visible — the
+    /// avatar's own object update re-sent with the seat's region-local id as
+    /// its `ParentID` and a position that is the offset from the seat rather
+    /// than a place in the region.
+    #[tokio::test]
+    async fn the_agent_sits_on_a_prim_and_rides_it() -> Result<(), TestError> {
+        let mut running = start().await?;
+        let agent_id = running.agent.agent_id();
+        let seat = sl_fake_grid::scenario::stock_scripted_object();
+        let seat_local = sl_fake_grid::scenario::STOCK_SCRIPTED_OBJECT_LOCAL_ID;
+
+        running
+            .commands
+            .send(Command::Sit {
+                target: seat,
+                offset: Vector {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            })
+            .await?;
+        // The response and the avatar's re-rez in one wait: the grid sends them
+        // in that order, but nothing about the transport guarantees a client
+        // sees them in it, and a second wait would consume the first's.
+        let mut answered = None;
+        let mut seated = None;
+        running
+            .wait_until("the sit answered and the avatar aboard", |event| {
+                match event {
+                    Event::SitResult {
+                        sit_object,
+                        sit_position,
+                        ..
+                    } => answered = Some((*sit_object, sit_position.clone())),
+                    Event::ObjectAdded(object) | Event::ObjectUpdated(object)
+                        if object.full_id.uuid() == agent_id.uuid()
+                            && object.parent_id == seat_local =>
+                    {
+                        seated = Some(object.motion.position.clone());
+                    }
+                    _other => {}
+                }
+                answered.is_some() && seated.is_some()
+            })
+            .await?;
+        let answered = answered.ok_or("no sit response")?;
+        assert_eq!(answered.0, seat);
+        assert_eq!(
+            answered.1,
+            sl_fake_grid::world::SIT_TARGET_OFFSET,
+            "the seat has a sit target, so the click point is not honoured"
+        );
+        assert_eq!(seated, Some(sl_fake_grid::world::SIT_TARGET_OFFSET));
+        assert_eq!(
+            running.agent.with_sim(|sim| sim.seated_on()).await,
+            Some(seat),
+            "the grid knows the agent is on the seat"
+        );
         Ok(())
     }
 
@@ -1222,16 +1294,21 @@ mod test {
             .cross_agent(&source, "Fake Region East", landing, walking)
             .await?;
 
-        let (changed, world_reset) = running
-            .wait_for(|event| match event {
-                Event::RegionChanged {
+        let mut changed = None;
+        running
+            .wait_until("the arrival in the east region", |event| {
+                if let Event::RegionChanged {
                     region_handle,
                     world_reset,
                     ..
-                } => Some((*region_handle, *world_reset)),
-                _ => None,
+                } = event
+                {
+                    changed = Some((*region_handle, *world_reset));
+                }
+                changed.is_some()
             })
             .await?;
+        let (changed, world_reset) = changed.ok_or("no region change")?;
         assert_eq!(changed, east);
         assert!(
             !world_reset,
@@ -1277,11 +1354,252 @@ mod test {
             })
             .await?;
         running
-            .wait_for(|event| match event {
-                Event::ChatReceived(message) if message.message == "walked in" => Some(()),
-                _ => None,
+            .wait_until("the destination's chat line", |event| {
+                matches!(event, Event::ChatReceived(message) if message.message == "walked in")
             })
             .await?;
+        Ok(())
+    }
+
+    /// The two-region border grid a ridden crossing runs on: the same scene
+    /// either side, with the vehicle **numbered differently** in each.
+    ///
+    /// That renumbering is the point. A handover keeps an object's grid-wide
+    /// id and gives it the destination's own region-local one, so a rider's
+    /// seat has to be re-found rather than merely kept.
+    fn ridden_border_grid(ridden: bool) -> Vec<RegionConfig> {
+        use sl_fake_grid::fixtures::border::{BorderSide, border_with_vehicle};
+        vec![
+            border_with_vehicle(BorderSide::Leaving, ridden).into_region(RegionConfig::default()),
+            border_with_vehicle(BorderSide::Arriving, ridden).into_region(adjacent_east_region()),
+        ]
+    }
+
+    /// Sits the agent on the border scene's vehicle and waits for the wire to
+    /// show it riding: the sit response, then its own avatar object re-sent
+    /// with the vehicle's `ParentID`.
+    async fn ride_the_vehicle(running: &mut Running) -> Result<(), TestError> {
+        let agent_id = running.agent.agent_id();
+        running
+            .commands
+            .send(Command::Sit {
+                target: sl_fake_grid::fixtures::border::VEHICLE_OBJECT,
+                offset: Vector {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            })
+            .await?;
+        running
+            .wait_until("the agent aboard the vehicle", |event| match event {
+                Event::ObjectAdded(object) | Event::ObjectUpdated(object) => {
+                    object.full_id.uuid() == agent_id.uuid()
+                        && object.parent_id
+                            == sl_fake_grid::fixtures::border::BorderSide::Leaving
+                                .vehicle_local_id()
+                }
+                _ => false,
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// Hands the vehicle over the border the way a simulator does: the region
+    /// being left kills it, and the agent is seated on the destination's own
+    /// copy — which carries the same full id under a different local id.
+    ///
+    /// The destination already streams its copy (it is in that region's
+    /// fixtures, and its child circuit burst it long ago), so the handover is
+    /// the *source* forgetting the object and the *destination* claiming the
+    /// rider.
+    async fn hand_the_vehicle_over(
+        source: &FakeAgent,
+        destination: &FakeAgent,
+        riders: &[sl_proto::RegionLocalObjectId],
+    ) -> Result<(), TestError> {
+        use sl_fake_grid::fixtures::border;
+        let mut leaving = vec![border::BorderSide::Leaving.vehicle_local_id()];
+        leaving.extend_from_slice(riders);
+        source
+            .with_world(|world, sim| {
+                world
+                    .objects
+                    .retain(|object| object.full_id != border::VEHICLE_OBJECT);
+                world.npcs.clear();
+                sim.send_kill_object(&leaving, sim_now())
+            })
+            .await?;
+        destination
+            .seat_on(
+                border::BorderSide::Arriving.vehicle_local_id(),
+                sl_fake_grid::world::SIT_TARGET_OFFSET,
+            )
+            .await;
+        Ok(())
+    }
+
+    /// The instant a grid-side send is stamped with. The sessions here run on
+    /// the system clock, so this is that clock.
+    fn sim_now() -> std::time::Instant {
+        std::time::Instant::now()
+    }
+
+    /// Waits for both halves of a handover: the region being left forgetting
+    /// the vehicle, and the destination showing the agent aboard its own copy.
+    ///
+    /// **In one pass, because the two halves come from two different
+    /// simulators.** UDP is ordered per circuit and says nothing across
+    /// circuits, so the kill on the source and the re-seat on the destination
+    /// may be seen in either order — and a wait for one would consume the
+    /// other on its way past.
+    async fn wait_for_the_handover(
+        running: &mut Running,
+        destination_region: sl_client_tokio::RegionHandle,
+    ) -> Result<(), TestError> {
+        use sl_fake_grid::fixtures::border;
+        let agent_id = running.agent.agent_id();
+        let mut left = false;
+        let mut arrived = false;
+        running
+            .wait_until("the vehicle handed over the border", |event| {
+                match event {
+                    Event::ObjectRemoved { local_id, .. } => {
+                        left |= local_id.id() == border::BorderSide::Leaving.vehicle_local_id();
+                    }
+                    Event::ObjectAdded(object) | Event::ObjectUpdated(object) => {
+                        arrived |= object.full_id.uuid() == agent_id.uuid()
+                            && object.region_handle == destination_region
+                            && object.parent_id == border::BorderSide::Arriving.vehicle_local_id();
+                    }
+                    _other => {}
+                }
+                left && arrived
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// **An avatar riding a vehicle crosses the border with it.**
+    ///
+    /// The case that actually breaks in the wild. Everything about the seat is
+    /// renumbered at the border — the vehicle's region-local id is the
+    /// destination's, not the source's — while the client's own seat, which is
+    /// keyed by the object's grid-wide id, must come through untouched, along
+    /// with the sit-implied script permissions a stand would drop.
+    #[tokio::test]
+    async fn a_seated_avatar_crosses_with_its_vehicle() -> Result<(), TestError> {
+        use sl_fake_grid::fixtures::border;
+        let mut running = start_in(ridden_border_grid(false)).await?;
+        let east = running
+            ._grid
+            .region_handle("Fake Region East")
+            .ok_or("no east region")?;
+        running
+            .wait_until("the east region's child circuit", |event| match event {
+                Event::GenericMessage(generic) => {
+                    sl_fake_grid::neighbour_marker_region(generic).as_deref()
+                        == Some("Fake Region East")
+                }
+                _ => false,
+            })
+            .await?;
+        ride_the_vehicle(&mut running).await?;
+
+        let source = running.agent.clone();
+        let destination = running
+            ._grid
+            .cross_agent(
+                &source,
+                "Fake Region East",
+                RegionCoordinates::new(border::MARKER_X, border::MARKER_Y, border::MARKER_Z),
+                Vector {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            )
+            .await?;
+        hand_the_vehicle_over(&source, &destination, &[]).await?;
+
+        // The vehicle left one region and the rider is aboard the other's copy:
+        // same object, the other region's local id.
+        wait_for_the_handover(&mut running, east).await?;
+        assert_ne!(
+            border::BorderSide::Arriving.vehicle_local_id(),
+            border::BorderSide::Leaving.vehicle_local_id(),
+            "the seat is renumbered at the border, or this proves nothing"
+        );
+        assert_eq!(
+            destination.with_sim(|sim| sim.seated_on()).await,
+            Some(border::VEHICLE_OBJECT),
+            "the destination inherited the sit rather than believing the agent stood up"
+        );
+        assert!(
+            !source.is_closed(),
+            "the region the vehicle left is still a neighbour"
+        );
+        Ok(())
+    }
+
+    /// **The other riders come too, and are re-seated on the same vehicle.**
+    ///
+    /// One rider proves a seat was re-found; two prove the *right* one was.
+    #[tokio::test]
+    async fn other_riders_cross_on_the_same_vehicle() -> Result<(), TestError> {
+        use sl_fake_grid::fixtures::border;
+        let mut running = start_in(ridden_border_grid(true)).await?;
+        let east = running
+            ._grid
+            .region_handle("Fake Region East")
+            .ok_or("no east region")?;
+        // Both in one pass: the scripted rider's own update comes *inside* the
+        // child burst and the marker closes it, so waiting for the marker
+        // first would consume the rider's update on the way past.
+        let mut rider_aboard = false;
+        let mut burst_done = false;
+        running
+            .wait_until("the east region's scene, rider aboard", |event| {
+                match event {
+                    Event::ObjectAdded(object) | Event::ObjectUpdated(object) => {
+                        rider_aboard |= object.local_id
+                            == border::BorderSide::Arriving.rider_local_id()
+                            && object.region_handle == east
+                            && object.parent_id == border::BorderSide::Arriving.vehicle_local_id();
+                    }
+                    Event::GenericMessage(generic) => {
+                        burst_done |= sl_fake_grid::neighbour_marker_region(generic).as_deref()
+                            == Some("Fake Region East");
+                    }
+                    _other => {}
+                }
+                rider_aboard && burst_done
+            })
+            .await?;
+        ride_the_vehicle(&mut running).await?;
+
+        let source = running.agent.clone();
+        let destination = running
+            ._grid
+            .cross_agent(
+                &source,
+                "Fake Region East",
+                RegionCoordinates::new(border::MARKER_X, border::MARKER_Y, border::MARKER_Z),
+                Vector {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            )
+            .await?;
+        hand_the_vehicle_over(
+            &source,
+            &destination,
+            &[border::BorderSide::Leaving.rider_local_id()],
+        )
+        .await?;
+
+        wait_for_the_handover(&mut running, east).await?;
         Ok(())
     }
 

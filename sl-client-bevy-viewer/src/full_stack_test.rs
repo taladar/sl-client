@@ -481,6 +481,33 @@ impl ViewerHarness {
             .unwrap_or_default()
     }
 
+    /// Where `points` land on the frame, given in **Bevy world space** — for
+    /// asking where the viewer actually drew something, rather than where the
+    /// grid said it was.
+    ///
+    /// [`project`](Self::project) is the same question asked in the grid's
+    /// frame; this one takes a `GlobalTransform`'s translation straight from
+    /// the entity that was rendered, which is the only way to see a body placed
+    /// by something other than its own region-space position — a rider on a
+    /// seat, most of all.
+    pub(crate) fn project_world(&mut self, points: &[Vec3]) -> Projected {
+        let mut cameras = self
+            .app
+            .world_mut()
+            .query_filtered::<(&Camera, &GlobalTransform), With<ViewerCamera>>();
+        cameras
+            .single(self.app.world())
+            .map(|(camera, transform)| {
+                Projected(
+                    points
+                        .iter()
+                        .map(|point| camera.world_to_viewport(transform, *point).ok())
+                        .collect(),
+                )
+            })
+            .unwrap_or_default()
+    }
+
     /// Place the camera at `eye` looking at `target`, both in Second Life
     /// region-local metres.
     ///
@@ -509,6 +536,11 @@ impl ViewerHarness {
     /// client (a teleport) goes through the client's own command path instead.
     pub(crate) fn grid<F: Future>(&self, future: F) -> F::Output {
         self.runtime.block_on(future)
+    }
+
+    /// The viewer's world, mutably, for a query a read-only handle cannot run.
+    pub(crate) fn app_world_mut(&mut self) -> &mut World {
+        self.app.world_mut()
     }
 
     /// The viewer's world, for a claim about ECS state rather than pixels.
@@ -951,6 +983,7 @@ mod tests {
 
     use bevy::prelude::*;
     use sl_fake_grid::RegionConfig;
+    use sl_fake_grid::fixtures::border::BorderSide;
     use sl_fake_grid::fixtures::catalogue::{CatalogueEntry, MESH_ASSET, ROW_Y, entry};
     use sl_proto::Vector;
 
@@ -1600,6 +1633,214 @@ mod tests {
              {interrupted:#?}"
         );
         harness.logout()
+    }
+
+    /// The border grid with a rideable vehicle either side, numbered
+    /// differently in each — which is what makes a ridden crossing a handover
+    /// rather than two copies of one prim.
+    fn ridden_border_grid() -> Vec<RegionConfig> {
+        use sl_fake_grid::fixtures::border::border_with_vehicle;
+        vec![
+            border_with_vehicle(BorderSide::Leaving, false).into_region(RegionConfig {
+                name: WEST_REGION.to_owned(),
+                ..RegionConfig::default()
+            }),
+            border_with_vehicle(BorderSide::Arriving, false).into_region(RegionConfig {
+                name: EAST_REGION.to_owned(),
+                grid_x: RegionConfig::default().grid_x.saturating_add(1),
+                ..RegionConfig::default()
+            }),
+        ]
+    }
+
+    /// **A rider stays on its vehicle across a border.**
+    ///
+    /// The claim `Session::seat()` cannot make. The seat survives the crossing
+    /// as a *value* whatever the viewer does with it; what this asks is whether
+    /// the body is still drawn **on the deck** afterwards — which it only is if
+    /// the seat was re-found under the destination's own region-local id and
+    /// the avatar re-placed against it.
+    ///
+    /// Measured as the avatar's offset from the vehicle in pixels, before and
+    /// after. An absolute position would only restate what
+    /// [`a_border_crossing_keeps_the_picture_still`] already proves about the
+    /// origin; the *relative* one is the seat.
+    #[test]
+    fn a_rider_stays_on_its_vehicle_across_a_border() -> Result<(), TestError> {
+        use sl_fake_grid::fixtures::border;
+        let mut harness = ViewerHarness::start_in(ridden_border_grid())?;
+        harness.login()?;
+        harness.wait_neighbour(EAST_REGION)?;
+
+        // Aboard the western vehicle.
+        harness.command(sl_client_bevy::Command::Sit {
+            target: border::VEHICLE_OBJECT,
+            offset: Vector {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        });
+        let own = harness
+            .world()
+            .resource::<sl_client_bevy::SlIdentity>()
+            .agent_id
+            .ok_or("the session has no agent id")?;
+        harness.wait_event("the agent aboard the vehicle", |event| match event {
+            sl_client_bevy::SlSessionEvent::ObjectAdded(object)
+            | sl_client_bevy::SlSessionEvent::ObjectUpdated(object)
+                if object.full_id.uuid() == own.uuid()
+                    && object.parent_id == BorderSide::Leaving.vehicle_local_id() =>
+            {
+                Some(())
+            }
+            _ => None,
+        })?;
+
+        // Frame the vehicle the agent is on, from a fixed pose *relative to
+        // it*. Unlike the continuity test the camera is re-aimed after the
+        // crossing, and must be: the subject rides over the border, so a fixed
+        // world pose would be looking at where it used to be. What is compared
+        // is the rider's offset **from its vehicle**, which that re-aiming
+        // leaves alone.
+        frame_the_vehicle(&mut harness, BorderSide::Leaving);
+        let Some(_before) = harness.capture()? else {
+            no_adapter("the ridden crossing check");
+            return Ok(());
+        };
+        let ride_before = rider_offset_px(&mut harness, BorderSide::Leaving)?;
+
+        // Over the border, and the vehicle handed over with its rider.
+        let source = harness.agent()?;
+        let landing = BorderSide::Arriving.vehicle_position();
+        harness.cross_to(
+            EAST_REGION,
+            sl_proto::RegionCoordinates::new(landing.x, landing.y, landing.z),
+        )?;
+        let destination = harness.agent()?;
+        harness.grid(async {
+            source
+                .with_world(|world, sim| {
+                    world
+                        .objects
+                        .retain(|object| object.full_id != border::VEHICLE_OBJECT);
+                    sim.send_kill_object(&[BorderSide::Leaving.vehicle_local_id()], source.now())
+                })
+                .await
+        })?;
+        harness.grid(destination.seat_on(
+            BorderSide::Arriving.vehicle_local_id(),
+            sl_fake_grid::world::SIT_TARGET_OFFSET,
+        ));
+        harness.wait_event(
+            "the agent aboard the destination's vehicle",
+            |event| match event {
+                sl_client_bevy::SlSessionEvent::ObjectAdded(object)
+                | sl_client_bevy::SlSessionEvent::ObjectUpdated(object)
+                    if object.full_id.uuid() == own.uuid()
+                        && object.parent_id == BorderSide::Arriving.vehicle_local_id() =>
+                {
+                    Some(())
+                }
+                _ => None,
+            },
+        )?;
+        frame_the_vehicle(&mut harness, BorderSide::Arriving);
+        let _after = harness
+            .capture()?
+            .ok_or("the adapter answered the first capture and not the second")?;
+        let ride_after = rider_offset_px(&mut harness, BorderSide::Arriving)?;
+
+        let drift = Vec2::new(ride_after.x - ride_before.x, ride_after.y - ride_before.y).length();
+        assert!(
+            drift <= BORDER_DRIFT_PX,
+            "the rider moved {drift} px relative to its vehicle across the crossing ({ride_before:?}              -> {ride_after:?}) — the seat was not re-found under the destination's own local id",
+        );
+        harness.logout()
+    }
+
+    /// How far west of the vehicle its camera stands, in metres — looking east
+    /// at it, so the floating deck has sky behind it.
+    const VEHICLE_CAMERA_WEST: f32 = 12.0;
+
+    /// Aim the camera at the vehicle the agent is riding, in the current
+    /// origin's frame.
+    ///
+    /// Both regions place their vehicle at the same *region-local* spot, so
+    /// this one framing serves either side of the border — which is what makes
+    /// the before/after comparison a comparison of the **rider on the deck**
+    /// rather than of where the deck is.
+    fn frame_the_vehicle(harness: &mut ViewerHarness, side: BorderSide) {
+        let deck = side.vehicle_position();
+        harness.look_from(
+            Vector {
+                x: deck.x - VEHICLE_CAMERA_WEST,
+                y: deck.y,
+                z: BORDER_EYE_Z,
+            },
+            deck,
+        );
+    }
+
+    /// Where the own avatar sits on screen **relative to its vehicle**, in
+    /// pixels.
+    ///
+    /// Both are read in the current origin's frame, so the measurement says
+    /// nothing about which region either is in — only whether the body is on
+    /// the deck. Read from the projection rather than the wire: the question is
+    /// where the viewer *drew* the body, which is the only place a lost seat
+    /// shows.
+    fn rider_offset_px(harness: &mut ViewerHarness, side: BorderSide) -> Result<Vec2, TestError> {
+        let deck = side.vehicle_position();
+        let vehicle_px = harness
+            .project(&[deck])
+            .get(0)
+            .ok_or("the vehicle is not on the frame — the camera is not looking at it")?;
+        let body = own_avatar_px(harness)?;
+        Ok(Vec2::new(body.x - vehicle_px.x, body.y - vehicle_px.y))
+    }
+
+    /// Where the own avatar's body root projects on the current frame.
+    ///
+    /// Taken from the entity's transform — where the viewer *put* the body —
+    /// and not from any region-space position it was told, because a seated
+    /// avatar's position is its offset from a seat and says nothing about
+    /// where the seat is.
+    ///
+    /// Returns the reason rather than `None`: every step here has failed at
+    /// least once during this test's development, and "the own avatar has no
+    /// world position" says nothing about which.
+    fn own_avatar_px(harness: &mut ViewerHarness) -> Result<Vec2, String> {
+        let own = harness
+            .world()
+            .resource::<sl_client_bevy::SlIdentity>()
+            .agent_id
+            .ok_or_else(|| "the session has no agent id".to_owned())?;
+        let anchor = harness
+            .world()
+            .resource::<crate::world_api::AvatarState>()
+            .body_root_of(own)
+            .ok_or_else(|| format!("no body root is tracked for {own}"))?;
+        let live = harness.world().entities().contains(anchor);
+        let anchors = harness
+            .app_world_mut()
+            .query_filtered::<Entity, With<crate::world_api::AvatarAnchor>>()
+            .iter(harness.world())
+            .count();
+        let at = harness
+            .world()
+            .get::<Transform>(anchor)
+            .map(|transform| transform.translation)
+            .ok_or_else(|| {
+                format!(
+                    "the tracked body root {anchor:?} has no Transform (entity live: {live}, \
+                     avatar anchors in the world: {anchors})"
+                )
+            })?;
+        harness
+            .project_world(&[at])
+            .get(0)
+            .ok_or_else(|| format!("the body root at {at:?} does not project onto the frame"))
     }
 
     /// Aim the camera from inside the western region at the eastern region's

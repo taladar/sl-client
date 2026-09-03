@@ -20,8 +20,9 @@ use sl_types::key::{AgentKey, Key, ObjectKey, OwnerKey, TextureKey};
 use sl_types::lsl::Vector;
 
 use super::RegionFixture;
+use super::npcs::{NpcAppearance, NpcFixture};
 use super::prims::PrimFixture;
-use crate::world::{SceneFixtures, region_wide_parcel};
+use crate::world::{AvatarIdentity, SIT_TARGET_OFFSET, SceneFixtures, region_wide_parcel};
 
 /// The border parcel's name.
 pub const BORDER_PARCEL_NAME: &str = "Fake Grid Border";
@@ -61,6 +62,135 @@ pub const MARKER_Z: f32 = 31.0;
 /// How big the marker pillar is along each axis, in metres.
 pub const MARKER_SIZE: f32 = 3.0;
 
+/// The **vehicle**: a rideable platform a ridden border crossing hands to the
+/// region next door.
+///
+/// It keeps its grid-wide [`ObjectKey`] across the border and takes the
+/// destination's own region-local id, which is the renumbering a rider's seat
+/// has to survive — see [`BorderSide`].
+pub const VEHICLE_OBJECT: ObjectKey = ObjectKey(Key(uuid::Uuid::from_u128(0x000B_04DE_0010)));
+
+/// How wide and deep the vehicle is, in metres.
+pub const VEHICLE_SIZE: f32 = 2.0;
+
+/// How thick the vehicle's deck is, in metres.
+pub const VEHICLE_HEIGHT: f32 = 0.4;
+
+/// The rider NPC's agent id.
+pub const RIDER_AGENT: uuid::Uuid = uuid::Uuid::from_u128(0x000B_04DE_0011);
+
+/// The colour the rider NPC is baked, so a picture can tell it from the
+/// arriving agent's own green body.
+pub const RIDER_BAKE_COLOR: [u8; 4] = sl_test_assets::markers::BLUE;
+
+/// How far a vehicle stands from the border it is about to cross, or has just
+/// crossed, in metres.
+///
+/// A few metres, because a crossing is a few metres: the two regions' copies of
+/// one vehicle are this far either side of the same line, which is what a
+/// handover looks like. (An earlier version of this scene put both copies at
+/// the same *region-local* x, which put them 256 m apart and made the
+/// "handover" a sideways jump across a whole region.)
+pub const VEHICLE_FROM_BORDER: f32 = 4.0;
+
+/// Which side of the shared border a region is on, for a west-to-east
+/// crossing.
+///
+/// The two regions of a border grid are not interchangeable, and pairing the
+/// wrong local id with the wrong position is exactly the mistake this type
+/// exists to make impossible: a vehicle waiting to leave stands inside its
+/// region's **east** edge, and the copy it becomes stands inside the next
+/// region's **west** edge, a few metres away across the line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[expect(
+    clippy::module_name_repetitions,
+    reason = "the module is the scene and the type is a side of it; `border::BorderSide` \
+              reads as it should at every call site"
+)]
+pub enum BorderSide {
+    /// The region the crossing starts in: its vehicle waits just inside the
+    /// **east** edge, against the border.
+    Leaving,
+    /// The region the crossing ends in: its vehicle stands just inside the
+    /// **west** edge, the other side of that same border.
+    Arriving,
+}
+
+impl BorderSide {
+    /// The vehicle's region-local id on this side. Deliberately different
+    /// either side, because a handover renumbers.
+    #[must_use]
+    pub const fn vehicle_local_id(self) -> RegionLocalObjectId {
+        match self {
+            Self::Leaving => RegionLocalObjectId(0x310),
+            Self::Arriving => RegionLocalObjectId(0x340),
+        }
+    }
+
+    /// The scripted rider's region-local id on this side, renumbered with its
+    /// vehicle.
+    #[must_use]
+    pub const fn rider_local_id(self) -> RegionLocalObjectId {
+        match self {
+            Self::Leaving => RegionLocalObjectId(0x311),
+            Self::Arriving => RegionLocalObjectId(0x341),
+        }
+    }
+
+    /// Where the vehicle stands in this region, in region metres: hard against
+    /// the shared border, on this side of it.
+    ///
+    /// The two are [`VEHICLE_FROM_BORDER`] × 2 apart in world space — the
+    /// short hop a crossing actually is.
+    #[must_use]
+    pub const fn vehicle_position(self) -> Vector {
+        let x = match self {
+            Self::Leaving => REGION_SIZE_M - VEHICLE_FROM_BORDER,
+            Self::Arriving => VEHICLE_FROM_BORDER,
+        };
+        Vector {
+            x,
+            y: MARKER_Y - 4.0,
+            z: MARKER_Z,
+        }
+    }
+}
+
+/// A region's width in metres, for placing something against its far edge.
+const REGION_SIZE_M: f32 = 256.0;
+
+/// The vehicle as a prim, standing on `side` of the border.
+#[must_use]
+pub fn vehicle(side: BorderSide) -> PrimFixture {
+    PrimFixture::boxed(
+        side.vehicle_local_id(),
+        VEHICLE_OBJECT,
+        AgentKey::from(uuid::Uuid::from_u128(BORDER_OWNER)),
+        side.vehicle_position(),
+        Vector {
+            x: VEHICLE_SIZE,
+            y: VEHICLE_SIZE,
+            z: VEHICLE_HEIGHT,
+        },
+    )
+    .textured(MARKER_TEXTURE)
+}
+
+/// A scripted **other rider** on the vehicle, so a test can tell "my seat
+/// retargeted" from "every seat retargeted".
+#[must_use]
+pub fn rider(side: BorderSide) -> NpcFixture {
+    let agent = AgentKey::from(RIDER_AGENT);
+    NpcFixture::new(
+        side.rider_local_id(),
+        AvatarIdentity::new(agent, "Border", "Rider"),
+        // Parent-relative, like every seated avatar on the wire.
+        SIT_TARGET_OFFSET,
+    )
+    .seated_on(side.vehicle_local_id())
+    .looking(NpcAppearance::solid(agent, RIDER_BAKE_COLOR))
+}
+
 /// The side, in pixels, of the marker's checker texture, and the size of one
 /// of its cells. The same honest size the catalogue uses: a 64² texture reads
 /// as a stuck low-LOD blur on a prim this close to a camera.
@@ -78,6 +208,10 @@ pub const fn marker_position() -> Vector {
 
 /// The border scene as a [`RegionFixture`]: one region-wide parcel, one
 /// checkered marker pillar inside the west edge, and the checker it wears.
+///
+/// Carries no vehicle. A ridden crossing needs the two regions to number the
+/// same object differently, which a single fixture cannot express — use
+/// [`border_with_vehicle`] and give each region its own ids.
 #[must_use]
 pub fn border() -> RegionFixture {
     let owner = AgentKey::from(uuid::Uuid::from_u128(BORDER_OWNER));
@@ -109,6 +243,28 @@ pub fn border() -> RegionFixture {
     }
 }
 
+/// [`border`] plus the rideable vehicle, placed and numbered for one side of
+/// the shared border.
+///
+/// Give one region [`BorderSide::Leaving`] and the next [`BorderSide::Arriving`]
+/// and the pair is a crossing: one object, the same full id, a few metres and
+/// one renumbering apart. `ridden` decides whether the scripted rider is
+/// aboard, so the same scene serves both the alone case and the with-others
+/// case.
+#[must_use]
+#[expect(
+    clippy::module_name_repetitions,
+    reason = "re-exported nowhere; `border::border_with_vehicle` is how a caller reads it"
+)]
+pub fn border_with_vehicle(side: BorderSide, ridden: bool) -> RegionFixture {
+    let mut fixture = border();
+    fixture.world.objects.push(vehicle(side).build());
+    if ridden {
+        fixture.world.npcs.push(rider(side));
+    }
+    fixture
+}
+
 /// The marker's checker. An encode failure is logged rather than fatal, as
 /// everywhere else in the fixtures: the pillar then renders untextured, which
 /// is a visible failure and not a panic.
@@ -132,7 +288,7 @@ fn marker_assets() -> InMemoryAssetSource {
 #[cfg(test)]
 mod test {
     use super::*;
-    use pretty_assertions::assert_eq;
+    use pretty_assertions::{assert_eq, assert_ne};
 
     /// The pillar stands inside the west edge and clear of the ground — the two
     /// facts every framing in the crossing tests is built on.
@@ -156,5 +312,55 @@ mod test {
             "the marker has to clear the ground for a framing of it to be against the sky"
         );
         Ok(())
+    }
+
+    /// **The two copies of the vehicle stand either side of one line.**
+    ///
+    /// The property the whole ridden-crossing scene rests on, and the one an
+    /// earlier version of this fixture got wrong: both sides used the same
+    /// region-local position, which put the copies 256 m apart in world space
+    /// and turned a border crossing into a jump across a whole region.
+    ///
+    /// Stated in world metres for a west-to-east pair, where the eastern
+    /// region's own origin is one region width further on.
+    #[test]
+    fn the_vehicle_sits_against_the_border_on_both_sides() {
+        let leaving = BorderSide::Leaving.vehicle_position();
+        let arriving = BorderSide::Arriving.vehicle_position();
+        // The border is the leaving region's east edge, which is also the
+        // arriving region's origin.
+        let gap = (arriving.x + REGION_SIZE_M) - leaving.x;
+        assert!(
+            gap > 0.0 && gap <= VEHICLE_FROM_BORDER * 4.0,
+            "the two copies are {gap} m apart across the border, which is not a crossing"
+        );
+        assert!(
+            leaving.x > REGION_SIZE_M / 2.0,
+            "the leaving side's vehicle must be against its *east* edge"
+        );
+        assert!(
+            arriving.x < REGION_SIZE_M / 2.0,
+            "the arriving side's vehicle must be against its *west* edge"
+        );
+    }
+
+    /// A handover renumbers: the same object is not the same local id either
+    /// side, or a viewer that keyed a seat by local id alone would never be
+    /// tested.
+    #[test]
+    fn the_two_sides_number_the_vehicle_differently() {
+        assert_ne!(
+            BorderSide::Leaving.vehicle_local_id(),
+            BorderSide::Arriving.vehicle_local_id()
+        );
+        assert_ne!(
+            BorderSide::Leaving.rider_local_id(),
+            BorderSide::Arriving.rider_local_id()
+        );
+        assert_eq!(
+            vehicle(BorderSide::Leaving).build().full_id,
+            vehicle(BorderSide::Arriving).build().full_id,
+            "and it is the same object, or nothing was handed over"
+        );
     }
 }
