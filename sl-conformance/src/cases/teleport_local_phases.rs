@@ -81,6 +81,10 @@ impl Phase {
 /// for an avatar that logged in adjacent to the target). It records the ordered
 /// phase sequence, the count of progress updates, and the request-to-arrival
 /// time.
+///
+/// `1av`, `[both, fake]`: the fake grid answers a same-region teleport request
+/// with the same `TeleportStart` → `TeleportLocal` pair, so the local sequence
+/// is pinned offline on every commit.
 #[derive(Debug)]
 pub struct TeleportLocalPhases;
 
@@ -94,7 +98,7 @@ impl GridTest for TeleportLocalPhases {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::Fake]
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {

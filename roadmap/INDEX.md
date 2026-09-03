@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 310 |
+| ready | 311 |
 | blocked | 56 |
 | in-progress | 18 |
 | bugs | 70 |
-| done | 969 |
+| done | 970 |
 | deferred | 24 |
 | wont-do | 14 |
-| **total** | **1559** |
+| **total** | **1561** |
 
 ## ideas (98)
 
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (310)
+## ready (311)
 
 ### protocol
 
@@ -946,15 +946,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Decide what the remaining asset classes are worth
 - [`test-audit-conformance-boilerplate`](ready/test-audit-conformance-boilerplate.md)
   — Factor the repeated session/id acquisition out of the conformance cases
-- [`test-audit-fake-grid-conformance-grid`](ready/test-audit-fake-grid-conformance-grid.md)
-  — Teach sl-conformance about sl-fake-grid so ~16 cases run offline (blocked by
-  `test-fake-grid-determinism` (done))
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
 - [`test-fake-grid-builtin-sounds`](ready/test-fake-grid-builtin-sounds.md) —
   The built-in UI sounds the viewer plays on arrival 404
+- [`test-fake-grid-login-matrix-and-timeouts`](ready/test-fake-grid-login-matrix-and-timeouts.md)
+  — The login refusals and handover timeouts nothing tests
 - [`test-fake-grid-object-sounds`](ready/test-fake-grid-object-sounds.md) — The
   fake grid can serve a sound but cannot play one
+- [`test-fake-grid-simulator-request-surfaces`](ready/test-fake-grid-simulator-request-surfaces.md)
+  — Four client requests no simulator half answers
 - [`test-fake-grid-timeline`](ready/test-fake-grid-timeline.md) — Scripted
   scenario timelines with markers (blocked by `test-fake-grid-determinism`
   (done), `viewer-fake-grid-render-harness` (done))
@@ -1349,7 +1350,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (969)
+## done (970)
 
 ### protocol
 
@@ -3110,6 +3111,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-audit-conformance-trace-correctness`](done/test-audit-conformance-trace-correctness.md)
   — sl-conformance-trace mislabels every datagram on loopback and correlates
   across circuits
+- [`test-audit-fake-grid-conformance-grid`](done/test-audit-fake-grid-conformance-grid.md)
+  — Teach sl-conformance about sl-fake-grid so ~16 cases run offline (blocked by
+  `test-fake-grid-determinism` (done))
 - [`test-audit-fake-grid-session-teardown`](done/test-audit-fake-grid-session-teardown.md)
   — sl-fake-grid never prunes sessions, and its tasks outlive shutdown
 - [`test-avatar-notes`](done/test-avatar-notes-write-and-read-avatar-notes.md) —

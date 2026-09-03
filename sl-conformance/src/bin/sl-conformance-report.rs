@@ -78,7 +78,7 @@ fn run(args: &Options) -> Result<bool, Error> {
     let color = color_enabled(args.color);
     let grids: Vec<Grid> = match args.grid {
         Some(grid) => vec![grid],
-        None => Grid::ALL.to_vec(),
+        None => Grid::RECORDED.to_vec(),
     };
 
     let mut any_failed = false;

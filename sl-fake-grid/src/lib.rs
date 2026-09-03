@@ -22,6 +22,7 @@ pub mod terrain;
 pub mod time;
 pub mod udp_assets;
 pub mod world;
+mod world_map;
 
 pub use accounts::AccountConfig;
 pub use crossing::CROSSING_ARRIVAL_TIMEOUT;

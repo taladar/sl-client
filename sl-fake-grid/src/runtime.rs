@@ -352,6 +352,9 @@ pub(crate) struct GridCore {
     pub(crate) economy: EconomyConfig,
     /// The world-map tiles served under the login URI.
     pub(crate) map_tiles: MapTileStore,
+    /// The world-map region catalogue every session answers map requests
+    /// from, derived once from [`regions`](Self::regions) at start.
+    map: Arc<[sl_proto::MapRegionInfo]>,
     /// Live sessions by sequence number.
     pub(crate) sessions: Mutex<HashMap<u64, SharedSim>>,
     /// Mints session sequence numbers.
@@ -615,6 +618,7 @@ impl GridCore {
             role,
             seed_url: seed_url.clone(),
             udp_addr,
+            map: Arc::clone(&self.map),
         };
         let shared = new_shared_sim(
             state,
@@ -1127,6 +1131,10 @@ impl FakeGridBuilder {
         for region in &regions {
             assets.extend(&region.scenario.assets);
         }
+        // The world map is the same catalogue for every session, and the
+        // region table never changes after start, so it is built once here
+        // rather than per login.
+        let map: Arc<[sl_proto::MapRegionInfo]> = crate::world_map::catalogue(&regions).into();
         let core = Arc::new(GridCore {
             accounts: self
                 .accounts
@@ -1147,6 +1155,7 @@ impl FakeGridBuilder {
             grid_info,
             economy: self.economy,
             map_tiles,
+            map,
             sessions: Mutex::new(HashMap::new()),
             next_session: AtomicU64::new(1),
             shutdown_tx,

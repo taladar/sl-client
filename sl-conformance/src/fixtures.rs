@@ -131,12 +131,19 @@ pub enum FixturesError {
 
 impl Fixtures {
     /// The default fixtures-file path for a grid (alongside the credentials
-    /// file): `fixtures.toml` for OpenSim, `fixtures.<grid>.toml` otherwise.
+    /// file): `fixtures.toml` for OpenSim, `fixtures.<grid>.toml` otherwise,
+    /// and `None` for a grid whose environment is not something an operator
+    /// prepares.
+    ///
+    /// The fake grid is that `None`: it *is* the fixture, so there is nothing
+    /// for a file to point at — every id a case would look up there is a
+    /// constant in [`sl_fake_grid::fixtures`].
     #[must_use]
-    pub fn default_path(grid: Grid) -> PathBuf {
+    pub fn default_path(grid: Grid) -> Option<PathBuf> {
         match grid {
-            Grid::Opensim => PathBuf::from("fixtures.toml"),
-            Grid::Aditi => PathBuf::from("fixtures.aditi.toml"),
+            Grid::Opensim => Some(PathBuf::from("fixtures.toml")),
+            Grid::Aditi => Some(PathBuf::from("fixtures.aditi.toml")),
+            Grid::Fake => None,
         }
     }
 
@@ -155,14 +162,10 @@ impl Fixtures {
     pub fn load(grid: Grid, path: Option<&Path>) -> Result<Self, FixturesError> {
         match path {
             Some(explicit) => Self::load_file(explicit),
-            None => {
-                let default = Self::default_path(grid);
-                if default.exists() {
-                    Self::load_file(&default)
-                } else {
-                    Ok(Self::default())
-                }
-            }
+            None => match Self::default_path(grid) {
+                Some(default) if default.exists() => Self::load_file(&default),
+                _absent => Ok(Self::default()),
+            },
         }
     }
 
@@ -274,17 +277,26 @@ mod tests {
     use crate::grid::Grid;
     use pretty_assertions::{assert_eq, assert_ne};
 
-    /// The default fixtures path mirrors the credentials-file naming per grid.
+    /// The default fixtures path mirrors the credentials-file naming per live
+    /// grid, and the fake grid — which is its own fixture — names no file.
     #[test]
     fn default_path_per_grid() {
         assert_eq!(
-            Fixtures::default_path(Grid::Opensim).to_string_lossy(),
-            "fixtures.toml"
+            Fixtures::default_path(Grid::Opensim).map(|path| path.to_string_lossy().into_owned()),
+            Some("fixtures.toml".to_owned())
         );
         assert_eq!(
-            Fixtures::default_path(Grid::Aditi).to_string_lossy(),
-            "fixtures.aditi.toml"
+            Fixtures::default_path(Grid::Aditi).map(|path| path.to_string_lossy().into_owned()),
+            Some("fixtures.aditi.toml".to_owned())
         );
+        assert_eq!(Fixtures::default_path(Grid::Fake), None);
+    }
+
+    /// With no file to consult, the fake grid loads the empty fixtures rather
+    /// than failing.
+    #[test]
+    fn the_fake_grid_needs_no_fixtures_file() {
+        assert!(matches!(Fixtures::load(Grid::Fake, None), Ok(_empty)));
     }
 
     /// An explicit, non-existent fixtures path is a read error, not silently

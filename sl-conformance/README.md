@@ -1,11 +1,17 @@
 # sl-conformance
 
-A manual, live-grid conformance test harness for the `sl-client` workspace.
+A conformance test harness for the `sl-client` workspace: one case per library
+feature, each driven against a grid.
 
-Unlike `cargo test`, these tests log in to a real grid (the local OpenSim or
-Second Life Beta "aditi") and exercise one library feature at a time. Each run
-records a git-stamped result — the commit at which the feature was last verified
-on that grid, plus per-test metrics — into the committed `records/` tree.
+Most of these tests log in to a real grid (the local OpenSim or Second Life Beta
+"aditi") and are run by hand, one at a time. Each such run records a git-stamped
+result — the commit at which the feature was last verified on that grid, plus
+per-test metrics — into the committed `records/` tree.
+
+The exception is `--grid fake`: an `sl-fake-grid` started inside the process on
+ephemeral ports, with its own accounts and no network. The cases listed in
+`fake::OFFLINE_CASES` run against it as ordinary `cargo test` tests
+(`tests/offline.rs`), so they are exercised on every commit and write no record.
 
 Two binaries:
 

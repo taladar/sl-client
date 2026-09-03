@@ -21,10 +21,11 @@
 //!    assert it carries real data (not [`ParcelRequestResult::NoData`]) with a
 //!    positive area.
 //!
-//! `1av`, `[both]`. The query rectangle is region-relative and independent of
-//! the avatar's exact position, so no fixed start location is needed — the reply
-//! describes whichever parcel occupies the region centre of the avatar's current
-//! region (on OpenSim's Default Region that is the single region-wide parcel).
+//! `1av`, `[both, fake]`. The query rectangle is region-relative and
+//! independent of the avatar's exact position, so no fixed start location is
+//! needed — the reply describes whichever parcel occupies the region centre of
+//! the avatar's current region (on OpenSim's Default Region and on the fake
+//! grid's catalogue region alike, that is the single region-wide parcel).
 
 use sl_client_tokio::{Command, Event, ParcelInfo, ParcelRequestResult};
 
@@ -62,7 +63,7 @@ impl GridTest for ParcelProperties {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::Fake]
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {

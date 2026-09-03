@@ -48,6 +48,11 @@ const DIAGNOSTIC_GRACE: Duration = Duration::from_millis(500);
 /// reads inbound for the full timeout window, and `LogoutReply` dispatch is not
 /// state-gated — a reply on the wire would be decoded. Nothing arrives on
 /// OpenSim because the reply is never transmitted.
+///
+/// The fake grid is the third grid this runs on, and the one that proves the
+/// decode rather than the absence: it *does* send a `LogoutReply`, so the
+/// offline run takes the `reply_received` branch that neither live grid
+/// reliably reaches.
 #[derive(Debug)]
 pub struct LogoutClean;
 
@@ -61,7 +66,7 @@ impl GridTest for LogoutClean {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::Fake]
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {

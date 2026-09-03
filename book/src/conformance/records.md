@@ -4,6 +4,14 @@ Each `(test, grid)` pair has one committed record at
 `records/<grid>/<test>.toml`. A record keeps a bounded history of recent runs so
 the reporter can compare the latest run to the previous one.
 
+Records exist because a live-grid run is expensive and rare: the last known
+answer is worth keeping between them. The offline grid is therefore *not*
+recorded — `Grid::RECORDED`, the reporter's default column set, is
+`[Opensim, Aditi]` — because its cases are re-asserted on every `cargo test`,
+and a committed copy of an answer that is re-made every run could only ever be
+staler than the truth. `sl-conformance-report --grid fake` still renders a
+column, for the rare case where somebody ran the runner against it by hand.
+
 ## The record format
 
 ```toml

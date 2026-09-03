@@ -15,10 +15,12 @@
 //! [`Option`]: [`None`] means "not advertised" (distinct from an advertised
 //! `Some(false)`). The one cross-grid invariant the case asserts is that the
 //! reply carries **at least one** advertised feature — an empty map would mean
-//! the capability answered but decoded to nothing. On OpenSim it additionally
-//! asserts the `OpenSimExtras` subtree is present (Second Life omits it), the
-//! one structural difference that reliably distinguishes the two grids' replies.
-//! `1av`, `[both]`.
+//! the capability answered but decoded to nothing. On OpenSim — and on the fake
+//! grid, which presents itself as an OpenSim one and fills the subtree with URLs
+//! pointing back at itself — it additionally asserts the `OpenSimExtras` subtree
+//! is present, the one structural difference that reliably distinguishes an
+//! OpenSim reply from a Second Life one, which omits it.
+//! `1av`, `[both, fake]`.
 
 use std::time::{Duration, Instant};
 
@@ -27,7 +29,7 @@ use sl_client_tokio::{Command, Event, SimulatorFeatures};
 use crate::context::TestContext;
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
-use crate::support::{REGION_TIMEOUT, check, count_metric, is_opensim, secs_metric};
+use crate::support::{REGION_TIMEOUT, check, content_is_ours, count_metric, secs_metric};
 
 /// How long to wait for the `SimulatorFeatures` reply.
 const REPLY_TIMEOUT: Duration = Duration::from_secs(30);
@@ -81,7 +83,7 @@ impl GridTest for SimulatorFeaturesCase {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::Fake]
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
@@ -109,12 +111,15 @@ impl GridTest for SimulatorFeaturesCase {
                 advertised >= 1,
                 "expected the SimulatorFeatures reply to advertise at least one feature",
             )?;
-            if is_opensim(grid) {
+            if content_is_ours(grid) {
                 // OpenSim fills in the `OpenSimExtras` subtree (currency, chat
                 // ranges, prim-scale limits, grid URLs); Second Life omits it.
+                // The fake grid presents itself as an OpenSim grid and fills the
+                // subtree in with URLs pointing back at itself, so it is held to
+                // the same claim.
                 check(
                     features.open_sim_extras.is_some(),
-                    "expected OpenSim to advertise the OpenSimExtras subtree",
+                    "expected an OpenSim-flavoured grid to advertise the OpenSimExtras subtree",
                 )?;
             }
 

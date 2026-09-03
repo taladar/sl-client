@@ -1,4 +1,8 @@
 //! Login and region handshake: the most basic liveness check on a grid.
+//!
+//! `1av`, `[both, fake]`. Offline it is also the first thing to break when the
+//! login response or the handshake changes shape, and the cheapest test in the
+//! suite to run.
 
 use std::time::{Duration, Instant};
 
@@ -23,7 +27,7 @@ impl GridTest for LoginHandshake {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::Fake]
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {

@@ -363,6 +363,36 @@ over a small generic `xmlrpc` module):
   the commit must echo. Nothing moves a balance — an accepted purchase
   is published on `FakeGrid::economy_events` for tests to assert.
 
+## The world map
+
+The tiles above are only half of a world map; the other half is the UDP
+catalogue drawn under them, and `world_map.rs` answers it. The region table
+never changes after start-up, so the catalogue — one `MapRegionInfo` per
+configured region — is built once and shared by every session, which is right
+in more than one sense: a viewer opening its map asks *whichever* simulator it
+happens to be on about the whole grid, so every session has to be able to
+answer for every region.
+
+- **`MapBlockRequest`** — every region whose grid coordinates fall inside the
+  requested rectangle.
+- **`MapNameRequest`** — every region whose name starts with the search text,
+  case-insensitively, because the viewer's search box sends whatever has been
+  typed so far.
+- **`MapItemRequest`** — for `AgentLocations` on the session's own region, one
+  green dot at the agent's position; anything else answers with an empty reply
+  of the requested type rather than silence, which is what a viewer's "no
+  events here" needs to see.
+- **`MapLayerRequest`** — one layer covering the bounding rectangle of every
+  configured region.
+
+A block's `map_image_id` is the **region id**, which is what OpenSim reports for
+a region with no separately-uploaded map asset. It is not a texture the grid
+serves: the tiles go out over HTTP, as they do on every modern grid.
+
+This is what lets a client *find* somewhere to go — `sl-conformance`'s
+`teleport-cross-region` discovers its destination through a map query, exactly
+as `sl-survey` enumerates a real grid.
+
 ## The legacy UDP asset fixtures
 
 `SimSession` implements the server half of the legacy UDP asset paths but
@@ -895,6 +925,23 @@ in-flight asset leaks, NPC appearance delivery) belongs in the viewer's
 full-stack harness against this grid, read back as pixels; reaction logic
 that a fixture world can stand up from `SlEvent`s belongs in the
 interaction tier. See the *viewer test harness* chapter.
+
+## The offline conformance tier
+
+`sl-conformance` is the third consumer, and the one whose subject is the *wire*
+rather than the picture. `sl-conformance::fake` starts a grid with two regions —
+the catalogue and the border scene announced as its neighbour — registers three
+accounts and synthesises the credentials that reach them, so the conformance
+runner's ordinary login path (XML-RPC round trip included) reaches an offline
+grid. The cases in `fake::OFFLINE_CASES` then run as plain `cargo test` tests
+instead of waiting for someone to log a live grid in.
+
+Two of them can only exist here. `region-crossing` needs the harness to speak
+*as* the simulator — a crossing is a decision a region makes, and this grid
+simulates no movement to make it with — so `TestContext::fake()` hands the case
+`FakeGrid::cross_agent`; and `neighbour-child-circuits` needs two adjacent
+regions an avatar may walk between, which neither live grid reliably offers.
+See the *conformance testing* chapter.
 
 ## Voice signalling
 

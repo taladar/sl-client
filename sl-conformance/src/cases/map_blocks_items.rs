@@ -24,14 +24,18 @@
 //! about the region the agent is standing in. Records each round-trip's latency
 //! plus the block / item / layer counts and the resolved region name.
 //!
-//! `1av`, `[both]`. No new client code — the whole command/event surface
+//! `1av`, `[both, fake]`. No new client code — the whole command/event surface
 //! (`request_map_blocks`, `request_map_items`, `request_map_layer`) already
 //! existed; `sl-survey` uses the same `RequestMapBlocks` path to enumerate
 //! regions. On OpenSim's standalone grid the block reply is the single local
 //! Default Region, the item reply the one green-dot placeholder, and the layer
 //! reply OpenSim's built-in whole-grid tile. Second Life answers the same UDP
 //! requests (the aditi run is deferred with the batch; SL may additionally serve
-//! the layer/tile over a CAPS path, but the UDP replies still arrive).
+//! the layer/tile over a CAPS path, but the UDP replies still arrive). The fake
+//! grid answers all three from its own region table
+//! (`sl_fake_grid::world_map`), so the offline run reports the catalogue region
+//! and its eastern neighbour, one green dot for the logged-in agent, and one
+//! layer covering the pair.
 
 use std::time::{Duration, Instant};
 
@@ -68,7 +72,7 @@ impl GridTest for MapBlocksItems {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::Fake]
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {

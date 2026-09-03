@@ -8619,6 +8619,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sl-client-tokio",
+ "sl-fake-grid",
  "sl-repl",
  "sl-wire",
  "thiserror 2.0.19",

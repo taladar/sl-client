@@ -12,12 +12,28 @@ pub enum Grid {
     Opensim,
     /// Second Life Beta, the "aditi" grid (requires MFA; rate-limited).
     Aditi,
+    /// The offline [`sl-fake-grid`](sl_fake_grid) started inside this process,
+    /// on ephemeral ports, serving the shared fixture catalogue.
+    ///
+    /// Unlike the two live grids this one needs no credentials file, no
+    /// network and no cooldown: [`crate::fake::FakeGridHarness`] stands it up,
+    /// synthesises the accounts and hands out the login URI it bound. That is
+    /// what lets the cases in [`crate::fake::OFFLINE_CASES`] run as plain
+    /// `cargo test`.
+    Fake,
 }
 
 impl Grid {
-    /// Every grid, in declaration order — used by the reporter to lay out
-    /// columns deterministically.
-    pub const ALL: [Self; 2] = [Self::Opensim, Self::Aditi];
+    /// The grids whose runs are **recorded** under `records/`, in declaration
+    /// order — the columns the reporter lays out when it is not told which grid
+    /// to show.
+    ///
+    /// [`Fake`](Self::Fake) is deliberately absent. Its cases are asserted on
+    /// every `cargo test` (see [`crate::fake`]), so a committed record of them
+    /// would be a second, staler copy of an answer the test suite already
+    /// gives; the reporter still renders the column on an explicit
+    /// `--grid fake` if someone runs the runner against it.
+    pub const RECORDED: [Self; 2] = [Self::Opensim, Self::Aditi];
 
     /// The on-disk directory name (under `records/`) holding this grid's
     /// records.
@@ -26,6 +42,7 @@ impl Grid {
         match self {
             Self::Opensim => "opensim",
             Self::Aditi => "aditi",
+            Self::Fake => "fake",
         }
     }
 
@@ -37,13 +54,20 @@ impl Grid {
     }
 
     /// The default XML-RPC login URI used when the credentials entry for the
-    /// chosen avatar does not specify one.
+    /// chosen avatar does not specify one, or `None` for a grid that has no
+    /// fixed address.
+    ///
+    /// The fake grid is the `None`: it binds an ephemeral port at start-up, so
+    /// its address is only known to whoever started it — which is why
+    /// [`crate::fake::FakeGridHarness`] writes the URI it bound into the
+    /// credentials it synthesises.
     #[must_use]
-    pub const fn default_login_uri(self) -> &'static str {
+    pub const fn default_login_uri(self) -> Option<&'static str> {
         match self {
-            Self::Opensim => "http://127.0.0.1:9000/",
+            Self::Opensim => Some("http://127.0.0.1:9000/"),
             // Second Life Beta (aditi).
-            Self::Aditi => "https://login.aditi.lindenlab.com/cgi-bin/login.cgi",
+            Self::Aditi => Some("https://login.aditi.lindenlab.com/cgi-bin/login.cgi"),
+            Self::Fake => None,
         }
     }
 }
@@ -65,8 +89,20 @@ mod tests {
     fn grid_properties() {
         assert_eq!(Grid::Opensim.dir_name(), "opensim");
         assert_eq!(Grid::Aditi.dir_name(), "aditi");
+        assert_eq!(Grid::Fake.dir_name(), "fake");
         assert!(!Grid::Opensim.needs_cooldown());
         assert!(Grid::Aditi.needs_cooldown());
+        assert!(!Grid::Fake.needs_cooldown());
         assert_eq!(format!("{}", Grid::Aditi), "aditi");
+    }
+
+    /// Only the fake grid has no fixed address, and it is the one grid the
+    /// reporter does not lay a column out for by default.
+    #[test]
+    fn only_the_fake_grid_is_addressless_and_unrecorded() {
+        assert!(Grid::Opensim.default_login_uri().is_some());
+        assert!(Grid::Aditi.default_login_uri().is_some());
+        assert_eq!(Grid::Fake.default_login_uri(), None);
+        assert!(!Grid::RECORDED.contains(&Grid::Fake));
     }
 }

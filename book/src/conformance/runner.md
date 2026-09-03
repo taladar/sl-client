@@ -5,11 +5,11 @@
 ## Commands
 
 ```text
-sl-conformance run    --grid <opensim|aditi> [--avatar <name>]
+sl-conformance run    --grid <opensim|aditi|fake> [--avatar <name>]
                       [--secondary <name>] [--credentials <path>]
                       [--fixtures <path>] [--force] [--timeout <secs>]
                       <TEST>
-sl-conformance list   [--grid <opensim|aditi>]
+sl-conformance list   [--grid <opensim|aditi|fake>]
 sl-conformance generate-manpage --output-dir <dir>
 sl-conformance generate-shell-completion --output-file <f> --shell <shell>
 ```
@@ -25,6 +25,14 @@ sl-conformance generate-shell-completion --output-file <f> --shell <shell>
 for OpenSim and `credentials.aditi.toml` for aditi; override with
 `--credentials`. The primary avatar comes from `--avatar` (or the file's default
 avatar).
+
+`--grid fake` needs none of that. It stands an `sl-fake-grid` up inside the
+runner process on ephemeral ports, registers three accounts and synthesises the
+credentials that reach them, so there is no file to write, no cooldown to
+respect and no network to be on. It exists for the same reason the runner has a
+`--timeout`: to run *one* offline case by hand with the full trace log, when
+the `cargo test` suite says it fails and you want to watch it. See
+[The offline grid](#the-offline-grid) below.
 
 ### The avatar-availability precondition
 
@@ -70,6 +78,50 @@ premade_groups = [
 
 Every field is optional and an absent file is equivalent to an empty one, so no
 fixtures file is needed to run on OpenSim.
+
+## The offline grid
+
+`Grid::Fake` is a third target, and the only one that runs without anyone
+standing a grid up. `sl-conformance::fake` starts an `sl-fake-grid` serving two
+regions — the shared fixture catalogue (`Fake Region`) and the border scene east
+of it (`Fake Region East`), which is announced as its neighbour — registers the
+`primary` / `secondary` / `tertiary` accounts, and hands out the login URI it
+bound as synthesised credentials. Everything below that is the ordinary login
+path, XML-RPC round trip included.
+
+The point is `sl-conformance/tests/offline.rs`: one `#[tokio::test]` per name in
+`fake::OFFLINE_CASES`, each on its own fresh grid. Those cases are therefore
+exercised on **every** `cargo test` — and so on every commit — instead of the
+next time somebody remembers to log a live grid in. A unit test pins the list
+against the registry in both directions, so a case cannot declare `Grid::Fake`
+without being run, nor be listed without declaring it.
+
+Two rules decide whether a case belongs there:
+
+- **Every fixture it needs is offline.** A case asserting protocol *shape* — a
+  handshake, a ping, a throttle, a parcel record, the world map — qualifies. One
+  asserting *grid semantics* (groups, money, experiences, the marketplace) does
+  not, and neither does one whose provocation the fake grid has no answer for:
+  it would pass by recording `partial`, which costs suite time to assert
+  nothing.
+- **It bites offline.** Where a case branches on `is_opensim` to *require* what
+  a region it controls must contain, use `support::content_is_ours`, which is
+  true of OpenSim and the fake grid and false of Second Life.
+
+Four cases live on the fake grid **only**, because nothing else can host them:
+`region-crossing` and `neighbour-child-circuits` need two adjacent regions an
+avatar may walk between; `terrain-layerdata` and `avatar-appearance-npc` assert
+against ground and bakes this workspace declares. The first of those also needs
+the harness to speak *as* the simulator — a crossing is a decision a region
+makes, and a grid that simulates no movement has to be told to make it — which
+is what `TestContext::fake()` hands a case. It is `None` on every live grid, and
+a case that reaches for it declares `&[Grid::Fake]`.
+
+Nothing offline writes a record. The committed `records/` tree holds the last
+known answer from a grid somebody had to log into; this answer is re-made from
+scratch every run, so a stored copy could only ever be staler than the truth —
+which is why `Grid::RECORDED`, the reporter's default column set, is the two
+live grids.
 
 ## The aditi cooldown
 
@@ -152,4 +204,6 @@ a complete run's.
 
 Restrict `grids()` to the grids where the feature exists — e.g. an
 experiences-only test returns `&[Grid::Aditi]`, and the reporter shows `n/a` for
-OpenSim.
+OpenSim. Adding `Grid::Fake` also means adding the case's name to
+`fake::OFFLINE_CASES` and a line to `tests/offline.rs`; a unit test fails if you
+do one without the other.

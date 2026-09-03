@@ -306,15 +306,18 @@ fn raw_multiplier(max_height: f32) -> u8 {
         .unwrap_or(RAW_MULTIPLIER_DIVISOR)
 }
 
-/// Rounds a scaled height to the nearest RAW height byte, saturating at both
-/// ends (a negative height is sea floor the format cannot express).
+/// Rounds a height in metres to the nearest whole-metre byte, saturating at
+/// both ends (a negative height is sea floor the format cannot express).
+///
+/// Shared with [`crate::world_map`], whose map blocks carry a region's water
+/// height in the same `u8` metres.
 #[expect(
     clippy::as_conversions,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
     reason = "the value is clamped into 0..=255 before the cast; no From impl exists"
 )]
-fn round_to_u8(value: f32) -> u8 {
+pub(crate) fn round_to_u8(value: f32) -> u8 {
     value.round().clamp(0.0, f32::from(u8::MAX)) as u8
 }
 

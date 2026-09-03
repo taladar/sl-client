@@ -70,6 +70,23 @@ multi-region offsets, in-flight asset leaks, NPC appearance delivery.
   crate reaches for `Instant::now()` on its own, and
   `sl_fake_grid::tokio_clock()` is what a paused-timer test passes. Tier F
   records the grid produces are therefore comparable run to run.
+- `sl-conformance`'s **offline tier** — the same fake grid, asserted on the
+  wire instead of in pixels. `Grid::Fake` starts a grid inside the test
+  process (the catalogue region plus the border scene east of it as its
+  neighbour) and synthesises the credentials that reach it, so the ordinary
+  login path runs offline; the cases named in `fake::OFFLINE_CASES` are
+  `#[tokio::test]`s in `sl-conformance/tests/offline.rs`, each on its own
+  grid. A case belongs there when **every fixture it needs is offline** *and*
+  it **bites** — a case that passes by recording `partial` costs suite time to
+  assert nothing, which is why `agent-alert` and `server-error` are not in the
+  list despite passing. Where a case branches on `is_opensim` to *require*
+  what a region it controls must contain, `support::content_is_ours` is the
+  predicate (OpenSim or fake, not aditi). Nothing offline writes a record: the
+  assertion is re-made every run, so a committed copy could only be staler,
+  and `Grid::RECORDED` — the reporter's default columns — stays the two live
+  grids. Four cases live here and nowhere else, because a crossing needs the
+  harness to speak as the simulator (`TestContext::fake()`, `None` on a live
+  grid) and two adjacent regions no live grid reliably offers.
 - `sl-crosscheck` — the Firestorm cross-check runner: one in-process fake
   grid on a fixed port with a named scenario, both viewers run against it
   in turn with the same capture size, layers, camera and day position, and

@@ -3,6 +3,11 @@
 //! the live `GetTexture` capability, decode it to RGBA8, confirm a second request
 //! is served from the in-memory cache (the same shared entry, no re-fetch), and
 //! exercise a level-of-detail downgrade (downsample, no re-decode) and re-upgrade.
+//!
+//! `1av`, `[both, fake]`. The plywood texture is a Linden library id every grid
+//! answers, and the fake grid is no exception — its stock asset store encodes a
+//! stand-in for each built-in under its real UUID — so the whole store, its
+//! decode and its LOD arithmetic run offline on every commit.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -34,7 +39,7 @@ impl GridTest for TextureFetchHttp {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::Fake]
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {

@@ -18,8 +18,8 @@ use crate::support::{REGION_TIMEOUT, REPLY_TIMEOUT, check, secs_metric};
 /// is a sane, sub-second-ish measurement (well under the reply timeout), then
 /// records it.
 ///
-/// Runs on both grids: the ping exchange is plain LLUDP, present on OpenSim and
-/// Second Life alike.
+/// Runs on every grid: the ping exchange is plain LLUDP, present on OpenSim,
+/// Second Life and the offline fake grid alike.
 #[derive(Debug)]
 pub struct KeepalivePing;
 
@@ -33,7 +33,7 @@ impl GridTest for KeepalivePing {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::Fake]
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {

@@ -520,9 +520,21 @@ async fn connect_and_spawn(
     force: bool,
     cache_dir: Option<PathBuf>,
 ) -> Result<Session, TestFailure> {
-    let login_uri_text = avatar
-        .login_uri()
-        .map_or_else(|| grid.default_login_uri().to_owned(), str::to_owned);
+    // The avatar's own URI wins; otherwise the grid's fixed address. The fake
+    // grid has none — it binds an ephemeral port, and the credentials
+    // `crate::fake::FakeGridHarness` synthesises carry the URI it bound — so an
+    // avatar reaching here without one was not built by the harness.
+    let login_uri_text = match avatar.login_uri() {
+        Some(explicit) => explicit.to_owned(),
+        None => grid
+            .default_login_uri()
+            .ok_or_else(|| {
+                TestFailure::Login(format!(
+                    "the {grid} grid has no fixed login URI and this avatar names none"
+                ))
+            })?
+            .to_owned(),
+    };
     let login_uri: url::Url = login_uri_text
         .parse()
         .map_err(|error: url::ParseError| TestFailure::Login(error.to_string()))?;
@@ -700,6 +712,13 @@ pub struct TestContext {
     completeness: Completeness,
     /// The note explaining a partial run.
     completeness_note: Option<String>,
+    /// The other end of the conversation, on [`Grid::Fake`] only.
+    ///
+    /// A live grid is something a case can only ask questions of; the fake grid
+    /// is something a case can also *tell*. The handovers — a border crossing,
+    /// a grid-initiated teleport — are decided by a simulator, so on a grid that
+    /// simulates no movement the case has to make the decision itself.
+    fake: Option<crate::fake::FakeControl>,
 }
 
 impl TestContext {
@@ -721,7 +740,26 @@ impl TestContext {
             fixtures,
             completeness: Completeness::Complete,
             completeness_note: None,
+            fake: None,
         }
+    }
+
+    /// Attach the grid-side handle a [`Grid::Fake`] run drives the simulator
+    /// with.
+    #[must_use]
+    pub fn with_fake(mut self, control: crate::fake::FakeControl) -> Self {
+        self.fake = Some(control);
+        self
+    }
+
+    /// The grid-side handle, on the fake grid only.
+    ///
+    /// `None` on a live grid, where nothing in the harness can speak as the
+    /// simulator — which is why every case that reaches for this declares
+    /// [`Grid::Fake`] as its only grid.
+    #[must_use]
+    pub const fn fake(&self) -> Option<&crate::fake::FakeControl> {
+        self.fake.as_ref()
     }
 
     /// The grid under test.

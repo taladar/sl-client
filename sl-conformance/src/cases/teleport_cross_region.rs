@@ -40,7 +40,11 @@
 //! surface, and the map-block discovery path all existed from earlier teleport and
 //! survey work. The aditi run is deferred with the batch (SL's grid also answers a
 //! cross-region teleport with a `TeleportFinish` handover to a different
-//! simulator).
+//! simulator). The **fake** grid serves two regions and answers the same map
+//! query, so this runs offline on every commit; note that its second region is
+//! the *neighbour*, so the handover is to a region the client already holds a
+//! child circuit for — [`super::region_crossing`] is the case that pins what
+//! that distinction means.
 
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
@@ -86,7 +90,7 @@ impl GridTest for TeleportCrossRegion {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::Fake]
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {

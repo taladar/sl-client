@@ -8,7 +8,9 @@ use sl_client_tokio::{Event, Object, RegionLocalObjectId, pcode};
 use crate::context::{TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
-use crate::support::{REGION_TIMEOUT, check, count_metric, is_opensim, secs_metric};
+use crate::support::{
+    REGION_TIMEOUT, check, content_is_ours, count_metric, is_opensim, secs_metric,
+};
 
 /// The OpenSim start location: the "Default Region" (1000,1000), centred, where
 /// this workspace's test object lives. On Second Life the avatar keeps `"last"`
@@ -38,12 +40,13 @@ const OBSERVE_WINDOW: Duration = Duration::from_secs(20);
 /// deduplicated by region-local id.
 ///
 /// On the local OpenSim grid the avatar is forced into the "Default Region",
-/// which holds this workspace's rezzed test object, so the case asserts at least
-/// one primitive is decoded — proof the full-update decode and the cache-miss
-/// refetch both work end to end. On Second Life the landing region's contents
-/// are not controlled; a region that streams no primitives within the window is
-/// recorded `partial` rather than failed. The primitive/avatar/total counts and
-/// the latency to the first decoded object are recorded.
+/// which holds this workspace's rezzed test object, and on the fake grid the
+/// region *is* the fixture catalogue — so on both the case asserts at least one
+/// primitive is decoded, proof the full-update decode and the cache-miss refetch
+/// both work end to end. On Second Life the landing region's contents are not
+/// controlled; a region that streams no primitives within the window is recorded
+/// `partial` rather than failed. The primitive/avatar/total counts and the
+/// latency to the first decoded object are recorded.
 #[derive(Debug)]
 pub struct ObjectUpdateDecode;
 
@@ -57,7 +60,7 @@ impl GridTest for ObjectUpdateDecode {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::Fake]
     }
 
     fn start_location(&self, grid: Grid) -> &'static str {
@@ -114,12 +117,13 @@ impl GridTest for ObjectUpdateDecode {
             }
 
             let total = seen.len();
-            if is_opensim(grid) {
+            if content_is_ours(grid) {
                 // The OpenSim "Default Region" holds this workspace's rezzed test
-                // object, so at least one primitive must decode.
+                // object and the fake grid's region is the fixture catalogue, so
+                // on both at least one primitive must decode.
                 check(
                     primitives >= 1,
-                    "expected at least one primitive in the Default Region object stream",
+                    "expected at least one primitive in the region's object stream",
                 )?;
             } else if primitives == 0 {
                 // On Second Life the landing region's contents are uncontrolled;

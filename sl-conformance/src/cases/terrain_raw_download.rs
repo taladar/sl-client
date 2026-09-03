@@ -17,9 +17,12 @@
 //! gets no reply at all. There is no capability for this on either grid, so it
 //! always rides `Xfer`.
 //!
-//! `[opensim]` only: we own no region on Second Life (same constraint as the
+//! `[opensim, fake]`: we own no region on Second Life (same constraint as the
 //! other estate-owner cases). The estate-owner avatar is forced to the Default
-//! Region so it is within the region whose terrain it owns.
+//! Region so it is within the region whose terrain it owns. The fake grid
+//! serves the RAW file from the region's own `TerrainFixture` and gates it on
+//! nothing, so the offline run needs no estate rights and pins the `Xfer`
+//! download direction on every commit.
 //!
 //! The RAW file is asserted to be a plausible LL heightmap: non-empty, an exact
 //! multiple of the 13-byte-per-point LL RAW stride, and a perfect square of at
@@ -74,7 +77,7 @@ impl GridTest for TerrainRawDownload {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim]
+        &[Grid::Opensim, Grid::Fake]
     }
 
     fn start_location(&self, grid: Grid) -> &'static str {

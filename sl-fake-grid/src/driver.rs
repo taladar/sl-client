@@ -71,6 +71,13 @@ pub(crate) struct SimState {
     pub(crate) seed_url: url::Url,
     /// This session's loopback UDP address, announced alongside the seed.
     pub(crate) udp_addr: std::net::SocketAddr,
+    /// The grid's whole region catalogue, as the world map reports it.
+    ///
+    /// The one piece of state a session holds that is not about its own
+    /// region: a viewer asks whichever simulator it is on about every region
+    /// on the grid ([`crate::world_map`]). Shared, because it is the same
+    /// answer for every session and never changes after start-up.
+    pub(crate) map: Arc<[sl_proto::MapRegionInfo]>,
 }
 
 /// One live session's shared handle: the lockable state plus its I/O anchors
@@ -207,6 +214,14 @@ impl SharedSim {
                 now,
             );
             answer_world_request(&state.world, &state.avatar, &mut state.sim, &event, now);
+            crate::world_map::answer_map_request(
+                &state.map,
+                state.identity.region_handle,
+                &state.avatar,
+                &mut state.sim,
+                &event,
+                now,
+            );
             if let Some(hook) = &state.on_event {
                 hook(&mut state.sim, &event, now);
             }

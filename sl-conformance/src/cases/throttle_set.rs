@@ -48,8 +48,11 @@ const PING_WAIT: Duration = Duration::from_secs(20);
 /// `AgentThrottle` retransmit-exhaustion diagnostic once the budget has run out.
 /// The requested total bandwidth and the post-throttle RTT are recorded.
 ///
-/// Runs on both grids: `AgentThrottle` is plain LLUDP, handled by OpenSim and
-/// Second Life alike.
+/// Runs on every grid: `AgentThrottle` is plain LLUDP, handled by OpenSim,
+/// Second Life and the offline fake grid alike. It is also the longest of the
+/// offline cases, and unavoidably so: the assertion *is* the wait, because the
+/// only evidence a throttle was accepted is a retransmit budget that went
+/// unspent.
 #[derive(Debug)]
 pub struct ThrottleSet;
 
@@ -63,7 +66,7 @@ impl GridTest for ThrottleSet {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::Fake]
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {

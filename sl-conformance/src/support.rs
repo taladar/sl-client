@@ -67,6 +67,25 @@ pub const fn is_aditi(grid: Grid) -> bool {
     matches!(grid, Grid::Aditi)
 }
 
+/// Whether the test is running against the in-process fake grid.
+#[must_use]
+pub const fn is_fake(grid: Grid) -> bool {
+    matches!(grid, Grid::Fake)
+}
+
+/// Whether the region's contents are something this workspace declares, so a
+/// case may *require* what it expects to find rather than record its absence.
+///
+/// True of OpenSim (whose Default Region holds this workspace's rezzed test
+/// object) and of the fake grid (whose region is the fixture catalogue);
+/// false of Second Life, where the landing region is whatever it is. The
+/// distinction is what separates a case's `check` branch from its
+/// [`TestContext::mark_partial`] one.
+#[must_use]
+pub const fn content_is_ours(grid: Grid) -> bool {
+    is_opensim(grid) || is_fake(grid)
+}
+
 /// Assert `condition`, failing the test with `message` as a
 /// [`TestFailure::Assertion`] when it does not hold.
 ///
@@ -453,7 +472,10 @@ pub mod fixtures {
 
 #[cfg(test)]
 mod tests {
-    use super::{check, check_eq, count_metric, fixtures, is_aditi, is_opensim, secs_metric};
+    use super::{
+        check, check_eq, content_is_ours, count_metric, fixtures, is_aditi, is_fake, is_opensim,
+        secs_metric,
+    };
     use crate::context::TestFailure;
     use crate::grid::Grid;
     use pretty_assertions::assert_eq;
@@ -486,13 +508,19 @@ mod tests {
         assert_eq!(count_metric("folders"), "folders_count");
     }
 
-    /// Grid-gating predicates are mutually exclusive.
+    /// Grid-gating predicates are mutually exclusive, and only the grid whose
+    /// region is somebody else's is not ours to make claims about.
     #[test]
     fn grid_gating() {
         assert!(is_opensim(Grid::Opensim));
         assert!(!is_aditi(Grid::Opensim));
         assert!(is_aditi(Grid::Aditi));
         assert!(!is_opensim(Grid::Aditi));
+        assert!(is_fake(Grid::Fake));
+        assert!(!is_fake(Grid::Opensim));
+        assert!(content_is_ours(Grid::Opensim));
+        assert!(content_is_ours(Grid::Fake));
+        assert!(!content_is_ours(Grid::Aditi));
     }
 
     /// The fixture UUID constants parse, and the typed accessor matches.

@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use clap::Parser as _;
 use sl_conformance::context::{self, TestContext, TestFailure};
+use sl_conformance::fake::FakeGridHarness;
 use sl_conformance::fixtures::Fixtures;
 use sl_conformance::grid::Grid;
 use sl_conformance::record::{Outcome, Record, Run};
@@ -156,11 +157,17 @@ fn resolve_tertiary<'creds>(
     None
 }
 
-/// The default credentials path for a grid when `--credentials` is omitted.
-fn default_credentials(grid: Grid) -> PathBuf {
+/// The default credentials path for a grid when `--credentials` is omitted, or
+/// `None` for a grid whose accounts are not an operator's to write down.
+///
+/// The fake grid is that `None`: [`FakeGridHarness`] registers its accounts as
+/// it starts and synthesises the credentials that reach them, so there is no
+/// file to default to.
+fn default_credentials(grid: Grid) -> Option<PathBuf> {
     match grid {
-        Grid::Opensim => PathBuf::from("credentials.toml"),
-        Grid::Aditi => PathBuf::from("credentials.aditi.toml"),
+        Grid::Opensim => Some(PathBuf::from("credentials.toml")),
+        Grid::Aditi => Some(PathBuf::from("credentials.aditi.toml")),
+        Grid::Fake => None,
     }
 }
 
@@ -183,12 +190,33 @@ async fn run(args: RunArgs) -> Result<(), Error> {
         });
     }
 
-    let credentials_path = args
-        .credentials
-        .clone()
-        .unwrap_or_else(|| default_credentials(args.grid));
-    let credentials =
-        Credentials::load(&credentials_path).map_err(|error| Error::Auth(error.to_string()))?;
+    // The fake grid comes up here, before anything else needs it: it registers
+    // the accounts, so it is also where the credentials come from. It is held
+    // for the whole run — dropping it shuts every session and socket down.
+    let fake = match args.grid {
+        Grid::Fake => Some(
+            FakeGridHarness::start()
+                .await
+                .map_err(|error| Error::Test(error.to_string()))?,
+        ),
+        Grid::Opensim | Grid::Aditi => None,
+    };
+    let credentials = match &fake {
+        Some(harness) => harness.credentials().clone(),
+        None => {
+            let path = args
+                .credentials
+                .clone()
+                .or_else(|| default_credentials(args.grid))
+                .ok_or_else(|| {
+                    Error::Auth(format!(
+                        "grid {} has no default credentials file",
+                        args.grid
+                    ))
+                })?;
+            Credentials::load(&path).map_err(|error| Error::Auth(error.to_string()))?
+        }
+    };
     let primary = credentials
         .select(args.avatar.as_deref())
         .map_err(|error| Error::Auth(error.to_string()))?;
@@ -328,6 +356,16 @@ async fn run(args: RunArgs) -> Result<(), Error> {
         tertiary_session,
         fixtures,
     );
+    // On the fake grid the case may also drive the simulator; hand it the
+    // grid-side handle onto the primary's session, now that it exists.
+    if let Some(harness) = &fake {
+        ctx = ctx.with_fake(
+            harness
+                .control_for(primary)
+                .await
+                .map_err(|error| Error::Test(error.to_string()))?,
+        );
+    }
     // Run the body isolated: a panic or a hang inside it fails this one case and
     // still reaches the logout + record path below, rather than aborting the
     // process with the avatars left logged in on the grid.
