@@ -579,6 +579,71 @@ impl PlayState {
     }
 }
 
+/// One animation an avatar is playing, as a reader **outside** the animation
+/// layer sees it: the scene dump's per-avatar `animations` section
+/// (`sl_viewer_world_view::scene_dump`), and any diagnostic that wants to say
+/// what a body is doing rather than pose it.
+///
+/// The fields are the ones that decide what a viewer draws: where the motion's
+/// clock has reached, and what outranks what. Everything is read from the
+/// playback state and the decoded asset — nothing is derived from the skeleton,
+/// so an animation that is playing but whose asset has not arrived still
+/// appears, with its unknown fields absent rather than invented.
+#[derive(Debug, Clone, Copy)]
+pub struct PlayingAnimation {
+    /// The animation's asset id.
+    pub id: Uuid,
+    /// The simulator's per-avatar sequence number for it. A change means the
+    /// animation restarted.
+    pub sequence: i32,
+    /// Seconds since the motion started, on the clock it is **sampled** at —
+    /// wall time for everything except a walk-class motion, whose sampling
+    /// clock is speed-scaled so the cycle keeps pace with the ground (P31.14).
+    pub time: f32,
+    /// The motion's length in seconds, once its asset has decoded.
+    pub duration: Option<f32>,
+    /// Whether it loops, once its asset has decoded.
+    pub loops: Option<bool>,
+    /// Its base priority, once its asset has decoded — what decides which
+    /// motion owns a joint when several animate it.
+    pub priority: Option<i32>,
+    /// Whether the simulator has dropped it and it is easing out.
+    pub stopping: bool,
+}
+
+/// The playing set of one avatar (or one animesh root), in the order a viewer
+/// applies it: **most recently activated first**, which is the order the
+/// reference viewer's motion controller keeps its active list in
+/// (`LLMotionController::mActiveMotions`, pushed to the front on activation)
+/// and the order our own per-joint blend breaks priority ties by
+/// ([`PlayState::order`]).
+pub(crate) fn playing_animations_of(
+    anims: &HashMap<Uuid, PlayState>,
+    now: f32,
+    manager: &AnimationManager,
+) -> Vec<PlayingAnimation> {
+    let mut playing: Vec<(u64, PlayingAnimation)> = anims
+        .iter()
+        .map(|(&id, play)| {
+            let motion = manager.motion(AssetKey::from(id));
+            (
+                play.order,
+                PlayingAnimation {
+                    id,
+                    sequence: play.sequence_id,
+                    time: (now - play.start) + play.anim_offset,
+                    duration: motion.map(|motion| motion.duration),
+                    loops: motion.map(|motion| motion.loops),
+                    priority: motion.map(|motion| motion.base_priority.value()),
+                    stopping: play.stopped_at.is_some(),
+                },
+            )
+        })
+        .collect();
+    playing.sort_by_key(|&(order, _anim)| core::cmp::Reverse(order));
+    playing.into_iter().map(|(_order, anim)| anim).collect()
+}
+
 /// Per-avatar animation *playback* state (P18.3 / P18.4), distinct from the
 /// [`AnimationManager`]'s asset resolve/cache: which animations each avatar is
 /// playing, their timing / activation order, and the per-joint pose the driver
@@ -797,6 +862,24 @@ impl AnimationPlayback {
         merged.iter().any(|(&anim_id, play)| {
             play.stopped_at.is_none() && sl_anim::is_gun_aim_trigger(anim_id)
         })
+    }
+
+    /// What `agent` is playing, in the order a viewer applies it — see
+    /// [`PlayingAnimation`]. The merged set, so a client-driven locomotion or
+    /// typing animation is reported beside the simulator's.
+    #[must_use]
+    pub fn playing_animations(
+        &self,
+        agent: AgentKey,
+        now: f32,
+        manager: &AnimationManager,
+    ) -> Vec<PlayingAnimation> {
+        let merged = merge_playing(
+            self.playing.get(&agent),
+            self.client_locomotion.get(&agent),
+            self.client_typing.get(&agent),
+        );
+        playing_animations_of(&merged, now, manager)
     }
 
     /// The avatar's merged playing set — simulator-driven plus the two

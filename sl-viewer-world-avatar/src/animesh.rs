@@ -244,6 +244,23 @@ impl ControlAvatarState {
             .map_or(0, |control| control.overrides_generation)
     }
 
+    /// What the animesh rooted at `object` is playing, in the order a viewer
+    /// applies it — the animesh counterpart of
+    /// [`AnimationPlayback::playing_animations`](crate::animations::AnimationPlayback::playing_animations),
+    /// over the merged set its linkset's parts contribute.
+    #[must_use]
+    pub fn playing_animations(
+        &self,
+        object: ObjectKey,
+        now: f32,
+        manager: &AnimationManager,
+    ) -> Vec<crate::animations::PlayingAnimation> {
+        self.merged
+            .get(&object)
+            .map(|set| crate::animations::playing_animations_of(set, now, manager))
+            .unwrap_or_default()
+    }
+
     /// `object`'s merged playing set as owned `(animation id, play state)` pairs
     /// — the animesh counterpart of
     /// [`AnimationPlayback::merged_active`](crate::animations::AnimationPlayback::merged_active),

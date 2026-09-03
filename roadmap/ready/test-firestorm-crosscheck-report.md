@@ -125,6 +125,17 @@ absent on that side rather than different, and read a gap between the two
 *within our own dump* as what it is: an attachment drawn somewhere its
 wearer did not put it.
 
+An animated subject needs the same care, and nearly cost a wrong bug
+report. The catalogue's NPCs looked posed differently in the two viewers'
+frames, and it was **phase**: a 2 s looping motion sampled every 0.5 s puts
+any two frames at two arbitrary points in the loop. A contact sheet of a
+moving avatar compares two phases, not two viewers. The dump now carries
+each avatar's playing animations and where each one's clock has reached
+([[viewer-scene-dump-animations]]), so the report can say which — and must
+expect the reference to list default motions (head rotation, eye, body
+noise, breathing, physics, hand pose, pelvis fix) this viewer implements as
+adjusters, rather than rank them as missing.
+
 Two fields carry a **known semantic difference** rather than a divergence,
 and the report should say so rather than rank them: `num_faces` is the
 count this viewer drew and the count the reference declares, and

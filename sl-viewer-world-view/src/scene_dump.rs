@@ -71,6 +71,29 @@
 //! joint, or one never parented to the skeleton at all, is still a difference a
 //! reader can see, on the side of the pair that can see it.
 //!
+//! # What an avatar is doing, not just where it is
+//!
+//! Each avatar lists the animations it is playing, in the order the viewer
+//! applies them — most recently activated first, which is the order the
+//! reference's motion controller keeps its active list in and the order our own
+//! per-joint blend breaks a priority tie by. Order is half of what decides which
+//! motion owns a joint; `priority` is the other half, and both are reported.
+//!
+//! Each entry says where that motion's clock has reached. `time` is seconds
+//! since the viewer started playing it and is *not* comparable between two
+//! viewers — they start at different moments — while `loop_time`, the same
+//! number wrapped into the motion's own duration, is: it is the frame of the
+//! animation the body was drawn at. A pair of frames photographed 0.5 s apart
+//! out of a 2 s loop can differ wildly and mean nothing, and this section is
+//! what says so.
+//!
+//! The two viewers list different *sets* here, deliberately. The reference
+//! starts default motions on every avatar — head rotation, eye, body noise,
+//! breathing, physics, hand pose, pelvis fix — which this viewer implements as
+//! adjusters rather than as motions, so they appear only on that side. What is
+//! worth comparing is the animations the **simulator** named: whether both
+//! viewers play them, and where each one's clock has got to.
+//!
 //! # Which ids two viewers can agree on
 //!
 //! A comparison keys objects by id, and **not every id in a scene is a grid
@@ -108,6 +131,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use serde::Serialize;
 use sl_client_bevy::{
@@ -118,6 +142,7 @@ use sl_viewer_world_api::{
     AvatarState, MAX_PARENT_WALK, ObjectCategory, ObjectState, SceneObject, TrackedObject,
     ViewerCamera,
 };
+use sl_viewer_world_avatar::animations::{AnimationManager, AnimationPlayback, PlayingAnimation};
 use sl_viewer_world_avatar::animesh::ControlAvatarState;
 use sl_viewer_world_avatar::avatars::AvatarBodyPart;
 use sl_viewer_world_scene::environment::EnvironmentState;
@@ -466,6 +491,9 @@ pub struct AvatarDump {
     /// docs](self). The reference mints a local UUID instead, which is why the
     /// two are matched by this flag and the object, never by id.
     pub is_control_avatar: bool,
+    /// What it is playing, in the order the viewer applies it — see
+    /// [`AnimationDump`].
+    pub animations: Vec<AnimationDump>,
     /// Whether this viewer has drawn it as a body rather than a placeholder.
     ///
     /// The nearest thing this viewer has to the reference's `is_fully_loaded`,
@@ -474,6 +502,81 @@ pub struct AvatarDump {
     /// a sphere reads `false` here and `false` there, which is the comparison
     /// that matters.
     pub has_body: bool,
+}
+
+/// The three resources that say what every avatar is playing and when.
+///
+/// One [`SystemParam`] rather than three parameters because a dump is a
+/// photograph of the whole world and the system that writes it is already at
+/// Bevy's parameter limit — see [`write_requested_scene_dump`].
+#[derive(SystemParam)]
+struct AnimationInputs<'w> {
+    /// What each avatar is playing.
+    playback: Res<'w, AnimationPlayback>,
+    /// The decoded motions, for each animation's duration and priority.
+    manager: Res<'w, AnimationManager>,
+    /// The clock the playback times are measured against.
+    time: Res<'w, Time>,
+}
+
+/// One animation an avatar is playing.
+///
+/// The list is in **the order the viewer applies it**, most recently activated
+/// first: the reference's motion controller pushes each newly started motion to
+/// the front of its active list, and our own per-joint blend breaks a priority
+/// tie the same way. Order matters because it is half of what decides which
+/// motion owns a joint; `priority` is the other half.
+///
+/// Two viewers list different *sets* here, and that is not a divergence. The
+/// reference starts default motions on every avatar (head rotation, eye, body
+/// noise, breathing, physics, hand pose, pelvis fix) which this viewer
+/// implements as adjusters rather than as motions, so they appear only on that
+/// side. What is worth comparing is the animations the **simulator** named:
+/// whether both viewers are playing them, and where each one's clock has
+/// reached.
+#[derive(Debug, Serialize)]
+pub struct AnimationDump {
+    /// The animation's asset id.
+    pub id: String,
+    /// The simulator's per-avatar sequence number, when the simulator is what
+    /// asked for this animation. Absent for a motion the viewer plays of its
+    /// own accord.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sequence: Option<i32>,
+    /// Seconds since the motion started, on the clock it is sampled at.
+    pub time: f32,
+    /// Where in the motion that lands, in seconds — `time` wrapped by
+    /// [`duration`](Self::duration) for a looping motion, and clamped to it for
+    /// one that plays once. This is the "which frame" of the animation, and the
+    /// number two viewers of one scene can actually be compared on: `time` runs
+    /// from whenever each viewer started playing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub loop_time: Option<f32>,
+    /// The motion's length in seconds, when the viewer has its asset.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration: Option<f32>,
+    /// Whether it loops.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub looping: Option<bool>,
+    /// Its base priority: what decides which motion owns a joint when several
+    /// animate it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub priority: Option<i32>,
+    /// Whether it has been stopped and is easing out.
+    pub stopping: bool,
+}
+
+/// Where `time` lands inside a motion: wrapped for a looping one, clamped for
+/// one that plays once, and `None` when the viewer does not have the asset and
+/// so does not know how long it is.
+fn loop_time(time: f32, duration: Option<f32>, looping: Option<bool>) -> Option<f32> {
+    let duration = duration.filter(|duration| *duration > 0.0)?;
+    let time = time.max(0.0);
+    if looping == Some(true) {
+        Some(time % duration)
+    } else {
+        Some(time.min(duration))
+    }
 }
 
 /// Collect the dump. See [the module docs](self) for what the numbers mean.
@@ -490,6 +593,9 @@ fn build(
     animesh: &ControlAvatarState,
     environment: &EnvironmentState,
     settings: &ViewerSettings,
+    playback: &AnimationPlayback,
+    animation_manager: &AnimationManager,
+    now: f32,
     region: Option<&SlRegionIdentity>,
     camera: Option<(&GlobalTransform, Option<&Projection>)>,
     motions: &Query<'_, '_, &ObjectSlMotion>,
@@ -516,7 +622,17 @@ fn build(
             offset,
         ),
         avatars: build_avatars(
-            identity, avatars, animesh, objects, motions, transforms, bodies, offset,
+            identity,
+            avatars,
+            animesh,
+            objects,
+            playback,
+            animation_manager,
+            now,
+            motions,
+            transforms,
+            bodies,
+            offset,
         ),
     }
 }
@@ -1021,6 +1137,9 @@ fn build_avatars(
     avatars: &AvatarState,
     animesh: &ControlAvatarState,
     objects: &ObjectState,
+    playback: &AnimationPlayback,
+    animation_manager: &AnimationManager,
+    now: f32,
     motions: &Query<'_, '_, &ObjectSlMotion>,
     transforms: &Query<'_, '_, &GlobalTransform>,
     bodies: &Query<'_, '_, &AvatarBodyPart>,
@@ -1049,6 +1168,7 @@ fn build_avatars(
                 with_bodies.contains(agent),
                 placement,
                 transforms.get(entities.anchor).ok(),
+                &playback.playing_animations(*agent, now, animation_manager),
                 offset,
             )
         });
@@ -1060,7 +1180,16 @@ fn build_avatars(
         let anchor = objects
             .entity_of(object)
             .and_then(|entity| transforms.get(entity).ok());
-        dump_avatar(object.to_string(), false, true, true, None, anchor, offset)
+        dump_avatar(
+            object.to_string(),
+            false,
+            true,
+            true,
+            None,
+            anchor,
+            &animesh.playing_animations(object, now, animation_manager),
+            offset,
+        )
     });
     let mut dumped: Vec<AvatarDump> = residents.chain(animated).collect();
     dumped.sort_by(|left, right| left.id.cmp(&right.id));
@@ -1073,6 +1202,11 @@ fn build_avatars(
 /// own position — and `transform` is the body root this viewer drew, which sits
 /// a `root_drop` lower (see [`avatar_placement`]). A resident has both; a coarse
 /// dot, or an animesh's control avatar, has only what was drawn.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "an avatar entry is its identity, its two placements, what it is playing and its \
+              appearance state; a struct of them would only move the same arguments one call up"
+)]
 fn dump_avatar(
     id: String,
     is_self: bool,
@@ -1080,6 +1214,7 @@ fn dump_avatar(
     has_body: bool,
     placement: Option<ReferencePose>,
     transform: Option<&GlobalTransform>,
+    playing: &[PlayingAnimation],
     offset: Vec3,
 ) -> AvatarDump {
     let drawn = transform.map(|transform| {
@@ -1099,7 +1234,24 @@ fn dump_avatar(
         rotation,
         drawn_position: drawn_pose.map(|(position, _rotation)| position),
         drawn_rotation: drawn_pose.map(|(_position, rotation)| rotation),
+        animations: playing.iter().map(dump_animation).collect(),
         has_body,
+    }
+}
+
+/// One playing animation's entry.
+fn dump_animation(playing: &PlayingAnimation) -> AnimationDump {
+    AnimationDump {
+        id: playing.id.to_string(),
+        // The simulator numbers what it asks for from one; a motion the viewer
+        // started itself carries no number of the simulator's.
+        sequence: (playing.sequence > 0).then_some(playing.sequence),
+        time: playing.time,
+        loop_time: loop_time(playing.time, playing.duration, playing.loops),
+        duration: playing.duration,
+        looping: playing.loops,
+        priority: playing.priority,
+        stopping: playing.stopping,
     }
 }
 
@@ -1127,6 +1279,7 @@ fn write_requested_scene_dump(
     animesh: Res<ControlAvatarState>,
     environment: Res<EnvironmentState>,
     settings: Res<ViewerSettings>,
+    animations: AnimationInputs,
     regions: Query<&SlRegionIdentity, With<sl_client_bevy::SlCurrentRegion>>,
     cameras: Query<(&GlobalTransform, Option<&Projection>), With<ViewerCamera>>,
     motions: Query<&ObjectSlMotion>,
@@ -1147,6 +1300,9 @@ fn write_requested_scene_dump(
         &animesh,
         &environment,
         &settings,
+        &animations.playback,
+        &animations.manager,
+        animations.time.elapsed_secs(),
         regions.iter().next(),
         cameras.iter().next(),
         &motions,
@@ -1169,9 +1325,11 @@ mod tests {
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{Rotation, TextureFace, TextureKey, Uuid, Vector};
 
+    use sl_viewer_world_avatar::animations::PlayingAnimation;
+
     use super::{
         FaceDump, LocalPose, ObjectDump, Point, ReferencePose, compose_worn, dump_avatar,
-        dump_face, dump_faces, region_direction, region_point, region_rotation,
+        dump_face, dump_faces, loop_time, region_direction, region_point, region_rotation,
     };
     use crate::coords::{sl_to_bevy_object_rotation, sl_to_bevy_vec};
 
@@ -1342,7 +1500,16 @@ mod tests {
     #[test]
     fn a_control_avatar_is_reported_by_the_object_it_rides() {
         let object = "00000000-0000-0000-0000-00000ca71011";
-        let dumped = dump_avatar(object.to_owned(), false, true, true, None, None, Vec3::ZERO);
+        let dumped = dump_avatar(
+            object.to_owned(),
+            false,
+            true,
+            true,
+            None,
+            None,
+            &[],
+            Vec3::ZERO,
+        );
         assert!(dumped.is_control_avatar);
         assert!(!dumped.is_self);
         assert_eq!(dumped.id, object);
@@ -1473,6 +1640,7 @@ mod tests {
             true,
             Some(placement),
             Some(&drawn),
+            &[],
             Vec3::ZERO,
         );
         assert!(near(dumped.position, [104.0, 136.0, 25.95]));
@@ -1482,6 +1650,75 @@ mod tests {
                 .ok_or("an avatar with a body reports what was drawn")?,
             [104.0, 136.0, 25.009]
         ));
+        Ok(())
+    }
+
+    /// A looping motion's clock is reported as **where in the motion** it
+    /// landed, not as how long it has been running: two viewers start playing at
+    /// different moments, so the raw elapsed time is never comparable and the
+    /// wrapped one always is.
+    #[test]
+    fn a_motions_clock_is_reported_inside_the_motion() {
+        // The catalogue's own twist: two seconds, looping.
+        assert_eq!(loop_time(5.5, Some(2.0), Some(true)), Some(1.5));
+        assert_eq!(loop_time(0.25, Some(2.0), Some(true)), Some(0.25));
+        // A motion that plays once holds its last frame rather than wrapping
+        // back to its first.
+        assert_eq!(loop_time(5.5, Some(2.0), Some(false)), Some(2.0));
+        // Nothing is invented for a motion whose asset has not arrived, or one
+        // that declares no length.
+        assert_eq!(loop_time(5.5, None, Some(true)), None);
+        assert_eq!(loop_time(5.5, Some(0.0), Some(true)), None);
+    }
+
+    /// An avatar's entry lists what it is playing, with the simulator's sequence
+    /// number where the simulator asked for it — and the list is emitted in the
+    /// order it was handed in, which is the order the viewer applies it.
+    #[test]
+    fn an_avatar_entry_lists_what_it_is_playing() -> Result<(), TestError> {
+        let playing = [
+            PlayingAnimation {
+                id: Uuid::from_u128(0x57A2),
+                sequence: 2,
+                time: 3.5,
+                duration: Some(2.0),
+                loops: Some(true),
+                priority: Some(4),
+                stopping: false,
+            },
+            PlayingAnimation {
+                id: Uuid::from_u128(0x57A3),
+                sequence: 0,
+                time: 0.5,
+                duration: None,
+                loops: None,
+                priority: None,
+                stopping: true,
+            },
+        ];
+        let dumped = dump_avatar(
+            "id".to_owned(),
+            true,
+            false,
+            true,
+            None,
+            None,
+            &playing,
+            Vec3::ZERO,
+        );
+        let first = dumped.animations.first().ok_or("no animation reported")?;
+        assert_eq!(first.id, Uuid::from_u128(0x57A2).to_string());
+        assert_eq!(first.sequence, Some(2));
+        assert_eq!(first.loop_time, Some(1.5));
+        assert_eq!(first.priority, Some(4));
+        assert!(!first.stopping);
+        // The viewer's own motion carries no simulator sequence number, and an
+        // animation whose asset has not arrived invents no length or priority.
+        let second = dumped.animations.get(1).ok_or("no second animation")?;
+        assert_eq!(second.sequence, None);
+        assert_eq!(second.duration, None);
+        assert_eq!(second.loop_time, None);
+        assert!(second.stopping);
         Ok(())
     }
 
