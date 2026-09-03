@@ -199,7 +199,7 @@ fn i32_from_f32(value: f32) -> i32 {
     clippy::cast_precision_loss,
     reason = "a pixel index of a test frame (at most a few thousand) converts to f32 exactly"
 )]
-const fn f32_from_u32(value: u32) -> f32 {
+pub(crate) const fn f32_from_u32(value: u32) -> f32 {
     value as f32
 }
 
@@ -376,6 +376,40 @@ pub(crate) fn differing_pixels(a: &Frame, b: &Frame, within: Option<Silhouette>)
     count
 }
 
+/// **Where** two frames differ: the centroid, in pixels, of everything
+/// [`differing_pixels`] counts — inside `within` if given, else over the whole
+/// frame. `None` when fewer than [`CENTROID_MIN_PIXELS`] changed, which is the
+/// same floor [`centroid`] uses and for the same reason.
+///
+/// The companion an A/B toggle needs. "Turning the feature off changed the
+/// picture" is half a claim: a lens flare would satisfy it too. Asking *where*
+/// it changed pins the subject down without the test having to know how big the
+/// thing is or exactly how its renderer places it — which for a camera-facing
+/// billboard whose on-screen size is constant and whose anchor is pulled toward
+/// the camera is not something a metre figure can say.
+pub(crate) fn changed_centroid(a: &Frame, b: &Frame, within: Option<Silhouette>) -> Option<Vec2> {
+    if a.size() != b.size() {
+        return None;
+    }
+    let (mut sum, mut count) = (Vec2::ZERO, 0_u32);
+    for (x, y) in a.coordinates() {
+        if within.is_some_and(|silhouette| !silhouette.contains(x, y)) {
+            continue;
+        }
+        let (Some(before), Some(after)) = (a.pixel(x, y), b.pixel(x, y)) else {
+            continue;
+        };
+        if pixels_differ(before, after) {
+            sum = Vec2::new(sum.x + f32_from_u32(x), sum.y + f32_from_u32(y));
+            count = count.saturating_add(1);
+        }
+    }
+    (count >= CENTROID_MIN_PIXELS).then(|| {
+        let n = f32_from_u32(count);
+        Vec2::new(sum.x / n, sum.y / n)
+    })
+}
+
 /// Whether two pixels differ by more than [`DIFFER_STEP`] in any channel — the
 /// same threshold [`differing_pixels`] counts by, so "these two are different"
 /// means the same thing whether it is asked of two pixels or two frames.
@@ -422,6 +456,22 @@ pub(crate) fn band_mean(frame: &Frame, from: u32, to: u32) -> Option<Vec4> {
             sum[3] / count,
         )
     })
+}
+
+/// The **relative luminance** of a pixel — the Rec. 709 weighting of its three
+/// colour channels, alpha ignored.
+///
+/// The one thing a capture can honestly say about a *sky*: it has no marker
+/// colour to classify and no silhouette to cover, so what changes when the
+/// environment changes is how bright it came out. Weighted rather than a plain
+/// mean because the eye's is: a sky that loses its sun loses most of its green,
+/// and an unweighted average understates that by a third.
+///
+/// Alpha is dropped because in the full-stack tier's frames the alpha channel is
+/// the glow mask rather than opacity (`crate::full_stack_test`), so a bright
+/// glow would otherwise read as a bright sky.
+pub(crate) fn luminance(pixel: Vec4) -> f32 {
+    0.2126_f32.mul_add(pixel.x, 0.7152_f32.mul_add(pixel.y, 0.0722 * pixel.z))
 }
 
 /// The mean of the frame's four corner pixels: what the *background* looks
@@ -808,5 +858,79 @@ mod tests {
         assert!(!super::pixels_differ(red, red));
         // Four steps of an 8-bit channel is below the eight-step threshold.
         assert!(!super::pixels_differ(red, as_vec([234, 25, 25, 255])));
+    }
+
+    /// The change centroid finds where two frames differ, ignores where they
+    /// agree, and stays silent when almost nothing changed.
+    #[test]
+    fn the_change_centroid_points_at_what_moved() -> Result<(), TestError> {
+        const SIDE: u32 = 16;
+        let solid = |rgba: [u8; 4]| {
+            let mut pixels = blank(SIDE);
+            for y in 0..SIDE {
+                for x in 0..SIDE {
+                    paint(&mut pixels, SIDE, x, y, rgba);
+                }
+            }
+            pixels
+        };
+        // Two frames alike everywhere but a 4×4 block in the top-left quarter,
+        // whose centre is (4.5, 2.5).
+        let before = frame(solid(GREY), SIDE)?;
+        let mut painted = solid(GREY);
+        for y in 1..=4 {
+            for x in 3..=6 {
+                paint(&mut painted, SIDE, x, y, RED);
+            }
+        }
+        let after = frame(painted, SIDE)?;
+        let at = super::changed_centroid(&before, &after, None).ok_or("a change to point at")?;
+        assert!(
+            (at.x - 4.5).abs() < 0.51 && (at.y - 2.5).abs() < 0.51,
+            "the change centroid is {at:?}, not the block that changed"
+        );
+        // Restricted to a disc the block is outside of, there is nothing to
+        // point at — and two identical frames never have one.
+        let elsewhere = Silhouette {
+            centre: Vec2::new(12.0, 12.0),
+            radius: 3.0,
+        };
+        assert_eq!(
+            super::changed_centroid(&before, &after, Some(elsewhere)),
+            None
+        );
+        assert_eq!(super::changed_centroid(&before, &before, None), None);
+        Ok(())
+    }
+
+    /// Luminance orders a darkened pixel below the pixel it was darkened from,
+    /// weights green above red above blue, and ignores the alpha channel — which
+    /// in the full-stack tier's frames is the glow mask, not opacity.
+    #[test]
+    fn luminance_orders_bright_above_dark_and_ignores_alpha() {
+        let luminance = super::luminance;
+        let white = Vec4::new(1.0, 1.0, 1.0, 0.0);
+        assert!((luminance(white) - 1.0).abs() < 1e-5);
+        assert!((luminance(Vec4::ZERO)).abs() < 1e-5);
+        // Half as bright is half the luminance: the weighting is linear, so a
+        // "the sky halved" claim is a claim about the light and not about the
+        // curve this oracle applies.
+        let half = Vec4::new(0.5, 0.5, 0.5, 0.0);
+        assert!((luminance(half) - 0.5).abs() < 1e-5);
+        // Green above red above blue, at equal channel value.
+        let only = |channel: usize| {
+            let mut pixel = Vec4::ZERO;
+            match channel {
+                0 => pixel.x = 1.0,
+                1 => pixel.y = 1.0,
+                _ => pixel.z = 1.0,
+            }
+            luminance(pixel)
+        };
+        assert!(only(1) > only(0) && only(0) > only(2));
+        // The glow mask does not brighten a sky.
+        assert!(
+            (luminance(Vec4::new(0.2, 0.2, 0.2, 1.0)) - luminance(Vec4::splat(0.2))).abs() < 1e-5
+        );
     }
 }

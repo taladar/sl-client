@@ -16,6 +16,7 @@
 //!
 //! [`into_region`]: RegionFixture::into_region
 
+pub mod arrival;
 pub mod border;
 pub mod catalogue;
 pub mod npcs;
@@ -33,6 +34,7 @@ use crate::scenario::Scenario;
 use crate::terrain::TerrainFixture;
 use crate::world::SceneFixtures;
 
+pub use arrival::arrival;
 pub use border::border;
 pub use catalogue::{CatalogueEntry, catalogue};
 pub use npcs::{NpcAppearance, NpcBake, NpcFixture};

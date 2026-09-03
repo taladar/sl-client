@@ -14,10 +14,15 @@
 //! are what a grid serves for a settings asset id, so an inventory item, an
 //! offered day cycle, or a parcel pointing at an asset can all be fixtured —
 //! none of which the typed capability path can express.
+#![expect(
+    clippy::module_name_repetitions,
+    reason = "the module is the subject: `environment::noon_environment()` is how a \
+              caller reads it, and dropping the suffix would leave `environment::noon`"
+)]
 
 use sl_proto::{
-    Color, ColorAlpha, DayCycle, DayCycleFrame, EnvironmentAsset, SkySettings, WaterSettings,
-    azimuth_altitude_to_rotation, environment_asset_to_bytes,
+    Color, ColorAlpha, DayCycle, DayCycleFrame, EnvironmentAsset, EnvironmentSettings, SkySettings,
+    WaterSettings, azimuth_altitude_to_rotation, environment_asset_to_bytes,
 };
 
 /// The name (and frame name) of the bright fixture sky.
@@ -157,6 +162,49 @@ pub fn day_cycle_asset() -> Vec<u8> {
     environment_asset_to_bytes(&EnvironmentAsset::DayCycle(Box::new(day_cycle())))
 }
 
+/// A whole-region [`EnvironmentSettings`] whose day cycle holds `sky` and
+/// nothing else — the **typed** value the `ExtEnvironment` capability serves,
+/// as against the asset bytes above.
+///
+/// One sky keyframe rather than two, deliberately: a single-frame cycle renders
+/// the same sky whatever the clock says, so a capture of it is a capture of
+/// *that sky* and not of the moment it was taken. That is what makes a
+/// before/after pair of captures a comparison of two environments.
+#[must_use]
+pub fn single_sky_environment(sky: SkySettings) -> EnvironmentSettings {
+    let name = sky.name.clone();
+    EnvironmentSettings {
+        day_cycle: DayCycle {
+            name: name.clone(),
+            water_track: vec![DayCycleFrame {
+                keyframe: 0.0,
+                name: WATER_NAME.to_owned(),
+            }],
+            sky_tracks: vec![vec![DayCycleFrame {
+                keyframe: 0.0,
+                name: name.clone(),
+            }]],
+            sky_frames: core::iter::once((name, sky)).collect(),
+            water_frames: core::iter::once((WATER_NAME.to_owned(), water())).collect(),
+        },
+        ..EnvironmentSettings::legacy_windlight_default()
+    }
+}
+
+/// The bright region environment: [`noon_sky`] held over [`water`].
+#[must_use]
+pub fn noon_environment() -> EnvironmentSettings {
+    single_sky_environment(noon_sky())
+}
+
+/// The dark region environment: [`night_sky`] held over [`water`]. Paired with
+/// [`noon_environment`] — the two differ by a luminance and by nothing else a
+/// capture can see.
+#[must_use]
+pub fn night_environment() -> EnvironmentSettings {
+    single_sky_environment(night_sky())
+}
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
@@ -164,7 +212,8 @@ mod tests {
 
     use super::{
         DAY_CYCLE_NAME, NIGHT_SKY_NAME, NOON_SKY_NAME, WATER_NAME, day_cycle, day_cycle_asset,
-        night_sky, night_sky_asset, noon_sky, noon_sky_asset, water, water_asset,
+        night_environment, night_sky, night_sky_asset, noon_environment, noon_sky, noon_sky_asset,
+        water, water_asset,
     };
 
     type TestError = Box<dyn core::error::Error>;
@@ -234,6 +283,31 @@ mod tests {
                 "water keyframe {} names no frame",
                 frame.name
             );
+        }
+    }
+
+    /// The typed region environments are whole-region, single-frame and named
+    /// for the sky they hold — the three properties that make a capture of one
+    /// a capture of that sky rather than of the clock.
+    #[test]
+    fn a_single_sky_environment_holds_one_named_frame() {
+        for (environment, name) in [
+            (noon_environment(), NOON_SKY_NAME),
+            (night_environment(), NIGHT_SKY_NAME),
+        ] {
+            assert_eq!(environment.parcel_id, -1, "the whole region, not a parcel");
+            assert_eq!(
+                environment.day_cycle.sky_tracks,
+                vec![vec![sl_proto::DayCycleFrame {
+                    keyframe: 0.0,
+                    name: name.to_owned(),
+                }]]
+            );
+            assert_eq!(
+                environment.day_cycle.sky_frames.keys().collect::<Vec<_>>(),
+                vec![&name.to_owned()]
+            );
+            assert!(environment.day_cycle.water_frames.contains_key(WATER_NAME));
         }
     }
 }

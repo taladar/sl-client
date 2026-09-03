@@ -170,7 +170,7 @@ pub(crate) const FRAME_SIDE: u16 = 256;
 const STEP: f32 = 1.0 / 30.0;
 
 /// The one-frame timestep as a `Duration`, for `TimeUpdateStrategy`.
-const STEP_DURATION: Duration = Duration::from_nanos(33_333_333);
+pub(crate) const STEP_DURATION: Duration = Duration::from_nanos(33_333_333);
 
 /// How many consecutive **quiet** frames — no pipeline queued or compiling, every
 /// live reflection probe captured at least once — [`settle`] insists on before it
@@ -218,7 +218,7 @@ pub(crate) const CAPTURE_AT_SECS: f32 = 1.0;
     clippy::cast_sign_loss,
     reason = "a small positive frame count computed from a scene time in seconds"
 )]
-fn frames_for(seconds: f32) -> u32 {
+pub(crate) fn frames_for(seconds: f32) -> u32 {
     (seconds / STEP).round().max(0.0) as u32
 }
 

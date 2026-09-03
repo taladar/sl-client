@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 311 |
+| ready | 310 |
 | blocked | 56 |
 | in-progress | 18 |
 | bugs | 70 |
-| done | 968 |
+| done | 969 |
 | deferred | 24 |
 | wont-do | 14 |
 | **total** | **1559** |
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (311)
+## ready (310)
 
 ### protocol
 
@@ -485,9 +485,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-experiences-floater`](ready/viewer-experiences-floater.md) —
   Experiences floater — lists, profile, search (blocked by
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
-- [`viewer-fake-grid-render-catalogue`](ready/viewer-fake-grid-render-catalogue.md)
-  — The full-stack test catalogue — NPCs, attachments, teleport, crossing,
-  parcels, environment (blocked by `test-fake-grid-neighbours-crossing` (done))
 - [`viewer-floater-registry`](ready/viewer-floater-registry.md) — A FLOATERS
   registry, so floaters can be swept at all
 - [`viewer-floater-update-in-place`](ready/viewer-floater-update-in-place.md) —
@@ -1352,7 +1349,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (968)
+## done (969)
 
 ### protocol
 
@@ -1820,6 +1817,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   SimSession (blocked by `protocol-sim-caps-framework` (done))
 - [`viewer-fake-grid-login-smoke`](done/viewer-fake-grid-login-smoke.md) — The
   real client stack against the fake grid (blocked by `viewer-fake-grid` (done))
+- [`viewer-fake-grid-render-catalogue`](done/viewer-fake-grid-render-catalogue.md)
+  — The full-stack test catalogue — NPCs, attachments, teleport, crossing,
+  parcels, environment
 - [`viewer-fake-grid-render-harness`](done/viewer-fake-grid-render-harness.md) —
   ViewerHarness — the real viewer against the fake grid, read back as pixels
   (blocked by `test-fake-grid-terrain-layerdata` (done),

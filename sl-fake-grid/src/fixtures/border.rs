@@ -137,6 +137,30 @@ impl BorderSide {
         }
     }
 
+    /// The texture this side's ground is painted with — its own id, so the two
+    /// regions' grounds are two different textures rather than one shared one.
+    #[must_use]
+    pub const fn ground_texture(self) -> TextureKey {
+        match self {
+            Self::Leaving => TextureKey(Key(uuid::Uuid::from_u128(0x000B_04DE_0020))),
+            Self::Arriving => TextureKey(Key(uuid::Uuid::from_u128(0x000B_04DE_0021))),
+        }
+    }
+
+    /// The marker colour this side's ground is painted, so a framing holding
+    /// both regions' terrain can say which half of it is which.
+    ///
+    /// Blue and yellow, not the pillar's red and green: a capture that holds
+    /// the ground either side of a border may hold the pillar too, and four
+    /// classes that never collide is what makes both readable at once.
+    #[must_use]
+    pub const fn ground_color(self) -> [u8; 4] {
+        match self {
+            Self::Leaving => sl_test_assets::markers::BLUE,
+            Self::Arriving => sl_test_assets::markers::YELLOW,
+        }
+    }
+
     /// Where the vehicle stands in this region, in region metres: hard against
     /// the shared border, on this side of it.
     ///
@@ -265,9 +289,39 @@ pub fn border_with_vehicle(side: BorderSide, ridden: bool) -> RegionFixture {
     fixture
 }
 
-/// The marker's checker. An encode failure is logged rather than fatal, as
-/// everywhere else in the fixtures: the pillar then renders untextured, which
-/// is a visible failure and not a panic.
+/// [`border`] with its **ground painted** this side's [`ground_color`], so a
+/// framing that holds the terrain either side of the shared border can say
+/// which half of the picture belongs to which region.
+///
+/// All four detail slots carry the one solid, so the ground is that colour at
+/// every altitude — the height-blend the viewer shades a real region's ground
+/// with would otherwise make "what colour is the ground" a question about
+/// where on it you looked.
+///
+/// [`ground_color`]: BorderSide::ground_color
+#[must_use]
+#[expect(
+    clippy::module_name_repetitions,
+    reason = "re-exported nowhere; `border::border_on_painted_ground` is how a caller reads it"
+)]
+pub fn border_on_painted_ground(side: BorderSide) -> RegionFixture {
+    let mut fixture = border();
+    fixture.terrain.composition.detail_textures = [side.ground_texture().uuid(); 4];
+    fixture
+}
+
+/// The side, in pixels, of a painted-ground solid. A solid carries no detail,
+/// so a small tile is all the ground needs.
+const GROUND_TEXTURE_SIZE: u32 = 128;
+
+/// The marker's checker, plus the two painted-ground solids
+/// [`border_on_painted_ground`] shades a region with. An encode failure is
+/// logged rather than fatal, as everywhere else in the fixtures: the pillar
+/// then renders untextured, which is a visible failure and not a panic.
+///
+/// Both grounds are registered whichever side this fixture is built for: the
+/// grid's asset store is grid-wide, and a viewer standing in one region
+/// fetches its neighbour's ground texture over the region it is *rooted* in.
 fn marker_assets() -> InMemoryAssetSource {
     let mut assets = crate::scenario::default_assets();
     let checker = sl_test_assets::RgbaImage::checker(
@@ -281,6 +335,18 @@ fn marker_assets() -> InMemoryAssetSource {
             let _previous = assets.insert(AssetKey::from(MARKER_TEXTURE.uuid()), bytes);
         }
         Err(error) => tracing::warn!("encoding the border marker's checker failed: {error}"),
+    }
+    for side in [BorderSide::Leaving, BorderSide::Arriving] {
+        let ground =
+            sl_test_assets::RgbaImage::solid(GROUND_TEXTURE_SIZE, side.ground_color()).j2c();
+        match ground {
+            Ok(bytes) => {
+                let _previous = assets.insert(AssetKey::from(side.ground_texture().uuid()), bytes);
+            }
+            Err(error) => {
+                tracing::warn!("encoding the {side:?} side's painted ground failed: {error}");
+            }
+        }
     }
     assets
 }
@@ -342,6 +408,37 @@ mod test {
             arriving.x < REGION_SIZE_M / 2.0,
             "the arriving side's vehicle must be against its *west* edge"
         );
+    }
+
+    /// The two painted grounds are two textures in two marker classes, and
+    /// both are served whichever side the fixture was built for — the grid's
+    /// asset store is grid-wide, so a viewer looking across the border fetches
+    /// the neighbour's ground over its own region's `GetTexture`.
+    #[test]
+    fn the_painted_grounds_are_two_distinguishable_textures() {
+        let (west, east) = (BorderSide::Leaving, BorderSide::Arriving);
+        assert_ne!(west.ground_texture(), east.ground_texture());
+        assert_ne!(west.ground_color(), east.ground_color());
+        // Neither is the pillar's red or green, so a capture holding the pillar
+        // and both grounds classifies all three.
+        for side in [west, east] {
+            assert_ne!(side.ground_color(), sl_test_assets::markers::RED);
+            assert_ne!(side.ground_color(), sl_test_assets::markers::GREEN);
+        }
+        let fixture = border_on_painted_ground(west);
+        assert_eq!(
+            fixture.terrain.composition.detail_textures,
+            [west.ground_texture().uuid(); 4],
+            "every altitude band has to be the one colour or the ground is a gradient"
+        );
+        for side in [west, east] {
+            assert!(
+                fixture
+                    .assets
+                    .contains(AssetKey::from(side.ground_texture().uuid())),
+                "the {side:?} side's ground texture is not served"
+            );
+        }
     }
 
     /// A handover renumbers: the same object is not the same local id either

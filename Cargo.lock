@@ -8539,6 +8539,7 @@ dependencies = [
  "sl-proto",
  "sl-repl",
  "sl-settings",
+ "sl-test-assets",
  "sl-texture",
  "sl-viewer-asset-editors",
  "sl-viewer-audio",

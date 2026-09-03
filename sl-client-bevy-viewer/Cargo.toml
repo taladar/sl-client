@@ -231,6 +231,9 @@ pretty_assertions = { workspace = true }
 sl-fake-grid = { path = "../sl-fake-grid", version = "0.1.0" }
 sl-mesh = { workspace = true }
 sl-proto = { workspace = true }
+# The shared procedural fixtures the fake grid dresses a region with — the
+# full-stack tier states the environment it publishes in the same values.
+sl-test-assets = { workspace = true }
 sl-viewer-testkit = { workspace = true }
 # Hosts the fake grid's tasks; `sync` for its `broadcast` receivers.
 tokio = { workspace = true, features = ["rt-multi-thread", "sync"] }

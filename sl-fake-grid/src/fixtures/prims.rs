@@ -369,11 +369,21 @@ impl PrimFixture {
     }
 
     /// Floats `text` above the prim in `color` (RGBA; the alpha is the text's
-    /// opacity, as `llSetText` takes it).
+    /// **opacity**, as `llSetText` takes it — `255` fully opaque).
+    ///
+    /// The alpha is inverted on the way onto the wire, because that is where the
+    /// inversion lives: `ObjectUpdate`'s `TextColor` transmits `255 - opacity`,
+    /// so a transmitted `0` is fully opaque and a transmitted `255` is the
+    /// scripter's "text set but invisible, revealed later" trick (the reference
+    /// viewer's `coloru.mV[3] = 255 - coloru.mV[3]`). A fixture that wrote the
+    /// byte straight through would read as opaque and render as nothing —
+    /// which is exactly what the catalogue's floating text did until a
+    /// full-stack capture found no pixels above the prim.
     #[must_use]
     pub fn hover_text(mut self, text: &str, color: [u8; 4]) -> Self {
+        let [red, green, blue, opacity] = color;
         text.clone_into(&mut self.object.text);
-        self.object.text_color = color;
+        self.object.text_color = [red, green, blue, 255_u8.saturating_sub(opacity)];
         self
     }
 
@@ -763,6 +773,26 @@ mod test {
 
     /// A linkset re-parents every child to the root, whatever the children
     /// were built with.
+    /// Floating text is authored as an **opacity** and transmitted as its
+    /// inverse, because that is what the wire carries and what the client
+    /// un-inverts. A fixture that wrote the byte straight through would ask for
+    /// opaque white and get text nothing draws.
+    #[test]
+    fn floating_text_transmits_the_inverse_of_its_opacity() {
+        let opaque = prim(30)
+            .hover_text("catalogue", [255, 255, 255, 255])
+            .build();
+        assert_eq!(opaque.text, "catalogue");
+        assert_eq!(opaque.text_color, [255, 255, 255, 0]);
+        // The scripter's invisible-text trick, stated as what it is.
+        let invisible = prim(31).hover_text("hidden", [255, 255, 255, 0]).build();
+        assert_eq!(invisible.text_color, [255, 255, 255, 255]);
+        // A prim with no floating text carries neither the string nor a colour.
+        let plain = prim(32).build();
+        assert!(plain.text.is_empty());
+        assert_eq!(plain.text_color, [0; 4]);
+    }
+
     #[test]
     fn a_linkset_parents_its_children_to_its_root() {
         let root = prim(20);

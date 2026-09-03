@@ -186,3 +186,30 @@ multi-region offsets, in-flight asset leaks, NPC appearance delivery.
   entity, because the full viewer runs other readbacks (the GPU pick, the
   GPU avatar palettes) that a global observer would drain into the frame
   slot.
+
+  Four things the harness has to bring itself, because `run_session`
+  brings them and no plugin group does: the **avatar asset library**
+  (without it every avatar in the scene is a placeholder sphere and no
+  capture of one means anything), the **bundled fonts** (without them no
+  world-space text billboard — a name tag, an object's floating text —
+  lays out at all), the **media plugins** (`MediaEnginePlugin` with both
+  engines `enabled: false` plus `MediaPrimPlugin` — enough for the
+  `ObjectMedia` fetch, not for a surface's first paint, which needs a
+  Chromium process a test binary has no helper to start), and the **day
+  position**. That last one is pinned
+  because the sky follows a clock no test controls; it is pinned at
+  `0.5`, which on the synthesised preset cycle is midday (`0.0`
+  midnight, `0.25` sunrise, `0.75` sunset — it was `0.25` for a while,
+  and a scene lit at dawn is dim enough that a coloured avatar
+  classifies as no marker colour at all). Pinning **replaces** the
+  region's own day cycle, so a test whose subject is the environment
+  takes `HarnessOptions::following_the_region_environment()` instead.
+
+  **Any test that compares two captures should `hold_clock()` first** and
+  take its frames with `capture_after(seconds)`. Live, the gap between
+  two captures is however long a settle took — which for a two-second
+  looping animation can be the same pose twice — and the scene is never
+  still between them: the cloud layer drifts and the reflection probes
+  re-capture, which measured a tenth of a control patch changing on its
+  own. With the clock held, the only thing that moved is what the test
+  moved.

@@ -44,6 +44,18 @@ sessions. Everything asserting *grid semantics* rather than *wire shape*
 (group, estate, money, experience, display-names, offline-IM, marketplace,
 AIS3, and the 17 cases pinned to the OpenSim OAR fixture) stays live.
 
+Four **new** cases arrive with this one, handed over by
+[[viewer-fake-grid-render-catalogue]] (2026-09-03) because they have nowhere
+else to run: `region-crossing`, `neighbour-child-circuits`,
+`terrain-layerdata` and `avatar-appearance-npc`. Each asserts a *protocol*
+fact the viewer harness now asserts in pixels — the crossing hand-over, the
+neighbour's child circuit, the LAND patch set, an NPC's `AvatarAppearance` —
+against the same fixture catalogue, so the two tiers agree on what a region
+contains. They are not in the list below: nothing tests them on either live
+grid today, and `region-crossing` in particular needs two adjacent regions the
+avatar may walk between, which the fake grid has and neither live grid
+reliably offers.
+
 Offline behaviours the fake grid already serves that nothing tests today: a cap
 fetch with a `Range` header, `FakeGridBuilder::gates` (`runtime.rs:625`) and
 `AccountConfig::mfa` (`accounts.rs:22`) — the whole ToS / critical-message /

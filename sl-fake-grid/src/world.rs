@@ -352,6 +352,69 @@ pub fn region_wide_parcel(
     }
 }
 
+/// A **rectangular** parcel covering the region-local metre box
+/// `west..east` × `south..north`, otherwise exactly a [`region_wide_parcel`].
+///
+/// What a region split into parcels is made of, and the thing a region-wide
+/// parcel cannot express: an **interior** boundary. The viewer's property
+/// lines are drawn from the overlay's west/south edge bits, and a single
+/// region-wide parcel has none of those anywhere but the region rim — so a
+/// test that wants to see a parcel line appear (and, after a join, disappear)
+/// needs two of these.
+///
+/// The box is snapped outward to whole four-metre blocks, because the
+/// overlay and the membership bitmap are both one bit per 4 m block and a
+/// parcel edge that fell inside a block would be a boundary no viewer could
+/// draw.
+#[must_use]
+pub fn rect_parcel(
+    local_id: RegionLocalParcelId,
+    owner: OwnerKey,
+    name: &str,
+    west: f32,
+    south: f32,
+    east: f32,
+    north: f32,
+) -> ParcelInfo {
+    let mut parcel = region_wide_parcel(local_id, owner, name);
+    let block = |metres: f32| {
+        #[expect(
+            clippy::as_conversions,
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "a block index of a 64-block region, clamped to it"
+        )]
+        let index = (metres / CELL_METRES).floor().max(0.0) as usize;
+        index.min(CELLS_PER_EDGE)
+    };
+    let (west_block, south_block) = (block(west), block(south));
+    let (east_block, north_block) = (block(east), block(north));
+    parcel.bitmap = vec![0; CELLS_PER_EDGE.saturating_mul(CELLS_PER_EDGE) / 8];
+    let mut blocks = 0_u32;
+    for block_y in south_block..north_block {
+        for block_x in west_block..east_block {
+            let bit = block_y
+                .saturating_mul(CELLS_PER_EDGE)
+                .saturating_add(block_x);
+            if let Some(byte) = parcel.bitmap.get_mut(bit / 8) {
+                *byte |= 1_u8 << (bit % 8);
+                blocks = blocks.saturating_add(1);
+            }
+        }
+    }
+    parcel.aabb_min = RegionCoordinates::new(cell_edge(west_block), cell_edge(south_block), 0.0);
+    parcel.aabb_max = RegionCoordinates::new(cell_edge(east_block), cell_edge(north_block), 0.0);
+    // The claimed area is what a viewer's About Land reads, and OpenSim states
+    // it in square metres of the blocks the bitmap actually holds.
+    parcel.area = LandArea(blocks.saturating_mul(16));
+    parcel
+}
+
+/// The west or south edge of block index `block`, in region metres.
+fn cell_edge(block: usize) -> f32 {
+    f32::from(u16::try_from(block).unwrap_or(u16::MAX)) * CELL_METRES
+}
+
 /// An [`ObjectMotion`] at rest at `position`, unrotated.
 const fn resting_motion(position: Vector) -> ObjectMotion {
     ObjectMotion {
@@ -1002,6 +1065,75 @@ mod test {
                 .starts_with("FirstName STRING RW SV Test\n")
         );
         assert!(avatar.name_value.contains("LastName STRING RW SV User\n"));
+    }
+
+    /// Two rectangular parcels split the region down the middle, and the
+    /// overlay marks the **interior** boundary — the west-edge bit on the
+    /// eastern parcel's first column, which is the only thing a viewer's
+    /// property line at `x = 128` can be drawn from.
+    #[test]
+    fn two_rect_parcels_put_a_line_down_the_middle() {
+        let mut world = SceneFixtures::new();
+        world.parcels.push(rect_parcel(
+            RegionLocalParcelId(1),
+            OwnerKey::Agent(agent(7)),
+            "West",
+            0.0,
+            0.0,
+            128.0,
+            256.0,
+        ));
+        world.parcels.push(rect_parcel(
+            RegionLocalParcelId(2),
+            OwnerKey::Agent(agent(7)),
+            "East",
+            128.0,
+            0.0,
+            256.0,
+            256.0,
+        ));
+        assert_eq!(
+            world.parcel_at(64.0, 64.0).map(|found| found.local_id),
+            Some(RegionLocalParcelId(1))
+        );
+        assert_eq!(
+            world.parcel_at(192.0, 64.0).map(|found| found.local_id),
+            Some(RegionLocalParcelId(2))
+        );
+        // Half a region each, in square metres.
+        assert_eq!(
+            world.parcels.first().map(|parcel| parcel.area),
+            Some(LandArea(0x0000_8000))
+        );
+        let overlay = world.overlay_for(agent(7));
+        // The interior boundary: the first cell of the eastern parcel's west
+        // column (`x = 128` is block 32) carries the west-edge bit, and the
+        // cell west of it does not.
+        let cell = |x: usize, y: usize| {
+            overlay
+                .get(y.saturating_mul(CELLS_PER_EDGE).saturating_add(x))
+                .copied()
+        };
+        assert_eq!(
+            cell(32, 8),
+            Some(OVERLAY_OWNED_BY_REQUESTER | OVERLAY_WEST_LINE)
+        );
+        assert_eq!(cell(31, 8), Some(OVERLAY_OWNED_BY_REQUESTER));
+        // And a region-wide parcel has no such line, which is what makes the
+        // two states tell apart in a picture.
+        let mut whole = SceneFixtures::new();
+        whole.parcels.push(region_wide_parcel(
+            RegionLocalParcelId(1),
+            OwnerKey::Agent(agent(7)),
+            "All",
+        ));
+        let joined = whole.overlay_for(agent(7));
+        assert_eq!(
+            joined
+                .get(8_usize.saturating_mul(CELLS_PER_EDGE).saturating_add(32))
+                .copied(),
+            Some(OVERLAY_OWNED_BY_REQUESTER)
+        );
     }
 
     /// The stand animation the grid signals is the registry's `stand`, not a
