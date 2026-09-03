@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 59 |
 | in-progress | 18 |
 | bugs | 70 |
-| done | 961 |
+| done | 962 |
 | deferred | 24 |
 | wont-do | 14 |
-| **total** | **1555** |
+| **total** | **1556** |
 
 ## ideas (98)
 
@@ -1364,7 +1364,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (961)
+## done (962)
 
 ### protocol
 
@@ -2582,6 +2582,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   the @-command chat protocol
 - [`viewer-scene-dump`](done/viewer-scene-dump.md) — Emit the shared scene-dump
   JSON beside the frames
+- [`viewer-scene-dump-worn-placement`](done/viewer-scene-dump-worn-placement.md)
+  — A scene dump places an avatar and its attachments as the reference does
 - [`viewer-screenshot-fixed-resolution`](done/viewer-screenshot-fixed-resolution.md)
   — Pin the capture resolution, so two viewers can be compared at all
 - [`viewer-screenshot-wait-for-quiescence`](done/viewer-screenshot-wait-for-quiescence.md)

@@ -104,11 +104,16 @@ turned every object in the scene into a difference:
 What the pair still disagrees about, none of it schema noise, and all of it
 for somebody else to chase:
 
-- **The NPC's skull attachment** is at 27.06 m here and 26.20 m there, with
-  a rotation against an identity one. Ours is the posed skull joint; the
+- **The NPC's skull attachment** was at 27.06 m here and 26.20 m there, with
+  a rotation against an identity one. Ours was the posed skull joint; the
   reference's `getPositionRegion` on a child is its parent-relative
-  placement. Both may draw it in the same place — a dump-semantics
-  difference to settle before it is read as a placement bug.
+  placement. Settled in [[viewer-scene-dump-worn-placement]] (2026-09-03):
+  a dump-semantics difference, both viewers drawing it on the skull, and a
+  worn object is now composed here the way the reference composes one. That
+  chase turned up a second one this list had missed — every **avatar** was
+  reported at its drawn body root, a `root_drop` below the object position
+  the reference reports — which is a reminder that a difference big enough
+  to name can hide one beside it.
 - **`lod` differs on five objects**, which the dump explains itself: the
   two viewers' `mesh_lod_boost` is 1.0 against 2.0 and their draw distance
   512 m against 128 m. That is the document doing its job.

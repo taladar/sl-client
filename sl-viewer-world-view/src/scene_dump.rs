@@ -37,6 +37,40 @@
 //! The exception is **scale**, which no entity carries: an object's scale rides
 //! its geometry holder, so the wire value is reported as the object's size.
 //!
+//! # An avatar, and what it wears, is placed as the reference places it
+//!
+//! Two kinds of thing the reference's document does not report the drawn pose
+//! of, and both would otherwise read as a divergence on every avatar in every
+//! scene.
+//!
+//! **An avatar.** The wire position of one is the centre of its physics capsule,
+//! and both viewers lower the *skeleton* from there so the feet meet the ground
+//! (`body_root_transform`'s `root_drop` here, `LLVOAvatar::updateCharacter`'s
+//! `root_pos.z -= …` there). The reference's dump reports the **object's**
+//! position, undropped, so this one does too.
+//!
+//! **An attachment.** `LLViewerObject::getPositionRegion` composes a child
+//! against its parent **object** — for an attachment that is the avatar — while
+//! the thing is *drawn* parented to a skeleton joint
+//! (`LLViewerJointAttachment::setupDrawable`). So the reference reports the
+//! wearer's position plus the wire offset, and the drawn place is a joint's
+//! height further up. The first live pair caught exactly that on the fixture
+//! NPC's skull box: 27.06 m here against 26.20 m there, both viewers drawing it
+//! on the skull, the two numbers answering two different questions.
+//!
+//! A worn object is therefore composed here the way the reference composes one,
+//! onto its wearer's own reported position — including the reference's quirk
+//! that a *linked child* of an attachment is placed against its parent's
+//! **local** rotation, so the wearer's turn is applied once rather than twice —
+//! and a HUD attachment, drawn in screen space where a region position means
+//! nothing at all, comes out meaning what the reference means by it.
+//!
+//! Nothing is given up by that. What was drawn is reported beside it, as
+//! `drawn_position` / `drawn_rotation` — keys this viewer emits and the
+//! reference does not, like `day_position` — so an attachment on the wrong
+//! joint, or one never parented to the skeleton at all, is still a difference a
+//! reader can see, on the side of the pair that can see it.
+//!
 //! # Which ids two viewers can agree on
 //!
 //! A comparison keys objects by id, and **not every id in a scene is a grid
@@ -71,6 +105,7 @@
 //! moment it writes its status file, so the dump describes the scene the last
 //! frame was taken from.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use bevy::prelude::*;
@@ -80,13 +115,17 @@ use sl_client_bevy::{
     TextureFace, decode_texture_entry, pcode,
 };
 use sl_viewer_world_api::{
-    AvatarState, ObjectCategory, ObjectState, SceneObject, TrackedObject, ViewerCamera,
+    AvatarState, MAX_PARENT_WALK, ObjectCategory, ObjectState, SceneObject, TrackedObject,
+    ViewerCamera,
 };
 use sl_viewer_world_avatar::animesh::ControlAvatarState;
 use sl_viewer_world_avatar::avatars::AvatarBodyPart;
 use sl_viewer_world_scene::environment::EnvironmentState;
 
-use crate::coords::{bevy_to_sl_vec, metres_to_f32, region_offset_bevy, sl_to_bevy_rotation};
+use crate::coords::{
+    bevy_to_sl_vec, metres_to_f32, region_offset_bevy, sl_rotation_to_quat, sl_to_bevy_rotation,
+};
+use crate::objects::ObjectSlMotion;
 use crate::settings::ViewerSettings;
 
 /// The schema both viewers write. Bumped only when a field changes meaning; a
@@ -306,10 +345,25 @@ pub struct ObjectDump {
     pub local_id: u32,
     /// Its class, in the reference's spelling.
     pub pcode: String,
-    /// Where it is, in region metres — read back from what was drawn.
+    /// Where it is, in region metres — read back from what was drawn, except for
+    /// an object **worn on an avatar**, which is composed against its wearer the
+    /// way the reference composes one (see [the module docs](self)).
     pub position: Point,
-    /// How it is turned.
+    /// How it is turned, from the same source as [`position`](Self::position).
     pub rotation: Quaternion,
+    /// Where a **worn** object was actually drawn, in region metres.
+    ///
+    /// Present only for an attachment, whose [`position`](Self::position) is the
+    /// reference's composition rather than the drawn pose; for everything else
+    /// the two are the same number and this is absent. The reference emits no
+    /// such key, so it is expected to be absent on that side of a comparison
+    /// rather than different.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub drawn_position: Option<Point>,
+    /// How a worn object was actually drawn, beside
+    /// [`drawn_position`](Self::drawn_position).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub drawn_rotation: Option<Quaternion>,
     /// Its size in metres, as the simulator described it.
     pub scale: Point,
     /// How many faces this viewer **drew** — its tessellated prim faces or its
@@ -386,10 +440,25 @@ pub struct AvatarDump {
     pub id: String,
     /// Whether this is the logged-in agent.
     pub is_self: bool,
-    /// Where the avatar is, in region metres.
+    /// Where the avatar is, in region metres: the position the simulator sent
+    /// for its **object**, which is what the reference's document reports, and
+    /// not the drawn body root (see [the module docs](self)).
     pub position: Point,
-    /// How it is turned.
+    /// How it is turned, from the same source as [`position`](Self::position).
     pub rotation: Quaternion,
+    /// Where this viewer drew the avatar's body root — a `root_drop` below
+    /// [`position`](Self::position), because the wire position of an avatar is
+    /// the centre of its physics capsule and the skeleton hangs from its feet.
+    ///
+    /// Absent for a presence this viewer has only a position for (a coarse dot,
+    /// an animesh's control avatar), whose [`position`](Self::position) is the
+    /// drawn one. The reference emits no such key.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub drawn_position: Option<Point>,
+    /// How the drawn body root was turned, beside
+    /// [`drawn_position`](Self::drawn_position).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub drawn_rotation: Option<Quaternion>,
     /// Whether this is an animesh's control avatar rather than a resident.
     ///
     /// A control avatar has no grid identity, so [`id`](Self::id) here is the
@@ -423,6 +492,7 @@ fn build(
     settings: &ViewerSettings,
     region: Option<&SlRegionIdentity>,
     camera: Option<(&GlobalTransform, Option<&Projection>)>,
+    motions: &Query<'_, '_, &ObjectSlMotion>,
     transforms: &Query<'_, '_, &GlobalTransform>,
     bodies: &Query<'_, '_, &AvatarBodyPart>,
     scene_objects: &Query<'_, '_, &SceneObject>,
@@ -436,9 +506,17 @@ fn build(
         camera: build_camera(camera, offset, handle),
         environment: build_environment(environment),
         render: build_render(settings),
-        objects: build_objects(identity, objects, transforms, scene_objects, offset),
+        objects: build_objects(
+            identity,
+            objects,
+            avatars,
+            motions,
+            transforms,
+            scene_objects,
+            offset,
+        ),
         avatars: build_avatars(
-            identity, avatars, animesh, objects, transforms, bodies, offset,
+            identity, avatars, animesh, objects, motions, transforms, bodies, offset,
         ),
     }
 }
@@ -447,6 +525,11 @@ fn build(
 /// `arithmetic_side_effects` lint trips on (the idiom `crate::camera` uses).
 const fn vsub(a: Vec3, b: Vec3) -> Vec3 {
     Vec3::new(a.x - b.x, a.y - b.y, a.z - b.z)
+}
+
+/// Component-wise vector add, for the same reason as [`vsub`].
+const fn vadd(a: Vec3, b: Vec3) -> Vec3 {
+    Vec3::new(a.x + b.x, a.y + b.y, a.z + b.z)
 }
 
 /// A Bevy world position back in Second Life region metres.
@@ -463,7 +546,12 @@ fn region_point(world: Vec3, offset: Vec3) -> Point {
 /// routinely disagree about the sign — so without this every second object reads
 /// as a rotation difference in a comparison that is looking for exactly that.
 fn region_rotation(world: Quat) -> Quaternion {
-    let sl = sl_to_bevy_rotation().inverse().mul_quat(world);
+    canonical_rotation(sl_to_bevy_rotation().inverse().mul_quat(world))
+}
+
+/// A Second Life rotation as the dump emits one: `[x, y, z, w]`, with a
+/// non-negative real part. See [`region_rotation`] for why the sign is pinned.
+fn canonical_rotation(sl: Quat) -> Quaternion {
     if sl.w < 0.0 {
         [-sl.x, -sl.y, -sl.z, -sl.w]
     } else {
@@ -628,6 +716,8 @@ fn level(store: &sl_settings::SettingsStore, name: &str) -> Option<i32> {
 fn build_objects(
     identity: &SlIdentity,
     objects: &ObjectState,
+    avatars: &AvatarState,
+    motions: &Query<'_, '_, &ObjectSlMotion>,
     transforms: &Query<'_, '_, &GlobalTransform>,
     scene_objects: &Query<'_, '_, &SceneObject>,
     offset: Vec3,
@@ -642,7 +732,11 @@ fn build_objects(
                 .get(tracked.entity)
                 .is_ok_and(|object| object.category != ObjectCategory::Avatar)
         })
-        .map(|(scoped, tracked)| dump_object(scoped, tracked, transforms, offset))
+        .map(|(scoped, tracked)| {
+            dump_object(
+                scoped, tracked, objects, avatars, motions, transforms, offset,
+            )
+        })
         .collect();
     dumped.sort_by(|left, right| left.id.cmp(&right.id));
     dumped
@@ -652,6 +746,9 @@ fn build_objects(
 fn dump_object(
     scoped: &ScopedObjectId,
     tracked: &TrackedObject,
+    objects: &ObjectState,
+    avatars: &AvatarState,
+    motions: &Query<'_, '_, &ObjectSlMotion>,
     transforms: &Query<'_, '_, &GlobalTransform>,
     offset: Vec3,
 ) -> ObjectDump {
@@ -659,16 +756,26 @@ fn dump_object(
     let faces = dump_faces(&tracked.texture_entry, tracked.face_entities.len());
     let sculpt = tracked.extra.sculpt.as_ref();
     let is_mesh = sculpt.is_some_and(|sculpt| sculpt.texture.is_mesh());
+    // What was drawn, and — for a worn object, whose drawn pose the reference's
+    // document is not reporting — the reference's own composition beside it.
+    let drawn = transform.map(|transform| {
+        (
+            region_point(transform.translation(), offset),
+            region_rotation(transform.rotation()),
+        )
+    });
+    let worn = worn_placement(scoped, objects, avatars, motions, transforms, offset)
+        .map(ReferencePose::emitted);
+    let (position, rotation) = worn.or(drawn).unwrap_or(([0.0; 3], [0.0, 0.0, 0.0, 1.0]));
+    let drawn_pose = worn.and(drawn);
     ObjectDump {
         id: tracked.full_key.to_string(),
         local_id: scoped.id.get(),
         pcode: pcode::describe(tracked.shape.pcode()),
-        position: transform.map_or([0.0; 3], |transform| {
-            region_point(transform.translation(), offset)
-        }),
-        rotation: transform.map_or([0.0, 0.0, 0.0, 1.0], |transform| {
-            region_rotation(transform.rotation())
-        }),
+        position,
+        rotation,
+        drawn_position: drawn_pose.map(|(position, _rotation)| position),
+        drawn_rotation: drawn_pose.map(|(_position, rotation)| rotation),
         scale: [tracked.scale.x, tracked.scale.y, tracked.scale.z],
         num_faces: faces.len(),
         faces,
@@ -688,6 +795,173 @@ fn dump_object(
         is_flexible: tracked.extra.flexible.is_some(),
         is_light: tracked.extra.light.is_some(),
     }
+}
+
+/// The placement the reference's document reports for one object, and the
+/// rotation its children are composed against.
+#[derive(Debug, Clone, Copy)]
+struct ReferencePose {
+    /// Where the object is, in region metres (`getPositionRegion`).
+    position: Vec3,
+    /// How it is turned, in region coordinates (`getRotationRegion`) — what the
+    /// dump reports.
+    rotation: Quat,
+    /// The object's own **local** rotation (`getRotation`), which is what the
+    /// reference composes a child against and is *not* the region rotation for
+    /// anything below a root.
+    local_rotation: Quat,
+}
+
+impl ReferencePose {
+    /// The pose of a root object, whose local rotation is its region rotation.
+    const fn root(position: Vec3, rotation: Quat) -> Self {
+        Self {
+            position,
+            rotation,
+            local_rotation: rotation,
+        }
+    }
+
+    /// This pose as the dump emits one.
+    fn emitted(self) -> (Point, Quaternion) {
+        (
+            [self.position.x, self.position.y, self.position.z],
+            canonical_rotation(self.rotation),
+        )
+    }
+}
+
+/// One link of a parent chain: an object's wire-space pose relative to its
+/// parent, in Second Life coordinates — an attachment's offset from its
+/// attachment point, a seated avatar's offset from its seat, or a linked child's
+/// offset from its linkset root.
+#[derive(Debug, Clone, Copy)]
+struct LocalPose {
+    /// The parent-relative position, in metres.
+    position: Vec3,
+    /// The parent-relative rotation.
+    rotation: Quat,
+}
+
+impl LocalPose {
+    /// The wire pose an object last reported, as the object layer mirrors it
+    /// onto the entity.
+    fn of(motion: &ObjectSlMotion) -> Self {
+        Self {
+            position: Vec3::new(motion.position.x, motion.position.y, motion.position.z),
+            rotation: sl_rotation_to_quat(&motion.rotation),
+        }
+    }
+}
+
+/// One link of the reference's own composition:
+///
+/// ```text
+/// mPositionRegion = parent->getPositionRegion() + getPosition() * parent->getRotation()
+/// rotationRegion  = getRotation() * parent->getRotation()
+/// ```
+///
+/// Literal about it, quirk included: a link is composed against its parent's
+/// **local** rotation, so on a linked child of an attachment the wearer's turn is
+/// applied once rather than twice. Matching the reference is the point; a
+/// comparison that is right about a grandchild and disagrees with the document it
+/// is diffing has bought nothing.
+fn compose_link(parent: ReferencePose, link: LocalPose) -> ReferencePose {
+    ReferencePose {
+        position: vadd(
+            parent.position,
+            parent.local_rotation.mul_vec3(link.position),
+        ),
+        rotation: parent.local_rotation.mul_quat(link.rotation),
+        local_rotation: link.rotation,
+    }
+}
+
+/// A whole chain composed onto a base pose, outermost link first.
+fn compose_worn(base: ReferencePose, chain: &[LocalPose]) -> ReferencePose {
+    chain
+        .iter()
+        .fold(base, |parent, link| compose_link(parent, *link))
+}
+
+/// The reference's placement for an object **worn on an avatar**, or `None` when
+/// it is not worn — in which case what was drawn is what the dump reports.
+///
+/// Walks the parent chain up to the wearing avatar, collecting each link's wire
+/// pose, and composes them onto that avatar's own reference placement — the same
+/// number the `avatars` section reports, so the two sections agree with each
+/// other as well as with the reference. The walk is bounded exactly like the
+/// object layer's own ([`MAX_PARENT_WALK`]), against a malformed parent cycle.
+fn worn_placement(
+    scoped: &ScopedObjectId,
+    objects: &ObjectState,
+    avatars: &AvatarState,
+    motions: &Query<'_, '_, &ObjectSlMotion>,
+    transforms: &Query<'_, '_, &GlobalTransform>,
+    offset: Vec3,
+) -> Option<ReferencePose> {
+    let mut chain: Vec<LocalPose> = Vec::new();
+    let mut current = *scoped;
+    let mut wearer = None;
+    for _ in 0..MAX_PARENT_WALK {
+        let tracked = objects.objects.get(&current)?;
+        // A linkset root standing in the world is not worn by anybody, and is
+        // reported exactly as it was drawn.
+        if tracked.is_root {
+            return None;
+        }
+        chain.push(LocalPose::of(motions.get(tracked.entity).ok()?));
+        if avatars.agent_of(tracked.parent).is_some() {
+            wearer = avatar_placement(tracked.parent, objects, motions, transforms, offset);
+            break;
+        }
+        current = tracked.parent;
+    }
+    chain.reverse();
+    Some(compose_worn(wearer?, &chain))
+}
+
+/// The reference's placement for an **avatar object**: the position the
+/// simulator sent for it, or — when it is sitting — that offset composed onto its
+/// seat.
+///
+/// Not the drawn body root, which is a different quantity by design. The wire
+/// position of an avatar is the centre of its physics capsule, and both viewers
+/// lower the *skeleton* from there so the feet meet the ground
+/// (`body_root_transform`'s `root_drop` here, `LLVOAvatar::updateCharacter`'s
+/// `root_pos.z -= …` there). The reference's document reports the object's
+/// position, so a dump that reported the drawn root instead would differ from it
+/// by that drop on every avatar in the scene — and, through the wearer, on every
+/// attachment as well.
+fn avatar_placement(
+    scoped: ScopedObjectId,
+    objects: &ObjectState,
+    motions: &Query<'_, '_, &ObjectSlMotion>,
+    transforms: &Query<'_, '_, &GlobalTransform>,
+    offset: Vec3,
+) -> Option<ReferencePose> {
+    let tracked = objects.objects.get(&scoped)?;
+    let local = LocalPose::of(motions.get(tracked.entity).ok()?);
+    if tracked.is_root {
+        return Some(ReferencePose::root(local.position, local.rotation));
+    }
+    // Sitting: the wire pose is relative to the seat, which is an ordinary
+    // in-world object and is reported as it was drawn.
+    let seat = objects.objects.get(&tracked.parent)?;
+    let seat = drawn_pose(transforms.get(seat.entity).ok()?, offset);
+    Some(compose_link(seat, local))
+}
+
+/// What was drawn, as a [`ReferencePose`]: the entity's own global transform
+/// back in region coordinates. Its local rotation is its region rotation, which
+/// holds for the roots this is used on.
+fn drawn_pose(transform: &GlobalTransform, offset: Vec3) -> ReferencePose {
+    let position = region_point(transform.translation(), offset);
+    let rotation = region_rotation(transform.rotation());
+    ReferencePose::root(
+        Vec3::new(position[0], position[1], position[2]),
+        Quat::from_xyzw(rotation[0], rotation[1], rotation[2], rotation[3]),
+    )
 }
 
 /// The faces of a decoded texture entry, as many as the object actually has.
@@ -737,26 +1011,43 @@ fn dump_face(index: usize, face: &TextureFace) -> FaceDump {
 }
 
 /// The `avatars` section.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one avatar entry states its identity, its placement and its appearance state, and \
+              each of those is read from a different resource"
+)]
 fn build_avatars(
     identity: &SlIdentity,
     avatars: &AvatarState,
     animesh: &ControlAvatarState,
     objects: &ObjectState,
+    motions: &Query<'_, '_, &ObjectSlMotion>,
     transforms: &Query<'_, '_, &GlobalTransform>,
     bodies: &Query<'_, '_, &AvatarBodyPart>,
     offset: Vec3,
 ) -> Vec<AvatarDump> {
     let with_bodies: Vec<AgentKey> = bodies.iter().map(AvatarBodyPart::agent).collect();
+    // The avatar *object* behind each agent, which is what the reference reports
+    // a position for.
+    let objects_of: HashMap<AgentKey, ScopedObjectId> = avatars
+        .by_scoped
+        .iter()
+        .map(|(scoped, agent)| (*agent, *scoped))
+        .collect();
     let residents = avatars
         .objects
         .iter()
         .chain(avatars.coarse.iter())
         .map(|(agent, entities)| {
+            let placement = objects_of
+                .get(agent)
+                .and_then(|scoped| avatar_placement(*scoped, objects, motions, transforms, offset));
             dump_avatar(
                 agent.to_string(),
                 identity.agent_id == Some(*agent),
                 false,
                 with_bodies.contains(agent),
+                placement,
                 transforms.get(entities.anchor).ok(),
                 offset,
             )
@@ -769,7 +1060,7 @@ fn build_avatars(
         let anchor = objects
             .entity_of(object)
             .and_then(|entity| transforms.get(entity).ok());
-        dump_avatar(object.to_string(), false, true, true, anchor, offset)
+        dump_avatar(object.to_string(), false, true, true, None, anchor, offset)
     });
     let mut dumped: Vec<AvatarDump> = residents.chain(animated).collect();
     dumped.sort_by(|left, right| left.id.cmp(&right.id));
@@ -777,24 +1068,37 @@ fn build_avatars(
 }
 
 /// One avatar's entry.
+///
+/// `placement` is where the reference's document puts it — the avatar object's
+/// own position — and `transform` is the body root this viewer drew, which sits
+/// a `root_drop` lower (see [`avatar_placement`]). A resident has both; a coarse
+/// dot, or an animesh's control avatar, has only what was drawn.
 fn dump_avatar(
     id: String,
     is_self: bool,
     is_control_avatar: bool,
     has_body: bool,
+    placement: Option<ReferencePose>,
     transform: Option<&GlobalTransform>,
     offset: Vec3,
 ) -> AvatarDump {
+    let drawn = transform.map(|transform| {
+        (
+            region_point(transform.translation(), offset),
+            region_rotation(transform.rotation()),
+        )
+    });
+    let placed = placement.map(ReferencePose::emitted);
+    let (position, rotation) = placed.or(drawn).unwrap_or(([0.0; 3], [0.0, 0.0, 0.0, 1.0]));
+    let drawn_pose = placed.and(drawn);
     AvatarDump {
         id,
         is_self,
         is_control_avatar,
-        position: transform.map_or([0.0; 3], |transform| {
-            region_point(transform.translation(), offset)
-        }),
-        rotation: transform.map_or([0.0, 0.0, 0.0, 1.0], |transform| {
-            region_rotation(transform.rotation())
-        }),
+        position,
+        rotation,
+        drawn_position: drawn_pose.map(|(position, _rotation)| position),
+        drawn_rotation: drawn_pose.map(|(_position, rotation)| rotation),
         has_body,
     }
 }
@@ -825,6 +1129,7 @@ fn write_requested_scene_dump(
     settings: Res<ViewerSettings>,
     regions: Query<&SlRegionIdentity, With<sl_client_bevy::SlCurrentRegion>>,
     cameras: Query<(&GlobalTransform, Option<&Projection>), With<ViewerCamera>>,
+    motions: Query<&ObjectSlMotion>,
     transforms: Query<&GlobalTransform>,
     bodies: Query<&AvatarBodyPart>,
     scene_objects: Query<&SceneObject>,
@@ -844,6 +1149,7 @@ fn write_requested_scene_dump(
         &settings,
         regions.iter().next(),
         cameras.iter().next(),
+        &motions,
         &transforms,
         &bodies,
         &scene_objects,
@@ -864,8 +1170,8 @@ mod tests {
     use sl_client_bevy::{Rotation, TextureFace, TextureKey, Uuid, Vector};
 
     use super::{
-        FaceDump, ObjectDump, Point, dump_avatar, dump_face, dump_faces, region_direction,
-        region_point, region_rotation,
+        FaceDump, LocalPose, ObjectDump, Point, ReferencePose, compose_worn, dump_avatar,
+        dump_face, dump_faces, region_direction, region_point, region_rotation,
     };
     use crate::coords::{sl_to_bevy_object_rotation, sl_to_bevy_vec};
 
@@ -1036,23 +1342,23 @@ mod tests {
     #[test]
     fn a_control_avatar_is_reported_by_the_object_it_rides() {
         let object = "00000000-0000-0000-0000-00000ca71011";
-        let dumped = dump_avatar(object.to_owned(), false, true, true, None, Vec3::ZERO);
+        let dumped = dump_avatar(object.to_owned(), false, true, true, None, None, Vec3::ZERO);
         assert!(dumped.is_control_avatar);
         assert!(!dumped.is_self);
         assert_eq!(dumped.id, object);
     }
 
-    /// Every key the comparison matches on, spelled as `fstestscenedump.cpp`
-    /// spells it. A rename here is not a schema change but a silent divergence
-    /// in every object of every scene, which is why the list is written out.
-    #[test]
-    fn an_object_entry_carries_the_reference_key_set() -> Result<(), TestError> {
-        let object = ObjectDump {
+    /// A one-faced object entry, for the tests that ask what a serialised entry
+    /// looks like rather than what is in it.
+    fn an_object_entry() -> ObjectDump {
+        ObjectDump {
             id: "id".to_owned(),
             local_id: 1,
             pcode: "volume-0".to_owned(),
             position: [0.0; 3],
             rotation: [0.0, 0.0, 0.0, 1.0],
+            drawn_position: None,
+            drawn_rotation: None,
             scale: [1.0; 3],
             num_faces: 1,
             faces: vec![FaceDump {
@@ -1077,7 +1383,138 @@ mod tests {
             lod: 3,
             is_flexible: false,
             is_light: false,
+        }
+    }
+
+    /// The recorded divergence itself, in numbers: the cross-check's fixture NPC
+    /// stands at `z = 25.95` wearing a box a quarter metre above its skull point,
+    /// and the reference's document places that box at **26.20 m** — the wearer's
+    /// position plus the wire offset — while it is *drawn* on the skull joint,
+    /// 27.06 m up. Composing the reference's way is what makes the two documents
+    /// comparable at all.
+    #[test]
+    fn a_worn_object_is_placed_where_the_reference_places_it() {
+        let wearer = ReferencePose::root(Vec3::new(128.0, 136.0, 25.95), Quat::IDENTITY);
+        let box_on_the_skull = LocalPose {
+            position: Vec3::new(0.0, 0.0, 0.25),
+            rotation: Quat::IDENTITY,
         };
+        let placed = compose_worn(wearer, &[box_on_the_skull]);
+        assert!(near(placed.position.to_array(), [128.0, 136.0, 26.20]));
+        assert!(placed.rotation.abs_diff_eq(Quat::IDENTITY, 1e-5));
+    }
+
+    /// The wearer's own turn carries its attachment around with it: the offset is
+    /// rotated by the avatar's rotation, and the attachment's orientation is its
+    /// own rotation composed onto the avatar's.
+    #[test]
+    fn a_wearers_turn_carries_its_attachment_round() {
+        // A quarter turn left, which sends a half metre "forward" (+x) to +y.
+        let quarter = Quat::from_rotation_z(core::f32::consts::FRAC_PI_2);
+        let wearer = ReferencePose::root(Vec3::new(100.0, 100.0, 25.0), quarter);
+        let held = LocalPose {
+            position: Vec3::new(0.5, 0.0, 0.0),
+            rotation: Quat::IDENTITY,
+        };
+        let placed = compose_worn(wearer, &[held]);
+        assert!(near(placed.position.to_array(), [100.0, 100.5, 25.0]));
+        assert!(placed.rotation.abs_diff_eq(quarter, 1e-5));
+    }
+
+    /// A linked child of an attachment, composed the way
+    /// `LLViewerObject::getPositionRegion` composes one — **against its parent's
+    /// local rotation**, so the wearer's turn is applied once rather than twice.
+    ///
+    /// That is the reference's own arithmetic rather than the pose the child is
+    /// drawn at, and it is deliberate: this document exists to be diffed against
+    /// the reference's, and being right about a grandchild while disagreeing with
+    /// the document under comparison buys nothing. The drawn pose is reported
+    /// beside it instead.
+    #[test]
+    fn a_linked_child_of_an_attachment_follows_the_references_composition() {
+        let quarter = Quat::from_rotation_z(core::f32::consts::FRAC_PI_2);
+        let wearer = ReferencePose::root(Vec3::new(100.0, 100.0, 25.0), quarter);
+        let root = LocalPose {
+            position: Vec3::new(0.0, 0.0, 0.25),
+            rotation: quarter,
+        };
+        let child = LocalPose {
+            position: Vec3::new(1.0, 0.0, 0.0),
+            rotation: Quat::IDENTITY,
+        };
+        let placed = compose_worn(wearer, &[root, child]);
+        // The root lands a quarter metre above the wearer (its offset is along
+        // the shared z), and the child a metre along the *root's* own x — which
+        // the root's local quarter turn sends to +y — rather than along the
+        // twice-turned axis the child is drawn on.
+        assert!(near(placed.position.to_array(), [100.0, 101.0, 25.25]));
+        assert!(placed.rotation.abs_diff_eq(quarter, 1e-5));
+    }
+
+    /// An avatar is reported where the simulator put its **object**, with the
+    /// body root this viewer drew beside it.
+    ///
+    /// The two are a `root_drop` apart — the wire position is the centre of the
+    /// physics capsule and the skeleton hangs from the feet — so reporting the
+    /// drawn root made every avatar in the scene differ from the reference's
+    /// document by that drop, and every attachment with them.
+    #[test]
+    fn an_avatar_is_reported_at_its_object_position() -> Result<(), TestError> {
+        let placement = ReferencePose::root(Vec3::new(104.0, 136.0, 25.95), Quat::IDENTITY);
+        let drawn = GlobalTransform::from(Transform::from_translation(sl_to_bevy_vec(&Vector {
+            x: 104.0,
+            y: 136.0,
+            z: 25.009,
+        })));
+        let dumped = dump_avatar(
+            "id".to_owned(),
+            false,
+            false,
+            true,
+            Some(placement),
+            Some(&drawn),
+            Vec3::ZERO,
+        );
+        assert!(near(dumped.position, [104.0, 136.0, 25.95]));
+        assert!(near(
+            dumped
+                .drawn_position
+                .ok_or("an avatar with a body reports what was drawn")?,
+            [104.0, 136.0, 25.009]
+        ));
+        Ok(())
+    }
+
+    /// A worn object's entry carries the drawn pose beside the composed one, and
+    /// an unworn object's does not — the reference emits neither key, so their
+    /// presence must be exactly the case where the two poses answer different
+    /// questions.
+    #[test]
+    fn only_a_worn_entry_carries_the_drawn_pose() -> Result<(), TestError> {
+        let keys = |object: &ObjectDump| -> Result<Vec<String>, TestError> {
+            let value: serde_json::Value = serde_json::from_str(&serde_json::to_string(object)?)?;
+            let map = value
+                .as_object()
+                .ok_or("an object entry is a JSON object")?
+                .clone();
+            Ok(map.keys().cloned().collect())
+        };
+        let mut object = an_object_entry();
+        assert!(!keys(&object)?.contains(&"drawn_position".to_owned()));
+        object.drawn_position = Some([1.0, 2.0, 3.0]);
+        object.drawn_rotation = Some([0.0, 0.0, 0.0, 1.0]);
+        let worn = keys(&object)?;
+        assert!(worn.contains(&"drawn_position".to_owned()));
+        assert!(worn.contains(&"drawn_rotation".to_owned()));
+        Ok(())
+    }
+
+    /// Every key the comparison matches on, spelled as `fstestscenedump.cpp`
+    /// spells it. A rename here is not a schema change but a silent divergence
+    /// in every object of every scene, which is why the list is written out.
+    #[test]
+    fn an_object_entry_carries_the_reference_key_set() -> Result<(), TestError> {
+        let object = an_object_entry();
         let value: serde_json::Value = serde_json::from_str(&serde_json::to_string(&object)?)?;
         let map = value
             .as_object()

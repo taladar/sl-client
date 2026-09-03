@@ -111,6 +111,20 @@ Match on grid ids only: object keys, mesh and sculpt assets, and ordinary
 (non-baked) face textures. Everything else is compared by rule, or not at
 all.
 
+One difference the first pair reported has since been settled rather than
+ranked, and it hid a second: the NPC's skull attachment stood 0.86 m apart
+in the two dumps because the reference's document composes a worn object
+against its **wearer** while it is drawn on a skeleton joint, and every
+avatar stood a further 0.94 m apart because ours reported the drawn body
+root where the reference reports the object position
+([[viewer-scene-dump-worn-placement]], 2026-09-03). Both are now placed
+here the reference's way, so the two agree; what was drawn is
+reported beside it as `drawn_position` / `drawn_rotation`, which — like
+`day_position` — this viewer emits and the reference does not. Expect them
+absent on that side rather than different, and read a gap between the two
+*within our own dump* as what it is: an attachment drawn somewhere its
+wearer did not put it.
+
 Two fields carry a **known semantic difference** rather than a divergence,
 and the report should say so rather than rank them: `num_faces` is the
 count this viewer drew and the count the reference declares, and
