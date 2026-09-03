@@ -2,7 +2,7 @@
 id: test-firestorm-crosscheck-report
 title: Report the divergences — contact sheet, image diff, scene-dump diff
 topic: test
-status: ready
+status: done
 origin: Firestorm cross-check harness plan (2026-09-01)
 points: 5
 refs: [test-firestorm-fake-grid-crosscheck]
@@ -153,3 +153,79 @@ positions. One artefact of it survives in the dumps and must not be ranked
 as a divergence — `camera.aspect` reads 1.778 here against 1.388 there,
 because Firestorm's snapshot renders at the capture's aspect while its
 `LLViewerCamera` reports the window's by the time the dump is written.
+
+Done (2026-09-03): the `sl-crosscheck-report` binary and five modules
+beside the runner — `dump` (reading a `scene.json`), `scene_diff`,
+`frames`, `sheet` + `font`, and `report`, which writes `<run>/report`
+holding `contact-sheet.png`, `diff_NNN.png`, `report.txt` and
+`report.json`. Several run directories at once are ranked against each
+other by median frame difference.
+
+Four decisions the plan did not settle.
+
+**The reader is in this crate, not beside either writer.** The schema has
+two writers and only one of them is Rust, so no shared struct could cover
+both, and the reference's dialect is not ours: `(S32)` casts where we
+write JSON booleans, keys emitted only for an `LLVOVolume`, and seven keys
+(`visual_complexity`, `camera_mode`, `region_width`, `gltf_material`,
+`selected`, `visible_drawables`, `reflection_probes`) this viewer has no
+counterpart for. The reader is therefore deliberately lenient: a missing
+key is `None` and never an error, a boolean may arrive as a number, an
+unknown key is ignored. A field only one side writes is **absent, not
+different** — otherwise `day_position` and `drawn_position` would each be
+a finding on every object of every run.
+
+**Three numbers per frame, not one.** A mean absolute difference is
+dominated by the global tone difference and cannot tell an exposure shift
+from a wrong object; windowed SSIM on luma is blind to a uniform
+brightness shift and moves on structure; the differing-pixel fraction
+separates "everything is slightly darker" from "one object is wrong". And
+the localisation matters more than any of them: the worst 32-pixel tiles
+are what point at the object, and in the first synthetic pair they named
+the prim one side had not drawn before the scene diff was read at all.
+
+**Nothing is diffed against a half that did not happen — including its
+scene dump.** The frames rule was in the plan; the dump was not, and it is
+the same mistake: a viewer that never got in world writes a full set of
+black frames *and* a dump of an empty world, and diffing that reports
+every object in the scene as missing. The report says which output it
+withheld and why.
+
+**Findings are ranked, and the known semantic differences are not ranked
+at all.** The order is absent → a differing asset id → a number, by
+magnitude → a flag; annotations sort last always, whatever their
+magnitude, because a reader who finds the top of the list occupied by
+`num_faces` on every object learns to skip the list. Everything this task
+listed as a known difference is implemented that way: `num_faces`,
+`is_flexible`, `camera.aspect`, `has_body` against `is_fully_loaded`, an
+animation's `loop_time`, and the reference's eleven default motions (the
+`ANIM_AGENT_*` ids baked from `llvoavatar.cpp`), which are named as pose
+adjusters this viewer implements differently rather than as animations it
+failed to play. The settings — render, camera fov, clips, sky and water —
+are printed **above** the findings whether or not they differ.
+
+Smaller things worth knowing:
+
+- The contact sheet's labels are drawn in a **built-in 5×7 bitmap font**
+  (`src/font.rs`). A sheet must render identically on a machine with no
+  fonts installed and no asset tree beside the binary, and a label that
+  silently vanished because a font was not found would be worse than none:
+  a reader would not know it was missing. It folds this crate's own
+  typography — em dashes, `×`, curly quotes — to the ASCII it stands for,
+  because the sheet's title is built out of that prose.
+- Frames of **different sizes are not compared and never resampled**: a
+  resample would make every number downstream a measurement of the
+  resampler. Both viewers are told one capture size, so a mismatch is
+  reported as a run that did not do as it was told.
+- The sheet spreads its rows across the whole run rather than taking them
+  from the front — the start of a capture is a scene still rezzing — and
+  says how many frames it left out.
+- Verified end to end against a synthetic run pair carrying every case
+  this task names: an object only one side drew, one face's texture id,
+  a `lod` difference explained by the `mesh_lod_boost` above it, 258
+  viewer-side scene objects, a control-avatar-free avatar with three
+  reference default motions, and a `loop_time` two phases apart. The
+  ranking, the heatmap and the sheet were read back and are legible.
+  What has **not** happened yet is a report over a real pair of runs;
+  that wants a machine with the Firestorm build and is the next thing to
+  do with this tool.

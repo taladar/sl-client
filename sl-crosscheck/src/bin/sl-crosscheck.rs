@@ -478,8 +478,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     runtime.shutdown_timeout(core::time::Duration::from_secs(5));
 
     report(&format!(
-        "\n{}\n\ncollected in {}",
+        "\n{}\n\ncollected in {}\ncompare them with: sl-crosscheck-report {}",
         summary.render(),
+        dirs.root.display(),
         dirs.root.display()
     ));
     // The exit status is about the *run* — did every viewer that was asked to

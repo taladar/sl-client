@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 311 |
+| ready | 310 |
 | blocked | 59 |
 | in-progress | 18 |
 | bugs | 70 |
-| done | 963 |
+| done | 964 |
 | deferred | 24 |
 | wont-do | 14 |
 | **total** | **1557** |
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (311)
+## ready (310)
 
 ### protocol
 
@@ -961,9 +961,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   The built-in UI sounds the viewer plays on arrival 404
 - [`test-fake-grid-object-sounds`](ready/test-fake-grid-object-sounds.md) — The
   fake grid can serve a sound but cannot play one
-- [`test-firestorm-crosscheck-report`](ready/test-firestorm-crosscheck-report.md)
-  — Report the divergences — contact sheet, image diff, scene-dump diff (blocked
-  by `test-firestorm-crosscheck-runner` (done), `viewer-scene-dump` (done))
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
@@ -1364,7 +1361,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (963)
+## done (964)
 
 ### protocol
 
@@ -3193,6 +3190,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-terrain-layerdata`](done/test-fake-grid-terrain-layerdata.md)
   — The fake grid sends terrain — LayerData patches, wind, clouds (blocked by
   `test-fake-grid-determinism` (done))
+- [`test-firestorm-crosscheck-report`](done/test-firestorm-crosscheck-report.md)
+  — Report the divergences — contact sheet, image diff, scene-dump diff (blocked
+  by `test-firestorm-crosscheck-runner` (done), `viewer-scene-dump` (done))
 - [`test-firestorm-crosscheck-runner`](done/test-firestorm-crosscheck-runner.md)
   — Run both viewers against one fake grid and collect their artifacts (blocked
   by `viewer-screenshot-fixed-resolution` (done),

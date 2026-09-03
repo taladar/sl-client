@@ -254,6 +254,81 @@ Each viewer is confined to the run directory:
 viewer. Not only the cache — this viewer rewrites its settings on the way
 out, so a run would otherwise edit yours.
 
+### Reading a run: the report
+
+`sl-crosscheck-report` is the other half. It reads a collected run and
+writes `<run>/report`: a **contact sheet**, a **difference image** per
+frame, and `report.txt` / `report.json`.
+
+```sh
+cargo run --release -p sl-crosscheck --bin sl-crosscheck-report -- \
+  crosscheck-runs/catalogue
+```
+
+Three outputs, in increasing order of how often they identify the bug:
+
+- the **contact sheet** — both viewers' frames tiled, one row per capture
+  index and one column per viewer, each cell naming its viewer and frame
+  and the sheet naming the scene and camera. Frames are spread across the
+  whole run rather than taken from its start (a scene is still rezzing at
+  the start), and it says how many it left out.
+- the **image diff** — per pair, the mean absolute channel difference,
+  the fraction of pixels differing by more than 8/255, windowed SSIM on
+  luma, and the worst 32-pixel tiles. Three numbers because no one of
+  them is enough: a uniform exposure difference moves the mean and leaves
+  SSIM alone, and the tiles are what separate "everything is slightly
+  darker" from "one object is wrong".
+- the **scene-dump diff** — the field-by-field comparison of the two
+  `scene.json` documents, and the output that names a cause: a texture id
+  that differs, a level of detail that differs, an object one viewer
+  never built.
+
+Expect a **large baseline difference** and read it as one: the two
+viewers do not share a renderer, so tone mapping, exposure, shadow
+filtering and anti-aliasing differ everywhere at once. The signal is a
+change in the difference between runs, or a difference localised to one
+tile. Nothing here fails a build or enters `cargo nextest`, for the same
+reason this workspace has no golden images.
+
+Three things the scene diff will not do, each because doing them
+manufactures findings:
+
+- **It matches on grid ids only.** The reference models its terrain
+  patches, sky, water and clouds as objects with `local_id` 0 and an
+  `app-…` class — 275 of its 296 objects in the catalogue scene — which
+  this viewer does not model as objects at all; they are counted as
+  scenery, not reported as missing. Control avatars have no grid
+  identity, so they are paired by position rather than by id.
+- **It annotates the known semantic differences instead of ranking
+  them.** `num_faces` is what this viewer drew against what the reference
+  declares; `is_flexible` is "declares itself flexible" here against "is
+  being drawn flexible" there; `camera.aspect` is an artefact of how the
+  reference takes its snapshot; an animation's `loop_time` is where each
+  viewer's clock had reached, so two frames of one loop are two phases,
+  not two viewers disagreeing. The default motions the reference starts
+  on every avatar — head rotation, eye, body noise, breathing, physics,
+  hand pose, pelvis fix — are named as adjusters this viewer implements
+  differently, not as animations it failed to play.
+- **It prints the render, camera and environment settings above the
+  findings.** The first thing the first live pair of dumps found was not
+  in the images at all: `mesh_lod_boost` 1.0 against 2.0 and a draw
+  distance of 512 m against 128 m, which *explain* the `lod` differences
+  below them.
+
+A half whose `harness-status.json` is missing is a run that did not
+happen, and **nothing is diffed against it** — neither its frames, which
+are black and on schedule, nor its scene dump, which describes an empty
+world. Point the tool at several run directories to rank the scenes
+against each other by median frame difference.
+
+And "the reference viewer is right" is a prior, not evidence. One
+difference here looked exactly like a bug of ours and was upstream Linden
+code: Firestorm drew every avatar with no right hand, because
+`avatarSkinV.glsl` reads one past the end of its matrix palette for
+`mWristRight` and `NaN * 0` is `NaN` ([secondlife/viewer#6240]).
+
+[secondlife/viewer#6240]: https://github.com/secondlife/viewer/issues/6240
+
 ## The non-CAPS HTTP surfaces
 
 Besides login and CAPS, a real login host answers three more things a

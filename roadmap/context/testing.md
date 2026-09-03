@@ -62,7 +62,10 @@ multi-region offsets, in-flight asset leaks, NPC appearance delivery.
   grid on a fixed port with a named scenario, both viewers run against it
   in turn with the same capture size, layers, camera and day position, and
   a run directory of frames, scene dumps, `harness-status.json` and
-  `run.json`. It collects; it never compares. Both viewers write
+  `run.json`. The runner collects and never looks at a pixel; the
+  comparison is its own binary, `sl-crosscheck-report <run>`, which writes
+  a contact sheet, a difference image per frame and a scene-dump diff into
+  `<run>/report`. It is developer-facing and never a gate. Both viewers write
   `harness-status.json` before logging out (ours is
   `sl-viewer-world-view/src/harness_status.rs`), because a viewer that
   never got in world still writes a full set of black frames on schedule —

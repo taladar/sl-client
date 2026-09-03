@@ -17,12 +17,19 @@ publish = { workspace = true }
 name = "sl-crosscheck"
 path = "src/bin/sl-crosscheck.rs"
 
+[[bin]]
+name = "sl-crosscheck-report"
+path = "src/bin/sl-crosscheck-report.rs"
+
 [dependencies]
 clap = { workspace = true, features = ["cargo", "derive", "env"] }
 # A local `.env` so a machine's Firestorm build path is configured once and
 # never typed (or committed) again.
 dotenvy = "0.15.7"
 fs-err = { workspace = true }
+# The contact sheet and the image diff. PNG only: both viewers write PNG frames,
+# and a decoder for a format neither of them emits is a dependency for nothing.
+image = { version = "0.25.10", default-features = false, features = ["png"] }
 # `kill` with a signal of our choosing: `Child::kill` is SIGKILL only, and a
 # viewer killed outright never sends its LogoutRequest.
 nix = { version = "0.31.3", features = ["signal"] }

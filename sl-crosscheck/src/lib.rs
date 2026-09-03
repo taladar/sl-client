@@ -22,10 +22,12 @@
 //!     …the same three
 //! ```
 //!
-//! Comparing those artefacts is deliberately *not* here: turning a collected run
-//! into a contact sheet, an image diff and a scene-dump diff is a separate step
-//! with a separate audience, and keeping the collection honest is easier when it
-//! has no opinion about what the frames should look like.
+//! Comparing those artefacts is a separate step with a separate audience, and
+//! keeping the collection honest is easier when it has no opinion about what the
+//! frames should look like — so the runner ([`crate::process`], [`summary`]) has
+//! never looked at a pixel, and the comparison ([`report`], [`frames`],
+//! [`scene_diff`], [`sheet`]) is reached through its own binary,
+//! `sl-crosscheck-report <run>`.
 //!
 //! # The three things that decide whether a run is usable
 //!
@@ -63,10 +65,24 @@
 //! - [`process`] — spawning one viewer and getting it to stop.
 //! - [`status`] — reading back `harness-status.json` and the artefacts beside it.
 //! - [`summary`] — `run.json` and the printed report.
+//!
+//! And the comparison, which reads a collected run and never runs a viewer:
+//!
+//! - [`dump`] — reading a `scene.json`, in either viewer's dialect.
+//! - [`scene_diff`] — the structured comparison, which is what names a cause.
+//! - [`frames`] — the image diff: a number, not a verdict.
+//! - [`sheet`] and [`font`] — the contact sheet, and the labels on it.
+//! - [`report`] — the three of them, written into `<run>/report`.
 
+pub mod dump;
 pub mod files;
+pub mod font;
+pub mod frames;
 pub mod launch;
 pub mod plan;
 pub mod process;
+pub mod report;
+pub mod scene_diff;
+pub mod sheet;
 pub mod status;
 pub mod summary;
