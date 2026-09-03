@@ -2,7 +2,7 @@
 id: test-fake-grid-teleport-shapes
 title: The teleport matrix — same region, neighbour, distant, and each one failing
 topic: test
-status: ready
+status: done
 origin: review of test-fake-grid-neighbours-crossing (2026-09-03)
 points: 5
 refs: [viewer-fake-grid-teleport, test-fake-grid-neighbours-crossing, protocol-teleport-timeout-strands-child-circuits]
@@ -70,3 +70,63 @@ client's arrival, whichever reads more honestly.
 injected clock (`FakeGridBuilder::clock` + a paused tokio timer, as
 `tests/clock.rs` does) or a shorter budget made configurable — do not make
 the suite wait out the real one.
+
+## Done (2026-09-03)
+
+Five tests in the tokio tier, and two grid changes they needed.
+
+`FakeGridBuilder::handover_timeout` overrides both arrival budgets
+(`TELEPORT_ARRIVAL_TIMEOUT`, `CROSSING_ARRIVAL_TIMEOUT`). The failure
+cases use 250 ms. It changes only how long the grid is *willing* to wait,
+never what it does when the wait ends — the injected clock was the other
+option, but pausing tokio's timer under a real client on real sockets
+means auto-advance can fire the budget in the middle of a UDP round trip.
+
+`FakeGrid::sessions_in(region)` lists the live sessions in a region, root
+and child alike. Every claim in this task is about *how many sessions
+exist where*, which is invisible from the client side; without it the
+tests would have been inferring structure from event traffic.
+
+- `a_teleport_to_a_neighbour_reuses_its_child_session` — the untested
+  shape. The `TeleportNotice`'s `to_seq` is the seq the *announcement*
+  opened, one session in the destination afterwards rather than two, and
+  the arrival where the request asked rather than where the child was
+  built.
+- `a_local_teleport_opens_no_second_session` — the cell with nothing to
+  hand over.
+- `a_teleport_that_never_arrives_abandons_a_fresh_destination` and
+  `…_leaves_a_neighbour_child_alone` — the same failure two destination
+  shapes apart, with opposite cleanups.
+- `a_teleport_retires_the_children_of_the_region_left_behind`.
+
+### A bug the matrix found
+
+**A teleport never retired the children of the region it left.** A
+crossing has always called `retire_distant_children`; a teleport retired
+only the source, so an agent hopping across the grid left one open circuit
+per region it had ever bordered, each still streaming to a client now
+nowhere near it. `teleport_session` now retires them too, keeping the
+destination's own neighbours — which its arrival announces.
+
+### On provoking a timeout
+
+The client is stopped (`run.abort()`) so its movement can never complete;
+that is the one way to hold a handover open deterministically. It means
+these tests assert the **grid-side** cleanup and not the `timeout_tport`
+key reaching the client, because a stopped client cannot report what it
+was told. That the failure-reporting path works end to end is
+`teleport_to_unknown_region_is_refused`'s claim (`invalid_tport` observed
+at a live client), and it is the same `report_failure`.
+
+A live client that cannot arrive is not expressible here: on loopback it
+arrives in under a millisecond, so any budget short enough to beat it is
+short enough to race the announcement that precedes it.
+
+### Verified by mutation
+
+Each shape-dependent claim was checked by breaking the behaviour and
+confirming the test fails — a green test against correct code proves
+little. Forcing a fresh destination fails the reuse test; removing the
+retirement fails the retirement test; abandoning a borrowed neighbour on
+timeout fails the leave-it-alone test. In each case only the matching
+tests failed.

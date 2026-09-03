@@ -33,9 +33,23 @@ mod test {
     async fn connect_to(
         regions: Vec<RegionConfig>,
     ) -> Result<(FakeGrid, Client, FakeAgent), TestError> {
+        connect_configured(regions, None).await
+    }
+
+    /// [`connect_to`], optionally shortening how long the grid waits for a
+    /// client to complete its movement into a handover destination — what a
+    /// test of the **failure** path needs, since the real budget is tens of
+    /// seconds.
+    async fn connect_configured(
+        regions: Vec<RegionConfig>,
+        handover_timeout: Option<Duration>,
+    ) -> Result<(FakeGrid, Client, FakeAgent), TestError> {
         let mut builder = FakeGridBuilder::new()
             .account(AccountConfig::new("Test", "User", "password"))
             .event_queue_hold(Duration::from_secs(2));
+        if let Some(timeout) = handover_timeout {
+            builder = builder.handover_timeout(timeout);
+        }
         for region in regions {
             builder = builder.region(region);
         }
@@ -187,7 +201,16 @@ mod test {
 
     /// [`start`] against a grid serving `regions`.
     async fn start_in(regions: Vec<RegionConfig>) -> Result<Running, TestError> {
-        let (grid, client, agent) = connect_to(regions).await?;
+        start_configured(regions, None).await
+    }
+
+    /// [`start_in`] with the handover arrival budget of
+    /// [`connect_configured`].
+    async fn start_configured(
+        regions: Vec<RegionConfig>,
+        handover_timeout: Option<Duration>,
+    ) -> Result<Running, TestError> {
+        let (grid, client, agent) = connect_configured(regions, handover_timeout).await?;
         let circuit = client.root_circuit_id().ok_or("no root circuit")?;
         let (event_tx, event_rx) = mpsc::channel::<Event>(256);
         let (command_tx, command_rx) = mpsc::channel::<Command>(8);
@@ -1040,6 +1063,18 @@ mod test {
         }
     }
 
+    /// A second bordering region, named apart from [`adjacent_east_region`] so
+    /// a grid can serve a neighbour *and* a distant region at once — the
+    /// builder refuses two regions with the same name.
+    fn next_door_region() -> RegionConfig {
+        RegionConfig {
+            name: "Fake Region Next Door".to_owned(),
+            grid_x: RegionConfig::default().grid_x,
+            grid_y: RegionConfig::default().grid_y.saturating_add(1),
+            ..RegionConfig::default()
+        }
+    }
+
     /// **A neighbour is announced on arrival and streams its own scene.**
     ///
     /// The reason a region across a border is already drawn before you walk
@@ -1289,6 +1324,311 @@ mod test {
         assert!(
             alone._grid.neighbours_of("Fake Region").is_empty(),
             "a region that announces no neighbours has none to cross into"
+        );
+        Ok(())
+    }
+
+    /// How long the failure tests let the grid wait for an arrival that is
+    /// never coming.
+    ///
+    /// Long enough that it is a *timeout* and not a race with the announcement
+    /// that precedes it, short enough that four tests of the failure half cost
+    /// less than a second between them. `TELEPORT_ARRIVAL_TIMEOUT` is thirty
+    /// seconds, which is right for a viewer on a bad link and wrong for a
+    /// suite.
+    const SHORT_HANDOVER: Duration = Duration::from_millis(250);
+
+    /// **A teleport into a region the agent already borders reuses its child
+    /// circuit.**
+    ///
+    /// The third shape of a teleport destination, and the one with no test of
+    /// its own: not the same region (answered in place) and not a stranger
+    /// (opened on the spot), but a neighbour the client is *already* holding a
+    /// circuit to. Opening a second session there would hand the client two
+    /// simulators for one region handle and stream the destination's scene
+    /// twice.
+    #[tokio::test]
+    async fn a_teleport_to_a_neighbour_reuses_its_child_session() -> Result<(), TestError> {
+        let mut running = start_in(vec![RegionConfig::default(), adjacent_east_region()]).await?;
+        let east = running
+            ._grid
+            .region_handle("Fake Region East")
+            .ok_or("no east region")?;
+        let mut teleports = running._grid.teleports();
+        running
+            .wait_until("the east region's child circuit", |event| match event {
+                Event::GenericMessage(generic) => {
+                    sl_fake_grid::neighbour_marker_region(generic).as_deref()
+                        == Some("Fake Region East")
+                }
+                _ => false,
+            })
+            .await?;
+
+        // The session the *announcement* opened, before any teleport.
+        let announced = running._grid.sessions_in("Fake Region East").await;
+        assert_eq!(announced.len(), 1, "the neighbour was announced once");
+        let announced_seq = announced.first().ok_or("no child")?.session_seq().await;
+
+        let landing = RegionCoordinates::new(70.0, 200.0, 26.0);
+        running
+            .commands
+            .send(Command::Teleport {
+                region_handle: east,
+                position: landing,
+                look_at: Vector {
+                    x: 0.0,
+                    y: 1.0,
+                    z: 0.0,
+                },
+            })
+            .await?;
+        running
+            .wait_until("the arrival in the east region", |event| {
+                matches!(event, Event::RegionChanged { region_handle, .. } if *region_handle == east)
+            })
+            .await?;
+
+        let notice = tokio::time::timeout(WAIT, teleports.recv()).await??;
+        assert_eq!(
+            notice.to_seq, announced_seq,
+            "the teleport landed in the session the neighbour announcement opened, not a new one"
+        );
+        let after = running._grid.sessions_in("Fake Region East").await;
+        assert_eq!(
+            after.len(),
+            1,
+            "one session in the destination region, not two"
+        );
+        let destination = after.first().ok_or("no destination session")?;
+        assert!(destination.with_sim(|sim| sim.is_root_agent()).await);
+        assert_eq!(
+            destination
+                .with_sim(|sim| sim.arrival_position().position)
+                .await,
+            landing,
+            "the arrival is where the request asked, not where the child was built"
+        );
+        Ok(())
+    }
+
+    /// A same-region request opens no second session at all — the shape of the
+    /// matrix that has nothing to hand over, and so nothing to time out.
+    #[tokio::test]
+    async fn a_local_teleport_opens_no_second_session() -> Result<(), TestError> {
+        let mut running = start().await?;
+        let handle = running
+            ._grid
+            .region_handle("Fake Region")
+            .ok_or("no region")?;
+        running
+            .commands
+            .send(Command::Teleport {
+                region_handle: handle,
+                position: RegionCoordinates::new(10.0, 20.0, 30.0),
+                look_at: Vector {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            })
+            .await?;
+        running
+            .wait_until("the local teleport", |event| {
+                matches!(event, Event::TeleportLocal { .. })
+            })
+            .await?;
+        assert_eq!(
+            running._grid.sessions_in("Fake Region").await.len(),
+            1,
+            "a local hop stays in the session it started in"
+        );
+        Ok(())
+    }
+
+    /// **A teleport the client never completes takes its own destination back
+    /// down.**
+    ///
+    /// The failure half of the distant shape. The client is stopped so its
+    /// movement can never complete, which is the one way to hold a handover
+    /// open deterministically; what is asserted is the grid-side cleanup, since
+    /// a stopped client cannot report what it was told. That the refusal
+    /// *reaches* a live client is
+    /// [`teleport_to_unknown_region_is_refused`]'s claim.
+    #[tokio::test]
+    async fn a_teleport_that_never_arrives_abandons_a_fresh_destination() -> Result<(), TestError> {
+        let running = start_configured(
+            vec![RegionConfig::default(), east_region()],
+            Some(SHORT_HANDOVER),
+        )
+        .await?;
+        assert!(
+            running
+                ._grid
+                .sessions_in("Fake Region East")
+                .await
+                .is_empty(),
+            "ten regions east is no neighbour, so nothing is open there yet"
+        );
+
+        // Stop the client: from here nothing can answer the destination.
+        running.run.abort();
+        let error = running
+            ._grid
+            .teleport_agent(
+                &running.agent,
+                "Fake Region East",
+                RegionCoordinates::new(64.0, 32.0, 25.0),
+                Vector {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            )
+            .await
+            .err()
+            .ok_or("a teleport nobody completes cannot succeed")?;
+        assert!(matches!(error, sl_fake_grid::Error::TeleportTimedOut));
+        assert!(
+            running
+                ._grid
+                .sessions_in("Fake Region East")
+                .await
+                .is_empty(),
+            "the session this teleport opened is abandoned with it"
+        );
+        assert!(
+            !running.agent.is_closed() && running.agent.with_sim(|sim| sim.is_root_agent()).await,
+            "the agent stays the root agent of the region it never left"
+        );
+        Ok(())
+    }
+
+    /// **A failed teleport leaves a *neighbour's* circuit alone.**
+    ///
+    /// The same failure, one destination shape over, and the opposite cleanup:
+    /// the session was not this teleport's to abandon. It is still a
+    /// neighbour, the client still holds its circuit, and tearing it down would
+    /// punish it for a handover that failed elsewhere.
+    #[tokio::test]
+    async fn a_teleport_that_never_arrives_leaves_a_neighbour_child_alone() -> Result<(), TestError>
+    {
+        let mut running = start_configured(
+            vec![RegionConfig::default(), adjacent_east_region()],
+            Some(SHORT_HANDOVER),
+        )
+        .await?;
+        running
+            .wait_until("the east region's child circuit", |event| match event {
+                Event::GenericMessage(generic) => {
+                    sl_fake_grid::neighbour_marker_region(generic).as_deref()
+                        == Some("Fake Region East")
+                }
+                _ => false,
+            })
+            .await?;
+        let before = running._grid.sessions_in("Fake Region East").await;
+        let before_seq = before.first().ok_or("no child")?.session_seq().await;
+
+        running.run.abort();
+        let error = running
+            ._grid
+            .teleport_agent(
+                &running.agent,
+                "Fake Region East",
+                RegionCoordinates::new(64.0, 32.0, 25.0),
+                Vector {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            )
+            .await
+            .err()
+            .ok_or("a teleport nobody completes cannot succeed")?;
+        assert!(matches!(error, sl_fake_grid::Error::TeleportTimedOut));
+
+        let after = running._grid.sessions_in("Fake Region East").await;
+        assert_eq!(after.len(), 1, "the neighbour's circuit is still there");
+        let survivor = after.first().ok_or("no child")?;
+        assert_eq!(
+            survivor.session_seq().await,
+            before_seq,
+            "and it is the same session, not a replacement"
+        );
+        assert!(!survivor.is_closed());
+        assert!(
+            !running.agent.is_closed() && running.agent.with_sim(|sim| sim.is_root_agent()).await,
+            "the agent stays the root agent of the region it never left"
+        );
+        Ok(())
+    }
+
+    /// **A teleport retires the children of the region it left, and the
+    /// destination announces its own.**
+    ///
+    /// A crossing has always done the first half. A teleport used to do
+    /// neither, so an agent that hopped across the grid left one open circuit
+    /// per region it had ever bordered, each still streaming to a client that
+    /// is now nowhere near it.
+    #[tokio::test]
+    async fn a_teleport_retires_the_children_of_the_region_left_behind() -> Result<(), TestError> {
+        let mut running = start_in(vec![
+            RegionConfig::default(),
+            next_door_region(),
+            east_region(),
+        ])
+        .await?;
+        let far = running
+            ._grid
+            .region_handle("Fake Region East")
+            .ok_or("no far region")?;
+        let mut teleports = running._grid.teleports();
+        running
+            .wait_until("the neighbour's child circuit", |event| match event {
+                Event::GenericMessage(generic) => {
+                    sl_fake_grid::neighbour_marker_region(generic).as_deref()
+                        == Some("Fake Region Next Door")
+                }
+                _ => false,
+            })
+            .await?;
+        assert_eq!(
+            running
+                ._grid
+                .sessions_in("Fake Region Next Door")
+                .await
+                .len(),
+            1,
+            "the neighbour is open before the teleport"
+        );
+
+        running
+            .commands
+            .send(Command::Teleport {
+                region_handle: far,
+                position: RegionCoordinates::new(64.0, 32.0, 25.0),
+                look_at: Vector {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            })
+            .await?;
+        let notice = tokio::time::timeout(WAIT, teleports.recv()).await??;
+        assert_eq!(notice.region_name, "Fake Region East");
+
+        assert!(
+            running
+                ._grid
+                .sessions_in("Fake Region Next Door")
+                .await
+                .is_empty(),
+            "the region the agent left bordered this one; the destination does not"
+        );
+        assert!(
+            running._grid.sessions_in("Fake Region").await.is_empty(),
+            "and the source itself was retired"
         );
         Ok(())
     }

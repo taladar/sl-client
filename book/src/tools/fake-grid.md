@@ -707,6 +707,14 @@ under the login's identity (the client opens every circuit with its login
    `FakeGrid::teleports()`. No arrival within `TELEPORT_ARRIVAL_TIMEOUT`
    fails the teleport with `timeout_tport` and abandons the destination.
 
+A destination the agent already borders is **reused**, not opened again:
+it is a child circuit the client is holding, and a second session there
+would hand it two simulators for one region handle. On a timeout only a
+destination this teleport opened itself is abandoned — a borrowed
+neighbour is still a neighbour. Arriving also retires the children of the
+region left behind, the way a crossing does, or an agent hopping across
+the grid accumulates one open circuit per region it ever bordered.
+
 Two entry points share the sequence. The **responder task** every session
 runs answers the client's own requests: `TeleportLocationRequest` by
 handle, `TeleportLandmarkRequest` through the landmark asset in the

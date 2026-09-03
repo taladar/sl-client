@@ -199,7 +199,8 @@ pub(crate) async fn teleport_session(
         .await?;
 
     let mut shutdown_rx = dest.shutdown_rx.clone();
-    if !wait_for_arrival(&mut dest_events, &mut shutdown_rx, TELEPORT_ARRIVAL_TIMEOUT).await {
+    let budget = core.handover_timeout.unwrap_or(TELEPORT_ARRIVAL_TIMEOUT);
+    if !wait_for_arrival(&mut dest_events, &mut shutdown_rx, budget).await {
         tracing::warn!(
             "teleport of session {source_seq} to {dest_name:?} timed out; abandoning session \
              {dest_seq}"
@@ -229,6 +230,12 @@ pub(crate) async fn teleport_session(
         tracing::warn!("retiring the source circuit failed: {error}");
     }
     core.remove_session(source_seq).await;
+    // The neighbours of the region left behind are neighbours no longer. A
+    // crossing has always retired them; a teleport used to leave one open
+    // circuit per region the agent had ever bordered, still streaming to a
+    // client that has moved to the far side of the grid. The destination's own
+    // neighbours are announced by its arrival, and this keeps only those.
+    crate::neighbours::retire_distant_children(core, agent_id, request.region).await;
     tracing::info!(
         "teleport: {} {} moved from session {source_seq} to {dest_name} (session {dest_seq})",
         account.config.first_name,

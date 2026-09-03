@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 313 |
+| ready | 312 |
 | blocked | 56 |
 | in-progress | 18 |
 | bugs | 70 |
-| done | 966 |
+| done | 967 |
 | deferred | 24 |
 | wont-do | 14 |
 | **total** | **1559** |
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (313)
+## ready (312)
 
 ### protocol
 
@@ -960,8 +960,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   fake grid can serve a sound but cannot play one
 - [`test-fake-grid-seated-crossing`](ready/test-fake-grid-seated-crossing.md) —
   Crossing a border seated on a vehicle, alone and with other riders
-- [`test-fake-grid-teleport-shapes`](ready/test-fake-grid-teleport-shapes.md) —
-  The teleport matrix — same region, neighbour, distant, and each one failing
 - [`test-fake-grid-timeline`](ready/test-fake-grid-timeline.md) — Scripted
   scenario timelines with markers (blocked by `test-fake-grid-determinism`
   (done), `viewer-fake-grid-render-harness` (done))
@@ -1356,7 +1354,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (966)
+## done (967)
 
 ### protocol
 
@@ -3191,6 +3189,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-self-avatar-baked-textures-rejected`](done/test-fake-grid-self-avatar-baked-textures-rejected.md)
   — The agent's own head, upper and lower bakes are fetched, served, and then
   discarded
+- [`test-fake-grid-teleport-shapes`](done/test-fake-grid-teleport-shapes.md) —
+  The teleport matrix — same region, neighbour, distant, and each one failing
 - [`test-fake-grid-terrain-layerdata`](done/test-fake-grid-terrain-layerdata.md)
   — The fake grid sends terrain — LayerData patches, wind, clouds (blocked by
   `test-fake-grid-determinism` (done))

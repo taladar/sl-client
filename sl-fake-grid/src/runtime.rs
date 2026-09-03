@@ -334,6 +334,11 @@ pub(crate) struct GridCore {
     pub(crate) clock: Now,
     /// How long an empty `EventQueueGet` poll is held before the 502.
     pub(crate) eq_hold: Duration,
+    /// Overrides how long the grid waits for a client to complete its movement
+    /// into a handover destination, or `None` for each path's own budget
+    /// ([`TELEPORT_ARRIVAL_TIMEOUT`](crate::TELEPORT_ARRIVAL_TIMEOUT),
+    /// [`CROSSING_ARRIVAL_TIMEOUT`](crate::CROSSING_ARRIVAL_TIMEOUT)).
+    pub(crate) handover_timeout: Option<Duration>,
     /// The bound HTTP port (fixed after `start`).
     pub(crate) http_port: u16,
     /// The login URI (`http://127.0.0.1:<port>/`), parsed once at start.
@@ -881,6 +886,8 @@ pub struct FakeGridBuilder {
     honor_options: bool,
     /// The `EventQueueGet` hold before the 502 re-poll answer.
     eq_hold: Duration,
+    /// An override for the handover arrival budget (see the builder method).
+    handover_timeout: Option<Duration>,
     /// The TCP port to bind, `0` for an ephemeral one.
     http_port: u16,
     /// The grid's self-description.
@@ -905,6 +912,7 @@ impl std::fmt::Debug for FakeGridBuilder {
             .field("gates", &self.gates)
             .field("honor_options", &self.honor_options)
             .field("eq_hold", &self.eq_hold)
+            .field("handover_timeout", &self.handover_timeout)
             .field("http_port", &self.http_port)
             .field("identity", &self.identity)
             .field("economy", &self.economy)
@@ -956,6 +964,7 @@ impl FakeGridBuilder {
             gates: LoginGates::default(),
             honor_options: false,
             eq_hold: Duration::from_secs(30),
+            handover_timeout: None,
             http_port: 0,
             identity: GridIdentity::default(),
             economy: EconomyConfig::default(),
@@ -1004,6 +1013,21 @@ impl FakeGridBuilder {
     #[must_use]
     pub const fn event_queue_hold(mut self, hold: Duration) -> Self {
         self.eq_hold = hold;
+        self
+    }
+
+    /// Overrides how long the grid waits for the client to complete its
+    /// movement into a teleport destination or across a border, replacing
+    /// **both** [`TELEPORT_ARRIVAL_TIMEOUT`](crate::TELEPORT_ARRIVAL_TIMEOUT)
+    /// and [`CROSSING_ARRIVAL_TIMEOUT`](crate::CROSSING_ARRIVAL_TIMEOUT).
+    ///
+    /// For a test that exercises the **failure** path: the real budgets are
+    /// tens of seconds, which is right for a viewer on a slow link and wrong
+    /// for a suite, and a test nobody runs proves nothing. It changes only how
+    /// long the grid is willing to wait, never what it does when the wait ends.
+    #[must_use]
+    pub const fn handover_timeout(mut self, timeout: Duration) -> Self {
+        self.handover_timeout = Some(timeout);
         self
     }
 
@@ -1115,6 +1139,7 @@ impl FakeGridBuilder {
             assets,
             clock: self.clock,
             eq_hold: self.eq_hold,
+            handover_timeout: self.handover_timeout,
             http_port,
             login_uri,
             identity: self.identity,
@@ -1305,6 +1330,35 @@ impl FakeGrid {
                 agent_id: agent.agent_id,
             }),
         }
+    }
+
+    /// Every live session in the region called `name`, in no particular order
+    /// — root and child alike.
+    ///
+    /// How a test asks the structural questions a handover raises, which are
+    /// otherwise invisible from the client side: that a teleport into a region
+    /// the agent already holds a child circuit in leaves **one** session there
+    /// and not two, that a failed teleport took its own destination back down,
+    /// and that it left a neighbour's alone.
+    pub async fn sessions_in(&self, name: &str) -> Vec<FakeAgent> {
+        let Some(region) = self.core.region_by_name(name) else {
+            return Vec::new();
+        };
+        let sessions: Vec<SharedSim> = self.core.sessions.lock().await.values().cloned().collect();
+        let mut here = Vec::new();
+        for shared in sessions {
+            if shared.is_closed() {
+                continue;
+            }
+            let (mine, agent_id) = {
+                let state = shared.state.lock().await;
+                (state.region == region, state.avatar.agent_id)
+            };
+            if mine {
+                here.push(FakeAgent { shared, agent_id });
+            }
+        }
+        here
     }
 
     /// Subscribes to completed border crossings ([`FakeGrid::cross_agent`]).

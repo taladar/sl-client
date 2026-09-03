@@ -58,6 +58,12 @@ without any screen at all, and leaves the source open as a child. The
 grid claims no movement authority, so a crossing is asked for rather than
 noticed.
 
+Either way a destination the agent already borders is reused rather than
+opened a second time, and arriving retires the children that have dropped
+out of view. `FakeGridBuilder::handover_timeout` shortens how long the
+grid waits for a client to complete its movement, so a test of the
+failure path need not wait out the real budget.
+
 ## Content fixtures
 
 Assets are **grid-wide**. A `RegionFixture` states the ids its own content

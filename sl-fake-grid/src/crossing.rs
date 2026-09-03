@@ -164,7 +164,8 @@ pub(crate) async fn cross_session(
         .await;
 
     let mut shutdown_rx = destination.shutdown_rx.clone();
-    if !wait_for_arrival(&mut dest_events, &mut shutdown_rx, CROSSING_ARRIVAL_TIMEOUT).await {
+    let budget = core.handover_timeout.unwrap_or(CROSSING_ARRIVAL_TIMEOUT);
+    if !wait_for_arrival(&mut dest_events, &mut shutdown_rx, budget).await {
         tracing::warn!(
             "the crossing of session {source_seq} into {dest_name:?} timed out; the agent stays \
              where it was"
