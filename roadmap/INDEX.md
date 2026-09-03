@@ -17,9 +17,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | in-progress | 18 |
 | bugs | 68 |
 | done | 972 |
-| deferred | 24 |
+| deferred | 25 |
 | wont-do | 14 |
-| **total** | **1561** |
+| **total** | **1562** |
 
 ## ideas (98)
 
@@ -3462,7 +3462,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](done/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## deferred (24)
+## deferred (25)
 
 ### viewer
 
@@ -3511,6 +3511,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   GPU compute particle simulation (+ raising the particle cap)
 - [`viewer-perf-media-upload-budget`](deferred/viewer-perf-media-upload-budget.md)
   — Per-frame byte budget for media-surface uploads
+- [`viewer-perf-prim-initial-lod-at-spawn`](deferred/viewer-perf-prim-initial-lod-at-spawn.md)
+  — Build a plain prim at its warranted LOD instead of Low-then-refine
 - [`viewer-sea-grid-edge-visible-from-height`](deferred/viewer-sea-grid-edge-visible-from-height.md)
   — The sea ends in a 256 m staircase when seen from high above the water
 - [`viewer-socks5-udp-proxy`](deferred/viewer-socks5-udp-proxy.md) — SOCKS5
