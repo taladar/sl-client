@@ -101,4 +101,7 @@ Not done, deliberately: the take mints an asset id and leaves it unbacked —
 nothing serialises the object into an asset, so a client that fetched it would
 get nothing. The case does not, and inventing an object serialisation format
 for a grid with no persistence would be a fixture pretending to be a
-simulator.
+simulator. The same is true of the item this task's `UpdateTaskInventory`
+writes into a prim, and of most of the seeded agent inventory, so it is not
+this path's problem: [[test-fake-grid-asset-round-trip]] is the whole of it,
+and [[test-assets-object-asset-codec]] is what the object half waits on.

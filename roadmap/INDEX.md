@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 309 |
+| ready | 311 |
 | blocked | 56 |
 | in-progress | 18 |
 | bugs | 64 |
 | done | 982 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1566** |
+| **total** | **1568** |
 
 ## ideas (98)
 
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (309)
+## ready (311)
 
 ### protocol
 
@@ -935,6 +935,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
+- [`test-asset-save-mutation-survey`](ready/test-asset-save-mutation-survey.md)
+  — Does a grid hand back the asset you saved?
 - [`test-assets-gesture-codec`](ready/test-assets-gesture-codec.md) — Read and
   write a gesture asset (LLMultiGesture)
 - [`test-assets-object-asset-codec`](ready/test-assets-object-asset-codec.md) —
@@ -945,6 +947,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Factor the repeated session/id acquisition out of the conformance cases
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
+- [`test-fake-grid-asset-round-trip`](ready/test-fake-grid-asset-round-trip.md)
+  — An asset id the grid hands out should name bytes the grid can serve
 - [`test-fake-grid-builtin-sounds`](ready/test-fake-grid-builtin-sounds.md) —
   The built-in UI sounds the viewer plays on arrival 404
 - [`test-fake-grid-login-matrix-and-timeouts`](ready/test-fake-grid-login-matrix-and-timeouts.md)
