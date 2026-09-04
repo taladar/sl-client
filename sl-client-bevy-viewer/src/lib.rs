@@ -317,6 +317,8 @@ pub(crate) use sl_viewer_ui_widgets::ui_combo;
 pub(crate) use sl_viewer_world_avatar::typing;
 pub(crate) use sl_viewer_world_scene::transparency;
 pub(crate) use sl_viewer_world_scene::water_clip;
+#[cfg(test)]
+mod ui_contract;
 mod ui_elements;
 pub(crate) use sl_viewer_notices::ui_name_link;
 pub(crate) use sl_viewer_platform::ui_perf;

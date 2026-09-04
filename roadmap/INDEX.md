@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 311 |
+| ready | 310 |
 | blocked | 56 |
 | in-progress | 18 |
-| bugs | 62 |
-| done | 980 |
+| bugs | 64 |
+| done | 981 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1564** |
+| **total** | **1566** |
 
 ## ideas (98)
 
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (311)
+## ready (310)
 
 ### protocol
 
@@ -883,9 +883,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-color-picker-advanced`](ready/viewer-ui-color-picker-advanced.md)
   — Color picker — SV square, hue strip, palette & eyedropper (blocked by
   `viewer-ui-color-picker` (done))
-- [`viewer-ui-interaction-contracts`](ready/viewer-ui-interaction-contracts.md)
-  — An interaction contract per registered element, swept like the matrix
-  (blocked by `viewer-ui-interaction-harness` (done))
 - [`viewer-ui-settings-binding-combo`](ready/viewer-ui-settings-binding-combo.md)
   — Combo↔settings two-way binding (blocked by `viewer-ui-combo-widget` (done),
   `viewer-ui-settings-binding` (done))
@@ -1183,7 +1180,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (62)
+## bugs (64)
 
 ### viewer
 
@@ -1263,6 +1260,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The world map keeps a second live arboard handle
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
   — Mesh-head brow spikes forward from face-bone shape deformation
+- [`viewer-chat-volume-dropdown-opens-off-screen`](bugs/viewer-chat-volume-dropdown-opens-off-screen.md)
+  — The chat volume select opens upward into nothing
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
   — Check clouds vs the waterline at the horizon against Firestorm
 - [`viewer-combo-stops-opening`](bugs/viewer-combo-stops-opening.md) — A combo
@@ -1314,6 +1313,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   instead of the `Data` genome (fix landed, needs live verify)
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
+- [`viewer-widget-any-mouse-button-activates`](bugs/viewer-widget-any-mouse-button-activates.md)
+  — A secondary or middle click presses every button in the viewer
 
 ### test
 
@@ -1333,7 +1334,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (980)
+## done (981)
 
 ### protocol
 
@@ -2701,6 +2702,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Scroll the keyboard-focused widget into view
 - [`viewer-ui-gallery-tab-order`](done/viewer-ui-gallery-tab-order.md) — Give
   the gallery a sensible keyboard tab order
+- [`viewer-ui-interaction-contracts`](done/viewer-ui-interaction-contracts.md) —
+  An interaction contract per registered element, swept like the matrix (blocked
+  by `viewer-ui-interaction-harness` (done))
 - [`viewer-ui-interaction-harness`](done/viewer-ui-interaction-harness.md) —
   Headless synthetic-pointer input for the UI test harness
 - [`viewer-ui-inventory-gear-menu-clipped`](done/viewer-ui-inventory-gear-menu-clipped.md)

@@ -38,6 +38,7 @@ use bevy::ui::{UiStack, UiSystems, ui_focus_system, ui_stack_system};
 use bevy::window::{PrimaryWindow, WindowEvent, WindowResolution};
 
 use crate::{LayoutTest, record};
+use sl_viewer_ui_core::ui::{UiPointerClaim, reset_ui_pointer_claim};
 use sl_viewer_ui_core::ui_element::UiAction;
 
 /// A [`crate::LayoutTest`] with the input and picking stack on top: a window, a
@@ -67,6 +68,17 @@ impl InteractionTest {
     #[must_use]
     pub const fn over(layout: LayoutTest) -> Self {
         Self { layout }
+    }
+
+    /// The layout half back out, for the checks that take one.
+    ///
+    /// [`crate::layout_violations`] is a function of the viewport and direction
+    /// the app was built with, and an interaction sweep re-asserts it after
+    /// every gesture — so the caller needs the same [`LayoutTest`] the app came
+    /// from rather than a fresh default that might disagree with it.
+    #[must_use]
+    pub const fn layout(self) -> LayoutTest {
+        self.layout
     }
 
     /// Build the app: the layout harness plus the input stack.
@@ -101,7 +113,8 @@ impl InteractionTest {
 ///
 /// Requires the input stack ([`install_input_stack`]), the layout stack
 /// ([`crate::LayoutTest::install`]) and visibility propagation to be present
-/// already: this adds only the pieces `bevy_ui`'s own `UiPlugin` would.
+/// already: this adds the pieces `bevy_ui`'s own `UiPlugin` would, plus the one
+/// piece of the *viewer's* pointer vocabulary the widget observers read.
 pub fn install_ui_interaction(app: &mut App) {
     // The UI stack and its writer: `ui_picking` reads the back-to-front
     // node list `UiPlugin` fills, so the harness fills it the same way.
@@ -119,6 +132,15 @@ pub fn install_ui_interaction(app: &mut App) {
     // the `Tab` key is inert — the observer that reads it is installed on the
     // primary window at `Startup` by this plugin, and by nothing else.
     app.add_plugins(bevy::input_focus::tab_navigation::TabNavigationPlugin);
+    // The per-frame "a widget took this press" flag. Its `init_resource` lives
+    // in `ComboPlugin`, but the observers that *write* it are attached by the
+    // widgets' own spawn functions — so any fixture that spawns a combo without
+    // its plugin has an observer whose `ResMut<UiPointerClaim>` fails parameter
+    // validation and takes the app down on the first press. The claim is
+    // pointer-stack vocabulary rather than a combo's private state, so it
+    // belongs here, where the pointer is.
+    app.init_resource::<UiPointerClaim>();
+    app.add_systems(First, reset_ui_pointer_claim);
 }
 
 /// Stand the **editable-text** path up: what turns a keystroke that has already

@@ -56,11 +56,13 @@ pub mod interact;
 
 use bevy::app::{HierarchyPropagatePlugin, PropagateSet};
 use bevy::camera::{ComputedCameraValues, RenderTargetInfo, Viewport};
+use bevy::ecs::observer::ObservedBy;
 use bevy::ecs::system::SystemState;
-use bevy::input_focus::tab_navigation::{NavAction, TabNavigation};
+use bevy::input_focus::tab_navigation::{NavAction, TabIndex, TabNavigation};
 use bevy::input_focus::{FocusCause, InputFocus};
+use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
-use bevy::text::{FontCx, LayoutCx, RemSize, ScaleCx, TextPipeline};
+use bevy::text::{EditableText, FontCx, LayoutCx, RemSize, ScaleCx, TextPipeline};
 use bevy::transform::systems::{
     mark_dirty_trees, propagate_parent_transforms, sync_simple_transforms,
 };
@@ -69,7 +71,8 @@ use bevy::ui::ui_layout_system;
 use bevy::ui::ui_surface::UiSurface;
 use bevy::ui::update::{propagate_ui_target_cameras, update_clipping_system};
 use bevy::ui::widget::measure_text_system;
-use bevy::ui_widgets::Activate;
+use bevy::ui_widgets::popover::Popover;
+use bevy::ui_widgets::{Activate, Button};
 
 use sl_viewer_ui_core::ui::{
     UiDirection, UiRoot, UiScaffoldSystems, apply_panel_visibility, apply_ui_direction,
@@ -469,6 +472,39 @@ pub fn settle(app: &mut App) {
 fn describe(name: Option<&Name>, entity: Entity) -> String {
     name.map_or_else(|| format!("{entity}"), |name| format!("`{name}`"))
 }
+/// Every node with an open [`Popover`] somewhere beneath it, plus the popovers
+/// themselves.
+///
+/// A popover is a **floating layer**: `bevy_ui_widgets`' positioner writes its
+/// `UiGlobalTransform` directly, forces `PositionType::Absolute` and places it
+/// *outside* the anchor it is a child of — `PopoverSide::Bottom` starts it
+/// exactly where the anchor's box ends. Escaping the parent is the widget's
+/// definition, not its failure, and the widgets already declare it by carrying
+/// this component; nothing new has to be remembered on the next popover.
+///
+/// The set is the whole ancestor chain rather than the popover alone because the
+/// escape propagates: taffy adds the popover's box to `content_size` at every
+/// level, so an open menu makes its host, the menu bar and the panel around them
+/// all report content bigger than their boxes.
+fn popover_ancestors(app: &mut App) -> HashSet<Entity> {
+    let world = app.world_mut();
+    let mut popovers = world.query_filtered::<Entity, With<Popover>>();
+    let roots: Vec<Entity> = popovers.iter(world).collect();
+    let mut parents = world.query::<&ChildOf>();
+    let mut hosting = HashSet::new();
+    for popover in roots {
+        let mut node = popover;
+        // `insert` returning false means this chain has already been walked, so
+        // a menu with three open submenus costs one walk, not three.
+        while hosting.insert(node) {
+            let Ok(parent) = parents.get(world, node) else {
+                break;
+            };
+            node = parent.parent();
+        }
+    }
+    hosting
+}
 
 /// **The invariant.** Every node's content must fit inside the box the node was
 /// given for it.
@@ -496,14 +532,25 @@ fn describe(name: Option<&Name>, entity: Entity) -> String {
 /// box is that widget's entire purpose (`viewer-ui-virtualized-list`), and it is
 /// the one case where the overflow is a decision rather than a bug.
 ///
+/// **An ancestor of an open [`Popover`] is skipped too**, and the reason is the
+/// whole of `popover_ancestors`: taffy folds an absolutely-positioned
+/// popover's box into every ancestor's `content_size`, so the moment a drop-down
+/// opens, each box between it and the root reports content it does not have to
+/// hold. That is not the check failing to see a bug — it is the check being
+/// asked a question that stops having an answer while a floating layer is up.
+///
 /// Returns one message per breach, so a caller can assert the whole tree at once
 /// and see everything wrong with it rather than the first thing.
 pub fn overflow_violations(app: &mut App) -> Vec<String> {
+    let hosting = popover_ancestors(app);
     let mut query = app
         .world_mut()
         .query::<(Entity, &ComputedNode, &Node, Option<&Name>)>();
     let mut violations = Vec::new();
     for (entity, computed, node, name) in query.iter(app.world()) {
+        if hosting.contains(&entity) {
+            continue;
+        }
         let available = computed.size;
         let content = computed.content_size;
         for (axis, content, available, overflow) in [
@@ -601,10 +648,21 @@ fn may_be_clipped(world: &World, node: Entity) -> bool {
 /// (a floater, a menu, a tooltip) contributes nothing to `content_size` and can
 /// sail straight out of its parent with the content check none the wiser.
 ///
+/// The one legitimate escapee is a [`Popover`], which is *defined* by sitting
+/// outside the anchor it is a child of — see `popover_ancestors`. It is
+/// skipped here, and its ancestors are skipped by [`overflow_violations`], but
+/// **not** by [`viewport_violations`]: a drop-down is allowed to leave its
+/// parent and never allowed to leave the window, and that division is what keeps
+/// the exemption from covering the bug it would otherwise hide.
+///
 /// A parent that clips or scrolls the axis is skipped: escaping is that widget's
 /// purpose there, and [`clipping_violations`] takes over the question of whether
 /// the result is *readable*.
 pub fn containment_violations(app: &mut App) -> Vec<String> {
+    let popovers: HashSet<Entity> = {
+        let mut query = app.world_mut().query_filtered::<Entity, With<Popover>>();
+        query.iter(app.world()).collect()
+    };
     let world = app.world_mut();
     let mut query = world.query::<(
         Entity,
@@ -628,6 +686,10 @@ pub fn containment_violations(app: &mut App) -> Vec<String> {
 
     let mut violations = Vec::new();
     for (entity, child_box, parent, name) in boxes {
+        if popovers.contains(&entity) {
+            // A floating layer, by its own declaration — see `popover_ancestors`.
+            continue;
+        }
         let Ok((parent_computed, parent_transform, parent_node)) = parent_boxes.get(world, parent)
         else {
             // No parent node: the `UiRoot` itself, which `viewport_violations`
@@ -1007,7 +1069,20 @@ pub fn enable_action_recording(app: &mut App) {
 /// where it would live in the viewer.
 pub fn spawn_element(test: LayoutTest, element: &UiElement, cx: ElementCx) -> App {
     let mut app = test.build();
-    enable_action_recording(&mut app);
+    spawn_element_into(&mut app, element, cx);
+    settle(&mut app);
+    app
+}
+
+/// Wire one registered element's spawn into an app that is built but not yet
+/// run, and turn on [`UiAction`] recording.
+///
+/// The half of [`spawn_element`] that is not "build a [`LayoutTest`] app", split
+/// out so a host that builds its own app — the contract sweep, over
+/// [`interact::InteractionTest`] — spawns the element exactly the same way
+/// rather than a way of its own.
+pub fn spawn_element_into(app: &mut App, element: &UiElement, cx: ElementCx) {
+    enable_action_recording(app);
     // `Startup`, ordered after the root exists, because that is how a real panel
     // spawns — testing it any other way would be testing a different thing.
     let spawn = element.spawn;
@@ -1018,8 +1093,66 @@ pub fn spawn_element(test: LayoutTest, element: &UiElement, cx: ElementCx) -> Ap
         })
         .after(UiScaffoldSystems::SpawnRoot),
     );
-    settle(&mut app);
-    app
+}
+
+/// Every named node that can **react** to input, in a stable order.
+///
+/// The address space a contract sweep aims at. A node qualifies when it carries
+/// any of the four things that make a `Node` answer a gesture:
+///
+/// - `ObservedBy` — something is watching it, which is how every `.observe`-wired
+///   widget in this viewer takes its click;
+/// - `Button` — `bevy_ui_widgets`' own state machine;
+/// - `TabIndex` — it is a keyboard stop;
+/// - `EditableText` — it takes text.
+///
+/// The alternative, every named node, is mostly labels and backdrops: it costs a
+/// whole app per gesture to re-prove that a caption ignores the mouse. Anything
+/// that *could* react is here, so the sweep's coverage claim survives.
+///
+/// Sorted and deduplicated because a name is an *address* — a repeated one (a
+/// table's rows, say) resolves through [`find_by_name`] to the first of them, so
+/// the sweep gets one row for it rather than one per occurrence.
+#[must_use]
+pub fn interactive_nodes(app: &mut App) -> Vec<String> {
+    let mut query = app.world_mut().query_filtered::<&Name, (
+        With<Node>,
+        Or<(
+            With<ObservedBy>,
+            With<Button>,
+            With<TabIndex>,
+            With<EditableText>,
+        )>,
+    )>();
+    let mut names: Vec<String> = query
+        .iter(app.world())
+        .map(|name| name.as_str().to_owned())
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
+/// Every named node that is a keyboard **stop**, in a stable order.
+///
+/// A stop is a node carrying a live [`TabIndex`]. "Live" is the whole subtlety
+/// and it is already handled for us: the scaffold parks a hidden subtree's
+/// `TabIndex` into `ParkedTabIndex`, so after [`settle`] the nodes this returns
+/// are exactly the ones `Tab` can reach — see
+/// [[viewer-audit-tab-panel-focus-order]].
+///
+/// A stop with no [`Name`] is skipped, because a contract addresses a node by
+/// name and there is nothing to write in the table for an anonymous one.
+#[must_use]
+pub fn focusable_nodes(app: &mut App) -> Vec<String> {
+    let mut query = app.world_mut().query_filtered::<&Name, With<TabIndex>>();
+    let mut names: Vec<String> = query
+        .iter(app.world())
+        .map(|name| name.as_str().to_owned())
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    names
 }
 
 /// Find one node of the spawned tree by its [`Name`].
