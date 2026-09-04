@@ -312,6 +312,91 @@ impl DeRezDestination {
             | Self::ReturnToLastOwner => Uuid::nil(),
         }
     }
+
+    /// Rebuilds a destination from the `Destination` wire byte and the
+    /// `DestinationID` beside it — the inverse of [`to_code`](Self::to_code)
+    /// paired with [`destination_id`](Self::destination_id), and what a
+    /// simulator decodes a client's `DeRezObject` with.
+    ///
+    /// `None` for a byte no `DRD_*` value uses. The destinations that carry no
+    /// id ignore `destination_id` entirely, so a client that sends a stray one
+    /// (the reference viewer sends nil) is decoded the same either way.
+    #[must_use]
+    pub fn from_code(code: u8, destination_id: Uuid) -> Option<Self> {
+        Some(match code {
+            0 => Self::SaveIntoAgentInventory(InventoryKey::from(destination_id)),
+            1 => Self::AcquireToAgentInventory(InventoryFolderKey::from(destination_id)),
+            2 => Self::SaveIntoTaskInventory(ObjectKey::from(destination_id)),
+            3 => Self::Attachment,
+            4 => Self::TakeIntoAgentInventory(InventoryFolderKey::from(destination_id)),
+            5 => Self::ForceToGodInventory(InventoryFolderKey::from(destination_id)),
+            6 => Self::Trash(InventoryFolderKey::from(destination_id)),
+            7 => Self::AttachmentToInventory,
+            8 => Self::AttachmentExists,
+            9 => Self::ReturnToOwner,
+            10 => Self::ReturnToLastOwner,
+            _unknown => return None,
+        })
+    }
+
+    /// The agent inventory folder a derez to this destination files the
+    /// object into, or `None` when it files it somewhere that is not a
+    /// folder — over an existing item, into a prim, onto the avatar — or
+    /// nowhere at all.
+    ///
+    /// Four destinations name a folder, and a simulator answers each of them
+    /// with an `UpdateCreateInventoryItem` for the item it minted there. They
+    /// differ only in whether the world copy survives, which is
+    /// [`removes_from_world`](Self::removes_from_world): a *take copy* and a
+    /// *god take copy* leave it standing, a *take* and a *delete to trash* do
+    /// not (OpenSim's `Scene.DeRezObjects`, whose `takeCopyGroups` /
+    /// `takeDeleteGroups` split is exactly this pair of predicates).
+    #[must_use]
+    pub const fn agent_folder(self) -> Option<InventoryFolderKey> {
+        match self {
+            Self::AcquireToAgentInventory(folder)
+            | Self::TakeIntoAgentInventory(folder)
+            | Self::ForceToGodInventory(folder)
+            | Self::Trash(folder) => Some(folder),
+            Self::SaveIntoAgentInventory(_)
+            | Self::SaveIntoTaskInventory(_)
+            | Self::Attachment
+            | Self::AttachmentToInventory
+            | Self::AttachmentExists
+            | Self::ReturnToOwner
+            | Self::ReturnToLastOwner => None,
+        }
+    }
+
+    /// Whether a derez to this destination removes the object from the region.
+    ///
+    /// True of a take, a delete to trash and both returns — the object is
+    /// filed away and the world copy goes. False of the two *copy* takes and
+    /// the two *saves*, which write the object's current state somewhere and
+    /// leave it standing where it is.
+    ///
+    /// The three attachment destinations are false because a simulator does
+    /// not act on them here at all: the reference viewer never sends them on a
+    /// `DeRezObject`, and OpenSim's `DeRezObjects` has no case for them. It
+    /// has no case for `ReturnToLastOwner` either — its `DeRezAction` stops at
+    /// `Return` — but a return that left the object standing would be wrong on
+    /// the grid this workspace targets, so both returns count.
+    #[must_use]
+    pub const fn removes_from_world(self) -> bool {
+        match self {
+            Self::TakeIntoAgentInventory(_)
+            | Self::Trash(_)
+            | Self::ReturnToOwner
+            | Self::ReturnToLastOwner => true,
+            Self::SaveIntoAgentInventory(_)
+            | Self::AcquireToAgentInventory(_)
+            | Self::ForceToGodInventory(_)
+            | Self::SaveIntoTaskInventory(_)
+            | Self::Attachment
+            | Self::AttachmentToInventory
+            | Self::AttachmentExists => false,
+        }
+    }
 }
 
 /// Which permission mask an `ObjectPermissions` change targets (the `Field`
@@ -815,6 +900,41 @@ pub struct RezObjectParams {
     ///
     /// [`RezRestoreToWorld`]: crate::Session::rez_restore_to_world
     pub item: RestoreItem,
+}
+
+/// A client's request to rez a **new** primitive (`ObjectAdd`), as a simulator
+/// decodes it: the [`PrimShape`] the client built plus the ray it aimed with.
+///
+/// The inverse of [`Session::rez_object`](crate::Session::rez_object), and
+/// distinct from [`RezObjectParams`], which is the *`RezObject` message* — a
+/// rez of an existing inventory item. The two are easy to confuse because the
+/// wire names disagree with the operations: `ObjectAdd` creates a prim from
+/// nothing, `RezObject` restores one from an item.
+///
+/// [`shape`](Self::shape)'s [`position`](PrimShape::position) carries
+/// [`ray_end`](Self::ray_end) — the wire block has no position field of its
+/// own, and where the prim lands is the ray's end point when the raycast is
+/// bypassed (which is what every client's rez does). The two are therefore
+/// always equal on decode; the ray fields are kept as well because a simulator
+/// that *does* raycast needs the start point and the target.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct AddPrimParams {
+    /// The active group the new object is set to (`None` for none) — the
+    /// `AgentData.GroupID` of the message.
+    pub group_id: Option<GroupKey>,
+    /// The shape, size, orientation and placement of the new prim.
+    pub shape: PrimShape,
+    /// When set, the simulator trusts [`ray_end`](Self::ray_end) rather than
+    /// raycasting.
+    pub bypass_raycast: bool,
+    /// The ray's start point (region-local).
+    pub ray_start: Vector,
+    /// The ray's end point (region-local) — where the prim lands.
+    pub ray_end: Vector,
+    /// The object the ray is cast against (`None` for the terrain).
+    pub ray_target_id: Option<ObjectKey>,
+    /// Whether [`ray_end`](Self::ray_end) is the actual intersection point.
+    pub ray_end_is_intersection: bool,
 }
 
 /// Parameters for dropping a script inventory item into an in-world object's

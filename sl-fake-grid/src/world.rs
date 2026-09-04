@@ -14,17 +14,20 @@
 //! The fixture types are `sl-proto`'s own [`ParcelInfo`] and [`Object`] —
 //! the records the client decodes — so a test asserts what it seeded.
 
+use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::time::Instant;
 
 use crate::fixtures::{NpcAppearance, NpcFixture};
 use crate::terrain::TerrainFixture;
 use sl_proto::{
-    AnimationKey, GlobalCoordinates, Object, ObjectExtraParams, ObjectMotion,
-    ObjectPlayingAnimation, ParcelCategory, ParcelDetails, ParcelInfo, ParcelRequestResult,
-    ParcelStatus, PrimShapeParams, RegionIdentity, RegionLocalObjectId, RegionLocalParcelId,
-    ServerEvent, SimSession, TerrainLayerType, pcode,
+    AnimationKey, AssetKey, AssetType, GlobalCoordinates, InventoryItem, InventoryType, Object,
+    ObjectExtraParams, ObjectMotion, ObjectPlayingAnimation, ParcelCategory, ParcelDetails,
+    ParcelInfo, ParcelRequestResult, ParcelStatus, PrimShape, PrimShapeParams, RegionIdentity,
+    RegionLocalObjectId, RegionLocalParcelId, SaleType, ServerEvent, SimSession, TaskInventoryItem,
+    TerrainLayerType, pcode,
 };
-use sl_types::key::{AgentKey, ObjectKey, OwnerKey, ParcelKey};
+use sl_types::key::{AgentKey, InventoryFolderKey, InventoryKey, ObjectKey, OwnerKey, ParcelKey};
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::map::{Direction, LandArea, RegionCoordinates};
 use sl_types::money::LindenAmount;
@@ -48,7 +51,7 @@ const OVERLAY_WEST_LINE: u8 = 0x40;
 /// The parcel-overlay bit marking a cell on a parcel's south edge.
 const OVERLAY_SOUTH_LINE: u8 = 0x80;
 /// The physics time dilation reported on fixture object updates: real time.
-const REAL_TIME_DILATION: u16 = 0xFFFF;
+pub(crate) const REAL_TIME_DILATION: u16 = 0xFFFF;
 /// The sequence id of an unsolicited agent-parcel push (what OpenSim's
 /// `SendLandUpdateToClient` sends).
 const UNSOLICITED_SEQUENCE_ID: i32 = 0;
@@ -92,12 +95,140 @@ pub struct SceneFixtures {
     ///
     /// [`PrimFixture::animated_mesh`]: crate::fixtures::PrimFixture::animated_mesh
     pub object_animations: Vec<ObjectAnimationFixture>,
+    /// The task (prim) inventories of the region's objects, keyed by the
+    /// object's region-local id: what a `RequestTaskInventory` is answered
+    /// from and what an `UpdateTaskInventory` writes into. An object with no
+    /// entry has an empty inventory, which is what a freshly rezzed prim has.
+    ///
+    /// This lives beside [`objects`] rather than with the other legacy-UDP
+    /// fixtures because it is not a fixture: the contents *serial* is the
+    /// whole observable — a viewer decides a cached listing is stale from it
+    /// alone — and a serial only means anything if the same store both answers
+    /// it and advances it. Keyed by region-local id because that is what the
+    /// request names; the [`ObjectKey`] the reply carries is read off the
+    /// object, so the two can never describe different prims.
+    ///
+    /// [`objects`]: Self::objects
+    pub task_inventories: BTreeMap<RegionLocalObjectId, TaskInventory>,
     /// The region-local id the arriving agent's own avatar object gets. A
     /// real simulator mints one per avatar; with one agent per session a
     /// fixed id is enough, but it must not collide with [`objects`].
     ///
     /// [`objects`]: Self::objects
     pub avatar_local_id: RegionLocalObjectId,
+    /// The highest region-local id [`mint_local_id`] has handed out, so a
+    /// second rez cannot reuse the id of an object a first one has since had
+    /// derezzed. Never lowered.
+    ///
+    /// [`mint_local_id`]: Self::mint_local_id
+    last_minted_local_id: RegionLocalObjectId,
+}
+
+/// One region's world behind its lock: a single store every session in that
+/// region reads and writes, rather than a copy each.
+///
+/// [`parking_lot::Mutex`] rather than the standard one because the driver
+/// takes it inside a synchronous flush and holds it for a handful of map
+/// lookups: there is nothing to await under it, and a lock that cannot be
+/// poisoned needs no error path a fake grid has no answer for.
+#[expect(
+    clippy::module_name_repetitions,
+    reason = "the name is read at its use sites -- a `RegionEntry`'s and a \
+              `SimState`'s field type -- where a bare `World` would not say \
+              whose world it is"
+)]
+pub type RegionWorld = Arc<parking_lot::Mutex<SceneFixtures>>;
+
+/// A change to a region's shared world, and which session made it.
+///
+/// The fake grid runs no simulation loop, so nothing sweeps the region for
+/// changes and streams them: the session that made the change publishes it and
+/// a per-session watcher task streams it to every *other* viewer in the
+/// region. "Other" is what [`source`](Self::source) is for — the session that
+/// made the change was told in the same breath as the mutation, and telling it
+/// again would send every rez down its circuit twice.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RegionUpdate {
+    /// The sequence number of the session that made the change — the one
+    /// session that must *not* be sent it again.
+    pub source: u64,
+    /// What changed.
+    pub change: RegionChange,
+}
+
+/// A change one session made to its region's shared world.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum RegionChange {
+    /// An object was added to the region; every other viewer needs its
+    /// `ObjectUpdate`.
+    Rezzed(Box<Object>),
+    /// An object left the region; every other viewer needs its `KillObject`.
+    Killed(RegionLocalObjectId),
+}
+
+/// The name a viewer gives a prim nobody has named — the reference viewer's
+/// `DEFAULT_OBJECT_NAME`, and what a take files an unnamed prim away as.
+const DEFAULT_OBJECT_NAME: &str = "Object";
+
+/// The creation date stamped on an inventory item the grid mints
+/// (2023-11-14T22:13:20Z).
+///
+/// A fixed instant rather than the wall clock, for the reason nothing else in
+/// this crate reaches for `Instant::now` either: a fake grid built from a seed
+/// mints the same run twice, and a timestamp read off the machine would be the
+/// one field that never matched.
+const FIXTURE_CREATION_DATE: i32 = 1_700_000_000;
+
+/// Permissions with everything granted on every mask: what the fake grid's own
+/// avatar gets on an object it rezzed itself.
+///
+/// The fake grid enforces no permissions — every account owns the region's
+/// content and nothing is for sale — so a mask that withheld anything would be
+/// a rule with no rule behind it.
+const FULL_PERMISSIONS: sl_wire::Permissions5 = sl_wire::Permissions5 {
+    base: sl_wire::Permissions::ALL,
+    owner: sl_wire::Permissions::ALL,
+    group: sl_wire::Permissions::ALL,
+    everyone: sl_wire::Permissions::ALL,
+    next_owner: sl_wire::Permissions::ALL,
+};
+
+/// One in-world object's task (prim) inventory: what it contains and the
+/// serial that says so.
+///
+/// The serial is the contract with the viewer: a simulator bumps it on every
+/// change, and a viewer that sees the same serial twice keeps the listing it
+/// already downloaded. [`write`](Self::write) is therefore the only way to put
+/// an item in, because it is the only way that also advances it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TaskInventory {
+    /// The contents serial reported in the `ReplyTaskInventory`.
+    pub serial: i16,
+    /// The items the object contains.
+    pub items: Vec<TaskInventoryItem>,
+}
+
+impl TaskInventory {
+    /// An inventory holding `items`, already at `serial` — a fixture stating
+    /// what an object contains before anybody logged in.
+    #[must_use]
+    pub const fn stated(serial: i16, items: Vec<TaskInventoryItem>) -> Self {
+        Self { serial, items }
+    }
+
+    /// Writes `item` in, replacing an entry with the same id, and advances the
+    /// serial.
+    ///
+    /// The serial saturates rather than wrapping: a wrap would let a listing
+    /// look unchanged after 32768 writes, and no fake-grid session lives that
+    /// long — the saturation is a boundary that cannot be reached, not a
+    /// behaviour anything depends on.
+    pub fn write(&mut self, item: TaskInventoryItem) {
+        self.items.retain(|held| held.item_id != item.item_id);
+        self.items.push(item);
+        self.serial = self.serial.saturating_add(1);
+    }
 }
 
 /// The grid-wide identity of one parcel: the half a region-local
@@ -215,8 +346,61 @@ impl SceneFixtures {
             objects: Vec::new(),
             npcs: Vec::new(),
             object_animations: Vec::new(),
+            task_inventories: BTreeMap::new(),
             avatar_local_id: RegionLocalObjectId(1),
+            last_minted_local_id: RegionLocalObjectId(0),
         }
+    }
+
+    /// Adds an object's stated task inventory under its region-local id — a
+    /// fixture saying what a prim already contains.
+    ///
+    /// Nothing checks that an object with that id exists: a fixture builds its
+    /// objects and its contents in whatever order it likes, and the answer
+    /// path resolves the object at request time.
+    pub fn add_task_inventory(&mut self, local_id: RegionLocalObjectId, inventory: TaskInventory) {
+        let _previous = self.task_inventories.insert(local_id, inventory);
+    }
+
+    /// Mints a region-local id no object in the region holds — the id a
+    /// simulator hands a freshly rezzed prim.
+    ///
+    /// One above the highest id in use, counting the objects, the NPCs, the
+    /// agent's own avatar and every id previously minted, so a rez that
+    /// followed a derez cannot hand back the derezzed object's id (a viewer
+    /// keyed on it would silently update the wrong thing).
+    pub fn mint_local_id(&mut self) -> RegionLocalObjectId {
+        let highest = self
+            .all_objects()
+            .iter()
+            .map(|object| object.local_id.0)
+            .chain(std::iter::once(self.avatar_local_id.0))
+            .chain(std::iter::once(self.last_minted_local_id.0))
+            .max()
+            .unwrap_or(0);
+        self.last_minted_local_id = RegionLocalObjectId(highest.saturating_add(1));
+        self.last_minted_local_id
+    }
+
+    /// The object with the given region-local id, prims and NPC bodies alike.
+    #[must_use]
+    pub fn object_by_local_id(&self, local_id: RegionLocalObjectId) -> Option<Object> {
+        self.all_objects()
+            .into_iter()
+            .find(|object| object.local_id == local_id)
+    }
+
+    /// Removes the prim with the given region-local id, returning it.
+    ///
+    /// Only [`objects`](Self::objects): an NPC's body is not a prim anybody
+    /// may derez, and its task inventory goes with it either way.
+    pub fn remove_object(&mut self, local_id: RegionLocalObjectId) -> Option<Object> {
+        let index = self
+            .objects
+            .iter()
+            .position(|object| object.local_id == local_id)?;
+        let _contents = self.task_inventories.remove(&local_id);
+        Some(self.objects.remove(index))
     }
 
     /// Adds one parcel with both its halves: the region-local record a
@@ -655,6 +839,50 @@ pub fn box_prim(
     object
 }
 
+/// The object a client's [`PrimShape`] rezzes as: the shape it built, at the
+/// ids and owner the simulator chose for it.
+///
+/// The client sends every path/profile field already quantized (it is building
+/// the same wire block a simulator would send back), so nothing here is
+/// converted — the numbers move across as they are, and the object a rez
+/// produces is the object the client described.
+#[must_use]
+pub fn prim_from_shape(
+    local_id: RegionLocalObjectId,
+    full_id: ObjectKey,
+    owner: AgentKey,
+    shape: &PrimShape,
+) -> Object {
+    let mut object = bare_object(local_id, full_id, owner, shape.position.clone());
+    object.pcode = shape.pcode;
+    object.state = shape.state;
+    object.material = shape.material.to_code();
+    object.update_flags = shape.add_flags;
+    object.scale = shape.scale.clone();
+    object.motion.rotation = shape.rotation.clone();
+    object.shape = PrimShapeParams {
+        path_curve: shape.path_curve,
+        profile_curve: shape.profile_curve,
+        path_begin: shape.path_begin,
+        path_end: shape.path_end,
+        path_scale_x: shape.path_scale_x,
+        path_scale_y: shape.path_scale_y,
+        path_shear_x: shape.path_shear_x,
+        path_shear_y: shape.path_shear_y,
+        path_twist: shape.path_twist,
+        path_twist_begin: shape.path_twist_begin,
+        path_radius_offset: shape.path_radius_offset,
+        path_taper_x: shape.path_taper_x,
+        path_taper_y: shape.path_taper_y,
+        path_revolutions: shape.path_revolutions,
+        path_skew: shape.path_skew,
+        profile_begin: shape.profile_begin,
+        profile_end: shape.profile_end,
+        profile_hollow: shape.profile_hollow,
+    };
+    object
+}
+
 /// An avatar object for `identity` standing at `position`: the `LEGACY_AVATAR`
 /// pcode, the agent id as the full id, and the `FirstName` / `LastName` /
 /// `Title` name-values a simulator attaches so the viewer can label it.
@@ -944,23 +1172,166 @@ fn push_terrain(terrain: &TerrainFixture, sim: &mut SimSession, now: Instant) {
     }
 }
 
-/// Answers one drained [`ServerEvent`] from the world fixtures, under the
-/// session lock: a parcel request (by rectangle or id) gets the covering
+/// Answers one drained [`ServerEvent`] against the region's world, under the
+/// session lock.
+///
+/// The **reads**: a parcel request (by rectangle or id) gets the covering
 /// parcel's record with the request's sequence id echoed — or a
 /// [`ParcelRequestResult::NoData`] reply on a miss, as a simulator says
 /// "no such parcel" — a dwell or search-listing request gets the parcel's
-/// [`ParcelListing`] half, and an object refetch gets a full `ObjectUpdate` of
+/// [`ParcelListing`] half, an object refetch gets a full `ObjectUpdate` of
 /// the matching fixtures (an unknown id is silently dropped, as a simulator
-/// drops a stale refetch).
+/// drops a stale refetch), and a task-inventory request gets the object's
+/// contents listing.
+///
+/// The **writes**: a rez mints an object into the region, a derez files it
+/// away and takes it out again, and a task-inventory update copies an agent
+/// inventory item into a prim. Each returns what it changed as a
+/// [`RegionChange`] so the region's other sessions can be told; the answering
+/// session is told directly, in the same breath as the mutation, because a
+/// client that rezzed something has to learn the ids it did not choose before
+/// it can do anything else with it.
+///
+/// `mint` supplies the ids the simulator chooses (object keys, inventory item
+/// ids): the grid's own [`IdMinter`](crate::runtime::IdMinter) reaches through
+/// here, so a seeded grid rezzes the same object twice.
 pub(crate) fn answer_world_request(
-    world: &SceneFixtures,
+    world: &mut SceneFixtures,
     identity: &AvatarIdentity,
     region: &RegionIdentity,
+    mint: &dyn Fn() -> uuid::Uuid,
     sim: &mut SimSession,
     event: &ServerEvent,
     now: Instant,
-) {
+) -> Vec<RegionChange> {
     match event {
+        // A new prim. The simulator owns both of the object's ids -- the
+        // region-local handle and the full key -- so the client cannot know
+        // what it rezzed until the update comes back.
+        ServerEvent::RezObject { params } => {
+            let local_id = world.mint_local_id();
+            let object = prim_from_shape(
+                local_id,
+                ObjectKey::from(mint()),
+                identity.agent_id,
+                &params.shape,
+            );
+            world.objects.push(object.clone());
+            if let Err(error) =
+                sim.send_object_update(std::slice::from_ref(&object), REAL_TIME_DILATION, now)
+            {
+                tracing::warn!("streaming a rezzed object back failed: {error}");
+            }
+            return vec![RegionChange::Rezzed(Box::new(object))];
+        }
+        // A take, a save, a return, a delete to trash. What each does is the
+        // destination's business, and the destination alone decides both
+        // halves: whether an inventory item is minted, and whether the world
+        // copy goes.
+        ServerEvent::DerezObjects {
+            local_ids,
+            destination,
+            transaction_id,
+            ..
+        } => {
+            let mut created = Vec::new();
+            let mut changes = Vec::new();
+            let mut killed = Vec::new();
+            for local_id in local_ids {
+                let Some(object) = world.object_by_local_id(*local_id) else {
+                    // The client believes in an object this region does not
+                    // have. A real simulator kills it on the client rather
+                    // than ignoring the request, so the two agree again — but
+                    // it is *this* client that is out of step, and telling the
+                    // region's other viewers to forget an object they may
+                    // legitimately hold would spread the disagreement rather
+                    // than settle it.
+                    killed.push(*local_id);
+                    continue;
+                };
+                if let Some(folder) = destination.agent_folder() {
+                    created.push(taken_item(&object, folder, identity.agent_id, mint));
+                }
+                if destination.removes_from_world() {
+                    let _removed = world.remove_object(*local_id);
+                    killed.push(*local_id);
+                    changes.push(RegionChange::Killed(*local_id));
+                }
+            }
+            if created.is_empty() {
+                // Nothing was filed, so there is no `UpdateCreateInventoryItem`
+                // to correlate the client's transaction with -- which is
+                // exactly what a `DeRezAck` is for.
+                if let Err(error) = sim.send_derez_ack(*transaction_id, true, now) {
+                    tracing::warn!("acknowledging a derez failed: {error}");
+                }
+            } else if let Err(error) =
+                sim.send_inventory_item_created(&created, *transaction_id, true, now)
+            {
+                tracing::warn!("handing over a taken object's inventory item failed: {error}");
+            }
+            for item in created {
+                sim.agent_inventory_mut().insert_item(item);
+            }
+            if !killed.is_empty()
+                && let Err(error) = sim.send_kill_object(&killed, now)
+            {
+                tracing::warn!("killing a derezzed object failed: {error}");
+            }
+            return changes;
+        }
+        // The contents listing of a prim. An object with nothing in it is
+        // answered with serial zero and an *empty* filename -- a real
+        // simulator writes no Xfer file for an empty inventory, and a viewer
+        // reads the empty name as "nothing to download".
+        ServerEvent::RequestTaskInventory { local_id } => {
+            let Some(object) = world.object_by_local_id(*local_id) else {
+                tracing::debug!(
+                    "a task inventory was requested for {local_id:?}, which is not here"
+                );
+                return Vec::new();
+            };
+            let contents = world.task_inventories.get(local_id);
+            let result = match contents {
+                Some(contents) if !contents.items.is_empty() => {
+                    sim.serve_task_inventory(object.full_id, contents.serial, &contents.items, now)
+                }
+                empty => sim.send_reply_task_inventory(
+                    &sl_proto::TaskInventoryReply {
+                        task: object.full_id,
+                        serial: empty.map_or(0, |contents| contents.serial),
+                        filename: String::new(),
+                    },
+                    now,
+                ),
+            };
+            if let Err(error) = result {
+                tracing::warn!("serving the task inventory of {local_id:?} failed: {error}");
+            }
+        }
+        // An agent inventory item dropped into a prim. The simulator resolves
+        // the item by id from the agent's *own* inventory rather than trusting
+        // the copy the client sent, mints a fresh task item id for it (a task
+        // copy is a new item, not the same one in two places), and the write
+        // advances the object's contents serial.
+        ServerEvent::UpdateTaskInventory { local_id, item, .. } => {
+            let Some(object) = world.object_by_local_id(*local_id) else {
+                tracing::debug!("a task inventory write named {local_id:?}, which is not here");
+                return Vec::new();
+            };
+            let Some(source) = sim.agent_inventory().item(item.item_id).cloned() else {
+                tracing::debug!(
+                    "a task inventory write named item {}, which this agent does not hold",
+                    item.item_id
+                );
+                return Vec::new();
+            };
+            world
+                .task_inventories
+                .entry(*local_id)
+                .or_default()
+                .write(task_item_from(&source, object.full_id, mint));
+        }
         // The agent asked to sit on something. A simulator answers a sit on an
         // object it has with an `AvatarSitResponse` and simply does not answer
         // one it does not (the client's own sit timeout recovers that), so an
@@ -972,7 +1343,7 @@ pub(crate) fn answer_world_request(
                 .find(|object| object.full_id == *target)
             else {
                 tracing::debug!("a sit was requested on {target}, which this region does not have");
-                return;
+                return Vec::new();
             };
             // The seat has a sit target, so the click point is ignored — see
             // [`SIT_TARGET_OFFSET`]. The `offset` the client sent is where it
@@ -1003,7 +1374,7 @@ pub(crate) fn answer_world_request(
                 .into_iter()
                 .find(|object| object.full_id == *seat)
             else {
-                return;
+                return Vec::new();
             };
             push_seated_avatar(
                 world,
@@ -1070,7 +1441,7 @@ pub(crate) fn answer_world_request(
         ServerEvent::RequestParcelDwell { local_id } => {
             let Some(listing) = world.listing_by_local_id(*local_id) else {
                 tracing::debug!("a dwell was requested for parcel {local_id:?}, which is not here");
-                return;
+                return Vec::new();
             };
             if let Err(error) =
                 sim.send_parcel_dwell_reply(*local_id, listing.parcel_id, listing.dwell, now)
@@ -1086,7 +1457,7 @@ pub(crate) fn answer_world_request(
                 tracing::debug!(
                     "a listing was requested for parcel {parcel_id}, which is not here"
                 );
-                return;
+                return Vec::new();
             };
             if let Err(error) = sim.send_parcel_info_reply(&listing.details(parcel, region), now) {
                 tracing::warn!("answering a parcel info request failed: {error}");
@@ -1105,6 +1476,94 @@ pub(crate) fn answer_world_request(
             }
         }
         _other => {}
+    }
+    Vec::new()
+}
+
+/// The agent inventory item a **take** files an object away as.
+///
+/// A real grid also writes the object's serialisation as an asset and points
+/// the item at it; nothing here fetches that asset (the take is observable
+/// through the item and the `KillObject`), so the id is minted and left
+/// unbacked rather than invented as nil — an item with a nil asset id is a
+/// *broken* item, and a viewer says so.
+fn taken_item(
+    object: &Object,
+    folder: InventoryFolderKey,
+    owner: AgentKey,
+    mint: &dyn Fn() -> uuid::Uuid,
+) -> InventoryItem {
+    let named = object
+        .properties
+        .as_ref()
+        .map_or(DEFAULT_OBJECT_NAME, |properties| properties.name.as_str());
+    InventoryItem {
+        item_id: InventoryKey::from(mint()),
+        folder_id: folder,
+        name: named.to_owned(),
+        description: object
+            .properties
+            .as_ref()
+            .map_or_else(String::new, |properties| properties.description.clone()),
+        asset_id: mint(),
+        item_type: narrow_code(AssetType::Object.to_code()),
+        inv_type: narrow_code(InventoryType::Object.to_code()),
+        flags: 0,
+        sale_type: SaleType::NotForSale.to_code(),
+        sale_price: None,
+        creation_date: FIXTURE_CREATION_DATE,
+        owner: OwnerKey::Agent(owner),
+        last_owner_id: uuid::Uuid::nil(),
+        creator_id: owner,
+        group: None,
+        permissions: FULL_PERMISSIONS,
+    }
+}
+
+/// An `LLAssetType` / `LLInventoryType` code narrowed to the `i8` an inventory
+/// item's wire block carries.
+///
+/// Every code either enum defines fits in an `i8`; one that did not would be a
+/// code no viewer could read off the wire either, so it falls back to LL's own
+/// "none" sentinel rather than to a plausible-looking wrong class.
+fn narrow_code(code: i32) -> i8 {
+    i8::try_from(code).unwrap_or(UNKNOWN_ASSET_CLASS)
+}
+
+/// LL's "no asset class" sentinel (`LLAssetType::AT_NONE`), which is also
+/// `LLInventoryType::IT_NONE`.
+const UNKNOWN_ASSET_CLASS: i8 = -1;
+
+/// The task-inventory entry an agent inventory item becomes when it is dropped
+/// into a prim.
+///
+/// The item id is **fresh**: a task copy is a new item that happens to name the
+/// same asset, which is why the conformance case matches the dropped item by
+/// name rather than by id. Everything else is carried across from the item the
+/// simulator holds, not from the copy the client sent.
+fn task_item_from(
+    source: &InventoryItem,
+    task: ObjectKey,
+    mint: &dyn Fn() -> uuid::Uuid,
+) -> TaskInventoryItem {
+    TaskInventoryItem {
+        item_id: InventoryKey::from(mint()),
+        parent_task: task,
+        permissions: source.permissions,
+        creator_id: source.creator_id,
+        last_owner_id: AgentKey::from(source.last_owner_id),
+        owner: source.owner,
+        group: source.group,
+        group_owned: source.owner.is_group(),
+        asset_id: Some(AssetKey::from(source.asset_id)),
+        asset_type: AssetType::from_code(i32::from(source.item_type)),
+        inv_type: InventoryType::from_code(i32::from(source.inv_type)),
+        flags: source.flags,
+        sale_type: SaleType::from_code(source.sale_type),
+        sale_price: source.sale_price.clone().unwrap_or(LindenAmount(0)),
+        name: source.name.clone(),
+        description: source.description.clone(),
+        creation_date: source.creation_date,
     }
 }
 
@@ -1375,5 +1834,147 @@ mod test {
             sl_anim::builtin_animation_by_name("stand").map(|found| found.id),
             Some(STAND_ANIMATION)
         );
+    }
+
+    /// A minted region-local id is above everything the region already uses —
+    /// its prims, its NPC bodies and the arriving agent's own avatar — and
+    /// stays above an id that has since been derezzed, so a viewer keyed on a
+    /// local id can never be handed a second object under the first one's
+    /// handle.
+    #[test]
+    fn minted_local_ids_never_collide_with_a_used_or_freed_one() {
+        let owner = agent(0x1);
+        let mut world = SceneFixtures::new();
+        world.avatar_local_id = RegionLocalObjectId(9);
+        world.objects.push(box_prim(
+            RegionLocalObjectId(4),
+            ObjectKey::from(uuid::Uuid::from_u128(4)),
+            owner,
+            ZERO,
+            ZERO,
+        ));
+
+        // Above the avatar, which is the highest id in use -- not above the
+        // highest *prim*.
+        let first = world.mint_local_id();
+        assert_eq!(first, RegionLocalObjectId(10));
+
+        world.objects.push(box_prim(
+            first,
+            ObjectKey::from(uuid::Uuid::from_u128(10)),
+            owner,
+            ZERO,
+            ZERO,
+        ));
+        let second = world.mint_local_id();
+        assert_eq!(second, RegionLocalObjectId(11));
+
+        // The freed id is not handed out again.
+        let removed = world.remove_object(first);
+        assert!(removed.is_some(), "the minted prim was not in the region");
+        assert_eq!(world.mint_local_id(), RegionLocalObjectId(12));
+    }
+
+    /// Removing a prim takes its contents with it: an id that comes back
+    /// round to a new object must not inherit the old one's inventory.
+    #[test]
+    fn removing_a_prim_drops_its_task_inventory() {
+        let mut world = SceneFixtures::new();
+        let local_id = RegionLocalObjectId(4);
+        world.objects.push(box_prim(
+            local_id,
+            ObjectKey::from(uuid::Uuid::from_u128(4)),
+            agent(0x1),
+            ZERO,
+            ZERO,
+        ));
+        world.add_task_inventory(local_id, TaskInventory::stated(3, Vec::new()));
+        let _removed = world.remove_object(local_id);
+        assert_eq!(world.task_inventories.get(&local_id), None);
+    }
+
+    /// A task-inventory write advances the serial — which is the whole
+    /// observable, since a viewer that sees the same serial twice keeps the
+    /// listing it already downloaded — and re-writing one item replaces it
+    /// rather than listing it twice.
+    #[test]
+    fn a_task_inventory_write_advances_the_serial() {
+        let task = ObjectKey::from(uuid::Uuid::from_u128(0x7));
+        let mut contents = TaskInventory::default();
+        assert_eq!(contents.serial, 0);
+
+        let item = task_item(task, 0x11, "Notecard");
+        contents.write(item.clone());
+        assert_eq!(contents.serial, 1);
+        assert_eq!(contents.items.len(), 1);
+
+        contents.write(TaskInventoryItem {
+            name: "Renamed".to_owned(),
+            ..item
+        });
+        assert_eq!(contents.serial, 2, "a re-write is still a change");
+        assert_eq!(contents.items.len(), 1, "the same id was listed twice");
+        assert_eq!(
+            contents.items.first().map(|held| held.name.as_str()),
+            Some("Renamed")
+        );
+
+        contents.write(task_item(task, 0x12, "Script"));
+        assert_eq!(contents.serial, 3);
+        assert_eq!(contents.items.len(), 2);
+    }
+
+    /// The prim a client's shape rezzes as carries the shape it described:
+    /// the client sends the path/profile fields already quantized, so the
+    /// object a rez produces round-trips them unchanged.
+    #[test]
+    fn a_rezzed_prim_carries_the_shape_the_client_described() {
+        let position = Vector {
+            x: 12.0,
+            y: 34.0,
+            z: 56.0,
+        };
+        let mut shape = sl_proto::PrimShape::cube(position.clone());
+        shape.profile_hollow = 25_000;
+        shape.path_twist = 40;
+        shape.state = 3;
+        let object = prim_from_shape(
+            RegionLocalObjectId(7),
+            ObjectKey::from(uuid::Uuid::from_u128(0x7)),
+            agent(0x1),
+            &shape,
+        );
+        assert_eq!(object.local_id, RegionLocalObjectId(7));
+        assert_eq!(object.motion.position, position);
+        assert_eq!(object.scale, shape.scale);
+        assert_eq!(object.state, 3);
+        assert_eq!(object.shape.profile_hollow, 25_000);
+        assert_eq!(object.shape.path_twist, 40);
+        assert_eq!(object.shape.path_curve, shape.path_curve);
+        assert_eq!(object.shape.profile_curve, shape.profile_curve);
+        assert_eq!(object.material, shape.material.to_code());
+    }
+
+    /// A task-inventory item fixture with a given id and name.
+    fn task_item(task: ObjectKey, item: u128, name: &str) -> TaskInventoryItem {
+        TaskInventoryItem {
+            item_id: InventoryKey::from(uuid::Uuid::from_u128(item)),
+            parent_task: task,
+            permissions: FULL_PERMISSIONS,
+            creator_id: agent(0x1),
+            last_owner_id: agent(0x1),
+            owner: OwnerKey::Agent(agent(0x1)),
+            group: None,
+            group_owned: false,
+            asset_id: None,
+            asset_type: AssetType::Notecard,
+            inv_type: InventoryType::Notecard,
+            flags: 0,
+            sale_type: SaleType::NotForSale,
+            sale_price: LindenAmount(0),
+            name: name.to_owned(),
+            description: String::new(),
+            creation_date: FIXTURE_CREATION_DATE,
+        }
     }
 }

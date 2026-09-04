@@ -94,8 +94,9 @@ use sl_wire::messages::{
     RemoveInventoryItemAgentDataBlock, RemoveInventoryItemInventoryDataBlock,
     RemoveInventoryObjects, RemoveInventoryObjectsAgentDataBlock,
     RemoveInventoryObjectsFolderDataBlock, RemoveInventoryObjectsItemDataBlock, ReplyTaskInventory,
-    ReplyTaskInventoryInventoryDataBlock, UserInfoReply, UserInfoReplyAgentDataBlock,
-    UserInfoReplyUserDataBlock,
+    ReplyTaskInventoryInventoryDataBlock, UpdateCreateInventoryItem,
+    UpdateCreateInventoryItemAgentDataBlock, UpdateCreateInventoryItemInventoryDataBlock,
+    UserInfoReply, UserInfoReplyAgentDataBlock, UserInfoReplyUserDataBlock,
 };
 use sl_wire::messages::{
     Error as ErrorWire, ErrorAgentDataBlock, ErrorDataBlock,
@@ -174,29 +175,29 @@ use crate::sim_inventory::{SimInventoryError, SimInventoryTree};
 use crate::sim_voice::{SimVoice, VoiceProvisionOutcome, VoiceProvisionRefusal};
 use crate::types::directory::category_from_wire;
 use crate::types::{
-    AlertInfo, AssetType, AttachmentMode, AttachmentPoint, AvatarAppearance, AvatarName,
-    AvatarPickerResult, Camera, ChatSource, ChatType, ClassifiedCategory, CoarseLocation,
-    DEFAULT_SKY_FRAME, DEFAULT_WATER_FRAME, DayCycle, DayCycleFrame, DetachOrder,
-    DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
-    DirPeopleResult, DirPlaceResult, DirectoryVisibility, DisplayNameUpdate, EconomyData,
-    EjectAction, EnvironmentSettings, EnvironmentUpdate, EstateCovenant, EventInfo,
-    FeatureDisabled, FollowCamPropertyValue, FreezeAction, FriendRights, GenericMessage,
-    GenericStreamingMessage, GestureActivation, GodRegionUpdate, GroupAccountDetails,
-    GroupAccountSummary, GroupAccountTransactions, GroupActiveProposalItem, GroupName,
-    GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
+    AddPrimParams, AlertInfo, AssetType, AttachmentMode, AttachmentPoint, AvatarAppearance,
+    AvatarName, AvatarPickerResult, Camera, ChatSource, ChatType, ClassifiedCategory,
+    CoarseLocation, DEFAULT_SKY_FRAME, DEFAULT_WATER_FRAME, DayCycle, DayCycleFrame,
+    DeRezDestination, DetachOrder, DirClassifiedResult, DirEventResult, DirFindFlags,
+    DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, DirectoryVisibility,
+    DisplayNameUpdate, EconomyData, EjectAction, EnvironmentSettings, EnvironmentUpdate,
+    EstateCovenant, EventInfo, FeatureDisabled, FollowCamPropertyValue, FreezeAction, FriendRights,
+    GenericMessage, GenericStreamingMessage, GestureActivation, GodRegionUpdate,
+    GroupAccountDetails, GroupAccountSummary, GroupAccountTransactions, GroupActiveProposalItem,
+    GroupName, GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
     InventoryItemMove, InventoryType, Kick, LandBrushAction, LandBrushSize, LandEdit,
     LandSearchType, LandStatItem, LandStatReportType, MapItem, MapItemType, MapLayer,
-    MapRegionInfo, MapRequestFlags, MeanCollision, MovementMode, NavMeshStatus, NewInventoryLink,
-    NotecardRez, Object, ObjectBuyItem, ObjectExtraParams, ObjectPlayingAnimation,
-    ObjectPropertiesFamily, OpenRegionInfo, ParcelCategory, ParcelDetails, ParcelInfo,
-    ParcelObjectOwner, PlacesResult, PlayingAnimation, Postcard, PrimShapeParams, ProposalVoteId,
-    RegionIdentity, RegionStats, Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment,
-    RezObjectParams, RezScriptParams, SaleType, ScriptControl, ScriptPermissionRequest,
-    ScriptPermissions, ServerError, SetDisplayNameReply, SimWideDeleteFlags, SimulatorTime,
-    SkySettings, StartLocationSlot, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply,
-    TelehubInfo, TerraformArea, TerrainLayerType, TerrainPatch, TextureEntry, Throttle,
-    TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
-    ViewerEffectType, WaterSettings, Wearable,
+    MapRegionInfo, MapRequestFlags, Material, MeanCollision, MovementMode, NavMeshStatus,
+    NewInventoryLink, NotecardRez, Object, ObjectBuyItem, ObjectExtraParams,
+    ObjectPlayingAnimation, ObjectPropertiesFamily, OpenRegionInfo, ParcelCategory, ParcelDetails,
+    ParcelInfo, ParcelObjectOwner, PlacesResult, PlayingAnimation, Postcard, PrimShape,
+    PrimShapeParams, ProposalVoteId, RegionIdentity, RegionStats, Reliability,
+    RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType,
+    ScriptControl, ScriptPermissionRequest, ScriptPermissions, ServerError, SetDisplayNameReply,
+    SimWideDeleteFlags, SimulatorTime, SkySettings, StartLocationSlot, TaskInventoryItem,
+    TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea, TerrainLayerType,
+    TerrainPatch, TextureEntry, Throttle, TransferStatus, Transmit, UpdateGroupInfoParams,
+    UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings, Wearable,
 };
 use crate::types::{Event, EventId};
 use sl_wire::AbuseReport;
@@ -2069,6 +2070,51 @@ pub enum ServerEvent {
         local_id: RegionLocalObjectId,
         /// The object's complete extra-parameter state.
         params: ObjectExtraParams,
+    },
+    /// The client rezzed a **new** primitive from a shape it built itself
+    /// (`ObjectAdd`). The inverse of the client's
+    /// [`Session::rez_object`](crate::Session::rez_object).
+    ///
+    /// A simulator answers by minting the object's region-local and full ids,
+    /// adding it to the region, and streaming it back in an `ObjectUpdate`
+    /// ([`send_object_update`](SimSession::send_object_update)) — which is how
+    /// the rezzing client learns the ids it did not choose.
+    ///
+    /// Distinct from [`RezObjectFromInventory`](Self::RezObjectFromInventory),
+    /// which is the `RezObject` *message* and rezzes an existing inventory
+    /// item: this one creates a prim from nothing.
+    RezObject {
+        /// The shape of the new prim and the ray the client placed it with.
+        params: AddPrimParams,
+    },
+    /// The client derezzed one or more in-world objects — a take, a save, a
+    /// return, a delete to trash (`DeRezObject`). The inverse of the client's
+    /// [`Session::derez_objects`](crate::Session::derez_objects).
+    ///
+    /// What the simulator does with them is entirely
+    /// [`destination`](Self::DerezObjects::destination)'s business:
+    /// [`DeRezDestination::agent_folder`] names the folder an inventory item is
+    /// minted in (answered with an `UpdateCreateInventoryItem`) and
+    /// [`DeRezDestination::removes_from_world`] says whether the world copy
+    /// then goes (answered with a `KillObject`). A destination that does
+    /// neither is acknowledged with a
+    /// [`send_derez_ack`](SimSession::send_derez_ack).
+    DerezObjects {
+        /// The region-local ids of the objects being derezzed. A viewer sends
+        /// its whole selection, so this is a batch even for one object.
+        local_ids: Vec<RegionLocalObjectId>,
+        /// Where the objects go.
+        destination: DeRezDestination,
+        /// The client's transaction id, echoed back in a `DeRezAck` or in the
+        /// `UpdateCreateInventoryItem` the take produces.
+        transaction_id: TransactionId,
+        /// The active group the derez is performed under (`None` for none).
+        group_id: Option<GroupKey>,
+        /// How many packets the client is splitting its selection across, and
+        /// which of them this is (`PacketCount` / `PacketNumber`). A viewer
+        /// sends `1` / `0` for any selection that fits one message, which is
+        /// every selection a viewer actually makes.
+        packet: (u8, u8),
     },
     /// The client rezzed an inventory item into the world as a new object
     /// (`RezObject`). The inverse of the client's
@@ -7101,6 +7147,84 @@ impl SimSession {
         Ok(())
     }
 
+    /// Sends an `UpdateCreateInventoryItem` — hands the client the inventory
+    /// items the simulator just minted or re-wrote (the inverse of the client's
+    /// [`Event::InventoryItemCreated`](crate::Event::InventoryItemCreated)).
+    ///
+    /// This is how every server-side inventory *creation* is announced: the
+    /// reply to a `CreateInventoryItem`, the item a take
+    /// ([`ServerEvent::DerezObjects`]) files away, an accepted inventory offer,
+    /// a completed asset upload. `transaction` echoes whatever the client
+    /// correlated its request with (nil where it sent none), and
+    /// `sim_approved` is the simulator's verdict on the item's permissions —
+    /// `false` marks an item the client should treat as unconfirmed.
+    ///
+    /// The block is repeatable and the client surfaces one event per entry, so
+    /// a batch of items goes in one message.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_inventory_item_created(
+        &mut self,
+        items: &[InventoryItem],
+        transaction: TransactionId,
+        sim_approved: bool,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let mut inventory_data = Vec::with_capacity(items.len());
+        for item in items {
+            let (owner_id, group_id) = crate::types::object_owner_to_wire(item.owner, item.group);
+            inventory_data.push(UpdateCreateInventoryItemInventoryDataBlock {
+                item_id: item.item_id.uuid(),
+                folder_id: item.folder_id.uuid(),
+                // The async callback id is the *client's*, and only a request
+                // that carried one gets it echoed; a take carries none, so the
+                // simulator writes the "no callback" zero.
+                callback_id: 0,
+                creator_id: item.creator_id.uuid(),
+                owner_id,
+                group_id,
+                base_mask: item.permissions.base.bits(),
+                owner_mask: item.permissions.owner.bits(),
+                group_mask: item.permissions.group.bits(),
+                everyone_mask: item.permissions.everyone.bits(),
+                next_owner_mask: item.permissions.next_owner.bits(),
+                group_owned: item.owner.is_group(),
+                asset_id: item.asset_id,
+                r#type: item.item_type,
+                inv_type: item.inv_type,
+                flags: item.flags,
+                sale_type: item.sale_type,
+                sale_price: crate::types::linden_price_to_wire(
+                    "SalePrice",
+                    item.sale_price.as_ref(),
+                )?,
+                name: with_nul(&item.name),
+                description: with_nul(&item.description),
+                creation_date: item.creation_date,
+                // The permissions checksum a viewer recomputes to notice a
+                // tampered item. The client's decode discards it, so a
+                // simulator that has no reason to lie writes zero.
+                crc: 0,
+            });
+        }
+        let message = AnyMessage::UpdateCreateInventoryItem(UpdateCreateInventoryItem {
+            agent_data: UpdateCreateInventoryItemAgentDataBlock {
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
+                sim_approved,
+                transaction_id: transaction.get(),
+            },
+            inventory_data,
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
     /// Sends a `RemoveInventoryItem` — tells the client the simulator deleted one
     /// or more inventory items server-side, so a client mirroring inventory can
     /// drop them (the inverse of the client's
@@ -9405,6 +9529,71 @@ impl SimSession {
                         params: decode_extra_param_blocks(blocks),
                     });
                 }
+            }
+            AnyMessage::ObjectAdd(add) => {
+                let data = &add.object_data;
+                self.events.push_back(ServerEvent::RezObject {
+                    params: AddPrimParams {
+                        group_id: crate::types::optional_key_from_wire(add.agent_data.group_id),
+                        shape: PrimShape {
+                            pcode: data.p_code,
+                            material: Material::from_code(data.material),
+                            add_flags: data.add_flags,
+                            path_curve: data.path_curve,
+                            profile_curve: data.profile_curve,
+                            path_begin: data.path_begin,
+                            path_end: data.path_end,
+                            path_scale_x: data.path_scale_x,
+                            path_scale_y: data.path_scale_y,
+                            path_shear_x: data.path_shear_x,
+                            path_shear_y: data.path_shear_y,
+                            path_twist: data.path_twist,
+                            path_twist_begin: data.path_twist_begin,
+                            path_radius_offset: data.path_radius_offset,
+                            path_taper_x: data.path_taper_x,
+                            path_taper_y: data.path_taper_y,
+                            path_revolutions: data.path_revolutions,
+                            path_skew: data.path_skew,
+                            profile_begin: data.profile_begin,
+                            profile_end: data.profile_end,
+                            profile_hollow: data.profile_hollow,
+                            scale: data.scale.clone(),
+                            rotation: data.rotation.clone(),
+                            // The block carries no position of its own: where
+                            // the prim lands is the ray's end point.
+                            position: data.ray_end.clone(),
+                            state: data.state,
+                        },
+                        bypass_raycast: data.bypass_raycast != 0,
+                        ray_start: data.ray_start.clone(),
+                        ray_end: data.ray_end.clone(),
+                        ray_target_id: crate::types::optional_key_from_wire(data.ray_target_id),
+                        ray_end_is_intersection: data.ray_end_is_intersection != 0,
+                    },
+                });
+            }
+            AnyMessage::DeRezObject(derez) => {
+                let block = &derez.agent_block;
+                // A destination byte no `DRD_*` value uses names nothing the
+                // simulator could act on, so the message is dropped whole —
+                // the same silence OpenSim's `DeRezObjects` gives an action
+                // its switch has no case for.
+                let Some(destination) =
+                    DeRezDestination::from_code(block.destination, block.destination_id)
+                else {
+                    return Ok(());
+                };
+                self.events.push_back(ServerEvent::DerezObjects {
+                    local_ids: derez
+                        .object_data
+                        .iter()
+                        .map(|object| RegionLocalObjectId(object.object_local_id))
+                        .collect(),
+                    destination,
+                    transaction_id: TransactionId::from(block.transaction_id),
+                    group_id: crate::types::optional_key_from_wire(block.group_id),
+                    packet: (block.packet_count, block.packet_number),
+                });
             }
             AnyMessage::RezObject(rez) => {
                 let rez_data = &rez.rez_data;

@@ -129,10 +129,10 @@ pub use sim_voice::{
 };
 pub use terrain::encode_layer;
 pub use types::{
-    ASSET_CODE_LINK, ASSET_CODE_LINK_FOLDER, ActiveGroup, AgentOrObjectKey, AlertInfo, Asset,
-    AssetType, AssetUpdateLocation, AttachmentMode, AttachmentPoint, AvatarAppearance,
-    AvatarAttachment, AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarName,
-    AvatarPick, AvatarPickerResult, AvatarProperties, BUILTIN_BUMPMAP_TEXTURES,
+    ASSET_CODE_LINK, ASSET_CODE_LINK_FOLDER, ActiveGroup, AddPrimParams, AgentOrObjectKey,
+    AlertInfo, Asset, AssetType, AssetUpdateLocation, AttachmentMode, AttachmentPoint,
+    AvatarAppearance, AvatarAttachment, AvatarClassified, AvatarGroupMembership, AvatarInterests,
+    AvatarName, AvatarPick, AvatarPickerResult, AvatarProperties, BUILTIN_BUMPMAP_TEXTURES,
     BUILTIN_ENVIRONMENT_TEXTURES, BUILTIN_VIEWER_TEXTURES, BUILTIN_WATER_PLANE_TEXTURES, Camera,
     CameraError, ChatAudible, ChatMessage, ChatSource, ChatSourceType, ChatType,
     ChatTypeNotAVolume, Child, ClassifiedCategory, ClassifiedInfo, ClassifiedUpdate, ClickAction,

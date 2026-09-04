@@ -8673,6 +8673,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "parking_lot",
  "pretty_assertions",
  "reqwest 0.12.28",
  "sl-anim",

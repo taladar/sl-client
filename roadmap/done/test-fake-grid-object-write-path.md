@@ -2,11 +2,14 @@
 id: test-fake-grid-object-write-path
 title: The fake grid has no way to rez, take or fill an object
 topic: test
-status: ready
+status: done
 origin: split out of test-fake-grid-simulator-request-surfaces (2026-09-04)
 points: 5
 refs: [test-fake-grid-simulator-request-surfaces]
 ---
+
+Done 2026-09-04. `task-inventory` is in `fake::OFFLINE_CASES` and passes; see
+"What landed" below.
 
 Context: [context/testing.md](../context/testing.md).
 
@@ -53,3 +56,49 @@ Acceptance: `task-inventory` runs in `fake::OFFLINE_CASES` with its test in
 `tests/offline.rs`, rezzing its own container, taking a donor item, dropping it
 in, watching the serial advance, reading the listing back over Xfer and
 trashing the container — with the region left as it was found.
+
+## What landed
+
+The region-scoped store, because the alternative was a rez only its rezzer
+could see. `RegionEntry` now owns one `SceneFixtures` behind one lock
+(`RegionWorld`) and every session in the region holds a clone of the `Arc`;
+the scenario states what the region *starts* as and this is what it has
+*become*. Two regions still hold different worlds, which is what a handover
+needs and what `with_world`'s doc used to promise per session.
+
+Nothing sweeps the region for changes, so each write publishes a
+`RegionUpdate` (tagged with the session that made it) and a per-session
+`run_region_watcher` turns it back into the `ObjectUpdate` / `KillObject` its
+own circuit needs, skipping its own. A lagging watcher warns rather than
+swallowing: a lost `KillObject` is a ghost object for good.
+
+Three things the task did not anticipate:
+
+- **The task inventories had to move.** They were `UdpAssetFixtures`
+  fixtures — bytes stated up front — and a contents serial only means
+  anything if the store that answers it is the store a write advances. They
+  are now `SceneFixtures::task_inventories`, keyed by region-local id, with
+  the `ObjectKey` the reply carries read off the object rather than restated
+  beside it. `TaskInventoryFixture` is gone; `TaskInventory::write` is the
+  only way in, because it is the only way that also bumps the serial.
+- **`DeRezDestination` decides both halves, and OpenSim disagrees with the
+  obvious guess.** `agent_folder()` names the folder an item is minted in and
+  `removes_from_world()` says whether the world copy goes; the pair is
+  `Scene.DeRezObjects`'s `takeCopyGroups` / `takeDeleteGroups` split, which
+  means a *take copy* and a *god take copy* leave the object standing and the
+  three attachment destinations do nothing at all here.
+- **`ObjectAdd` carries no position.** Where the prim lands is `ray_end`, so
+  `AddPrimParams` fills `shape.position` from it and keeps the ray fields
+  besides.
+
+`ObjectAdd` and `DeRezObject` left the `RAW_FORWARDED` ledger, so their
+assertions moved out of the object family test and into
+`sim_session.rs::object_rez_and_take_round_trip`. `send_inventory_item_created`
+is new (`UpdateCreateInventoryItem`), and is what every server-side inventory
+creation should go through from here.
+
+Not done, deliberately: the take mints an asset id and leaves it unbacked —
+nothing serialises the object into an asset, so a client that fetched it would
+get nothing. The case does not, and inventing an object serialisation format
+for a grid with no persistence would be a fixture pretending to be a
+simulator.

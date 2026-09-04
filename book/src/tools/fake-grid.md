@@ -405,9 +405,6 @@ else:
   session and re-armed after each serve, since a `SimSession`
   registration is consumed by the `RequestXfer` that names it. An unknown
   name gets the machine's own `AbortXfer`.
-- **Task inventories** (`task_inventories`, by region-local object id) —
-  answered with `serve_task_inventory` on `RequestTaskInventory`; an
-  unknown id is ignored, as a real simulator ignores a bogus one.
 - **`TransferRequest` sources** — task-item asset bodies by `(task, item)`
   (`task_item_assets`) and the estate covenant notecard
   (`estate_covenant`); a miss is refused with `UnknownSource`, which the
@@ -423,9 +420,14 @@ else:
   builds a flat 256 × 256 RAW32 file for a fixture that deliberately
   differs.
 
-The stock scenario ships `motd.txt`, one scripted object
-(`STOCK_SCRIPTED_OBJECT_LOCAL_ID`) whose task inventory holds a script with
-a body, and a covenant. Behaviour the fixtures do
+Task inventories used to live here too. They do not any more: a contents
+*serial* only means anything if the store that answers it is the store a
+write advances, so the listings moved to the region's world (below), where
+an `UpdateTaskInventory` lands. What is left here is genuinely fixture —
+bytes stated up front and served back unchanged.
+
+The stock scenario ships `motd.txt`, the asset behind the stock scripted
+object's script item, and a covenant. Behaviour the fixtures do
 not cover goes in `Scenario::on_event`, a hook that sees every drained
 `ServerEvent` with the live `SimSession` (after the stock behaviour ran).
 `client_end_to_end.rs` drives each of these flows through the real
@@ -434,8 +436,15 @@ not cover goes in `Scenario::on_event`, a hook that sees every drained
 ## The world fixtures
 
 `Scenario::world` (`SceneFixtures`) holds the region's parcels
-(`ParcelInfo`) and objects (`Object`) — the records the client decodes, so
-a test asserts exactly what it seeded. A real simulator pushes a burst of
+(`ParcelInfo`), objects (`Object`) and per-object task inventories — the
+records the client decodes, so a test asserts exactly what it seeded. The
+scenario states what the region *starts* as; what it has *become* lives on
+the `RegionEntry` (`RegionWorld`, one `SceneFixtures` behind one lock),
+shared by every session in that region rather than cloned into each. Two
+regions never share one, which is what a handover needs: the region an
+object left and the region it arrived in disagree for a moment by design.
+
+A real simulator pushes a burst of
 world state at an arriving viewer that nothing requested, and the driver
 does the same on `AgentArrived`, right after `AgentMovementComplete`:
 
@@ -472,8 +481,53 @@ common fixtures.
 The stock scenario's world is one region-wide public parcel
 (`STOCK_PARCEL_NAME`, `STOCK_PARCEL_LOCAL_ID`, flying and rezzing
 allowed) and the stock scripted object as a 1 m box at
-`STOCK_SCRIPTED_OBJECT_POSITION` — so the task-inventory fixtures describe
-an object a viewer can actually see and click.
+`STOCK_SCRIPTED_OBJECT_POSITION`, holding the stock script item in its task
+inventory — so the listing describes an object a viewer can actually see
+and click, and the two are stated in one place.
+
+### The write path
+
+Everything above is content the region was *handed*. Three client messages
+change what it holds, and all three are answered against the region world:
+
+- **`ObjectAdd` → `ServerEvent::RezObject`.** The simulator mints the
+  object's region-local id (`SceneFixtures::mint_local_id`, always above
+  every id in use *and* every id ever minted, so a rez after a derez cannot
+  reuse a handle a viewer is still keyed on) and its full key, builds the
+  prim from the client's `PrimShape` (`prim_from_shape`), adds it to the
+  region and streams it straight back — the rezzing client cannot use the
+  object until it learns the ids it did not choose.
+- **`DeRezObject` → `ServerEvent::DerezObjects`.** The destination decides
+  both halves and nothing else does: `DeRezDestination::agent_folder` names
+  the folder an inventory item is minted in (answered with an
+  `UpdateCreateInventoryItem`, and filed into the session's own
+  `SimInventoryTree` so a later `UpdateTaskInventory` can resolve it), and
+  `removes_from_world` says whether the world copy then goes (answered with
+  a `KillObject`). A destination that does neither gets a `DeRezAck`. The
+  split follows OpenSim's own `Scene.DeRezObjects`, whose
+  `takeCopyGroups` / `takeDeleteGroups` lists are exactly these two
+  predicates. An id the region does not have is killed on the client
+  anyway, so the two agree again.
+- **`UpdateTaskInventory` → `ServerEvent::UpdateTaskInventory`.** The item
+  is resolved **by id from the agent's own inventory**, not trusted from
+  the copy the client sent, minted a fresh task item id (a task copy is a
+  new item that happens to name the same asset), and written in — which
+  advances the object's contents serial. The listing a following
+  `RequestTaskInventory` serves is re-generated from the live store, so it
+  can never disagree with the serial that announced it.
+
+Because the world is the region's, one avatar's rez is a change every
+avatar in the region sees. There is no simulation loop to sweep for it, so
+the session that made the change publishes a `RegionUpdate` and a
+per-session `run_region_watcher` task turns it back into the `ObjectUpdate`
+or `KillObject` its own circuit needs — skipping the changes its own
+session published, which were sent directly. A watcher that falls behind
+its broadcast logs a warning rather than swallowing it: a lost `KillObject`
+is a ghost object standing in that viewer until its next refetch.
+
+`sl-conformance`'s `task-inventory` case runs the whole of this offline —
+rez a container, rez and take a donor, drop it in, watch the serial
+advance, read the listing back over Xfer, trash the container.
 
 ### A parcel's other half
 

@@ -30,19 +30,19 @@ mod test {
     use sl_proto::{
         AgentKey, AnimationKey, AssetType, AttachmentMode, AttachmentPoint, Camera, ChatChannel,
         ChatSessionKind, ClassifiedCategory, ClassifiedKey, ClassifiedUpdate, ClickAction,
-        ControlFlags, CreateGroupParams, DeRezDestination, Event, FolderType, FriendKey,
-        GridCoordinates, GroupKey, GroupNoticeKey, GroupRoleChange, GroupRoleEdit, GroupRoleKey,
-        GroupRoleMemberChange, GroupRoleUpdateType, InterestsUpdate, InventoryCallbackId,
-        InventoryFolderKey, InventoryItem, InventoryKey, InventoryType, LandStatReportType,
-        LindenAmount, LoginParams, LureId, Material, Maturity, MoneyTransactionType, MuteFlags,
-        MuteType, NewInventoryItem, ObjectExtraParams, ObjectFlagSettings, ObjectKey,
-        ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
-        ParcelCategory, ParcelFlags, ParcelReturnType, ParcelUpdate, PermissionField, Permissions,
-        Permissions5, PickKey, PickUpdate, PrimShape, PrimShapeParams, ProductType, ProfileUpdate,
-        QueryId, RegionHandle, RegionIdentity, RegionLocalObjectId, RegionLocalParcelId,
-        RegionTerrainComposition, RezAttachment, SaleType, ScopedObjectId, ScopedParcelId,
-        ServerEvent, Session, SimSession, TextureKey, TransactionId, Wearable, WearableType,
-        group_powers, parse_event_queue_response,
+        ControlFlags, CreateGroupParams, Event, FolderType, FriendKey, GridCoordinates, GroupKey,
+        GroupNoticeKey, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange,
+        GroupRoleUpdateType, InterestsUpdate, InventoryCallbackId, InventoryFolderKey,
+        InventoryItem, InventoryKey, InventoryType, LandStatReportType, LindenAmount, LoginParams,
+        LureId, Material, Maturity, MoneyTransactionType, MuteFlags, MuteType, NewInventoryItem,
+        ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey,
+        ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags,
+        ParcelReturnType, ParcelUpdate, PermissionField, Permissions, Permissions5, PickKey,
+        PickUpdate, PrimShapeParams, ProductType, ProfileUpdate, QueryId, RegionHandle,
+        RegionIdentity, RegionLocalObjectId, RegionLocalParcelId, RegionTerrainComposition,
+        RezAttachment, SaleType, ScopedObjectId, ScopedParcelId, ServerEvent, Session, SimSession,
+        TextureKey, TransactionId, Wearable, WearableType, group_powers,
+        parse_event_queue_response,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::{
@@ -462,7 +462,6 @@ mod test {
         "GroupNoticesListRequest",
         "GroupNoticeRequest",
         // object edits
-        "ObjectAdd",
         "MultipleObjectUpdate",
         "ObjectName",
         "ObjectDescription",
@@ -486,7 +485,6 @@ mod test {
         "Undo",
         "Redo",
         "ObjectDelete",
-        "DeRezObject",
         // parcels / land / region
         "ParcelPropertiesUpdate",
         "ParcelBuy",
@@ -571,7 +569,6 @@ mod test {
     ];
     /// The raw-forwarded messages the matching family test sends, in order.
     const OBJECT_FAMILY: &[&str] = &[
-        "ObjectAdd",
         "MultipleObjectUpdate",
         "ObjectName",
         "ObjectDescription",
@@ -595,7 +592,6 @@ mod test {
         "Undo",
         "Redo",
         "ObjectDelete",
-        "DeRezObject",
     ];
     /// The raw-forwarded messages the matching family test sends, in order.
     const PARCEL_FAMILY: &[&str] = &[
@@ -838,7 +834,6 @@ mod test {
             y: 64.0,
             z: 25.5,
         };
-        client.rez_object(&PrimShape::cube(position.clone()), None, now)?;
         client.update_object(
             one,
             &ObjectTransform {
@@ -902,15 +897,6 @@ mod test {
         client.undo_objects(&[one], now)?;
         client.redo_objects(&[one], now)?;
         client.delete_objects(&[two], now)?;
-        client.derez_objects(
-            &[one],
-            DeRezDestination::TakeIntoAgentInventory(InventoryFolderKey::from(
-                uuid::Uuid::from_u128(0xF01D),
-            )),
-            TransactionId::from(uuid::Uuid::from_u128(0x7)),
-            None,
-            now,
-        )?;
 
         let relayed = assert_family(&mut client, &mut sim, now, OBJECT_FAMILY)?;
         let AnyMessage::ObjectSaleInfo(sale) = find(&relayed, "ObjectSaleInfo")? else {

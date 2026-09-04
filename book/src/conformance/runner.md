@@ -113,8 +113,12 @@ the grid learns to answer it. `agent-alert` and `server-error` were both listed
 here as examples of cases that *pass* offline while asserting nothing; each now
 asserts, because the fake grid grew the policy behind its provocation — an
 estate-rights check and a `FeatureDisabled` refusal of the deprecated UDP
-inventory fetch. If a case belongs offline and does not bite, the thing to fix
-is usually the grid.
+inventory fetch. `task-inventory` was the last of them, and needed more than a
+policy: it is the one case that asks the grid to *write*, and it joined the list
+once the fake grid grew a
+[region-scoped world and a write path](../tools/fake-grid.md#the-write-path).
+If a case belongs offline and does not bite, the thing to fix is usually the
+grid.
 
 Four cases live on the fake grid **only**, because nothing else can host them:
 `region-crossing` and `neighbour-child-circuits` need two adjacent regions an

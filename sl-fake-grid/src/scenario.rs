@@ -26,8 +26,8 @@ use sl_proto::{
 };
 use sl_types::key::{AgentKey, InventoryFolderKey, InventoryKey, ObjectKey, OwnerKey, ParcelKey};
 
-use crate::udp_assets::{TaskInventoryFixture, UdpAssetFixtures};
-use crate::world::{SceneFixtures, box_prim, region_wide_parcel};
+use crate::udp_assets::UdpAssetFixtures;
+use crate::world::{SceneFixtures, TaskInventory, box_prim, region_wide_parcel};
 
 /// A hook run under the session lock against the machine (fixture setup,
 /// on-arrival content pushes), stamped with the grid's clock
@@ -291,10 +291,12 @@ pub fn stock_script_item() -> TaskInventoryItem {
     }
 }
 
-/// The stock UDP asset fixtures: the `motd.txt` `Xfer` file, one scripted
-/// object ([`STOCK_SCRIPTED_OBJECT_LOCAL_ID`]) whose task inventory holds
-/// [`stock_script_item`] with [`STOCK_SCRIPT_BODY`] as its asset, and the
+/// The stock UDP asset fixtures: the `motd.txt` `Xfer` file, the asset behind
+/// the stock scripted object's script item ([`STOCK_SCRIPT_BODY`]), and the
 /// covenant notecard.
+///
+/// The *listing* the script item appears in is not here — it is the region's,
+/// stated by [`default_world`] beside the object that holds it.
 ///
 /// No terrain RAW heightmap: a session whose scenario names none serves the
 /// region's own ground
@@ -305,17 +307,12 @@ pub fn stock_script_item() -> TaskInventoryItem {
 /// deliberately differs.
 #[must_use]
 pub fn default_udp_assets() -> UdpAssetFixtures {
-    let script = stock_script_item();
     UdpAssetFixtures::new()
         .with_xfer_file(STOCK_XFER_FILE, STOCK_XFER_FILE_BODY)
-        .with_task_item_asset(stock_scripted_object(), script.item_id, STOCK_SCRIPT_BODY)
-        .with_task_inventory(
-            STOCK_SCRIPTED_OBJECT_LOCAL_ID,
-            TaskInventoryFixture {
-                task: stock_scripted_object(),
-                serial: SCRIPTED_OBJECT_SERIAL,
-                items: vec![script],
-            },
+        .with_task_item_asset(
+            stock_scripted_object(),
+            stock_script_item().item_id,
+            STOCK_SCRIPT_BODY,
         )
         .with_estate_covenant(STOCK_COVENANT_BODY)
 }
@@ -335,8 +332,9 @@ pub const STOCK_SCRIPTED_OBJECT_POSITION: sl_types::lsl::Vector = sl_types::lsl:
 /// parcel the stock setup registers for `RemoteParcelRequest` and voice —
 /// and the stock scripted object ([`stock_scripted_object`],
 /// [`STOCK_SCRIPTED_OBJECT_LOCAL_ID`]) rezzed as a 1 m box at
-/// [`STOCK_SCRIPTED_OBJECT_POSITION`], so the task-inventory fixtures
-/// describe an object the viewer can actually see and click.
+/// [`STOCK_SCRIPTED_OBJECT_POSITION`], holding [`stock_script_item`] in its
+/// task inventory — so the listing describes an object the viewer can
+/// actually see and click, and the two are stated in one place.
 #[must_use]
 pub fn default_world() -> SceneFixtures {
     let creator = AgentKey::from(uuid::Uuid::from_u128(FIXTURE_CREATOR));
@@ -361,6 +359,10 @@ pub fn default_world() -> SceneFixtures {
             z: 1.0,
         },
     ));
+    world.add_task_inventory(
+        STOCK_SCRIPTED_OBJECT_LOCAL_ID,
+        TaskInventory::stated(SCRIPTED_OBJECT_SERIAL, vec![stock_script_item()]),
+    );
     world
 }
 

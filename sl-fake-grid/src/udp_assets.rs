@@ -1,6 +1,13 @@
-//! Fixtures for the legacy UDP asset paths: named `Xfer` files, task
-//! inventories, UDP `Transfer` sources (task-item assets, the estate
-//! covenant), and the estate terrain RAW heightmap.
+//! Fixtures for the legacy UDP asset paths: named `Xfer` files, UDP
+//! `Transfer` sources (task-item assets, the estate covenant), and the estate
+//! terrain RAW heightmap.
+//!
+//! An object's task inventory used to live here too. It does not any more: a
+//! contents *serial* is only meaningful if the store that answers it is the
+//! store a write advances, so the listings moved to the region's own world
+//! ([`SceneFixtures::task_inventories`](crate::SceneFixtures::task_inventories))
+//! where the writes land. What is left here is genuinely fixture — bytes
+//! stated up front and served back unchanged.
 //!
 //! `SimSession` implements the server half of every one of these flows but
 //! keeps no content of its own; the driver answers the corresponding
@@ -12,23 +19,8 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use sl_proto::{
-    RegionLocalObjectId, ServerEvent, SimSession, TaskInventoryItem, TransferRequestSource,
-    TransferStatus, Uuid,
-};
+use sl_proto::{ServerEvent, SimSession, TransferRequestSource, TransferStatus, Uuid};
 use sl_types::key::{InventoryKey, ObjectKey};
-
-/// One in-world object's task inventory, served on `RequestTaskInventory`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TaskInventoryFixture {
-    /// The object's full key (the `RequestTaskInventory` names only the
-    /// region-local id; the reply and the listing carry this key).
-    pub task: ObjectKey,
-    /// The inventory serial reported in the `ReplyTaskInventory`.
-    pub serial: i16,
-    /// The items listed.
-    pub items: Vec<TaskInventoryItem>,
-}
 
 /// The scripted content behind the legacy UDP asset paths.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -37,10 +29,6 @@ pub struct UdpAssetFixtures {
     /// session and re-armed after each serve (a `SimSession` registration
     /// is consumed by the request that names it).
     pub xfer_files: HashMap<String, Vec<u8>>,
-    /// Task inventories by region-local object id, answered on
-    /// `RequestTaskInventory`. An unknown id is ignored, as a real
-    /// simulator ignores a bogus one.
-    pub task_inventories: HashMap<RegionLocalObjectId, TaskInventoryFixture>,
     /// Task-item asset bodies by `(task, item)`, answered on a
     /// task-inventory-item `TransferRequest`. A miss is refused with
     /// [`TransferStatus::UnknownSource`].
@@ -67,17 +55,6 @@ impl UdpAssetFixtures {
     #[must_use]
     pub fn with_xfer_file(mut self, filename: impl Into<String>, data: impl Into<Vec<u8>>) -> Self {
         let _prev = self.xfer_files.insert(filename.into(), data.into());
-        self
-    }
-
-    /// Adds an object's task inventory under its region-local id.
-    #[must_use]
-    pub fn with_task_inventory(
-        mut self,
-        local_id: RegionLocalObjectId,
-        fixture: TaskInventoryFixture,
-    ) -> Self {
-        let _prev = self.task_inventories.insert(local_id, fixture);
         self
     }
 
@@ -166,10 +143,10 @@ pub fn flat_terrain_raw(height_m: u8) -> Vec<u8> {
 }
 
 /// Answers one drained [`ServerEvent`] from the fixtures, under the session
-/// lock: serves task inventories, answers `Transfer` requests (or refuses
-/// them), offers and captures the terrain RAW file, and re-arms a served
-/// named `Xfer` file. Send failures are logged, never fatal — the client's
-/// own timeouts report an unanswered request.
+/// lock: answers `Transfer` requests (or refuses them), offers and captures
+/// the terrain RAW file, and re-arms a served named `Xfer` file. Send
+/// failures are logged, never fatal — the client's own timeouts report an
+/// unanswered request.
 pub(crate) fn answer_from_fixtures(
     fixtures: &mut UdpAssetFixtures,
     sim: &mut SimSession,
@@ -178,18 +155,6 @@ pub(crate) fn answer_from_fixtures(
     now: Instant,
 ) {
     match event {
-        ServerEvent::RequestTaskInventory { local_id } => {
-            match fixtures.task_inventories.get(local_id) {
-                Some(fixture) => {
-                    if let Err(error) =
-                        sim.serve_task_inventory(fixture.task, fixture.serial, &fixture.items, now)
-                    {
-                        tracing::warn!("serving task inventory of {local_id:?} failed: {error}");
-                    }
-                }
-                None => tracing::debug!("no task inventory fixture for {local_id:?}; ignored"),
-            }
-        }
         ServerEvent::TransferRequested {
             transfer_id,
             source,

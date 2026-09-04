@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 310 |
+| ready | 309 |
 | blocked | 56 |
 | in-progress | 18 |
 | bugs | 64 |
-| done | 981 |
+| done | 982 |
 | deferred | 25 |
 | wont-do | 14 |
 | **total** | **1566** |
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (310)
+## ready (309)
 
 ### protocol
 
@@ -951,8 +951,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The login refusals and handover timeouts nothing tests
 - [`test-fake-grid-object-sounds`](ready/test-fake-grid-object-sounds.md) — The
   fake grid can serve a sound but cannot play one
-- [`test-fake-grid-object-write-path`](ready/test-fake-grid-object-write-path.md)
-  — The fake grid has no way to rez, take or fill an object
 - [`test-fake-grid-timeline`](ready/test-fake-grid-timeline.md) — Scripted
   scenario timelines with markers (blocked by `test-fake-grid-determinism`
   (done), `viewer-fake-grid-render-harness` (done))
@@ -1334,7 +1332,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (981)
+## done (982)
 
 ### protocol
 
@@ -3188,6 +3186,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-npc-avatars`](done/test-fake-grid-npc-avatars.md) — NPC
   avatars with appearance, animations and attachments (blocked by
   `test-fake-grid-render-fixtures` (done))
+- [`test-fake-grid-object-write-path`](done/test-fake-grid-object-write-path.md)
+  — The fake grid has no way to rez, take or fill an object
 - [`test-fake-grid-own-avatar-appearance`](done/test-fake-grid-own-avatar-appearance.md)
   — The arriving agent never got its own AvatarAppearance
 - [`test-fake-grid-render-fixtures`](done/test-fake-grid-render-fixtures.md) —

@@ -116,6 +116,7 @@ pub const OFFLINE_CASES: &[&str] = &[
     "parcel-info-dwell",
     "agent-alert",
     "server-error",
+    "task-inventory",
     "logout-clean",
 ];
 

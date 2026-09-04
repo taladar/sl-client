@@ -138,8 +138,8 @@ pub(crate) enum SessionRole {
     Child,
 }
 
-/// A registered region after the grid started: its config, minted id, and
-/// effective scenario.
+/// A registered region after the grid started: its config, minted id,
+/// effective scenario, and the one world its sessions share.
 pub(crate) struct RegionEntry {
     /// The builder-supplied region data.
     pub(crate) config: RegionConfig,
@@ -147,6 +147,18 @@ pub(crate) struct RegionEntry {
     pub(crate) region_id: Uuid,
     /// The scenario sessions in this region are seeded with.
     scenario: Scenario,
+    /// The region's live world: the scenario's [`SceneFixtures`] behind one
+    /// lock, shared by every session here rather than cloned into each.
+    ///
+    /// This is what makes a rez or a take a change to the *region*: the
+    /// scenario states what the region starts as, and this is what it has
+    /// become. Two grids never share one, and neither do two regions.
+    ///
+    /// [`SceneFixtures`]: crate::world::SceneFixtures
+    pub(crate) world: crate::world::RegionWorld,
+    /// Publishes every change a session makes to [`world`](Self::world), so
+    /// the region's *other* sessions can stream it to their viewers.
+    pub(crate) changes: broadcast::Sender<crate::world::RegionUpdate>,
 }
 
 impl RegionEntry {
@@ -380,6 +392,9 @@ pub(crate) struct GridCore {
 pub(crate) struct PreparedSession {
     /// The session's sequence number (also its CAPS path component).
     pub(crate) seq: u64,
+    /// The index of the region the session lives in, for the region-change
+    /// subscription activation opens.
+    pub(crate) region_index: usize,
     /// The shared driver handle (not yet registered or pumped).
     pub(crate) shared: SharedSim,
     /// The region the session lives in (for the notices).
@@ -580,17 +595,25 @@ impl GridCore {
         // scenario so a cover and the listing behind it cannot name different
         // parcels: both come out of the one fixture, as a live grid's both
         // come out of its one land record.
-        for listing in &region.scenario.world.listings {
-            let Some(parcel) = region.scenario.world.parcel_by_local_id(listing.local_id) else {
-                continue;
-            };
-            sim.add_parcel(sl_proto::SimParcel {
-                parcel_id: listing.parcel_id,
-                west: parcel.aabb_min.x(),
-                south: parcel.aabb_min.y(),
-                east: parcel.aabb_max.x(),
-                north: parcel.aabb_max.y(),
-            });
+        let covers: Vec<sl_proto::SimParcel> = {
+            let world = region.world.lock();
+            world
+                .listings
+                .iter()
+                .filter_map(|listing| {
+                    let parcel = world.parcel_by_local_id(listing.local_id)?;
+                    Some(sl_proto::SimParcel {
+                        parcel_id: listing.parcel_id,
+                        west: parcel.aabb_min.x(),
+                        south: parcel.aabb_min.y(),
+                        east: parcel.aabb_max.x(),
+                        north: parcel.aabb_max.y(),
+                    })
+                })
+                .collect()
+        };
+        for cover in covers {
+            sim.add_parcel(cover);
         }
         region.scenario.udp_assets.register_xfer_files(&mut sim);
         if *sim.simulator_features() == SimulatorFeatures::default() {
@@ -627,7 +650,9 @@ impl GridCore {
             on_event: region.scenario.on_event.clone(),
             udp_assets,
             terrain: region.config.terrain.clone(),
-            world: region.scenario.world.clone(),
+            world: Arc::clone(&region.world),
+            changes: region.changes.clone(),
+            minter: self.minter.clone(),
             economy: self.economy.prices.clone(),
             policy: crate::agent_requests::AgentPolicy {
                 estate_manager: account.config.estate_manager,
@@ -654,6 +679,7 @@ impl GridCore {
         );
         Ok(PreparedSession {
             seq,
+            region_index,
             shared,
             region_name: region.config.name.clone(),
             seed_url,
@@ -679,6 +705,17 @@ impl GridCore {
             Arc::clone(self),
             prepared.shared.clone(),
         ));
+        // Subscribed here rather than at prepare time because a session that
+        // is not yet activated has no circuit to stream a change down: the
+        // world it will be shown is the one `push_arrival_world` reads, and
+        // that runs after this.
+        if let Some(region) = self.region(prepared.region_index) {
+            tokio::spawn(crate::driver::run_region_watcher(
+                prepared.shared.clone(),
+                prepared.seq,
+                region.changes.subscribe(),
+            ));
+        }
         tokio::spawn(reap_closed_session(
             Arc::clone(self),
             prepared.seq,
@@ -1153,10 +1190,14 @@ impl FakeGridBuilder {
                     .scenario
                     .clone()
                     .unwrap_or_else(|| self.scenario.clone());
+                let world = Arc::new(parking_lot::Mutex::new(scenario.world.clone()));
+                let (changes, _) = broadcast::channel(REGION_CHANGES_CHANNEL_CAPACITY);
                 RegionEntry {
                     config,
                     region_id,
                     scenario,
+                    world,
+                    changes,
                 }
             })
             .collect::<Vec<RegionEntry>>();
@@ -1210,6 +1251,14 @@ impl FakeGridBuilder {
 
 /// Broadcast capacity for login notices.
 const LOGINS_CHANNEL_CAPACITY: usize = 32;
+
+/// Broadcast capacity for one region's world changes.
+///
+/// Generous, because a lagging subscriber loses the *oldest* changes and a
+/// lost `KillObject` leaves a ghost object standing in one viewer for good.
+/// The watchers only ever fall behind a burst of rezzes, and this is deeper
+/// than any burst a fixture makes.
+const REGION_CHANGES_CHANNEL_CAPACITY: usize = 256;
 
 /// Rejects duplicate account and region names.
 fn check_duplicates(accounts: &[AccountConfig], regions: &[RegionConfig]) -> Result<(), Error> {
@@ -1535,29 +1584,41 @@ impl FakeAgent {
         self.shared.with_sim(f).await
     }
 
-    /// Runs `f` against this session's **world fixtures** and its machine
+    /// Runs `f` against this session's **region world** and its machine
     /// together, then flushes — how a test changes what a region contains
     /// after it has started.
     ///
     /// The two go together because a change to the world that is not sent is
-    /// invisible, and a send that the fixtures do not agree with is undone by
+    /// invisible, and a send that the world does not agree with is undone by
     /// the next refetch: rez an object by pushing it onto
-    /// [`SceneFixtures::objects`](crate::SceneFixtures::objects) *and* sending its
-    /// `ObjectUpdate`, kill one by
-    /// dropping it *and* sending the `KillObject`. Holding one lock over both
-    /// is what keeps a concurrent refetch from seeing half of it.
+    /// [`SceneFixtures::objects`](crate::SceneFixtures::objects) *and* sending
+    /// its `ObjectUpdate`, kill one by dropping it *and* sending the
+    /// `KillObject`. Holding both locks over both is what keeps a concurrent
+    /// refetch from seeing half of it.
     ///
-    /// The fixtures are this session's own copy: changing them changes what
-    /// this circuit shows, not the region's other sessions. That is exactly
-    /// what a handover wants — the region an object left and the region it
-    /// arrived in are two sessions, and they disagree for a moment by design.
+    /// The world is the **region's**, shared with every session in it, so a
+    /// change here is a change the region's other avatars will see on their
+    /// next refetch or arrival — but only the `sim` this call hands out is
+    /// told about it now. A caller that wants the region's other viewers told
+    /// immediately is describing what a client-driven rez does, and should go
+    /// through the client rather than through here. Two sessions in
+    /// *different* regions still hold different worlds, which is what a
+    /// handover needs: the region an object left and the region it arrived in
+    /// disagree for a moment by design.
     pub async fn with_world<R>(
         &self,
         f: impl FnOnce(&mut crate::world::SceneFixtures, &mut SimSession) -> R,
     ) -> R {
         let mut guard = self.shared.state.lock().await;
-        let state = &mut *guard;
-        let result = f(&mut state.world, &mut state.sim);
+        // The region lock lives in its own scope: it is a synchronous lock, and
+        // the flush below awaits.
+        let result = {
+            let state = &mut *guard;
+            let mut world = state.world.lock();
+            let answer = f(&mut world, &mut state.sim);
+            drop(world);
+            answer
+        };
         let outcome = self.shared.flush_locked(&mut guard);
         drop(guard);
         self.shared.finish_flush(outcome).await;
@@ -1575,24 +1636,23 @@ impl FakeAgent {
     /// ridden crossing puts in front of a viewer.
     pub async fn seat_on(&self, seat: RegionLocalObjectId, offset: Vector) {
         let mut guard = self.shared.state.lock().await;
-        let state = &mut *guard;
-        if let Some(riding) = state
-            .world
-            .all_objects()
-            .into_iter()
-            .find(|object| object.local_id == seat)
-        {
-            state.sim.seat_agent(riding.full_id);
-        }
         let now = self.shared.now();
-        crate::world::push_seated_avatar(
-            &state.world,
-            &state.avatar,
-            seat,
-            offset,
-            &mut state.sim,
-            now,
-        );
+        {
+            let state = &mut *guard;
+            let world = state.world.lock();
+            if let Some(riding) = world.object_by_local_id(seat) {
+                state.sim.seat_agent(riding.full_id);
+            }
+            crate::world::push_seated_avatar(
+                &world,
+                &state.avatar,
+                seat,
+                offset,
+                &mut state.sim,
+                now,
+            );
+            drop(world);
+        }
         let outcome = self.shared.flush_locked(&mut guard);
         drop(guard);
         self.shared.finish_flush(outcome).await;

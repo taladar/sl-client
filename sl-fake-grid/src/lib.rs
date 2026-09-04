@@ -48,7 +48,8 @@ pub use scenario::{Scenario, SimEventHook, SimHook};
 pub use teleport::TELEPORT_ARRIVAL_TIMEOUT;
 pub use terrain::{Heightfield, TerrainFixture};
 pub use time::{Now, system_clock, tokio_clock};
-pub use udp_assets::{TaskInventoryFixture, UdpAssetFixtures, flat_terrain_raw};
+pub use udp_assets::{UdpAssetFixtures, flat_terrain_raw};
 pub use world::{
-    AvatarIdentity, ParcelListing, SceneFixtures, avatar_prim, box_prim, region_wide_parcel,
+    AvatarIdentity, ParcelListing, RegionChange, RegionUpdate, RegionWorld, SceneFixtures,
+    TaskInventory, avatar_prim, box_prim, prim_from_shape, region_wide_parcel,
 };

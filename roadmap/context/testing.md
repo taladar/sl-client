@@ -65,11 +65,19 @@ multi-region offsets, in-flight asset leaks, NPC appearance delivery.
   milliseconds; the scripted timeline emits the same message from a step.
 - `sl-fake-grid` is reproducible on demand:
   `FakeGridBuilder::deterministic(seed)` seeds every minted identifier (session,
-  secure session, circuit code, capability tokens, agent and region ids) and
+  secure session, circuit code, capability tokens, agent and region ids, and
+  the object keys and inventory item ids a write path mints) and
   `FakeGridBuilder::clock(now)` replaces every grid-side stamp — nothing in the
   crate reaches for `Instant::now()` on its own, and
   `sl_fake_grid::tokio_clock()` is what a paused-timer test passes. Tier F
   records the grid produces are therefore comparable run to run.
+- The region's world is **the region's**, not each session's: one
+  `SceneFixtures` behind one lock on the `RegionEntry`, so a rez by one avatar
+  is an object the region's other avatars see. The scenario states what the
+  region starts as; the store is what it has become. Two regions never share
+  one, which is what a handover needs. A write publishes a `RegionUpdate` and a
+  per-session watcher turns it into the `ObjectUpdate` / `KillObject` each other
+  circuit needs, because there is no simulation loop to sweep for it.
 - `sl-conformance`'s **offline tier** — the same fake grid, asserted on the
   wire instead of in pixels. `Grid::Fake` starts a grid inside the test
   process (the catalogue region plus the border scene east of it as its

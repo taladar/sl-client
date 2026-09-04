@@ -72,6 +72,7 @@ mod test {
         parcel_info_dwell => "parcel-info-dwell",
         agent_alert => "agent-alert",
         server_error => "server-error",
+        task_inventory => "task-inventory",
         logout_clean => "logout-clean",
     }
 

@@ -20,7 +20,8 @@ use crate::terrain::TerrainFixture;
 use crate::time::Now;
 use crate::udp_assets::{UdpAssetFixtures, answer_from_fixtures};
 use crate::world::{
-    AvatarIdentity, SceneFixtures, answer_world_request, push_arrival_world, push_child_world,
+    AvatarIdentity, REAL_TIME_DILATION, RegionChange, RegionUpdate, RegionWorld,
+    answer_world_request, push_arrival_world, push_child_world,
 };
 
 /// The lockable state of one logged-in session: the protocol machine, its
@@ -47,9 +48,24 @@ pub(crate) struct SimState {
     pub(crate) udp_assets: UdpAssetFixtures,
     /// The region's ground, streamed as `LayerData` in the arrival burst.
     pub(crate) terrain: TerrainFixture,
-    /// The region's parcels and objects (pushed on arrival, replayed on
-    /// request).
-    pub(crate) world: SceneFixtures,
+    /// The **region's** parcels and objects (pushed on arrival, replayed on
+    /// request), shared with every other session in the same region.
+    ///
+    /// Shared rather than cloned per session because a rez is a change to the
+    /// region, not to one circuit's view of it: an object one avatar rezzes is
+    /// an object the next one to arrive is shown. A session in a *different*
+    /// region holds a different store, which is what a handover needs — the
+    /// region an object left and the region it arrived in disagree for a
+    /// moment by design.
+    pub(crate) world: RegionWorld,
+    /// Publishes every change this session makes to [`world`](Self::world), so
+    /// the region's other sessions can stream it
+    /// ([`run_region_watcher`]). Shared with the region, like the store.
+    pub(crate) changes: broadcast::Sender<RegionUpdate>,
+    /// The grid's identifier minter, for the ids a write path chooses: a
+    /// rezzed object's key, a taken object's inventory item. Seeded on a
+    /// deterministic grid, so the same run mints the same ids.
+    pub(crate) minter: crate::runtime::IdMinter,
     /// The grid's price list and this region's object budget, answered to an
     /// `EconomyDataRequest`. Grid-wide, like the helper policy it comes from.
     pub(crate) economy: sl_proto::EconomyData,
@@ -173,7 +189,7 @@ impl SharedSim {
                 // standing in.
                 if matches!(state.role, SessionRole::Child) {
                     push_child_world(
-                        &state.world,
+                        &state.world.lock(),
                         &state.terrain,
                         &state.identity,
                         &mut state.sim,
@@ -201,7 +217,7 @@ impl SharedSim {
                 // ground, and every object in view — before the scenario's
                 // own hook.
                 push_arrival_world(
-                    &state.world,
+                    &state.world.lock(),
                     &state.terrain,
                     &state.avatar,
                     &state.assets,
@@ -219,14 +235,31 @@ impl SharedSim {
                 &event,
                 now,
             );
-            answer_world_request(
-                &state.world,
-                &state.avatar,
-                &state.identity,
-                &mut state.sim,
-                &event,
-                now,
-            );
+            {
+                let minter = state.minter.clone();
+                let mut world = state.world.lock();
+                let changes = answer_world_request(
+                    &mut world,
+                    &state.avatar,
+                    &state.identity,
+                    &move || minter.uuid(),
+                    &mut state.sim,
+                    &event,
+                    now,
+                );
+                // Published while the store is still held, so a watcher that
+                // wakes on the change and re-reads the region cannot see a
+                // world the change has not landed in yet.
+                for change in changes {
+                    // A region whose other sessions have all gone has no
+                    // subscribers; that is not a failure.
+                    drop(state.changes.send(RegionUpdate {
+                        source: state.seq,
+                        change,
+                    }));
+                }
+                drop(world);
+            }
             crate::economy_policy::answer_economy_request(
                 &state.economy,
                 &mut state.sim,
@@ -235,7 +268,7 @@ impl SharedSim {
             );
             crate::agent_requests::answer_agent_request(
                 state.policy,
-                &state.world,
+                &state.world.lock(),
                 state.avatar.agent_id,
                 &mut state.sim,
                 &event,
@@ -381,6 +414,80 @@ pub(crate) async fn run_udp_pump(shared: SharedSim) {
                 if closed {
                     tracing::info!("session closed; UDP pump exiting");
                     break;
+                }
+            }
+            changed = shutdown_rx.changed() => {
+                if changed.is_err() || *shutdown_rx.borrow() {
+                    break;
+                }
+            }
+        }
+    }
+}
+
+/// The region watcher: streams the changes *other* sessions in this region
+/// made to the shared world — an object rezzed, an object taken away — to this
+/// session's viewer.
+///
+/// A real simulator has one update loop per region that sweeps the scene and
+/// sends every viewer what changed. The fake grid has no loop: the session
+/// that made the change publishes it and this task, one per session, turns it
+/// back into the `ObjectUpdate` or `KillObject` its own circuit needs. A
+/// watcher skips the changes its own session published: that client was told
+/// directly, in the same breath as the mutation, and telling it again would
+/// put every rez down its circuit twice.
+///
+/// A lagging watcher would silently lose changes, which for a `KillObject`
+/// means a ghost object standing in that viewer for good — so a lag is
+/// reported rather than swallowed, and the watcher resynchronises by carrying
+/// on with the changes it can still see.
+pub(crate) async fn run_region_watcher(
+    shared: SharedSim,
+    seq: u64,
+    mut changes: broadcast::Receiver<RegionUpdate>,
+) {
+    let mut shutdown_rx = shared.shutdown_rx.clone();
+    let mut closed_rx = shared.closed_tx.subscribe();
+    loop {
+        tokio::select! {
+            changed = closed_rx.changed() => {
+                if changed.is_err() || *closed_rx.borrow() {
+                    break;
+                }
+            }
+            received = changes.recv() => {
+                match received {
+                    Ok(RegionUpdate { source, .. }) if source == seq => {}
+                    Ok(RegionUpdate { change, .. }) => {
+                        let now = shared.now();
+                        shared
+                            .with_sim(|sim| {
+                                let result = match &change {
+                                    RegionChange::Rezzed(object) => sim.send_object_update(
+                                        std::slice::from_ref(object.as_ref()),
+                                        REAL_TIME_DILATION,
+                                        now,
+                                    ),
+                                    RegionChange::Killed(local_id) => {
+                                        sim.send_kill_object(&[*local_id], now)
+                                    }
+                                };
+                                if let Err(error) = result {
+                                    tracing::debug!(
+                                        "streaming a neighbouring session's world change failed: \
+                                         {error}"
+                                    );
+                                }
+                            })
+                            .await;
+                    }
+                    Err(broadcast::error::RecvError::Lagged(missed)) => {
+                        tracing::warn!(
+                            "this session missed {missed} of its region's world changes; its \
+                             view of the region is now stale until the next refetch"
+                        );
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
                 }
             }
             changed = shutdown_rx.changed() => {

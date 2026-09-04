@@ -12,37 +12,38 @@ mod test {
     use sl_proto::{
         AbuseReport, AbuseReportType, AgentKey, AlertInfo, AnimationKey, AssetKey, AssetType,
         AttachmentMode, AttachmentPoint, AvatarName, AvatarPickerResult, ChatChannel, ChatSource,
-        ChatType, ClassifiedCategory, ClassifiedKey, CoarseLocation, ControlFlags, DetachOrder,
-        DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
-        DirPeopleResult, DirPlaceResult, DirectoryVisibility, DisplayName, DisplayNameUpdate,
-        EjectAction, EstateCovenant, Event, EventId, EventInfo, FeatureDisabled, FollowCamProperty,
-        FollowCamPropertyValue, FreezeAction, FriendKey, FriendRights, GenericMessage,
-        GenericStreamingMessage, GestureActivation, GlobalCoordinates, GodRegionUpdate,
-        GridCoordinates, GridRectangle, GroupAccountDetails, GroupAccountDetailsEntry,
-        GroupAccountSummary, GroupAccountTransaction, GroupAccountTransactions,
-        GroupActiveProposalItem, GroupKey, GroupName, GroupRequestId, GroupRoleKey, GroupVote,
-        GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolderKey, InventoryItem,
-        InventoryItemMove, InventoryItemOrFolderKey, InventoryKey, InventoryType, InvoiceId, Kick,
-        LandArea, LandBrushAction, LandBrushSize, LandEdit, LandSearchType, LandStatItem,
-        LandStatReportType, LandingType, LightData, LindenAmount, LindenBalance, LoginParams,
-        MAX_FACES, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity,
-        MeanCollision, MeanCollisionType, MovementMode, NavMeshBuildStatus, NavMeshStatus,
-        NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectKey,
-        ObjectPlayingAnimation, ObjectPropertiesFamily, OpenRegionInfo, OwnerKey, ParcelCategory,
-        ParcelDetails, ParcelInfo, ParcelKey, ParcelObjectOwner, ParcelRequestResult,
-        ParcelReturnType, ParcelStatus, Permissions, Permissions5, PingId, PlacesResult,
-        PointAtType, Postcard, PrimShapeParams, ProductType, QueryId, RegionCoordinates,
-        RegionHandle, RegionIdentity, RegionLocalObjectId, RegionLocalParcelId, RegionStats,
-        RegionTerrainComposition, RejectionReason, RequiredVoiceVersion, RestoreItem,
-        RezAttachment, RezObjectParams, RezScriptParams, SaleType, ScopedObjectId, ScopedParcelId,
-        ScriptControl, ScriptControlAction, ScriptPermissionRequest, ScriptPermissionStatus,
-        ScriptPermissions, ServerError, ServerEvent, Session, SetDisplayNameReply, SimSession,
-        SimStatId, SimWideDeleteFlags, SimulatorTime, SitTransform, StartLocationSlot,
-        TERRAIN_PATCHES_PER_MESSAGE, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply,
-        TelehubInfo, TerraformArea, TerrainLayerType, TerrainPatch, TextureEntry, TextureFace,
-        TextureKey, Throttle, TransactionId, TransferId, TransferRequestSource, TransferStatus,
-        Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
-        ViewerEffectType, XferId, enable_simulator_to_caps_llsd, parse_event_queue_response,
+        ChatType, ClassifiedCategory, ClassifiedKey, CoarseLocation, ControlFlags,
+        DeRezDestination, DetachOrder, DirClassifiedResult, DirEventResult, DirFindFlags,
+        DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, DirectoryVisibility,
+        DisplayName, DisplayNameUpdate, EjectAction, EstateCovenant, Event, EventId, EventInfo,
+        FeatureDisabled, FollowCamProperty, FollowCamPropertyValue, FreezeAction, FriendKey,
+        FriendRights, GenericMessage, GenericStreamingMessage, GestureActivation,
+        GlobalCoordinates, GodRegionUpdate, GridCoordinates, GridRectangle, GroupAccountDetails,
+        GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
+        GroupAccountTransactions, GroupActiveProposalItem, GroupKey, GroupName, GroupRequestId,
+        GroupRoleKey, GroupVote, GroupVoteHistoryItem, ImDialog, InstantMessage,
+        InventoryFolderKey, InventoryItem, InventoryItemMove, InventoryItemOrFolderKey,
+        InventoryKey, InventoryType, InvoiceId, Kick, LandArea, LandBrushAction, LandBrushSize,
+        LandEdit, LandSearchType, LandStatItem, LandStatReportType, LandingType, LightData,
+        LindenAmount, LindenBalance, LoginParams, MAX_FACES, MapItem, MapItemType, MapLayer,
+        MapRegionInfo, MapRequestFlags, Maturity, MeanCollision, MeanCollisionType, MovementMode,
+        NavMeshBuildStatus, NavMeshStatus, NewInventoryLink, NotecardRez, ObjectBuyItem,
+        ObjectExtraParams, ObjectKey, ObjectPlayingAnimation, ObjectPropertiesFamily,
+        OpenRegionInfo, OwnerKey, ParcelCategory, ParcelDetails, ParcelInfo, ParcelKey,
+        ParcelObjectOwner, ParcelRequestResult, ParcelReturnType, ParcelStatus, Permissions,
+        Permissions5, PingId, PlacesResult, PointAtType, Postcard, PrimShape, PrimShapeParams,
+        ProductType, QueryId, RegionCoordinates, RegionHandle, RegionIdentity, RegionLocalObjectId,
+        RegionLocalParcelId, RegionStats, RegionTerrainComposition, RejectionReason,
+        RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
+        SaleType, ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction,
+        ScriptPermissionRequest, ScriptPermissionStatus, ScriptPermissions, ServerError,
+        ServerEvent, Session, SetDisplayNameReply, SimSession, SimStatId, SimWideDeleteFlags,
+        SimulatorTime, SitTransform, StartLocationSlot, TERRAIN_PATCHES_PER_MESSAGE,
+        TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea,
+        TerrainLayerType, TerrainPatch, TextureEntry, TextureFace, TextureKey, Throttle,
+        TransactionId, TransferId, TransferRequestSource, TransferStatus, Transmit,
+        UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType, XferId,
+        enable_simulator_to_caps_llsd, parse_event_queue_response,
     };
     use sl_proto::{
         AgentPresence, FlowMirrorStatus, SESSION_FLOW_COVERAGE, SimChatSessionKind, UserRightsEntry,
@@ -7975,6 +7976,157 @@ mod test {
         assert_eq!(
             removed,
             vec![RegionLocalObjectId(0x10), RegionLocalObjectId(0x11)]
+        );
+        Ok(())
+    }
+
+    /// The grid-side **write** path: the client rezzes a prim, the simulator
+    /// surfaces it typed and streams the object back, the client takes it into
+    /// inventory, and the simulator answers with both halves of a take — the
+    /// minted inventory item and the object's removal.
+    ///
+    /// The two client messages here (`ObjectAdd`, `DeRezObject`) used to be
+    /// raw-forwarded, which is why the object family in
+    /// `sim_session_symmetry.rs` no longer sends them: a message with a typed
+    /// arm is asserted on its event, not on its bytes.
+    #[test]
+    fn object_rez_and_take_round_trip() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+        let circuit = client.root_circuit_id().ok_or("no circuit")?;
+        let folder = InventoryFolderKey::from(uuid::Uuid::from_u128(0xF01D));
+        let transaction = TransactionId::from(uuid::Uuid::from_u128(0x7));
+        let position = sl_proto::Vector {
+            x: 128.5,
+            y: 64.25,
+            z: 25.5,
+        };
+
+        // 1. The rez. The wire block carries no position of its own, so the
+        //    placement the client asked for has to come back out of the ray.
+        let mut shape = PrimShape::cube(position.clone());
+        shape.scale = sl_proto::Vector {
+            x: 0.75,
+            y: 0.75,
+            z: 2.0,
+        };
+        client.rez_object(&shape, None, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let rezzed = drain_server(&mut sim)
+            .into_iter()
+            .find_map(|e| match e {
+                ServerEvent::RezObject { params } => Some(params),
+                _ => None,
+            })
+            .ok_or("expected a RezObject server event")?;
+        assert_eq!(rezzed.shape, shape);
+        assert_eq!(rezzed.shape.position, position);
+        assert_eq!(rezzed.ray_end, position);
+        assert_eq!(rezzed.ray_start, position);
+        assert!(
+            rezzed.bypass_raycast,
+            "a headless rez places the prim without a raycast"
+        );
+        assert_eq!(rezzed.ray_target_id, None);
+        assert_eq!(rezzed.group_id, None);
+
+        // The simulator mints the ids and streams the object back — how the
+        // rezzing client learns the id it did not choose.
+        let local_id = RegionLocalObjectId(0x4200);
+        sim.send_object_update(
+            &[box_prim(local_id.0, 0x4200, position.clone())],
+            0xFFFF,
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+        let added = drain_client(&mut client)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::ObjectAdded(object) if object.local_id == local_id => Some(*object),
+                _ => None,
+            })
+            .ok_or("expected the rezzed object back as an ObjectAdded")?;
+        assert_eq!(added.motion.position, position);
+
+        // 2. The take.
+        client.derez_objects(
+            &[ScopedObjectId::new(circuit, local_id)],
+            DeRezDestination::TakeIntoAgentInventory(folder),
+            transaction,
+            None,
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+        let derez = drain_server(&mut sim)
+            .into_iter()
+            .find_map(|e| match e {
+                ServerEvent::DerezObjects { .. } => Some(e),
+                _ => None,
+            })
+            .ok_or("expected a DerezObjects server event")?;
+        let ServerEvent::DerezObjects {
+            local_ids,
+            destination,
+            transaction_id,
+            group_id,
+            packet,
+        } = derez
+        else {
+            return Err("expected a DerezObjects server event".into());
+        };
+        assert_eq!(local_ids, vec![local_id]);
+        assert_eq!(
+            destination,
+            DeRezDestination::TakeIntoAgentInventory(folder)
+        );
+        assert_eq!(transaction_id, transaction);
+        assert_eq!(group_id, None);
+        // The whole selection fits one message, which is every selection a
+        // viewer makes.
+        assert_eq!(packet, (1, 0));
+        // The destination decides the answer, and this one does both halves.
+        assert_eq!(destination.agent_folder(), Some(folder));
+        assert!(destination.removes_from_world());
+
+        // 3. The answer: the minted item, then the object going away.
+        let item = InventoryItem {
+            folder_id: folder,
+            name: "Object".to_owned(),
+            item_type: 6,
+            inv_type: 6,
+            ..wearable_item()
+        };
+        sim.send_inventory_item_created(std::slice::from_ref(&item), transaction, true, now)?;
+        sim.send_kill_object(&[local_id], now)?;
+        pump(&mut client, &mut sim, now)?;
+        let client_events = drain_client(&mut client);
+        let created = client_events
+            .iter()
+            .find_map(|e| match e {
+                Event::InventoryItemCreated {
+                    sim_approved,
+                    transaction_id,
+                    callback_id,
+                    item,
+                } => Some((*sim_approved, *transaction_id, *callback_id, item.clone())),
+                _ => None,
+            })
+            .ok_or("expected an InventoryItemCreated client event")?;
+        assert_eq!(created.0, true);
+        assert_eq!(created.1, transaction.get());
+        // A take carries no async callback id, so the encoder writes the
+        // "none" zero and the client reads it back as absent rather than as
+        // callback zero.
+        assert_eq!(created.2, None);
+        assert_eq!(created.3, item);
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::ObjectRemoved { local_id: removed, .. } if removed.id() == local_id
+            )),
+            "expected the taken object to be killed"
         );
         Ok(())
     }

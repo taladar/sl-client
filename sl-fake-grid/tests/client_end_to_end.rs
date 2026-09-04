@@ -2885,4 +2885,173 @@ mod test {
         );
         Ok(())
     }
+
+    /// One avatar's session, for a test that needs two of them on one grid and
+    /// so cannot let each own it (a [`Running`] drops its own grid).
+    struct Joined {
+        /// The client's root circuit id (for scoped ids).
+        circuit: sl_client_tokio::CircuitId,
+        /// The client event stream.
+        events: mpsc::Receiver<Event>,
+        /// The client command channel.
+        commands: mpsc::Sender<Command>,
+        /// The run-loop task (aborted on teardown).
+        run: tokio::task::JoinHandle<Result<(), sl_client_tokio::Error>>,
+    }
+
+    impl Drop for Joined {
+        fn drop(&mut self) {
+            self.run.abort();
+        }
+    }
+
+    /// Logs `first_name` in against an already-started grid, starts its run
+    /// loop and waits for the region handshake.
+    async fn join(grid: &FakeGrid, first_name: &str) -> Result<Joined, TestError> {
+        let request = LoginRequest::new(
+            first_name,
+            "User",
+            "password",
+            StartLocation::Last,
+            "sl-fake-grid-e2e",
+            "0.0",
+        );
+        let client = Client::connect(LoginParams {
+            login_uri: grid.login_uri(),
+            request,
+        })
+        .await?;
+        let circuit = client.root_circuit_id().ok_or("no root circuit")?;
+        let (event_tx, mut events) = mpsc::channel::<Event>(256);
+        let (commands, command_rx) = mpsc::channel::<Command>(8);
+        let (diag_tx, _diag_rx) = mpsc::channel(16);
+        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+        wait_on(&mut events, |event| {
+            matches!(
+                event,
+                Event::RegionHandshakeComplete | Event::RegionChanged { .. }
+            )
+            .then_some(())
+        })
+        .await?;
+        Ok(Joined {
+            circuit,
+            events,
+            commands,
+            run,
+        })
+    }
+
+    /// A rez is a change to the **region**, not to the rezzing circuit's view
+    /// of it: the other avatar standing in the same region is shown the new
+    /// object without asking for it, and the derez that takes it away kills it
+    /// for both.
+    ///
+    /// This is what the region-scoped world buys. With a world cloned per
+    /// session the first avatar would rez into its own copy and the second
+    /// would never hear of it — and neither would the *next* avatar to arrive,
+    /// whose arrival burst is read from the same store.
+    #[tokio::test]
+    async fn a_rez_reaches_the_regions_other_avatar() -> Result<(), TestError> {
+        let grid = FakeGridBuilder::new()
+            .account(AccountConfig::new("First", "User", "password"))
+            .account(AccountConfig::new("Second", "User", "password"))
+            .event_queue_hold(Duration::from_secs(2))
+            .region(RegionConfig::default())
+            .start()
+            .await?;
+        let mut first = join(&grid, "First").await?;
+        let mut second = join(&grid, "Second").await?;
+
+        let position = Vector {
+            x: 140.0,
+            y: 128.0,
+            z: 26.0,
+        };
+        first
+            .commands
+            .send(Command::RezObject {
+                shape: sl_client_tokio::PrimShape::cube(position.clone()),
+                group_id: None,
+            })
+            .await?;
+
+        // The rezzing client is told directly, in the same breath as the
+        // mutation, because it cannot use the object until it knows the ids
+        // the simulator chose.
+        let rezzed = wait_on(&mut first.events, |event| match event {
+            Event::ObjectAdded(object) if object.motion.position == position => {
+                Some((**object).clone())
+            }
+            _ => None,
+        })
+        .await?;
+
+        // The other avatar is told by the region.
+        let seen = wait_on(&mut second.events, |event| match event {
+            Event::ObjectAdded(object) if object.full_id == rezzed.full_id => {
+                Some((**object).clone())
+            }
+            _ => None,
+        })
+        .await?;
+        assert_eq!(seen.local_id, rezzed.local_id);
+        assert_eq!(seen.motion.position, position);
+        assert_eq!(seen.scale, rezzed.scale);
+
+        // A return mints no inventory item, so the requester gets a `DeRezAck`
+        // rather than an `UpdateCreateInventoryItem` -- and both avatars get
+        // the kill.
+        let expected_transaction =
+            sl_client_tokio::TransactionId::from(uuid::Uuid::from_u128(0x0DE5));
+        first
+            .commands
+            .send(Command::DerezObjects {
+                local_ids: vec![sl_client_tokio::ScopedObjectId::new(
+                    first.circuit,
+                    rezzed.local_id,
+                )],
+                destination: sl_client_tokio::DeRezDestination::ReturnToOwner,
+                transaction_id: expected_transaction,
+                group_id: None,
+            })
+            .await?;
+        let acked = wait_on(&mut first.events, |event| match event {
+            Event::DeRezAck {
+                transaction,
+                success,
+            } if *transaction == expected_transaction => Some(*success),
+            _ => None,
+        })
+        .await?;
+        assert!(acked, "a return of an object the region has is refused");
+        for (name, avatar) in [("the rezzer", &mut first), ("the bystander", &mut second)] {
+            let removed = wait_on(&mut avatar.events, |event| match event {
+                Event::ObjectRemoved { local_id, .. } if local_id.id() == rezzed.local_id => {
+                    Some(*local_id)
+                }
+                _ => None,
+            })
+            .await;
+            assert!(
+                removed.is_ok(),
+                "{name} was never told the returned object went away"
+            );
+        }
+
+        // And the region itself has forgotten it, so the next avatar to arrive
+        // is not shown a ghost.
+        let held = grid
+            .sessions_in(&grid.region_names().first().ok_or("no regions")?.clone())
+            .await;
+        let session = held.first().ok_or("no live session")?;
+        let still_there = session
+            .with_world(|world, _sim| world.object_by_local_id(rezzed.local_id))
+            .await;
+        assert_eq!(
+            still_there, None,
+            "the region still holds the returned object"
+        );
+        Ok(())
+    }
 }

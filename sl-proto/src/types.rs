@@ -434,7 +434,7 @@ pub use directory::{
 pub use display_name::{DisplayNameUpdate, SetDisplayNameReply};
 pub use economy::{EconomyData, LandImpact, MoneyBalance, MoneyTransaction, MoneyTransactionType};
 pub use editing::{
-    ClickAction, DeRezDestination, Material, Maturity, NotecardRez, ObjectBuyItem,
+    AddPrimParams, ClickAction, DeRezDestination, Material, Maturity, NotecardRez, ObjectBuyItem,
     ObjectFlagSettings, ObjectTransform, PermissionField, PrimShape, ProductType, RestoreItem,
     RezObjectParams, RezScriptParams, SaleType, SurfaceInfo, TaskInventoryKey, TeleportFlags,
 };
