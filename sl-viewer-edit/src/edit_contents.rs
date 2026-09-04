@@ -74,7 +74,7 @@ use crate::ui::focus_within;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
-use crate::virtual_list::{VirtualList, VirtualRow, VirtualViewport};
+use crate::virtual_list::{VirtualList, VirtualRow, VirtualViewport, amend_row_node};
 use crate::world_api::InputContext;
 use crate::world_api::LocalChatNotice;
 use crate::world_api::ObjectState;
@@ -1160,19 +1160,18 @@ fn populate_new_contents_rows(
         let Ok(&ContentsViewport(surface)) = viewports.get(child_of.parent()) else {
             continue;
         };
-        commands.entity(row_entity).insert((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                right: Val::Px(0.0),
-                height: Val::Px(ROW_HEIGHT),
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(4.0),
-                ..Default::default()
-            },
-            Pickable::default(),
-            BackgroundColor(Color::NONE),
-        ));
+        // Amended, not inserted: `top` and `display` are the virtual list's.
+        amend_row_node(&mut commands, row_entity, |node| {
+            node.position_type = PositionType::Absolute;
+            node.left = Val::Px(0.0);
+            node.right = Val::Px(0.0);
+            node.height = Val::Px(ROW_HEIGHT);
+            node.align_items = AlignItems::Center;
+            node.column_gap = Val::Px(4.0);
+        });
+        commands
+            .entity(row_entity)
+            .insert((Pickable::default(), BackgroundColor(Color::NONE)));
         let icon = commands
             .spawn((
                 Text::new(""),

@@ -53,7 +53,9 @@ use crate::i18n::{TransArgs, Translated, Translator};
 use crate::people::PeopleUi;
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
-use crate::virtual_list::{VirtualList, VirtualRow, VirtualViewport, layout_virtual_lists};
+use crate::virtual_list::{
+    VirtualList, VirtualRow, VirtualViewport, amend_row_node, layout_virtual_lists,
+};
 use crate::world_api::OpenGroupProfile;
 use crate::world_api::{ConversationKey, OpenConversation};
 use crate::world_api::{GroupRow, GroupsModel};
@@ -811,20 +813,19 @@ fn populate_group_rows(
         if child_of.parent() != ui.viewport {
             continue;
         }
-        commands.entity(row_entity).insert((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                right: Val::Px(0.0),
-                height: Val::Px(ROW_HEIGHT),
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(4.0),
-                padding: UiRect::horizontal(Val::Px(4.0)),
-                ..default()
-            },
-            BackgroundColor(Color::NONE),
-            Pickable::default(),
-        ));
+        // Amended, not inserted: `top` and `display` are the virtual list's.
+        amend_row_node(&mut commands, row_entity, |node| {
+            node.position_type = PositionType::Absolute;
+            node.left = Val::Px(0.0);
+            node.right = Val::Px(0.0);
+            node.height = Val::Px(ROW_HEIGHT);
+            node.align_items = AlignItems::Center;
+            node.column_gap = Val::Px(4.0);
+            node.padding = UiRect::horizontal(Val::Px(4.0));
+        });
+        commands
+            .entity(row_entity)
+            .insert((BackgroundColor(Color::NONE), Pickable::default()));
         // Name fills the row; the active marker sits in a fixed-width cell under the
         // "Active" header.
         let label = commands

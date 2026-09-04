@@ -70,7 +70,9 @@ use crate::ui_element::{ElementCx, TextMayClip};
 use crate::ui_font::UiFont;
 use crate::ui_search::{SearchFieldSpec, spawn_search_field};
 use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab_strip};
-use crate::virtual_list::{VirtualList, VirtualRow, VirtualViewport, layout_virtual_lists};
+use crate::virtual_list::{
+    VirtualList, VirtualRow, VirtualViewport, amend_row_node, layout_virtual_lists,
+};
 
 /// The stable id of the picker's floater, keying its persisted geometry.
 pub(crate) const EMOJI_FLOATER_ID: &str = "emoji-picker";
@@ -475,17 +477,15 @@ fn populate_new_emoji_rows(
         if child_of.parent() != ui.viewport {
             continue;
         }
-        commands.entity(row_entity).insert((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                right: Val::Px(0.0),
-                height: Val::Px(CELL_SIZE),
-                align_items: AlignItems::Center,
-                ..default()
-            },
-            Pickable::IGNORE,
-        ));
+        // Amended, not inserted: `top` and `display` are the virtual list's.
+        amend_row_node(&mut commands, row_entity, |node| {
+            node.position_type = PositionType::Absolute;
+            node.left = Val::Px(0.0);
+            node.right = Val::Px(0.0);
+            node.height = Val::Px(CELL_SIZE);
+            node.align_items = AlignItems::Center;
+        });
+        commands.entity(row_entity).insert(Pickable::IGNORE);
         let mut cells = Vec::with_capacity(GRID_COLUMNS);
         for _column in 0..GRID_COLUMNS {
             cells.push(spawn_live_emoji_cell(&mut commands, row_entity));

@@ -49,7 +49,7 @@ use sl_viewer_settings::ViewerSettings;
 use sl_viewer_ui_core::i18n::Translated;
 use sl_viewer_ui_core::ui_ellipsis::{RevealEllipsis, spawn_ellipsis_marker};
 use sl_viewer_ui_core::ui_font::UiFont;
-use sl_viewer_ui_core::virtual_list::{VirtualList, VirtualRow, VirtualViewport};
+use sl_viewer_ui_core::virtual_list::{VirtualList, VirtualRow, VirtualViewport, amend_row_node};
 
 /// The smallest a resizable column may be dragged, in logical pixels — enough to
 /// keep its header legible.
@@ -991,30 +991,44 @@ fn column_cell_node(column: &TableColumn, column_gap: f32) -> Node {
     }
 }
 
+/// Write the table's own row-node fields — the band shape, and the gap and
+/// padding that line a body row up with the header — leaving every other field
+/// of the node alone.
+///
+/// `top` and `display` belong to `virtual_list::layout_virtual_lists`, which
+/// owns where a pooled row sits and whether it is parked, which is why this is
+/// an amendment through `virtual_list::amend_row_node` rather than an insert.
+const fn apply_table_row_node(node: &mut Node, spec: &TableSpec) {
+    node.position_type = PositionType::Absolute;
+    node.left = Val::Px(0.0);
+    node.right = Val::Px(0.0);
+    node.height = Val::Px(spec.row_height);
+    node.align_items = AlignItems::Center;
+    node.column_gap = Val::Px(spec.column_gap);
+    node.padding = UiRect::horizontal(Val::Px(spec.row_padding));
+}
+
 /// Build one pooled row's cells under `row_entity` (already a
 /// `virtual_list::VirtualRow`) and configure the row node to match the
 /// header's gap / padding. Returns [`TableRowCells`] — one text node per column,
 /// which the consumer keeps and binds its projection into on each rebind. Also
 /// inserts that component on the row so widget systems can find the cells.
+///
+/// The row node is **amended, not replaced**: `top` and `display` belong to
+/// [`virtual_list::layout_virtual_lists`](sl_viewer_ui_core::virtual_list::layout_virtual_lists),
+/// which owns where a pooled row sits and whether it is parked.
 pub fn spawn_table_row(
     commands: &mut Commands,
     row_entity: Entity,
     root: Entity,
     spec: &'static TableSpec,
 ) -> TableRowCells {
+    amend_row_node(commands, row_entity, move |node| {
+        apply_table_row_node(node, spec);
+    });
     commands
         .entity(row_entity)
         .insert((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                right: Val::Px(0.0),
-                height: Val::Px(spec.row_height),
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(spec.column_gap),
-                padding: UiRect::horizontal(Val::Px(spec.row_padding)),
-                ..default()
-            },
             BackgroundColor(Color::NONE),
             Pickable::default(),
             TableRow { table: root },
@@ -1855,6 +1869,58 @@ mod tests {
         queue.apply(app.world_mut());
         app.update();
         entity
+    }
+
+    /// `spawn_table_row` amends the row node the virtual list owns rather than
+    /// replacing it. `top` and `display` are the list's — where the pooled row
+    /// sits, and whether it is parked — and a fresh `Node` would reset both, so a
+    /// parked row would flash at `top: Auto`, visible, until the next layout pass
+    /// took it back.
+    #[test]
+    fn spawning_a_row_keeps_the_placement_the_virtual_list_owns() -> Result<(), TestError> {
+        let mut app = table_app();
+        let handle = table(&mut app);
+        // A parked pooled row, exactly as `layout_virtual_lists` leaves one.
+        let entity = app
+            .world_mut()
+            .spawn((
+                VirtualRow {
+                    slot: 0,
+                    index: None,
+                },
+                Node {
+                    position_type: PositionType::Absolute,
+                    top: Val::Px(140.0),
+                    display: Display::None,
+                    ..default()
+                },
+                ChildOf(handle.viewport),
+            ))
+            .id();
+        app.update();
+
+        let mut queue = bevy::ecs::world::CommandQueue::default();
+        {
+            let mut commands = Commands::new(&mut queue, app.world());
+            spawn_table_row(&mut commands, entity, handle.root, &SORTABLE_SPEC);
+        }
+        queue.apply(app.world_mut());
+        app.update();
+
+        let node = app
+            .world()
+            .get::<Node>(entity)
+            .ok_or("the row lost its node")?;
+        assert_eq!(node.top, Val::Px(140.0), "the list's placement survives");
+        assert_eq!(node.display, Display::None, "a parked row stays parked");
+        // …while the table's own fields are applied.
+        assert_eq!(
+            node.padding,
+            UiRect::horizontal(Val::Px(SORTABLE_SPEC.row_padding))
+        );
+        assert_eq!(node.column_gap, Val::Px(SORTABLE_SPEC.column_gap));
+        assert_eq!(node.height, Val::Px(SORTABLE_SPEC.row_height));
+        Ok(())
     }
 
     /// Trigger a primary press on `entity` and settle a frame — the observer call

@@ -61,7 +61,7 @@ use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab_strip};
 use crate::virtual_list::{
-    VirtualList, VirtualRow, VirtualViewport, index_to_f32, layout_virtual_lists,
+    VirtualList, VirtualRow, VirtualViewport, amend_row_node, index_to_f32, layout_virtual_lists,
 };
 use sl_viewer_ui_core::ui_ellipsis::{RevealEllipsis, spawn_ellipsis_marker};
 
@@ -2558,16 +2558,16 @@ fn populate_new_rows(
         if child_of.parent() != ui.viewport {
             continue;
         }
+        // Amended, not inserted: `top` and `display` are the virtual list's.
+        amend_row_node(&mut commands, row_entity, |node| {
+            node.position_type = PositionType::Absolute;
+            node.left = Val::Px(0.0);
+            node.right = Val::Px(0.0);
+            node.height = Val::Px(ROW_HEIGHT);
+            node.align_items = AlignItems::Center;
+            node.column_gap = Val::Px(4.0);
+        });
         commands.entity(row_entity).insert((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                right: Val::Px(0.0),
-                height: Val::Px(ROW_HEIGHT),
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(4.0),
-                ..default()
-            },
             Pickable::default(),
             // Transparent until the drag-and-drop hover paints it as the drop
             // target ([`crate::inventory_drag`]).

@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 311 |
 | blocked | 56 |
 | in-progress | 18 |
-| bugs | 62 |
-| done | 978 |
+| bugs | 61 |
+| done | 979 |
 | deferred | 25 |
 | wont-do | 14 |
 | **total** | **1562** |
@@ -1183,7 +1183,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (62)
+## bugs (61)
 
 ### viewer
 
@@ -1259,8 +1259,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   unbounded
 - [`viewer-audit-ui-texture-poll-leak`](bugs/viewer-audit-ui-texture-poll-leak.md)
   — Eight copied texture-poll systems each leak Image assets for the session
-- [`viewer-audit-virtual-list-rebinding`](bugs/viewer-audit-virtual-list-rebinding.md)
-  — The recycling virtual list re-binds every pooled row on a one-row scroll
 - [`viewer-audit-world-map-clipboard`](bugs/viewer-audit-world-map-clipboard.md)
   — The world map keeps a second live arboard handle
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
@@ -1333,7 +1331,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (978)
+## done (979)
 
 ### protocol
 
@@ -1627,6 +1625,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The colour picker writes unguarded every frame and defeats the layout gate
 - [`viewer-audit-underwater-fog-nan`](done/viewer-audit-underwater-fog-nan.md) —
   A negative underwater fog density NaNs the screen
+- [`viewer-audit-virtual-list-rebinding`](done/viewer-audit-virtual-list-rebinding.md)
+  — The recycling virtual list re-binds every pooled row on a one-row scroll
 - [`viewer-audit-water-state-purge`](done/viewer-audit-water-state-purge.md) —
   WaterState is not purged on a teleport, and leaks spawned water planes
 - [`viewer-audit-world-reset-purge-completeness`](done/viewer-audit-world-reset-purge-completeness.md)

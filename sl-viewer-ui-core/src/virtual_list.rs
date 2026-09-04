@@ -6,8 +6,11 @@
 //! laid out every frame. This widget instead keeps a **small pool** of row
 //! entities — only enough to cover the viewport plus a little overscan — and
 //! **recycles** them as the viewport scrolls: a row that scrolls off the top is
-//! re-bound to the item now scrolling in at the bottom. The cost is set by the
-//! viewport height, not the item count, so a list of any length scrolls cheaply.
+//! re-bound to the item now scrolling in at the bottom — and *only* that row,
+//! because the slot↔item mapping is modular rather than by offset (see
+//! `slot_index`). The cost is set by the viewport height, not the item count,
+//! so a list of any length scrolls cheaply, and one row of scroll costs one
+//! consumer rebind rather than a pool's worth.
 //!
 //! # The split: generic recycling, app-supplied row content
 //!
@@ -400,6 +403,90 @@ fn row_window(
     }
 }
 
+/// Which model item pool slot `slot` presents, out of a pool of `pool_len` rows
+/// showing `window` — or `None` when the window is narrower than the pool and
+/// this slot is parked.
+///
+/// **This is what makes the widget a recycler rather than a re-binder.** The
+/// mapping is *modular*: item `i` always lives in slot `i % pool_len`. Scroll by
+/// one row and exactly **one** slot changes item — the row that just left the
+/// top is the one that takes the item arriving at the bottom, which is the
+/// promise in the module docs. The obvious alternative, `first + slot`, maps by
+/// offset, so a one-row scroll changes the item under *every* slot and wakes
+/// every consumer's `Changed<VirtualRow>` bind: N rebinds per row scrolled,
+/// where the whole point of pooling is one.
+///
+/// The pool length is the modulus, so it must be the *settled* length for the
+/// frame (already grown to cover the window), not the length before growth. The
+/// modulus changing does rebind the whole pool — but the pool only ever grows,
+/// and only up to what the viewport needs, so that is a handful of times over a
+/// list's life rather than once per scroll step.
+fn slot_index(slot: usize, window: RowWindow, pool_len: usize) -> Option<usize> {
+    if slot >= pool_len {
+        return None;
+    }
+    // Which slot the window's first item lands in. `slot < pool_len` already
+    // implies a non-empty pool, so this remainder is always defined.
+    let anchor = window.first.checked_rem(pool_len)?;
+    // How far into the window the item congruent to `slot` sits: `slot - anchor`
+    // modulo the pool length, adding a whole pool first so the subtraction stays
+    // in `usize`. The result is in `0..pool_len`, and the window is never wider
+    // than the pool, so distinct slots always name distinct items.
+    let offset = slot
+        .checked_add(pool_len)?
+        .checked_sub(anchor)?
+        .checked_rem(pool_len)?;
+    (offset < window.count).then(|| window.first.saturating_add(offset))
+}
+
+/// The [`Node`] a pooled row carries: a full-width absolutely positioned band at
+/// its item's offset within the scrolled content, or hidden when parked.
+///
+/// Shared by the growth path (which spawns a row already bound) and the bind
+/// path (which writes the same three fields in place), so a fresh row and a
+/// recycled one cannot end up laid out differently.
+fn row_node(index: Option<usize>, row_height: f32, scroll: f32) -> Node {
+    Node {
+        position_type: PositionType::Absolute,
+        left: Val::Px(0.0),
+        right: Val::Px(0.0),
+        height: Val::Px(row_height),
+        top: Val::Px(index.map_or(0.0, |index| row_top(index, row_height) - scroll)),
+        display: if index.is_some() {
+            Display::Flex
+        } else {
+            Display::None
+        },
+        ..default()
+    }
+}
+
+/// Amend a pooled row's [`Node`] in place, leaving the fields this module owns
+/// alone — **the supported way for a consumer to dress its rows**.
+///
+/// A row's `top` and `display` belong to [`layout_virtual_lists`]: where the row
+/// sits in the scrolled content, and whether it is parked because the window is
+/// narrower than the pool. A consumer wants the *other* fields — its alignment,
+/// gap and padding — and reaching for them by inserting a fresh `Node`
+/// **replaces** the whole component, placement included, so a parked row comes
+/// back at `top: Auto` and visible until the next layout pass takes it away
+/// again. Amending says "these fields are mine" and means it.
+///
+/// The amendment runs against whatever node the row already has; a row with none
+/// (a test fixture, say) gets a default one first, exactly as an insert would
+/// have given it.
+pub fn amend_row_node(
+    commands: &mut Commands,
+    row: Entity,
+    amend: impl FnOnce(&mut Node) + Send + Sync + 'static,
+) {
+    commands
+        .entity(row)
+        .entry::<Node>()
+        .or_default()
+        .and_modify(move |mut node| amend(&mut node));
+}
+
 /// Route the wheel to the virtual list under the pointer. The world camera
 /// never zooms at the same time: a list viewport is blocking UI, and the
 /// camera's wheel zoom ignores a scroll over blocking UI — see the
@@ -441,6 +528,10 @@ pub fn scroll_virtual_lists(
 /// every pooled row. Runs every frame but writes a row's [`VirtualRow`] or
 /// [`Node`] only when a value actually changes, so a still list costs a compare
 /// and nothing more (and does not spuriously wake consumers' `Changed` binds).
+///
+/// Which slot shows which item is `slot_index`'s modular mapping, so a scroll
+/// rebinds only the rows that actually changed item. A row grown this frame is
+/// spawned already bound and positioned, so it never renders blank.
 pub fn layout_virtual_lists(
     mut commands: Commands,
     mut lists: Query<(Entity, &mut VirtualList, &ComputedNode)>,
@@ -477,32 +568,29 @@ pub fn layout_virtual_lists(
             .collect();
         pool.sort_unstable_by_key(|&(_, slot)| slot);
 
-        // Grow the pool until it can cover the window.
+        // The pool length is the modulus [`slot_index`] turns on, so settle it
+        // *before* binding anything: the rows grown below must land on the same
+        // mapping as the rows that already exist, or the two halves of one frame
+        // would disagree about which slot shows which item.
+        let pool_len = pool.len().max(window.count);
+
+        // Grow the pool until it can cover the window. A grown row is spawned
+        // already bound to its item and already positioned — the bind loop below
+        // could not do it, because `commands.spawn` is deferred and `rows` cannot
+        // see an entity that does not exist yet, which used to leave every fresh
+        // row blank and `Display::None` for one frame.
         for slot in pool.len()..window.count {
-            let row = commands
-                .spawn((
-                    VirtualRow { slot, index: None },
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(0.0),
-                        right: Val::Px(0.0),
-                        height: Val::Px(list.row_height),
-                        display: Display::None,
-                        ..default()
-                    },
-                    ChildOf(list_entity),
-                ))
-                .id();
-            pool.push((row, slot));
+            let index = slot_index(slot, window, pool_len);
+            commands.spawn((
+                VirtualRow { slot, index },
+                row_node(index, list.row_height, list.scroll),
+                ChildOf(list_entity),
+            ));
         }
 
         // Bind each pooled row to its window item (or park it) and position it.
         for &(entity, slot) in &pool {
-            let index = if slot < window.count {
-                Some(window.first.saturating_add(slot))
-            } else {
-                None
-            };
+            let index = slot_index(slot, window, pool_len);
             let Ok((mut row, mut node)) = rows.get_mut(entity) else {
                 continue;
             };
@@ -565,9 +653,13 @@ fn floor_to_usize(value: f32) -> usize {
 
 #[cfg(test)]
 mod tests {
+    use bevy::prelude::*;
+    use std::collections::BTreeSet;
+
     use super::{
-        OVERSCAN_ROWS, RowWindow, content_height, floor_to_usize, index_to_f32, max_scroll,
-        row_top, row_window,
+        OVERSCAN_ROWS, RowWindow, VirtualList, VirtualRow, content_height, floor_to_usize,
+        index_to_f32, layout_virtual_lists, max_scroll, row_top, row_window, scrollbar_geometry,
+        slot_index,
     };
     use pretty_assertions::assert_eq;
 
@@ -671,5 +763,249 @@ mod tests {
         assert_eq!(floor_to_usize(-1.0), 0);
         assert_eq!(floor_to_usize(f32::NAN), 0);
         assert_eq!(floor_to_usize(3.9), 3);
+    }
+
+    /// Every slot's item, in slot order — the whole mapping for one frame.
+    fn slot_map(window: RowWindow, pool_len: usize) -> Vec<Option<usize>> {
+        (0..pool_len)
+            .map(|slot| slot_index(slot, window, pool_len))
+            .collect()
+    }
+
+    /// At the top of the list, with a pool sized exactly to the window, the
+    /// modular mapping is the identity — which is why every test and consumer
+    /// written against the old offset mapping still reads the same.
+    #[test]
+    fn a_full_pool_at_the_top_maps_slot_to_item() {
+        let window = RowWindow { first: 0, count: 8 };
+        assert_eq!(
+            slot_map(window, 8),
+            (0..8).map(Some).collect::<Vec<Option<usize>>>()
+        );
+    }
+
+    /// The mapping is a bijection: every item in the window has exactly one
+    /// slot, and no two slots claim the same item.
+    #[test]
+    fn every_window_item_gets_exactly_one_slot() {
+        let pool_len = 11;
+        for first in 0..40 {
+            let window = RowWindow {
+                first,
+                count: pool_len,
+            };
+            let items: BTreeSet<usize> = slot_map(window, pool_len).into_iter().flatten().collect();
+            assert_eq!(
+                items,
+                (first..first.saturating_add(pool_len)).collect::<BTreeSet<usize>>(),
+                "first={first}: the pool must cover the window exactly once"
+            );
+        }
+    }
+
+    /// **The bug this widget exists to avoid.** Scrolling by one row must move
+    /// exactly one slot to a new item — the row that left the top takes the item
+    /// arriving at the bottom. The offset mapping (`first + slot`) changed every
+    /// slot instead, waking every consumer's `Changed<VirtualRow>` bind.
+    #[test]
+    fn a_one_row_scroll_rebinds_exactly_one_slot() {
+        let pool_len = 11;
+        for first in 0..40 {
+            let before = slot_map(
+                RowWindow {
+                    first,
+                    count: pool_len,
+                },
+                pool_len,
+            );
+            let after = slot_map(
+                RowWindow {
+                    first: first.saturating_add(1),
+                    count: pool_len,
+                },
+                pool_len,
+            );
+            let moved = before
+                .iter()
+                .zip(&after)
+                .filter(|(before, after)| before != after)
+                .count();
+            assert_eq!(moved, 1, "first={first}: one row of scroll, one rebind");
+        }
+    }
+
+    /// A pool wider than the window parks its surplus slots, and parks the same
+    /// number however far down the list the window sits.
+    #[test]
+    fn a_pool_wider_than_the_window_parks_the_surplus() {
+        let window = RowWindow {
+            first: 17,
+            count: 6,
+        };
+        let parked = slot_map(window, 10)
+            .into_iter()
+            .filter(Option::is_none)
+            .count();
+        assert_eq!(parked, 4);
+        // An empty window parks the whole pool.
+        let empty = RowWindow { first: 0, count: 0 };
+        assert_eq!(slot_map(empty, 10).into_iter().flatten().count(), 0);
+        // A slot outside the pool never has an item.
+        assert_eq!(slot_index(10, window, 10), None);
+        assert_eq!(slot_index(0, window, 0), None);
+    }
+
+    /// The scrollbar hides while the content fits, and otherwise reports a thumb
+    /// proportional to the visible fraction beside the same `max_scroll` the
+    /// layout pass clamps against.
+    #[expect(
+        clippy::float_cmp,
+        reason = "the geometry is exact at these representable inputs, asserted exactly"
+    )]
+    #[test]
+    fn scrollbar_geometry_tracks_the_visible_fraction() -> Result<(), TestError> {
+        // Content that fits, and a degenerate viewport: no bar at all.
+        assert!(scrollbar_geometry(5, 20.0, 100.0).is_none());
+        assert!(scrollbar_geometry(50, 20.0, 0.0).is_none());
+        // Two fifths of the content is visible, so the thumb covers two fifths
+        // of the track, and the content scrolls by everything below the fold.
+        let geometry = scrollbar_geometry(25, 10.0, 100.0).ok_or("a 25-row list must scroll")?;
+        assert_eq!(geometry.thumb_height, 40.0);
+        assert_eq!(geometry.max_scroll, 150.0);
+        // A very long list would compute a sub-pixel thumb; it is floored at the
+        // minimum so it stays grabbable.
+        let long = scrollbar_geometry(100_000, 20.0, 100.0).ok_or("a huge list must scroll")?;
+        assert_eq!(long.thumb_height, super::SCROLLBAR_MIN_THUMB);
+        Ok(())
+    }
+
+    /// Errors a test reports rather than unwrapping.
+    type TestError = Box<dyn core::error::Error>;
+
+    /// How many rows the last [`layout_virtual_lists`] run actually re-bound —
+    /// the number a consumer's `Changed<VirtualRow>` bind would have paid for.
+    #[derive(Resource, Default)]
+    struct Rebinds(usize);
+
+    /// Record the frame's rebind count. Runs straight after the layout pass, so
+    /// it sees exactly the writes that pass made.
+    fn count_rebinds(mut rebinds: ResMut<Rebinds>, rows: Query<(), Changed<VirtualRow>>) {
+        rebinds.0 = rows.iter().count();
+    }
+
+    /// An app carrying just the pool machinery and the rebind counter — no
+    /// `bevy_ui` layout, so the viewport's [`ComputedNode`] is written by hand.
+    fn pool_app(item_count: usize, row_height: f32, viewport_height: f32) -> (App, Entity) {
+        let mut app = App::new();
+        app.init_resource::<Rebinds>()
+            .add_systems(Update, (layout_virtual_lists, count_rebinds).chain());
+        let mut list = VirtualList::new(row_height);
+        list.item_count = item_count;
+        let viewport = app
+            .world_mut()
+            .spawn((
+                list,
+                Node::default(),
+                ComputedNode {
+                    size: Vec2::new(200.0, viewport_height),
+                    ..ComputedNode::DEFAULT
+                },
+            ))
+            .id();
+        (app, viewport)
+    }
+
+    /// Every pooled row's item, in slot order.
+    fn pooled_items(app: &mut App, viewport: Entity) -> Vec<Option<usize>> {
+        let mut query = app.world_mut().query::<(&VirtualRow, &ChildOf)>();
+        let mut rows = query
+            .iter(app.world())
+            .filter(|&(_, child_of)| child_of.parent() == viewport)
+            .map(|(row, _)| (row.slot, row.index))
+            .collect::<Vec<(usize, Option<usize>)>>();
+        rows.sort_unstable_by_key(|&(slot, _)| slot);
+        rows.into_iter().map(|(_, index)| index).collect()
+    }
+
+    /// A row grown this frame comes up **already bound and already placed**. The
+    /// growth loop spawns through `Commands`, so the bind loop right below it
+    /// cannot see the new entity — it used to `continue` past it, leaving the row
+    /// blank and `Display::None` until the next frame.
+    #[test]
+    fn a_grown_row_comes_up_already_bound() -> Result<(), TestError> {
+        let (mut app, viewport) = pool_app(1000, 20.0, 100.0);
+        app.update();
+
+        let items = pooled_items(&mut app, viewport);
+        assert!(!items.is_empty(), "the pool must cover the viewport");
+        assert!(
+            items.iter().all(Option::is_some),
+            "a row spawned to cover the window is bound to its item: {items:?}"
+        );
+        let mut nodes = app.world_mut().query::<(&VirtualRow, &Node)>();
+        for (row, node) in nodes.iter(app.world()) {
+            let index = row.index.ok_or("a covering row lost its item")?;
+            assert_eq!(node.display, Display::Flex, "slot {} is hidden", row.slot);
+            assert_eq!(
+                node.top,
+                Val::Px(row_top(index, 20.0)),
+                "slot {} sits at the wrong offset",
+                row.slot
+            );
+        }
+        Ok(())
+    }
+
+    /// End to end through the real system: one row of scroll costs one rebind,
+    /// and a still list costs none.
+    #[test]
+    fn scrolling_one_row_wakes_one_bind() -> Result<(), TestError> {
+        let (mut app, viewport) = pool_app(1000, 20.0, 100.0);
+        // Start in the middle: near the top the overscan pins the window's first
+        // index at 0, so scrolling a row would not move the window at all.
+        app.world_mut()
+            .get_mut::<VirtualList>(viewport)
+            .ok_or("the viewport lost its list")?
+            .scroll_to_index(20);
+        // Settle: the first frame grows the pool, the second is the consumer's
+        // `Added` frame, the third is quiet.
+        for _ in 0..3 {
+            app.update();
+        }
+        assert_eq!(
+            app.world().resource::<Rebinds>().0,
+            0,
+            "a list nobody touched must not wake a single bind"
+        );
+        let before = pooled_items(&mut app, viewport);
+
+        app.world_mut()
+            .get_mut::<VirtualList>(viewport)
+            .ok_or("the viewport lost its list")?
+            .scroll_by(20.0);
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<Rebinds>().0,
+            1,
+            "one row of scroll must re-bind one pooled row, not the whole pool"
+        );
+        let after = pooled_items(&mut app, viewport);
+        // And the one that moved took the item arriving at the bottom.
+        let moved: Vec<(Option<usize>, Option<usize>)> = before
+            .iter()
+            .zip(&after)
+            .filter(|(before, after)| before != after)
+            .map(|(before, after)| (*before, *after))
+            .collect();
+        assert_eq!(moved.len(), 1);
+        let (left, arrived) = *moved.first().ok_or("no row moved")?;
+        let left = left.ok_or("the recycled row was parked")?;
+        let arrived = arrived.ok_or("the recycled row was parked")?;
+        assert!(
+            arrived > left,
+            "scrolling down recycles the top row to the bottom: {left} -> {arrived}"
+        );
+        Ok(())
     }
 }
