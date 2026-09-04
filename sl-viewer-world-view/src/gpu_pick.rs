@@ -16,7 +16,7 @@
 //! the **submitting frame's** matrices (kept per in-flight pick) to the world
 //! hit point.
 //!
-//! Pick identity rides [`MeshTag`] — `class:4 bits | index:28 bits`
+//! Pick identity rides [`MeshTag`] — `class:4 | generation:8 | index:20`
 //! (`encode_pick_tag`) — assigned at spawn by the `assign_*` systems (avatar
 //! submeshes via [`AvatarPickTarget`], prim faces via [`PrimFaceEntity`],
 //! terrain patches, water planes) and freed on despawn. Name tags keep their
@@ -112,11 +112,29 @@ const PICK_ITEM_CAP: usize = 512;
 /// under the cursor was dropped (the pick missed it).
 const SKINNED_PICK_BOUND: f32 = 3.0;
 
-/// How many bits of a pick tag hold the slot index.
+/// Where a pick tag's class bits start: `class:4 | generation:8 | index:20`.
 const PICK_CLASS_SHIFT: u32 = 28;
 
-/// The mask over a pick tag's index bits.
-const PICK_INDEX_MASK: u32 = 0x0FFF_FFFF;
+/// Where a pick tag's generation bits start.
+///
+/// A freed slot index is recycled, and a read-back tag is resolved two to three
+/// frames after it was captured — so without a generation the click meant for a
+/// derendered object could be answered by whatever took its slot in the
+/// meantime ([[viewer-audit-gpu-pick-slot-lifecycle]]). The slot table bumps
+/// this counter every time an index is freed, and [`PickRegistry::resolve`]
+/// refuses a tag whose generation is no longer the index's.
+const PICK_GENERATION_SHIFT: u32 = 20;
+
+/// The mask over a pick tag's generation bits, once shifted down. Eight bits:
+/// a stale tag is at most three frames old, so a false match would need its
+/// slot freed and reallocated 256 times inside those three frames.
+const PICK_GENERATION_MASK: u32 = 0xFF;
+
+/// The mask over a pick tag's index bits — 20 bits, just over a million live
+/// slots per class. A dense region's face entities are counted in the low
+/// hundreds of thousands, and freed indices are recycled, so the tables only
+/// ever grow to the peak *live* count.
+const PICK_INDEX_MASK: u32 = 0x000F_FFFF;
 
 /// The pick class of an avatar submesh (index → avatar slot).
 const CLASS_AVATAR: u32 = 1;
@@ -131,15 +149,30 @@ const CLASS_TERRAIN: u32 = 3;
 /// The pick class of a water plane (occludes, resolves to `Water`).
 const CLASS_WATER: u32 = 4;
 
-/// Encode a pick tag from its class and slot index (`class:4 | index:28`).
-/// `None` when the index outgrows the 28 index bits.
-fn encode_pick_tag(class: u32, index: u32) -> Option<u32> {
-    (index <= PICK_INDEX_MASK).then(|| class.wrapping_shl(PICK_CLASS_SHIFT) | index)
+/// Encode a pick tag from its class, the slot's generation and its index
+/// (`class:4 | generation:8 | index:20`). `None` when either outgrows its
+/// field.
+fn encode_pick_tag(class: u32, generation: u32, index: u32) -> Option<u32> {
+    (index <= PICK_INDEX_MASK && generation <= PICK_GENERATION_MASK).then(|| {
+        class.wrapping_shl(PICK_CLASS_SHIFT)
+            | generation.wrapping_shl(PICK_GENERATION_SHIFT)
+            | index
+    })
 }
 
-/// Split a pick tag back into `(class, index)`.
-const fn decode_pick_tag(tag: u32) -> (u32, u32) {
-    (tag.wrapping_shr(PICK_CLASS_SHIFT), tag & PICK_INDEX_MASK)
+/// The generation an index carries after being freed once more — wrapping
+/// inside the tag's eight generation bits rather than growing out of them.
+const fn next_generation(generation: u32) -> u32 {
+    generation.wrapping_add(1) & PICK_GENERATION_MASK
+}
+
+/// Split a pick tag back into `(class, generation, index)`.
+const fn decode_pick_tag(tag: u32) -> (u32, u32, u32) {
+    (
+        tag.wrapping_shr(PICK_CLASS_SHIFT),
+        tag.wrapping_shr(PICK_GENERATION_SHIFT) & PICK_GENERATION_MASK,
+        tag & PICK_INDEX_MASK,
+    )
 }
 
 /// What a resolved pick tag names.
@@ -194,19 +227,47 @@ struct ObjectFaceSlot {
     face: PrimFaceId,
 }
 
+/// One entry of a slot table: what the index names while it is allocated, and
+/// the generation every tag naming this index carries.
+///
+/// The generation is what makes a recycled index safe. A read-back tag is
+/// resolved two to three frames after the GPU captured it; the slot it names
+/// can have been freed and handed to a different object in between, and
+/// without the counter the click would be answered by the new occupant
+/// ([[viewer-audit-gpu-pick-slot-lifecycle]]).
+#[derive(Debug, Clone, Copy)]
+struct SlotEntry<T> {
+    /// Bumped each time this index is freed, so every tag issued before the
+    /// free stops matching. Wraps within [`PICK_GENERATION_MASK`].
+    generation: u32,
+    /// The identity this index names, or `None` while it sits on the free list.
+    slot: Option<T>,
+}
+
+impl<T> SlotEntry<T> {
+    /// A freshly allocated entry at generation zero — an index that has never
+    /// been recycled.
+    const fn first(slot: T) -> Self {
+        Self {
+            generation: 0,
+            slot: Some(slot),
+        }
+    }
+}
+
 /// The pick-ID registry: dense free-listed slot tables per class, the
 /// entity → tag map used to free on despawn, and the tag → identity resolve
 /// the readback goes through.
 #[derive(Resource, Debug, Default)]
 pub(crate) struct PickRegistry {
     /// Avatar slots by index (class 1).
-    avatar_slots: Vec<Option<AvatarSlot>>,
+    avatar_slots: Vec<SlotEntry<AvatarSlot>>,
     /// Free avatar slot indices.
     avatar_free: Vec<u32>,
     /// The live `(agent, worn)` → avatar slot index map (slots are shared).
     avatar_index: HashMap<(AgentKey, Option<ScopedObjectId>), u32>,
     /// Object-face slots by index (class 2).
-    object_slots: Vec<Option<ObjectFaceSlot>>,
+    object_slots: Vec<SlotEntry<ObjectFaceSlot>>,
     /// Free object-face slot indices.
     object_free: Vec<u32>,
     /// Every tagged entity's tag, for freeing on removal/despawn.
@@ -225,7 +286,9 @@ impl PickRegistry {
         let index = match self.avatar_index.get(&(agent, worn)) {
             Some(index) => {
                 let index = *index;
-                if let Some(Some(slot)) = self.avatar_slots.get_mut(usize::try_from(index).ok()?) {
+                if let Some(entry) = self.avatar_slots.get_mut(usize::try_from(index).ok()?)
+                    && let Some(slot) = entry.slot.as_mut()
+                {
                     slot.refs = slot.refs.saturating_add(1);
                 }
                 index
@@ -238,15 +301,15 @@ impl PickRegistry {
                 };
                 let index = match self.avatar_free.pop() {
                     Some(free) => {
-                        if let Some(entry) = self.avatar_slots.get_mut(usize::try_from(free).ok()?)
-                        {
-                            *entry = Some(slot);
-                        }
+                        // A recycled index keeps its generation, which the free
+                        // that returned it here already bumped.
+                        let entry = self.avatar_slots.get_mut(usize::try_from(free).ok()?)?;
+                        entry.slot = Some(slot);
                         free
                     }
                     None => {
                         let index = u32::try_from(self.avatar_slots.len()).ok()?;
-                        self.avatar_slots.push(Some(slot));
+                        self.avatar_slots.push(SlotEntry::first(slot));
                         index
                     }
                 };
@@ -254,7 +317,11 @@ impl PickRegistry {
                 index
             }
         };
-        let tag = encode_pick_tag(CLASS_AVATAR, index)?;
+        let generation = self
+            .avatar_slots
+            .get(usize::try_from(index).ok()?)?
+            .generation;
+        let tag = encode_pick_tag(CLASS_AVATAR, generation, index)?;
         self.entity_tags.insert(entity, tag);
         Some(tag)
     }
@@ -274,18 +341,24 @@ impl PickRegistry {
         };
         let index = match self.object_free.pop() {
             Some(free) => {
-                if let Some(entry) = self.object_slots.get_mut(usize::try_from(free).ok()?) {
-                    *entry = Some(slot);
-                }
+                // A recycled index keeps its generation, which the free that
+                // returned it here already bumped — so the tag issued below
+                // differs from the one the previous occupant held.
+                let entry = self.object_slots.get_mut(usize::try_from(free).ok()?)?;
+                entry.slot = Some(slot);
                 free
             }
             None => {
                 let index = u32::try_from(self.object_slots.len()).ok()?;
-                self.object_slots.push(Some(slot));
+                self.object_slots.push(SlotEntry::first(slot));
                 index
             }
         };
-        let tag = encode_pick_tag(CLASS_OBJECT_FACE, index)?;
+        let generation = self
+            .object_slots
+            .get(usize::try_from(index).ok()?)?
+            .generation;
+        let tag = encode_pick_tag(CLASS_OBJECT_FACE, generation, index)?;
         self.entity_tags.insert(entity, tag);
         Some(tag)
     }
@@ -295,20 +368,48 @@ impl PickRegistry {
         self.entity_tags.insert(entity, tag);
     }
 
+    /// Allocate whatever `pending` names and record its entity's tag — the one
+    /// entry point [`queue_pick_tags`] uses, so every class is allocated under
+    /// the same liveness rule.
+    fn alloc(&mut self, pending: PendingPickTag) -> Option<u32> {
+        match pending {
+            PendingPickTag::Avatar {
+                entity,
+                agent,
+                worn,
+            } => self.alloc_avatar(entity, agent, worn),
+            PendingPickTag::ObjectFace {
+                entity,
+                scoped,
+                face,
+            } => self.alloc_object_face(entity, scoped, face),
+            PendingPickTag::Fixed { entity, tag } => {
+                self.note_fixed(entity, tag);
+                Some(tag)
+            }
+        }
+    }
+
     /// Free whatever `entity` held: drop an avatar slot reference (freeing
     /// the slot at zero), free an object-face slot, or forget a fixed tag.
+    ///
+    /// A tag whose generation is no longer the index's names a slot that has
+    /// already been freed and handed on, so it frees nothing — the entry
+    /// belongs to somebody else now.
     fn free_entity(&mut self, entity: Entity) {
         let Some(tag) = self.entity_tags.remove(&entity) else {
             return;
         };
-        let (class, index) = decode_pick_tag(tag);
+        let (class, generation, index) = decode_pick_tag(tag);
         let Ok(slot_index) = usize::try_from(index) else {
             return;
         };
         match class {
             CLASS_AVATAR => {
-                if let Some(entry) = self.avatar_slots.get_mut(slot_index) {
-                    let emptied = match entry {
+                if let Some(entry) = self.avatar_slots.get_mut(slot_index)
+                    && entry.generation == generation
+                {
+                    let emptied = match entry.slot.as_mut() {
                         Some(slot) => {
                             slot.refs = slot.refs.saturating_sub(1);
                             slot.refs == 0
@@ -316,17 +417,20 @@ impl PickRegistry {
                         None => false,
                     };
                     if emptied {
-                        if let Some(slot) = entry.take() {
+                        if let Some(slot) = entry.slot.take() {
                             self.avatar_index.remove(&(slot.agent, slot.worn));
                         }
+                        entry.generation = next_generation(entry.generation);
                         self.avatar_free.push(index);
                     }
                 }
             }
             CLASS_OBJECT_FACE => {
                 if let Some(entry) = self.object_slots.get_mut(slot_index)
-                    && entry.take().is_some()
+                    && entry.generation == generation
+                    && entry.slot.take().is_some()
                 {
+                    entry.generation = next_generation(entry.generation);
                     self.object_free.push(index);
                 }
             }
@@ -334,29 +438,30 @@ impl PickRegistry {
         }
     }
 
-    /// Resolve a read-back tag to what it names (`None` for 0 / a freed or
-    /// unknown slot).
+    /// Resolve a read-back tag to what it names (`None` for 0, a freed or
+    /// unknown slot, or a **stale** one — an index recycled since the tag was
+    /// captured, which the generation catches).
     pub(crate) fn resolve(&self, tag: u32) -> Option<PickResolution> {
         if tag == 0 {
             return None;
         }
-        let (class, index) = decode_pick_tag(tag);
+        let (class, generation, index) = decode_pick_tag(tag);
         match class {
             CLASS_AVATAR => {
-                let slot = self
-                    .avatar_slots
-                    .get(usize::try_from(index).ok()?)?
-                    .as_ref()?;
+                let entry = self.avatar_slots.get(usize::try_from(index).ok()?)?;
+                let slot = (entry.generation == generation)
+                    .then_some(entry.slot.as_ref())
+                    .flatten()?;
                 Some(PickResolution::Avatar {
                     agent: slot.agent,
                     worn: slot.worn,
                 })
             }
             CLASS_OBJECT_FACE => {
-                let slot = self
-                    .object_slots
-                    .get(usize::try_from(index).ok()?)?
-                    .as_ref()?;
+                let entry = self.object_slots.get(usize::try_from(index).ok()?)?;
+                let slot = (entry.generation == generation)
+                    .then_some(entry.slot.as_ref())
+                    .flatten()?;
                 Some(PickResolution::ObjectFace {
                     entity: slot.entity,
                     scoped: slot.scoped,
@@ -389,6 +494,91 @@ pub(crate) struct PickId(pub(crate) u32);
 // Tag assignment / freeing.
 // ---------------------------------------------------------------------------
 
+/// One entity an assignment system decided to tag, carried to the deferred
+/// command that allocates its slot (see [`queue_pick_tags`]).
+#[derive(Debug, Clone, Copy)]
+enum PendingPickTag {
+    /// An avatar submesh, taking the `(agent, worn)` slot its siblings share.
+    Avatar {
+        /// The submesh to tag.
+        entity: Entity,
+        /// The avatar the geometry belongs to.
+        agent: AgentKey,
+        /// The worn object of a rigged attachment submesh, `None` for the body.
+        worn: Option<ScopedObjectId>,
+    },
+    /// A prim face, taking a slot of its own.
+    ObjectFace {
+        /// The face entity to tag.
+        entity: Entity,
+        /// The object the face belongs to.
+        scoped: ScopedObjectId,
+        /// The face's Linden face index.
+        face: PrimFaceId,
+    },
+    /// Terrain or water: a fixed class tag with no slot to allocate.
+    Fixed {
+        /// The patch or plane to tag.
+        entity: Entity,
+        /// The class tag it carries.
+        tag: u32,
+    },
+}
+
+impl PendingPickTag {
+    /// The entity this tag is for.
+    const fn entity(&self) -> Entity {
+        match *self {
+            Self::Avatar { entity, .. }
+            | Self::ObjectFace { entity, .. }
+            | Self::Fixed { entity, .. } => entity,
+        }
+    }
+}
+
+/// Allocate every pending tag and insert it, as one deferred command.
+///
+/// Allocating in the system and inserting through `Commands` used to be two
+/// steps with a gap in between: an entity despawned in that gap never received
+/// its [`PickId`], so no `RemovedComponents<PickId>` ever fired for it and both
+/// its slot and its `entity_tags` entry leaked for the life of the session
+/// ([[viewer-audit-gpu-pick-slot-lifecycle]]). The code knew the insert could be
+/// lost — that is what its `try_insert` was for — but the registry had already
+/// been written by then.
+///
+/// Doing both inside one exclusive command closes it. The allocation is
+/// unwound with the ordinary [`PickRegistry::free_entity`] path if the entity
+/// turns out to be gone, so there is no second liveness rule to keep in step
+/// with the first; its replacement is tagged when it appears, as before.
+fn queue_pick_tags(commands: &mut Commands, pending: Vec<PendingPickTag>) {
+    if pending.is_empty() {
+        return;
+    }
+    commands.queue(move |world: &mut World| {
+        let scoped = world.try_resource_scope(|world, mut registry: Mut<PickRegistry>| {
+            for item in pending {
+                let entity = item.entity();
+                let Some(tag) = registry.alloc(item) else {
+                    warn!("gpu-pick: slot space exhausted; entity stays unpickable");
+                    continue;
+                };
+                match world.get_entity_mut(entity) {
+                    Ok(mut tagged) => {
+                        tagged.insert((PickId(tag), MeshTag(tag)));
+                    }
+                    // Despawned since the query ran (a region purge, an object
+                    // removed by an earlier event this frame): give the slot
+                    // straight back rather than leaving it held by a dead id.
+                    Err(_despawned) => registry.free_entity(entity),
+                }
+            }
+        });
+        if scoped.is_none() {
+            warn!("gpu-pick: no pick registry to tag into; entities stay unpickable");
+        }
+    });
+}
+
 /// Tag every untagged avatar mesh piece (base body parts, rigid parts, the
 /// placeholder sphere, worn rigged submeshes) with its avatar's class-1 tag —
 /// worn rigged submeshes get their own `(agent, worn)` slot so a hit on them
@@ -398,27 +588,21 @@ pub(crate) struct PickId(pub(crate) u32);
     reason = "a query's term list is its type; splitting it loses the single-query guarantee"
 )]
 pub(crate) fn assign_avatar_pick_tags(
-    mut registry: ResMut<PickRegistry>,
     untagged: Query<
         (Entity, &AvatarPickTarget, Option<&WornPickTarget>),
         (With<Mesh3d>, Without<PickId>),
     >,
     mut commands: Commands,
 ) {
-    for (entity, target, worn) in &untagged {
-        let worn = worn.map(|worn| worn.scoped);
-        let Some(tag) = registry.alloc_avatar(entity, target.agent(), worn) else {
-            warn!("gpu-pick: avatar slot space exhausted; entity stays unpickable");
-            continue;
-        };
-        // `try_insert`, not `insert`: another system may despawn this queried entity
-        // (a re-tessellation / LOD swap despawns face entities) before this deferred
-        // command applies, which an `insert` would panic on; the replacement is
-        // tagged next frame (still `Without<PickId>`).
-        commands
-            .entity(entity)
-            .try_insert((PickId(tag), MeshTag(tag)));
-    }
+    let pending = untagged
+        .iter()
+        .map(|(entity, target, worn)| PendingPickTag::Avatar {
+            entity,
+            agent: target.agent(),
+            worn: worn.map(|worn| worn.scoped),
+        })
+        .collect();
+    queue_pick_tags(&mut commands, pending);
 }
 
 /// Tag every untagged prim-face mesh with its object's class-2 tag, resolved
@@ -431,7 +615,6 @@ pub(crate) fn assign_avatar_pick_tags(
     reason = "a query's term list is its type; splitting it loses the single-query guarantee"
 )]
 pub(crate) fn assign_object_face_pick_tags(
-    mut registry: ResMut<PickRegistry>,
     untagged: Query<
         (Entity, &PrimFaceEntity),
         (With<Mesh3d>, Without<PickId>, Without<AvatarPickTarget>),
@@ -440,6 +623,7 @@ pub(crate) fn assign_object_face_pick_tags(
     parents: Query<&ChildOf>,
     mut commands: Commands,
 ) {
+    let mut pending = Vec::new();
     for (entity, face) in &untagged {
         // Walk up the linkset to the entity carrying the scene identity (the
         // same walk the resolvers use).
@@ -456,18 +640,13 @@ pub(crate) fn assign_object_face_pick_tags(
         let Some(scoped) = scoped else {
             continue;
         };
-        let Some(tag) = registry.alloc_object_face(entity, scoped, face.face_id) else {
-            warn!("gpu-pick: object-face slot space exhausted; face stays unpickable");
-            continue;
-        };
-        // `try_insert`, not `insert`: another system may despawn this queried entity
-        // (a re-tessellation / LOD swap despawns face entities) before this deferred
-        // command applies, which an `insert` would panic on; the replacement is
-        // tagged next frame (still `Without<PickId>`).
-        commands
-            .entity(entity)
-            .try_insert((PickId(tag), MeshTag(tag)));
+        pending.push(PendingPickTag::ObjectFace {
+            entity,
+            scoped,
+            face: face.face_id,
+        });
     }
+    queue_pick_tags(&mut commands, pending);
 }
 
 /// Tag every untagged terrain patch with the shared class-3 tag (the depth
@@ -477,23 +656,17 @@ pub(crate) fn assign_object_face_pick_tags(
     reason = "a query's term list is its type; splitting it loses the single-query guarantee"
 )]
 pub(crate) fn assign_terrain_pick_tags(
-    mut registry: ResMut<PickRegistry>,
     untagged: Query<Entity, (With<TerrainSurface>, With<Mesh3d>, Without<PickId>)>,
     mut commands: Commands,
 ) {
-    let Some(tag) = encode_pick_tag(CLASS_TERRAIN, 0) else {
+    let Some(tag) = encode_pick_tag(CLASS_TERRAIN, 0, 0) else {
         return;
     };
-    for entity in &untagged {
-        registry.note_fixed(entity, tag);
-        // `try_insert`, not `insert`: another system may despawn this queried entity
-        // (a re-tessellation / LOD swap despawns face entities) before this deferred
-        // command applies, which an `insert` would panic on; the replacement is
-        // tagged next frame (still `Without<PickId>`).
-        commands
-            .entity(entity)
-            .try_insert((PickId(tag), MeshTag(tag)));
-    }
+    let pending = untagged
+        .iter()
+        .map(|entity| PendingPickTag::Fixed { entity, tag })
+        .collect();
+    queue_pick_tags(&mut commands, pending);
 }
 
 /// Tag every untagged water plane (endless ocean + per-region planes) with
@@ -504,23 +677,17 @@ pub(crate) fn assign_terrain_pick_tags(
     reason = "a query's term list is its type; splitting it loses the single-query guarantee"
 )]
 pub(crate) fn assign_water_pick_tags(
-    mut registry: ResMut<PickRegistry>,
     untagged: Query<Entity, (With<WaterCell>, With<Mesh3d>, Without<PickId>)>,
     mut commands: Commands,
 ) {
-    let Some(tag) = encode_pick_tag(CLASS_WATER, 0) else {
+    let Some(tag) = encode_pick_tag(CLASS_WATER, 0, 0) else {
         return;
     };
-    for entity in &untagged {
-        registry.note_fixed(entity, tag);
-        // `try_insert`, not `insert`: another system may despawn this queried entity
-        // (a re-tessellation / LOD swap despawns face entities) before this deferred
-        // command applies, which an `insert` would panic on; the replacement is
-        // tagged next frame (still `Without<PickId>`).
-        commands
-            .entity(entity)
-            .try_insert((PickId(tag), MeshTag(tag)));
-    }
+    let pending = untagged
+        .iter()
+        .map(|entity| PendingPickTag::Fixed { entity, tag })
+        .collect();
+    queue_pick_tags(&mut commands, pending);
 }
 
 /// Free the registry slot of every entity whose [`PickId`] went away
@@ -1109,6 +1276,15 @@ impl Plugin for PickRegistryPlugin {
             .add_message::<GpuPickResolved>()
             .add_systems(
                 Update,
+                // Unordered, and safe unordered: no assignment system touches
+                // the registry any more. Each only queues what it wants tagged,
+                // and the allocation happens in the deferred command at the end
+                // of the schedule ([`queue_pick_tags`]) — strictly after every
+                // `Update` system, `free_pick_tags` included. So a slot freed
+                // this frame is already back on the free list before anything
+                // allocates, whichever order these four ran in, and a tag
+                // captured before the free no longer resolves to the index
+                // whatever reuses it ([[viewer-audit-gpu-pick-slot-lifecycle]]).
                 (
                     assign_avatar_pick_tags,
                     assign_object_face_pick_tags,
@@ -1261,30 +1437,37 @@ mod tests {
     };
 
     use super::{
-        CLASS_AVATAR, CLASS_OBJECT_FACE, CLASS_TERRAIN, CLASS_WATER, CROP_PIXELS, GpuPickWarmSet,
-        PICK_INDEX_MASK, PickId, PickRegistry, PickResolution, collect_pick_warm_set,
-        crop_clip_from_world, decode_pick_tag, encode_pick_tag, parse_centre_pixel,
-        unproject_centre,
+        AvatarPickTarget, CLASS_AVATAR, CLASS_OBJECT_FACE, CLASS_TERRAIN, CLASS_WATER, CROP_PIXELS,
+        GpuPickWarmSet, PICK_GENERATION_MASK, PICK_INDEX_MASK, PickId, PickRegistry,
+        PickResolution, PrimFaceEntity, SceneObject, collect_pick_warm_set, crop_clip_from_world,
+        decode_pick_tag, encode_pick_tag, parse_centre_pixel, unproject_centre,
     };
 
     /// A boxed error so tests can use `?` instead of the disallowed
     /// `unwrap` / `expect`.
     type TestError = Box<dyn core::error::Error>;
 
-    /// Tags round-trip through encode/decode across every class, and an index
-    /// beyond the 28 bits is rejected.
+    /// Tags round-trip through encode/decode across every class and
+    /// generation, and an index or generation beyond its field is rejected.
     #[test]
     fn tag_encode_decode_round_trips() -> Result<(), TestError> {
         for class in [CLASS_AVATAR, CLASS_OBJECT_FACE, CLASS_TERRAIN, CLASS_WATER] {
-            for index in [0_u32, 1, 4095, PICK_INDEX_MASK] {
-                let tag = encode_pick_tag(class, index).ok_or("encode in range")?;
-                assert_eq!(decode_pick_tag(tag), (class, index));
+            for generation in [0_u32, 1, 200, PICK_GENERATION_MASK] {
+                for index in [0_u32, 1, 4095, PICK_INDEX_MASK] {
+                    let tag = encode_pick_tag(class, generation, index).ok_or("encode in range")?;
+                    assert_eq!(decode_pick_tag(tag), (class, generation, index));
+                }
             }
         }
         assert_eq!(
-            encode_pick_tag(CLASS_AVATAR, PICK_INDEX_MASK.wrapping_add(1)),
+            encode_pick_tag(CLASS_AVATAR, 0, PICK_INDEX_MASK.wrapping_add(1)),
             None,
-            "an index beyond 28 bits must be rejected"
+            "an index beyond 20 bits must be rejected"
+        );
+        assert_eq!(
+            encode_pick_tag(CLASS_AVATAR, PICK_GENERATION_MASK.wrapping_add(1), 0),
+            None,
+            "a generation beyond 8 bits must be rejected"
         );
         Ok(())
     }
@@ -1418,6 +1601,146 @@ mod tests {
             .resource_mut::<Messages<super::GpuPickResolved>>()
             .drain()
             .collect()
+    }
+
+    /// **A recycled slot does not answer the old object's click**
+    /// ([[viewer-audit-gpu-pick-slot-lifecycle]]).
+    ///
+    /// The GPU writes a tag into the ID target and the readback resolves it two
+    /// to three frames later. In between, the face it named can be despawned
+    /// (a derender, an object removed, a region purge) and its slot index
+    /// handed to something else — so the tag captured over one object would be
+    /// resolved against whatever took its place, and the click would land on
+    /// the wrong thing entirely. The generation packed into the tag is what
+    /// makes the stale one refuse to resolve.
+    #[test]
+    fn a_recycled_slot_refuses_the_stale_tag() -> Result<(), TestError> {
+        let mut registry = PickRegistry::default();
+        let [face, replacement] = test_entities::<2>();
+
+        let stale = registry
+            .alloc_object_face(face, scoped(7), PrimFaceId::new(2))
+            .ok_or("alloc")?;
+        // The click is captured here — over object 7, face 2.
+        assert_eq!(
+            registry.resolve(stale),
+            Some(PickResolution::ObjectFace {
+                entity: face,
+                scoped: scoped(7),
+                face: PrimFaceId::new(2),
+            })
+        );
+
+        // …and before the readback lands, that face goes and a different
+        // object's face takes the freed index.
+        registry.free_entity(face);
+        let fresh = registry
+            .alloc_object_face(replacement, scoped(99), PrimFaceId::new(0))
+            .ok_or("realloc")?;
+        let (_stale_class, _stale_generation, stale_index) = decode_pick_tag(stale);
+        let (_class, _generation, fresh_index) = decode_pick_tag(fresh);
+        assert_eq!(
+            stale_index, fresh_index,
+            "this test is only meaningful while the index is genuinely recycled"
+        );
+
+        assert_eq!(
+            registry.resolve(stale),
+            None,
+            "the captured tag names an index that has moved on — it must resolve \
+             to nothing, not to object 99"
+        );
+        assert_eq!(
+            registry.resolve(fresh),
+            Some(PickResolution::ObjectFace {
+                entity: replacement,
+                scoped: scoped(99),
+                face: PrimFaceId::new(0),
+            }),
+            "while the new occupant's own tag resolves normally"
+        );
+        Ok(())
+    }
+
+    /// **A tag lost to a despawn leaks no slot**
+    /// ([[viewer-audit-gpu-pick-slot-lifecycle]]).
+    ///
+    /// The assignment query runs against the world as it stands, but the
+    /// component insert is deferred — so an entity despawned in between (an
+    /// object removed by an earlier event in the same frame) never receives its
+    /// [`PickId`]. Without one, no `RemovedComponents<PickId>` ever fires for
+    /// it, so the slot it was allocated and its `entity_tags` entry used to be
+    /// held for the rest of the session.
+    ///
+    /// Reproduced exactly: run the assignment system, despawn the face before
+    /// its commands apply, then apply them.
+    #[test]
+    fn a_face_despawned_before_the_insert_leaks_no_slot() -> Result<(), TestError> {
+        use bevy::ecs::system::SystemState;
+
+        /// The parameters `assign_object_face_pick_tags` takes, as one named
+        /// `SystemState` tuple (to satisfy `type_complexity`).
+        type AssignParams<'w, 's> = (
+            Query<
+                'w,
+                's,
+                (Entity, &'static PrimFaceEntity),
+                (With<Mesh3d>, Without<PickId>, Without<AvatarPickTarget>),
+            >,
+            Query<'w, 's, &'static SceneObject>,
+            Query<'w, 's, &'static ChildOf>,
+            Commands<'w, 's>,
+        );
+
+        let mut world = World::new();
+        world.init_resource::<PickRegistry>();
+        let object = world
+            .spawn(SceneObject {
+                scoped_id: scoped(7),
+                category: crate::objects::ObjectCategory::Prim,
+            })
+            .id();
+        let face = world
+            .spawn((
+                Mesh3d(Handle::default()),
+                PrimFaceEntity {
+                    face_id: PrimFaceId::new(0),
+                },
+                ChildOf(object),
+            ))
+            .id();
+
+        let mut params: SystemState<AssignParams> = SystemState::new(&mut world);
+        {
+            let (untagged, scene, parents, mut commands) = params
+                .get_mut(&mut world)
+                .map_err(|error| format!("system params: {error}"))?;
+            super::assign_object_face_pick_tags(untagged, scene, parents, commands.reborrow());
+        }
+        // The despawn that used to win the race: after the query, before the
+        // commands apply.
+        world.entity_mut(face).despawn();
+        params.apply(&mut world);
+
+        let registry = world.resource::<PickRegistry>();
+        assert_eq!(
+            registry.resolve_entity(face),
+            None,
+            "a face that never received its PickId must hold no tag"
+        );
+        assert!(
+            registry.entity_tags.is_empty(),
+            "and no entity_tags entry, which nothing would ever remove: {:?}",
+            registry.entity_tags
+        );
+        assert!(
+            registry
+                .object_slots
+                .iter()
+                .all(|entry| entry.slot.is_none()),
+            "and no allocated slot, which nothing would ever free"
+        );
+        Ok(())
     }
 
     /// **The CPU resolver's teeth** ([[viewer-cpu-pick-resolver]]): a pick on
@@ -1562,11 +1885,19 @@ mod tests {
         // Dropping the last frees it.
         registry.free_entity(body_b);
         assert_eq!(registry.resolve(tag_a), None, "freed slot resolves to none");
-        // The freed index is reused.
+        // The freed index is reused — but at a new generation, so the tag the
+        // old occupant's submeshes carried is not handed out again.
         let again = registry
             .alloc_avatar(body_a, agent, None)
             .ok_or("realloc")?;
-        assert_eq!(again, tag_a, "the freed slot index is reused");
+        let (_class, generation, index) = decode_pick_tag(again);
+        let (_was_class, was_generation, was_index) = decode_pick_tag(tag_a);
+        assert_eq!(index, was_index, "the freed slot index is reused");
+        assert!(
+            generation != was_generation,
+            "but at a new generation, so a tag captured before the free cannot match"
+        );
+        assert_eq!(registry.resolve(tag_a), None, "and the old tag stays dead");
         Ok(())
     }
 
@@ -1596,7 +1927,13 @@ mod tests {
         let reused = registry
             .alloc_object_face(face_a, scoped(9), PrimFaceId::new(1))
             .ok_or("realloc")?;
-        assert_eq!(reused, tag_a, "the freed slot index is reused");
+        let (_class, generation, index) = decode_pick_tag(reused);
+        let (_was_class, was_generation, was_index) = decode_pick_tag(tag_a);
+        assert_eq!(index, was_index, "the freed slot index is reused");
+        assert!(
+            generation != was_generation,
+            "but at a new generation, so the previous occupant's tag is not reissued"
+        );
         // Tag 0 (the cleared background) never resolves.
         assert_eq!(registry.resolve(0), None);
         Ok(())

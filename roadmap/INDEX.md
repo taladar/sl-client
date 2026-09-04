@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 311 |
 | blocked | 56 |
 | in-progress | 18 |
-| bugs | 68 |
-| done | 972 |
+| bugs | 67 |
+| done | 973 |
 | deferred | 25 |
 | wont-do | 14 |
 | **total** | **1562** |
@@ -1183,7 +1183,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (68)
+## bugs (67)
 
 ### viewer
 
@@ -1223,8 +1223,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A cell about one ellipsis wide latches a permanent spurious ellipsis
 - [`viewer-audit-env-overrides-preferences`](bugs/viewer-audit-env-overrides-preferences.md)
   — Environment variables silently override live graphics preferences
-- [`viewer-audit-gpu-pick-slot-lifecycle`](bugs/viewer-audit-gpu-pick-slot-lifecycle.md)
-  — Pick slots are recycled with no generation, and a lost try_insert leaks one
 - [`viewer-audit-inventory-delete-guard-parity`](bugs/viewer-audit-inventory-delete-guard-parity.md)
   — The keyboard delete path omits the in-trash check the menu path has
 - [`viewer-audit-inventory-merge-and-tree-walks`](bugs/viewer-audit-inventory-merge-and-tree-walks.md)
@@ -1345,7 +1343,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (972)
+## done (973)
 
 ### protocol
 
@@ -1606,6 +1604,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The viewer collects protocol diagnostics and drains none of them
 - [`viewer-audit-environment-parcel-reply`](done/viewer-audit-environment-parcel-reply.md)
   — A parcel environment reply is accepted as the shared one
+- [`viewer-audit-gpu-pick-slot-lifecycle`](done/viewer-audit-gpu-pick-slot-lifecycle.md)
+  — Pick slots are recycled with no generation, and a lost try_insert leaks one
 - [`viewer-audit-parcel-access-list-accumulate`](done/viewer-audit-parcel-access-list-accumulate.md)
   — Editing a multi-packet parcel ban list unbans everyone not in the last
   packet
