@@ -85,6 +85,20 @@
 //! gestures resolved by [`resize_strip_width`] — so the handle behaves under a
 //! mirrored layout with no per-side code.
 //!
+//! # A disabled strip, and a disabled tab
+//!
+//! [`InteractionDisabled`](bevy::ui::InteractionDisabled) on the strip makes
+//! every switch inert and greys every label; on a single tab button it refuses
+//! the switch *to that tab* and greys only its label — the reference's per-tab
+//! `LLTabContainer::enableTabButton`. Bevy's marker is advisory (it updates the
+//! a11y tree and nothing else), so the widget enforces it in its own
+//! value-change and divider-drag observers.
+//!
+//! Scrolling is not a gesture on the *selection*, so the scroll arrows, the
+//! scrollbar and the wheel stay live on a disabled strip: a strip that will not
+//! switch is still one whose tabs must be readable. The active tab keeps its
+//! highlight for the same reason.
+//!
 //! # Constructible without wiring
 //!
 //! Per the registry rule (`ui_element`): selecting a tab is pure UI
@@ -172,6 +186,11 @@ pub const DEFAULT_ELLIPSIS: &str = "…";
 
 /// A tab label's colour.
 pub const TAB_LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+
+/// A [disabled](bevy::ui::InteractionDisabled) tab's label / ellipsis colour —
+/// dimmed so a tab that will not switch reads as inert, matching the combo and
+/// text-field widgets' disabled text.
+const TAB_DISABLED_LABEL_COLOR: Color = Color::srgb(0.45, 0.47, 0.52);
 
 /// The panel area's background — the "content" shade the active tab shares.
 const PANEL_BACKGROUND: Color = Color::srgb(0.19, 0.23, 0.31);
@@ -464,6 +483,18 @@ pub struct TabButton {
     pub placement: TabPlacement,
 }
 
+/// On every text node a tab owns — its label and its trailing ellipsis marker —
+/// naming the button and the strip, so `reflect_tab_disabled` can grey exactly
+/// the tabs a [disabled](bevy::ui::InteractionDisabled) strip (or one disabled
+/// tab) stops switching to.
+#[derive(Component, Debug, Clone, Copy)]
+struct TabLabelText {
+    /// The strip the tab belongs to — disabling it disables every tab.
+    strip: Entity,
+    /// The tab button this text labels — disabling it disables that one tab.
+    button: Entity,
+}
+
 /// A tab panel: which strip switches it and which tab reveals it.
 ///
 /// Hidden panels are toggled with [`Visibility`], **not** the scaffold's
@@ -564,6 +595,7 @@ impl Plugin for TabWidgetPlugin {
                     apply_tab_corner_radius,
                     apply_tab_arrow_glyphs,
                     apply_programmatic_tab_selection,
+                    reflect_tab_disabled,
                     scroll_tabs_with_wheel,
                 ),
             )
@@ -1157,6 +1189,7 @@ fn spawn_tab_button(
                 TextLayout::no_wrap(),
                 UiFont::Sans.at(spec.font_size),
                 TextColor(TAB_LABEL_COLOR),
+                TabLabelText { strip, button },
                 // Natural width, so the container — not the text — is what shrinks
                 // and clips, and the text overflows the container's trailing edge.
                 Node {
@@ -1169,6 +1202,9 @@ fn spawn_tab_button(
         translate_tab_label(commands, label_entity, spec, label);
         let ellipsis = spawn_tab_ellipsis(commands, button, spec, index);
         commands
+            .entity(ellipsis)
+            .insert(TabLabelText { strip, button });
+        commands
             .entity(label_clip)
             .insert(RevealEllipsis { marker: ellipsis });
     } else {
@@ -1178,6 +1214,7 @@ fn spawn_tab_button(
                 TextLayout::no_wrap(),
                 UiFont::Sans.at(spec.font_size),
                 TextColor(TAB_LABEL_COLOR),
+                TabLabelText { strip, button },
                 Name::new(format!("{}:tab-label:{index}", spec.element)),
                 ChildOf(button),
             ))
@@ -1370,8 +1407,14 @@ fn spawn_divider(
         .observe(
             move |drag: On<Pointer<Drag>>,
                   mut widths: Query<&mut TabStripWidth>,
+                  disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
                   direction: Res<UiDirection>| {
                 if drag.button != PointerButton::Primary {
+                    return;
+                }
+                // A disabled strip does not resize: the divider is a gesture on
+                // the widget, so it goes inert with the rest of them.
+                if disabled.contains(strip) || disabled.contains(drag.entity) {
                     return;
                 }
                 let Ok(mut width) = widths.get_mut(strip) else {
@@ -1434,26 +1477,43 @@ fn apply_tab_strip_width(mut strips: Query<(&TabStripWidth, &mut Node), Changed<
 fn on_tab_value_change(
     change: On<ValueChange<Entity>>,
     mut commands: Commands,
-    mut strips: Query<&mut TabStrip>,
-    mut buttons: Query<(Entity, &TabButton, &mut BackgroundColor, &mut BorderColor)>,
+    mut strips: Query<(&mut TabStrip, Has<bevy::ui::InteractionDisabled>)>,
+    mut buttons: Query<(
+        Entity,
+        &TabButton,
+        &mut BackgroundColor,
+        &mut BorderColor,
+        Has<bevy::ui::InteractionDisabled>,
+    )>,
     panels: Query<(Entity, &TabPanel)>,
     mut visibility: PanelVisibility,
     mut actions: MessageWriter<UiAction>,
 ) {
     let strip_id = change.source;
     // The event's value is the newly-picked button; its `TabButton` names the
-    // index to move to. A value that is not one of this strip's tabs (impossible
-    // in practice, but the query is fallible) is ignored.
-    let Some(picked) = buttons
+    // index to move to — and its own disabled flag comes along, so a single
+    // disabled tab refuses the switch *to it* while its neighbours stay live
+    // (the reference's per-tab `enableTabButton`). Upstream's `RadioButton`
+    // already blocks a click or key on a disabled button; this also refuses a
+    // `ValueChange` written straight into the world. A value that is not one of
+    // this strip's tabs (impossible in practice, but the query is fallible) is
+    // ignored.
+    let Some((picked, tab_disabled)) = buttons
         .get(change.value)
         .ok()
-        .map(|(_, button, _, _)| button.index)
+        .map(|(_, button, _, _, disabled)| (button.index, disabled))
     else {
         return;
     };
-    let Ok(mut strip) = strips.get_mut(strip_id) else {
+    let Ok((mut strip, strip_disabled)) = strips.get_mut(strip_id) else {
         return;
     };
+    // A disabled strip ignores every switch. The scroll arrows, the scrollbar
+    // and the wheel are untouched: a strip that will not switch is still one
+    // whose tabs must be readable.
+    if strip_disabled || tab_disabled {
+        return;
+    }
     if strip.active == picked {
         return;
     }
@@ -1491,12 +1551,18 @@ fn on_tab_value_change(
 fn reconcile_tab_selection(
     strip_id: Entity,
     active: usize,
-    buttons: &mut Query<(Entity, &TabButton, &mut BackgroundColor, &mut BorderColor)>,
+    buttons: &mut Query<(
+        Entity,
+        &TabButton,
+        &mut BackgroundColor,
+        &mut BorderColor,
+        Has<bevy::ui::InteractionDisabled>,
+    )>,
     panels: &Query<(Entity, &TabPanel)>,
     visibility: &mut PanelVisibility,
     commands: &mut Commands,
 ) {
-    for (button, tab, mut background, mut border) in buttons.iter_mut() {
+    for (button, tab, mut background, mut border, _disabled) in buttons.iter_mut() {
         if tab.strip != strip_id {
             continue;
         }
@@ -1528,6 +1594,32 @@ fn reconcile_tab_selection(
     }
 }
 
+/// Grey every tab label and ellipsis whose strip — or whose own button — is
+/// [disabled](bevy::ui::InteractionDisabled), and restore [`TAB_LABEL_COLOR`]
+/// when it is enabled again: the visible half of the disabled state, so a tab
+/// that refuses a click does not look like one that would answer it.
+///
+/// The tab's *background* and *border* are left alone deliberately — they carry
+/// the selection highlight, which a disabled strip must keep showing: hiding
+/// which tab is open would cost more than the greyed label buys.
+///
+/// Every write is guarded, so a settled strip costs a compare per label.
+fn reflect_tab_disabled(
+    disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
+    mut labels: Query<(&TabLabelText, &mut TextColor)>,
+) {
+    for (label, mut color) in &mut labels {
+        let wanted = if disabled.contains(label.strip) || disabled.contains(label.button) {
+            TAB_DISABLED_LABEL_COLOR
+        } else {
+            TAB_LABEL_COLOR
+        };
+        if color.0 != wanted {
+            color.0 = wanted;
+        }
+    }
+}
+
 /// Reconcile a strip's visuals when its [`TabStrip::active`] is set
 /// **programmatically** — a consumer writing `TabStrip::active` directly (the
 /// build floater's material-mode auto-select) rather than through a click / arrow,
@@ -1536,7 +1628,13 @@ fn reconcile_tab_selection(
 /// user selection (which also marks the strip changed) is a no-op.
 fn apply_programmatic_tab_selection(
     strips: Query<(Entity, &TabStrip), Changed<TabStrip>>,
-    mut buttons: Query<(Entity, &TabButton, &mut BackgroundColor, &mut BorderColor)>,
+    mut buttons: Query<(
+        Entity,
+        &TabButton,
+        &mut BackgroundColor,
+        &mut BorderColor,
+        Has<bevy::ui::InteractionDisabled>,
+    )>,
     panels: Query<(Entity, &TabPanel)>,
     mut visibility: PanelVisibility,
     mut commands: Commands,
@@ -1751,15 +1849,17 @@ pub fn spawn_tabs_scroll_demo(
 mod tests {
     use super::{
         ARROW_SCROLL_STEP, MAX_STRIP_WIDTH, MIN_STRIP_WIDTH, RevealEllipsis, SAMPLE_LABELS,
-        TAB_ACTIVE_BACKGROUND, TAB_INACTIVE_BACKGROUND, TAB_SELECTED_ACTION, TabButton,
-        TabContainerHandle, TabDivider, TabPanel, TabPlacement, TabScrollControl, TabSpec,
-        TabStrip, TabStripWidth, TabViewport, apply_tab_strip_width, arrow_scroll_delta,
-        resize_strip_width, spawn_tab_container, spawn_tab_strip,
+        TAB_ACTIVE_BACKGROUND, TAB_DISABLED_LABEL_COLOR, TAB_INACTIVE_BACKGROUND, TAB_LABEL_COLOR,
+        TAB_SELECTED_ACTION, TabButton, TabContainerHandle, TabDivider, TabLabelText, TabPanel,
+        TabPlacement, TabScrollControl, TabSpec, TabStrip, TabStripWidth, TabViewport,
+        apply_tab_strip_width, arrow_scroll_delta, reflect_tab_disabled, resize_strip_width,
+        spawn_tab_container, spawn_tab_strip,
     };
     use bevy::ecs::system::SystemState;
     use bevy::ecs::world::CommandQueue;
     use bevy::input_focus::tab_navigation::{NavAction, TabIndex, TabNavigation};
     use bevy::input_focus::{FocusCause, InputFocus};
+    use bevy::picking::pointer::{Location, PointerId};
     use bevy::prelude::*;
     use bevy::ui::Checked;
     use bevy::ui_widgets::ValueChange;
@@ -1843,7 +1943,10 @@ mod tests {
             .init_resource::<InputFocus>()
             .add_message::<UiAction>()
             .add_systems(Startup, spawn_ui_root)
-            .add_systems(Update, park_new_tab_stops_in_hidden_subtrees);
+            .add_systems(
+                Update,
+                (park_new_tab_stops_in_hidden_subtrees, reflect_tab_disabled),
+            );
         app.update();
         app
     }
@@ -2842,5 +2945,175 @@ mod tests {
             arrow_scroll_delta(false, UiDirection::Rtl),
             ARROW_SCROLL_STEP
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // The disabled state.
+    // -----------------------------------------------------------------------
+
+    /// Every label / ellipsis colour of the tab at `index`.
+    fn label_colors(app: &mut App, button: Entity) -> Vec<Color> {
+        let mut texts = app.world_mut().query::<(&TabLabelText, &TextColor)>();
+        texts
+            .iter(app.world())
+            .filter(|(label, _)| label.button == button)
+            .map(|(_, color)| color.0)
+            .collect()
+    }
+
+    /// Drag the divider by `dx` logical pixels, as the pointer would.
+    fn drag_divider(app: &mut App, divider: Entity, dx: f32) {
+        let event = Pointer::new(
+            PointerId::Mouse,
+            Location {
+                target: bevy::camera::NormalizedRenderTarget::None {
+                    width: 800,
+                    height: 600,
+                },
+                position: Vec2::ZERO,
+            },
+            Drag {
+                button: PointerButton::Primary,
+                distance: Vec2::new(dx, 0.0),
+                delta: Vec2::new(dx, 0.0),
+            },
+            divider,
+        );
+        app.world_mut().trigger(event);
+        app.update();
+    }
+
+    /// A strip wearing [`InteractionDisabled`](bevy::ui::InteractionDisabled)
+    /// switches to nothing, emits no action, and greys every label — while the
+    /// active tab keeps its highlight, so which panel is open stays legible.
+    #[test]
+    fn a_disabled_strip_switches_to_nothing() -> Result<(), TestError> {
+        let mut app = tab_app();
+        let parent = root(&app);
+        let handle = spawn_container(&mut app, parent, TabPlacement::BlockStart, 0, None);
+        let panels = handle.panels.clone();
+        let strip = the_strip(&mut app);
+        let buttons = tab_buttons(&mut app);
+        let tab0 = *buttons.first().ok_or("no tab 0")?;
+        let tab2 = *buttons.get(2).ok_or("no tab 2")?;
+        app.world_mut()
+            .entity_mut(strip)
+            .insert(bevy::ui::InteractionDisabled);
+        app.update();
+        let _settled = drained_actions(&mut app);
+
+        select(&mut app, strip, tab2);
+
+        assert_eq!(strip_active(&app, strip), 0, "the selection did not move");
+        assert!(is_checked(&app, tab0), "tab 0 is still the checked one");
+        assert!(panel_shown(&app, *panels.first().ok_or("no panel 0")?));
+        assert!(!panel_shown(&app, *panels.get(2).ok_or("no panel 2")?));
+        assert!(
+            drained_actions(&mut app).is_empty(),
+            "a refused switch says nothing"
+        );
+        assert_eq!(
+            background(&app, tab0),
+            TAB_ACTIVE_BACKGROUND,
+            "the active tab keeps its highlight while disabled"
+        );
+        for button in &buttons {
+            assert!(
+                label_colors(&mut app, *button)
+                    .iter()
+                    .all(|color| *color == TAB_DISABLED_LABEL_COLOR),
+                "every label of a disabled strip is greyed"
+            );
+        }
+
+        // Re-enabling restores both the colours and the switch.
+        app.world_mut()
+            .entity_mut(strip)
+            .remove::<bevy::ui::InteractionDisabled>();
+        app.update();
+        for button in &buttons {
+            assert!(
+                label_colors(&mut app, *button)
+                    .iter()
+                    .all(|color| *color == TAB_LABEL_COLOR),
+                "re-enabling puts the label colour back"
+            );
+        }
+        select(&mut app, strip, tab2);
+        assert_eq!(strip_active(&app, strip), 2, "and the switch works again");
+        Ok(())
+    }
+
+    /// The marker on **one tab button** refuses the switch to that tab and greys
+    /// only its label — the reference's per-tab `enableTabButton` — while its
+    /// neighbours still switch.
+    #[test]
+    fn one_disabled_tab_leaves_the_others_live() -> Result<(), TestError> {
+        let mut app = tab_app();
+        let parent = root(&app);
+        spawn_container(&mut app, parent, TabPlacement::BlockStart, 0, None);
+        let strip = the_strip(&mut app);
+        let buttons = tab_buttons(&mut app);
+        let frozen = *buttons.get(2).ok_or("no tab 2")?;
+        let live = *buttons.get(1).ok_or("no tab 1")?;
+        app.world_mut()
+            .entity_mut(frozen)
+            .insert(bevy::ui::InteractionDisabled);
+        app.update();
+
+        select(&mut app, strip, frozen);
+        assert_eq!(
+            strip_active(&app, strip),
+            0,
+            "the disabled tab was not switched to"
+        );
+        select(&mut app, strip, live);
+        assert_eq!(strip_active(&app, strip), 1, "its neighbour still switches");
+
+        assert!(
+            label_colors(&mut app, frozen)
+                .iter()
+                .all(|color| *color == TAB_DISABLED_LABEL_COLOR),
+            "the disabled tab's label is greyed"
+        );
+        assert!(
+            label_colors(&mut app, live)
+                .iter()
+                .all(|color| *color == TAB_LABEL_COLOR),
+            "its neighbour's is not"
+        );
+        Ok(())
+    }
+
+    /// The divider is a gesture on the widget, so a disabled strip does not
+    /// resize — and an enabled one still does, which is what makes the first
+    /// half a rule rather than a broken drag.
+    #[test]
+    fn a_disabled_strip_does_not_resize() -> Result<(), TestError> {
+        let mut app = tab_app();
+        let parent = root(&app);
+        spawn_container(&mut app, parent, TabPlacement::InlineStart, 0, Some(120.0));
+        let strip = the_strip(&mut app);
+        let divider = the_divider(&mut app).ok_or("a resizable container has a divider")?;
+        let width = |app: &App| app.world().get::<TabStripWidth>(strip).map(|w| w.0);
+
+        app.world_mut()
+            .entity_mut(strip)
+            .insert(bevy::ui::InteractionDisabled);
+        app.update();
+        drag_divider(&mut app, divider, 20.0);
+        assert_eq!(width(&app), Some(120.0), "a disabled strip keeps its width");
+
+        app.world_mut()
+            .entity_mut(strip)
+            .remove::<bevy::ui::InteractionDisabled>();
+        app.update();
+        drag_divider(&mut app, divider, 20.0);
+        assert_eq!(
+            width(&app),
+            Some(140.0),
+            "an enabled strip still follows the pointer"
+        );
+        Ok(())
     }
 }

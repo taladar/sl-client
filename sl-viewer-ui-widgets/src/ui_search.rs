@@ -27,6 +27,12 @@
 //! placeholder and `Escape`-to-clear are the widget's, driven by
 //! [`SearchFieldPlugin`]'s systems off the field's own value.
 //!
+//! A **disabled** field inherits [`crate::ui_text_input`]'s handling of
+//! [`InteractionDisabled`](bevy::ui::InteractionDisabled) — greyed text, focus
+//! dropped so keystrokes cannot reach it — and this module closes the two ways
+//! round it that are its own: the clear (`×`) button goes inert and grey, and
+//! `Escape` no longer empties the field.
+//!
 //! Direction-neutral by construction: the box is a `ui::row`, so the
 //! leading glyph and the trailing clear button swap ends under RTL with no code
 //! here saying so (convention 1).
@@ -85,6 +91,12 @@ const CLEAR_GLYPH: &str = "\u{00d7}";
 
 /// The clear button's glyph size, in logical pixels.
 const CLEAR_FONT: f32 = 12.0;
+
+/// The clear glyph's colour while the field (or the button) is
+/// [disabled](bevy::ui::InteractionDisabled) — dimmed so the one affordance that
+/// would still empty a disabled field does not look live. The same grey
+/// [`crate::ui_text_input`] greys the field's own text to.
+const CLEAR_DISABLED_COLOR: Color = Color::srgb(0.45, 0.47, 0.52);
 
 /// The leading search glyph (🔍, U+1F50D), shown when
 /// [`SearchFieldSpec::search_glyph`] is set.
@@ -339,12 +351,21 @@ fn spawn_clear_button(
     commands.entity(clear).observe(
         move |mut press: On<Pointer<Press>>,
               mut fields: Query<&mut EditableText>,
+              disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
               mut focus: ResMut<InputFocus>| {
             // Consume the press so it does not reach an ancestor's dismiss observer
             // (the menu bar closes its drop-down on an outside press — clearing the
             // field must not close the menu the term just opened).
             press.propagate(false);
             if press.button != PointerButton::Primary {
+                return;
+            }
+            // Clearing is an edit, so a disabled field's clear button is inert —
+            // `ui_text_input` already refuses the keystrokes, and this is the one
+            // way left to empty the field. The marker is honoured on the button
+            // itself too, for a consumer that wants the field editable but the
+            // clear affordance off.
+            if disabled.contains(press.entity) || disabled.contains(field) {
                 return;
             }
             if let Ok(mut field_text) = fields.get_mut(field) {
@@ -370,6 +391,7 @@ impl Plugin for SearchFieldPlugin {
             Update,
             (
                 toggle_search_clear,
+                reflect_search_clear_disabled,
                 toggle_search_placeholder,
                 clear_focused_search_on_escape,
             ),
@@ -394,6 +416,34 @@ fn toggle_search_clear(
         };
         if node.display != wanted {
             node.display = wanted;
+        }
+    }
+}
+
+/// Grey a clear button's `×` glyph while its field — or the button itself — is
+/// [disabled](bevy::ui::InteractionDisabled), and restore it when enabled, so the
+/// affordance the observer above refuses does not look live.
+///
+/// The glyph only. The button's circle carries the [`SEARCH_CLEAR_CLASS`] skin
+/// class, so its background belongs to the skin's cascade, not to a system that
+/// would overwrite it every frame.
+fn reflect_search_clear_disabled(
+    buttons: Query<(Entity, &SearchClearButton, &Children)>,
+    disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
+    mut glyphs: Query<&mut TextColor>,
+) {
+    for (button, clear, children) in &buttons {
+        let wanted = if disabled.contains(button) || disabled.contains(clear.field) {
+            CLEAR_DISABLED_COLOR
+        } else {
+            TEXT_COLOR
+        };
+        for child in children.iter() {
+            if let Ok(mut color) = glyphs.get_mut(child)
+                && color.0 != wanted
+            {
+                color.0 = wanted;
+            }
         }
     }
 }
@@ -423,7 +473,18 @@ fn toggle_search_placeholder(
 fn clear_focused_search_on_escape(
     keys: Res<ButtonInput<KeyCode>>,
     focus: Res<InputFocus>,
-    mut fields: Query<&mut EditableText, With<SearchInputField>>,
+    mut fields: Query<
+        &mut EditableText,
+        (
+            With<SearchInputField>,
+            // A disabled field is not cleared by `Escape` either. `ui_text_input`'s
+            // `clear_disabled_field_focus` would normally have dropped focus off it
+            // already, but that lives in the *other* widget's plugin — a host that
+            // added only [`SearchFieldPlugin`] would otherwise leave this one way
+            // in.
+            Without<bevy::ui::InteractionDisabled>,
+        ),
+    >,
 ) {
     if !keys.just_pressed(KeyCode::Escape) {
         return;
@@ -637,6 +698,99 @@ mod tests {
             interact::text_of(&mut app, "test-search:field"),
             Some("hats".to_owned()),
             "an unfocused field keeps its term"
+        );
+        Ok(())
+    }
+
+    /// A [disabled](bevy::ui::InteractionDisabled) field cannot be emptied by
+    /// either of the two routes this module owns — the clear button and `Escape`
+    /// — and the button's glyph greys to say so. `ui_text_input` already refuses
+    /// the keystrokes; these are the ways round it that live here.
+    ///
+    /// Driven by a real click on the button, not a poked observer: the clear
+    /// button is `Display::None` until the field holds a term, so a test that
+    /// aimed at it by entity would keep passing on a button that had stopped
+    /// being reachable at all.
+    #[test]
+    fn a_disabled_field_cannot_be_cleared() -> Result<(), TestError> {
+        use crate::ui_test::interact::{self, InteractionTest};
+        use bevy::input::keyboard::Key;
+
+        let mut app = InteractionTest::new().build();
+        app.add_plugins(SearchFieldPlugin).add_systems(
+            Startup,
+            (|mut commands: Commands, root: Res<UiRoot>| {
+                spawn_search_field(
+                    &mut commands,
+                    root.0,
+                    &SearchFieldSpec {
+                        search_glyph: true,
+                        ..SearchFieldSpec::new("test-search")
+                    },
+                );
+            })
+            .after(UiScaffoldSystems::SpawnRoot),
+        );
+        settle(&mut app);
+
+        interact::click_node(&mut app, "test-search:field")?;
+        interact::type_str(&mut app, "boots");
+        settle(&mut app);
+
+        let field = find_by_name(&mut app, "test-search:field").ok_or("the field did not spawn")?;
+        let glyph = find_by_name(&mut app, "test-search:search-clear-glyph")
+            .ok_or("the clear glyph did not spawn")?;
+        let color = |app: &App| {
+            app.world()
+                .entity(glyph)
+                .get::<TextColor>()
+                .map(|color| color.0)
+        };
+        assert_eq!(
+            color(&app),
+            Some(super::TEXT_COLOR),
+            "the glyph starts at the live colour"
+        );
+
+        app.world_mut()
+            .entity_mut(field)
+            .insert(bevy::ui::InteractionDisabled);
+        settle(&mut app);
+
+        assert_eq!(
+            color(&app),
+            Some(super::CLEAR_DISABLED_COLOR),
+            "the glyph greys with the field"
+        );
+        interact::click_node(&mut app, "test-search:search-clear")?;
+        assert_eq!(
+            interact::text_of(&mut app, "test-search:field"),
+            Some("boots".to_owned()),
+            "the clear button is inert while the field is disabled"
+        );
+        interact::tap(&mut app, KeyCode::Escape, Key::Escape);
+        assert_eq!(
+            interact::text_of(&mut app, "test-search:field"),
+            Some("boots".to_owned()),
+            "and neither does Escape empty it"
+        );
+
+        // Re-enabled, both routes work again — so the two assertions above are a
+        // rule about the disabled state, not a broken clear button.
+        app.world_mut()
+            .entity_mut(field)
+            .remove::<bevy::ui::InteractionDisabled>();
+        settle(&mut app);
+        assert_eq!(
+            color(&app),
+            Some(super::TEXT_COLOR),
+            "the glyph is live again"
+        );
+        interact::click_node(&mut app, "test-search:search-clear")?;
+        assert_eq!(
+            interact::text_of(&mut app, "test-search:field"),
+            Some(String::new()),
+            "an enabled field is cleared by its button"
         );
         Ok(())
     }

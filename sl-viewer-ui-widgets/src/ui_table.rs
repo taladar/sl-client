@@ -25,6 +25,11 @@
 //! - **Column sorting** with the sort order **persisted** per avatar
 //!   ([`TableSort`] ↔ [`ViewerSettings`]), and **draggable column widths** also
 //!   persisted.
+//! - **A disabled state**: [`InteractionDisabled`](bevy::ui::InteractionDisabled)
+//!   on the table root makes the sort, resize and row-selection gestures inert
+//!   and greys the header; on one header cell or one row it disables just that
+//!   part. Scrolling and reading a disabled table stay live, because a table the
+//!   agent may not *change* is still one they must be able to *read*.
 //!
 //! # The split: generic chrome, consumer-supplied rows and ordering
 //!
@@ -76,6 +81,11 @@ const SORT_DESCENDING_GLYPH: &str = "\u{25BC}";
 /// The ellipsis shown before any locale bundle has resolved `i18n`'s
 /// `ui-ellipsis` — the Latin single ellipsis, matching the tab widget's default.
 const FALLBACK_ELLIPSIS: &str = "\u{2026}";
+
+/// A [disabled](bevy::ui::InteractionDisabled) header's label / sort-arrow
+/// colour — dimmed so a header that will not answer a click reads as inert. The
+/// same grey the combo and text-field widgets use for their disabled text.
+const DISABLED_TEXT_COLOR: Color = Color::srgb(0.45, 0.47, 0.52);
 
 // ---------------------------------------------------------------------------
 // Column / table specification (static, const-constructible).
@@ -591,6 +601,23 @@ struct TableHeaderArrow {
     column: usize,
 }
 
+/// On every text node the *widget* owns in a header cell — the column label and
+/// (where there is one) its sort arrow — naming the table root and the header
+/// cell it sits in, so `reflect_table_disabled` can grey exactly the text a
+/// disabled table stops answering for.
+///
+/// The body cells deliberately carry no such marker: a consumer sets each cell's
+/// colour itself on bind ([`set_table_cell`]), so a widget system that wrote them
+/// would have nothing to restore them to when the table is re-enabled.
+#[derive(Component, Debug, Clone, Copy)]
+struct TableHeaderText {
+    /// The table root this text belongs to.
+    table: Entity,
+    /// The header cell this text sits in — the entity a consumer disables to
+    /// grey out (and make inert) one column rather than the whole table.
+    cell: Entity,
+}
+
 /// A handle to a freshly-spawned table's key entities.
 #[derive(Debug, Clone)]
 pub struct TableHandle {
@@ -858,6 +885,7 @@ fn spawn_header_cell(
         TextLayout::no_wrap(),
         UiFont::Sans.at(spec.font_size),
         TextColor(spec.header_color),
+        TableHeaderText { table: root, cell },
         Pickable::IGNORE,
         ChildOf(clip),
     ));
@@ -867,6 +895,7 @@ fn spawn_header_cell(
             TextLayout::no_wrap(),
             UiFont::Sans.at(spec.font_size),
             TextColor(spec.header_color),
+            TableHeaderText { table: root, cell },
             Node {
                 flex_shrink: 0.0,
                 margin: UiRect::left(Val::Px(ARROW_GAP)),
@@ -1099,14 +1128,46 @@ pub fn set_table_cell(
 // Interaction: sort clicks and column resize.
 // ---------------------------------------------------------------------------
 
+/// The query the gesture observers use to test Bevy's advisory
+/// [`InteractionDisabled`](bevy::ui::InteractionDisabled) marker: a filter-only
+/// query, so `contains` is the whole of its use.
+///
+/// Named, because each of the three observer factories below spells it in its
+/// `impl Fn(..)` return type, where an inline `Query<(), With<..>>` tips those
+/// signatures over `clippy::type_complexity`.
+type DisabledQuery<'w, 's> = Query<'w, 's, (), With<bevy::ui::InteractionDisabled>>;
+
+/// Whether a table gesture is refused because the table, or the part of it the
+/// pointer landed on, is [disabled](bevy::ui::InteractionDisabled).
+///
+/// Bevy's marker is advisory — it updates the a11y tree and nothing else — so
+/// every widget enforces it in its own press / value-change observers. Both ends
+/// are checked here, so a consumer can disable the whole table (the marker on the
+/// root) or just one column's header or one row (the marker on that entity).
+///
+/// Only the *gesture* observers consult this. Scrolling a disabled table, and
+/// focusing its viewport so the wheel reaches it, stay live: a table the agent
+/// may not change is still one they must be able to read.
+fn gesture_refused(disabled: &DisabledQuery, table: Entity, target: Entity) -> bool {
+    disabled.contains(table) || disabled.contains(target)
+}
+
 /// An observer that sorts `table` by `column` on a primary-button header press.
 fn sort_header_on_press(
     table: Entity,
     column: usize,
-) -> impl Fn(On<Pointer<Press>>, Query<&mut TableState>) {
-    move |mut press: On<Pointer<Press>>, mut tables: Query<&mut TableState>| {
+) -> impl Fn(On<Pointer<Press>>, Query<&mut TableState>, DisabledQuery) {
+    move |mut press: On<Pointer<Press>>,
+          mut tables: Query<&mut TableState>,
+          disabled: DisabledQuery| {
         press.propagate(false);
         if press.button != PointerButton::Primary {
+            return;
+        }
+        // A disabled table (or a disabled column header) still swallows the press
+        // — the click lands nowhere rather than falling through to whatever is
+        // behind — but changes nothing.
+        if gesture_refused(&disabled, table, press.entity) {
             return;
         }
         if let Ok(mut state) = tables.get_mut(table) {
@@ -1129,10 +1190,15 @@ fn sort_header_on_press(
 fn resize_border_on_drag(
     root: Entity,
     left: usize,
-) -> impl Fn(On<Pointer<Drag>>, Query<&mut TableState>) {
-    move |mut drag: On<Pointer<Drag>>, mut tables: Query<&mut TableState>| {
+) -> impl Fn(On<Pointer<Drag>>, Query<&mut TableState>, DisabledQuery) {
+    move |mut drag: On<Pointer<Drag>>,
+          mut tables: Query<&mut TableState>,
+          disabled: DisabledQuery| {
         drag.propagate(false);
         if drag.button != PointerButton::Primary {
+            return;
+        }
+        if gesture_refused(&disabled, root, drag.entity) {
             return;
         }
         let dx = drag.delta.x;
@@ -1164,10 +1230,20 @@ fn adjust_width(widths: &mut [f32], index: usize, delta: f32) {
 
 /// An observer that marks a table dirty (to persist its widths) when a column
 /// resize drag ends — so the write happens once per gesture, not per delta.
-fn persist_on_drag_end(root: Entity) -> impl Fn(On<Pointer<DragEnd>>, Query<&mut TableState>) {
-    move |mut drag: On<Pointer<DragEnd>>, mut tables: Query<&mut TableState>| {
+fn persist_on_drag_end(
+    root: Entity,
+) -> impl Fn(On<Pointer<DragEnd>>, Query<&mut TableState>, DisabledQuery) {
+    move |mut drag: On<Pointer<DragEnd>>,
+          mut tables: Query<&mut TableState>,
+          disabled: DisabledQuery| {
         drag.propagate(false);
         if drag.button != PointerButton::Primary {
+            return;
+        }
+        // Nothing moved, so nothing is owed to the settings file — and marking the
+        // table dirty anyway would write the widths on a gesture the widget just
+        // refused.
+        if gesture_refused(&disabled, root, drag.entity) {
             return;
         }
         if let Ok(mut state) = tables.get_mut(root) {
@@ -1231,6 +1307,35 @@ fn drive_table_sort_arrows(
         };
         if text.0 != glyph {
             glyph.clone_into(&mut text.0);
+        }
+    }
+}
+
+/// Grey each header label and sort arrow whose table — or whose own header cell
+/// — is [disabled](bevy::ui::InteractionDisabled), and restore the spec's header
+/// colour when it is enabled again: the visible half of the disabled state, so a
+/// header that refuses a click does not look like one that would answer it.
+///
+/// Header text only. A body cell's colour is the consumer's, written on every
+/// bind by [`set_table_cell`], so a widget system that greyed it would have no
+/// colour to put back — and the consumer's next bind would undo the greying
+/// anyway. Every write is guarded, so a settled table costs a compare.
+fn reflect_table_disabled(
+    tables: Query<(&TableState, Has<bevy::ui::InteractionDisabled>)>,
+    disabled: DisabledQuery,
+    mut texts: Query<(&TableHeaderText, &mut TextColor)>,
+) {
+    for (header, mut color) in &mut texts {
+        let Ok((state, table_disabled)) = tables.get(header.table) else {
+            continue;
+        };
+        let wanted = if table_disabled || disabled.contains(header.cell) {
+            DISABLED_TEXT_COLOR
+        } else {
+            state.spec.header_color
+        };
+        if color.0 != wanted {
+            color.0 = wanted;
         }
     }
 }
@@ -1378,7 +1483,7 @@ pub fn register_table_settings(settings: &mut ViewerSettings, section: &[&str], 
 // ---------------------------------------------------------------------------
 
 /// The plugin that drives every [`TableState`]: column-width sync, ellipsis
-/// reveal, sort arrows, and the settings seed / persist.
+/// reveal, sort arrows, the disabled greying, and the settings seed / persist.
 #[derive(Debug)]
 pub struct TableWidgetPlugin;
 
@@ -1395,6 +1500,7 @@ impl Plugin for TableWidgetPlugin {
                 seed_tables_from_settings,
                 sync_table_column_widths,
                 drive_table_sort_arrows,
+                reflect_table_disabled,
                 apply_table_selection_highlight
                     .after(sl_viewer_ui_core::virtual_list::layout_virtual_lists),
                 persist_table_state,
@@ -1411,6 +1517,7 @@ fn select_table_row_on_press(
     press: On<Pointer<Press>>,
     rows: Query<(&VirtualRow, &TableRow)>,
     keyboard: Res<ButtonInput<KeyCode>>,
+    disabled: DisabledQuery,
     mut tables: Query<&mut TableState>,
 ) {
     if press.button != PointerButton::Primary {
@@ -1422,6 +1529,10 @@ fn select_table_row_on_press(
     let Some(index) = row.index else {
         return;
     };
+    // A disabled table (or a single disabled row) does not move its selection.
+    if gesture_refused(&disabled, row_ref.table, press.entity) {
+        return;
+    }
     let Ok(mut state) = tables.get_mut(row_ref.table) else {
         return;
     };
@@ -1462,12 +1573,22 @@ fn apply_table_selection_highlight(
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_COLUMN_WIDTH, MIN_COLUMN_WIDTH, TableAlign, TableColumn, TableColumnKind,
-        TableColumnWidth, TableSelectionMode, TableSort, TableSortDefault, TableSpec, TableState,
-        resize_column_width,
+        DISABLED_TEXT_COLOR, MAX_COLUMN_WIDTH, MIN_COLUMN_WIDTH, TableAlign, TableColumn,
+        TableColumnKind, TableColumnWidth, TableHandle, TableHeaderText, TableSelectionMode,
+        TableSort, TableSortDefault, TableSpec, TableState, TableWidgetPlugin, resize_column_width,
+        spawn_table, spawn_table_row,
     };
-    use bevy::color::Color;
+    use bevy::camera::NormalizedRenderTarget;
+    use bevy::picking::backend::HitData;
+    use bevy::picking::pointer::{Location, PointerId};
+    use bevy::prelude::*;
     use pretty_assertions::assert_eq;
+    use sl_viewer_ui_core::ui::UiRoot;
+    use sl_viewer_ui_core::virtual_list::VirtualRow;
+
+    /// A boxed error so tests can use `?` instead of the disallowed
+    /// `unwrap` / `expect`.
+    type TestError = Box<dyn core::error::Error>;
 
     /// A three-column fixture: a flexible Name, a fixed Title, a fixed Land.
     const COLUMNS: &[TableColumn] = &[
@@ -1672,5 +1793,315 @@ mod tests {
         assert_eq!(table.selection_revision(), 0);
         table.clear_selection();
         assert_eq!(table.selection_revision(), 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // The disabled state: every gesture the widget owns, refused.
+    // -----------------------------------------------------------------------
+
+    /// The same fixture with the widget's own sort and multi-selection on, so
+    /// the header-click and row-click observers are actually installed.
+    static SORTABLE_SPEC: TableSpec = TableSpec {
+        builtin_sort: true,
+        ..spec_with(TableSelectionMode::Multi)
+    };
+
+    /// A headless app with the widget's plugin and the keyboard resource the
+    /// row-selection observer reads. No settings resource: the seed and persist
+    /// systems take it as an `Option` and no-op without it, which is what a
+    /// disabled-state test wants — nothing writing widths behind the assertions.
+    fn table_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(TableWidgetPlugin)
+            .init_resource::<ButtonInput<KeyCode>>();
+        let root = app.world_mut().spawn(Node::default()).id();
+        app.insert_resource(UiRoot(root));
+        app.update();
+        app
+    }
+
+    /// Spawn a table under the harness root and settle a frame.
+    fn table(app: &mut App) -> TableHandle {
+        let root = app.world().resource::<UiRoot>().0;
+        let mut queue = bevy::ecs::world::CommandQueue::default();
+        let handle = {
+            let mut commands = Commands::new(&mut queue, app.world());
+            spawn_table(&mut commands, root, &SORTABLE_SPEC)
+        };
+        queue.apply(app.world_mut());
+        app.update();
+        handle
+    }
+
+    /// Pool one virtual row bound to data index `index` under a table's viewport,
+    /// as a consumer's row pool would.
+    fn row(app: &mut App, handle: &TableHandle, slot: usize, index: usize) -> Entity {
+        let mut queue = bevy::ecs::world::CommandQueue::default();
+        let entity = {
+            let mut commands = Commands::new(&mut queue, app.world());
+            let entity = commands
+                .spawn((
+                    VirtualRow {
+                        slot,
+                        index: Some(index),
+                    },
+                    ChildOf(handle.viewport),
+                ))
+                .id();
+            spawn_table_row(&mut commands, entity, handle.root, &SORTABLE_SPEC);
+            entity
+        };
+        queue.apply(app.world_mut());
+        app.update();
+        entity
+    }
+
+    /// Trigger a primary press on `entity` and settle a frame — the observer call
+    /// a real click makes, without a picking backend to aim one.
+    fn press(app: &mut App, entity: Entity) {
+        let event = Pointer::new(
+            PointerId::Mouse,
+            location(),
+            Press {
+                button: PointerButton::Primary,
+                hit: HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
+                count: 1,
+            },
+            entity,
+        );
+        app.world_mut().trigger(event);
+        app.update();
+    }
+
+    /// Trigger a primary drag of `dx` logical pixels on `entity`, then its end.
+    fn drag(app: &mut App, entity: Entity, dx: f32) {
+        let event = Pointer::new(
+            PointerId::Mouse,
+            location(),
+            Drag {
+                button: PointerButton::Primary,
+                distance: Vec2::new(dx, 0.0),
+                delta: Vec2::new(dx, 0.0),
+            },
+            entity,
+        );
+        app.world_mut().trigger(event);
+        app.update();
+    }
+
+    /// A pointer location on no render target — the events are triggered by hand,
+    /// so nothing reads it.
+    fn location() -> Location {
+        Location {
+            target: NormalizedRenderTarget::None {
+                width: 800,
+                height: 600,
+            },
+            position: Vec2::ZERO,
+        }
+    }
+
+    /// A table's primary sort column.
+    fn primary_column(app: &App, table: Entity) -> Option<usize> {
+        app.world()
+            .get::<TableState>(table)
+            .and_then(|state| state.sort().primary().map(|key| key.column))
+    }
+
+    /// A table's live width for column `index`.
+    fn width(app: &App, table: Entity, index: usize) -> Option<f32> {
+        app.world()
+            .get::<TableState>(table)
+            .and_then(|state| state.widths.get(index).copied())
+    }
+
+    /// A table's selected data indices.
+    fn selected(app: &App, table: Entity) -> Vec<usize> {
+        app.world()
+            .get::<TableState>(table)
+            .map(|state| state.selected().to_vec())
+            .unwrap_or_default()
+    }
+
+    /// The colour of the first header text under `cell`, walking the cell's
+    /// subtree (the label sits inside a clip container, the arrow beside it).
+    fn header_color(app: &mut App, cell: Entity) -> Option<Color> {
+        let mut texts = app.world_mut().query::<(&TableHeaderText, &TextColor)>();
+        texts
+            .iter(app.world())
+            .find(|(header, _)| header.cell == cell)
+            .map(|(_, color)| color.0)
+    }
+
+    /// The named descendant of the table (its column-resize handle).
+    fn find_by_name(app: &mut App, wanted: &str) -> Option<Entity> {
+        let mut names = app.world_mut().query::<(Entity, &Name)>();
+        names
+            .iter(app.world())
+            .find(|(_, name)| name.as_str() == wanted)
+            .map(|(entity, _)| entity)
+    }
+
+    /// The baseline the disabled tests are measured against: with nothing
+    /// disabled, a header press sorts, a border drag resizes, and a row press
+    /// selects. Without this the tests below could pass on a table that never
+    /// reacts to anything at all.
+    #[test]
+    fn the_gestures_work_when_nothing_is_disabled() -> Result<(), TestError> {
+        let mut app = table_app();
+        let handle = table(&mut app);
+        let cell = *handle.header_cells.get(2).ok_or("no header cell 2")?;
+        let resizer = find_by_name(&mut app, "test:table-border-resizer:1")
+            .ok_or("no resize handle on border 1")?;
+        let pooled = row(&mut app, &handle, 0, 4);
+
+        assert_eq!(
+            primary_column(&app, handle.root),
+            Some(0),
+            "the default sort"
+        );
+        press(&mut app, cell);
+        assert_eq!(
+            primary_column(&app, handle.root),
+            Some(2),
+            "the click sorts"
+        );
+
+        let before = width(&app, handle.root, 1).ok_or("no width for column 1")?;
+        drag(&mut app, resizer, 10.0);
+        let after = width(&app, handle.root, 1).ok_or("no width for column 1")?;
+        assert!(
+            after > before,
+            "the drag widened column 1: {before} -> {after}"
+        );
+
+        press(&mut app, pooled);
+        assert_eq!(selected(&app, handle.root), vec![4], "the click selects");
+        Ok(())
+    }
+
+    /// A table wearing [`InteractionDisabled`](bevy::ui::InteractionDisabled)
+    /// answers none of the three gestures, and greys its header.
+    #[test]
+    fn a_disabled_table_refuses_every_gesture() -> Result<(), TestError> {
+        let mut app = table_app();
+        let handle = table(&mut app);
+        let cell = *handle.header_cells.get(2).ok_or("no header cell 2")?;
+        let resizer = find_by_name(&mut app, "test:table-border-resizer:1")
+            .ok_or("no resize handle on border 1")?;
+        let pooled = row(&mut app, &handle, 0, 4);
+        app.world_mut()
+            .entity_mut(handle.root)
+            .insert(bevy::ui::InteractionDisabled);
+        app.update();
+
+        let before = width(&app, handle.root, 1).ok_or("no width for column 1")?;
+        press(&mut app, cell);
+        drag(&mut app, resizer, 10.0);
+        press(&mut app, pooled);
+
+        assert_eq!(
+            primary_column(&app, handle.root),
+            Some(0),
+            "the sort did not move"
+        );
+        assert_eq!(
+            width(&app, handle.root, 1),
+            Some(before),
+            "the column width did not move"
+        );
+        assert!(
+            selected(&app, handle.root).is_empty(),
+            "nothing was selected"
+        );
+        assert_eq!(
+            header_color(&mut app, cell),
+            Some(DISABLED_TEXT_COLOR),
+            "the header greyed"
+        );
+        Ok(())
+    }
+
+    /// The marker on **one header cell** disables that column alone: its own
+    /// click is refused and its label greys, while the next column still sorts.
+    #[test]
+    fn one_disabled_header_leaves_the_others_live() -> Result<(), TestError> {
+        let mut app = table_app();
+        let handle = table(&mut app);
+        let frozen = *handle.header_cells.get(2).ok_or("no header cell 2")?;
+        let live = *handle.header_cells.get(1).ok_or("no header cell 1")?;
+        app.world_mut()
+            .entity_mut(frozen)
+            .insert(bevy::ui::InteractionDisabled);
+        app.update();
+
+        press(&mut app, frozen);
+        assert_eq!(
+            primary_column(&app, handle.root),
+            Some(0),
+            "the disabled column did not sort"
+        );
+        press(&mut app, live);
+        assert_eq!(
+            primary_column(&app, handle.root),
+            Some(1),
+            "its neighbour still sorts"
+        );
+        assert_eq!(
+            header_color(&mut app, frozen),
+            Some(DISABLED_TEXT_COLOR),
+            "the disabled header greyed"
+        );
+        assert_eq!(
+            header_color(&mut app, live),
+            Some(SORTABLE_SPEC.header_color),
+            "the live header kept the spec's colour"
+        );
+        Ok(())
+    }
+
+    /// The marker on **one row** refuses that row's selection click while its
+    /// neighbours still select — and re-enabling restores the header's colour,
+    /// so the greying is a reflection of the state, not a one-way write.
+    #[test]
+    fn one_disabled_row_and_a_restored_header() -> Result<(), TestError> {
+        let mut app = table_app();
+        let handle = table(&mut app);
+        let frozen = row(&mut app, &handle, 0, 1);
+        let live = row(&mut app, &handle, 1, 2);
+        app.world_mut()
+            .entity_mut(frozen)
+            .insert(bevy::ui::InteractionDisabled);
+        app.update();
+
+        press(&mut app, frozen);
+        assert!(
+            selected(&app, handle.root).is_empty(),
+            "the disabled row did not select"
+        );
+        press(&mut app, live);
+        assert_eq!(
+            selected(&app, handle.root),
+            vec![2],
+            "its neighbour still selects"
+        );
+
+        let cell = *handle.header_cells.first().ok_or("no header cell 0")?;
+        app.world_mut()
+            .entity_mut(handle.root)
+            .insert(bevy::ui::InteractionDisabled);
+        app.update();
+        assert_eq!(header_color(&mut app, cell), Some(DISABLED_TEXT_COLOR));
+        app.world_mut()
+            .entity_mut(handle.root)
+            .remove::<bevy::ui::InteractionDisabled>();
+        app.update();
+        assert_eq!(
+            header_color(&mut app, cell),
+            Some(SORTABLE_SPEC.header_color),
+            "re-enabling puts the spec's colour back"
+        );
+        Ok(())
     }
 }

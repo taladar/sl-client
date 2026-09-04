@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 311 |
 | blocked | 56 |
 | in-progress | 18 |
-| bugs | 63 |
-| done | 977 |
+| bugs | 62 |
+| done | 978 |
 | deferred | 25 |
 | wont-do | 14 |
 | **total** | **1562** |
@@ -1183,7 +1183,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (63)
+## bugs (62)
 
 ### viewer
 
@@ -1252,8 +1252,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   mouselook
 - [`viewer-audit-system-ordering-claims`](bugs/viewer-audit-system-ordering-claims.md)
   — Update tuples claim a pipeline order the scheduler does not enforce
-- [`viewer-audit-table-interaction-disabled`](bugs/viewer-audit-table-interaction-disabled.md)
-  — The table widget ignores InteractionDisabled
 - [`viewer-audit-texture-align-material-channels`](bugs/viewer-audit-texture-align-material-channels.md)
   — Align planar faces does not propagate to the normal and specular transforms
 - [`viewer-audit-toast-starvation-dnd-queue`](bugs/viewer-audit-toast-starvation-dnd-queue.md)
@@ -1335,7 +1333,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (977)
+## done (978)
 
 ### protocol
 
@@ -1621,6 +1619,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   pose
 - [`viewer-audit-tab-panel-focus-order`](done/viewer-audit-tab-panel-focus-order.md)
   — Inactive tab panels keep their keyboard tab stops
+- [`viewer-audit-table-interaction-disabled`](done/viewer-audit-table-interaction-disabled.md)
+  — The table widget ignores InteractionDisabled
 - [`viewer-audit-tonemap-legacy-sky`](done/viewer-audit-tonemap-legacy-sky.md) —
   ACES tonemapping is applied to legacy skies the reference exempts
 - [`viewer-audit-ui-widget-per-frame-writes`](done/viewer-audit-ui-widget-per-frame-writes.md)

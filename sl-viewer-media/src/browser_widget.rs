@@ -19,6 +19,11 @@
 //! - The pointer position reaches the page in surface pixels via
 //!   [`RelativeCursorPosition`]; the surface itself is sized from the node's
 //!   laid-out physical size, so page pixels are 1:1 with screen pixels.
+//! - **A non-interactive view** — [`InteractionDisabled`](bevy::ui::InteractionDisabled)
+//!   on the node, the reference's media that may be watched but not driven —
+//!   forwards no press, release, hover or keystroke, and never takes focus.
+//!   Scrolling and the mouse-leave notice stay live: a page the agent may not
+//!   *drive* is still one they must be able to *read* to the bottom.
 
 use bevy::input::keyboard::KeyboardInput;
 use bevy::input_focus::{FocusCause, FocusedInput, InputFocus};
@@ -188,6 +193,7 @@ const fn media_button(button: PointerButton) -> MediaMouseButton {
 fn on_browser_press(
     event: On<Pointer<Press>>,
     views: Query<(&BrowserView, &RelativeCursorPosition)>,
+    disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
     surfaces: NonSend<MediaSurfaces>,
     mut focus: ResMut<InputFocus>,
     keyboard: Res<ButtonInput<KeyCode>>,
@@ -197,6 +203,12 @@ fn on_browser_press(
     let Ok((view, relative)) = views.get(entity) else {
         return;
     };
+    // A non-interactive view (media the agent may watch but not drive) neither
+    // takes focus nor forwards the click: taking focus would send the page every
+    // subsequent keystroke through `on_browser_key`.
+    if disabled.contains(entity) {
+        return;
+    }
     focus.set(entity, FocusCause::Pressed);
     let Some(slot) = view.surface.and_then(|id| surfaces.get(id)) else {
         return;
@@ -219,6 +231,7 @@ fn on_browser_press(
 fn on_browser_release(
     event: On<Pointer<Release>>,
     views: Query<(&BrowserView, &RelativeCursorPosition)>,
+    disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
     surfaces: NonSend<MediaSurfaces>,
     keyboard: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -226,6 +239,9 @@ fn on_browser_release(
     let Ok((view, relative)) = views.get(event.entity) else {
         return;
     };
+    if disabled.contains(event.entity) {
+        return;
+    }
     let Some(slot) = view.surface.and_then(|id| surfaces.get(id)) else {
         return;
     };
@@ -246,6 +262,7 @@ fn on_browser_release(
 fn on_browser_move(
     event: On<Pointer<bevy::picking::events::Move>>,
     views: Query<(&BrowserView, &RelativeCursorPosition)>,
+    disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
     surfaces: NonSend<MediaSurfaces>,
     keyboard: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -253,6 +270,12 @@ fn on_browser_move(
     let Ok((view, relative)) = views.get(event.entity) else {
         return;
     };
+    // Hover is forwarded only where the click that follows it would be: a page
+    // lighting its links up under a pointer that can never click them lies about
+    // what the view will do.
+    if disabled.contains(event.entity) {
+        return;
+    }
     let Some(slot) = view.surface.and_then(|id| surfaces.get(id)) else {
         return;
     };
@@ -308,6 +331,7 @@ fn on_browser_scroll(
 fn on_browser_key(
     event: On<FocusedInput<KeyboardInput>>,
     views: Query<&BrowserView>,
+    disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
     surfaces: NonSend<MediaSurfaces>,
     keyboard: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -315,6 +339,12 @@ fn on_browser_key(
     let Ok(view) = views.get(event.focused_entity) else {
         return;
     };
+    // A view disabled *while* it held focus keeps that focus until the next
+    // navigation, so the keystrokes are refused here rather than only at the
+    // click that would have granted it.
+    if disabled.contains(event.focused_entity) {
+        return;
+    }
     let Some(slot) = view.surface.and_then(|id| surfaces.get(id)) else {
         return;
     };
@@ -505,4 +535,109 @@ pub fn spawn_browser_specimen(
         },
     );
     frame
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BrowserViewSpec, spawn_browser_view};
+    use bevy::camera::NormalizedRenderTarget;
+    use bevy::input_focus::InputFocus;
+    use bevy::picking::backend::HitData;
+    use bevy::picking::pointer::{Location, PointerId};
+    use bevy::prelude::*;
+    use pretty_assertions::assert_eq;
+
+    use crate::media_engine::MediaSurfaces;
+
+    /// A boxed error so tests can use `?` instead of the disallowed
+    /// `unwrap` / `expect`.
+    type TestError = Box<dyn core::error::Error>;
+
+    /// A headless app with the two things the pointer observers take besides
+    /// the view itself: the focus resource they write and the (empty) surface
+    /// table they read. No engine — the surface lookup is not what is under
+    /// test here, and every observer reaches the disabled check before it.
+    fn browser_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<InputFocus>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<ButtonInput<MouseButton>>()
+            .insert_non_send(MediaSurfaces::default());
+        app.update();
+        app
+    }
+
+    /// Spawn a browser view under a bare root and settle a frame.
+    fn view(app: &mut App) -> Entity {
+        let root = app.world_mut().spawn(Node::default()).id();
+        let mut queue = bevy::ecs::world::CommandQueue::default();
+        let entity = {
+            let mut commands = Commands::new(&mut queue, app.world());
+            spawn_browser_view(
+                &mut commands,
+                root,
+                &BrowserViewSpec {
+                    initial_url: "about:blank".to_owned(),
+                    isolated: true,
+                    tab_index: 0,
+                    fixed_height: Some(64.0),
+                },
+            )
+        };
+        queue.apply(app.world_mut());
+        app.update();
+        entity
+    }
+
+    /// Trigger a primary press on `entity` and settle a frame.
+    fn press(app: &mut App, entity: Entity) {
+        let event = Pointer::new(
+            PointerId::Mouse,
+            Location {
+                target: NormalizedRenderTarget::None {
+                    width: 800,
+                    height: 600,
+                },
+                position: Vec2::ZERO,
+            },
+            Press {
+                button: PointerButton::Primary,
+                hit: HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
+                count: 1,
+            },
+            entity,
+        );
+        app.world_mut().trigger(event);
+        app.update();
+    }
+
+    /// A click focuses a live view (click-to-focus) but not a
+    /// [disabled](bevy::ui::InteractionDisabled) one — which is the load-bearing
+    /// half of the refusal, because focus is what would route every subsequent
+    /// keystroke into the page through `on_browser_key`.
+    #[test]
+    fn a_disabled_view_does_not_take_focus() -> Result<(), TestError> {
+        let mut app = browser_app();
+        let live = view(&mut app);
+        press(&mut app, live);
+        assert_eq!(
+            app.world().resource::<InputFocus>().get(),
+            Some(live),
+            "a click focuses a live view"
+        );
+
+        app.world_mut().resource_mut::<InputFocus>().clear();
+        app.world_mut()
+            .entity_mut(live)
+            .insert(bevy::ui::InteractionDisabled);
+        app.update();
+        press(&mut app, live);
+        assert_eq!(
+            app.world().resource::<InputFocus>().get(),
+            None,
+            "a disabled view refuses the focus the click would have given it"
+        );
+        Ok(())
+    }
 }

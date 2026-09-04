@@ -779,11 +779,16 @@ pub fn spawn_floater(commands: &mut Commands, root: Entity, spec: FloaterSpec) -
     // host), the grip resizes it, and each button raises then acts. Each observer
     // captures the floater root by `move`, so it is correct however deep in the
     // chrome the pointer actually landed.
-    commands.entity(parts.title_bar).observe(
+    let title_bar = parts.title_bar;
+    commands.entity(title_bar).observe(
         move |drag: On<Pointer<Drag>>,
               mut floaters: Query<&mut Floater>,
+              disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
               direction: Res<UiDirection>,
               mut commands: MessageWriter<FloaterCommand>| {
+            if chrome_refused(&disabled, floater, title_bar) {
+                return;
+            }
             drag_title(floater, &drag, &mut floaters, *direction, &mut commands);
         },
     );
@@ -794,15 +799,23 @@ pub fn spawn_floater(commands: &mut Commands, root: Entity, spec: FloaterSpec) -
             .observe(
                 move |_drag: On<Pointer<DragStart>>,
                       mut floaters: Query<&mut Floater>,
+                      disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
                       computed: Query<&ComputedNode>| {
+                    if chrome_refused(&disabled, floater, handle) {
+                        return;
+                    }
                     seed_content_size(floater, content, &mut floaters, &computed);
                 },
             )
             .observe(
                 move |drag: On<Pointer<Drag>>,
                       mut floaters: Query<&mut Floater>,
+                      disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
                       direction: Res<UiDirection>,
                       mut commands: MessageWriter<FloaterCommand>| {
+                    if chrome_refused(&disabled, floater, handle) {
+                        return;
+                    }
                     drag_resize(floater, &drag, &mut floaters, *direction, &mut commands);
                 },
             );
@@ -816,15 +829,24 @@ pub fn spawn_floater(commands: &mut Commands, root: Entity, spec: FloaterSpec) -
             continue;
         };
         commands.entity(button).observe(
-            move |press: On<Pointer<Press>>, mut commands: MessageWriter<FloaterCommand>| {
+            move |press: On<Pointer<Press>>,
+                  disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
+                  mut commands: MessageWriter<FloaterCommand>| {
                 if press.button != PointerButton::Primary {
                     return;
                 }
                 // Raise first (any mouse-down brings a floater to front), then act.
+                // The raise is deliberately *outside* the disabled check: bringing a
+                // window to the front is not a change to it, and the root observer
+                // above raises on any press anyway, so skipping it here would only
+                // make the chrome behave differently from the floater's own body.
                 commands.write(FloaterCommand {
                     floater,
                     op: FloaterOp::BringToFront,
                 });
+                if chrome_refused(&disabled, floater, button) {
+                    return;
+                }
                 commands.write(FloaterCommand { floater, op });
             },
         );
@@ -835,6 +857,26 @@ pub fn spawn_floater(commands: &mut Commands, root: Entity, spec: FloaterSpec) -
         content: parts.content,
         title_text: parts.title_text,
     }
+}
+
+/// Whether a chrome gesture is refused because the floater — or the piece of
+/// chrome it was made on — is [disabled](bevy::ui::InteractionDisabled).
+///
+/// Bevy's marker is advisory, so each widget enforces it in its own observers.
+/// Both ends are checked, so a consumer can freeze a whole window (the marker on
+/// the root) or take away one affordance (the marker on that button, the title
+/// bar or the grip) without touching [`FloaterCaps`] — which is the *build-time*
+/// answer to the same question and removes the chrome outright.
+///
+/// The target is the entity the observer is *attached to*, captured by `move`,
+/// not the event's `.entity`: a bubbled `Pointer` reports the original hit, which
+/// for a title-bar drag is usually the title text rather than the bar.
+fn chrome_refused(
+    disabled: &Query<(), With<bevy::ui::InteractionDisabled>>,
+    floater: Entity,
+    target: Entity,
+) -> bool {
+    disabled.contains(floater) || disabled.contains(target)
 }
 
 /// The title-bar drag body, shared by the observer closure: move the floater with
@@ -1549,6 +1591,8 @@ mod tests {
         drag_position, floater_panel, highlight_active_floater, resize_size, spawn_floater,
         toggle_floater,
     };
+    use bevy::picking::backend::HitData;
+    use bevy::picking::pointer::PointerId;
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
     use sl_viewer_ui_core::ui::{UiDirection, UiPanelShown, UiRoot};
@@ -1926,6 +1970,189 @@ mod tests {
         }
         let mut content = app.world_mut().query_filtered::<(), With<TestContent>>();
         assert_eq!(content.iter(app.world()).count(), 1);
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // The disabled state: the chrome gestures, refused.
+    // -----------------------------------------------------------------------
+
+    /// Trigger a primary press on `entity` and settle a frame — the observer
+    /// call a real click makes, without a picking backend to aim one.
+    fn press(app: &mut App, entity: Entity) {
+        let event = Pointer::new(
+            PointerId::Mouse,
+            pointer_location(),
+            Press {
+                button: PointerButton::Primary,
+                hit: HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
+                count: 1,
+            },
+            entity,
+        );
+        app.world_mut().trigger(event);
+        app.update();
+    }
+
+    /// Trigger a primary drag of `delta` on `entity` and settle a frame.
+    fn drag(app: &mut App, entity: Entity, delta: Vec2) {
+        let event = Pointer::new(
+            PointerId::Mouse,
+            pointer_location(),
+            Drag {
+                button: PointerButton::Primary,
+                distance: delta,
+                delta,
+            },
+            entity,
+        );
+        app.world_mut().trigger(event);
+        app.update();
+    }
+
+    /// A pointer location on no render target — the events are triggered by
+    /// hand, so nothing reads it.
+    fn pointer_location() -> bevy::picking::pointer::Location {
+        bevy::picking::pointer::Location {
+            target: bevy::camera::NormalizedRenderTarget::None {
+                width: 800,
+                height: 600,
+            },
+            position: Vec2::ZERO,
+        }
+    }
+
+    /// A floater's chrome parts.
+    fn parts_of(app: &App, floater: Entity) -> Option<FloaterParts> {
+        app.world().get::<FloaterParts>(floater).copied()
+    }
+
+    /// A floater's live position, size and minimized flag.
+    fn state_of(app: &App, floater: Entity) -> Option<(Vec2, Option<Vec2>, bool)> {
+        app.world()
+            .get::<Floater>(floater)
+            .map(|state| (state.position, state.content_size, state.minimized))
+    }
+
+    /// A floater wearing [`InteractionDisabled`](bevy::ui::InteractionDisabled)
+    /// does not move, resize or minimize — but a press still raises it, because
+    /// bringing a window to the front is not a change to it.
+    #[test]
+    fn a_disabled_floater_refuses_its_chrome() -> Result<(), TestError> {
+        let (mut app, root, _host) = floater_app();
+        let floater = spawn_one(&mut app, root);
+        let parts = parts_of(&app, floater).ok_or("the floater has no chrome")?;
+        let grip = parts
+            .resize_handle
+            .ok_or("a resizable floater has a grip")?;
+        let minimize = parts
+            .minimize_button
+            .ok_or("a minimizable floater has one")?;
+        let before = state_of(&app, floater).ok_or("the floater lost its state")?;
+
+        app.world_mut()
+            .entity_mut(floater)
+            .insert(bevy::ui::InteractionDisabled);
+        app.update();
+
+        drag(&mut app, parts.title_bar, Vec2::new(25.0, 15.0));
+        drag(&mut app, grip, Vec2::new(40.0, 30.0));
+        press(&mut app, minimize);
+
+        assert_eq!(
+            state_of(&app, floater),
+            Some(before),
+            "position, size and the minimized flag all held"
+        );
+        assert_eq!(
+            app.world().resource::<ActiveFloater>().0,
+            Some(floater),
+            "the press still raised it to the front"
+        );
+        Ok(())
+    }
+
+    /// The marker on **one button** takes away that one affordance: a floater
+    /// whose close button is disabled still minimizes. The enabled halves are
+    /// asserted too, so the refusals above are a rule and not a dead observer.
+    #[test]
+    fn one_disabled_button_leaves_the_rest_live() -> Result<(), TestError> {
+        let (mut app, root, _host) = floater_app();
+        let floater = spawn_one(&mut app, root);
+        let parts = parts_of(&app, floater).ok_or("the floater has no chrome")?;
+        let close = parts.close_button.ok_or("a closable floater has a close")?;
+        let minimize = parts
+            .minimize_button
+            .ok_or("a minimizable floater has one")?;
+        // Open it, so a refused close is visible as "still shown".
+        {
+            let mut shown = app
+                .world_mut()
+                .get_mut::<UiPanelShown>(floater)
+                .ok_or("the floater has no panel flag")?;
+            shown.0 = true;
+        }
+        app.update();
+
+        app.world_mut()
+            .entity_mut(close)
+            .insert(bevy::ui::InteractionDisabled);
+        app.update();
+
+        press(&mut app, close);
+        assert_eq!(
+            app.world()
+                .get::<UiPanelShown>(floater)
+                .map(|shown| shown.0),
+            Some(true),
+            "the disabled close button did not close the window"
+        );
+
+        press(&mut app, minimize);
+        assert_eq!(
+            state_of(&app, floater).map(|(_, _, minimized)| minimized),
+            Some(true),
+            "its neighbour still minimizes"
+        );
+
+        // Re-enabled, the close works — the same press, a different answer.
+        app.world_mut()
+            .entity_mut(close)
+            .remove::<bevy::ui::InteractionDisabled>();
+        app.update();
+        press(&mut app, close);
+        assert_eq!(
+            app.world()
+                .get::<UiPanelShown>(floater)
+                .map(|shown| shown.0),
+            Some(false),
+            "an enabled close button closes it"
+        );
+        Ok(())
+    }
+
+    /// The title bar drags the window when nothing is disabled — the baseline
+    /// the refusal above is measured against.
+    #[test]
+    fn an_enabled_floater_still_drags_and_resizes() -> Result<(), TestError> {
+        let (mut app, root, _host) = floater_app();
+        let floater = spawn_one(&mut app, root);
+        let parts = parts_of(&app, floater).ok_or("the floater has no chrome")?;
+        let grip = parts
+            .resize_handle
+            .ok_or("a resizable floater has a grip")?;
+
+        drag(&mut app, parts.title_bar, Vec2::new(25.0, 15.0));
+        assert_eq!(
+            state_of(&app, floater).map(|(position, _, _)| position),
+            Some(Vec2::new(55.0, 55.0)),
+            "the title drag moved the window"
+        );
+        drag(&mut app, grip, Vec2::new(40.0, 30.0));
+        assert!(
+            state_of(&app, floater).is_some_and(|(_, size, _)| size.is_some()),
+            "the grip drag gave the window a manual size"
+        );
         Ok(())
     }
 }
