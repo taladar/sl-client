@@ -8,6 +8,7 @@ points: 3
 refs:
   [
     test-fake-grid-asset-round-trip,
+    test-fake-grid-concurrent-edits,
     test-notecard-create-update,
     test-asset-upload,
     test-script-upload,
@@ -56,6 +57,34 @@ Classes where a difference is plausible enough to go looking:
   live state, choosing position, `task_id`, permissions and the contents
   serial. Listed so the survey records it as "authored, not echoed" rather
   than leaving the next reader to wonder.
+
+## The other axis: mutated by somebody else
+
+Everything above is the grid rewriting *your* save. A grid's copy also
+changes under you because **another agent changed it** — two avatars with the
+same prim's notecard or script open, both saving. (The same collision exists
+for object properties, parcel, region and estate settings, which is
+[[test-fake-grid-concurrent-edits]]'s problem; the asset classes are asked
+here because the answer decides what a *re-fetch* returns.) What a real grid
+does there is equally unmeasured, and the answers decide what
+[[test-fake-grid-concurrent-edits]] should build:
+
+- does anything arbitrate at all? Expect not — there is no edit lock, no
+  two-phase commit and no consensus in the protocol, so last-write-wins is
+  the likely whole of it. Worth one run to record as a *finding* rather
+  than an assumption, since it is what puts convergence on the viewer.
+- does the contents serial advance on an in-place asset *replacement* (same
+  item id, new asset id), or only on an add or a remove? If it does not
+  advance, a cached listing stays "valid" while naming a stale asset — and a
+  viewer has no way to notice at all.
+- does the losing viewer get told without asking — a re-sent `ObjectProperties`
+  carrying the new `inventory_serial` is the channel a simulator has for it —
+  or does it only find out when it next requests the listing?
+- for a script, does the save reset or restart it, and does the other viewer
+  see the `ScriptRunning` change?
+
+Two avatars in one region is a `2av` case on OpenSim and on aditi; the
+existing `1av` upload cases cannot reach any of it.
 
 The measurement is the ordinary conformance shape — upload a known body,
 re-fetch the id the grid returned, compare — run against **both** live grids,

@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 311 |
+| ready | 313 |
 | blocked | 56 |
 | in-progress | 18 |
 | bugs | 64 |
 | done | 982 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1568** |
+| **total** | **1570** |
 
 ## ideas (98)
 
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (311)
+## ready (313)
 
 ### protocol
 
@@ -951,6 +951,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — An asset id the grid hands out should name bytes the grid can serve
 - [`test-fake-grid-builtin-sounds`](ready/test-fake-grid-builtin-sounds.md) —
   The built-in UI sounds the viewer plays on arrival 404
+- [`test-fake-grid-concurrent-edits`](ready/test-fake-grid-concurrent-edits.md)
+  — Somebody else changed it and nobody was told
+- [`test-fake-grid-edit-surfaces`](ready/test-fake-grid-edit-surfaces.md) — A
+  viewer can edit nothing on the fake grid
 - [`test-fake-grid-login-matrix-and-timeouts`](ready/test-fake-grid-login-matrix-and-timeouts.md)
   — The login refusals and handover timeouts nothing tests
 - [`test-fake-grid-object-sounds`](ready/test-fake-grid-object-sounds.md) — The
