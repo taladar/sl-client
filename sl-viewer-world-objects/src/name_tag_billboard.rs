@@ -484,6 +484,24 @@ impl Default for TagLayoutBudget {
     }
 }
 
+/// Whether the logical viewport size differs from the one the previous run
+/// saw, storing `current` for the next.
+///
+/// Deliberately **not** a verbatim port: the stock `update_text2d_layout`
+/// (bevy_sprite 0.19 `text2d.rs:198`) writes `*last == logical`, which computes
+/// *un*changed, and hands it to [`ComputedTextBlock::needs_rerender`], whose
+/// parameter is `is_viewport_size_changed`. Upstream that is wrong in both
+/// directions — a viewport-sized block reshapes every steady-state frame and
+/// does *not* reshape on the frame the window actually resized. Only a block
+/// whose [`FontSize`] is viewport-relative (`Vw`/`Vh`/`VMin`/`VMax`) reads the
+/// flag at all, and a tag's spans are all [`FontSize::Px`] today, so the
+/// inversion is latent here rather than a per-frame cost.
+fn viewport_size_changed(last: &mut Vec2, current: Vec2) -> bool {
+    let changed = *last != current;
+    *last = current;
+    changed
+}
+
 /// Lay out every dirty [`TagText`] block through [`TextPipeline`] — a trimmed
 /// port of the stock `update_text2d_layout` loop, with the scale factor taken
 /// from the **viewer camera** (`With<ViewerCamera>` — the probe cameras make
@@ -527,8 +545,8 @@ pub(crate) fn layout_tag_text(
     let mut laid_out = 0_usize;
     let logical_viewport_size =
         primary_window.map_or(Vec2::splat(1000.0), |window| window.resolution.size());
-    let viewport_size_changed = *last_logical_viewport_size == logical_viewport_size;
-    *last_logical_viewport_size = logical_viewport_size;
+    let viewport_resized =
+        viewport_size_changed(&mut last_logical_viewport_size, logical_viewport_size);
 
     let scale_factor = cameras
         .iter()
@@ -549,7 +567,7 @@ pub(crate) fn layout_tag_text(
         let text_changed = scale_factor != text_layout_info.scale_factor
             || tag_text.is_changed()
             || block.is_changed()
-            || computed.needs_rerender(viewport_size_changed, rem_size.is_changed())
+            || computed.needs_rerender(viewport_resized, rem_size.is_changed())
             || (!reprocess_queue.is_empty() && reprocess_queue.remove(&entity));
 
         if !(text_changed || bounds.is_changed() || hinting.is_changed()) {
@@ -1915,7 +1933,7 @@ mod tests {
         GlyphQuadInput, NEUTRAL_MESH_TAG, NameTag, SETTING_SHOW_NAME_TAGS,
         SETTING_SHOW_OWN_NAME_TAG, TagContent, TagLine, TagLineSize, TagPageGeometry, TagText,
         build_tag_mesh_data, empty_tag_mesh, pack_overlap_offset, sync_tag_spans,
-        unpack_overlap_offset, write_page_mesh,
+        unpack_overlap_offset, viewport_size_changed, write_page_mesh,
     };
     use bevy::prelude::*;
     use pretty_assertions::{assert_eq, assert_ne};
@@ -2432,5 +2450,18 @@ mod tests {
         let mut mesh = empty_tag_mesh();
         write_page_mesh(&mut mesh, TagPageGeometry::default());
         assert_eq!(mesh.count_vertices(), 0);
+    }
+
+    /// The viewport gate reports *changed*, not *unchanged* — the stock
+    /// `update_text2d_layout` has this comparison inverted, so a verbatim port
+    /// would tell `needs_rerender` "resized" on every steady-state frame and
+    /// "unchanged" on the one frame the window actually resized.
+    #[test]
+    fn viewport_gate_reports_change_not_sameness() {
+        let mut last = Vec2::new(1600.0, 900.0);
+        assert!(!viewport_size_changed(&mut last, Vec2::new(1600.0, 900.0)));
+        assert!(viewport_size_changed(&mut last, Vec2::new(1280.0, 900.0)));
+        // The new size is remembered: the frame after a resize is steady again.
+        assert!(!viewport_size_changed(&mut last, Vec2::new(1280.0, 900.0)));
     }
 }
