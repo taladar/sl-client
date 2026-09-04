@@ -14,6 +14,13 @@
 //! discovers a worn wearable from the agent's `AgentWearablesUpdate` and pulls
 //! its asset; a stripped avatar with no known worn asset id is recorded
 //! `partial`.
+//!
+//! The fake grid runs it too: its stock account wears the four library body
+//! parts, and it serves a stand-in `.bodypart` asset under each of their ids
+//! (`sl_test_assets::builtin::library_wearables`), so both halves — the outfit
+//! the grid reports and the asset behind it — are exercised offline. Nothing
+//! installs a static-asset library in this crate, so the fetch really goes over
+//! the capability rather than being answered from a viewer-shipped copy.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -42,7 +49,7 @@ impl GridTest for AssetFetchHttp {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Fake, Grid::Opensim, Grid::Aditi]
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {

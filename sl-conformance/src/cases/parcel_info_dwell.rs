@@ -30,10 +30,12 @@
 //! 5. Request that parcel's info listing and await the `ParcelDetails` whose
 //!    echoed id matches.
 //!
-//! `1av`, `[both]`. On OpenSim's Default Region the single region-wide parcel
+//! `1av`, every grid. On OpenSim's Default Region the single region-wide parcel
 //! answers all three requests; the dwell is 0 on a fresh region (no accumulated
 //! traffic) but the reply still arrives (the `DefaultDwellModule` is enabled by
-//! default). Second Life tracks real dwell.
+//! default). Second Life tracks real dwell. The fake grid's catalogue region
+//! carries one region-wide parcel with a grid-wide listing and a deliberately
+//! non-zero dwell, so all three replies are asserted offline.
 
 use std::time::Instant;
 
@@ -77,7 +79,7 @@ impl GridTest for ParcelInfoDwell {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Fake, Grid::Opensim, Grid::Aditi]
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {

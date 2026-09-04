@@ -68,6 +68,10 @@ use sl_wire::messages::{
     ViewerEffect as ViewerEffectMessage, ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
 };
 use sl_wire::messages::{
+    AgentWearablesUpdate, AgentWearablesUpdateAgentDataBlock,
+    AgentWearablesUpdateWearableDataBlock, EconomyData as EconomyDataMessage, EconomyDataInfoBlock,
+};
+use sl_wire::messages::{
     AvatarAnimation as AvatarAnimationWire, AvatarAnimationAnimationListBlock,
     AvatarAnimationAnimationSourceListBlock, AvatarAnimationSenderBlock,
     AvatarAppearance as AvatarAppearanceWire, AvatarAppearanceAppearanceDataBlock,
@@ -128,11 +132,12 @@ use sl_wire::messages::{
 use sl_wire::messages::{
     ObjectPropertiesFamily as ObjectPropertiesFamilyMessage,
     ObjectPropertiesFamilyObjectDataBlock as ObjectPropertiesFamilyObjectDataBlockMessage,
-    ParcelInfoReply, ParcelInfoReplyAgentDataBlock, ParcelInfoReplyDataBlock,
-    ParcelObjectOwnersReply, ParcelObjectOwnersReplyDataBlock, PayPriceReply,
-    PayPriceReplyButtonDataBlock, PayPriceReplyObjectDataBlock, ScriptRunningReply,
-    ScriptRunningReplyScriptBlock, TelehubInfo as TelehubInfoMessage,
-    TelehubInfoSpawnPointBlockBlock, TelehubInfoTelehubBlockBlock,
+    ParcelDwellReply, ParcelDwellReplyAgentDataBlock, ParcelDwellReplyDataBlock, ParcelInfoReply,
+    ParcelInfoReplyAgentDataBlock, ParcelInfoReplyDataBlock, ParcelObjectOwnersReply,
+    ParcelObjectOwnersReplyDataBlock, PayPriceReply, PayPriceReplyButtonDataBlock,
+    PayPriceReplyObjectDataBlock, ScriptRunningReply, ScriptRunningReplyScriptBlock,
+    TelehubInfo as TelehubInfoMessage, TelehubInfoSpawnPointBlockBlock,
+    TelehubInfoTelehubBlockBlock,
 };
 use sl_wire::{
     AnyMessage, CircuitCode, ControlFlags, EventQueueEvent, ExperienceInfo, ExperiencePermission,
@@ -173,24 +178,25 @@ use crate::types::{
     AvatarPickerResult, Camera, ChatSource, ChatType, ClassifiedCategory, CoarseLocation,
     DEFAULT_SKY_FRAME, DEFAULT_WATER_FRAME, DayCycle, DayCycleFrame, DetachOrder,
     DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
-    DirPeopleResult, DirPlaceResult, DirectoryVisibility, DisplayNameUpdate, EjectAction,
-    EnvironmentSettings, EnvironmentUpdate, EstateCovenant, EventInfo, FeatureDisabled,
-    FollowCamPropertyValue, FreezeAction, FriendRights, GenericMessage, GenericStreamingMessage,
-    GestureActivation, GodRegionUpdate, GroupAccountDetails, GroupAccountSummary,
-    GroupAccountTransactions, GroupActiveProposalItem, GroupName, GroupVoteHistoryItem, ImDialog,
-    InstantMessage, InventoryFolder, InventoryItem, InventoryItemMove, InventoryType, Kick,
-    LandBrushAction, LandBrushSize, LandEdit, LandSearchType, LandStatItem, LandStatReportType,
-    MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, MeanCollision, MovementMode,
-    NavMeshStatus, NewInventoryLink, NotecardRez, Object, ObjectBuyItem, ObjectExtraParams,
-    ObjectPlayingAnimation, ObjectPropertiesFamily, OpenRegionInfo, ParcelCategory, ParcelDetails,
-    ParcelInfo, ParcelObjectOwner, PlacesResult, PlayingAnimation, Postcard, PrimShapeParams,
-    ProposalVoteId, RegionIdentity, RegionStats, Reliability, RequiredVoiceVersion, RestoreItem,
-    RezAttachment, RezObjectParams, RezScriptParams, SaleType, ScriptControl,
-    ScriptPermissionRequest, ScriptPermissions, ServerError, SetDisplayNameReply,
-    SimWideDeleteFlags, SimulatorTime, SkySettings, StartLocationSlot, TaskInventoryItem,
-    TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea, TerrainLayerType,
-    TerrainPatch, TextureEntry, Throttle, TransferStatus, Transmit, UpdateGroupInfoParams,
-    UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings,
+    DirPeopleResult, DirPlaceResult, DirectoryVisibility, DisplayNameUpdate, EconomyData,
+    EjectAction, EnvironmentSettings, EnvironmentUpdate, EstateCovenant, EventInfo,
+    FeatureDisabled, FollowCamPropertyValue, FreezeAction, FriendRights, GenericMessage,
+    GenericStreamingMessage, GestureActivation, GodRegionUpdate, GroupAccountDetails,
+    GroupAccountSummary, GroupAccountTransactions, GroupActiveProposalItem, GroupName,
+    GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
+    InventoryItemMove, InventoryType, Kick, LandBrushAction, LandBrushSize, LandEdit,
+    LandSearchType, LandStatItem, LandStatReportType, MapItem, MapItemType, MapLayer,
+    MapRegionInfo, MapRequestFlags, MeanCollision, MovementMode, NavMeshStatus, NewInventoryLink,
+    NotecardRez, Object, ObjectBuyItem, ObjectExtraParams, ObjectPlayingAnimation,
+    ObjectPropertiesFamily, OpenRegionInfo, ParcelCategory, ParcelDetails, ParcelInfo,
+    ParcelObjectOwner, PlacesResult, PlayingAnimation, Postcard, PrimShapeParams, ProposalVoteId,
+    RegionIdentity, RegionStats, Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment,
+    RezObjectParams, RezScriptParams, SaleType, ScriptControl, ScriptPermissionRequest,
+    ScriptPermissions, ServerError, SetDisplayNameReply, SimWideDeleteFlags, SimulatorTime,
+    SkySettings, StartLocationSlot, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply,
+    TelehubInfo, TerraformArea, TerrainLayerType, TerrainPatch, TextureEntry, Throttle,
+    TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
+    ViewerEffectType, WaterSettings, Wearable,
 };
 use crate::types::{Event, EventId};
 use sl_wire::AbuseReport;
@@ -1513,6 +1519,17 @@ pub enum ServerEvent {
         /// The parcel's grid-wide id.
         parcel_id: ParcelKey,
     },
+    /// The client asked for a parcel's dwell — its accumulated traffic score —
+    /// by region-local id (`ParcelDwellRequest`); the simulator answers with
+    /// [`SimSession::send_parcel_dwell_reply`].
+    ///
+    /// The request carries the grid-wide id as well, but a viewer sends it
+    /// nil (it is asking precisely because it does not know one), so only the
+    /// region-local id identifies the parcel.
+    RequestParcelDwell {
+        /// The parcel's region-local id.
+        local_id: RegionLocalParcelId,
+    },
     /// The client asked whether a task's script is running (`GetScriptRunning`);
     /// the simulator answers with [`SimSession::send_script_running_reply`].
     RequestScriptRunning {
@@ -1537,6 +1554,21 @@ pub enum ServerEvent {
         /// The script inventory item inside that task.
         item_id: Uuid,
     },
+    /// The client asked for the grid's economy — the L$ prices and this
+    /// region's object budget (`EconomyDataRequest`); the simulator answers
+    /// with [`SimSession::send_economy_data`].
+    ///
+    /// The request carries nothing but the agent: which region's capacity to
+    /// report is the receiving simulator's own.
+    RequestEconomyData,
+    /// The client asked what the agent is wearing (`AgentWearablesRequest`);
+    /// the simulator answers with
+    /// [`SimSession::send_agent_wearables_update`].
+    ///
+    /// A simulator pushes the same message unsolicited at login and after
+    /// every wearable change, so this is the re-ask a viewer makes when it
+    /// missed one.
+    RequestAgentWearables,
     /// The client requested a group's financial summary
     /// (`GroupAccountSummaryRequest`); the simulator answers with
     /// [`SimSession::send_group_account_summary_reply`].
@@ -2719,6 +2751,15 @@ pub struct SimSession {
     /// to it — fixture state, not world authority — so follow-up fetches
     /// observe them.
     agent_inventory: SimInventoryTree,
+    /// What the simulator holds the agent to be wearing, and the serial it
+    /// stamps that state with — the `AgentWearablesUpdate` an
+    /// `AgentWearablesRequest` is answered from
+    /// ([`SimSession::set_agent_wearables`]). Held rather than derived from
+    /// [`agent_inventory`](Self::agent_inventory) because a simulator holds it
+    /// too: the outfit is appearance state the viewer updates with
+    /// `AgentIsNowWearing`, and the Current Outfit Folder is the inventory
+    /// record that shadows it.
+    agent_wearables: (u32, Vec<Wearable>),
     /// The read-only shared-Library tree the `FetchLibDescendents2` /
     /// `FetchLib2` / `LibraryAPIv3` capabilities serve from.
     /// Driver-populated ([`SimSession::library_inventory_mut`]); the
@@ -2987,6 +3028,7 @@ impl SimSession {
             region_materials: BTreeMap::new(),
             object_media: BTreeMap::new(),
             agent_inventory: SimInventoryTree::default(),
+            agent_wearables: (0, Vec::new()),
             library_inventory: SimInventoryTree::default(),
             simulator_features: SimulatorFeatures::default(),
             lsl_syntax: LslSyntax::default(),
@@ -3799,6 +3841,28 @@ impl SimSession {
     /// [`SimInventoryTree::insert_item`]).
     pub const fn agent_inventory_mut(&mut self) -> &mut SimInventoryTree {
         &mut self.agent_inventory
+    }
+
+    /// What the simulator holds this agent to be wearing, and the serial that
+    /// state carries — the pair
+    /// [`send_agent_wearables_update`](Self::send_agent_wearables_update)
+    /// answers an `AgentWearablesRequest` with.
+    #[must_use]
+    pub fn agent_wearables(&self) -> (u32, &[Wearable]) {
+        let (serial, ref wearables) = self.agent_wearables;
+        (serial, wearables)
+    }
+
+    /// Replaces what the simulator holds this agent to be wearing, advancing
+    /// the serial — the driver/test population API.
+    ///
+    /// The serial advances on every call rather than being passed in, because
+    /// that is the one rule the number has: a receiver drops an update whose
+    /// serial is not newer than the last it applied, so a fixture that changes
+    /// the outfit without moving it on would have its change ignored.
+    pub fn set_agent_wearables(&mut self, wearables: Vec<Wearable>) {
+        let (serial, _previous) = &self.agent_wearables;
+        self.agent_wearables = (serial.saturating_add(1), wearables);
     }
 
     /// The read-only shared-Library serving tree.
@@ -5180,6 +5244,65 @@ impl SimSession {
         Ok(())
     }
 
+    /// Sends an `EconomyData`: the grid's L$ price list and this region's
+    /// object budget, in response to a client's `EconomyDataRequest` (surfaced
+    /// as [`ServerEvent::RequestEconomyData`]). The inverse of the client's
+    /// [`Event::EconomyData`](crate::Event::EconomyData) decode. Sent
+    /// reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode — which for this message means a price or a
+    /// capacity too large for its signed 32-bit wire field.
+    pub fn send_economy_data(&mut self, economy: &EconomyData, now: Instant) -> Result<(), Error> {
+        use crate::types::{land_impact_to_wire, linden_to_wire};
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::EconomyData(EconomyDataMessage {
+            info: EconomyDataInfoBlock {
+                object_capacity: land_impact_to_wire("ObjectCapacity", economy.object_capacity)?,
+                object_count: land_impact_to_wire("ObjectCount", economy.object_count)?,
+                price_energy_unit: linden_to_wire("PriceEnergyUnit", &economy.price_energy_unit)?,
+                price_object_claim: linden_to_wire(
+                    "PriceObjectClaim",
+                    &economy.price_object_claim,
+                )?,
+                price_public_object_decay: linden_to_wire(
+                    "PricePublicObjectDecay",
+                    &economy.price_public_object_decay,
+                )?,
+                price_public_object_delete: linden_to_wire(
+                    "PricePublicObjectDelete",
+                    &economy.price_public_object_delete,
+                )?,
+                price_parcel_claim: linden_to_wire(
+                    "PriceParcelClaim",
+                    &economy.price_parcel_claim,
+                )?,
+                price_parcel_claim_factor: economy.price_parcel_claim_factor,
+                price_upload: linden_to_wire("PriceUpload", &economy.price_upload)?,
+                price_rent_light: linden_to_wire("PriceRentLight", &economy.price_rent_light)?,
+                teleport_min_price: linden_to_wire(
+                    "TeleportMinPrice",
+                    &economy.teleport_min_price,
+                )?,
+                teleport_price_exponent: economy.teleport_price_exponent,
+                energy_efficiency: economy.energy_efficiency,
+                price_object_rent: economy.price_object_rent,
+                price_object_scale_factor: economy.price_object_scale_factor,
+                price_parcel_rent: linden_to_wire("PriceParcelRent", &economy.price_parcel_rent)?,
+                price_group_create: linden_to_wire(
+                    "PriceGroupCreate",
+                    &economy.price_group_create,
+                )?,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
     /// Sends a `PayPriceReply`: an object's pay-button layout, in response to a
     /// client's `RequestPayPrice` (surfaced as [`ServerEvent::RequestPayPrice`]).
     ///
@@ -5620,6 +5743,44 @@ impl SimSession {
                     details.sale_price.as_ref(),
                 )?,
                 auction_id: details.auction_id,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `ParcelDwellReply`: one parcel's dwell (traffic) score, in
+    /// response to a client's `ParcelDwellRequest` (surfaced as
+    /// [`ServerEvent::RequestParcelDwell`] — echo its `local_id` back).
+    /// Surfaces on the client as [`Event::ParcelDwell`](crate::Event::ParcelDwell).
+    ///
+    /// Unlike the request, the reply *does* carry the parcel's grid-wide id:
+    /// it is the simulator that knows it, which is why the same lookup
+    /// answers [`send_parcel_info_reply`](Self::send_parcel_info_reply).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_parcel_dwell_reply(
+        &mut self,
+        local_id: RegionLocalParcelId,
+        parcel_id: ParcelKey,
+        dwell: f32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let RegionLocalParcelId(local_id) = local_id;
+        let message = AnyMessage::ParcelDwellReply(ParcelDwellReply {
+            agent_data: ParcelDwellReplyAgentDataBlock {
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
+            },
+            data: ParcelDwellReplyDataBlock {
+                local_id,
+                parcel_id: parcel_id.uuid(),
+                dwell,
             },
         });
         self.send(&message, Reliability::Reliable, now)?;
@@ -6336,6 +6497,54 @@ impl SimSession {
                 .map(|attachment| AvatarAppearanceAttachmentBlockBlock {
                     id: attachment.id.uuid(),
                     attachment_point: attachment.attachment_point,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends an `AgentWearablesUpdate`: the simulator's view of what **this**
+    /// session's agent is wearing, as it pushes unsolicited at login and after
+    /// every wearable change, and in answer to an `AgentWearablesRequest`
+    /// (surfaced as [`ServerEvent::RequestAgentWearables`]). Surfaces on the
+    /// client as [`Event::AgentWearables`](crate::Event::AgentWearables). Sent
+    /// reliably.
+    ///
+    /// `serial` is the outfit's serial number, which the receiver uses to drop
+    /// an update that overtook a newer one; it has to advance on every change
+    /// the simulator makes, which is the caller's business rather than this
+    /// session's.
+    ///
+    /// A [`Wearable`] with no `asset_id` goes out nil, as a simulator sends one
+    /// whose asset it has not resolved (the client then falls back to its
+    /// inventory record).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_agent_wearables_update(
+        &mut self,
+        serial: u32,
+        wearables: &[Wearable],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::AgentWearablesUpdate(AgentWearablesUpdate {
+            agent_data: AgentWearablesUpdateAgentDataBlock {
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
+                session_id: self.session_id.unwrap_or_else(Uuid::nil),
+                serial_num: serial,
+            },
+            wearable_data: wearables
+                .iter()
+                .map(|wearable| AgentWearablesUpdateWearableDataBlock {
+                    item_id: wearable.item_id.uuid(),
+                    asset_id: wearable.asset_id.unwrap_or_else(Uuid::nil),
+                    wearable_type: wearable.wearable_type.to_code(),
                 })
                 .collect(),
         });
@@ -8948,6 +9157,20 @@ impl SimSession {
                 self.events.push_back(ServerEvent::RequestParcelInfo {
                     parcel_id: ParcelKey::from(request.data.parcel_id),
                 });
+            }
+            AnyMessage::ParcelDwellRequest(request) => {
+                // `Data.ParcelID` is the template's "filled in on sim" field:
+                // the viewer sends it nil and the simulator resolves the
+                // region-local id itself, so only the local id is surfaced.
+                self.events.push_back(ServerEvent::RequestParcelDwell {
+                    local_id: RegionLocalParcelId(request.data.local_id),
+                });
+            }
+            AnyMessage::EconomyDataRequest(_request) => {
+                self.events.push_back(ServerEvent::RequestEconomyData);
+            }
+            AnyMessage::AgentWearablesRequest(_request) => {
+                self.events.push_back(ServerEvent::RequestAgentWearables);
             }
             AnyMessage::GetScriptRunning(request) => {
                 self.events.push_back(ServerEvent::RequestScriptRunning {

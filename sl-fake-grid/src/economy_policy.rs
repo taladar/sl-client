@@ -5,15 +5,23 @@
 //! `economy_endpoint` only parses, calls, and serialises. Nothing here moves
 //! a balance: the fake grid has no money ledger, so a purchase is observable
 //! only as an [`EconomyEvent`] on [`FakeGrid::economy_events`](crate::FakeGrid::economy_events).
+//!
+//! The config also carries the **UDP** side of the same policy: the price list
+//! and region object budget an `EconomyDataRequest` is answered with
+//! ([`EconomyConfig::prices`]). One config, because a grid whose web helper
+//! quoted one L$ rate while its simulator quoted another would be a grid no
+//! viewer could reconcile.
 
+use sl_proto::{EconomyData, LandImpact};
 use sl_types::key::AgentKey;
+use sl_types::money::LindenAmount;
 use sl_wire::{
     BuyCurrencyRequest, CurrencyQuote, CurrencyQuoteRequest, HelperFailure, HelperOutcome,
     LandPrep, LandPrepRequest, LandUseRequirement, MembershipLevel, MembershipRequirement,
 };
 
-/// The economy helper's behaviour.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The economy helper's behaviour, and the price list the simulator quotes.
+#[derive(Debug, Clone, PartialEq)]
 pub struct EconomyConfig {
     /// The currency symbol advertised in the login response and
     /// `SimulatorFeatures` (`currency`), e.g. `"L$"`.
@@ -31,6 +39,9 @@ pub struct EconomyConfig {
     pub land_use_upgrade: bool,
     /// The `confirm` token quotes hand out and commits must echo.
     pub confirm_token: String,
+    /// The grid-wide L$ price list and the region's object budget, answered
+    /// over UDP to an `EconomyDataRequest` (see [`stock_prices`]).
+    pub prices: EconomyData,
 }
 
 impl Default for EconomyConfig {
@@ -44,7 +55,40 @@ impl Default for EconomyConfig {
             membership_upgrade: false,
             land_use_upgrade: false,
             confirm_token: "fake-grid-confirm".to_owned(),
+            prices: stock_prices(),
         }
+    }
+}
+
+/// The stock price list an `EconomyDataRequest` is answered with.
+///
+/// Every L$ amount is **distinct**, and deliberately not a round table of
+/// zeroes the way a stock OpenSim region answers (its `SampleMoneyModule`
+/// defaults every price to `0` and group creation to `-1`): a reply whose
+/// fields are all the same number cannot tell a test that the encoder wrote a
+/// price into the wrong slot. The two Land Impact figures are a full region's
+/// budget and a plausible part of it, so the "capacity is positive and usage
+/// fits inside it" check a viewer makes has something to check.
+#[must_use]
+pub const fn stock_prices() -> EconomyData {
+    EconomyData {
+        object_capacity: LandImpact(15_000),
+        object_count: LandImpact(250),
+        price_energy_unit: LindenAmount(1),
+        price_object_claim: LindenAmount(2),
+        price_public_object_decay: LindenAmount(3),
+        price_public_object_delete: LindenAmount(4),
+        price_parcel_claim: LindenAmount(5),
+        price_parcel_claim_factor: 1.0,
+        price_upload: LindenAmount(10),
+        price_rent_light: LindenAmount(6),
+        teleport_min_price: LindenAmount(7),
+        teleport_price_exponent: 2.0,
+        energy_efficiency: 1.0,
+        price_object_rent: 8.0,
+        price_object_scale_factor: 10.0,
+        price_parcel_rent: LindenAmount(9),
+        price_group_create: LindenAmount(100),
     }
 }
 
@@ -195,13 +239,32 @@ impl EconomyConfig {
     }
 }
 
+/// Answers one drained [`ServerEvent`] from the economy policy: an
+/// `EconomyDataRequest` gets the grid's price list and this region's object
+/// budget. Everything else is left alone.
+///
+/// A live simulator answers this from the money module the grid runs; the fake
+/// grid answers it from the same [`EconomyConfig`] its web helper quotes from.
+pub(crate) fn answer_economy_request(
+    prices: &EconomyData,
+    sim: &mut sl_proto::SimSession,
+    event: &sl_proto::ServerEvent,
+    now: std::time::Instant,
+) {
+    if matches!(event, sl_proto::ServerEvent::RequestEconomyData)
+        && let Err(error) = sim.send_economy_data(prices, now)
+    {
+        tracing::warn!("answering an economy data request failed: {error}");
+    }
+}
+
 #[cfg(test)]
 mod test {
     use pretty_assertions::assert_eq;
     use sl_wire::{BuyCurrencyRequest, CurrencyQuoteRequest, HelperOutcome, ViewerVersionInfo};
     use uuid::Uuid;
 
-    use super::{EconomyConfig, EconomyEvent};
+    use super::{EconomyConfig, EconomyEvent, stock_prices};
 
     fn quote_request(amount: i32) -> CurrencyQuoteRequest {
         CurrencyQuoteRequest {
@@ -211,6 +274,39 @@ mod test {
             currency_buy: amount,
             viewer: ViewerVersionInfo::default(),
         }
+    }
+
+    /// Every L$ price the stock list quotes is a different number, and the
+    /// region's usage fits inside its budget.
+    ///
+    /// The first half is what makes the `economy-data` reply diagnostic: with
+    /// seventeen fields on one message, a table of equal amounts cannot tell a
+    /// test that the encoder wrote a price into the wrong slot. The second is
+    /// the coherence a viewer checks before believing the capacity at all.
+    #[test]
+    fn every_stock_price_is_distinct_and_the_capacity_is_coherent() {
+        let prices = stock_prices();
+        let mut amounts = vec![
+            prices.price_energy_unit.0,
+            prices.price_object_claim.0,
+            prices.price_public_object_decay.0,
+            prices.price_public_object_delete.0,
+            prices.price_parcel_claim.0,
+            prices.price_upload.0,
+            prices.price_rent_light.0,
+            prices.teleport_min_price.0,
+            prices.price_parcel_rent.0,
+            prices.price_group_create.0,
+        ];
+        let quoted = amounts.len();
+        amounts.sort_unstable();
+        amounts.dedup();
+        assert_eq!(amounts.len(), quoted, "two stock prices quote the same L$");
+        assert!(prices.object_capacity.0 > 0, "the region has no budget");
+        assert!(
+            prices.object_count <= prices.object_capacity,
+            "the region reports more objects than it can hold"
+        );
     }
 
     #[test]

@@ -108,6 +108,14 @@ Two rules decide whether a case belongs there:
   a region it controls must contain, use `support::content_is_ours`, which is
   true of OpenSim and the fake grid and false of Second Life.
 
+The second rule is about the grid, not the case, so a case joins the list when
+the grid learns to answer it. `agent-alert` and `server-error` were both listed
+here as examples of cases that *pass* offline while asserting nothing; each now
+asserts, because the fake grid grew the policy behind its provocation — an
+estate-rights check and a `FeatureDisabled` refusal of the deprecated UDP
+inventory fetch. If a case belongs offline and does not bite, the thing to fix
+is usually the grid.
+
 Four cases live on the fake grid **only**, because nothing else can host them:
 `region-crossing` and `neighbour-child-circuits` need two adjacent regions an
 avatar may walk between; `terrain-layerdata` and `avatar-appearance-npc` assert

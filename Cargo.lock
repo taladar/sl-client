@@ -9027,6 +9027,7 @@ dependencies = [
  "bytes",
  "pretty_assertions",
  "sl-anim",
+ "sl-avatar",
  "sl-llsd",
  "sl-material",
  "sl-mesh",

@@ -19,9 +19,12 @@ use crate::support::{REGION_TIMEOUT, REPLY_TIMEOUT, check, send_then_wait};
 ///
 /// The prices themselves are grid policy — OpenSim's defaults differ from
 /// Second Life's — so the case does not assert specific amounts, only that the
-/// reply parsed and carries a coherent capacity. This runs on both grids
-/// (`1av`): OpenSim answers from its `EconomyDataRequest` handler and Aditi from
-/// the live grid economy.
+/// reply parsed and carries a coherent capacity. This runs on every grid
+/// (`1av`): OpenSim answers from its `EconomyDataRequest` handler, Aditi from
+/// the live grid economy, and the fake grid from the
+/// [`EconomyConfig`](sl_fake_grid::EconomyConfig) its web helper quotes from,
+/// so a price the encoder wrote into the wrong slot is caught offline rather
+/// than the next time somebody logs a grid in.
 ///
 /// Named `…Case` rather than `EconomyData` to avoid clashing with the
 /// [`EconomyData`] reply type this case decodes.
@@ -42,7 +45,7 @@ impl GridTest for EconomyDataCase {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Fake, Grid::Opensim, Grid::Aditi]
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {

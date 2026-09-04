@@ -19,11 +19,12 @@ use std::time::Instant;
 use crate::fixtures::{NpcAppearance, NpcFixture};
 use crate::terrain::TerrainFixture;
 use sl_proto::{
-    AnimationKey, Object, ObjectExtraParams, ObjectMotion, ObjectPlayingAnimation, ParcelCategory,
-    ParcelInfo, ParcelRequestResult, ParcelStatus, PrimShapeParams, RegionLocalObjectId,
-    RegionLocalParcelId, ServerEvent, SimSession, TerrainLayerType, pcode,
+    AnimationKey, GlobalCoordinates, Object, ObjectExtraParams, ObjectMotion,
+    ObjectPlayingAnimation, ParcelCategory, ParcelDetails, ParcelInfo, ParcelRequestResult,
+    ParcelStatus, PrimShapeParams, RegionIdentity, RegionLocalObjectId, RegionLocalParcelId,
+    ServerEvent, SimSession, TerrainLayerType, pcode,
 };
-use sl_types::key::{AgentKey, ObjectKey, OwnerKey};
+use sl_types::key::{AgentKey, ObjectKey, OwnerKey, ParcelKey};
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::map::{Direction, LandArea, RegionCoordinates};
 use sl_types::money::LindenAmount;
@@ -60,6 +61,18 @@ pub struct SceneFixtures {
     /// a request for it. The stock scenario carries one region-wide parcel
     /// ([`region_wide_parcel`]).
     pub parcels: Vec<ParcelInfo>,
+    /// The grid-wide half of each parcel in [`parcels`], keyed by its
+    /// region-local id: what a `ParcelProperties` record does not carry and a
+    /// `ParcelDwellRequest` / `ParcelInfoRequest` / `RemoteParcelRequest` asks
+    /// for. Push both halves together with [`add_parcel`](Self::add_parcel).
+    ///
+    /// A parcel with no listing is answered as any other — it simply has no
+    /// grid-wide identity, so a location inside it resolves to nothing and its
+    /// dwell and search listing go unanswered, the way a region whose land
+    /// service is down behaves.
+    ///
+    /// [`parcels`]: Self::parcels
+    pub listings: Vec<ParcelListing>,
     /// The objects rezzed in the region, sent in one full `ObjectUpdate` on
     /// arrival (after the agent's own avatar object, which the driver adds
     /// from the login).
@@ -85,6 +98,72 @@ pub struct SceneFixtures {
     ///
     /// [`objects`]: Self::objects
     pub avatar_local_id: RegionLocalObjectId,
+}
+
+/// The grid-wide identity of one parcel: the half a region-local
+/// [`ParcelInfo`] record has no field for.
+///
+/// Three surfaces read it and a live grid answers all three from the same land
+/// record, which is why one fixture states it once:
+///
+/// - the `RemoteParcelRequest` capability, which turns a location into
+///   [`parcel_id`](Self::parcel_id) (registered as a
+///   [`SimParcel`](sl_proto::SimParcel) cover when the session starts),
+/// - a `ParcelDwellRequest`, answered with [`dwell`](Self::dwell), and
+/// - a `ParcelInfoRequest` for that id, answered with the search listing
+///   [`ParcelListing::details`] derives from the parcel's own record.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParcelListing {
+    /// The region-local id of the parcel in [`SceneFixtures::parcels`] this
+    /// describes.
+    pub local_id: RegionLocalParcelId,
+    /// The parcel's grid-wide id — the one a `RemoteParcelRequest` resolves a
+    /// location to and a `ParcelInfoRequest` names.
+    pub parcel_id: ParcelKey,
+    /// The parcel's dwell: the traffic score a `ParcelDwellRequest` asks for,
+    /// and the same number the search listing carries. Zero on a region
+    /// nobody has visited, which is what a fresh OpenSim region reports.
+    pub dwell: f32,
+}
+
+impl ParcelListing {
+    /// The search listing a `ParcelInfoRequest` is answered with: this
+    /// parcel's grid-wide identity and dwell, over `parcel`'s own name,
+    /// description, owner, area and flags, anchored at the parcel's
+    /// south-west corner in `region`.
+    ///
+    /// Derived rather than stated so the two records cannot disagree about
+    /// the parcel they both describe — the drift a live grid cannot have,
+    /// because both come out of its one land record.
+    #[must_use]
+    pub fn details(&self, parcel: &ParcelInfo, region: &RegionIdentity) -> ParcelDetails {
+        let (global_x, global_y) = region.region_handle.global_coordinates();
+        ParcelDetails {
+            parcel_id: self.parcel_id,
+            owner_id: parcel.owner.uuid(),
+            name: parcel.name.clone(),
+            description: parcel.description.clone(),
+            actual_area: parcel.area,
+            billable_area: parcel.area,
+            // The condensed byte a listing carries is not the full parcel
+            // bitfield: the reference viewer reads only the mature/adult bit
+            // out of it, and a listing of a general-rated parcel is zero.
+            flags: 0,
+            global_position: GlobalCoordinates::new(
+                f64::from(global_x) + f64::from(parcel.aabb_min.x()),
+                f64::from(global_y) + f64::from(parcel.aabb_min.y()),
+                f64::from(parcel.aabb_min.z()),
+            ),
+            sim_name: region.sim_name.clone(),
+            snapshot_id: parcel.snapshot_id,
+            dwell: self.dwell,
+            sale_price: parcel.sale_price.clone(),
+            // The same auction, in the signed field the listing carries it in;
+            // an id past the signed range is not one a simulator mints, so
+            // "no auction" is the honest answer for one.
+            auction_id: i32::try_from(parcel.auction_id).unwrap_or(0),
+        }
+    }
 }
 
 /// The animations one animated object (animesh) is playing.
@@ -132,11 +211,50 @@ impl SceneFixtures {
     pub const fn new() -> Self {
         Self {
             parcels: Vec::new(),
+            listings: Vec::new(),
             objects: Vec::new(),
             npcs: Vec::new(),
             object_animations: Vec::new(),
             avatar_local_id: RegionLocalObjectId(1),
         }
+    }
+
+    /// Adds one parcel with both its halves: the region-local record a
+    /// `ParcelProperties` reply carries, and the [`ParcelListing`] naming its
+    /// grid-wide id and dwell.
+    ///
+    /// The one call every fixture makes, so no parcel is ever pushed without
+    /// the identity three of its request surfaces need.
+    pub fn add_parcel(&mut self, parcel: ParcelInfo, parcel_id: ParcelKey, dwell: f32) {
+        self.listings.push(ParcelListing {
+            local_id: parcel.local_id,
+            parcel_id,
+            dwell,
+        });
+        self.parcels.push(parcel);
+    }
+
+    /// The listing of the parcel with the given region-local id.
+    #[must_use]
+    pub fn listing_by_local_id(&self, local_id: RegionLocalParcelId) -> Option<&ParcelListing> {
+        self.listings
+            .iter()
+            .find(|listing| listing.local_id == local_id)
+    }
+
+    /// The listing with the given grid-wide parcel id, and the parcel record
+    /// it describes.
+    #[must_use]
+    pub fn listing_by_parcel_id(
+        &self,
+        parcel_id: ParcelKey,
+    ) -> Option<(&ParcelListing, &ParcelInfo)> {
+        let listing = self
+            .listings
+            .iter()
+            .find(|listing| listing.parcel_id == parcel_id)?;
+        let parcel = self.parcel_by_local_id(listing.local_id)?;
+        Some((listing, parcel))
     }
 
     /// Every object the region shows: its prims, then each NPC's avatar body
@@ -830,12 +948,14 @@ fn push_terrain(terrain: &TerrainFixture, sim: &mut SimSession, now: Instant) {
 /// session lock: a parcel request (by rectangle or id) gets the covering
 /// parcel's record with the request's sequence id echoed — or a
 /// [`ParcelRequestResult::NoData`] reply on a miss, as a simulator says
-/// "no such parcel" — and an object refetch gets a full `ObjectUpdate` of
+/// "no such parcel" — a dwell or search-listing request gets the parcel's
+/// [`ParcelListing`] half, and an object refetch gets a full `ObjectUpdate` of
 /// the matching fixtures (an unknown id is silently dropped, as a simulator
 /// drops a stale refetch).
 pub(crate) fn answer_world_request(
     world: &SceneFixtures,
     identity: &AvatarIdentity,
+    region: &RegionIdentity,
     sim: &mut SimSession,
     event: &ServerEvent,
     now: Instant,
@@ -943,6 +1063,35 @@ pub(crate) fn answer_world_request(
             });
             send_parcel_or_no_data(sim, record, *sequence_id, now);
         }
+        // The parcel's traffic score. A parcel with no grid-wide listing is
+        // left unanswered rather than answered with a zero dwell: "no such
+        // parcel" and "nobody has been here" are different facts, and the
+        // client's own timeout tells them apart.
+        ServerEvent::RequestParcelDwell { local_id } => {
+            let Some(listing) = world.listing_by_local_id(*local_id) else {
+                tracing::debug!("a dwell was requested for parcel {local_id:?}, which is not here");
+                return;
+            };
+            if let Err(error) =
+                sim.send_parcel_dwell_reply(*local_id, listing.parcel_id, listing.dwell, now)
+            {
+                tracing::warn!("answering a parcel dwell request failed: {error}");
+            }
+        }
+        // The search listing behind a parcel *id* — the id a viewer got from
+        // the `RemoteParcelRequest` capability, a landmark or a place profile,
+        // never from the region-local record.
+        ServerEvent::RequestParcelInfo { parcel_id } => {
+            let Some((listing, parcel)) = world.listing_by_parcel_id(*parcel_id) else {
+                tracing::debug!(
+                    "a listing was requested for parcel {parcel_id}, which is not here"
+                );
+                return;
+            };
+            if let Err(error) = sim.send_parcel_info_reply(&listing.details(parcel, region), now) {
+                tracing::warn!("answering a parcel info request failed: {error}");
+            }
+        }
         ServerEvent::RequestObjects { objects } => {
             let matching: Vec<Object> = world
                 .all_objects()
@@ -1012,6 +1161,34 @@ mod test {
     /// A fixed agent for the overlay tests.
     fn agent(id: u128) -> AgentKey {
         AgentKey::from(uuid::Uuid::from_u128(id))
+    }
+
+    /// A region identity at grid `(grid_x, grid_y)`, as the runtime mints one
+    /// for a configured region — enough of it for a parcel listing, which
+    /// reads only the name and the handle.
+    fn test_region(name: &str, grid_x: u32, grid_y: u32) -> RegionIdentity {
+        RegionIdentity {
+            sim_name: sl_wire::region_name_from_wire("fake-grid", name)
+                .ok()
+                .flatten(),
+            region_id: uuid::Uuid::nil(),
+            region_handle: sl_wire::RegionHandle::from_grid(grid_x, grid_y),
+            grid_coordinates: sl_types::map::GridCoordinates::new(grid_x, grid_y),
+            region_flags: 0,
+            region_flags_extended: 0,
+            region_protocols: 0,
+            maturity: sl_proto::Maturity::Pg,
+            product: sl_proto::ProductType::FullRegion,
+            product_sku: String::new(),
+            product_name: name.to_owned(),
+            cpu_class_id: 0,
+            cpu_ratio: 1,
+            sim_owner: uuid::Uuid::nil(),
+            is_estate_manager: false,
+            water_height: 20.0,
+            billable_factor: 1.0,
+            terrain: crate::TerrainFixture::default().composition,
+        }
     }
 
     #[test]
@@ -1134,6 +1311,59 @@ mod test {
                 .copied(),
             Some(OVERLAY_OWNED_BY_REQUESTER)
         );
+    }
+
+    /// Both halves of a parcel go in together, and its search listing is
+    /// derived from the record rather than restated: the name, owner and area
+    /// a `ParcelInfoRequest` answers with are the ones the
+    /// `ParcelProperties` reply carries, and the id and dwell are the ones
+    /// only the listing knows.
+    #[test]
+    fn a_parcel_carries_its_grid_wide_half() -> Result<(), String> {
+        let parcel_id = ParcelKey::from(uuid::Uuid::from_u128(0xBEEF));
+        let mut world = SceneFixtures::new();
+        world.add_parcel(
+            region_wide_parcel(
+                RegionLocalParcelId(3),
+                OwnerKey::Agent(agent(7)),
+                "Sunny Plaza",
+            ),
+            parcel_id,
+            42.5,
+        );
+
+        let listing = world
+            .listing_by_local_id(RegionLocalParcelId(3))
+            .ok_or("the parcel has no listing")?;
+        assert_eq!(listing.parcel_id, parcel_id);
+        let (by_id, parcel) = world
+            .listing_by_parcel_id(parcel_id)
+            .ok_or("the grid-wide id resolves to nothing")?;
+        assert_eq!(by_id, listing);
+        assert_eq!(parcel.local_id, RegionLocalParcelId(3));
+
+        // The region's south-west corner is at (1000, 1000) regions =
+        // (256_000, 256_000) metres, and the parcel starts at the corner.
+        let region = test_region("Fake Region", 1000, 1000);
+        let details = listing.details(parcel, &region);
+        assert_eq!(details.parcel_id, parcel_id);
+        assert_eq!(details.name, "Sunny Plaza");
+        assert_eq!(details.owner_id, agent(7).uuid());
+        assert_eq!(details.actual_area, parcel.area);
+        assert_eq!(details.dwell.to_bits(), 42.5_f32.to_bits());
+        assert_eq!(
+            details.sim_name.as_ref().map(ToString::to_string),
+            Some("Fake Region".to_owned())
+        );
+        assert_eq!(
+            details.global_position.x().to_bits(),
+            256_000.0_f64.to_bits()
+        );
+        assert_eq!(
+            details.global_position.y().to_bits(),
+            256_000.0_f64.to_bits()
+        );
+        Ok(())
     }
 
     /// The stand animation the grid signals is the registry's `stand`, not a

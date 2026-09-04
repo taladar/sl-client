@@ -40,6 +40,18 @@ answer, ICE trickle, parcel channel, logout — no media plane) and
 advertises it the way a Second Life region does (`voice-config`,
 `SimulatorFeatures.VoiceServerType`, `RequiredVoiceVersion`).
 
+## Policy, not content
+
+A few of the answers a grid gives are not content at all but *policy* —
+what it charges, what it lets an agent do, what it refuses. `EconomyConfig`
+carries both halves of the money policy: the L$ rate its web helper quotes
+and the price list its simulator answers an `EconomyDataRequest` with, so
+the two cannot disagree. `AgentPolicy` (from `AccountConfig::estate_manager`
+and `FakeGridBuilder::legacy_udp_inventory`) decides whether an agent's
+estate commands are answered or silently dropped the way OpenSim drops them,
+and whether the deprecated UDP inventory fetch is refused with a
+`FeatureDisabled` or ignored the way Second Life ignores it.
+
 ## Neighbours, teleports and crossings
 
 A grid with more than one region behaves like a real one about its
@@ -71,6 +83,13 @@ references, and the builder folds every region's into one store when the
 grid starts — because an asset id names a blob the whole grid knows, and a
 viewer fetches every one of them over its *root* region's capability,
 including the textures of the neighbour it can see across a border.
+
+A parcel is stated once, with both its halves: the region-local record a
+`ParcelProperties` reply carries, and the `ParcelListing` naming the
+grid-wide id a `RemoteParcelRequest` resolves a location to and the dwell a
+`ParcelDwellRequest` asks for. The search listing a `ParcelInfoRequest`
+answers with is *derived* from the two, so the record and the listing cannot
+disagree about the parcel they both describe.
 
 `fixtures::PrimFixture` builds the `Object` records a region pushes:
 every builder method sets a typed value and packs it into the raw wire

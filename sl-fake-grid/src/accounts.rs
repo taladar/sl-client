@@ -20,6 +20,11 @@ pub struct AccountConfig {
     /// The account's multi-factor policy, if logins must pass an MFA
     /// challenge (see [`sl_wire::MfaPolicy`]).
     pub mfa: Option<MfaPolicy>,
+    /// Whether this account may issue estate commands. `false` by default,
+    /// because most avatars on most grids may not, and a check nobody ever
+    /// fails is not a check — see
+    /// [`AgentPolicy`](crate::agent_requests::AgentPolicy).
+    pub estate_manager: bool,
 }
 
 impl AccountConfig {
@@ -37,7 +42,15 @@ impl AccountConfig {
             agent_id: None,
             start_region: None,
             mfa: None,
+            estate_manager: false,
         }
+    }
+
+    /// The same account, holding estate powers over the grid's regions.
+    #[must_use]
+    pub const fn estate_manager(mut self) -> Self {
+        self.estate_manager = true;
+        self
     }
 }
 

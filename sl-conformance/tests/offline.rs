@@ -67,6 +67,11 @@ mod test {
         neighbour_child_circuits => "neighbour-child-circuits",
         avatar_appearance_npc => "avatar-appearance-npc",
         texture_fetch_http => "texture-fetch-http",
+        asset_fetch_http => "asset-fetch-http",
+        economy_data => "economy-data",
+        parcel_info_dwell => "parcel-info-dwell",
+        agent_alert => "agent-alert",
+        server_error => "server-error",
         logout_clean => "logout-clean",
     }
 

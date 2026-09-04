@@ -30,6 +30,7 @@ use sl_repl::{Avatar, Credentials};
 use crate::context::{Session, TestContext, TestFailure};
 use crate::fixtures::Fixtures;
 use crate::grid::Grid;
+use crate::record::Completeness;
 use crate::registry::GridTest;
 
 /// The seed every fake conformance grid is built with, so the ids a failing
@@ -57,6 +58,16 @@ const ACCOUNTS: [(&str, &str); 3] = [
     ("tertiary", "Onlooker"),
 ];
 
+/// The credentials-file label of the account the fake grid registers as an
+/// **estate manager**.
+///
+/// The primary, matching what a live OpenSim run has to do by hand (`--avatar
+/// estate-owner`): an estate command from an agent without the power is
+/// silently dropped, so a case that provokes one has nothing to observe unless
+/// the avatar it runs as holds it. The other two stay ordinary residents, so
+/// the check is a check.
+const ESTATE_MANAGER: &str = "primary";
+
 /// The name of the region a fake grid's accounts start in: the shared prim
 /// catalogue, the same scene the full-stack viewer harness photographs.
 pub const START_REGION: &str = "Fake Region";
@@ -76,8 +87,9 @@ pub const EAST_REGION: &str = "Fake Region East";
 /// it asserts protocol *shape* (a handshake, a ping, a throttle, a parcel
 /// record, the world map), not grid semantics — and each must **bite**: a case
 /// that passes here only by recording `partial` costs suite time to assert
-/// nothing, which is why `agent-alert` and `server-error` are absent despite
-/// passing.
+/// nothing, so a case joins the list when the grid can answer it, not when it
+/// stops erroring. [`run_offline_case`] enforces the second rule rather than
+/// trusting it: a partial run is a failure here.
 ///
 /// The list is asserted against the registry in both directions (each name
 /// resolves and declares [`Grid::Fake`]; no case declares [`Grid::Fake`]
@@ -99,6 +111,11 @@ pub const OFFLINE_CASES: &[&str] = &[
     "neighbour-child-circuits",
     "avatar-appearance-npc",
     "texture-fetch-http",
+    "asset-fetch-http",
+    "economy-data",
+    "parcel-info-dwell",
+    "agent-alert",
+    "server-error",
     "logout-clean",
 ];
 
@@ -176,10 +193,13 @@ impl FakeGridHarness {
     /// would be a bug in this module, not in the caller's input).
     pub async fn start() -> Result<Self, TestFailure> {
         let mut builder = sl_fake_grid::FakeGridBuilder::new().deterministic(SEED);
-        for (_label, first_name) in ACCOUNTS {
-            builder = builder.account(sl_fake_grid::AccountConfig::new(
-                first_name, LAST_NAME, PASSWORD,
-            ));
+        for (label, first_name) in ACCOUNTS {
+            let account = sl_fake_grid::AccountConfig::new(first_name, LAST_NAME, PASSWORD);
+            builder = builder.account(if label == ESTATE_MANAGER {
+                account.estate_manager()
+            } else {
+                account
+            });
         }
         let start = sl_fake_grid::RegionConfig {
             name: START_REGION.to_owned(),
@@ -359,23 +379,38 @@ fn credentials_for(login_uri: &url::Url) -> Result<Credentials, TestFailure> {
 /// record: the assertion *is* the record, and it is re-made on every test run
 /// rather than committed and left to go stale.
 ///
+/// A case that finishes [`Completeness::Partial`] **fails** here, which is the
+/// second membership rule enforced rather than documented: a partial run is a
+/// case telling you it could not provoke what it came to assert, and the fake
+/// grid is the one grid where that is always fixable — every fixture and every
+/// policy it meets is one this workspace wrote. On a live grid the same
+/// outcome is honest reporting; on this one it is a to-do.
+///
 /// # Errors
 ///
-/// Returns the case's own [`TestFailure`], or the failure that stopped it from
-/// starting (the grid, the login, the account resolution).
+/// Returns the case's own [`TestFailure`], the failure that stopped it from
+/// starting (the grid, the login, the account resolution), or
+/// [`TestFailure::Assertion`] naming the reason it recorded partial.
 pub async fn run_offline_case(test: &dyn GridTest) -> Result<(), TestFailure> {
     let harness = FakeGridHarness::start().await?;
     let mut context = harness.context(test).await?;
     let outcome =
         crate::isolate::run_isolated(test.run(&mut context), crate::isolate::DEFAULT_CASE_TIMEOUT)
             .await;
-    let (_metrics, _completeness, _note, primary, secondary, tertiary) = context.into_parts();
+    let (_metrics, completeness, note, primary, secondary, tertiary) = context.into_parts();
     for session in [Some(primary), secondary, tertiary].into_iter().flatten() {
         if let Err(error) = session.logout().await {
             tracing::warn!("logout error after the offline case: {error}");
         }
     }
-    outcome
+    outcome?;
+    if completeness == Completeness::Partial {
+        return Err(TestFailure::Assertion(format!(
+            "the case recorded partial offline, so it asserted less than it came to: {}",
+            note.as_deref().unwrap_or("no reason given")
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -27,7 +27,7 @@
 //! Compiled only under `profile-tracy` (it exists solely to feed the profiler,
 //! and the timeline message uses the Tracy client directly).
 
-use bevy::diagnostic::{Diagnostic, DiagnosticPath, Diagnostics, RegisterDiagnostic};
+use bevy::diagnostic::{Diagnostic, DiagnosticPath, Diagnostics, RegisterDiagnostic as _};
 use bevy::prelude::*;
 use sl_client_bevy::SlRegion;
 use tracing_tracy::client::Client;

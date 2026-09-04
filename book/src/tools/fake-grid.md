@@ -475,6 +475,30 @@ allowed) and the stock scripted object as a 1 m box at
 `STOCK_SCRIPTED_OBJECT_POSITION` — so the task-inventory fixtures describe
 an object a viewer can actually see and click.
 
+### A parcel's other half
+
+A `ParcelProperties` record has no field for the parcel's **grid-wide** id,
+and three request surfaces want one. `SceneFixtures::add_parcel` therefore
+takes both halves at once — the record, plus a `ParcelListing` naming the
+grid-wide id and the parcel's dwell — and pushing a parcel any other way is
+pushing one those three surfaces cannot answer:
+
+- the `RemoteParcelRequest` capability turns a location into that id. The
+  runtime registers one `SimParcel` cover per listing when the session
+  starts, from the parcel's own bounds, so a cover and the listing behind it
+  cannot name different parcels;
+- a `ParcelDwellRequest` (region-local id in, `ParcelDwellReply` out) is
+  answered with the listing's dwell;
+- a `ParcelInfoRequest` for the grid-wide id is answered with a search
+  listing *derived* from the two — the name, owner, area and anchor come out
+  of the parcel record, the id and dwell out of the listing — so the two
+  records cannot drift into describing different land, which is a drift a
+  live grid cannot have because both come out of its one land record.
+
+A parcel with no listing is still served: it simply has no grid-wide
+identity, so a location inside it resolves to nothing and its dwell and
+listing go unanswered, the way a region whose land service is down behaves.
+
 **Ordering matters.** The `RegionHandshake` goes out on `CircuitOpened`
 (`UseCircuitCode`), not on arrival: a viewer waits for the handshake
 before it sends `CompleteAgentMovement`, and this workspace's client
@@ -936,12 +960,74 @@ runner's ordinary login path (XML-RPC round trip included) reaches an offline
 grid. The cases in `fake::OFFLINE_CASES` then run as plain `cargo test` tests
 instead of waiting for someone to log a live grid in.
 
+The list grew again with the request surfaces the simulator half was missing:
+`economy-data`, `parcel-info-dwell` and `asset-fetch-http` now run offline
+because `SimSession` learned to surface an `EconomyDataRequest`, a
+`ParcelDwellRequest` and an `AgentWearablesRequest`, and `agent-alert` and
+`server-error` joined them once the grid grew the *policy* behind their
+provocations (see above) — both of those used to pass by recording `partial`
+after burning their whole reply window, which is not the same as passing.
+
 Two of them can only exist here. `region-crossing` needs the harness to speak
 *as* the simulator — a crossing is a decision a region makes, and this grid
 simulates no movement to make it with — so `TestContext::fake()` hands the case
 `FakeGrid::cross_agent`; and `neighbour-child-circuits` needs two adjacent
 regions an avatar may walk between, which neither live grid reliably offers.
 See the *conformance testing* chapter.
+
+## Policy: what the grid charges, permits and refuses
+
+Not every answer is content. Three of them are policy, and they live apart
+from the fixtures because they are decisions about the *grid* rather than
+statements about a region.
+
+`EconomyConfig` carries the whole money policy, both halves of it: the L$
+rate its web helper quotes over `currency.php` and the price list its
+simulator answers an `EconomyDataRequest` with (`EconomyConfig::prices`,
+defaulting to `stock_prices()`). One config, because a grid whose helper
+quoted one rate while its simulator quoted another is a grid no viewer can
+reconcile. Every L$ amount in the stock list is a **different** number,
+which stock OpenSim's are not (its `SampleMoneyModule` defaults every price
+to `0` and group creation to `-1`): with seventeen fields on one message, a
+reply of equal amounts cannot tell a test that the encoder wrote a price
+into the wrong slot.
+
+`AgentPolicy` is the per-session half — what *this* agent may do:
+
+- **Estate powers** (`AccountConfig::estate_manager`, `false` by default).
+  OpenSim returns without a word from an estate command an agent has no
+  power for, and so does the fake grid, so the check is a check: the
+  conformance grid registers only its primary account as a manager, which is
+  the same thing a live OpenSim run has to arrange by hand. With the power,
+  the one estate command the grid answers — the viewer's `refreshmapvisibility`
+  nudge — replies with OpenSim's own "Terrain map generated" `AlertMessage`.
+- **The deprecated UDP inventory fetch**
+  (`FakeGridBuilder::legacy_udp_inventory`). The fake grid does not serve
+  `FetchInventoryDescendents` at all, and of the two answers a grid without
+  that path can give, only `FeatureDisabled` is observable — silence is
+  indistinguishable from a lost packet — so `LegacyUdpInventory::Refused` is
+  the default. `Ignored` reproduces the silence Second Life empirically
+  answers with.
+
+Set-Home is policy of a third kind: *every* outcome is answered, which is
+what makes it the one deterministic way to provoke an `AgentAlertMessage`.
+Which outcome follows OpenSim's rule — the land's owner may set home on it
+and nobody else may — so on the catalogue region, whose land belongs to a
+fixture creator, an ordinary avatar gets the refusal.
+
+The agent's **outfit** is the fourth: the simulator holds it
+(`SimSession::set_agent_wearables`, seeded by `default_setup` from the same
+table the Current Outfit Folder links are built from), and an
+`AgentWearablesRequest` is answered from that record rather than from the
+folder — as a simulator does, because the outfit is appearance state and the
+COF is the inventory record shadowing it. The four library body parts the
+stock account wears are also **served**:
+`sl_test_assets::builtin::library_wearables` writes an `LLWearable`
+stand-in per id. A viewer that ships them answers them
+locally and never asks, but a grid that dresses an avatar in an asset it will
+not serve is lying about what it has — and anything without those static
+assets (a conformance case pulling a worn asset over `ViewerAsset`) fetches
+them like any other asset.
 
 ## Voice signalling
 

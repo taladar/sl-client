@@ -1456,6 +1456,7 @@ mod test {
             now,
         )?;
         client.request_parcel_info(ParcelKey::from(uuid::Uuid::from_u128(0x00C0_FFEE)), now)?;
+        client.request_parcel_dwell(ScopedParcelId::new(circuit, RegionLocalParcelId(7)), now)?;
         pump(&mut client, &mut sim, now)?;
 
         let server_events = drain_server(&mut sim);
@@ -1512,6 +1513,17 @@ mod test {
             })
             .ok_or("expected a RequestParcelInfo server event")?;
         assert_eq!(info.uuid(), uuid::Uuid::from_u128(0x00C0_FFEE));
+        // The dwell request names the parcel by its *region-local* id: the
+        // grid-wide one is the field the template marks "filled in on sim",
+        // which is why the event carries only the local id.
+        let dwell_request = server_events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::RequestParcelDwell { local_id } => Some(*local_id),
+                _ => None,
+            })
+            .ok_or("expected a RequestParcelDwell server event")?;
+        assert_eq!(dwell_request, RegionLocalParcelId(7));
 
         // Sim -> client: the two reply encoders.
         sim.send_parcel_object_owners_reply(
@@ -1542,6 +1554,12 @@ mod test {
             },
             now,
         )?;
+        sim.send_parcel_dwell_reply(
+            RegionLocalParcelId(7),
+            ParcelKey::from(uuid::Uuid::from_u128(0x00C0_FFEE)),
+            88.0,
+            now,
+        )?;
         pump(&mut client, &mut sim, now)?;
 
         let client_events = drain_client(&mut client);
@@ -1566,6 +1584,20 @@ mod test {
             ParcelKey::from(uuid::Uuid::from_u128(0x00C0_FFEE))
         );
         assert_eq!(details.sale_price, Some(LindenAmount(1000)));
+        let dwell = client_events
+            .iter()
+            .find_map(|e| match e {
+                Event::ParcelDwell {
+                    local_id,
+                    parcel_id,
+                    dwell,
+                } => Some((local_id.id(), *parcel_id, *dwell)),
+                _ => None,
+            })
+            .ok_or("expected a ParcelDwell client event")?;
+        assert_eq!(dwell.0, RegionLocalParcelId(7));
+        assert_eq!(dwell.1, ParcelKey::from(uuid::Uuid::from_u128(0x00C0_FFEE)));
+        assert_eq!(dwell.2.to_bits(), 88.0_f32.to_bits());
         Ok(())
     }
 
@@ -2004,6 +2036,124 @@ mod test {
                         && item.votes.first().is_some_and(|v| v.num_votes == 7)
             )),
             "expected a GroupVoteHistory client event"
+        );
+        Ok(())
+    }
+
+    /// The two "what does the grid hold about me" asks that had a decode and a
+    /// carrier type but no simulator half: the grid's price list and the
+    /// agent's own outfit. Each goes out as a request, arrives as a
+    /// [`ServerEvent`], is answered from the simulator's own state, and
+    /// decodes back into the client event a viewer reads.
+    #[test]
+    fn economy_and_wearables_round_trip() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+
+        let shape_item = InventoryKey::from(uuid::Uuid::from_u128(0x0EA2_0001));
+        let shape_asset = uuid::Uuid::from_u128(0x0EA2_0002);
+        let shirt_item = InventoryKey::from(uuid::Uuid::from_u128(0x0EA2_0003));
+        // What the simulator holds the agent to be wearing. The serial the
+        // update carries is the session's, not the caller's: `set_agent_wearables`
+        // advances it, so a second outfit is never dropped as stale.
+        sim.set_agent_wearables(vec![
+            sl_proto::Wearable {
+                item_id: shape_item,
+                asset_id: Some(shape_asset),
+                wearable_type: sl_proto::WearableType::Shape,
+            },
+            sl_proto::Wearable {
+                item_id: shirt_item,
+                // A layer whose asset the simulator has not resolved: it goes
+                // out nil, and the client keeps it as such rather than
+                // inventing one.
+                asset_id: None,
+                wearable_type: sl_proto::WearableType::Shirt,
+            },
+        ]);
+        let (serial, _worn) = sim.agent_wearables();
+        assert_eq!(serial, 1, "the first outfit is serial one");
+
+        client.request_economy_data(now)?;
+        client.request_wearables(now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::RequestEconomyData)),
+            "expected a RequestEconomyData server event"
+        );
+        assert!(
+            server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::RequestAgentWearables)),
+            "expected a RequestAgentWearables server event"
+        );
+
+        let economy = sl_proto::EconomyData {
+            object_capacity: sl_proto::LandImpact(15_000),
+            object_count: sl_proto::LandImpact(250),
+            price_energy_unit: LindenAmount(1),
+            price_object_claim: LindenAmount(2),
+            price_public_object_decay: LindenAmount(3),
+            price_public_object_delete: LindenAmount(4),
+            price_parcel_claim: LindenAmount(5),
+            price_parcel_claim_factor: 1.0,
+            price_upload: LindenAmount(10),
+            price_rent_light: LindenAmount(6),
+            teleport_min_price: LindenAmount(7),
+            teleport_price_exponent: 2.0,
+            energy_efficiency: 1.0,
+            price_object_rent: 8.0,
+            price_object_scale_factor: 10.0,
+            price_parcel_rent: LindenAmount(9),
+            price_group_create: LindenAmount(100),
+        };
+        sim.send_economy_data(&economy, now)?;
+        let (serial, worn) = sim.agent_wearables();
+        let worn = worn.to_vec();
+        sim.send_agent_wearables_update(serial, &worn, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let client_events = drain_client(&mut client);
+        let decoded = client_events
+            .iter()
+            .find_map(|e| match e {
+                Event::EconomyData(data) => Some((**data).clone()),
+                _ => None,
+            })
+            .ok_or("expected an EconomyData client event")?;
+        // Every price is distinct in the fixture, so a field the encoder wrote
+        // into the wrong slot fails here rather than reading as plausible.
+        assert_eq!(decoded, economy);
+
+        let (decoded_serial, decoded_worn) = client_events
+            .iter()
+            .find_map(|e| match e {
+                Event::AgentWearables { serial, wearables } => Some((*serial, wearables.clone())),
+                _ => None,
+            })
+            .ok_or("expected an AgentWearables client event")?;
+        assert_eq!(decoded_serial, serial);
+        assert_eq!(decoded_worn.len(), 2);
+        let shape = decoded_worn
+            .iter()
+            .find(|wearable| wearable.wearable_type == sl_proto::WearableType::Shape)
+            .ok_or("expected the shape in the decoded outfit")?;
+        assert_eq!(shape.item_id, shape_item);
+        assert_eq!(shape.asset_id, Some(shape_asset));
+        let shirt = decoded_worn
+            .iter()
+            .find(|wearable| wearable.wearable_type == sl_proto::WearableType::Shirt)
+            .ok_or("expected the shirt in the decoded outfit")?;
+        assert_eq!(shirt.item_id, shirt_item);
+        assert!(
+            shirt.asset_id.is_none_or(|id| id.is_nil()),
+            "an unresolved layer keeps its nil asset id"
         );
         Ok(())
     }

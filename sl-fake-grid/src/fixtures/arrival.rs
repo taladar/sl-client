@@ -14,7 +14,7 @@
 //! colour is the cleanest way to see one.
 
 use sl_proto::{AssetKey, InMemoryAssetSource, RegionLocalObjectId, RegionLocalParcelId};
-use sl_types::key::{AgentKey, Key, ObjectKey, OwnerKey, TextureKey};
+use sl_types::key::{AgentKey, Key, ObjectKey, OwnerKey, ParcelKey, TextureKey};
 use sl_types::lsl::Vector;
 
 use super::RegionFixture;
@@ -30,6 +30,14 @@ pub const ARRIVAL_PARCEL_LOCAL_ID: RegionLocalParcelId = RegionLocalParcelId(1);
 
 /// The agent every arrival object is owned by (a fixture owner, never a login).
 const ARRIVAL_OWNER: u128 = 0x00A2_2140_0000;
+
+/// The grid-wide id of the arrival scene's parcel: what a
+/// `RemoteParcelRequest` resolves a location in it to, and what its dwell and
+/// search listing are keyed on.
+pub const ARRIVAL_PARCEL_ID: ParcelKey = ParcelKey(Key(uuid::Uuid::from_u128(0x00A2_2140_0003)));
+
+/// The dwell the arrival parcel reports: none, as a region nobody has visited.
+const ARRIVAL_DWELL: f32 = 0.0;
 
 /// The arrival prim's region-local id. Deliberately clear of the catalogue's
 /// row (`0x100`…) and of the border scene's ids (`0x300`…), so a grid can serve
@@ -74,11 +82,15 @@ pub const fn arrival_position() -> Vector {
 pub fn arrival() -> RegionFixture {
     let owner = AgentKey::from(uuid::Uuid::from_u128(ARRIVAL_OWNER));
     let mut world = SceneFixtures::new();
-    world.parcels.push(region_wide_parcel(
-        ARRIVAL_PARCEL_LOCAL_ID,
-        OwnerKey::Agent(owner),
-        ARRIVAL_PARCEL_NAME,
-    ));
+    world.add_parcel(
+        region_wide_parcel(
+            ARRIVAL_PARCEL_LOCAL_ID,
+            OwnerKey::Agent(owner),
+            ARRIVAL_PARCEL_NAME,
+        ),
+        ARRIVAL_PARCEL_ID,
+        ARRIVAL_DWELL,
+    );
     world.objects.push(
         PrimFixture::boxed(
             ARRIVAL_LOCAL_ID,

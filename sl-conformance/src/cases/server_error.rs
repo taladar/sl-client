@@ -23,6 +23,15 @@
 //! path — partial), or silence (partial on a grid documented to ignore the
 //! message; a failure on OpenSim, which demonstrably serves UDP inventory).
 //!
+//! The fake grid takes the second road deliberately: it serves no UDP
+//! inventory at all, and of the two answers a grid without that path can give,
+//! only `FeatureDisabled` is observable — silence is indistinguishable from a
+//! lost packet. Its
+//! [`LegacyUdpInventory`](sl_fake_grid::LegacyUdpInventory) policy therefore
+//! defaults to refusing the fetch, which is what makes this case assert
+//! something offline instead of recording `partial` after its whole reply
+//! window; the policy's other setting reproduces Second Life's silence.
+//!
 //! Whatever the live outcome, the *decode* of both messages is guaranteed by
 //! the in-process client ↔ `SimSession` round-trip
 //! (`sl-proto/tests/sim_session.rs`,
@@ -97,7 +106,7 @@ impl GridTest for ServerErrorCase {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Fake, Grid::Opensim, Grid::Aditi]
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {

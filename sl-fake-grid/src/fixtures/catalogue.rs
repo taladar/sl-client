@@ -17,7 +17,9 @@ use sl_proto::{
     LightImage, MediaEntry, ObjectMediaState, ParticleSystem, ReflectionProbe, RegionLocalObjectId,
     RegionLocalParcelId, TextureAnimation, particle_pattern, texture_anim_mode,
 };
-use sl_types::key::{AgentKey, InventoryKey, Key, MeshKey, ObjectKey, OwnerKey, TextureKey};
+use sl_types::key::{
+    AgentKey, InventoryKey, Key, MeshKey, ObjectKey, OwnerKey, ParcelKey, TextureKey,
+};
 use sl_types::lsl::Vector;
 use sl_wire::{LegacyMaterial, ReflectionProbeFlags};
 
@@ -34,6 +36,16 @@ pub const CATALOGUE_PARCEL_LOCAL_ID: RegionLocalParcelId = RegionLocalParcelId(1
 
 /// The agent that owns and created every catalogue prim.
 const CATALOGUE_OWNER: u128 = 0xCA7_0000;
+
+/// The grid-wide id of the catalogue's parcel: what a `RemoteParcelRequest`
+/// resolves a location in it to, and what its dwell and search listing are
+/// keyed on.
+pub const CATALOGUE_PARCEL_ID: ParcelKey = ParcelKey(Key(uuid::Uuid::from_u128(0xCA7_0003)));
+
+/// The dwell the catalogue parcel reports. Non-zero, and deliberately not a
+/// round number, so a test that reads a dwell back can tell it apart from the
+/// zero an unanswered or defaulted field leaves behind.
+const CATALOGUE_DWELL: f32 = 42.5;
 
 /// The region-local id of the first catalogue prim; each later one is the
 /// next id up. Deliberately clear of the arriving avatar's id and of the stock
@@ -298,11 +310,15 @@ pub fn entry(name: &str) -> Option<CatalogueEntry> {
 pub fn catalogue() -> RegionFixture {
     let owner = AgentKey::from(uuid::Uuid::from_u128(CATALOGUE_OWNER));
     let mut world = SceneFixtures::new();
-    world.parcels.push(region_wide_parcel(
-        CATALOGUE_PARCEL_LOCAL_ID,
-        OwnerKey::Agent(owner),
-        CATALOGUE_PARCEL_NAME,
-    ));
+    world.add_parcel(
+        region_wide_parcel(
+            CATALOGUE_PARCEL_LOCAL_ID,
+            OwnerKey::Agent(owner),
+            CATALOGUE_PARCEL_NAME,
+        ),
+        CATALOGUE_PARCEL_ID,
+        CATALOGUE_DWELL,
+    );
     world.objects = objects(owner);
     world.npcs = vec![npc(), seated_npc()];
     world.object_animations = animesh_animations();

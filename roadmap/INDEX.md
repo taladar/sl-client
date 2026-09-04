@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 311 |
 | blocked | 56 |
 | in-progress | 18 |
-| bugs | 61 |
-| done | 979 |
+| bugs | 62 |
+| done | 980 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1562** |
+| **total** | **1564** |
 
 ## ideas (98)
 
@@ -954,8 +954,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The login refusals and handover timeouts nothing tests
 - [`test-fake-grid-object-sounds`](ready/test-fake-grid-object-sounds.md) — The
   fake grid can serve a sound but cannot play one
-- [`test-fake-grid-simulator-request-surfaces`](ready/test-fake-grid-simulator-request-surfaces.md)
-  — Four client requests no simulator half answers
+- [`test-fake-grid-object-write-path`](ready/test-fake-grid-object-write-path.md)
+  — The fake grid has no way to rez, take or fill an object
 - [`test-fake-grid-timeline`](ready/test-fake-grid-timeline.md) — Scripted
   scenario timelines with markers (blocked by `test-fake-grid-determinism`
   (done), `viewer-fake-grid-render-harness` (done))
@@ -1183,7 +1183,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (61)
+## bugs (62)
 
 ### viewer
 
@@ -1328,10 +1328,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-map-server-url-not-honoured`](bugs/test-fake-grid-map-server-url-not-honoured.md)
   — The viewer falls back to map.secondlife.com instead of the grid's
   map-server-url
+- [`test-fake-grid-teleport-phase-order-flake`](bugs/test-fake-grid-teleport-phase-order-flake.md)
+  — teleport-cross-region intermittently sees a phase before TeleportStart
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (979)
+## done (980)
 
 ### protocol
 
@@ -3193,6 +3195,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-self-avatar-baked-textures-rejected`](done/test-fake-grid-self-avatar-baked-textures-rejected.md)
   — The agent's own head, upper and lower bakes are fetched, served, and then
   discarded
+- [`test-fake-grid-simulator-request-surfaces`](done/test-fake-grid-simulator-request-surfaces.md)
+  — Four client requests no simulator half answers
 - [`test-fake-grid-teleport-shapes`](done/test-fake-grid-teleport-shapes.md) —
   The teleport matrix — same region, neighbour, distant, and each one failing
 - [`test-fake-grid-terrain-layerdata`](done/test-fake-grid-terrain-layerdata.md)

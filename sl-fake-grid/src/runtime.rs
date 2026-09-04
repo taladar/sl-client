@@ -24,6 +24,7 @@ use tokio::net::{TcpListener, UdpSocket};
 use tokio::sync::{Mutex, broadcast, watch};
 
 use crate::accounts::{Account, AccountConfig};
+use crate::agent_requests::LegacyUdpInventory;
 use crate::assets::GridAssets;
 use crate::driver::{SharedSim, SimState, new_shared_sim, run_timer, run_udp_pump};
 use crate::economy_policy::{EconomyConfig, EconomyEvent};
@@ -350,6 +351,8 @@ pub(crate) struct GridCore {
     pub(crate) grid_info: GridInfo,
     /// The economy helper policy.
     pub(crate) economy: EconomyConfig,
+    /// How every session answers the deprecated UDP inventory fetch.
+    pub(crate) legacy_udp_inventory: LegacyUdpInventory,
     /// The world-map tiles served under the login URI.
     pub(crate) map_tiles: MapTileStore,
     /// The world-map region catalogue every session answers map requests
@@ -571,6 +574,24 @@ impl GridCore {
             sim.set_environment(stamped);
         }
         (region.scenario.setup)(&mut sim, now);
+        // The parcel covers the `RemoteParcelRequest` capability resolves a
+        // location against, one per parcel the scene's fixtures carry a
+        // grid-wide listing for. Registered here rather than stated by the
+        // scenario so a cover and the listing behind it cannot name different
+        // parcels: both come out of the one fixture, as a live grid's both
+        // come out of its one land record.
+        for listing in &region.scenario.world.listings {
+            let Some(parcel) = region.scenario.world.parcel_by_local_id(listing.local_id) else {
+                continue;
+            };
+            sim.add_parcel(sl_proto::SimParcel {
+                parcel_id: listing.parcel_id,
+                west: parcel.aabb_min.x(),
+                south: parcel.aabb_min.y(),
+                east: parcel.aabb_max.x(),
+                north: parcel.aabb_max.y(),
+            });
+        }
         region.scenario.udp_assets.register_xfer_files(&mut sim);
         if *sim.simulator_features() == SimulatorFeatures::default() {
             // The scenario left the feature document untouched: advertise
@@ -607,6 +628,11 @@ impl GridCore {
             udp_assets,
             terrain: region.config.terrain.clone(),
             world: region.scenario.world.clone(),
+            economy: self.economy.prices.clone(),
+            policy: crate::agent_requests::AgentPolicy {
+                estate_manager: account.config.estate_manager,
+                legacy_udp_inventory: self.legacy_udp_inventory,
+            },
             avatar: crate::world::AvatarIdentity {
                 agent_id: account.agent_id,
                 first_name: account.config.first_name.clone(),
@@ -899,6 +925,8 @@ pub struct FakeGridBuilder {
     identity: GridIdentity,
     /// The economy helper policy.
     economy: EconomyConfig,
+    /// How every session answers the deprecated UDP inventory fetch.
+    legacy_udp_inventory: LegacyUdpInventory,
     /// Builder-registered map tiles.
     map_tiles: MapTileStore,
     /// The identifier source (random unless seeded).
@@ -921,6 +949,7 @@ impl std::fmt::Debug for FakeGridBuilder {
             .field("http_port", &self.http_port)
             .field("identity", &self.identity)
             .field("economy", &self.economy)
+            .field("legacy_udp_inventory", &self.legacy_udp_inventory)
             .field("map_tiles", &self.map_tiles)
             .field("minter", &self.minter)
             .field("clock", &"<closure>")
@@ -973,6 +1002,7 @@ impl FakeGridBuilder {
             http_port: 0,
             identity: GridIdentity::default(),
             economy: EconomyConfig::default(),
+            legacy_udp_inventory: LegacyUdpInventory::default(),
             map_tiles: MapTileStore::default(),
         }
     }
@@ -1055,6 +1085,14 @@ impl FakeGridBuilder {
     #[must_use]
     pub fn economy(mut self, economy: EconomyConfig) -> Self {
         self.economy = economy;
+        self
+    }
+
+    /// Sets how every session answers the deprecated UDP inventory fetch
+    /// (default: [`LegacyUdpInventory::Refused`]).
+    #[must_use]
+    pub const fn legacy_udp_inventory(mut self, policy: LegacyUdpInventory) -> Self {
+        self.legacy_udp_inventory = policy;
         self
     }
 
@@ -1154,6 +1192,7 @@ impl FakeGridBuilder {
             identity: self.identity,
             grid_info,
             economy: self.economy,
+            legacy_udp_inventory: self.legacy_udp_inventory,
             map_tiles,
             map,
             sessions: Mutex::new(HashMap::new()),

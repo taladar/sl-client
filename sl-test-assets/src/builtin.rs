@@ -21,6 +21,10 @@
 //! Each is keyed by the id `sl-proto` names for it, so nothing here restates a
 //! UUID the renderer already knows.
 
+use std::collections::BTreeMap;
+
+use sl_avatar::{SaleType, WearableAsset, WearablePermissions};
+use sl_proto::WearableType;
 use sl_texture::EncodeError;
 use uuid::Uuid;
 
@@ -388,6 +392,127 @@ pub fn library_textures() -> Result<Vec<(Uuid, Vec<u8>)>, EncodeError> {
     Ok(textures)
 }
 
+/// The four **default body-part wearables** a fresh account is dressed in, as
+/// `(slot, item name, asset id)`.
+///
+/// The ids are Linden library assets: the `.bodypart` files every viewer ships
+/// in its `app_settings/static_assets` and answers locally, and which a live
+/// grid also serves out of its library. (They are the same files this
+/// workspace vendors under `viewer-assets/static_assets/`, so its own viewer
+/// resolves them the same way.) A grid that dresses an account in them
+/// therefore costs itself nothing at the viewer — and the reference viewer
+/// will not de-cloud the agent's **own** avatar until all four are worn,
+/// because `LLVOAvatarSelf::getHasMissingParts` counts exactly this set and
+/// logs "Self is clouded due to missing one or more required body parts" when
+/// any is absent. That gate is independent of the bakes: a grid can push a
+/// perfectly good `AvatarAppearance` and the avatar still stays a cloud.
+///
+/// The Linden originals are named `RASL F LEARN SHAPE (ANNA)`, `RASL F EXPLORE
+/// SKIN (SOFIA)`, `RASL M LEARN EYEBROWSHAPER` and `New Eyes`, in that order;
+/// the short names here are what a fixture account's inventory shows.
+pub const DEFAULT_BODY_PARTS: [(WearableType, &str, Uuid); 4] = [
+    (
+        WearableType::Shape,
+        "Shape",
+        Uuid::from_u128(0x57cb_d4f1_c53e_020f_f455_5ad2_a5ba_b98d),
+    ),
+    (
+        WearableType::Skin,
+        "Skin",
+        Uuid::from_u128(0x205a_e4a8_42c6_1c5c_b142_6728_64fa_fe8a),
+    ),
+    (
+        WearableType::Hair,
+        "Hair",
+        Uuid::from_u128(0x51f3_b303_a783_f0bd_9e98_9c09_4be1_3653),
+    ),
+    (
+        WearableType::Eyes,
+        "Eyes",
+        Uuid::from_u128(0x1497_39c0_f677_4b4c_1587_e44b_e72d_d7ef),
+    ),
+];
+
+/// One `LLWearable` stand-in per [`DEFAULT_BODY_PARTS`] entry, so a grid that
+/// dresses an account in the library body parts can also *serve* them.
+///
+/// Serving them is the same honesty as [`library_textures`]: a fake grid is a
+/// grid with a library, and these are library ids. It matters because a viewer
+/// only answers them locally if it ships them — anything else reading the
+/// account's outfit (a conformance case pulling a worn asset over
+/// `ViewerAsset`, a second client with no static assets) fetches them from the
+/// grid like any other asset.
+///
+/// What the stand-ins carry is the wearable's **type** and the layer textures
+/// its slot composites ([`sl_proto::avatar_texture::WEARABLE_LAYER_TEXTURES`],
+/// whose stand-in pixels [`library_textures`] serves) — not Linden's own
+/// visual-param weights, which are the part nothing here can honestly invent.
+/// A bake from these is therefore a default-shaped avatar in the stand-in skin
+/// tones, which is what a fixture avatar should look like.
+#[must_use]
+pub fn library_wearables() -> Vec<(Uuid, Vec<u8>)> {
+    DEFAULT_BODY_PARTS
+        .iter()
+        .map(|&(wearable_type, name, id)| {
+            let asset = WearableAsset {
+                version: WEARABLE_VERSION,
+                name: name.to_owned(),
+                wearable_type,
+                // No weights: a wearable with no `parameters` rows is one whose
+                // every param sits at its default, which is exactly what a
+                // stand-in for pixels we do not have should claim.
+                params: BTreeMap::new(),
+                textures: sl_proto::avatar_texture::WEARABLE_LAYER_TEXTURES
+                    .into_iter()
+                    .filter(|&(_id, layer)| layer_slot(layer).0 == wearable_type)
+                    .map(|(texture, layer)| (layer_slot(layer).1, texture))
+                    .collect(),
+            };
+            (id, asset.to_text(&LIBRARY_PERMISSIONS).into_bytes())
+        })
+        .collect()
+}
+
+/// The wearable-asset format version the stand-ins are written at — the version
+/// the reference viewer writes and every viewer reads.
+const WEARABLE_VERSION: i32 = 22;
+
+/// The permissions block the stand-ins carry: a library asset, owned by nobody,
+/// not for sale, with every right granted — which is what a library body part
+/// a viewer may copy onto its own avatar has to be.
+const LIBRARY_PERMISSIONS: WearablePermissions = WearablePermissions {
+    base_mask: FULL_PERMISSIONS,
+    owner_mask: FULL_PERMISSIONS,
+    group_mask: 0,
+    everyone_mask: 0,
+    next_owner_mask: FULL_PERMISSIONS,
+    creator_id: Uuid::nil(),
+    owner_id: Uuid::nil(),
+    last_owner_id: Uuid::nil(),
+    group_id: Uuid::nil(),
+    sale_type: SaleType::Not,
+    sale_price: 0,
+};
+
+/// `PERM_ALL`: every permission bit a wearable can grant.
+const FULL_PERMISSIONS: u32 = 0x7FFF_FFFF;
+
+/// Which wearable owns a layer, and the avatar `TextureEntry` slot that layer
+/// occupies in its asset — the two facts a `textures` row is built from.
+fn layer_slot(layer: sl_proto::avatar_texture::WearableLayer) -> (WearableType, u32) {
+    use sl_proto::avatar_texture::{self, WearableLayer};
+    let (wearable_type, slot) = match layer {
+        WearableLayer::SkinHead => (WearableType::Skin, avatar_texture::HEAD_BODYPAINT),
+        WearableLayer::SkinUpperBody => (WearableType::Skin, avatar_texture::UPPER_BODYPAINT),
+        WearableLayer::SkinLowerBody => (WearableType::Skin, avatar_texture::LOWER_BODYPAINT),
+        WearableLayer::Hair => (WearableType::Hair, avatar_texture::HAIR),
+        WearableLayer::EyeIris => (WearableType::Eyes, avatar_texture::EYES_IRIS),
+    };
+    // The slot constants are small fixed indices into a 45-face texture entry,
+    // so the narrowing cannot lose one; face 0 is the answer no arm produces.
+    (wearable_type, u32::try_from(slot).unwrap_or(0))
+}
+
 /// The stand-in colour for a wearable layer: a plausible flat tone per region,
 /// so a locally-baked avatar reads as an avatar rather than as five identical
 /// grey patches.
@@ -611,5 +736,57 @@ mod tests {
                 assert_eq!(image.pixel(x, y), Some(FLAT_NORMAL_RGBA));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod wearable_tests {
+    use super::{DEFAULT_BODY_PARTS, library_wearables};
+    use pretty_assertions::assert_eq;
+
+    /// Every stand-in body part is a wearable asset the parser reads back, of
+    /// the slot its table entry claims — the round trip through the format,
+    /// which is the only thing that makes these bytes an asset rather than a
+    /// blob a grid happens to serve.
+    #[test]
+    fn the_stand_in_body_parts_parse_back_as_their_own_slot() -> Result<(), String> {
+        let served = library_wearables();
+        assert_eq!(served.len(), DEFAULT_BODY_PARTS.len());
+        for (index, (id, bytes)) in served.iter().enumerate() {
+            let (wearable_type, name, expected_id) = DEFAULT_BODY_PARTS
+                .get(index)
+                .copied()
+                .ok_or_else(|| format!("no table entry {index}"))?;
+            assert_eq!(*id, expected_id, "{name} is served under the wrong id");
+            let text = core::str::from_utf8(bytes).map_err(|error| format!("{name}: {error}"))?;
+            let parsed = sl_avatar::WearableAsset::parse(text)
+                .map_err(|error| format!("{name}: {error}"))?;
+            assert_eq!(parsed.wearable_type, wearable_type);
+            assert_eq!(parsed.name, name);
+        }
+        Ok(())
+    }
+
+    /// Every layer texture the four assets name between them is one the
+    /// texture library serves, and each is named exactly once. A layer whose
+    /// source id nothing serves is the failure that leaves an avatar a cloud
+    /// with every body part correctly worn.
+    #[test]
+    fn the_named_layer_textures_are_all_served_exactly_once() -> Result<(), String> {
+        let mut named: Vec<uuid::Uuid> = Vec::new();
+        for (_id, bytes) in library_wearables() {
+            let text = String::from_utf8(bytes).map_err(|error| format!("{error}"))?;
+            let parsed =
+                sl_avatar::WearableAsset::parse(&text).map_err(|error| format!("{error}"))?;
+            named.extend(parsed.textures.values().copied());
+        }
+        let mut expected: Vec<uuid::Uuid> = sl_proto::avatar_texture::WEARABLE_LAYER_TEXTURES
+            .into_iter()
+            .map(|(id, _layer)| id)
+            .collect();
+        named.sort_unstable();
+        expected.sort_unstable();
+        assert_eq!(named, expected);
+        Ok(())
     }
 }

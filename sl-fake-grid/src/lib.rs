@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 
 pub mod accounts;
+pub mod agent_requests;
 mod assets;
 mod caps_endpoint;
 pub mod crossing;
@@ -25,8 +26,9 @@ pub mod world;
 mod world_map;
 
 pub use accounts::AccountConfig;
+pub use agent_requests::{AgentPolicy, LegacyUdpInventory};
 pub use crossing::CROSSING_ARRIVAL_TIMEOUT;
-pub use economy_policy::{EconomyConfig, EconomyEvent};
+pub use economy_policy::{EconomyConfig, EconomyEvent, stock_prices};
 pub use error::Error;
 pub use fixtures::{
     CatalogueEntry, FaceStyle, Landmark, NamedScenario, NpcAppearance, NpcBake, NpcFixture,
@@ -47,4 +49,6 @@ pub use teleport::TELEPORT_ARRIVAL_TIMEOUT;
 pub use terrain::{Heightfield, TerrainFixture};
 pub use time::{Now, system_clock, tokio_clock};
 pub use udp_assets::{TaskInventoryFixture, UdpAssetFixtures, flat_terrain_raw};
-pub use world::{AvatarIdentity, SceneFixtures, avatar_prim, box_prim, region_wide_parcel};
+pub use world::{
+    AvatarIdentity, ParcelListing, SceneFixtures, avatar_prim, box_prim, region_wide_parcel,
+};

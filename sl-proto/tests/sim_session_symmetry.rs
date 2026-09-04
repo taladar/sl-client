@@ -497,7 +497,6 @@ mod test {
         "ParcelSelectObjects",
         "ParcelAccessListRequest",
         "ParcelAccessListUpdate",
-        "ParcelDwellRequest",
         "LandStatRequest",
         "RequestRegionInfo",
         // profile / picks / classifieds
@@ -514,7 +513,6 @@ mod test {
         "ClassifiedGodDelete",
         // money
         "MoneyBalanceRequest",
-        "EconomyDataRequest",
         "MoneyTransferRequest",
         // mutes
         "MuteListRequest",
@@ -524,7 +522,6 @@ mod test {
         "AgentAnimation",
         "AgentIsNowWearing",
         "AgentSetAppearance",
-        "AgentWearablesRequest",
         "AgentCachedTexture",
         "RequestImage",
         "RetrieveInstantMessages",
@@ -611,7 +608,6 @@ mod test {
         "ParcelSelectObjects",
         "ParcelAccessListRequest",
         "ParcelAccessListUpdate",
-        "ParcelDwellRequest",
         "LandStatRequest",
         "RequestRegionInfo",
     ];
@@ -632,7 +628,6 @@ mod test {
     /// The raw-forwarded messages the matching family test sends, in order.
     const MONEY_AND_MUTE_FAMILY: &[&str] = &[
         "MoneyBalanceRequest",
-        "EconomyDataRequest",
         "MoneyTransferRequest",
         "MuteListRequest",
         "UpdateMuteListEntry",
@@ -643,7 +638,6 @@ mod test {
         "AgentAnimation",
         "AgentIsNowWearing",
         "AgentSetAppearance",
-        "AgentWearablesRequest",
         "AgentCachedTexture",
         "RequestImage",
         "RetrieveInstantMessages",
@@ -972,7 +966,6 @@ mod test {
             uuid::Uuid::from_u128(0x7A),
             now,
         )?;
-        client.request_parcel_dwell(parcel, now)?;
         client.request_land_stat(LandStatReportType::TopScripts, 0, "", parcel, now)?;
         client.request_region_info(now)?;
 
@@ -1060,7 +1053,6 @@ mod test {
         let target = uuid::Uuid::from_u128(0x9001);
 
         client.request_money_balance(now)?;
-        client.request_economy_data(now)?;
         client.send_money_transfer(
             uuid::Uuid::from_u128(0xABCD),
             LindenAmount(250),
@@ -1121,7 +1113,6 @@ mod test {
             &[(uuid::Uuid::from_u128(0x41), 0)],
             now,
         )?;
-        client.request_wearables(now)?;
         client.request_cached_textures(3, &[(uuid::Uuid::from_u128(0x51), 0)], now)?;
         client.request_texture(texture, 0, 1.0e6, now)?;
         client.retrieve_instant_messages(now)?;

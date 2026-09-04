@@ -207,10 +207,17 @@ impl GridTest for TeleportCrossRegion {
             };
             let elapsed = started_at.elapsed();
 
-            // The sequence must open with the Starting phase.
+            // The sequence must open with the Starting phase. The whole
+            // observed sequence goes in the message: which phase arrived
+            // instead is the entire diagnosis, and a bare "it was not started"
+            // sends the next reader back to re-run it to find out.
             check(
                 phases.first() == Some(&"started"),
-                "expected the teleport to begin with a Starting (TeleportStart) phase",
+                &format!(
+                    "expected the teleport to begin with a Starting (TeleportStart) phase; the \
+                     phases observed were [{}]",
+                    phases.join(",")
+                ),
             )?;
 
             // A TeleportFinished must have carried the destination handle: the

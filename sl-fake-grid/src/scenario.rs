@@ -22,7 +22,7 @@ use sl_proto::{
     AssetKey, AssetType, ChatSource, ChatType, InventoryFolder, InventoryItem, InventoryType,
     LindenAmount, ParcelVoiceInfo, Permissions, Permissions5, RegionLocalObjectId,
     RegionLocalParcelId, SaleType, ServerEvent, SimSession, TaskInventoryItem, VoiceChannelUri,
-    WebRtcStub,
+    Wearable, WebRtcStub,
 };
 use sl_types::key::{AgentKey, InventoryFolderKey, InventoryKey, ObjectKey, OwnerKey, ParcelKey};
 
@@ -145,6 +145,15 @@ pub fn default_assets() -> sl_proto::InMemoryAssetSource {
         }
         Err(error) => tracing::warn!("encoding the built-in library textures failed: {error}"),
     }
+    // The four library body parts the stock account is dressed in. A viewer
+    // that ships them answers them locally and never asks -- but anything
+    // else reading the account's outfit (a conformance case pulling a worn
+    // asset over `ViewerAsset`) fetches them like any other asset, and a grid
+    // that dresses an avatar in an asset it will not serve is lying about what
+    // it has.
+    for (id, wearable) in sl_test_assets::builtin::library_wearables() {
+        let _previous = assets.insert(AssetKey::from(id), wearable);
+    }
     assets
 }
 
@@ -194,36 +203,6 @@ const AGENT_SYSTEM_FOLDERS: &[(i8, &str)] = &[
 const AGENT_SYSTEM_FOLDER_BASE: u128 = 0xFA80;
 /// The stock "Party Hat" item inside "Clothing".
 const AGENT_HAT: u128 = 0xFA11;
-
-/// The four body-part wearables the stock account wears, as
-/// `(wearable type, name, asset id)`.
-///
-/// The reference viewer will not de-cloud its **own** avatar until the agent
-/// wears all four: `LLVOAvatarSelf::getHasMissingParts` counts SHAPE, SKIN,
-/// HAIR and EYES and logs "Self is clouded due to missing one or more required
-/// body parts" when any is absent. That gate is independent of the bakes — a
-/// grid can push a perfectly good `AvatarAppearance`, and the avatar still
-/// stays a cloud without these.
-///
-/// The ids are Linden **library** assets, which every viewer ships in its
-/// `app_settings/static_assets` and pre-loads into its cache. Naming them costs
-/// the grid no asset to serve: the viewer resolves each locally and never asks.
-/// (They are the same files this workspace vendors under
-/// `viewer-assets/static_assets/`, so its own viewer resolves them the same
-/// way.)
-///
-/// Wearable types are `LLWearableType::EType`; the ids are the `type` field of
-/// the corresponding `.bodypart` asset.
-const AGENT_BODY_PARTS: &[(i8, &str, u128)] = &[
-    // RASL F LEARN SHAPE (ANNA)
-    (0, "Shape", 0x57cb_d4f1_c53e_020f_f455_5ad2_a5ba_b98d),
-    // RASL F EXPLORE SKIN (SOFIA)
-    (1, "Skin", 0x205a_e4a8_42c6_1c5c_b142_6728_64fa_fe8a),
-    // RASL M LEARN EYEBROWSHAPER
-    (2, "Hair", 0x51f3_b303_a783_f0bd_9e98_9c09_4be1_3653),
-    // New Eyes
-    (3, "Eyes", 0x1497_39c0_f677_4b4c_1587_e44b_e72d_d7ef),
-];
 
 /// The id base for the body-part inventory items; each item's id is this plus
 /// its wearable type.
@@ -362,11 +341,15 @@ pub const STOCK_SCRIPTED_OBJECT_POSITION: sl_types::lsl::Vector = sl_types::lsl:
 pub fn default_world() -> SceneFixtures {
     let creator = AgentKey::from(uuid::Uuid::from_u128(FIXTURE_CREATOR));
     let mut world = SceneFixtures::new();
-    world.parcels.push(region_wide_parcel(
-        STOCK_PARCEL_LOCAL_ID,
-        OwnerKey::Agent(creator),
-        STOCK_PARCEL_NAME,
-    ));
+    world.add_parcel(
+        region_wide_parcel(
+            STOCK_PARCEL_LOCAL_ID,
+            OwnerKey::Agent(creator),
+            STOCK_PARCEL_NAME,
+        ),
+        stock_parcel_id(),
+        STOCK_PARCEL_DWELL,
+    );
     world.objects.push(box_prim(
         STOCK_SCRIPTED_OBJECT_LOCAL_ID,
         stock_scripted_object(),
@@ -411,6 +394,17 @@ fn stock_item(id: u128, folder: InventoryFolderKey, name: &str) -> InventoryItem
 /// The region-local id of the stock region-wide parcel.
 pub const STOCK_PARCEL_LOCAL_ID: RegionLocalParcelId = RegionLocalParcelId(1);
 
+/// The dwell the stock parcel reports: none, as a region nobody has visited.
+pub const STOCK_PARCEL_DWELL: f32 = 0.0;
+
+/// The grid-wide id of the stock region-wide parcel — the id a
+/// `RemoteParcelRequest` resolves a location on it to, and the one its dwell
+/// and search listing are keyed on.
+#[must_use]
+pub fn stock_parcel_id() -> ParcelKey {
+    ParcelKey::from(uuid::Uuid::from_u128(PARCEL))
+}
+
 /// Seeds the stock fixtures on a fresh session: agent inventory (root →
 /// Clothing → Party Hat), a library, one region-wide parcel, and WebRTC
 /// voice — the stub answerer ([`WebRtcStub::default`]) plus the parcel's
@@ -449,11 +443,13 @@ pub(crate) fn default_setup(sim: &mut SimSession, _now: Instant) {
         });
     }
 
-    // The worn body parts, and the Current Outfit Folder links that say they
-    // are worn. Both halves are needed: the items alone leave the wearables in
-    // inventory but not on the avatar, and the viewer counts what the COF links
-    // resolve to. Without them the agent's own avatar never de-clouds -- see
-    // AGENT_BODY_PARTS.
+    // The worn body parts, the Current Outfit Folder links that say they are
+    // worn, and the outfit the simulator itself holds. All three are needed:
+    // the items alone leave the wearables in inventory but not on the avatar,
+    // the viewer counts what the COF links resolve to, and an
+    // `AgentWearablesRequest` is answered from the simulator's own record, not
+    // from the folder. Without the first two the agent's own avatar never
+    // de-clouds -- see `DEFAULT_BODY_PARTS`.
     let body_parts_folder = folder_key(
         AGENT_SYSTEM_FOLDER_BASE
             .saturating_add(u128::try_from(FOLDER_TYPE_BODY_PARTS).unwrap_or(0)),
@@ -462,8 +458,9 @@ pub(crate) fn default_setup(sim: &mut SimSession, _now: Instant) {
         AGENT_SYSTEM_FOLDER_BASE
             .saturating_add(u128::try_from(FOLDER_TYPE_CURRENT_OUTFIT).unwrap_or(0)),
     );
-    for (wearable_type, name, asset) in AGENT_BODY_PARTS {
-        let offset = u128::try_from(*wearable_type).unwrap_or(0);
+    let mut worn = Vec::new();
+    for (wearable_type, name, asset) in sl_test_assets::builtin::DEFAULT_BODY_PARTS {
+        let offset = u128::from(wearable_type.to_code());
         let item_id = InventoryKey::from(uuid::Uuid::from_u128(
             AGENT_BODY_PART_ITEM_BASE.saturating_add(offset),
         ));
@@ -471,12 +468,12 @@ pub(crate) fn default_setup(sim: &mut SimSession, _now: Instant) {
         // The wearable itself, in Body Parts.
         let mut item = stock_item(0, body_parts_folder, name);
         item.item_id = item_id;
-        item.asset_id = uuid::Uuid::from_u128(*asset);
+        item.asset_id = asset;
         item.item_type = ASSET_TYPE_BODYPART;
         item.inv_type = ASSET_TYPE_BODYPART;
         // `flags` carries the wearable type for a body part, which is how the
         // viewer knows which slot an item fills before fetching its asset.
-        item.flags = u32::try_from(*wearable_type).unwrap_or(0);
+        item.flags = u32::from(wearable_type.to_code());
         sim.agent_inventory_mut().insert_item(item);
 
         // The COF link naming it. A link's asset_id is the *item* it points at.
@@ -488,7 +485,14 @@ pub(crate) fn default_setup(sim: &mut SimSession, _now: Instant) {
         link.item_type = ASSET_TYPE_LINK;
         link.inv_type = ASSET_TYPE_LINK;
         sim.agent_inventory_mut().insert_item(link);
+
+        worn.push(Wearable {
+            item_id,
+            asset_id: Some(asset),
+            wearable_type,
+        });
     }
+    sim.set_agent_wearables(worn);
 
     sim.agent_inventory_mut().insert_item(stock_item(
         AGENT_HAT,
@@ -507,13 +511,6 @@ pub(crate) fn default_setup(sim: &mut SimSession, _now: Instant) {
         folder_key(LIB_ROOT),
         "Library Texture",
     ));
-    sim.add_parcel(sl_proto::SimParcel {
-        parcel_id: ParcelKey::from(uuid::Uuid::from_u128(PARCEL)),
-        west: 0.0,
-        south: 0.0,
-        east: 256.0,
-        north: 256.0,
-    });
     let region_id = sim.region_id();
     sim.voice_mut().enable_webrtc(WebRtcStub::default());
     sim.voice_mut().set_parcel_voice_info(ParcelVoiceInfo {
@@ -615,11 +612,21 @@ mod test {
                 "no asset registered for wearable layer texture {id}"
             );
         }
+        // The four library body parts the stock account is dressed in are
+        // served too: a grid that dresses an avatar in an asset it will not
+        // serve is lying about what it has.
+        for (_wearable_type, name, id) in sl_test_assets::builtin::DEFAULT_BODY_PARTS {
+            assert!(
+                assets.contains(AssetKey::from(id)),
+                "no asset registered for the default {name} body part ({id})"
+            );
+        }
         // Four terrain solids, seven environment textures, the prim texture,
         // two avatar sentinels, fifteen bump maps, two viewer textures, two
-        // water plane textures and five wearable layer textures — and nothing
-        // else: a stock scenario's store is the library, not a fixture dump.
-        assert_eq!(assets.len(), 4 + 7 + 1 + 2 + 15 + 2 + 2 + 5);
+        // water plane textures, five wearable layer textures and four body
+        // parts — and nothing else: a stock scenario's store is the library,
+        // not a fixture dump.
+        assert_eq!(assets.len(), 4 + 7 + 1 + 2 + 15 + 2 + 2 + 5 + 4);
     }
 
     #[test]

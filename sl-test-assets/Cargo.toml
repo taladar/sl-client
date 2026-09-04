@@ -17,6 +17,10 @@ exclude = { workspace = true }
 
 [dependencies]
 bytes = { workspace = true }
+# The wearable-asset writer behind the library body-part stand-ins: the inverse
+# of the `WearableAsset` parser a bake reads them back with, so the fixture and
+# the consumer share one definition of the format.
+sl-avatar = { workspace = true }
 sl-llsd = { workspace = true }
 sl-mesh = { workspace = true }
 sl-proto = { workspace = true }
@@ -28,7 +32,8 @@ uuid = { workspace = true }
 pretty_assertions = { workspace = true }
 # The animation and material assets the crate writes are read back through the
 # viewer's own decoders (the mesh and sound encoders are `sl-mesh`'s and
-# `sl-sound`'s own, so those crates are plain dependencies).
+# `sl-sound`'s own, and the wearable writer is `sl-avatar`'s, so those crates
+# are plain dependencies).
 sl-anim = { workspace = true }
 sl-material = { workspace = true }
 # The decoder behind `sl-audio`'s `decode_clip`, used directly so a fixture

@@ -16,7 +16,7 @@
 //! the neighbouring terrain.
 
 use sl_proto::{AssetKey, InMemoryAssetSource, RegionLocalObjectId, RegionLocalParcelId};
-use sl_types::key::{AgentKey, Key, ObjectKey, OwnerKey, TextureKey};
+use sl_types::key::{AgentKey, Key, ObjectKey, OwnerKey, ParcelKey, TextureKey};
 use sl_types::lsl::Vector;
 
 use super::RegionFixture;
@@ -32,6 +32,14 @@ pub const BORDER_PARCEL_LOCAL_ID: RegionLocalParcelId = RegionLocalParcelId(1);
 
 /// The agent every border object is owned by (a fixture owner, never a login).
 const BORDER_OWNER: u128 = 0x000B_04DE_0000;
+
+/// The grid-wide id of the border scene's parcel: what a `RemoteParcelRequest`
+/// resolves a location in it to, and what its dwell and search listing are
+/// keyed on.
+pub const BORDER_PARCEL_ID: ParcelKey = ParcelKey(Key(uuid::Uuid::from_u128(0x000B_04DE_0003)));
+
+/// The dwell the border parcel reports: none, as a region nobody has visited.
+const BORDER_DWELL: f32 = 0.0;
 
 /// The marker pillar's region-local id.
 pub const MARKER_LOCAL_ID: RegionLocalObjectId = RegionLocalObjectId(0x300);
@@ -240,11 +248,15 @@ pub const fn marker_position() -> Vector {
 pub fn border() -> RegionFixture {
     let owner = AgentKey::from(uuid::Uuid::from_u128(BORDER_OWNER));
     let mut world = SceneFixtures::new();
-    world.parcels.push(region_wide_parcel(
-        BORDER_PARCEL_LOCAL_ID,
-        OwnerKey::Agent(owner),
-        BORDER_PARCEL_NAME,
-    ));
+    world.add_parcel(
+        region_wide_parcel(
+            BORDER_PARCEL_LOCAL_ID,
+            OwnerKey::Agent(owner),
+            BORDER_PARCEL_NAME,
+        ),
+        BORDER_PARCEL_ID,
+        BORDER_DWELL,
+    );
     world.objects.push(
         PrimFixture::boxed(
             MARKER_LOCAL_ID,

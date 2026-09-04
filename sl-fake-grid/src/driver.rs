@@ -50,6 +50,12 @@ pub(crate) struct SimState {
     /// The region's parcels and objects (pushed on arrival, replayed on
     /// request).
     pub(crate) world: SceneFixtures,
+    /// The grid's price list and this region's object budget, answered to an
+    /// `EconomyDataRequest`. Grid-wide, like the helper policy it comes from.
+    pub(crate) economy: sl_proto::EconomyData,
+    /// What this session's agent is permitted, and how the deprecated paths
+    /// are answered ([`crate::agent_requests`]).
+    pub(crate) policy: crate::agent_requests::AgentPolicy,
     /// Who the agent is, for its own avatar object.
     pub(crate) avatar: AvatarIdentity,
     /// This session's sequence number (its CAPS path component and the key
@@ -213,7 +219,28 @@ impl SharedSim {
                 &event,
                 now,
             );
-            answer_world_request(&state.world, &state.avatar, &mut state.sim, &event, now);
+            answer_world_request(
+                &state.world,
+                &state.avatar,
+                &state.identity,
+                &mut state.sim,
+                &event,
+                now,
+            );
+            crate::economy_policy::answer_economy_request(
+                &state.economy,
+                &mut state.sim,
+                &event,
+                now,
+            );
+            crate::agent_requests::answer_agent_request(
+                state.policy,
+                &state.world,
+                state.avatar.agent_id,
+                &mut state.sim,
+                &event,
+                now,
+            );
             crate::world_map::answer_map_request(
                 &state.map,
                 state.identity.region_handle,

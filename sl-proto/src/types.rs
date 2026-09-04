@@ -222,6 +222,27 @@ pub(crate) fn land_impact_from_wire(
     }
 }
 
+/// Encode a [`LandImpact`](crate::types::LandImpact) back into a signed 32-bit
+/// wire field, the inverse of [`land_impact_from_wire`].
+///
+/// A budget above the signed 32-bit range a wire field can hold is rejected
+/// with [`WireError::ValueOutOfRange`](sl_wire::WireError::ValueOutOfRange)
+/// rather than wrapped into a negative capacity, which is exactly the value
+/// [`land_impact_from_wire`] refuses to decode on the other end.
+pub(crate) fn land_impact_to_wire(
+    field: &'static str,
+    impact: crate::types::LandImpact,
+) -> Result<i32, sl_wire::WireError> {
+    let crate::types::LandImpact(value) = impact;
+    match i32::try_from(value) {
+        Ok(wire) => Ok(wire),
+        Err(_too_large) => Err(sl_wire::WireError::ValueOutOfRange {
+            field,
+            value: i64::from(value),
+        }),
+    }
+}
+
 /// Encode a [`LindenAmount`](sl_types::money::LindenAmount) back into a signed
 /// 32-bit L$ wire field, the inverse of [`linden_from_wire`].
 ///
