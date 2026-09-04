@@ -366,6 +366,20 @@ slot_is_held() {
   return 0
 }
 
+# True while an --exclusive operation holds the gate. Needed because such an
+# operation deliberately takes no numbered slot, so without this it would be
+# invisible in `status` -- every slot would read "free" while the machine was in
+# fact reserved, which is exactly backwards from what the reader needs to know.
+# A normal holder takes the gate *shared*, so the shared probe still succeeds
+# and is correctly not reported here.
+exclusive_is_held() {
+  [ -e "${SLOT_DIR}/gate" ] || return 1
+  if (flock -n -s 7) 7>"${SLOT_DIR}/gate" 2>/dev/null; then
+    return 1
+  fi
+  return 0
+}
+
 release_slot() {
   if [ -n "${held_slot}" ]; then
     rm -f "${SLOT_DIR}/slot.${held_slot}.owner"
@@ -524,6 +538,18 @@ do_status() {
     echo 'load:   EXTERNAL BUILD ACTIVE -- heavy commands run exclusively'
   fi
   echo "memory: $(mem_available_mb) MiB available"
+
+  if exclusive_is_held; then
+    _ds_owner="${SLOT_DIR}/slot.exclusive.owner"
+    if [ -f "${_ds_owner}" ]; then
+      echo "EXCLUSIVE: $(agent_label "$(meta_get "${_ds_owner}" agent)") -- $(meta_get "${_ds_owner}" label) (since $(meta_get "${_ds_owner}" since))"
+    else
+      echo 'EXCLUSIVE: held (the whole pool is reserved)'
+    fi
+    echo '           every numbered slot below is unavailable until it finishes'
+  else
+    rm -f "${SLOT_DIR}/slot.exclusive.owner"
+  fi
 
   _ds_n=1
   while [ "${_ds_n}" -le "${SLOTS}" ]; do
