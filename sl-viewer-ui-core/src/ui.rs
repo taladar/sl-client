@@ -224,10 +224,18 @@ impl Plugin for ViewerUiPlugin {
             )
             .add_systems(
                 PostUpdate,
-                // *After* layout, because it reads the freshly computed
-                // `ComputedNode` / `UiGlobalTransform` of the focused widget and
-                // its scroll container to decide how far to scroll.
-                scroll_focus_into_view.after(bevy::ui::UiSystems::Layout),
+                // *After* layout, because they read the freshly computed boxes:
+                // `scroll_focus_into_view` the `ComputedNode` /
+                // `UiGlobalTransform` of the focused widget and its scroll
+                // container, to decide how far to scroll; `apply_reveal_ellipsis`
+                // each clipped value's measured box, to decide whether its `…`
+                // shows. Registered here, once, for every surface that clips —
+                // tabs, table cells and inventory rows alike.
+                (
+                    scroll_focus_into_view,
+                    crate::ui_ellipsis::apply_reveal_ellipsis,
+                )
+                    .after(bevy::ui::UiSystems::Layout),
             );
     }
 }

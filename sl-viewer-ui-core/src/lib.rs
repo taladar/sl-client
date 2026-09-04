@@ -14,6 +14,8 @@
 //!   swash cannot rasterise; the rest are bundled so text renders identically
 //!   on a host with no fonts installed.
 //! - [`ui_text`], [`virtual_list`] — text nodes and a windowed list.
+//! - [`ui_ellipsis`] — the trailing `…` a clipped value is marked with, and the
+//!   one rule that decides when it shows.
 //! - [`ui_element`] — the vocabulary a gallery entry is written in
 //!   ([`ui_element::UiElement`], [`ui_element::ElementCx`]) plus the generic
 //!   spawners. The registry *of* elements lives in the binary crate, because it
@@ -38,6 +40,7 @@ pub mod skin;
 pub mod skin_colors;
 pub mod ui;
 pub mod ui_element;
+pub mod ui_ellipsis;
 pub mod ui_font;
 pub mod ui_pseudoloc;
 pub mod ui_sounds;

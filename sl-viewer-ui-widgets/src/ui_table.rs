@@ -41,7 +41,8 @@ use bevy::prelude::*;
 use sl_settings::SettingValue;
 
 use sl_viewer_settings::ViewerSettings;
-use sl_viewer_ui_core::i18n::{LocaleEllipsisMarker, Translated};
+use sl_viewer_ui_core::i18n::Translated;
+use sl_viewer_ui_core::ui_ellipsis::{RevealEllipsis, spawn_ellipsis_marker};
 use sl_viewer_ui_core::ui_font::UiFont;
 use sl_viewer_ui_core::virtual_list::{VirtualList, VirtualRow, VirtualViewport};
 
@@ -63,10 +64,6 @@ const RESIZER_COLOR: Color = Color::srgba(0.62, 0.66, 0.74, 0.35);
 
 /// The gap between a header label and its sort-direction arrow, in logical pixels.
 const ARROW_GAP: f32 = 2.0;
-
-/// The leading gap between a truncated cell value and its ellipsis, in logical
-/// pixels — a hair of breathing room off the last visible glyph.
-const ELLIPSIS_GAP: f32 = 1.0;
 
 /// The sort-direction arrow shown on the primary sort column's header when it is
 /// ascending (`▲`).
@@ -584,14 +581,6 @@ pub struct TableColumnCell {
     pub column: usize,
 }
 
-/// On a cell's **clip container**, naming the trailing ellipsis marker
-/// [`apply_table_cell_ellipsis`] reveals when the value overflows the column.
-#[derive(Component, Debug, Clone, Copy)]
-struct TableCellClip {
-    /// The ellipsis marker node to reveal / hide.
-    marker: Entity,
-}
-
 /// On a sortable column's header arrow node — the `▲` / `▼` indicator, updated
 /// from the table's primary sort key.
 #[derive(Component, Debug, Clone, Copy)]
@@ -1073,25 +1062,18 @@ fn spawn_body_cell(
             ChildOf(clip),
         ))
         .id();
-    let marker = commands
-        .spawn((
-            Text::new(FALLBACK_ELLIPSIS.to_owned()),
-            TextLayout::no_wrap(),
-            UiFont::Sans.at(spec.font_size),
-            TextColor(spec.cell_color),
-            Node {
-                display: Display::None,
-                flex_shrink: 0.0,
-                margin: UiRect::left(Val::Px(ELLIPSIS_GAP)),
-                ..default()
-            },
-            LocaleEllipsisMarker,
-            Pickable::IGNORE,
-            Name::new(format!("{}:table-cell-ellipsis:{index}", spec.element)),
-            ChildOf(cell),
-        ))
-        .id();
-    commands.entity(clip).insert(TableCellClip { marker });
+    let marker = spawn_ellipsis_marker(
+        commands,
+        cell,
+        spec.font_size,
+        spec.cell_color,
+        FALLBACK_ELLIPSIS,
+    );
+    commands.entity(marker).insert(Name::new(format!(
+        "{}:table-cell-ellipsis:{index}",
+        spec.element
+    )));
+    commands.entity(clip).insert(RevealEllipsis { marker });
     text
 }
 
@@ -1223,29 +1205,6 @@ fn sync_table_column_widths(
         let wanted = Val::Px(width);
         if node.width != wanted {
             node.width = wanted;
-        }
-    }
-}
-
-/// Reveal a body cell's ellipsis marker exactly when its value overflows the
-/// column, and hide it when the value fits — the same measure the tab widget
-/// uses (natural width vs laid-out width of the clip container).
-fn apply_table_cell_ellipsis(
-    clips: Query<(&ComputedNode, &TableCellClip)>,
-    mut markers: Query<&mut Node, With<LocaleEllipsisMarker>>,
-) {
-    for (computed, clip) in &clips {
-        let truncated = computed.content_size.x > computed.size.x + f32::EPSILON;
-        let Ok(mut node) = markers.get_mut(clip.marker) else {
-            continue;
-        };
-        let wanted = if truncated {
-            Display::Flex
-        } else {
-            Display::None
-        };
-        if node.display != wanted {
-            node.display = wanted;
         }
     }
 }
@@ -1440,10 +1399,6 @@ impl Plugin for TableWidgetPlugin {
                     .after(sl_viewer_ui_core::virtual_list::layout_virtual_lists),
                 persist_table_state,
             ),
-        )
-        .add_systems(
-            PostUpdate,
-            apply_table_cell_ellipsis.after(bevy::ui::UiSystems::Layout),
         );
     }
 }

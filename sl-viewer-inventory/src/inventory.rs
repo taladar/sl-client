@@ -54,7 +54,7 @@ use sl_client_bevy::{
 use crate::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater,
 };
-use crate::i18n::{LocaleEllipsisMarker, Translated};
+use crate::i18n::Translated;
 use crate::menu::{MenuCommand, MenuConditions, MenuDef, MenuItemDef};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::{ElementCx, UiAction};
@@ -63,6 +63,7 @@ use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab
 use crate::virtual_list::{
     VirtualList, VirtualRow, VirtualViewport, index_to_f32, layout_virtual_lists,
 };
+use sl_viewer_ui_core::ui_ellipsis::{RevealEllipsis, spawn_ellipsis_marker};
 
 /// The uniform height of a tree row, in logical pixels. Drives the virtualized
 /// list's windowing.
@@ -138,10 +139,6 @@ const ROW_FONT_SIZE: f32 = 14.0;
 /// table cells' and tab strips' default.
 const FALLBACK_ELLIPSIS: &str = "\u{2026}";
 
-/// The gap between a clipped row label and its trailing `…` marker, in logical
-/// pixels (mirrors the table cells' `ELLIPSIS_GAP`).
-const ELLIPSIS_GAP: f32 = 2.0;
-
 /// A selected row's background.
 const SELECTED_ROW_BACKGROUND: Color = Color::srgba(0.24, 0.34, 0.52, 0.55);
 
@@ -205,12 +202,6 @@ impl Plugin for InventoryPlugin {
                 )
                     .chain()
                     .after(layout_virtual_lists),
-            )
-            // The `…` marker toggles from the just-measured clip overflow, so it
-            // runs after layout — like the table cells' equivalent.
-            .add_systems(
-                PostUpdate,
-                apply_inventory_row_ellipsis.after(bevy::ui::UiSystems::Layout),
             );
     }
 }
@@ -2521,26 +2512,13 @@ struct RowParts {
     arrow: Entity,
     /// The type-icon glyph.
     icon: Entity,
-    /// The clip box the label sits in — its overflow drives the `…` marker.
-    label_clip: Entity,
-    /// The label text.
+    /// The label text. The clip box around it and the trailing `…` marker are
+    /// not named here: the clip carries a `RevealEllipsis` naming the marker, and
+    /// `ui_ellipsis::apply_reveal_ellipsis` drives the pair from that.
     label: Entity,
-    /// The trailing `…` marker, revealed when the label overflows its clip.
-    ellipsis: Entity,
     /// The trailing decoration text (permissions / link / worn), dimmer than
     /// the label.
     suffix: Entity,
-}
-
-/// Whether a row's label overflows its clip box, so the trailing `…` marker
-/// should be revealed. The label `Text` is no-wrap and does not shrink, so when
-/// the name is wider than the (shrunk) clip the clip reports a `content_size`
-/// wider than its own `size` — the same overflow test the table cells use
-/// (`crate::ui_table`'s `apply_table_cell_ellipsis`). Pure so it is
-/// unit-testable without a running layout.
-#[must_use]
-pub fn ellipsis_visible(clip: &ComputedNode) -> bool {
-    clip.content_size.x > clip.size.x + f32::EPSILON
 }
 
 /// The `Node` for a row's label column: a clip box that **shrinks** to the
@@ -2645,25 +2623,19 @@ fn populate_new_rows(
             ))
             .id();
         // The trailing `…` marker, between the clipped label and the decoration,
-        // hidden until `apply_inventory_row_ellipsis` reveals it on overflow. It
-        // carries `LocaleEllipsisMarker`, so `i18n` sets its localised glyph.
-        let ellipsis = commands
-            .spawn((
-                Text::new(FALLBACK_ELLIPSIS.to_owned()),
-                TextLayout::no_wrap(),
-                UiFont::Sans.at(ROW_FONT_SIZE),
-                TextColor(LABEL_COLOR),
-                Node {
-                    display: Display::None,
-                    flex_shrink: 0.0,
-                    margin: UiRect::left(Val::Px(ELLIPSIS_GAP)),
-                    ..default()
-                },
-                LocaleEllipsisMarker,
-                Pickable::IGNORE,
-                ChildOf(row_entity),
-            ))
-            .id();
+        // hidden until `ui_ellipsis::apply_reveal_ellipsis` reveals it on
+        // overflow — the shared marker the table cells and tab labels use, so it
+        // carries `LocaleEllipsisMarker` and `i18n` sets its localised glyph.
+        let ellipsis = spawn_ellipsis_marker(
+            &mut commands,
+            row_entity,
+            ROW_FONT_SIZE,
+            LABEL_COLOR,
+            FALLBACK_ELLIPSIS,
+        );
+        commands
+            .entity(label_clip)
+            .insert(RevealEllipsis { marker: ellipsis });
         let suffix = commands
             .spawn((
                 Text::new(""),
@@ -2678,9 +2650,7 @@ fn populate_new_rows(
                 indent,
                 arrow,
                 icon,
-                label_clip,
                 label,
-                ellipsis,
                 suffix,
             })
             .observe(on_row_press)
@@ -2757,33 +2727,6 @@ fn bind_rows(
         }
         if let Ok((mut text, _color)) = texts.get_mut(parts.suffix) {
             set_text(&mut text, &display.suffix);
-        }
-    }
-}
-
-/// Reveal or hide each row's trailing `…` marker from whether its label overflows
-/// its clip box ([`ellipsis_visible`]) — the same mechanism the table cells use.
-/// The marker itself carries [`crate::i18n::LocaleEllipsisMarker`], so `i18n`
-/// localises its glyph; this system only toggles its `Display`. Runs after layout
-/// (in `PostUpdate`) so it reads the freshly measured clip box.
-fn apply_inventory_row_ellipsis(
-    rows: Query<&RowParts>,
-    clips: Query<&ComputedNode>,
-    mut markers: Query<&mut Node>,
-) {
-    for parts in &rows {
-        let Ok(clip) = clips.get(parts.label_clip) else {
-            continue;
-        };
-        let wanted = if ellipsis_visible(clip) {
-            Display::Flex
-        } else {
-            Display::None
-        };
-        if let Ok(mut marker) = markers.get_mut(parts.ellipsis)
-            && marker.display != wanted
-        {
-            marker.display = wanted;
         }
     }
 }

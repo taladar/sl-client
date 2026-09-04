@@ -108,9 +108,9 @@ use bevy::ui_widgets::{
     Button, ControlOrientation, RadioButton, RadioGroup, Scrollbar, ScrollbarThumb, ValueChange,
 };
 
-use sl_viewer_ui_core::i18n::LocaleEllipsisMarker;
 use sl_viewer_ui_core::ui::{FocusRevealBounds, UiDirection, column, row};
 use sl_viewer_ui_core::ui_element::{ElementCx, TextMayClip, UiAction};
+use sl_viewer_ui_core::ui_ellipsis::{RevealEllipsis, spawn_ellipsis_marker};
 use sl_viewer_ui_core::ui_font::UiFont;
 
 /// The gap between adjacent tab buttons, in logical pixels.
@@ -166,10 +166,6 @@ const TAB_CORNER_RADIUS: f32 = 8.0;
 /// The default truncation glyph for a clipped tab label — a single Latin
 /// ellipsis. See [`TabSpec::ellipsis`] for why this is configurable.
 pub const DEFAULT_ELLIPSIS: &str = "…";
-
-/// The leading gap between a truncated label and its ellipsis, in logical pixels,
-/// so the marker is not glued to the last visible glyph.
-const ELLIPSIS_GAP: f32 = 2.0;
 
 /// A tab label's colour.
 pub const TAB_LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
@@ -318,6 +314,17 @@ impl TabPlacement {
     /// a vertical strip, a `ui::row` for a horizontal one, scrolling on
     /// that axis and shrinkable below its content so it clips rather than growing
     /// the strip. `flex_grow` fills the wrapper beside the controls.
+    ///
+    /// **Both** axes are unpinned, and the cross one is not decoration. A flex
+    /// item's `min-width: auto` resolves to its *min-content* width, and a
+    /// no-wrap label has no break opportunity, so its min-content width is the
+    /// whole name: without `min_width: 0` a vertical viewport cannot shrink below
+    /// the longest tab name, the buttons keep their full width inside a strip
+    /// pinned to a narrower one, and the labels spill out of the strip instead of
+    /// clipping — which also means their ellipsis marker is never revealed, since
+    /// nothing ever overflows. Found by
+    /// `a_widened_strip_takes_the_ellipsis_off_a_label_that_fits_again`, which
+    /// could not reach the state it was written to test.
     fn viewport_node(self) -> Node {
         if self.is_vertical() {
             Node {
@@ -327,6 +334,7 @@ impl TabPlacement {
                 },
                 flex_grow: 1.0,
                 min_height: Val::Px(0.0),
+                min_width: Val::Px(0.0),
                 ..column(Val::Px(TAB_GAP))
             }
         } else {
@@ -437,15 +445,6 @@ pub struct TabStripWidth(pub f32);
 pub struct TabDivider {
     /// The strip whose [`TabStripWidth`] this handle drags.
     pub strip: Entity,
-}
-
-/// A truncatable tab label, naming the ellipsis marker
-/// `apply_tab_ellipsis` reveals when the label is clipped. Present only on a
-/// clipped (resizable) strip's labels.
-#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TabLabelClip {
-    /// The `…` marker node, shown only while this label overflows its box.
-    pub ellipsis: Entity,
 }
 
 /// A tab button: which strip it belongs to and its index within it. Carried so
@@ -564,12 +563,14 @@ impl Plugin for TabWidgetPlugin {
                     scroll_tabs_with_wheel,
                 ),
             )
-            // After layout, because they read each node's *measured* size — a
-            // label's, a viewport's — to decide truncation / overflow and write
-            // next frame, the same shape as the pie's post-layout fit.
+            // After layout, because it reads each viewport's *measured* size to
+            // decide overflow and writes next frame, the same shape as the pie's
+            // post-layout fit. Truncation is the other half of that shape, and it
+            // is `ui_ellipsis::apply_reveal_ellipsis` — registered once by
+            // `ViewerUiPlugin`, because the table and the inventory clip too.
             .add_systems(
                 PostUpdate,
-                (apply_tab_ellipsis, apply_tab_scroll_controls).after(UiSystems::Layout),
+                apply_tab_scroll_controls.after(UiSystems::Layout),
             );
     }
 }
@@ -1056,8 +1057,9 @@ fn handle_active(spec: &TabSpec) -> usize {
 /// the button grows to fit its label, centred. On a **resizable** strip the
 /// button is pinned to the strip width, so the label is a flex child that clips
 /// (leading-aligned, so the *start* of a long name shows) with a trailing
-/// ellipsis marker ([`spawn_tab_ellipsis`]) that `apply_tab_ellipsis` reveals
-/// only while the label is actually truncated. The label declares [`TextMayClip`]
+/// ellipsis marker ([`spawn_tab_ellipsis`]) that
+/// [`sl_viewer_ui_core::ui_ellipsis::apply_reveal_ellipsis`] reveals only while
+/// the label is actually truncated. The label declares [`TextMayClip`]
 /// so the harness's clipping check knows the slice is by design.
 fn spawn_tab_button(
     commands: &mut Commands,
@@ -1160,7 +1162,7 @@ fn spawn_tab_button(
         let ellipsis = spawn_tab_ellipsis(commands, button, spec, index);
         commands
             .entity(label_clip)
-            .insert(TabLabelClip { ellipsis });
+            .insert(RevealEllipsis { marker: ellipsis });
     } else {
         let label_entity = commands
             .spawn((
@@ -1179,65 +1181,28 @@ fn spawn_tab_button(
 }
 
 /// Spawn a clipped tab's trailing ellipsis marker (`…`, or whatever
-/// [`TabSpec::ellipsis`] configured), hidden until `apply_tab_ellipsis` finds
+/// [`TabSpec::ellipsis`] configured), hidden until `apply_reveal_ellipsis` finds
 /// the label truncated.
+///
+/// A thin wrapper over the shared [`spawn_ellipsis_marker`]: the marker, plus the
+/// name the layout harness addresses it by.
 fn spawn_tab_ellipsis(
     commands: &mut Commands,
     button: Entity,
     spec: &TabSpec,
     index: usize,
 ) -> Entity {
+    let marker = spawn_ellipsis_marker(
+        commands,
+        button,
+        spec.font_size,
+        TAB_LABEL_COLOR,
+        spec.ellipsis,
+    );
     commands
-        .spawn((
-            Text::new(spec.ellipsis.to_owned()),
-            TextLayout::no_wrap(),
-            UiFont::Sans.at(spec.font_size),
-            TextColor(TAB_LABEL_COLOR),
-            Node {
-                // Hidden until the label overflows; never shrinks, so it keeps its
-                // room once shown; a small leading gap off the last visible glyph.
-                display: Display::None,
-                flex_shrink: 0.0,
-                margin: UiRect::left(Val::Px(ELLIPSIS_GAP)),
-                ..default()
-            },
-            Name::new(format!("{}:tab-ellipsis:{index}", spec.element)),
-            LocaleEllipsisMarker,
-            ChildOf(button),
-        ))
-        .id()
-}
-
-/// Reveal a clipped tab's ellipsis exactly when its label overflows its box, and
-/// hide it when the label fits.
-///
-/// Compares the label's natural width (`ComputedNode::content_size`) against its
-/// laid-out box (`ComputedNode::size`): wider means the clip bit, so the marker
-/// shows. Runs only for labels that declared [`TabLabelClip`] (a resizable
-/// strip's), and guards the write so a settled label does not re-toggle layout.
-///
-/// The label's leading-edge alignment (so the *start* of the name shows and the
-/// *end* clips) and the ellipsis's trailing side (right under LTR, left under
-/// RTL) both come from the container's flow, which `apply_ui_direction` mirrors —
-/// so this system is direction-agnostic.
-fn apply_tab_ellipsis(
-    labels: Query<(&ComputedNode, &TabLabelClip)>,
-    mut ellipses: Query<&mut Node>,
-) {
-    for (computed, clip) in &labels {
-        let truncated = computed.content_size.x > computed.size.x + f32::EPSILON;
-        let Ok(mut node) = ellipses.get_mut(clip.ellipsis) else {
-            continue;
-        };
-        let wanted = if truncated {
-            Display::Flex
-        } else {
-            Display::None
-        };
-        if node.display != wanted {
-            node.display = wanted;
-        }
-    }
+        .entity(marker)
+        .insert(Name::new(format!("{}:tab-ellipsis:{index}", spec.element)));
+    marker
 }
 
 /// Show a strip's scroll control (scrollbar or arrows) exactly when its viewport
@@ -1763,11 +1728,11 @@ pub fn spawn_tabs_scroll_demo(
 #[cfg(test)]
 mod tests {
     use super::{
-        ARROW_SCROLL_STEP, MAX_STRIP_WIDTH, MIN_STRIP_WIDTH, SAMPLE_LABELS, TAB_ACTIVE_BACKGROUND,
-        TAB_INACTIVE_BACKGROUND, TAB_SELECTED_ACTION, TabButton, TabContainerHandle, TabDivider,
-        TabLabelClip, TabPanel, TabPlacement, TabScrollControl, TabSpec, TabStrip, TabStripWidth,
-        TabViewport, apply_tab_strip_width, arrow_scroll_delta, resize_strip_width,
-        spawn_tab_container, spawn_tab_strip,
+        ARROW_SCROLL_STEP, MAX_STRIP_WIDTH, MIN_STRIP_WIDTH, RevealEllipsis, SAMPLE_LABELS,
+        TAB_ACTIVE_BACKGROUND, TAB_INACTIVE_BACKGROUND, TAB_SELECTED_ACTION, TabButton,
+        TabContainerHandle, TabDivider, TabPanel, TabPlacement, TabScrollControl, TabSpec,
+        TabStrip, TabStripWidth, TabViewport, apply_tab_strip_width, arrow_scroll_delta,
+        resize_strip_width, spawn_tab_container, spawn_tab_strip,
     };
     use bevy::ecs::world::CommandQueue;
     use bevy::input_focus::tab_navigation::TabIndex;
@@ -2193,10 +2158,10 @@ mod tests {
         );
         // Each tab has a clippable label: it declares the harness exception and
         // names a live ellipsis marker.
-        let mut clips = app.world_mut().query::<(Entity, &TabLabelClip)>();
+        let mut clips = app.world_mut().query::<(Entity, &RevealEllipsis)>();
         let labels: Vec<(Entity, Entity)> = clips
             .iter(app.world())
-            .map(|(label, clip)| (label, clip.ellipsis))
+            .map(|(label, clip)| (label, clip.marker))
             .collect();
         assert_eq!(
             labels.len(),
@@ -2401,6 +2366,135 @@ mod tests {
                 );
             }
         }
+        Ok(())
+    }
+
+    /// **Real layout, regression:** a label wide enough to need the ellipsis at
+    /// one strip width must stop needing it when the strip is widened back —
+    /// including through the band exactly one marker wide, where the reveal used
+    /// to latch (`viewer-audit-ellipsis-reveal-latch`).
+    ///
+    /// The marker is a sibling of the clip and does not shrink, so showing it
+    /// takes its own width off the clip. Measuring the label against that shrunk
+    /// clip — which all three copies of this system did — makes the answer depend
+    /// on the previous answer, and a value whose natural width lands between
+    /// `available - marker` and `available` never gets its marker taken away
+    /// again.
+    ///
+    /// The width is **calibrated from the run itself** rather than guessed: the
+    /// strip is widened until the label has its own natural width plus half a
+    /// marker, which is inside the band by construction whatever the font
+    /// measures. `ui_ellipsis::apply_reveal_ellipsis` must then hide the marker
+    /// and hand the whole name back.
+    #[test]
+    fn a_widened_strip_takes_the_ellipsis_off_a_label_that_fits_again() -> Result<(), TestError> {
+        use crate::ui_test::{LayoutTest, settle};
+        use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems};
+        /// Narrow enough that every sample label is clipped to start with.
+        const NARROW: f32 = 70.0;
+
+        let mut app = LayoutTest::new().build();
+        app.add_systems(
+            Startup,
+            (|mut commands: Commands, root: Res<UiRoot>| {
+                let labels: Vec<String> = ["A really quite long tab label".to_owned()].into();
+                spawn_tab_container(
+                    &mut commands,
+                    root.0,
+                    &super::TabSpec {
+                        element: "latch-fixture",
+                        placement: TabPlacement::InlineStart,
+                        labels: &labels,
+                        active: 0,
+                        tab_index: 1,
+                        font_size: 14.0,
+                        strip_width: Some(NARROW),
+                        ellipsis: super::DEFAULT_ELLIPSIS,
+                        translate_labels: false,
+                    },
+                );
+            })
+            .after(UiScaffoldSystems::SpawnRoot),
+        );
+        settle(&mut app);
+
+        let strip = the_strip(&mut app);
+        let mut clips = app.world_mut().query::<(Entity, &RevealEllipsis)>();
+        let (clip, marker) = clips
+            .iter(app.world())
+            .map(|(clip, reveal)| (clip, reveal.marker))
+            .next()
+            .ok_or("the resizable strip's label declares a reveal")?;
+
+        let displayed = |app: &App, entity: Entity| -> Option<Display> {
+            app.world()
+                .entity(entity)
+                .get::<Node>()
+                .map(|node| node.display)
+        };
+        assert_eq!(
+            displayed(&app, marker),
+            Some(Display::Flex),
+            "the narrow strip clips the label, so the marker starts shown —              without that this test never enters the latching state"
+        );
+
+        // Calibrate off the measured boxes: the label's natural width, the box it
+        // was given, and what the marker is taking. All physical pixels.
+        let (natural, laid_out, inverse_scale) = app
+            .world()
+            .entity(clip)
+            .get::<ComputedNode>()
+            .map(|computed| {
+                (
+                    computed.content_size.x,
+                    computed.size.x,
+                    computed.inverse_scale_factor,
+                )
+            })
+            .ok_or("the clip is laid out")?;
+        let marker_width = app
+            .world()
+            .entity(marker)
+            .get::<ComputedNode>()
+            .map(|computed| computed.size.x)
+            .ok_or("the shown marker is laid out")?;
+        assert!(
+            marker_width > 1.0,
+            "the marker must have real width for the band to exist ({marker_width} px)"
+        );
+
+        // Widen so the label has its natural width plus *half* a marker: it fits
+        // whole, but would not fit beside the marker — the band itself.
+        let available = laid_out + marker_width;
+        let widen = (natural + marker_width * 0.5 - available) * inverse_scale;
+        assert!(
+            widen > 0.0,
+            "the fixture must start narrower than the band ({widen} logical px)"
+        );
+        let widened = NARROW + widen;
+        if let Some(mut node) = app.world_mut().entity_mut(strip).get_mut::<Node>() {
+            node.width = Val::Px(widened);
+        }
+        settle(&mut app);
+
+        assert_eq!(
+            displayed(&app, marker),
+            Some(Display::None),
+            "at {widened} logical px the label fits without the marker, so the \
+             marker must come off — measuring against the shrunk clip leaves it \
+             on forever"
+        );
+        let (natural_now, laid_out_now) = app
+            .world()
+            .entity(clip)
+            .get::<ComputedNode>()
+            .map(|computed| (computed.content_size.x, computed.size.x))
+            .ok_or("the clip is still laid out")?;
+        assert!(
+            natural_now <= laid_out_now,
+            "with the marker gone the whole label must fit its box \
+             ({natural_now} px of label in {laid_out_now} px)"
+        );
         Ok(())
     }
 

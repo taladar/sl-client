@@ -79,6 +79,7 @@ use sl_viewer_ui_core::ui_element::{
     AlignEdge, AlignmentGroup, ElementCx, RadialCentre, RadialPlacement, TextMayClip, UiAction,
     UiElement,
 };
+use sl_viewer_ui_core::ui_ellipsis::apply_reveal_ellipsis;
 use sl_viewer_ui_core::ui_font::register_ui_fonts;
 
 /// A boxed error, so a test can use `?` rather than the workspace-denied
@@ -380,6 +381,10 @@ impl LayoutTest {
                 .chain()
                 .before(UiSystems::Layout),
         );
+        // The scaffold's after-layout half, likewise: a clipped value's `…`
+        // marker is revealed from the box layout just gave it, so a fixture that
+        // clips is laid out here exactly as it is live.
+        app.add_systems(PostUpdate, apply_reveal_ellipsis.after(UiSystems::Layout));
 
         // **Widget layout systems**: a registered element whose placement is not
         // pure taffy needs its own system run, or the harness lays it out

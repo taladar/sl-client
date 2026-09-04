@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 311 |
 | blocked | 56 |
 | in-progress | 18 |
-| bugs | 66 |
-| done | 974 |
+| bugs | 65 |
+| done | 975 |
 | deferred | 25 |
 | wont-do | 14 |
 | **total** | **1562** |
@@ -1183,7 +1183,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (66)
+## bugs (65)
 
 ### viewer
 
@@ -1219,8 +1219,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   forever
 - [`viewer-audit-display-name-accessor-sweep`](bugs/viewer-audit-display-name-accessor-sweep.md)
   — Ten display sites call the wire-name accessor, so display names are ignored
-- [`viewer-audit-ellipsis-reveal-latch`](bugs/viewer-audit-ellipsis-reveal-latch.md)
-  — A cell about one ellipsis wide latches a permanent spurious ellipsis
 - [`viewer-audit-env-overrides-preferences`](bugs/viewer-audit-env-overrides-preferences.md)
   — Environment variables silently override live graphics preferences
 - [`viewer-audit-inventory-delete-guard-parity`](bugs/viewer-audit-inventory-delete-guard-parity.md)
@@ -1341,7 +1339,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (974)
+## done (975)
 
 ### protocol
 
@@ -1600,6 +1598,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The bevy command dispatcher discards 300 protocol send results with no log
 - [`viewer-audit-diagnostic-stream-unread`](done/viewer-audit-diagnostic-stream-unread.md)
   — The viewer collects protocol diagnostics and drains none of them
+- [`viewer-audit-ellipsis-reveal-latch`](done/viewer-audit-ellipsis-reveal-latch.md)
+  — A cell about one ellipsis wide latches a permanent spurious ellipsis
 - [`viewer-audit-environment-parcel-reply`](done/viewer-audit-environment-parcel-reply.md)
   — A parcel environment reply is accepted as the shared one
 - [`viewer-audit-gpu-pick-slot-lifecycle`](done/viewer-audit-gpu-pick-slot-lifecycle.md)

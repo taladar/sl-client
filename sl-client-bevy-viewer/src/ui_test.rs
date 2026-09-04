@@ -182,13 +182,15 @@ mod tests {
     ///    like the padding pair above — clearly shorter than the *same* name in a
     ///    plain wrapping column, so the test has teeth (it would not pass vacuously
     ///    if the name happened to fit).
-    /// 2. **Ellipsis trigger.** `ellipsis_visible` is true for the clip holding
-    ///    the long name (its content is wider than its shrunk box) and false for a
-    ///    clip holding a short one — the exact condition
-    ///    `apply_inventory_row_ellipsis` toggles the marker on.
+    /// 2. **Ellipsis trigger.** `ui_ellipsis::ellipsis_wanted` is true for the
+    ///    clip holding the long name (its content is wider than its box) and
+    ///    false for a clip holding a short one — the exact condition
+    ///    `apply_reveal_ellipsis` toggles the marker on. There is no marker in
+    ///    this fixture, so the width it would occupy is zero.
     #[test]
     fn a_long_inventory_row_label_clips_and_flags_the_ellipsis() {
-        use crate::inventory::{ellipsis_visible, label_clip_node};
+        use crate::inventory::label_clip_node;
+        use sl_viewer_ui_core::ui_ellipsis::ellipsis_wanted;
 
         /// A name far wider than the bounded row, so wrapping (if it happened)
         /// would take several lines and the clip must overflow.
@@ -305,7 +307,9 @@ mod tests {
             app.world()
                 .entity(entity)
                 .get::<ComputedNode>()
-                .is_some_and(ellipsis_visible)
+                .is_some_and(|computed| {
+                    ellipsis_wanted(computed.content_size.x, computed.size.x, 0.0)
+                })
         };
         assert!(
             overflows(&app, fixed_clip),
