@@ -120,6 +120,59 @@ it can never clear, so the dependent is parked forever — drop the edge or
 reconsider the task. The generated `INDEX.md` annotates each task's line with
 its blockers, tagging any that are already `done`.
 
+## Working in parallel (several worktrees)
+
+When more than one agent works this repo at once, each from its own
+`git worktree`, they coordinate through `roadmap/coord.sh`. Its state lives in
+the shared `.git` directory, so every worktree sees the same picture, and
+nothing about it is committed — the durable record stays what it has always
+been: the task file's status directory, moved with `git mv`.
+
+```sh
+roadmap/coord.sh status                        # who holds what, on which branch
+roadmap/coord.sh claim <id> --subsystem <area> # one agent per task
+roadmap/coord.sh release
+```
+
+**Read `status` before picking a task.** It lists every live agent's claim and
+the crates its unmerged commits already touch. Prefer a task in a different
+area from what another agent is rewriting — an import conflict is cheap to
+merge, two rewrites of one subsystem are not. Claiming a task another agent
+holds is refused; overlapping on a subsystem only warns.
+
+Claiming does not move the file: run the printed `git mv` into `in-progress/`
+and commit it yourself, as before.
+
+### Heavy commands take a slot
+
+```sh
+roadmap/coord.sh heavy -- cargo clippy -p sl-wire
+roadmap/coord.sh heavy --exclusive -- cargo build --release -p sl-client-bevy-viewer
+```
+
+Builds, tests and **commits** (the pre-commit hook runs cargo-hack's feature
+powerset and the full nextest suite, so committing *is* a large build) go
+through `heavy`. It bounds how many run at once, waits for real free memory,
+and runs each in its own transient systemd scope.
+
+That last part is the one that matters most: `systemd-oomd` kills whole
+cgroups, so a build started straight from the agent's terminal takes the agent
+and every one of its subprocesses down with it when memory runs out. In its own
+scope, the build is the only casualty — it exits 137 and the session survives.
+
+Use `--exclusive` for a full or release build of `sl-client-bevy-viewer`: a
+single rustc for that crate has been measured near 16 GiB, and two of them do
+not fit. A `PreToolUse` hook in `.claude/settings.json` denies an unwrapped
+heavy command and tells you the wrapped form, so this cannot be forgotten;
+`ROADMAP_COORD_BYPASS=1` is the escape hatch. Tuning lives in
+`roadmap/coord.conf`.
+
+Before adding a worktree, `export CEF_PATH=$HOME/.cache/cef` —
+`.cargo/config.toml` pins `CEF_PATH` relative, so a fresh worktree otherwise
+re-downloads 1.8 GiB.
+Keep per-worktree `target/` directories; a shared one serialises on cargo's own
+build lock, putting a quick check behind a full release build.
+
 ## Conventions
 
 - Markdown layout is whatever `rumdl fmt` produces (`rumdl.toml` sets
@@ -128,3 +181,6 @@ its blockers, tagging any that are already `done`.
   resolves, every `status:` matches its directory, no duplicate ids, and the
   `blocked_by` partial order holds (see above). Use it as a gate before
   committing roadmap changes.
+- `python3 roadmap/index.py --locate <id>` prints `<status>` and the file's
+  path for one id (exit 1 if unknown). `coord.sh` uses it to reject a claim on
+  a finished task and to work out the `git mv` to suggest.

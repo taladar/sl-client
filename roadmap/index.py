@@ -17,6 +17,11 @@ Usage::
 
     python3 roadmap/index.py            # rewrite roadmap/INDEX.md
     python3 roadmap/index.py --check    # validate only, exit non-zero on error
+    python3 roadmap/index.py --locate <id>   # print "<status>\\t<path>"
+
+``--locate`` lets sibling tooling (notably ``coord.sh``, which claims a task for
+one worktree) resolve an id to its status and file without reimplementing the
+front-matter parser. It prints nothing and exits 1 when the id is unknown.
 """
 
 from __future__ import annotations
@@ -64,6 +69,26 @@ TOPICS = [
 WIKILINK = re.compile(r"\[\[([a-z0-9][a-z0-9-]*)\]\]")
 
 
+def strip_code(text: str) -> str:
+    """Drop fenced blocks and inline-code spans before harvesting wikilinks.
+
+    A ``[[id]]`` written as *data* — a syntax example, a rendered-output sample,
+    a literal from the protocol under discussion — is not a cross-reference, and
+    treating it as one makes ``--check`` fail on a file that is perfectly
+    correct."""
+    out = []
+    in_fence = False
+    for line in text.splitlines():
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        # even-indexed segments are outside inline `code` spans
+        out.append("".join(line.split("`")[::2]))
+    return "\n".join(out)
+
+
 class Task:
     """One parsed task file."""
 
@@ -90,7 +115,9 @@ class Task:
         # Front-matter refs plus inline [[id]] links in the body, de-duplicated
         # while preserving first-seen order.
         seen = {}
-        for ref in list(self.meta.get("refs", [])) + WIKILINK.findall(self.body):
+        for ref in list(self.meta.get("refs", [])) + WIKILINK.findall(
+            strip_code(self.body)
+        ):
             seen.setdefault(ref, None)
         return list(seen)
 
@@ -361,8 +388,30 @@ def blocked_by_suffix(task, status_by_id) -> str:
     return " (blocked by " + ", ".join(parts) + ")"
 
 
+def locate(task_id: str) -> int:
+    """Print ``<status>\\t<path relative to the repo root>`` for one task id.
+
+    This exists so sibling tooling can resolve an id without reimplementing the
+    front-matter parser: ``coord.sh`` uses it to reject a claim on a task that is
+    already ``done/`` and to suggest the ``git mv`` into ``in-progress/``.
+    Deliberately silent and non-zero on an unknown id, so a caller can treat "not
+    a roadmap task" as an ordinary outcome rather than an error to parse."""
+    for task in load_tasks():
+        if task.id == task_id:
+            print(f"{task.status_dir}\t{task.path.relative_to(ROADMAP_DIR.parent)}")
+            return 0
+    return 1
+
+
 def main() -> int:
-    check = "--check" in sys.argv[1:]
+    args = sys.argv[1:]
+    if "--locate" in args:
+        index = args.index("--locate")
+        if index + 1 >= len(args):
+            print("error: --locate wants a task id", file=sys.stderr)
+            return 2
+        return locate(args[index + 1])
+    check = "--check" in args
     tasks = load_tasks()
     errors, ref_warnings = validate(tasks)
     for warning in ref_warnings:

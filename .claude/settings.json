@@ -1,0 +1,52 @@
+{
+	"hooks": {
+		"PreToolUse": [
+			{
+				"matcher": "Bash",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "\"$CLAUDE_PROJECT_DIR\"/roadmap/coord.sh hook-pretooluse",
+						"timeout": 10
+					}
+				]
+			}
+		]
+	},
+	"permissions": {
+		"allow": [
+			"Bash(roadmap/coord.sh status)",
+			"Bash(roadmap/coord.sh register)",
+			"Bash(roadmap/coord.sh release)",
+			"Bash(roadmap/coord.sh unmerged)",
+			"Bash(roadmap/coord.sh reap)",
+			"Bash(roadmap/coord.sh claim *)",
+			"Bash(roadmap/coord.sh heavy -- cargo clippy *)",
+			"Bash(roadmap/coord.sh heavy --exclusive -- cargo clippy *)",
+			"Bash(roadmap/coord.sh heavy -- cargo test *)",
+			"Bash(roadmap/coord.sh heavy --exclusive -- cargo test *)",
+			"Bash(roadmap/coord.sh heavy -- cargo build *)",
+			"Bash(roadmap/coord.sh heavy --exclusive -- cargo build *)",
+			"Bash(roadmap/coord.sh heavy -- cargo doc *)",
+			"Bash(roadmap/coord.sh heavy --exclusive -- cargo doc *)",
+			"Bash(roadmap/coord.sh heavy -- cargo check *)",
+			"Bash(roadmap/coord.sh heavy --exclusive -- cargo check *)",
+			"Bash(roadmap/coord.sh heavy -- RUSTDOCFLAGS=\"-D warnings -D rustdoc::private_intra_doc_links\" cargo doc -p sl-wire --no-deps)",
+			"Bash(roadmap/coord.sh heavy --exclusive -- RUSTDOCFLAGS=\"-D warnings -D rustdoc::private_intra_doc_links\" cargo doc -p sl-wire --no-deps)",
+			"Bash(roadmap/coord.sh heavy -- RUSTDOCFLAGS=\"-D warnings\" cargo doc -p sl-repl --no-deps)",
+			"Bash(roadmap/coord.sh heavy --exclusive -- RUSTDOCFLAGS=\"-D warnings\" cargo doc -p sl-repl --no-deps)",
+			"Bash(roadmap/coord.sh heavy -- cargo deny *)",
+			"Bash(roadmap/coord.sh heavy --exclusive -- cargo deny *)",
+			"Bash(roadmap/coord.sh heavy -- cargo run *)",
+			"Bash(roadmap/coord.sh heavy --exclusive -- cargo run *)",
+			"Bash(roadmap/coord.sh heavy -- RUSTDOCFLAGS=\"-D warnings\" cargo doc -p sl-lsl-lsp --no-deps)",
+			"Bash(roadmap/coord.sh heavy --exclusive -- RUSTDOCFLAGS=\"-D warnings\" cargo doc -p sl-lsl-lsp --no-deps)",
+			"Bash(roadmap/coord.sh heavy -- SL_VIEWER_LOG_BAKE=1 timeout 1800 cargo test -p sl-client-bevy-viewer --release static_casters_stay_shadowed_across_a_rebake -- --nocapture)",
+			"Bash(roadmap/coord.sh heavy --exclusive -- SL_VIEWER_LOG_BAKE=1 timeout 1800 cargo test -p sl-client-bevy-viewer --release static_casters_stay_shadowed_across_a_rebake -- --nocapture)",
+			"Bash(roadmap/coord.sh heavy -- SL_VIEWER_LOG_BAKE=1 timeout 1800 cargo test -p sl-client-bevy-viewer --release shadow -- --nocapture)",
+			"Bash(roadmap/coord.sh heavy --exclusive -- SL_VIEWER_LOG_BAKE=1 timeout 1800 cargo test -p sl-client-bevy-viewer --release shadow -- --nocapture)",
+			"Bash(roadmap/coord.sh heavy -- cargo nextest *)",
+			"Bash(roadmap/coord.sh heavy --exclusive -- cargo nextest *)"
+		]
+	}
+}
