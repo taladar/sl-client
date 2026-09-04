@@ -3948,4 +3948,280 @@ mod tests {
             .filter(|entity_name| entity_name.as_str() == name)
             .count()
     }
+
+    /// **The bar, driven** (`viewer-ui-widget-interaction-suite`): open,
+    /// navigate, dismiss — with a pointer that has to hit what it aims at and
+    /// keys that arrive as keys.
+    ///
+    /// Three of this widget's behaviours are *defined* in terms of the pointer
+    /// and cannot be reached any other way:
+    ///
+    /// - `switch_menu_on_hover` reads the live `HoverMap`, so the sweep across
+    ///   the bar (one menu closing as the next opens, with no click) simply
+    ///   does not happen in a harness that has no hover;
+    /// - `manage_submenus` opens and closes a branch's child list from the same
+    ///   map, hit-testing through the popup that escaped its clipping ancestor;
+    /// - the root dismiss observer only ever fires for a press that reached the
+    ///   root, which is a statement about what the popups consume.
+    ///
+    /// The keyboard half is here for a different reason: live, a menu is opened
+    /// with the mouse and then walked with the arrows, and the focus that makes
+    /// that work is placed by the *click*. The tests above set focus by hand
+    /// and would keep passing if a click had stopped placing it.
+    mod scenarios {
+        use bevy::input::keyboard::Key;
+        use bevy::prelude::*;
+        use pretty_assertions::assert_eq;
+
+        use super::{FIXTURE_MENU_BAR, MenuHost, MenuKeyboard, TestError};
+        use crate::menu::{MenuWidgetPlugin, spawn_menu_bar};
+        use crate::ui_test::interact::{self, InteractionTest};
+        use crate::ui_test::{drain_actions, enable_action_recording, find_by_name, settle};
+        use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems};
+        use sl_viewer_ui_core::ui_element::{ElementCx, UiAction};
+
+        /// The element the fixture bar attributes its actions to.
+        const ELEMENT: &str = "test-bar";
+
+        /// The fixture menu bar under the real pointer stack.
+        fn bar_app() -> App {
+            let mut app = InteractionTest::new().build();
+            app.add_plugins(MenuWidgetPlugin);
+            enable_action_recording(&mut app);
+            app.add_systems(
+                Startup,
+                (|mut commands: Commands, root: Res<UiRoot>| {
+                    spawn_menu_bar(
+                        &mut commands,
+                        root.0,
+                        ElementCx::new(),
+                        &FIXTURE_MENU_BAR,
+                        ELEMENT,
+                    );
+                })
+                .after(UiScaffoldSystems::SpawnRoot),
+            );
+            settle(&mut app);
+            app
+        }
+
+        /// How many of the bar's menus are open.
+        fn open_menus(app: &mut App) -> usize {
+            app.world_mut()
+                .query::<&MenuHost>()
+                .iter(app.world())
+                .filter(|host| host.open.is_some())
+                .count()
+        }
+
+        /// Whether the named node exists (a popup is spawned on open and
+        /// despawned on close, so its presence *is* its openness).
+        fn present(app: &mut App, name: &str) -> bool {
+            find_by_name(app, name).is_some()
+        }
+
+        /// A click opens a top menu; sweeping the pointer onto the next button
+        /// switches to that one without a second click; a click on the open
+        /// button closes it again.
+        #[test]
+        fn a_click_opens_a_menu_and_a_sweep_switches_it() -> Result<(), TestError> {
+            let mut app = bar_app();
+            assert_eq!(open_menus(&mut app), 0, "the bar rests closed");
+
+            interact::click_node(&mut app, "menu-button:Avatar")?;
+            settle(&mut app);
+            assert!(
+                present(&mut app, "menu-popup:Avatar"),
+                "the click dropped it"
+            );
+
+            // No click: the bar reads as one strip you sweep across once
+            // something on it is open.
+            interact::hover_node(&mut app, "menu-button:World")?;
+            settle(&mut app);
+            assert!(
+                present(&mut app, "menu-popup:World"),
+                "hovering the next button opens that menu"
+            );
+            assert!(
+                !present(&mut app, "menu-popup:Avatar"),
+                "and the previous one closes — at most one bar menu is ever down"
+            );
+            assert_eq!(open_menus(&mut app), 1);
+
+            interact::click_node(&mut app, "menu-button:World")?;
+            settle(&mut app);
+            assert_eq!(
+                open_menus(&mut app),
+                0,
+                "clicking the open button closes it"
+            );
+            Ok(())
+        }
+
+        /// Hovering a branch line opens its submenu, and sweeping off it (onto
+        /// a sibling line) closes it again.
+        #[test]
+        fn hovering_a_branch_opens_its_submenu_and_leaving_closes_it() -> Result<(), TestError> {
+            let mut app = bar_app();
+            interact::click_node(&mut app, "menu-button:World")?;
+            settle(&mut app);
+
+            interact::hover_node(&mut app, "menu-submenu:Environment")?;
+            settle(&mut app);
+            assert!(
+                present(&mut app, "menu-popup:Environment"),
+                "the branch's child list opens under the pointer"
+            );
+            assert!(
+                present(&mut app, "menu-item:env-midday"),
+                "and it is the child list, with its own entries"
+            );
+
+            interact::hover_node(&mut app, "menu-item:teleport-home")?;
+            settle(&mut app);
+            assert!(
+                !present(&mut app, "menu-popup:Environment"),
+                "sweeping onto a sibling line closes the submenu again"
+            );
+            Ok(())
+        }
+
+        /// Clicking an entry emits its action and takes the whole bar down.
+        #[test]
+        fn an_entry_click_emits_its_action_and_closes_the_bar() -> Result<(), TestError> {
+            let mut app = bar_app();
+            interact::click_node(&mut app, "menu-button:Avatar")?;
+            settle(&mut app);
+            let _opening = drain_actions(&mut app);
+
+            interact::click_node(&mut app, "menu-item:appearance")?;
+            settle(&mut app);
+
+            let actions: Vec<UiAction> = drain_actions(&mut app);
+            let action = actions.first().ok_or("the entry emitted nothing")?;
+            assert_eq!(action.action, "appearance");
+            assert_eq!(action.element, ELEMENT);
+            assert_eq!(actions.len(), 1, "one pick, one action: {actions:?}");
+            assert_eq!(open_menus(&mut app), 0, "picking closes the menu");
+            Ok(())
+        }
+
+        /// A press outside every popup dismisses the bar and emits nothing —
+        /// the escape route from a menu opened by mistake.
+        #[test]
+        fn an_outside_press_dismisses_the_bar() -> Result<(), TestError> {
+            let mut app = bar_app();
+            interact::click_node(&mut app, "menu-button:Avatar")?;
+            settle(&mut app);
+            let _opening = drain_actions(&mut app);
+
+            interact::click(&mut app, Vec2::new(900.0, 800.0), MouseButton::Left);
+            settle(&mut app);
+
+            assert_eq!(open_menus(&mut app), 0, "the press outside closed it");
+            let actions = drain_actions(&mut app);
+            assert!(actions.is_empty(), "and picked nothing: {actions:?}");
+            Ok(())
+        }
+
+        /// The mixed gesture a user actually makes: open with the mouse, walk
+        /// with the arrows, commit with `Enter`.
+        ///
+        /// The keyboard only reaches the menu because the click placed focus on
+        /// the bar button, so this is as much a test of the click as of the
+        /// arrows.
+        #[test]
+        fn a_clicked_menu_is_walked_and_activated_from_the_keyboard() -> Result<(), TestError> {
+            let mut app = bar_app();
+            interact::click_node(&mut app, "menu-button:Avatar")?;
+            settle(&mut app);
+            let _opening = drain_actions(&mut app);
+            assert!(
+                app.world().resource::<MenuKeyboard>().focus_captured,
+                "opening by click hands the keyboard to the menu"
+            );
+
+            // Down to the first entry, then down again to the second.
+            interact::tap(&mut app, KeyCode::ArrowDown, Key::ArrowDown);
+            settle(&mut app);
+            let first = app.world().resource::<MenuKeyboard>().highlighted;
+            interact::tap(&mut app, KeyCode::ArrowDown, Key::ArrowDown);
+            settle(&mut app);
+            let second = app.world().resource::<MenuKeyboard>().highlighted;
+            assert!(
+                first.is_some() && first != second,
+                "the arrows step the highlight: {first:?} -> {second:?}"
+            );
+
+            interact::tap(&mut app, KeyCode::Enter, Key::Enter);
+            settle(&mut app);
+
+            let actions: Vec<UiAction> = drain_actions(&mut app);
+            let action = actions.first().ok_or("Enter activated nothing")?;
+            assert_eq!(
+                action.action, "appearance",
+                "Enter activates the highlighted entry, the second one"
+            );
+            assert_eq!(open_menus(&mut app), 0, "and the bar closes behind it");
+            Ok(())
+        }
+
+        /// `Escape` closes an open menu without picking anything.
+        #[test]
+        fn escape_closes_the_open_menu() -> Result<(), TestError> {
+            let mut app = bar_app();
+            interact::click_node(&mut app, "menu-button:Avatar")?;
+            settle(&mut app);
+            let _opening = drain_actions(&mut app);
+
+            interact::tap(&mut app, KeyCode::Escape, Key::Escape);
+            settle(&mut app);
+
+            assert_eq!(open_menus(&mut app), 0, "Escape closes the menu");
+            let actions = drain_actions(&mut app);
+            assert!(actions.is_empty(), "and picks nothing: {actions:?}");
+            Ok(())
+        }
+
+        /// **A canary, not a contract**: the accelerators this widget *draws*
+        /// are dead, and pressing one does nothing
+        /// (`viewer-menu-accelerators-inert`).
+        ///
+        /// The fixture's Inventory entry is drawn with `Ctrl+I` beside it and
+        /// no code here routes that chord to the command — the chords that do
+        /// work in the viewer each have a bespoke handler elsewhere. This is
+        /// pinned the way the harness pins every known-broken behaviour: the
+        /// breakage must still be *there*, so the day a generic
+        /// accelerator dispatcher lands, this test fails and has to be replaced
+        /// by its positive counterpart (Ctrl+I emits `inventory`) in the same
+        /// commit. A test that merely tolerated the gap would go on passing
+        /// forever and stop meaning anything.
+        #[test]
+        fn a_drawn_accelerator_is_still_inert() -> Result<(), TestError> {
+            let mut app = bar_app();
+            let _resting = drain_actions(&mut app);
+            // The label is really drawn — otherwise this would be pinning the
+            // absence of an accelerator rather than the absence of its wiring.
+            assert!(
+                present(&mut app, "menu-button:Avatar"),
+                "the fixture bar is up"
+            );
+
+            interact::with_modifier(&mut app, KeyCode::ControlLeft, Key::Control, |app| {
+                interact::tap(app, KeyCode::KeyI, Key::Character("i".into()));
+            });
+            settle(&mut app);
+
+            let actions = drain_actions(&mut app);
+            assert!(
+                actions.is_empty(),
+                "the accelerator drawn on Inventory does nothing yet \
+                 (viewer-menu-accelerators-inert); if this fails, the dispatcher \
+                 landed — assert the action instead: {actions:?}"
+            );
+            assert_eq!(open_menus(&mut app), 0, "and opens no menu either");
+            Ok(())
+        }
+    }
 }

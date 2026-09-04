@@ -747,4 +747,254 @@ mod tests {
         );
         Ok(())
     }
+
+    /// **The drop-down, driven** (`viewer-ui-widget-interaction-suite`): the
+    /// open → pick → dismiss scenarios, through the real pointer.
+    ///
+    /// The tests above reach the widget by hand — they write a
+    /// [`super::ComboSelection`], spawn a bare [`super::ComboPopover`], read a
+    /// component back. That is the right shape for the reconcile rules, and it
+    /// is blind to the half a user actually meets: whether a press *lands* on
+    /// the anchor, whether the popover it builds has a box anyone can hit, and
+    /// whether the row under the pointer is the option the list is showing
+    /// there. Every test here goes through hit-testing, so it fails if the
+    /// popover opens somewhere unreachable — which is the shape
+    /// [[viewer-combo-stops-opening]] would take if it were reproducible.
+    mod scenarios {
+        use bevy::prelude::*;
+        use pretty_assertions::assert_eq;
+
+        use super::TestError;
+        use crate::ui_combo::{ComboChanged, ComboSpec, ComboWidgetPlugin, spawn_combo};
+        use crate::ui_test::interact::{self, InteractionTest};
+        use crate::ui_test::{drain, find_by_name, record, settle};
+        use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems};
+
+        /// The element id every scenario combo carries, and so the prefix of
+        /// its node names.
+        const ELEMENT: &str = "test-combo";
+
+        /// The anchor button's node name.
+        const ANCHOR: &str = "test-combo:combo";
+
+        /// The closed value text's node name.
+        const VALUE: &str = "test-combo:combo-value";
+
+        /// The options the scenario combo lists, in order. Also the
+        /// **address space** the pinning test below fixes: option *N* is
+        /// `combo-option:N`, and which label sits there is a fact a user's hand
+        /// learns.
+        const OPTIONS: [&str; 3] = ["Low", "Medium", "High"];
+
+        /// One combo under the real pointer stack, with the widget's own plugin
+        /// (the selection reconcile, the change message, the root dismiss
+        /// observer) and a [`ComboChanged`] recorder.
+        fn combo_app(active: usize) -> App {
+            let mut app = InteractionTest::new().build();
+            app.add_plugins(ComboWidgetPlugin);
+            record::<ComboChanged>(&mut app);
+            app.add_systems(
+                Startup,
+                (move |mut commands: Commands, root: Res<UiRoot>| {
+                    let labels: Vec<String> =
+                        OPTIONS.iter().map(|label| (*label).to_owned()).collect();
+                    spawn_combo(
+                        &mut commands,
+                        root.0,
+                        &ComboSpec {
+                            element: ELEMENT,
+                            labels: &labels,
+                            active,
+                            tab_index: 1,
+                            font_size: 14.0,
+                            translate_labels: false,
+                        },
+                    );
+                })
+                .after(UiScaffoldSystems::SpawnRoot),
+            );
+            settle(&mut app);
+            app
+        }
+
+        /// Whether a popover is up — the widget despawns it on close, so its
+        /// node existing and the list being open are the same thing.
+        fn is_open(app: &mut App) -> bool {
+            find_by_name(app, "combo-popover").is_some()
+        }
+
+        /// The text a node (or its first text child) is showing.
+        fn label_at(app: &mut App, name: &str) -> Option<String> {
+            let entity = find_by_name(app, name)?;
+            if let Some(text) = app.world().get::<Text>(entity) {
+                return Some(text.0.clone());
+            }
+            let children = app.world().get::<Children>(entity)?;
+            children
+                .iter()
+                .find_map(|child| app.world().get::<Text>(child))
+                .map(|text| text.0.clone())
+        }
+
+        /// The combo's selected index, read off the anchor.
+        fn selected(app: &mut App) -> Option<usize> {
+            let anchor = find_by_name(app, ANCHOR)?;
+            app.world()
+                .get::<crate::ui_combo::ComboSelection>(anchor)
+                .map(|selection| selection.active)
+        }
+
+        /// A click on the anchor opens the list; a second one closes it again.
+        ///
+        /// Both halves are the same press arriving at the same widget, which is
+        /// the toggle's whole contract — and the reason the closing half is
+        /// worth a test is that the open popover is a full-size node sitting
+        /// directly under the anchor, so a placement that drifted upwards would
+        /// eat the second press and the list would never close.
+        #[test]
+        fn a_click_opens_the_list_and_a_second_click_closes_it() -> Result<(), TestError> {
+            let mut app = combo_app(1);
+            assert!(!is_open(&mut app), "a combo spawns closed");
+
+            interact::click_node(&mut app, ANCHOR)?;
+            settle(&mut app);
+            assert!(is_open(&mut app), "a primary click drops the list down");
+            let popover = find_by_name(&mut app, "combo-popover").ok_or("the list did not open")?;
+            let size = app
+                .world()
+                .get::<ComputedNode>(popover)
+                .ok_or("the open list never laid out")?
+                .size;
+            assert!(
+                size.x > 0.0 && size.y > 0.0,
+                "an open list a pointer cannot reach is not open: {size:?}"
+            );
+
+            interact::click_node(&mut app, ANCHOR)?;
+            settle(&mut app);
+            assert!(!is_open(&mut app), "the second click closes the list");
+            Ok(())
+        }
+
+        /// Clicking an option moves the selection, announces the pick, rewrites
+        /// the closed value, and puts the list away.
+        #[test]
+        fn clicking_an_option_moves_the_selection_and_closes_the_list() -> Result<(), TestError> {
+            let mut app = combo_app(1);
+            interact::click_node(&mut app, ANCHOR)?;
+            settle(&mut app);
+            let _opening = drain::<ComboChanged>(&mut app);
+
+            interact::click_node(&mut app, "combo-option:2")?;
+            settle(&mut app);
+
+            let picks = drain::<ComboChanged>(&mut app);
+            let pick = picks.first().ok_or("the pick was never announced")?;
+            assert_eq!(pick.active, 2, "the announced option is the one clicked");
+            assert_eq!(picks.len(), 1, "one pick, one message: {picks:?}");
+            assert_eq!(selected(&mut app), Some(2));
+            assert_eq!(
+                label_at(&mut app, VALUE),
+                Some("High".to_owned()),
+                "the closed combo shows what was picked"
+            );
+            assert!(!is_open(&mut app), "picking an option puts the list away");
+            Ok(())
+        }
+
+        /// Re-picking the option already selected closes the list and announces
+        /// nothing — a consumer must not see a change that did not happen.
+        #[test]
+        fn re_picking_the_active_option_announces_nothing() -> Result<(), TestError> {
+            let mut app = combo_app(1);
+            interact::click_node(&mut app, ANCHOR)?;
+            settle(&mut app);
+            let _opening = drain::<ComboChanged>(&mut app);
+
+            interact::click_node(&mut app, "combo-option:1")?;
+            settle(&mut app);
+
+            assert_eq!(
+                drain::<ComboChanged>(&mut app).len(),
+                0,
+                "re-picking the active option is not a change"
+            );
+            assert_eq!(selected(&mut app), Some(1));
+            assert!(!is_open(&mut app), "it still closes the list");
+            Ok(())
+        }
+
+        /// A press anywhere outside the list dismisses it and leaves the
+        /// selection alone — the escape route from a list opened by mistake.
+        #[test]
+        fn a_press_outside_dismisses_the_list() -> Result<(), TestError> {
+            let mut app = combo_app(0);
+            interact::click_node(&mut app, ANCHOR)?;
+            settle(&mut app);
+            assert!(is_open(&mut app));
+
+            // Far from the anchor, which sits at the top-left of the root: the
+            // press lands on the root, whose dismiss observer closes the list.
+            interact::click(&mut app, Vec2::new(900.0, 700.0), MouseButton::Left);
+            settle(&mut app);
+
+            assert!(!is_open(&mut app), "an outside press dismisses the list");
+            assert_eq!(selected(&mut app), Some(0), "and changes nothing");
+            assert_eq!(drain::<ComboChanged>(&mut app).len(), 0);
+            Ok(())
+        }
+
+        /// **The address table**: option *N* is at `combo-option:N`, shows the
+        /// label this table names, and the rows run down the list in index
+        /// order.
+        ///
+        /// The same argument as the pie menu's compass addresses: a user picks
+        /// the second entry without reading it, so a refactor that reorders the
+        /// options — or that renumbers the rows while leaving the labels where
+        /// they look — has to say so here, in a diff a reviewer sees.
+        #[test]
+        fn the_open_list_keeps_its_declared_addresses() -> Result<(), TestError> {
+            let mut app = combo_app(0);
+            interact::click_node(&mut app, ANCHOR)?;
+            settle(&mut app);
+
+            let mut addressed: Vec<(String, String, f32)> = Vec::new();
+            for index in 0..OPTIONS.len() {
+                let name = format!("combo-option:{index}");
+                let row = find_by_name(&mut app, &name)
+                    .ok_or_else(|| format!("no row at address `{name}`"))?;
+                let label = label_at(&mut app, &name)
+                    .ok_or_else(|| format!("the row at `{name}` shows nothing"))?;
+                let top = app
+                    .world()
+                    .get::<UiGlobalTransform>(row)
+                    .ok_or_else(|| format!("the row at `{name}` never laid out"))?
+                    .translation
+                    .y;
+                addressed.push((name, label, top));
+            }
+
+            let table: Vec<(String, String)> = addressed
+                .iter()
+                .map(|(name, label, _top)| (name.clone(), label.clone()))
+                .collect();
+            assert_eq!(
+                table,
+                vec![
+                    ("combo-option:0".to_owned(), "Low".to_owned()),
+                    ("combo-option:1".to_owned(), "Medium".to_owned()),
+                    ("combo-option:2".to_owned(), "High".to_owned()),
+                ]
+            );
+
+            let tops: Vec<f32> = addressed.iter().map(|(_name, _label, top)| *top).collect();
+            let mut sorted = tops.clone();
+            sorted.sort_by(f32::total_cmp);
+            assert_eq!(
+                tops, sorted,
+                "the rows must run down the list in index order, not merely exist"
+            );
+            Ok(())
+        }
+    }
 }

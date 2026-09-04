@@ -3116,4 +3116,213 @@ mod tests {
         );
         Ok(())
     }
+
+    /// **The strip, driven** (`viewer-ui-widget-interaction-suite`): a real
+    /// click on a real tab, in each of the four edge orientations, and a real
+    /// drag on the divider between strip and panel.
+    ///
+    /// The tests above reach the widget through the [`ValueChange`] its
+    /// `RadioGroup` would have produced, and a hand-built `Pointer<Drag>` aimed
+    /// at the divider by entity. Both skip hit-testing, so both would keep
+    /// passing on a strip whose buttons had been laid out somewhere no pointer
+    /// can reach — behind the panel, off the edge of the container, clipped out
+    /// of the viewport. The orientation loop is the reason that is worth
+    /// paying for: which side the strip lands on is decided by flow order and
+    /// `strip_first`, and it is exactly the sort of thing that goes wrong for
+    /// one placement and not the other three.
+    mod scenarios {
+        use bevy::prelude::*;
+        use pretty_assertions::assert_eq;
+
+        use super::{
+            SAMPLE_LABELS, TAB_SELECTED_ACTION, TabPlacement, TabSpec, TabStrip, TabStripWidth,
+            TestError, spawn_tab_container,
+        };
+        use crate::ui_tab::TabWidgetPlugin;
+        use crate::ui_test::interact::{self, InteractionTest, centre_of};
+        use crate::ui_test::{drain_actions, enable_action_recording, find_by_name, settle};
+        use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems};
+        use sl_viewer_ui_core::ui_element::UiAction;
+
+        /// The element id every scenario container carries.
+        const ELEMENT: &str = "fixture";
+
+        /// One tab container under the real pointer stack, at `placement`, with
+        /// tab 0 active and the widget's own plugin driving it.
+        fn tab_app(placement: TabPlacement, strip_width: Option<f32>) -> App {
+            let mut app = InteractionTest::new().build();
+            app.add_plugins(TabWidgetPlugin);
+            enable_action_recording(&mut app);
+            app.add_systems(
+                Startup,
+                (move |mut commands: Commands, root: Res<UiRoot>| {
+                    let labels: Vec<String> = SAMPLE_LABELS
+                        .iter()
+                        .map(|label| (*label).to_owned())
+                        .collect();
+                    spawn_tab_container(
+                        &mut commands,
+                        root.0,
+                        &TabSpec {
+                            element: ELEMENT,
+                            placement,
+                            labels: &labels,
+                            active: 0,
+                            tab_index: 1,
+                            font_size: 15.0,
+                            strip_width,
+                            ellipsis: super::super::DEFAULT_ELLIPSIS,
+                            translate_labels: false,
+                        },
+                    );
+                })
+                .after(UiScaffoldSystems::SpawnRoot),
+            );
+            settle(&mut app);
+            app
+        }
+
+        /// The strip's active index.
+        fn active(app: &mut App) -> Option<usize> {
+            let strip = find_by_name(app, "fixture:tab-strip")?;
+            app.world().get::<TabStrip>(strip).map(|strip| strip.active)
+        }
+
+        /// Whether the named panel is the one on screen.
+        fn panel_shown(app: &mut App, index: usize) -> Option<bool> {
+            let panel = find_by_name(app, &format!("fixture:panel:{index}"))?;
+            app.world()
+                .get::<InheritedVisibility>(panel)
+                .map(|visible| visible.get())
+        }
+
+        /// A click on a tab switches the widget — in every placement.
+        ///
+        /// One app per placement rather than one app with four containers:
+        /// which side the strip sits on is a layout fact, and four widgets
+        /// sharing a root would let one that landed on top of another pass by
+        /// swallowing its clicks.
+        #[test]
+        fn a_click_switches_the_tab_in_every_placement() -> Result<(), TestError> {
+            for placement in [
+                TabPlacement::BlockStart,
+                TabPlacement::BlockEnd,
+                TabPlacement::InlineStart,
+                TabPlacement::InlineEnd,
+            ] {
+                let mut app = tab_app(placement, None);
+                let _resting = drain_actions(&mut app);
+                assert_eq!(active(&mut app), Some(0), "{placement:?} starts on tab 0");
+
+                interact::click_node(&mut app, "fixture:tab:2")?;
+                settle(&mut app);
+
+                assert_eq!(
+                    active(&mut app),
+                    Some(2),
+                    "{placement:?}: clicking tab 2 selects it"
+                );
+                assert_eq!(
+                    panel_shown(&mut app, 2),
+                    Some(true),
+                    "{placement:?}: tab 2's panel is the one on screen"
+                );
+                assert_eq!(
+                    panel_shown(&mut app, 0),
+                    Some(false),
+                    "{placement:?}: tab 0's panel went away"
+                );
+                let actions: Vec<UiAction> = drain_actions(&mut app);
+                let action = actions
+                    .first()
+                    .ok_or_else(|| format!("{placement:?}: the switch announced nothing"))?;
+                assert_eq!(action.action, TAB_SELECTED_ACTION);
+                assert_eq!(action.element, ELEMENT);
+                assert_eq!(
+                    actions.len(),
+                    1,
+                    "{placement:?}: one click, one action: {actions:?}"
+                );
+            }
+            Ok(())
+        }
+
+        /// Clicking the tab already open changes nothing and announces nothing —
+        /// so a consumer that rebuilds its panel on the action does not rebuild
+        /// it every time the user re-clicks where they already are.
+        #[test]
+        fn clicking_the_open_tab_announces_nothing() -> Result<(), TestError> {
+            let mut app = tab_app(TabPlacement::BlockStart, None);
+            let _resting = drain_actions(&mut app);
+
+            interact::click_node(&mut app, "fixture:tab:0")?;
+            settle(&mut app);
+
+            assert_eq!(active(&mut app), Some(0));
+            let actions = drain_actions(&mut app);
+            assert!(
+                actions.is_empty(),
+                "re-clicking the open tab is not a switch: {actions:?}"
+            );
+            Ok(())
+        }
+
+        /// A drag on the divider resizes the strip, and the width follows the
+        /// pointer the whole way rather than jumping to where it was released.
+        ///
+        /// The step-by-step check is the point: the observer sums `drag.delta`,
+        /// so a handler that read `distance` (the total since the press)
+        /// instead would land at four times the distance for a four-step drag
+        /// and still finish "in the right direction".
+        #[test]
+        fn a_divider_drag_resizes_the_strip_as_the_pointer_moves() -> Result<(), TestError> {
+            const START_WIDTH: f32 = 120.0;
+            const TRAVEL: f32 = 60.0;
+
+            let mut app = tab_app(TabPlacement::InlineStart, Some(START_WIDTH));
+            let strip = find_by_name(&mut app, "fixture:tab-strip").ok_or("no strip")?;
+            let width = |app: &App| -> Option<f32> {
+                app.world().get::<TabStripWidth>(strip).map(|width| width.0)
+            };
+            assert_eq!(width(&app), Some(START_WIDTH));
+
+            let grip =
+                centre_of(&mut app, "fixture:tab-divider").ok_or("the divider never laid out")?;
+            interact::drag(
+                &mut app,
+                grip,
+                Vec2::new(grip.x + TRAVEL, grip.y),
+                4,
+                MouseButton::Left,
+            );
+            settle(&mut app);
+
+            let widened = width(&app).ok_or("the strip lost its width")?;
+            let wanted = START_WIDTH + TRAVEL;
+            assert!(
+                (widened - wanted).abs() < 1.0,
+                "an {TRAVEL} px drag widens the strip by {TRAVEL} px, not {}: {widened}",
+                widened - START_WIDTH
+            );
+
+            // And back the other way, which a handler that only ever added
+            // would fail.
+            let from =
+                centre_of(&mut app, "fixture:tab-divider").ok_or("the divider moved away")?;
+            interact::drag(
+                &mut app,
+                from,
+                Vec2::new(from.x - TRAVEL, from.y),
+                4,
+                MouseButton::Left,
+            );
+            settle(&mut app);
+            let narrowed = width(&app).ok_or("the strip lost its width")?;
+            assert!(
+                (narrowed - START_WIDTH).abs() < 1.0,
+                "dragging back returns the strip to {START_WIDTH}: {narrowed}"
+            );
+            Ok(())
+        }
+    }
 }

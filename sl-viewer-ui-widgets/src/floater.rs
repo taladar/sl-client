@@ -2155,4 +2155,189 @@ mod tests {
         );
         Ok(())
     }
+
+    /// **The window, driven** (`viewer-ui-widget-interaction-suite`): the title
+    /// bar dragged, the grip dragged, the close button clicked — by a pointer
+    /// that has to find each of them where it is drawn.
+    ///
+    /// The tests above are split between the pure geometry functions
+    /// (`drag_position`, `resize_size`) and hand-triggered `Pointer<Drag>`s
+    /// aimed at an entity looked up through [`parts_of`]. What neither reaches
+    /// is the chrome's **layout**: the grip is an absolutely-positioned node
+    /// pinned to the trailing-bottom corner through a logical inset, drawn over
+    /// the content and blocking it, and the title bar is stretched across a
+    /// window whose width is its content's. A grip that mirrored to the wrong
+    /// corner, or a title bar that stopped filling the header, would pass every
+    /// test above and be un-grabbable in the viewer.
+    mod scenarios {
+        use bevy::prelude::*;
+        use pretty_assertions::assert_eq;
+
+        use super::{Floater, TestError};
+        use crate::floater::{FloaterCaps, FloaterPlugin, FloaterSpec, spawn_floater};
+        use crate::ui_test::interact::{self, InteractionTest, centre_of};
+        use crate::ui_test::{find_by_name, settle};
+        use sl_viewer_ui_core::ui::{UiPanelShown, UiRoot, UiScaffoldSystems};
+
+        /// Where the fixture floater opens, in logical pixels.
+        const START_POSITION: Vec2 = Vec2::new(120.0, 90.0);
+
+        /// The fixture floater's content area, in logical pixels — a definite
+        /// size, because the grip adjusts the *content* size and a purely
+        /// content-driven window has none to adjust.
+        const START_SIZE: Vec2 = Vec2::new(320.0, 220.0);
+
+        /// One resizable floater under the real pointer stack.
+        fn floater_app() -> App {
+            let mut app = InteractionTest::new().build();
+            app.add_plugins(FloaterPlugin);
+            app.add_systems(
+                Startup,
+                (|mut commands: Commands, root: Res<UiRoot>| {
+                    spawn_floater(
+                        &mut commands,
+                        root.0,
+                        FloaterSpec {
+                            id: "scenario",
+                            title: "Scenario".to_owned(),
+                            position: START_POSITION,
+                            default_size: Some(START_SIZE),
+                            min_size: None,
+                            dock_host: None,
+                            caps: FloaterCaps {
+                                resizable: true,
+                                minimizable: true,
+                                closable: true,
+                                dockable: false,
+                            },
+                        },
+                    );
+                })
+                .after(UiScaffoldSystems::SpawnRoot),
+            );
+            settle(&mut app);
+            // A floater spawns **hidden** — its opener shows it — and a
+            // `Display::None` window has no box for a pointer to find, so the
+            // fixture is its own opener.
+            let root = find_by_name(&mut app, "floater:scenario").unwrap_or(Entity::PLACEHOLDER);
+            if let Some(mut shown) = app.world_mut().get_mut::<UiPanelShown>(root) {
+                shown.0 = true;
+            }
+            settle(&mut app);
+            app
+        }
+
+        /// The floater's root entity.
+        fn floater(app: &mut App) -> Option<Entity> {
+            find_by_name(app, "floater:scenario")
+        }
+
+        /// Its remembered position and content size.
+        fn geometry(app: &mut App) -> Option<(Vec2, Option<Vec2>)> {
+            let root = floater(app)?;
+            app.world()
+                .get::<Floater>(root)
+                .map(|state| (state.position, state.content_size))
+        }
+
+        /// Dragging the title bar moves the window by what the pointer
+        /// travelled — and the grip, which sits on the opposite corner, moves
+        /// with it.
+        #[test]
+        fn a_title_bar_drag_moves_the_window() -> Result<(), TestError> {
+            const TRAVEL: Vec2 = Vec2::new(60.0, 40.0);
+
+            let mut app = floater_app();
+            assert_eq!(
+                geometry(&mut app).map(|(position, _size)| position),
+                Some(START_POSITION)
+            );
+            let grip_before = centre_of(&mut app, "floater-resize").ok_or("no grip")?;
+
+            let bar = centre_of(&mut app, "floater-title-bar").ok_or("no title bar")?;
+            // Component-wise `f32` throughout: the workspace's
+            // `arithmetic_side_effects` lint fires on `glam`'s operators.
+            let to = Vec2::new(bar.x + TRAVEL.x, bar.y + TRAVEL.y);
+            interact::drag(&mut app, bar, to, 4, MouseButton::Left);
+            settle(&mut app);
+
+            let (position, size) = geometry(&mut app).ok_or("the floater lost its state")?;
+            let wanted = Vec2::new(START_POSITION.x + TRAVEL.x, START_POSITION.y + TRAVEL.y);
+            assert!(
+                position.distance(wanted) < 1.0,
+                "the window follows the pointer: {position:?} vs {wanted:?}"
+            );
+            assert_eq!(size, Some(START_SIZE), "moving a window does not resize it");
+
+            let grip_after =
+                centre_of(&mut app, "floater-resize").ok_or("the grip went missing")?;
+            let grip_wanted = Vec2::new(grip_before.x + TRAVEL.x, grip_before.y + TRAVEL.y);
+            assert!(
+                grip_after.distance(grip_wanted) < 2.0,
+                "the chrome travelled with the window: {grip_before:?} -> {grip_after:?}"
+            );
+            Ok(())
+        }
+
+        /// Dragging the grip resizes the content area, and the window's own box
+        /// grows with it — the grip is on the corner the drag pushes.
+        #[test]
+        fn a_grip_drag_resizes_the_content_area() -> Result<(), TestError> {
+            const TRAVEL: Vec2 = Vec2::new(50.0, 30.0);
+
+            let mut app = floater_app();
+            let root = floater(&mut app).ok_or("no floater")?;
+            let width_before = app
+                .world()
+                .get::<ComputedNode>(root)
+                .map(|node| node.size().x)
+                .ok_or("the floater never laid out")?;
+
+            let grip = centre_of(&mut app, "floater-resize").ok_or("no grip")?;
+            let to = Vec2::new(grip.x + TRAVEL.x, grip.y + TRAVEL.y);
+            interact::drag(&mut app, grip, to, 4, MouseButton::Left);
+            settle(&mut app);
+
+            let size = geometry(&mut app)
+                .and_then(|(_position, size)| size)
+                .ok_or("the floater lost its size")?;
+            let wanted = Vec2::new(START_SIZE.x + TRAVEL.x, START_SIZE.y + TRAVEL.y);
+            assert!(
+                size.distance(wanted) < 1.5,
+                "the content area follows the grip: {size:?} vs {wanted:?}"
+            );
+            let width_after = app
+                .world()
+                .get::<ComputedNode>(root)
+                .map(|node| node.size().x)
+                .ok_or("the floater lost its box")?;
+            assert!(
+                width_after > width_before,
+                "and the window grew with it: {width_before} -> {width_after}"
+            );
+            Ok(())
+        }
+
+        /// The close button closes the window it is drawn on.
+        #[test]
+        fn the_close_button_closes_the_window() -> Result<(), TestError> {
+            let mut app = floater_app();
+            let root = floater(&mut app).ok_or("no floater")?;
+            assert_eq!(
+                app.world().get::<UiPanelShown>(root).map(|shown| shown.0),
+                Some(true),
+                "the fixture opens shown"
+            );
+
+            interact::click_node(&mut app, "floater-button:close")?;
+            settle(&mut app);
+
+            assert_eq!(
+                app.world().get::<UiPanelShown>(root).map(|shown| shown.0),
+                Some(false),
+                "the × closed it"
+            );
+            Ok(())
+        }
+    }
 }

@@ -1142,4 +1142,202 @@ mod tests {
         );
         Ok(())
     }
+
+    /// **The picker, driven** (`viewer-ui-widget-interaction-suite`): a click on
+    /// the swatch, a drag along a channel track, and OK — through the real
+    /// pointer, on the real geometry.
+    ///
+    /// Every test above hands the widget a `ValueChange` already carrying the
+    /// number it is meant to arrive at, which makes them tests of what the
+    /// picker does with a value and not of where a value comes from. A slider
+    /// is the one widget here whose output is a *function of its own layout*:
+    /// `bevy_ui_widgets` converts a drag distance into a value through the
+    /// track's measured width less the thumb's, so a track that laid out at
+    /// the wrong size, or a thumb the descendant search cannot find, moves the
+    /// channel by the wrong amount for a gesture that still looks right. Only a
+    /// real drag on a laid-out track can see that.
+    mod scenarios {
+        use bevy::prelude::*;
+        use bevy::ui_widgets::{SliderRange, SliderThumb, SliderValue};
+        use pretty_assertions::assert_eq;
+
+        use super::{TestError, bytes};
+        use crate::ui_color_picker::{
+            CHANNEL_MAX, ColorPicked, ColorPickerPlugin, ColorPickerState, THUMB_WIDTH,
+            TRACK_WIDTH, spawn_color_swatch, thumb_offset,
+        };
+        use crate::ui_test::interact::{self, InteractionTest, centre_of};
+        use crate::ui_test::{drain, find_by_name, record, settle};
+        use sl_viewer_ui_core::ui::{LogicalInset, UiPanelShown, UiRoot, UiScaffoldSystems};
+
+        /// The swatch's node name.
+        const SWATCH: &str = "test:color-swatch";
+
+        /// The red channel's slider.
+        const RED_SLIDER: &str = "color-picker-slider:R";
+
+        /// How far the drag travels along the track, in logical pixels. Chosen
+        /// so the value it lands on is exact: the usable track is
+        /// `TRACK_WIDTH - THUMB_WIDTH` = 150 px for a span of 255, so 60 px is
+        /// 102 — no rounding to hide a small error behind.
+        const DRAG_PX: f32 = 60.0;
+
+        /// The channel value [`DRAG_PX`] must produce.
+        const DRAGGED_VALUE: f32 = 102.0;
+
+        /// A swatch and the picker floater under the real pointer stack.
+        fn picker_app() -> App {
+            let mut app = InteractionTest::new().build();
+            app.add_plugins(ColorPickerPlugin);
+            record::<ColorPicked>(&mut app);
+            app.add_systems(
+                Startup,
+                (|mut commands: Commands, root: Res<UiRoot>| {
+                    spawn_color_swatch(&mut commands, root.0, "test", 1, Color::BLACK);
+                })
+                .after(UiScaffoldSystems::SpawnRoot),
+            );
+            settle(&mut app);
+            settle(&mut app);
+            app
+        }
+
+        /// Whether the picker floater is on screen.
+        fn picker_shown(app: &App) -> Option<bool> {
+            let panel = app.world().get_resource::<super::ColorPickerUi>()?.panel;
+            app.world().get::<UiPanelShown>(panel).map(|shown| shown.0)
+        }
+
+        /// Where the named slider's thumb sits along its track, in logical
+        /// pixels from the leading edge.
+        fn thumb_at(app: &mut App, slider: &str) -> Option<f32> {
+            let entity = find_by_name(app, slider)?;
+            let children = app.world().get::<Children>(entity)?;
+            let thumb = children
+                .iter()
+                .find(|child| app.world().get::<SliderThumb>(*child).is_some())?;
+            match app.world().get::<LogicalInset>(thumb)?.0.inline_start {
+                Val::Px(px) => Some(px),
+                _other => None,
+            }
+        }
+
+        /// Clicking the swatch opens the picker; dragging a channel track moves
+        /// that channel by what the gesture actually travelled; OK commits it
+        /// and puts the picker away.
+        #[test]
+        fn a_swatch_click_a_track_drag_and_ok() -> Result<(), TestError> {
+            let mut app = picker_app();
+            assert_eq!(picker_shown(&app), Some(false), "the picker starts closed");
+
+            interact::click_node(&mut app, SWATCH)?;
+            settle(&mut app);
+            assert_eq!(
+                picker_shown(&app),
+                Some(true),
+                "a click on the swatch opens the picker"
+            );
+            assert_eq!(
+                thumb_at(&mut app, RED_SLIDER),
+                Some(0.0),
+                "it opens on the swatch's colour — black, so every thumb is home"
+            );
+            let _opening = drain::<ColorPicked>(&mut app);
+
+            let track = centre_of(&mut app, RED_SLIDER).ok_or("the red track never laid out")?;
+            interact::drag(
+                &mut app,
+                track,
+                Vec2::new(track.x + DRAG_PX, track.y),
+                4,
+                MouseButton::Left,
+            );
+            settle(&mut app);
+
+            let channels = app.world().resource::<ColorPickerState>().channels;
+            let red = channels.first().copied().ok_or("no red channel")?;
+            assert!(
+                (red - DRAGGED_VALUE).abs() < 1.0,
+                "a {DRAG_PX} px drag along a {TRACK_WIDTH} px track (thumb {THUMB_WIDTH}) is \
+                 {DRAGGED_VALUE} of {CHANNEL_MAX}, not {red}"
+            );
+            let thumb = thumb_at(&mut app, RED_SLIDER).ok_or("the thumb went missing")?;
+            let wanted = thumb_offset(red, &SliderRange::new(0.0, CHANNEL_MAX));
+            assert!(
+                (thumb - wanted).abs() < 0.5,
+                "the thumb follows the value it produced: {thumb} vs {wanted}"
+            );
+
+            let previews = drain::<ColorPicked>(&mut app);
+            let last = previews.last().ok_or("the drag previewed nothing")?;
+            assert!(
+                !last.final_pick,
+                "a drag previews, it does not commit: {last:?}"
+            );
+            let [red_byte, green, blue, _alpha] = bytes(last.color);
+            assert_eq!(
+                (red_byte, green, blue),
+                (102, 0, 0),
+                "the preview is the dragged channel and nothing else"
+            );
+
+            interact::click_node(&mut app, "color-picker-button:color-picker-ok")?;
+            settle(&mut app);
+
+            let committed = drain::<ColorPicked>(&mut app);
+            let commit = committed
+                .iter()
+                .find(|reply| reply.final_pick)
+                .ok_or("OK committed nothing")?;
+            assert_eq!(bytes(commit.color), [102, 0, 0, 255]);
+            assert_eq!(picker_shown(&app), Some(false), "OK puts the picker away");
+            Ok(())
+        }
+
+        /// A drag that starts on the track and is released far outside it still
+        /// belongs to the slider it began on — the pointer capture every drag
+        /// widget relies on, and the reason a user can slide past the end of a
+        /// short track without the value freezing.
+        #[test]
+        fn a_drag_leaving_the_track_keeps_driving_it() -> Result<(), TestError> {
+            let mut app = picker_app();
+            interact::click_node(&mut app, SWATCH)?;
+            settle(&mut app);
+
+            let track = centre_of(&mut app, RED_SLIDER).ok_or("the red track never laid out")?;
+            // Well below the row, and past the track's trailing end: a slider
+            // that only listened while hovered would stop here.
+            interact::drag(
+                &mut app,
+                track,
+                Vec2::new(track.x + TRACK_WIDTH, track.y + 120.0),
+                4,
+                MouseButton::Left,
+            );
+            settle(&mut app);
+
+            let red = app
+                .world()
+                .resource::<ColorPickerState>()
+                .channels
+                .first()
+                .copied()
+                .ok_or("no red channel")?;
+            let slider = find_by_name(&mut app, RED_SLIDER).ok_or("the slider went missing")?;
+            let value = app
+                .world()
+                .get::<SliderValue>(slider)
+                .map(|value| value.0)
+                .ok_or("the slider lost its value")?;
+            assert!(
+                (red - CHANNEL_MAX).abs() < f32::EPSILON,
+                "a drag past the end pins the channel at its maximum: {red}"
+            );
+            assert!(
+                (value - red).abs() < f32::EPSILON,
+                "and the slider and the picker agree about it: {value} vs {red}"
+            );
+            Ok(())
+        }
+    }
 }

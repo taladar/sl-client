@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 310 |
+| ready | 309 |
 | blocked | 56 |
 | in-progress | 18 |
 | bugs | 63 |
-| done | 982 |
+| done | 983 |
 | deferred | 25 |
 | wont-do | 14 |
 | **total** | **1566** |
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (310)
+## ready (309)
 
 ### protocol
 
@@ -897,10 +897,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-styling-interaction-tests`](ready/viewer-ui-styling-interaction-tests.md)
   — bevy_flair state styling under synthetic hover and focus (blocked by
   `viewer-ui-interaction-harness` (done))
-- [`viewer-ui-widget-interaction-suite`](ready/viewer-ui-widget-interaction-suite.md)
-  — Deep interaction tests for the stateful widgets (blocked by
-  `viewer-ui-interaction-harness` (done), `viewer-ui-keyboard-text-harness`
-  (done))
 - [`viewer-url-context-menus`](ready/viewer-url-context-menus.md) — Right-click
   context menus on linkified text and names
 - [`viewer-usb-route-map-display`](ready/viewer-usb-route-map-display.md) — USB
@@ -1332,7 +1328,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (982)
+## done (983)
 
 ### protocol
 
@@ -2772,6 +2768,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-virtualized-list`](done/viewer-ui-virtualized-list.md) —
   Virtualized (windowed-recycling) list (blocked by `viewer-ui-widget-scaffold`
+  (done))
+- [`viewer-ui-widget-interaction-suite`](done/viewer-ui-widget-interaction-suite.md)
+  — Deep interaction tests for the stateful widgets (blocked by
+  `viewer-ui-interaction-harness` (done), `viewer-ui-keyboard-text-harness`
   (done))
 - [`viewer-ui-widget-scaffold`](done/viewer-ui-widget-scaffold.md) — UI widget
   scaffold (bevy_ui plugin + conventions anchor) (blocked by

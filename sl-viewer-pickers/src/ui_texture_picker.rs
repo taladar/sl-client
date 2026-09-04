@@ -1322,4 +1322,154 @@ mod tests {
         assert!(!item_matches(InventoryType::Snapshot, PickerKind::Material));
         assert!(!item_matches(InventoryType::Object, PickerKind::Material));
     }
+
+    /// **The picker, driven** (`viewer-ui-widget-interaction-suite`): swatch →
+    /// quick choice → OK, through the real pointer.
+    ///
+    /// The two tests above are about the item filter and touch no widget at
+    /// all. What is worth driving here is the **reply protocol** every consumer
+    /// of a swatch is written against — a non-final `TexturePicked` while the
+    /// user is still choosing, a final one on OK — and the fact that the
+    /// gestures producing it land on buttons a pointer can reach. The tree
+    /// itself is deliberately out of scope: it is fed by an inventory the
+    /// harness has none of, and the quick choices are the picker's own
+    /// controls.
+    mod scenarios {
+        use bevy::prelude::*;
+        use pretty_assertions::assert_eq;
+
+        use super::super::{
+            IMG_BLANK, TexturePickerPlugin, TexturePickerState, TexturePickerUi,
+            spawn_texture_swatch,
+        };
+        use crate::inventory::InventoryModel;
+        use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems};
+        use crate::world_api::{BoostTexture, DecodedTextures, TexturePicked};
+        use sl_client_bevy::{SlCommand, TextureKey, Uuid};
+        use sl_viewer_testkit::interact::{self, InteractionTest};
+        use sl_viewer_testkit::{drain, record, settle};
+
+        /// A boxed error so the tests use `?` rather than the disallowed
+        /// `unwrap` / `expect`.
+        type TestError = Box<dyn core::error::Error>;
+
+        /// The swatch's node name.
+        const SWATCH: &str = "test:texture-swatch";
+
+        /// The texture the swatch (and so the picker) opens on.
+        fn opened_on() -> TextureKey {
+            TextureKey::from(Uuid::from_u128(0x1234_5678))
+        }
+
+        /// A swatch and the picker floater under the real pointer stack.
+        ///
+        /// The resources and messages below are the picker's *runtime* seams,
+        /// stood up empty: the tree reads an inventory, the preview reads the
+        /// decoded-texture store and asks for fetches, and a tree row would
+        /// send a session command. Each is a system parameter that must exist
+        /// for the plugin's systems to run at all — empty is exactly right,
+        /// because a picker with no inventory is the state a click on the quick
+        /// choices has to work in anyway.
+        fn picker_app() -> App {
+            let mut app = InteractionTest::new().build();
+            app.init_resource::<InventoryModel>()
+                .init_resource::<DecodedTextures>()
+                .add_message::<BoostTexture>()
+                .add_message::<SlCommand>()
+                .add_plugins(TexturePickerPlugin);
+            record::<TexturePicked>(&mut app);
+            app.add_systems(
+                Startup,
+                (|mut commands: Commands, root: Res<UiRoot>| {
+                    spawn_texture_swatch(&mut commands, root.0, "test", 1, opened_on());
+                })
+                .after(UiScaffoldSystems::SpawnRoot),
+            );
+            settle(&mut app);
+            settle(&mut app);
+            app
+        }
+
+        /// Whether the picker floater is on screen.
+        fn picker_shown(app: &App) -> Option<bool> {
+            let panel = app.world().get_resource::<TexturePickerUi>()?.panel;
+            app.world().get::<UiPanelShown>(panel).map(|shown| shown.0)
+        }
+
+        /// Clicking the swatch opens the picker on that swatch's texture; a
+        /// quick choice previews without committing; OK commits it and closes.
+        #[test]
+        fn a_swatch_click_a_quick_choice_and_ok() -> Result<(), TestError> {
+            let mut app = picker_app();
+            assert_eq!(picker_shown(&app), Some(false), "it starts closed");
+
+            interact::click_node(&mut app, SWATCH)?;
+            settle(&mut app);
+            assert_eq!(
+                picker_shown(&app),
+                Some(true),
+                "a click on the swatch opens the picker"
+            );
+            let state = app.world().resource::<TexturePickerState>();
+            assert_eq!(
+                state.original,
+                opened_on(),
+                "and it opens on the swatch's own texture"
+            );
+            let _opening = drain::<TexturePicked>(&mut app);
+
+            interact::click_node(&mut app, "texture-picker-button:texture-picker-blank")?;
+            settle(&mut app);
+            let previews = drain::<TexturePicked>(&mut app);
+            let preview = previews.last().ok_or("the quick choice replied nothing")?;
+            assert_eq!(preview.texture, TextureKey::from(IMG_BLANK));
+            assert!(
+                !preview.final_pick,
+                "choosing previews on the object; it does not commit: {preview:?}"
+            );
+            assert_eq!(
+                picker_shown(&app),
+                Some(true),
+                "and leaves the picker open to choose again"
+            );
+
+            interact::click_node(&mut app, "texture-picker-button:texture-picker-ok")?;
+            settle(&mut app);
+            let committed = drain::<TexturePicked>(&mut app);
+            let commit = committed
+                .iter()
+                .find(|reply| reply.final_pick)
+                .ok_or("OK committed nothing")?;
+            assert_eq!(commit.texture, TextureKey::from(IMG_BLANK));
+            assert_eq!(picker_shown(&app), Some(false), "OK closes the picker");
+            Ok(())
+        }
+
+        /// **Cancel reverts**: the picker replies with the texture it opened
+        /// on, so a consumer that has been live-previewing every choice puts
+        /// the object back the way it found it.
+        #[test]
+        fn cancel_replies_with_the_texture_it_opened_on() -> Result<(), TestError> {
+            let mut app = picker_app();
+            interact::click_node(&mut app, SWATCH)?;
+            settle(&mut app);
+            interact::click_node(&mut app, "texture-picker-button:texture-picker-none")?;
+            settle(&mut app);
+            let _previews = drain::<TexturePicked>(&mut app);
+
+            interact::click_node(&mut app, "texture-picker-button:texture-picker-cancel")?;
+            settle(&mut app);
+
+            let replies = drain::<TexturePicked>(&mut app);
+            let revert = replies.last().ok_or("Cancel replied nothing")?;
+            assert_eq!(
+                revert.texture,
+                opened_on(),
+                "Cancel reverts to the opened-on texture, not to the last choice"
+            );
+            assert!(!revert.final_pick, "and a revert is not a commit");
+            assert_eq!(picker_shown(&app), Some(false), "Cancel closes it too");
+            Ok(())
+        }
+    }
 }

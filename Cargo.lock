@@ -9314,6 +9314,7 @@ dependencies = [
  "pretty_assertions",
  "sl-client-bevy",
  "sl-viewer-inventory",
+ "sl-viewer-testkit",
  "sl-viewer-ui-core",
  "sl-viewer-ui-widgets",
  "sl-viewer-world-api",

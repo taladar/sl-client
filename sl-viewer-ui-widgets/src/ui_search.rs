@@ -794,4 +794,138 @@ mod tests {
         );
         Ok(())
     }
+
+    /// **Type-to-filter, end to end** (`viewer-ui-widget-interaction-suite`):
+    /// the loop a search box exists for — characters arrive by keystroke, a
+    /// consumer narrows its list on every one of them, and the affordances
+    /// (placeholder, clear button) track the term as it grows and shrinks.
+    ///
+    /// The tests above check each half separately and mostly write the term
+    /// with `set_text`. What only the whole loop can catch is a field that
+    /// takes a keystroke without publishing it — the value updating a frame
+    /// too late for a consumer reading `Changed<EditableText>`, or a
+    /// backspace that leaves the widget's own view of the term stale — and
+    /// that is precisely the failure a user reports as "the list does not
+    /// filter until I click somewhere else".
+    #[test]
+    fn typing_narrows_the_list_and_clearing_restores_it() -> Result<(), TestError> {
+        use crate::ui_test::interact::{self, InteractionTest};
+        use bevy::input::keyboard::Key;
+        use sl_viewer_ui_core::ui::UiScaffoldSystems;
+
+        /// The consumer's catalogue, and what its filter currently keeps.
+        #[derive(Resource, Debug, Default)]
+        struct Filtered(Vec<&'static str>);
+
+        /// Everything the fixture consumer could show.
+        const CATALOGUE: [&str; 4] = ["Boots", "Boater", "Hat", "Gloves"];
+
+        /// The consumer half: narrow the catalogue to the field's term, the
+        /// way a panel filters its list.
+        fn filter(
+            fields: Query<&EditableText, With<SearchInputField>>,
+            mut filtered: ResMut<Filtered>,
+        ) {
+            let Ok(field) = fields.single() else {
+                return;
+            };
+            let term = field.value().to_string().to_lowercase();
+            filtered.0 = CATALOGUE
+                .into_iter()
+                .filter(|item| item.to_lowercase().contains(&term))
+                .collect();
+        }
+
+        let mut app = InteractionTest::new().build();
+        app.add_plugins(SearchFieldPlugin)
+            .init_resource::<Filtered>()
+            .add_systems(Update, filter)
+            .add_systems(
+                Startup,
+                (|mut commands: Commands, root: Res<UiRoot>| {
+                    spawn_search_field(
+                        &mut commands,
+                        root.0,
+                        &SearchFieldSpec {
+                            placeholder: "Search".to_owned(),
+                            search_glyph: true,
+                            ..SearchFieldSpec::new("test-search")
+                        },
+                    );
+                })
+                .after(UiScaffoldSystems::SpawnRoot),
+            );
+        settle(&mut app);
+
+        let kept =
+            |app: &App| -> Vec<&'static str> { app.world().resource::<Filtered>().0.clone() };
+        let display = |app: &mut App, name: &str| -> Option<Display> {
+            let entity = find_by_name(app, name)?;
+            app.world().get::<Node>(entity).map(|node| node.display)
+        };
+        assert_eq!(
+            kept(&app),
+            CATALOGUE.to_vec(),
+            "an empty term keeps everything"
+        );
+        assert_eq!(
+            display(&mut app, "test-search:search-clear"),
+            Some(Display::None),
+            "nothing to clear yet"
+        );
+
+        interact::click_node(&mut app, "test-search:field")?;
+        interact::type_str(&mut app, "bo");
+        settle(&mut app);
+        assert_eq!(
+            kept(&app),
+            vec!["Boots", "Boater"],
+            "two characters narrow the list to what matches them"
+        );
+        assert_eq!(
+            display(&mut app, "test-search:search-placeholder"),
+            Some(Display::None),
+            "the prompt gets out of the way of a term"
+        );
+        assert_eq!(
+            display(&mut app, "test-search:search-clear"),
+            Some(Display::Flex),
+            "and the clear button appears with one"
+        );
+
+        interact::type_str(&mut app, "o");
+        settle(&mut app);
+        assert_eq!(
+            kept(&app),
+            vec!["Boots"],
+            "a third character narrows further"
+        );
+
+        interact::tap(&mut app, KeyCode::Backspace, Key::Backspace);
+        settle(&mut app);
+        assert_eq!(
+            kept(&app),
+            vec!["Boots", "Boater"],
+            "a backspace widens the list back out"
+        );
+
+        interact::click_node(&mut app, "test-search:search-clear")?;
+        settle(&mut app);
+        assert_eq!(
+            kept(&app),
+            CATALOGUE.to_vec(),
+            "clearing restores the whole list"
+        );
+        assert_eq!(
+            display(&mut app, "test-search:search-placeholder"),
+            Some(Display::Flex),
+            "and the prompt comes back"
+        );
+        assert_eq!(
+            display(&mut app, "test-search:search-clear"),
+            Some(Display::None),
+            "and the button that did it goes away"
+        );
+        Ok(())
+    }
 }

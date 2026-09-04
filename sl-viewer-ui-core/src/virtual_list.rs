@@ -42,6 +42,18 @@
 //! doing *nothing* over a not-yet-focused list, since the camera already
 //! ignored it there too). Away from any list the hover walk finds nothing and
 //! the wheel stays the camera's.
+//!
+//! That routing — a real `AccumulatedMouseScroll` over a real `HoverMap`, and
+//! the scrollbar thumb's drag — is covered by
+//! `sl_viewer_ui_widgets::ui_table::tests::scenarios`, through the table, which
+//! is this widget's main consumer. It is tested *there* rather than here
+//! because the pointer harness (`sl-viewer-testkit`) is built on this crate: a
+//! dev-dependency back onto it would link **two** copies of this crate into the
+//! test binary — the `cfg(test)` one and the harness's — whose `UiRoot` and
+//! every other resource are different types, so a fixture would fail parameter
+//! validation on a resource it can see sitting in the world. The tests below
+//! stay pure: the windowing arithmetic and the pool, with the viewport's
+//! `ComputedNode` written by hand.
 
 use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::picking::hover::HoverMap;
