@@ -215,7 +215,7 @@ struct ColorPickerUi {
 struct ColorChannel(usize);
 
 /// A picker action button.
-#[derive(Component, Debug, Clone, Copy)]
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 enum PickerButton {
     /// Accept the current colour.
     Ok,
@@ -239,12 +239,17 @@ impl Plugin for ColorPickerPlugin {
             )
             .add_systems(
                 Update,
+                // Ordered, not a bare tuple: the visual sync reads the slider
+                // values the open handler seeds (and needs its commands applied
+                // to see them), so an unordered pair would leave the thumbs a
+                // frame behind the colour the picker opened on.
                 (
                     handle_open_color_picker,
                     sync_color_picker_visual,
                     apply_color_swatch_fill,
                     reflect_color_swatch_disabled,
-                ),
+                )
+                    .chain(),
             );
     }
 }
@@ -520,9 +525,23 @@ fn handle_open_color_picker(
     let Some(ui) = ui else {
         return;
     };
-    let Some(open) = opens.read().last() else {
+    // One shared floater serves one requester, so a frame carrying several
+    // requests can only honour one of them — the **first**, the earliest click.
+    // Taking the last instead would silently leave that requester waiting on a
+    // picker that opened on somebody else's colour, so the losers are said out
+    // loud rather than dropped.
+    let mut requests = opens.read();
+    let Some(open) = requests.next().copied() else {
         return;
     };
+    let ignored = requests.count();
+    if ignored > 0 {
+        warn!(
+            "{ignored} further colour-picker request(s) in one frame ignored; the picker opened \
+             for {:?}",
+            open.requester
+        );
+    }
     let srgba = open.current.to_srgba();
     state.requester = Some(open.requester);
     state.original = open.current;
@@ -543,8 +562,30 @@ fn handle_open_color_picker(
     }
 }
 
+/// Where a thumb's leading edge sits along its track for `value`: the value's
+/// fraction of `range`, over the track less the thumb's own width, so the thumb
+/// spans the track exactly at the ends rather than hanging off them.
+fn thumb_offset(value: f32, range: &SliderRange) -> f32 {
+    let span = range.span();
+    let fraction = if span > f32::EPSILON {
+        ((value - range.start()) / span).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    fraction * (TRACK_WIDTH - THUMB_WIDTH)
+}
+
 /// Reconcile the picker's preview / original swatches, slider thumbs, and value
 /// labels from the live state.
+///
+/// Every write is guarded by a compare, as every other widget in this crate
+/// does. `LogicalInset` is exactly what `ChangedLogicalBoxes` filters on so that
+/// an unchanged UI does not re-resolve its boxes every frame, and an unguarded
+/// thumb write put all three through that resolver on every frame of the
+/// process, picker open or closed. (`resolve_logical_boxes` compares again
+/// before it touches `Node`, so taffy was never re-entered — the waste was the
+/// resolver's own pass, small but permanent.) A closed picker is not on screen,
+/// so it does no work at all.
 fn sync_color_picker_visual(
     ui: Option<Res<ColorPickerUi>>,
     state: Res<ColorPickerState>,
@@ -556,26 +597,30 @@ fn sync_color_picker_visual(
     let Some(ui) = ui else {
         return;
     };
-    if let Ok(mut preview) = backgrounds.get_mut(ui.preview) {
-        preview.0 = state.current();
+    if state.requester.is_none() {
+        return;
     }
-    if let Ok(mut original) = backgrounds.get_mut(ui.original) {
+    let current = state.current();
+    if let Ok(mut preview) = backgrounds.get_mut(ui.preview)
+        && preview.0 != current
+    {
+        preview.0 = current;
+    }
+    if let Ok(mut original) = backgrounds.get_mut(ui.original)
+        && original.0 != state.original
+    {
         original.0 = state.original;
     }
     for (index, slider) in ui.sliders.iter().enumerate() {
         let Ok((value, range, children)) = sliders.get(*slider) else {
             continue;
         };
-        let span = range.span();
-        let fraction = if span > f32::EPSILON {
-            ((value.0 - range.start()) / span).clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
-        let offset = fraction * (TRACK_WIDTH - THUMB_WIDTH);
+        let offset = Val::Px(thumb_offset(value.0, range));
         for child in children.iter() {
-            if let Ok(mut inset) = insets.get_mut(child) {
-                inset.0.inline_start = Val::Px(offset);
+            if let Ok(mut inset) = insets.get_mut(child)
+                && inset.0.inline_start != offset
+            {
+                inset.0.inline_start = offset;
             }
         }
         if let Some(label) = ui.labels.get(index)
@@ -653,4 +698,448 @@ const fn byte(value: f32) -> u8 {
     )]
     let byte = clamped as u8;
     byte
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy::camera::NormalizedRenderTarget;
+    use bevy::picking::backend::HitData;
+    use bevy::picking::pointer::{Location, PointerId};
+    use bevy::prelude::*;
+    use bevy::ui_widgets::{SliderRange, SliderThumb, ValueChange};
+    use pretty_assertions::assert_eq;
+
+    use super::{
+        ColorPicked, ColorPickerPlugin, ColorPickerState, ColorPickerUi, ColorSwatchValue,
+        OpenColorPicker, PickerButton, byte, spawn_color_swatch, thumb_offset,
+    };
+    use sl_viewer_ui_core::ui::{LogicalInset, UiPanelShown, UiRoot};
+
+    /// A boxed error so tests can use `?` instead of the disallowed
+    /// `unwrap` / `expect`.
+    type TestError = Box<dyn core::error::Error>;
+
+    /// What the picker emitted, and how much churn the visual sync caused —
+    /// copied out in `PostUpdate` so a frame's writes are seen after the systems
+    /// that made them.
+    #[derive(Resource, Debug, Default)]
+    struct Recorded {
+        /// Every [`ColorPicked`] the picker has emitted.
+        picked: Vec<ColorPicked>,
+        /// How many thumb insets were re-marked, summed over frames.
+        inset_writes: usize,
+        /// How many backgrounds were re-marked, summed over frames.
+        background_writes: usize,
+    }
+
+    /// Copy this frame's replies and count the components the sync touched.
+    fn record(
+        mut picked: MessageReader<ColorPicked>,
+        insets: Query<(), (With<SliderThumb>, Changed<LogicalInset>)>,
+        backgrounds: Query<(), Changed<BackgroundColor>>,
+        mut recorded: ResMut<Recorded>,
+    ) {
+        let replies: Vec<ColorPicked> = picked.read().copied().collect();
+        recorded.picked.extend(replies);
+        recorded.inset_writes = recorded.inset_writes.saturating_add(insets.iter().count());
+        recorded.background_writes = recorded
+            .background_writes
+            .saturating_add(backgrounds.iter().count());
+    }
+
+    /// A headless app carrying the picker plugin, a `UiRoot` for its floater to
+    /// hang from, and the recorder — everything the picker's *behaviour* needs,
+    /// minus the picking backend (the tests synthesise the presses themselves).
+    fn picker_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(ColorPickerPlugin)
+            .init_resource::<Recorded>()
+            .add_systems(PostUpdate, record);
+        let root = app.world_mut().spawn(Node::default()).id();
+        app.insert_resource(UiRoot(root));
+        // Startup builds the floater; a second frame settles the spawn's own
+        // change marks so a later churn count measures the sync alone.
+        app.update();
+        app.update();
+        app
+    }
+
+    /// The `UiRoot` the floater and the test swatches hang from.
+    fn root_of(app: &App) -> Entity {
+        app.world().resource::<UiRoot>().0
+    }
+
+    /// Spawn a colour swatch and settle a frame, returning it.
+    fn swatch(app: &mut App, initial: Color) -> Entity {
+        let root = root_of(app);
+        let mut queue = bevy::ecs::world::CommandQueue::default();
+        let entity = {
+            let mut commands = Commands::new(&mut queue, app.world());
+            spawn_color_swatch(&mut commands, root, "test", 0, initial)
+        };
+        queue.apply(app.world_mut());
+        app.update();
+        entity
+    }
+
+    /// Synthesise a primary press on `entity` and run the frame it lands in.
+    fn press(app: &mut App, entity: Entity) {
+        let location = Location {
+            target: NormalizedRenderTarget::None {
+                width: 800,
+                height: 600,
+            },
+            position: Vec2::ZERO,
+        };
+        let event = Pointer::new(
+            PointerId::Mouse,
+            location,
+            Press {
+                button: PointerButton::Primary,
+                hit: HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
+                count: 1,
+            },
+            entity,
+        );
+        app.world_mut().trigger(event);
+        app.update();
+    }
+
+    /// The picker's OK / Cancel button entity.
+    fn action_button(app: &mut App, wanted: PickerButton) -> Entity {
+        app.world_mut()
+            .query::<(Entity, &PickerButton)>()
+            .iter(app.world())
+            .find(|(_, which)| **which == wanted)
+            .map_or(Entity::PLACEHOLDER, |(entity, _)| entity)
+    }
+
+    /// The picker's live requester, if it is open.
+    fn requester(app: &App) -> Option<Entity> {
+        app.world().resource::<ColorPickerState>().requester
+    }
+
+    /// Whether the picker floater is showing.
+    fn shown(app: &App) -> bool {
+        let panel = app.world().resource::<ColorPickerUi>().panel;
+        app.world()
+            .entity(panel)
+            .get::<UiPanelShown>()
+            .is_some_and(|shown| shown.0)
+    }
+
+    /// The bytes of a colour, the form the picker actually round-trips.
+    fn bytes(color: Color) -> [u8; 4] {
+        color.to_srgba().to_u8_array()
+    }
+
+    /// Zero the churn counters so the next frames measure only what follows.
+    fn settle(app: &mut App) {
+        app.update();
+        let mut recorded = app.world_mut().resource_mut::<Recorded>();
+        recorded.inset_writes = 0;
+        recorded.background_writes = 0;
+    }
+
+    /// A channel value rounds to its byte, and anything outside 0..=255 is
+    /// clamped rather than wrapped.
+    #[test]
+    fn a_channel_value_rounds_and_clamps_to_a_byte() {
+        assert_eq!(byte(0.0), 0);
+        assert_eq!(byte(127.4), 127);
+        assert_eq!(byte(127.5), 128);
+        assert_eq!(byte(255.0), 255);
+        assert_eq!(byte(-40.0), 0, "below the floor clamps, it does not wrap");
+        assert_eq!(byte(400.0), 255, "above the ceiling clamps");
+    }
+
+    /// The live colour is built from the three channel bytes.
+    #[test]
+    fn the_live_colour_is_the_three_channel_bytes() {
+        let state = ColorPickerState {
+            requester: None,
+            original: Color::BLACK,
+            channels: [12.0, 200.4, 255.0],
+        };
+        assert_eq!(bytes(state.current()), [12, 200, 255, 255]);
+    }
+
+    /// The thumb spans the track at both ends: at the range's start its leading
+    /// edge is at zero, at the end it is a thumb's width short of the track's, so
+    /// the thumb never hangs off either end.
+    #[expect(
+        clippy::float_cmp,
+        reason = "the offsets are exact multiples of the travel, asserted exactly"
+    )]
+    #[test]
+    fn the_thumb_stays_inside_the_track() {
+        let range = SliderRange::new(0.0, super::CHANNEL_MAX);
+        let travel = super::TRACK_WIDTH - super::THUMB_WIDTH;
+        assert_eq!(thumb_offset(0.0, &range), 0.0);
+        assert_eq!(thumb_offset(super::CHANNEL_MAX, &range), travel);
+        assert_eq!(thumb_offset(super::CHANNEL_MAX / 2.0, &range), travel / 2.0);
+        assert_eq!(
+            thumb_offset(-10.0, &range),
+            0.0,
+            "a value under the range clamps to the near end"
+        );
+        assert_eq!(
+            thumb_offset(1000.0, &range),
+            travel,
+            "a value over the range clamps to the far end"
+        );
+        let degenerate = SliderRange::new(1.0, 1.0);
+        assert_eq!(
+            thumb_offset(1.0, &degenerate),
+            0.0,
+            "an empty range does not divide by zero"
+        );
+    }
+
+    /// Clicking a swatch opens the picker on that swatch's colour, seeding the
+    /// three sliders and showing the floater.
+    #[expect(
+        clippy::float_cmp,
+        reason = "the channels are exact bytes seeded from an exact colour"
+    )]
+    #[test]
+    fn a_swatch_opens_the_picker_on_its_own_colour() -> Result<(), TestError> {
+        let mut app = picker_app();
+        let swatch = swatch(&mut app, Color::srgb_u8(10, 20, 30));
+        press(&mut app, swatch);
+        assert_eq!(requester(&app), Some(swatch));
+        assert!(shown(&app), "the floater is shown");
+        let state = app.world().resource::<ColorPickerState>();
+        assert_eq!(state.channels, [10.0, 20.0, 30.0]);
+        Ok(())
+    }
+
+    /// A [disabled](bevy::ui::InteractionDisabled) swatch does not open the
+    /// picker.
+    #[test]
+    fn a_disabled_swatch_does_not_open_the_picker() -> Result<(), TestError> {
+        let mut app = picker_app();
+        let swatch = swatch(&mut app, Color::WHITE);
+        app.world_mut()
+            .entity_mut(swatch)
+            .insert(bevy::ui::InteractionDisabled);
+        press(&mut app, swatch);
+        assert_eq!(requester(&app), None);
+        assert!(!shown(&app));
+        Ok(())
+    }
+
+    /// Two swatches asking in one frame: one shared floater can only answer one,
+    /// and it answers the **first** — the earliest click — rather than silently
+    /// discarding it in favour of the last.
+    #[expect(
+        clippy::float_cmp,
+        reason = "the channels are exact bytes seeded from an exact colour"
+    )]
+    #[test]
+    fn the_first_of_two_requests_in_a_frame_wins() -> Result<(), TestError> {
+        let mut app = picker_app();
+        let first = swatch(&mut app, Color::srgb_u8(1, 2, 3));
+        let second = swatch(&mut app, Color::srgb_u8(9, 8, 7));
+        {
+            let mut opens = app.world_mut().resource_mut::<Messages<OpenColorPicker>>();
+            opens.write(OpenColorPicker {
+                requester: first,
+                current: Color::srgb_u8(1, 2, 3),
+            });
+            opens.write(OpenColorPicker {
+                requester: second,
+                current: Color::srgb_u8(9, 8, 7),
+            });
+        }
+        app.update();
+        assert_eq!(requester(&app), Some(first));
+        let state = app.world().resource::<ColorPickerState>();
+        assert_eq!(
+            state.channels,
+            [1.0, 2.0, 3.0],
+            "the picker opened on the first requester's colour"
+        );
+        Ok(())
+    }
+
+    /// An open picker sitting still writes nothing: the thumb insets are what the
+    /// logical-box resolver filters on, so re-marking them every frame would put
+    /// the whole picker through layout for the life of the process.
+    #[test]
+    fn an_idle_open_picker_does_not_churn_the_layout() -> Result<(), TestError> {
+        let mut app = picker_app();
+        let swatch = swatch(&mut app, Color::srgb_u8(64, 128, 192));
+        press(&mut app, swatch);
+        settle(&mut app);
+        for _ in 0..5_u8 {
+            app.update();
+        }
+        let recorded = app.world().resource::<Recorded>();
+        assert_eq!(
+            recorded.inset_writes, 0,
+            "an idle picker re-marks no thumb inset"
+        );
+        assert_eq!(
+            recorded.background_writes, 0,
+            "an idle picker re-marks no swatch fill"
+        );
+        Ok(())
+    }
+
+    /// Dragging a slider updates the channel, live-previews the new colour to the
+    /// requester without committing, and moves that thumb — and only that thumb.
+    #[expect(
+        clippy::float_cmp,
+        reason = "the channel takes the exact value the drag reported"
+    )]
+    #[test]
+    fn a_slider_drag_previews_and_moves_its_thumb() -> Result<(), TestError> {
+        let mut app = picker_app();
+        let swatch = swatch(&mut app, Color::BLACK);
+        press(&mut app, swatch);
+        settle(&mut app);
+        let slider = *app
+            .world()
+            .resource::<ColorPickerUi>()
+            .sliders
+            .first()
+            .ok_or("the picker has no red slider")?;
+        app.world_mut().trigger(ValueChange {
+            source: slider,
+            value: super::CHANNEL_MAX,
+            is_final: false,
+        });
+        app.update();
+
+        let state = app.world().resource::<ColorPickerState>();
+        assert_eq!(state.channels, [255.0, 0.0, 0.0]);
+        let recorded = app.world().resource::<Recorded>();
+        let last = recorded.picked.last().ok_or("no preview was emitted")?;
+        assert_eq!(last.requester, swatch);
+        assert_eq!(bytes(last.color), [255, 0, 0, 255]);
+        assert!(!last.final_pick, "a drag previews, it does not commit");
+        assert_eq!(
+            recorded.inset_writes, 1,
+            "only the red thumb moved; the other two are where they were"
+        );
+
+        let thumb_at = |app: &App, slider: Entity| -> Option<Val> {
+            let children = app.world().entity(slider).get::<Children>()?;
+            let child = children.iter().next()?;
+            Some(
+                app.world()
+                    .entity(child)
+                    .get::<LogicalInset>()?
+                    .0
+                    .inline_start,
+            )
+        };
+        assert_eq!(
+            thumb_at(&app, slider),
+            Some(Val::Px(super::TRACK_WIDTH - super::THUMB_WIDTH)),
+            "a full-scale channel puts the thumb at the far end"
+        );
+        Ok(())
+    }
+
+    /// **OK** commits the chosen colour to the requester and closes the floater.
+    #[test]
+    fn ok_commits_the_chosen_colour() -> Result<(), TestError> {
+        let mut app = picker_app();
+        let swatch = swatch(&mut app, Color::srgb_u8(10, 20, 30));
+        press(&mut app, swatch);
+        let slider = *app
+            .world()
+            .resource::<ColorPickerUi>()
+            .sliders
+            .first()
+            .ok_or("the picker has no red slider")?;
+        app.world_mut().trigger(ValueChange {
+            source: slider,
+            value: 200.0_f32,
+            is_final: true,
+        });
+        app.update();
+        let ok = action_button(&mut app, PickerButton::Ok);
+        press(&mut app, ok);
+
+        let recorded = app.world().resource::<Recorded>();
+        let last = recorded.picked.last().ok_or("OK emitted nothing")?;
+        assert_eq!(last.requester, swatch);
+        assert_eq!(bytes(last.color), [200, 20, 30, 255]);
+        assert!(last.final_pick, "OK is the committed choice");
+        assert_eq!(requester(&app), None, "the picker is closed");
+        assert!(!shown(&app));
+        Ok(())
+    }
+
+    /// **Cancel** hands the requester back the colour the picker opened on, and
+    /// says so with `final_pick: false` so the consumer reverts its live preview
+    /// rather than storing the cancelled colour.
+    #[test]
+    fn cancel_reverts_to_the_original_and_does_not_commit() -> Result<(), TestError> {
+        let mut app = picker_app();
+        let swatch = swatch(&mut app, Color::srgb_u8(10, 20, 30));
+        press(&mut app, swatch);
+        let slider = *app
+            .world()
+            .resource::<ColorPickerUi>()
+            .sliders
+            .first()
+            .ok_or("the picker has no red slider")?;
+        app.world_mut().trigger(ValueChange {
+            source: slider,
+            value: 200.0_f32,
+            is_final: true,
+        });
+        app.update();
+        let cancel = action_button(&mut app, PickerButton::Cancel);
+        press(&mut app, cancel);
+
+        let recorded = app.world().resource::<Recorded>();
+        let last = recorded.picked.last().ok_or("Cancel emitted nothing")?;
+        assert_eq!(last.requester, swatch);
+        assert_eq!(
+            bytes(last.color),
+            [10, 20, 30, 255],
+            "the colour the picker opened on"
+        );
+        assert!(!last.final_pick, "Cancel never commits");
+        assert_eq!(requester(&app), None);
+        assert!(!shown(&app));
+        Ok(())
+    }
+
+    /// A consumer writing a swatch's value repaints that swatch — and a write of
+    /// the same colour repaints nothing.
+    #[test]
+    fn a_swatch_repaints_from_its_value_only_when_it_changes() -> Result<(), TestError> {
+        let mut app = picker_app();
+        let swatch = swatch(&mut app, Color::BLACK);
+        settle(&mut app);
+        app.world_mut()
+            .entity_mut(swatch)
+            .insert(ColorSwatchValue(Color::srgb_u8(255, 0, 0)));
+        app.update();
+        assert_eq!(
+            app.world()
+                .entity(swatch)
+                .get::<BackgroundColor>()
+                .map(|background| bytes(background.0)),
+            Some([255, 0, 0, 255])
+        );
+        let touched = app.world().resource::<Recorded>().background_writes;
+        app.world_mut()
+            .entity_mut(swatch)
+            .insert(ColorSwatchValue(Color::srgb_u8(255, 0, 0)));
+        app.update();
+        assert_eq!(
+            app.world().resource::<Recorded>().background_writes,
+            touched,
+            "re-writing the same colour repaints nothing"
+        );
+        Ok(())
+    }
 }

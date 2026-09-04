@@ -306,9 +306,17 @@ pub(crate) fn apply_hud_fullbright(faces: RelitFaces, mut materials: ResMut<Asse
         if !on_hud_layer(Some(layers)) {
             continue;
         }
-        if let Some(mut material) = materials.get_mut(&face.0)
-            && !material.base.unlit
+        // Asked before the `get_mut`, not inside it: `get_mut` raises
+        // `AssetEvent::Modified` whether or not the value changes, and a face
+        // whose *layer* changed (the common case here) already carries the
+        // fullbright flag from an earlier pass.
+        if materials
+            .get(&face.0)
+            .is_some_and(|material| material.base.unlit)
         {
+            continue;
+        }
+        if let Some(mut material) = materials.get_mut(&face.0) {
             material.base.unlit = true;
         }
     }

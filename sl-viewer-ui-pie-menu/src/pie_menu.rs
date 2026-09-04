@@ -972,7 +972,7 @@ pub struct PiePlacement {
 
 /// The uniform `pie_menu.wgsl` reads. Field order and padding mirror the WGSL
 /// `PieParams` exactly, so the std140 packing lines up.
-#[derive(Clone, Copy, Debug, ShaderType)]
+#[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
 struct PieParams {
     /// The ring's resting fill.
     background: Vec4,
@@ -1885,7 +1885,14 @@ fn update_pie_labels(
     }
 }
 
-/// Push each pie's live state into its ring material.
+/// Push each pie's live state into its ring material — when it has actually
+/// moved.
+///
+/// A `get_mut` on an `Assets<M>` entry is a write whether or not the value
+/// differs: it raises `AssetEvent::Modified`, which re-prepares the material's
+/// bind group. A pie is only open briefly, but while it is open its radii and
+/// slot states rarely change, so the params are built first and only written
+/// through if they differ from what the material already holds.
 fn drive_pie_material(
     pies: Query<(&PieMenu, &PieConditions, &PieGeometry, &Children)>,
     rings: Query<(&MaterialNode<PieMenuMaterial>, &ComputedNode), With<PieRing>>,
@@ -1905,9 +1912,6 @@ fn drive_pie_material(
             let Ok((node, computed)) = rings.get(child) else {
                 continue;
             };
-            let Some(mut material) = materials.get_mut(&node.0) else {
-                continue;
-            };
             // The shader works in physical pixels (the node's own space), while
             // everything above is logical.
             let scale = if computed.inverse_scale_factor > 0.0 {
@@ -1915,10 +1919,23 @@ fn drive_pie_material(
             } else {
                 1.0
             };
-            material.params.inner_radius = geometry.dead_zone * scale;
-            material.params.outer_radius = geometry.outer * scale;
-            material.params.slot_states = states;
-            material.params.highlighted = highlighted;
+            let wanted = {
+                let Some(material) = materials.get(&node.0) else {
+                    continue;
+                };
+                let mut wanted = material.params;
+                wanted.inner_radius = geometry.dead_zone * scale;
+                wanted.outer_radius = geometry.outer * scale;
+                wanted.slot_states = states;
+                wanted.highlighted = highlighted;
+                if wanted == material.params {
+                    continue;
+                }
+                wanted
+            };
+            if let Some(mut material) = materials.get_mut(&node.0) {
+                material.params = wanted;
+            }
         }
     }
 }

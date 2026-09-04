@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 311 |
 | blocked | 56 |
 | in-progress | 18 |
-| bugs | 65 |
-| done | 975 |
+| bugs | 64 |
+| done | 976 |
 | deferred | 25 |
 | wont-do | 14 |
 | **total** | **1562** |
@@ -1183,7 +1183,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (65)
+## bugs (64)
 
 ### viewer
 
@@ -1263,8 +1263,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   unbounded
 - [`viewer-audit-ui-texture-poll-leak`](bugs/viewer-audit-ui-texture-poll-leak.md)
   — Eight copied texture-poll systems each leak Image assets for the session
-- [`viewer-audit-ui-widget-per-frame-writes`](bugs/viewer-audit-ui-widget-per-frame-writes.md)
-  — The colour picker writes unguarded every frame and defeats the layout gate
 - [`viewer-audit-virtual-list-rebinding`](bugs/viewer-audit-virtual-list-rebinding.md)
   — The recycling virtual list re-binds every pooled row on a one-row scroll
 - [`viewer-audit-world-map-clipboard`](bugs/viewer-audit-world-map-clipboard.md)
@@ -1339,7 +1337,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (975)
+## done (976)
 
 ### protocol
 
@@ -1625,6 +1623,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   pose
 - [`viewer-audit-tonemap-legacy-sky`](done/viewer-audit-tonemap-legacy-sky.md) —
   ACES tonemapping is applied to legacy skies the reference exempts
+- [`viewer-audit-ui-widget-per-frame-writes`](done/viewer-audit-ui-widget-per-frame-writes.md)
+  — The colour picker writes unguarded every frame and defeats the layout gate
 - [`viewer-audit-underwater-fog-nan`](done/viewer-audit-underwater-fog-nan.md) —
   A negative underwater fog density NaNs the screen
 - [`viewer-audit-water-state-purge`](done/viewer-audit-water-state-purge.md) —
