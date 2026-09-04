@@ -39,6 +39,7 @@
 use std::collections::HashSet;
 
 use bevy::prelude::*;
+use bevy::ui_widgets::popover::{Popover, PopoverAlign, PopoverPlacement, PopoverSide};
 use sl_client_bevy::{ChatChannel, ChatType};
 
 use crate::chat_input::{ChatInputHandle, ChatInputSpec, ChatInputSubmit, spawn_chat_input};
@@ -66,6 +67,10 @@ const OPTION_ACTIVE_BACKGROUND: Color = Color::srgb(0.22, 0.40, 0.60);
 
 /// The dropdown panel background.
 const DROPDOWN_BACKGROUND: Color = Color::srgba(0.10, 0.12, 0.16, 0.98);
+
+/// How close to the window edge the volume dropdown may go, in logical pixels —
+/// the same margin [`sl_viewer_ui_widgets::ui_combo`]'s dropdown keeps.
+const POPOVER_WINDOW_MARGIN: f32 = 4.0;
 
 /// The three chat volumes the select box offers — the local-chat range, which the
 /// `/N` channel form and the command form both bypass.
@@ -306,18 +311,41 @@ pub fn spawn_local_chat_input(
 /// Build the volume select box (button + dropdown) under the chat box, for
 /// `field`.
 fn build_volume_select(commands: &mut Commands, container: Entity, field: Entity) {
-    // The dropdown panel, above the button, hidden until the button is clicked.
+    // The dropdown panel, hidden until the button is clicked, and placed by
+    // `bevy_ui_widgets`' popover positioner rather than by hand: `Top` is the
+    // side it wants (the chat bar usually sits at the bottom of the screen),
+    // `Bottom` is the fallback the positioner falls through to when there is no
+    // room above — a chat bar docked at the top, or this widget reused in a
+    // panel anywhere else. Hand-positioning it at `bottom: 100%` had no such
+    // fallback and no window margin, and laid three of the four rows out above
+    // the top edge of the window (`viewer-chat-volume-dropdown-opens-off-screen`).
+    //
+    // `align: End` reproduces the old `right: 0` — the panel's right edge lines
+    // up with the button's.
     let dropdown = commands
         .spawn((
             Node {
                 display: Display::None,
                 position_type: PositionType::Absolute,
-                bottom: Val::Percent(100.0),
-                right: Val::Px(0.0),
                 min_width: Val::Px(72.0),
                 border: UiRect::all(Val::Px(1.0)),
                 padding: UiRect::all(Val::Px(2.0)),
                 ..column(Val::Px(0.0))
+            },
+            Popover {
+                positions: vec![
+                    PopoverPlacement {
+                        side: PopoverSide::Top,
+                        align: PopoverAlign::End,
+                        gap: 0.0,
+                    },
+                    PopoverPlacement {
+                        side: PopoverSide::Bottom,
+                        align: PopoverAlign::End,
+                        gap: 0.0,
+                    },
+                ],
+                window_margin: POPOVER_WINDOW_MARGIN,
             },
             BorderColor::all(SELECT_BORDER),
             BackgroundColor(DROPDOWN_BACKGROUND),
@@ -545,9 +573,14 @@ pub fn spawn_local_chat_input_specimen(
 
 #[cfg(test)]
 mod tests {
-    use super::{ChatAction, ChatSayVolume, classify_line, resolve_volume};
+    use super::{ChatAction, ChatSayVolume, classify_line, resolve_volume, spawn_local_chat_input};
+    use crate::chat_input::ChatInputSpec;
+    use crate::ui::{UiRoot, UiScaffoldSystems};
+    use bevy::prelude::*;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{ChatChannel, ChatType};
+    use sl_viewer_testkit::interact::{self, InteractionTest};
+    use sl_viewer_testkit::{LayoutTest, TestError, box_of, settle};
 
     /// No command is registered in these classification tests.
     fn no_commands(_name: &str) -> bool {
@@ -650,5 +683,131 @@ mod tests {
             resolve_volume(ChatSayVolume::Say, true, true),
             ChatSayVolume::Say
         );
+    }
+
+    /// The viewport both placement cases are measured in, in logical pixels.
+    const VIEWPORT: UVec2 = UVec2::new(800, 600);
+
+    /// How tall the bar hosting the chat input is, in logical pixels — enough
+    /// for the field, and small enough that parking it at either end of an
+    /// 800×600 window leaves room on exactly one side of the volume button.
+    const BAR_HEIGHT: f32 = 40.0;
+
+    /// The tolerance the side assertions allow, in pixels: the volume button's
+    /// own border.
+    ///
+    /// Not slack. Absolute positioning is measured against the anchor's
+    /// **padding** box, so the positioner starts the panel at the inside of the
+    /// button's 1 px border rather than the outside — the panel overlaps the
+    /// border line by exactly that and nothing else. Written as the button's
+    /// border because that is what it is, so a thicker border moves this
+    /// deliberately rather than silently widening a fudge factor.
+    const ANCHOR_BORDER: f32 = 1.0;
+
+    /// Open the volume dropdown with the chat bar parked `top` logical pixels
+    /// down the window, and answer with the button's and the panel's boxes.
+    ///
+    /// The bar is absolutely positioned rather than laid out in flow because the
+    /// whole question is *where on the screen the anchor is*: the same widget
+    /// against the bottom edge and against the top edge must reach opposite
+    /// answers, and nothing else about it changes between the two.
+    fn open_dropdown_with_bar_at(top: f32) -> Result<(Rect, Rect), TestError> {
+        let mut app =
+            InteractionTest::over(LayoutTest::new().with_viewport(VIEWPORT.x, VIEWPORT.y)).build();
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .add_message::<crate::emoji_picker::OpenEmojiPicker>()
+            .add_plugins((
+                crate::emoji_complete::ColonCompletePlugin,
+                crate::chat_input::ChatInputPlugin,
+                super::LocalChatInputPlugin,
+            ))
+            .add_systems(
+                Startup,
+                (move |mut commands: Commands, root: Res<UiRoot>| {
+                    let bar = commands
+                        .spawn((
+                            Node {
+                                position_type: PositionType::Absolute,
+                                left: Val::Px(0.0),
+                                top: Val::Px(top),
+                                width: Val::Percent(100.0),
+                                height: Val::Px(BAR_HEIGHT),
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                            Name::new("host-bar"),
+                            ChildOf(root.0),
+                        ))
+                        .id();
+                    spawn_local_chat_input(
+                        &mut commands,
+                        bar,
+                        &ChatInputSpec::new("local-chat-input"),
+                    );
+                })
+                .after(UiScaffoldSystems::SpawnRoot),
+            );
+        settle(&mut app);
+
+        interact::click_node(&mut app, "local-chat-volume-button")?;
+        let button = box_of(&mut app, "local-chat-volume-button")
+            .ok_or("the volume button is not a laid-out node")?;
+        let dropdown = box_of(&mut app, "local-chat-volume-dropdown")
+            .ok_or("the volume dropdown is not a laid-out node")?;
+        assert!(
+            dropdown.size().y > 0.0,
+            "the dropdown did not open, so its placement says nothing"
+        );
+        Ok((button, dropdown))
+    }
+
+    /// **The dropdown opens on whichever side of the button has room, and never
+    /// off the window.**
+    ///
+    /// `viewer-chat-volume-dropdown-opens-off-screen`: the panel used to be
+    /// hand-positioned at `bottom: 100%`, which reads "entirely above my anchor"
+    /// with no fallback and no window margin. That is right only while the chat
+    /// bar happens to sit at the bottom of the screen — the same widget in a bar
+    /// docked at the top laid all six of its rows out at negative Y, where three
+    /// of the four options cannot be clicked at all.
+    ///
+    /// Both ends of the window are driven, because a single case cannot tell a
+    /// fallback from a hard-coded side: parked at the bottom the panel must go
+    /// **up** (its preferred placement), parked at the top it must go **down**,
+    /// and in both cases stay inside the viewport.
+    #[test]
+    fn the_volume_dropdown_opens_on_the_side_with_room() -> Result<(), TestError> {
+        let window = Rect {
+            min: Vec2::ZERO,
+            max: VIEWPORT.as_vec2(),
+        };
+
+        // Against the bottom edge, as the nearby-chat bar sits: room above only.
+        let (button, dropdown) = open_dropdown_with_bar_at(VIEWPORT.as_vec2().y - BAR_HEIGHT)?;
+        assert!(
+            dropdown.max.y <= button.min.y + ANCHOR_BORDER,
+            "with room only above it, the dropdown opened at {dropdown:?} rather than above the \
+             button at {button:?}"
+        );
+        assert_eq!(
+            dropdown.intersect(window),
+            dropdown,
+            "the dropdown left the {window:?} viewport"
+        );
+
+        // Against the top edge — a docked chat bar, a floater, the gallery card:
+        // no room above, so the fallback placement must be taken.
+        let (button, dropdown) = open_dropdown_with_bar_at(0.0)?;
+        assert!(
+            dropdown.min.y >= button.max.y - ANCHOR_BORDER,
+            "with no room above it, the dropdown opened at {dropdown:?} rather than below the \
+             button at {button:?}"
+        );
+        assert_eq!(
+            dropdown.intersect(window),
+            dropdown,
+            "the dropdown left the {window:?} viewport"
+        );
+        Ok(())
     }
 }

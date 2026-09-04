@@ -278,8 +278,8 @@ mod tests {
     use crate::ui_elements::ELEMENTS;
     use crate::ui_test::interact::{self, InteractionTest};
     use crate::ui_test::{
-        drain_actions, find_by_name, focusable_nodes, interactive_nodes, layout_violations, settle,
-        spawn_element_into,
+        TestError, drain_actions, find_by_name, focusable_nodes, interactive_nodes,
+        layout_violations, settle, spawn_element_into,
     };
     use bevy::input::keyboard::Key;
     use bevy::prelude::*;
@@ -493,24 +493,30 @@ mod tests {
         }
 
         let violations = layout_violations(app, test.layout());
-        match row.map_or(LayoutClaim::Clean, |row| row.layout) {
-            LayoutClaim::Clean => {
-                if !violations.is_empty() {
-                    failures.push(format!(
-                        "element `{element}` node `{node}` after {gesture:?}: {violations:#?}"
-                    ));
-                }
-            }
-            LayoutClaim::KnownBroken(bug) => {
-                if violations.is_empty() {
-                    failures.push(format!(
-                        "element `{element}` node `{node}` after {gesture:?}: the layout is clean, \
-                         but the row pins it as broken against `{bug}`. If that bug is fixed, \
-                         delete the `.known_broken({bug:?})` from this row — the pin exists to \
-                         tell you exactly this."
-                    ));
-                }
-            }
+        let claim = row.map_or(LayoutClaim::Clean, |row| row.layout);
+        if let Some(why) = judge_layout(claim, &violations) {
+            failures.push(format!(
+                "element `{element}` node `{node}` after {gesture:?}: {why}"
+            ));
+        }
+    }
+
+    /// What `claim` says about the `violations` a settled gesture left behind:
+    /// `None` when the claim holds, else what is wrong with it.
+    ///
+    /// Split out of [`judge`] so both directions of the **inverted** claim can
+    /// be driven directly — see `a_known_broken_pin_fails_the_day_it_is_fixed`.
+    /// A canary that has never been heard is not a canary.
+    fn judge_layout(claim: LayoutClaim, violations: &[String]) -> Option<String> {
+        match claim {
+            LayoutClaim::Clean => (!violations.is_empty()).then(|| format!("{violations:#?}")),
+            LayoutClaim::KnownBroken(bug) => violations.is_empty().then(|| {
+                format!(
+                    "the layout is clean, but the row pins it as broken against `{bug}`. If that \
+                     bug is fixed, delete the `.known_broken({bug:?})` from this row — the pin \
+                     exists to tell you exactly this."
+                )
+            }),
         }
     }
 
@@ -790,6 +796,50 @@ mod tests {
             !CONTRACTS.is_empty(),
             "no element declares a contract, so every cell is running on the default"
         );
+    }
+
+    /// **The canary's teeth.** A pinned-broken layout must fail once it is fixed.
+    ///
+    /// [`LayoutClaim::KnownBroken`] is the one check in this module that runs
+    /// *backwards* — it asserts a bug is still present — and a backwards check
+    /// that is never exercised is the easiest kind to get wrong, because a
+    /// silently-inverted one passes on every row forever. Both directions are
+    /// driven here through the real [`judge_layout`], so the day a pin's bug is
+    /// fixed the sweep is known to say so rather than quietly agreeing.
+    ///
+    /// Its first subject was the chat volume dropdown, which laid out above the
+    /// top of the window until it became a `Popover`; that fix is what turned
+    /// this from a mechanism with a user into a mechanism with a test.
+    #[test]
+    fn a_known_broken_pin_fails_the_day_it_is_fixed() -> Result<(), TestError> {
+        const PIN: &str = "viewer-chat-volume-dropdown-opens-off-screen";
+        let pinned = Row::emits(Gesture::PrimaryClick, &[]).known_broken(PIN);
+        let breach = vec!["`some-panel`: laid out outside the viewport".to_owned()];
+
+        // The pin holds while the breakage is there, and fires the moment it is
+        // not — naming the row to delete.
+        assert!(
+            judge_layout(pinned.layout, &breach).is_none(),
+            "a pinned-broken row failed while its breakage was still present"
+        );
+        let complaint = judge_layout(pinned.layout, &[])
+            .ok_or("a pinned-broken row passed on a clean layout, so the pin means nothing")?;
+        assert!(
+            complaint.contains(PIN),
+            "the complaint does not name the bug to unpin: {complaint}"
+        );
+
+        // And the ordinary claim is the other way round, so the two are not the
+        // same check wearing different names.
+        assert!(
+            judge_layout(LayoutClaim::Clean, &[]).is_none(),
+            "a clean layout failed the default claim"
+        );
+        assert!(
+            judge_layout(LayoutClaim::Clean, &breach).is_some(),
+            "a broken layout passed the default claim"
+        );
+        Ok(())
     }
 
     /// The registry's plainest control, and the subject of the teeth below:

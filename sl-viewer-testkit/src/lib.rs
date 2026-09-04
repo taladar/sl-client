@@ -93,11 +93,17 @@ pub type TestError = Box<dyn core::error::Error>;
 /// A node's border box, in physical pixels, from its computed size and where the
 /// layout put it.
 ///
+/// Public because it is the harness's one answer to *where did this end up*, and
+/// a widget's own test asking that question (which side of its anchor a drop-down
+/// opened on) should not reinvent the centre-plus-half-size arithmetic — see
+/// [`box_of`], which is this plus the lookup.
+///
 /// Built per-component in plain `f32` rather than with the `glam` operators, per
 /// the convention the viewer follows (`ik`, `camera`):
 /// the workspace's `arithmetic_side_effects` lint fires on `glam`'s overloaded
 /// operators but not on plain floating-point arithmetic.
-fn border_box(computed: &ComputedNode, transform: &UiGlobalTransform) -> Rect {
+#[must_use]
+pub fn border_box(computed: &ComputedNode, transform: &UiGlobalTransform) -> Rect {
     let centre = transform.translation;
     let (half_x, half_y) = (computed.size.x / 2.0, computed.size.y / 2.0);
     Rect {
@@ -472,6 +478,32 @@ pub fn settle(app: &mut App) {
 fn describe(name: Option<&Name>, entity: Entity) -> String {
     name.map_or_else(|| format!("{entity}"), |name| format!("`{name}`"))
 }
+
+/// The [`Popover`] nodes that are actually **up** — laid out with a box, rather
+/// than merely resident in the tree.
+///
+/// The distinction exists because the two ways a viewer widget owns a drop-down
+/// disagree about it. A menu or a combo spawns its popover on open and despawns
+/// it on close, so carrying the component and being open are the same thing; the
+/// chat volume select builds its panel once and toggles `Display::None`, so its
+/// popover is in the tree whether or not it is showing.
+///
+/// A closed popover floats over nothing and must exempt nothing — otherwise one
+/// resident-but-hidden panel would silently retire the overflow check for its
+/// whole ancestor chain, for every cell of the sweep, forever. A `Display::None`
+/// node lays out at zero size, which is exactly the question being asked, and is
+/// the same test [`viewport_violations`] uses to skip a closed panel.
+fn open_popovers(app: &mut App) -> HashSet<Entity> {
+    let mut popovers = app
+        .world_mut()
+        .query_filtered::<(Entity, &ComputedNode), With<Popover>>();
+    popovers
+        .iter(app.world())
+        .filter(|(_entity, computed)| !computed.size.cmple(Vec2::ZERO).any())
+        .map(|(entity, _computed)| entity)
+        .collect()
+}
+
 /// Every node with an open [`Popover`] somewhere beneath it, plus the popovers
 /// themselves.
 ///
@@ -486,10 +518,11 @@ fn describe(name: Option<&Name>, entity: Entity) -> String {
 /// escape propagates: taffy adds the popover's box to `content_size` at every
 /// level, so an open menu makes its host, the menu bar and the panel around them
 /// all report content bigger than their boxes.
+///
+/// Only the **open** ones count — see [`open_popovers`].
 fn popover_ancestors(app: &mut App) -> HashSet<Entity> {
+    let roots: Vec<Entity> = open_popovers(app).into_iter().collect();
     let world = app.world_mut();
-    let mut popovers = world.query_filtered::<Entity, With<Popover>>();
-    let roots: Vec<Entity> = popovers.iter(world).collect();
     let mut parents = world.query::<&ChildOf>();
     let mut hosting = HashSet::new();
     for popover in roots {
@@ -648,9 +681,10 @@ fn may_be_clipped(world: &World, node: Entity) -> bool {
 /// (a floater, a menu, a tooltip) contributes nothing to `content_size` and can
 /// sail straight out of its parent with the content check none the wiser.
 ///
-/// The one legitimate escapee is a [`Popover`], which is *defined* by sitting
-/// outside the anchor it is a child of — see `popover_ancestors`. It is
-/// skipped here, and its ancestors are skipped by [`overflow_violations`], but
+/// The one legitimate escapee is an **open** [`Popover`], which is *defined* by
+/// sitting outside the anchor it is a child of — see `open_popovers` and
+/// `popover_ancestors`. It is skipped here, and its ancestors are skipped by
+/// [`overflow_violations`], but
 /// **not** by [`viewport_violations`]: a drop-down is allowed to leave its
 /// parent and never allowed to leave the window, and that division is what keeps
 /// the exemption from covering the bug it would otherwise hide.
@@ -659,10 +693,7 @@ fn may_be_clipped(world: &World, node: Entity) -> bool {
 /// purpose there, and [`clipping_violations`] takes over the question of whether
 /// the result is *readable*.
 pub fn containment_violations(app: &mut App) -> Vec<String> {
-    let popovers: HashSet<Entity> = {
-        let mut query = app.world_mut().query_filtered::<Entity, With<Popover>>();
-        query.iter(app.world()).collect()
-    };
+    let popovers = open_popovers(app);
     let world = app.world_mut();
     let mut query = world.query::<(
         Entity,
@@ -1165,6 +1196,21 @@ pub fn find_by_name(app: &mut App, name: &str) -> Option<Entity> {
         .iter(app.world())
         .find(|(_, node_name)| node_name.as_str() == name)
         .map(|(entity, _)| entity)
+}
+
+/// Where a named node ended up: its [`border_box`], in physical pixels.
+///
+/// The question a placement test asks — did the drop-down open above or below,
+/// and did it stay inside the window — in the one form the harness measures
+/// everything else in, so a widget's own test and [`viewport_violations`] cannot
+/// disagree about what "outside" means. `None` when nothing carries the name, or
+/// when it does but is not a laid-out node.
+pub fn box_of(app: &mut App, name: &str) -> Option<Rect> {
+    let entity = find_by_name(app, name)?;
+    let world = app.world();
+    let computed = world.get::<ComputedNode>(entity)?;
+    let transform = world.get::<UiGlobalTransform>(entity)?;
+    Some(border_box(computed, transform))
 }
 
 /// Activate a widget as a click or `Enter` would, and settle.

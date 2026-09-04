@@ -14,7 +14,7 @@
 //!
 //! # What the first sweep found, and what is pinned rather than fixed
 //!
-//! Three groups of rows describe behaviour that is *not* what the viewer wants.
+//! Two groups of rows describe behaviour that is *not* what the viewer wants.
 //! They are pinned exactly, so the correction has to pass through this file:
 //!
 //! - **`Row::emits_wrongly(…, "viewer-widget-any-mouse-button-activates")`** —
@@ -23,9 +23,6 @@
 //!   upstream's observers never read `click.button` and `Activate` carries no
 //!   button for a downstream observer to read either. Fixing it is a change to
 //!   the `taladar/bevy` fork, not to this workspace.
-//! - **`.known_broken("viewer-chat-volume-dropdown-opens-off-screen")`** — the
-//!   chat volume panel, hand-positioned upward with no fallback, laid out above
-//!   the top of the window.
 //! - The **arrow keys on a tab strip and a radio group**, which move the
 //!   selection on all four arrows regardless of the widget's orientation. That
 //!   one is upstream *by design* — `bevy_ui_widgets`' `radio.rs` reads
@@ -774,16 +771,17 @@ pub(crate) const CONTRACTS: &[ElementContract] = &[
             NodeContract::new(
                 "local-chat-volume-button",
                 &[
-                    // Opening the whisper/say/shout panel puts it above the top
-                    // edge of the window: it is hand-positioned at
-                    // `bottom: 100%` with no fallback placement and no window
-                    // margin, so three of its four rows are unreachable. Both
-                    // gestures that open it are pinned as canaries — they fail
-                    // when the panel becomes a `Popover`, which is the fix.
-                    Row::emits(Gesture::PrimaryClick, &[])
-                        .known_broken("viewer-chat-volume-dropdown-opens-off-screen"),
-                    Row::emits(Gesture::DragAcross, &[])
-                        .known_broken("viewer-chat-volume-dropdown-opens-off-screen"),
+                    // Both gestures open the whisper/say/shout panel, and both
+                    // used to be pinned `known_broken` against
+                    // `viewer-chat-volume-dropdown-opens-off-screen`: the panel
+                    // was hand-positioned at `bottom: 100%` with no fallback
+                    // placement and no window margin, so it laid out above the
+                    // top edge of the window and three of its four rows were
+                    // unreachable. It is a `Popover` now, so the rows are clean
+                    // — and a clean layout here is the whole assertion, since
+                    // opening a drop-down emits no action.
+                    Row::emits(Gesture::PrimaryClick, &[]),
+                    Row::emits(Gesture::DragAcross, &[]),
                 ],
             ),
         ],

@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 310 |
 | blocked | 56 |
 | in-progress | 18 |
-| bugs | 64 |
-| done | 981 |
+| bugs | 63 |
+| done | 982 |
 | deferred | 25 |
 | wont-do | 14 |
 | **total** | **1566** |
@@ -1180,7 +1180,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (64)
+## bugs (63)
 
 ### viewer
 
@@ -1260,8 +1260,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The world map keeps a second live arboard handle
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
   — Mesh-head brow spikes forward from face-bone shape deformation
-- [`viewer-chat-volume-dropdown-opens-off-screen`](bugs/viewer-chat-volume-dropdown-opens-off-screen.md)
-  — The chat volume select opens upward into nothing
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
   — Check clouds vs the waterline at the horizon against Firestorm
 - [`viewer-combo-stops-opening`](bugs/viewer-combo-stops-opening.md) — A combo
@@ -1334,7 +1332,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (981)
+## done (982)
 
 ### protocol
 
@@ -1733,6 +1731,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-chat-sender-name-links`](done/viewer-chat-sender-name-links.md) —
   Chat sender names — clickable agent / object links (blocked by
   `viewer-url-linkification` (done))
+- [`viewer-chat-volume-dropdown-opens-off-screen`](done/viewer-chat-volume-dropdown-opens-off-screen.md)
+  — The chat volume select opens upward into nothing
 - [`viewer-clickable-name-widgets`](done/viewer-clickable-name-widgets.md) —
   Reusable clickable avatar-name / group-name widgets
 - [`viewer-clipped-links-still-pickable`](done/viewer-clipped-links-still-pickable.md)
