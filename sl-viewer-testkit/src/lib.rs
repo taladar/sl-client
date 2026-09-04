@@ -73,7 +73,8 @@ use bevy::ui_widgets::Activate;
 
 use sl_viewer_ui_core::ui::{
     UiDirection, UiRoot, UiScaffoldSystems, apply_panel_visibility, apply_ui_direction,
-    invalidate_logical_boxes, resolve_logical_boxes, spawn_ui_root,
+    invalidate_logical_boxes, park_new_tab_stops_in_hidden_subtrees, resolve_logical_boxes,
+    spawn_ui_root,
 };
 use sl_viewer_ui_core::ui_element::{
     AlignEdge, AlignmentGroup, ElementCx, RadialCentre, RadialPlacement, TextMayClip, UiAction,
@@ -374,6 +375,7 @@ impl LayoutTest {
             PostUpdate,
             (
                 apply_panel_visibility,
+                park_new_tab_stops_in_hidden_subtrees,
                 invalidate_logical_boxes,
                 resolve_logical_boxes,
                 apply_ui_direction,

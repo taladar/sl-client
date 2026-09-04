@@ -108,7 +108,10 @@ use bevy::ui_widgets::{
     Button, ControlOrientation, RadioButton, RadioGroup, Scrollbar, ScrollbarThumb, ValueChange,
 };
 
-use sl_viewer_ui_core::ui::{FocusRevealBounds, UiDirection, column, row};
+use sl_viewer_ui_core::ui::{
+    FocusRevealBounds, HideWith, PanelVisibility, TabStopsFollowVisibility, UiDirection, column,
+    row,
+};
 use sl_viewer_ui_core::ui_element::{ElementCx, TextMayClip, UiAction};
 use sl_viewer_ui_core::ui_ellipsis::{RevealEllipsis, spawn_ellipsis_marker};
 use sl_viewer_ui_core::ui_font::UiFont;
@@ -466,10 +469,11 @@ pub struct TabButton {
 /// Hidden panels are toggled with [`Visibility`], **not** the scaffold's
 /// `UiPanelShown` / `Display::None`: they must stay laid out so the panel area
 /// sizes to the largest of them and the widget does not shrink when a lighter tab
-/// is selected. (A consequence is that a *focusable* widget in a hidden panel
-/// stays reachable by `Tab` — the scaffold's `UiPanelShown` parks that, and a
-/// consumer that puts focusables in tab panels will want the same here; no
-/// consumer does yet.)
+/// is selected. That is the *only* difference — the tab-stop parking and the
+/// focus drop are identical, so both go through the same
+/// [`PanelVisibility`] ([`HideWith::Visibility`] here,
+/// [`HideWith::Display`] there) and a focusable in a switched-away panel is out
+/// of the `Tab` cycle exactly as it is in a closed one.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TabPanel {
     /// The strip that switches this panel.
@@ -925,12 +929,16 @@ pub fn spawn_tab_container(
                 },
                 // Hidden panels are laid out (so they count toward the max size)
                 // but not drawn. `Visibility`, not `Display`, is the whole of the
-                // difference from the scaffold's `UiPanelShown`.
+                // difference from the scaffold's `UiPanelShown` — and the marker
+                // beside it is what tells the scaffold that this one *is* a
+                // managed subtree, so a panel not on screen is out of the `Tab`
+                // cycle as well as unseen.
                 if shown {
                     Visibility::Inherited
                 } else {
                     Visibility::Hidden
                 },
+                TabStopsFollowVisibility,
                 TabPanel { strip, index },
                 Name::new(format!("{}:panel:{index}", spec.element)),
                 ChildOf(panel_area),
@@ -1428,7 +1436,8 @@ fn on_tab_value_change(
     mut commands: Commands,
     mut strips: Query<&mut TabStrip>,
     mut buttons: Query<(Entity, &TabButton, &mut BackgroundColor, &mut BorderColor)>,
-    mut panels: Query<(&TabPanel, &mut Visibility)>,
+    panels: Query<(Entity, &TabPanel)>,
+    mut visibility: PanelVisibility,
     mut actions: MessageWriter<UiAction>,
 ) {
     let strip_id = change.source;
@@ -1451,7 +1460,14 @@ fn on_tab_value_change(
     strip.active = picked;
     let element = strip.element;
 
-    reconcile_tab_selection(strip_id, picked, &mut buttons, &mut panels, &mut commands);
+    reconcile_tab_selection(
+        strip_id,
+        picked,
+        &mut buttons,
+        &panels,
+        &mut visibility,
+        &mut commands,
+    );
 
     actions.write(UiAction {
         element,
@@ -1466,11 +1482,18 @@ fn on_tab_value_change(
 /// ([`on_tab_value_change`]) and the programmatic-selection system
 /// ([`apply_programmatic_tab_selection`]). Every write is guarded, so a settled
 /// strip is not re-touched.
+///
+/// A panel's `Visibility` is written through [`PanelVisibility`] rather than
+/// here, because hiding a panel is not only a `Visibility`: `bevy_input_focus`
+/// consults neither `Visibility` nor `Display`, so a panel switched away from
+/// keeps its tab stops and `Tab` walks into it. That is the same leak the
+/// scaffold's `UiPanelShown` parks, and it is parked in the same place.
 fn reconcile_tab_selection(
     strip_id: Entity,
     active: usize,
     buttons: &mut Query<(Entity, &TabButton, &mut BackgroundColor, &mut BorderColor)>,
-    panels: &mut Query<(&TabPanel, &mut Visibility)>,
+    panels: &Query<(Entity, &TabPanel)>,
+    visibility: &mut PanelVisibility,
     commands: &mut Commands,
 ) {
     for (button, tab, mut background, mut border) in buttons.iter_mut() {
@@ -1493,18 +1516,15 @@ fn reconcile_tab_selection(
         }
     }
 
-    for (panel, mut visibility) in panels.iter_mut() {
-        if panel.strip != strip_id {
-            continue;
-        }
-        let wanted = if panel.index == active {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        };
-        if *visibility != wanted {
-            *visibility = wanted;
-        }
+    // Collected first: the walk `set_shown` does reads `Children` and writes
+    // `Visibility`, which it cannot do while this query is still iterating.
+    let switched: Vec<(Entity, bool)> = panels
+        .iter()
+        .filter(|(_, panel)| panel.strip == strip_id)
+        .map(|(entity, panel)| (entity, panel.index == active))
+        .collect();
+    for (panel, is_active) in switched {
+        visibility.set_shown(panel, is_active, HideWith::Visibility);
     }
 }
 
@@ -1517,7 +1537,8 @@ fn reconcile_tab_selection(
 fn apply_programmatic_tab_selection(
     strips: Query<(Entity, &TabStrip), Changed<TabStrip>>,
     mut buttons: Query<(Entity, &TabButton, &mut BackgroundColor, &mut BorderColor)>,
-    mut panels: Query<(&TabPanel, &mut Visibility)>,
+    panels: Query<(Entity, &TabPanel)>,
+    mut visibility: PanelVisibility,
     mut commands: Commands,
 ) {
     for (strip_id, strip) in &strips {
@@ -1525,7 +1546,8 @@ fn apply_programmatic_tab_selection(
             strip_id,
             strip.active,
             &mut buttons,
-            &mut panels,
+            &panels,
+            &mut visibility,
             &mut commands,
         );
     }
@@ -1734,13 +1756,17 @@ mod tests {
         TabStrip, TabStripWidth, TabViewport, apply_tab_strip_width, arrow_scroll_delta,
         resize_strip_width, spawn_tab_container, spawn_tab_strip,
     };
+    use bevy::ecs::system::SystemState;
     use bevy::ecs::world::CommandQueue;
-    use bevy::input_focus::tab_navigation::TabIndex;
+    use bevy::input_focus::tab_navigation::{NavAction, TabIndex, TabNavigation};
+    use bevy::input_focus::{FocusCause, InputFocus};
     use bevy::prelude::*;
     use bevy::ui::Checked;
     use bevy::ui_widgets::ValueChange;
     use pretty_assertions::assert_eq;
-    use sl_viewer_ui_core::ui::{UiDirection, UiRoot, spawn_ui_root};
+    use sl_viewer_ui_core::ui::{
+        UiDirection, UiRoot, park_new_tab_stops_in_hidden_subtrees, spawn_ui_root,
+    };
     use sl_viewer_ui_core::ui_element::UiAction;
 
     /// A boxed error so tests can use `?` instead of the disallowed
@@ -1804,11 +1830,20 @@ mod tests {
     /// A minimal app with the scaffold root and the `UiAction` message, enough to
     /// spawn a widget and drive its observer by triggering the value change the
     /// `RadioGroup` would.
+    ///
+    /// [`InputFocus`] is the scaffold's, not this widget's — live it comes from
+    /// `InputFocusPlugin` — but a tab switch drops focus that the panel it hides
+    /// was holding, so a harness without it cannot run the observer at all.
+    /// `park_new_tab_stops_in_hidden_subtrees` likewise runs here because it is
+    /// what parks the widgets a container is *built* with, in the panels it is
+    /// built hidden.
     fn tab_app() -> App {
         let mut app = App::new();
         app.insert_resource(UiDirection::default())
+            .init_resource::<InputFocus>()
             .add_message::<UiAction>()
-            .add_systems(Startup, spawn_ui_root);
+            .add_systems(Startup, spawn_ui_root)
+            .add_systems(Update, park_new_tab_stops_in_hidden_subtrees);
         app.update();
         app
     }
@@ -2574,6 +2609,152 @@ mod tests {
                 "{placement:?} with {count} tabs in a {host:?} host: overflow"
             );
         }
+        Ok(())
+    }
+
+    /// A focusable in a panel that is not the selected one is out of the `Tab`
+    /// cycle — from the moment the container is built, not merely after the
+    /// first switch — and comes back with the index it had when its tab is
+    /// picked.
+    ///
+    /// `bevy_input_focus` consults neither `Visibility` nor `Display`, so
+    /// without this every tabbed floater in the viewer — preferences, profiles,
+    /// places, search, the pickers, inventory — lets `Tab` walk into panels that
+    /// are not on screen.
+    #[test]
+    fn only_the_selected_panel_keeps_its_tab_stops() -> Result<(), TestError> {
+        let mut app = tab_app();
+        let parent = root(&app);
+        let handle = spawn_container(&mut app, parent, TabPlacement::BlockStart, 0, None);
+        let panels = handle.panels.clone();
+
+        // A focusable per panel, spawned *after* the container, which is the
+        // order every consumer builds in.
+        let mut stops = Vec::new();
+        for (index, &panel) in panels.iter().enumerate() {
+            let want = i32::try_from(index).unwrap_or(0).saturating_add(1);
+            stops.push(
+                app.world_mut()
+                    .spawn((Node::default(), TabIndex(want), ChildOf(panel)))
+                    .id(),
+            );
+        }
+        app.update();
+
+        let stop_index = |app: &App, stop: Entity| app.world().get::<TabIndex>(stop).copied();
+        assert_eq!(
+            stop_index(&app, *stops.first().ok_or("no stop 0")?),
+            Some(TabIndex(1)),
+            "the selected panel's widget is reachable"
+        );
+        for (index, &stop) in stops.iter().enumerate().skip(1) {
+            assert!(
+                stop_index(&app, stop).is_none(),
+                "panel {index} is not selected, so `Tab` must not reach into it"
+            );
+        }
+
+        let strip = the_strip(&mut app);
+        let buttons = tab_buttons(&mut app);
+        select(&mut app, strip, *buttons.get(2).ok_or("no tab 2")?);
+
+        assert_eq!(
+            stop_index(&app, *stops.get(2).ok_or("no stop 2")?),
+            Some(TabIndex(3)),
+            "the newly selected panel's widget must come back with the index it had"
+        );
+        assert!(
+            stop_index(&app, *stops.first().ok_or("no stop 0")?).is_none(),
+            "and the panel switched away from must give its stop up"
+        );
+        Ok(())
+    }
+
+    /// The same thing said by the keyboard rather than by the components:
+    /// pressing `Tab` from the strip lands on the selected panel's widget and
+    /// never on a switched-away panel's.
+    ///
+    /// Driven through `bevy_input_focus`'s real `TabNavigation`, because that —
+    /// not the presence of a component — is what the user experiences, and it is
+    /// the thing that consults neither `Visibility` nor `Display`.
+    #[test]
+    fn tab_never_lands_in_an_unselected_panel() -> Result<(), TestError> {
+        let mut app = tab_app();
+        let parent = root(&app);
+        let handle = spawn_container(&mut app, parent, TabPlacement::BlockStart, 0, None);
+        let panels = handle.panels.clone();
+        let mut stops = Vec::new();
+        for &panel in &panels {
+            stops.push(
+                app.world_mut()
+                    .spawn((Node::default(), TabIndex(0), ChildOf(panel)))
+                    .id(),
+            );
+        }
+        app.update();
+
+        // Walk the whole cycle from nowhere and collect where focus lands.
+        let mut visited = Vec::new();
+        app.world_mut().resource_mut::<InputFocus>().clear();
+        for _step in 0..panels.len().saturating_add(2) {
+            let focus = app.world().resource::<InputFocus>().clone();
+            let mut state = SystemState::<TabNavigation>::new(app.world_mut());
+            let Some(next) = state
+                .get(app.world())
+                .ok()
+                .and_then(|navigation| navigation.navigate(&focus, NavAction::Next).ok())
+            else {
+                break;
+            };
+            app.world_mut()
+                .resource_mut::<InputFocus>()
+                .set(next, FocusCause::Navigated);
+            app.update();
+            visited.push(next);
+        }
+
+        for (index, &stop) in stops.iter().enumerate().skip(1) {
+            assert!(
+                !visited.contains(&stop),
+                "`Tab` reached the widget in unselected panel {index}"
+            );
+        }
+        assert!(
+            visited.contains(stops.first().ok_or("no stop 0")?),
+            "`Tab` must still reach the selected panel's widget"
+        );
+        Ok(())
+    }
+
+    /// Switching away from the panel that holds keyboard focus takes the
+    /// keyboard with it.
+    ///
+    /// Otherwise the hidden panel goes on receiving what is typed — the same
+    /// third promise the scaffold's `UiPanelShown` makes, for the same reason.
+    #[test]
+    fn switching_away_drops_focus_that_was_inside_the_panel() -> Result<(), TestError> {
+        let mut app = tab_app();
+        let parent = root(&app);
+        let handle = spawn_container(&mut app, parent, TabPlacement::BlockStart, 0, None);
+        let panel = *handle.panels.first().ok_or("no panel 0")?;
+        let stop = app
+            .world_mut()
+            .spawn((Node::default(), TabIndex(1), ChildOf(panel)))
+            .id();
+        app.update();
+        app.world_mut()
+            .resource_mut::<InputFocus>()
+            .set(stop, FocusCause::Navigated);
+
+        let strip = the_strip(&mut app);
+        let buttons = tab_buttons(&mut app);
+        select(&mut app, strip, *buttons.get(1).ok_or("no tab 1")?);
+
+        assert_eq!(
+            app.world().resource::<InputFocus>().get(),
+            None,
+            "a panel switched away from must give up the keyboard"
+        );
         Ok(())
     }
 

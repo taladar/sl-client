@@ -107,6 +107,7 @@
 
 use std::ffi::OsStr;
 
+use bevy::ecs::system::SystemParam;
 use bevy::input_focus::tab_navigation::{TabGroup, TabIndex, TabNavigationPlugin};
 use bevy::input_focus::{InputFocus, InputFocusVisible};
 use bevy::prelude::*;
@@ -209,13 +210,18 @@ impl Plugin for ViewerUiPlugin {
                 PostUpdate,
                 (
                     apply_panel_visibility,
+                    // After the panel sweep, so the two never disagree about a
+                    // stop that appears and is hidden in the same frame: the
+                    // sweep settles the panels, then this looks at what is new.
+                    park_new_tab_stops_in_hidden_subtrees,
                     invalidate_logical_boxes,
                     resolve_logical_boxes,
                     apply_ui_direction,
                 )
-                    // Chained because the middle two are a dirty-then-resolve
-                    // pair, and because three of the four write `Node` — left
-                    // unordered, they would be an ambiguous access.
+                    // Chained because the two logical-box systems are a
+                    // dirty-then-resolve pair, and because four of the five
+                    // touch `Node` mutably — left unordered, they would be an
+                    // ambiguous access.
                     .chain()
                     // Ahead of the layout pass, so a node spawned or re-resolved
                     // this frame is laid out with the boxes it asked for rather
@@ -657,58 +663,255 @@ pub fn apply_ui_direction(direction: Res<UiDirection>, mut nodes: Query<&mut Nod
 /// 3. **Drop focus that is inside it.** Otherwise the closed panel keeps the
 ///    keyboard: keystrokes go on being typed into an editor nobody can see.
 ///
-/// All three are [`apply_panel_visibility`]'s job.
+/// All three are [`apply_panel_visibility`]'s job, which does them through
+/// [`PanelVisibility`].
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UiPanelShown(pub bool);
 
 /// Where a hidden panel's `TabIndex` waits while the panel is closed, so
-/// [`apply_panel_visibility`] can give each node back the index it had rather
-/// than a guessed one.
+/// [`PanelVisibility`] can give each node back the index it had rather than a
+/// guessed one.
 #[derive(Component, Debug, Clone, Copy)]
 pub struct ParkedTabIndex(TabIndex);
 
-/// Apply a panel's [`UiPanelShown`] to its whole subtree: flow, tab reachability
-/// and focus. See [`UiPanelShown`] for why each of the three is needed.
-pub fn apply_panel_visibility(
-    mut commands: Commands,
-    panels: Query<(Entity, &UiPanelShown), Changed<UiPanelShown>>,
-    mut nodes: Query<&mut Node>,
-    children: Query<&Children>,
-    tab_indices: Query<&TabIndex>,
-    parked: Query<&ParkedTabIndex>,
-    mut focus: ResMut<InputFocus>,
-) {
-    for (panel, shown) in &panels {
-        if let Ok(mut node) = nodes.get_mut(panel) {
-            let display = if shown.0 {
-                Display::Flex
-            } else {
-                Display::None
-            };
-            if node.display != display {
-                node.display = display;
+/// On a subtree root hidden with [`HideWith::Visibility`], the opt-in that says
+/// its `Visibility` governs tab reachability too — so a
+/// [`PanelVisibility`] walk knows to stop at it.
+///
+/// It has to be asked for, because `Visibility::Hidden` and `Display::None` are
+/// both used all over the viewer for things that are *not* managed subtrees:
+/// [`crate::virtual_list`] parks its pooled rows with `Display::None` and gives
+/// them back by writing `Node` itself, a scrollbar hides when its content fits,
+/// a tooltip hides when the pointer leaves. Treating any of those as "this
+/// subtree owns its tab stops" would park a stop that nothing is ever going to
+/// un-park. [`UiPanelShown`] needs no marker — carrying it *is* the opt-in.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TabStopsFollowVisibility;
+
+/// Which of the two ways a subtree is taken out of view — the *only* difference
+/// between the scaffold's panels and the tab widget's, and the reason
+/// [`PanelVisibility`] is asked rather than assumed.
+///
+/// The tab-stop and focus halves are identical either way, which is the whole
+/// point of routing both through one place: `bevy_input_focus` consults neither
+/// field, so both mechanisms leak tab stops in exactly the same manner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HideWith {
+    /// `Display::None` — the node leaves the flow entirely. Right when the
+    /// hidden thing must not hold its space open, which is every panel that
+    /// shares a flow container with its siblings ([`UiPanelShown`]).
+    Display,
+    /// `Visibility::Hidden` — the node stays laid out but is not drawn. Right
+    /// when the container must keep sizing to the hidden thing: a tab widget
+    /// stacks all its panels in one grid cell so the panel area holds the
+    /// largest of them and the widget does not shrink on a tab switch.
+    Visibility,
+}
+
+/// The one place a UI subtree is hidden or shown, so that flow, **tab
+/// reachability** and **focus** can never disagree.
+///
+/// The second and third are the ones nothing upstream does: `bevy_input_focus`'s
+/// tab navigation walks the hierarchy and checks neither `Display` nor
+/// `Visibility`, so a subtree hidden by either mechanism keeps its tab stops and
+/// `Tab` lands on a widget nobody can see — and if focus was already inside it,
+/// keystrokes go on being typed into it. Every hiding mechanism therefore goes
+/// through [`set_shown`](Self::set_shown) rather than writing the field itself.
+///
+/// # Why hiding and showing are not mirror images
+///
+/// Parking sweeps the **whole** subtree unconditionally: everything under a
+/// hidden root is unreachable, however it came to be there.
+///
+/// Un-parking must not, because subtrees nest — a floater holds a tab widget,
+/// whose inactive panels are themselves hidden. So the restore walk **stops at
+/// any managed subtree that is currently hiding itself** ([`UiPanelShown`], or
+/// [`TabStopsFollowVisibility`] and `Visibility::Hidden`), leaving its stops
+/// parked for whoever eventually shows it, and it declines entirely when an
+/// *ancestor* of the root being shown is still hidden — a tab switching inside a
+/// closed floater must not hand the keyboard back. Both checks read the owner's
+/// own live state rather than a bookkeeping marker, so the two mechanisms need
+/// no agreement about who parked what and no ordering between them.
+#[derive(SystemParam)]
+#[expect(
+    missing_debug_implementations,
+    reason = "a `SystemParam` of queries and `Commands`, none of which are `Debug`"
+)]
+pub struct PanelVisibility<'w, 's> {
+    /// Insert / remove of `TabIndex` and [`ParkedTabIndex`], which is the only
+    /// deferred part of the whole mechanism.
+    commands: Commands<'w, 's>,
+    /// Owns `Node` mutably so [`HideWith::Display`] can be written here rather
+    /// than by the caller — a second `&mut Node` query in the same system would
+    /// be a conflicting access.
+    nodes: Query<'w, 's, &'static mut Node>,
+    /// Owns `Visibility` mutably for the same reason, for
+    /// [`HideWith::Visibility`].
+    visibilities: Query<'w, 's, &'static mut Visibility>,
+    /// A panel that has not been through [`apply_panel_visibility`] yet still
+    /// answers "am I hidden?" correctly through this.
+    shown: Query<'w, 's, &'static UiPanelShown>,
+    /// The [`HideWith::Visibility`] half of the same question — asked only of
+    /// roots that opted in, see [`TabStopsFollowVisibility`].
+    visibility_gated: Query<'w, 's, (), With<TabStopsFollowVisibility>>,
+    /// The subtree walk.
+    children: Query<'w, 's, &'static Children>,
+    /// The ancestor walk, for the "is the thing I am showing itself inside
+    /// something hidden?" check.
+    parents: Query<'w, 's, &'static ChildOf>,
+    /// The stops to park.
+    tab_indices: Query<'w, 's, &'static TabIndex>,
+    /// The stops to give back.
+    parked: Query<'w, 's, &'static ParkedTabIndex>,
+    /// Focus inside a subtree being hidden is dropped.
+    focus: ResMut<'w, InputFocus>,
+}
+
+impl PanelVisibility<'_, '_> {
+    /// Show or hide `root`'s subtree: write the flow field `hide_with` names,
+    /// park or restore the subtree's tab stops, and drop focus that a hide has
+    /// just taken off screen.
+    ///
+    /// The flow write is guarded, so a settled panel does not re-trigger layout
+    /// or change detection; the tab-stop walk is idempotent, so calling this
+    /// with the state a panel is already in changes nothing.
+    pub fn set_shown(&mut self, root: Entity, shown: bool, hide_with: HideWith) {
+        match hide_with {
+            HideWith::Display => {
+                let wanted = if shown { Display::Flex } else { Display::None };
+                if let Ok(mut node) = self.nodes.get_mut(root)
+                    && node.display != wanted
+                {
+                    node.display = wanted;
+                }
+            }
+            HideWith::Visibility => {
+                let wanted = if shown {
+                    Visibility::Inherited
+                } else {
+                    Visibility::Hidden
+                };
+                if let Ok(mut visibility) = self.visibilities.get_mut(root)
+                    && *visibility != wanted
+                {
+                    *visibility = wanted;
+                }
             }
         }
-        // The panel itself can be focusable, so walk it as well as its children.
-        for node in core::iter::once(panel).chain(children.iter_descendants(panel)) {
-            if shown.0 {
-                if let Ok(ParkedTabIndex(index)) = parked.get(node) {
-                    commands
-                        .entity(node)
-                        .insert(*index)
-                        .remove::<ParkedTabIndex>();
-                }
-            } else {
-                if let Ok(index) = tab_indices.get(node) {
-                    commands
-                        .entity(node)
-                        .insert(ParkedTabIndex(*index))
-                        .remove::<TabIndex>();
-                }
-                if focus.get() == Some(node) {
-                    focus.clear();
+        if shown {
+            self.restore(root);
+        } else {
+            self.park(root);
+        }
+    }
+
+    /// Park every tab stop in `root`'s subtree, and drop focus that lands in it.
+    ///
+    /// The root itself is walked too — a panel can be focusable — and the sweep
+    /// is unconditional: everything under a hidden root is unreachable no matter
+    /// which mechanism, or which owner, put it there.
+    fn park(&mut self, root: Entity) {
+        for node in core::iter::once(root).chain(self.children.iter_descendants(root)) {
+            let index = self.tab_indices.get(node).ok().copied();
+            if let Some(index) = index {
+                self.commands
+                    .entity(node)
+                    .insert(ParkedTabIndex(index))
+                    .remove::<TabIndex>();
+            }
+            if self.focus.get() == Some(node) {
+                self.focus.clear();
+            }
+        }
+    }
+
+    /// Give back the tab stops in `root`'s subtree that are reachable again —
+    /// see [`PanelVisibility`] for why this is not the mirror of `park`.
+    fn restore(&mut self, root: Entity) {
+        if self.hidden_by_an_ancestor(root) {
+            return;
+        }
+        let mut pending = vec![root];
+        while let Some(node) = pending.pop() {
+            let index = self.parked.get(node).ok().map(|parked| parked.0);
+            if let Some(index) = index {
+                self.commands
+                    .entity(node)
+                    .insert(index)
+                    .remove::<ParkedTabIndex>();
+            }
+            let children: Vec<Entity> = self
+                .children
+                .get(node)
+                .map_or_else(|_| Vec::new(), |children| children.iter().collect());
+            for child in children {
+                // A nested panel that is still hidden keeps its stops parked;
+                // showing it is its own owner's business.
+                if !self.hides_its_subtree(child) {
+                    pending.push(child);
                 }
             }
+        }
+    }
+
+    /// Whether `entity` is a **managed** subtree root that is currently hiding
+    /// itself — by either mechanism, and *only* for a root that has opted in.
+    ///
+    /// Both answers come from the state the owner writes ([`UiPanelShown`],
+    /// `Visibility`) rather than from the flow field [`set_shown`](Self::set_shown)
+    /// derives from it, so they are already right in the frame a panel closes,
+    /// before [`apply_panel_visibility`] has run — which is exactly the frame a
+    /// tab inside that panel might switch.
+    fn hides_its_subtree(&self, entity: Entity) -> bool {
+        if self.shown.get(entity).is_ok_and(|shown| !shown.0) {
+            return true;
+        }
+        self.visibility_gated.get(entity).is_ok()
+            && self
+                .visibilities
+                .get(entity)
+                .is_ok_and(|visibility| *visibility == Visibility::Hidden)
+    }
+
+    /// Whether anything above `entity` is hiding it.
+    fn hidden_by_an_ancestor(&self, entity: Entity) -> bool {
+        self.parents
+            .iter_ancestors(entity)
+            .any(|ancestor| self.hides_its_subtree(ancestor))
+    }
+}
+
+/// Apply a panel's [`UiPanelShown`] to its whole subtree: flow, tab reachability
+/// and focus. See [`UiPanelShown`] for why each of the three is needed, and
+/// [`PanelVisibility`] for how the last two are done.
+pub fn apply_panel_visibility(
+    panels: Query<(Entity, &UiPanelShown), Changed<UiPanelShown>>,
+    mut visibility: PanelVisibility,
+) {
+    for (panel, shown) in &panels {
+        visibility.set_shown(panel, shown.0, HideWith::Display);
+    }
+}
+
+/// Park a tab stop that is **born** inside a subtree nothing is going to hide
+/// again.
+///
+/// [`apply_panel_visibility`] and the tab widget park on the *transition*, so
+/// neither ever sees a focusable spawned into an already-hidden panel — which is
+/// the normal order of things: a container is built with its inactive panels
+/// hidden, and only then filled with content. Without this, a tabbed floater's
+/// off-tab widgets are reachable by `Tab` from the moment it opens until the
+/// first tab switch.
+///
+/// `Added<TabIndex>` keeps it to the frame a stop appears (and the frame
+/// [`PanelVisibility`] hands one back, where it correctly finds nothing hidden).
+pub fn park_new_tab_stops_in_hidden_subtrees(
+    added: Query<Entity, Added<TabIndex>>,
+    mut visibility: PanelVisibility,
+) {
+    for stop in &added {
+        if visibility.hides_its_subtree(stop) || visibility.hidden_by_an_ancestor(stop) {
+            visibility.park(stop);
         }
     }
 }
@@ -1353,11 +1556,12 @@ pub const BOTTOM_BAR_Z: i32 = 9_000;
 #[cfg(test)]
 mod tests {
     use super::{
-        LogicalBorder, LogicalInset, LogicalMargin, LogicalPadding, LogicalRect, UiDemoButton,
-        UiDemoLabelLong, UiDemoRoot, UiDemoTextSize, UiDemoVisible, UiDirection, UiPanelShown,
-        UiRoot, UiRootNode, ViewerUiPlugin, apply_panel_visibility, apply_ui_direction, column,
-        invalidate_logical_boxes, resolve_logical_boxes, reveal_delta, row, setup_ui_demo,
-        spawn_ui_root,
+        LogicalBorder, LogicalInset, LogicalMargin, LogicalPadding, LogicalRect,
+        TabStopsFollowVisibility, UiDemoButton, UiDemoLabelLong, UiDemoRoot, UiDemoTextSize,
+        UiDemoVisible, UiDirection, UiPanelShown, UiRoot, UiRootNode, ViewerUiPlugin,
+        apply_panel_visibility, apply_ui_direction, column, invalidate_logical_boxes,
+        park_new_tab_stops_in_hidden_subtrees, resolve_logical_boxes, reveal_delta, row,
+        setup_ui_demo, spawn_ui_root,
     };
     use bevy::input_focus::tab_navigation::{TabGroup, TabIndex, TabNavigationPlugin};
     use bevy::input_focus::{FocusCause, InputFocus};
@@ -1823,6 +2027,180 @@ mod tests {
                 .ok_or("the panel lost its `Node`")?
                 .display,
             Display::Flex
+        );
+        Ok(())
+    }
+
+    /// Re-opening a panel must not hand the tab cycle back to a panel *inside*
+    /// it that is still closed.
+    ///
+    /// The obvious restore — walk the subtree, give every parked index back —
+    /// gets this wrong, because the nested panel never changed and so nothing
+    /// re-parks it: its widgets rejoin the `Tab` cycle while still
+    /// `Display::None`. That is why [`PanelVisibility`] stops the restore walk
+    /// at anything that hides its own subtree.
+    #[test]
+    fn re_opening_a_panel_leaves_a_nested_closed_one_out_of_the_tab_cycle() -> Result<(), TestError>
+    {
+        let mut app = App::new();
+        app.init_resource::<InputFocus>()
+            .add_systems(Update, apply_panel_visibility);
+        let outer = app
+            .world_mut()
+            .spawn((Node::default(), UiPanelShown(true)))
+            .id();
+        let inner = app
+            .world_mut()
+            .spawn((Node::default(), UiPanelShown(false), ChildOf(outer)))
+            .id();
+        let outer_button = app
+            .world_mut()
+            .spawn((Node::default(), TabIndex(1), ChildOf(outer)))
+            .id();
+        let inner_button = app
+            .world_mut()
+            .spawn((Node::default(), TabIndex(2), ChildOf(inner)))
+            .id();
+        app.update();
+        assert!(
+            app.world().get::<TabIndex>(inner_button).is_none(),
+            "a panel born closed must park its widgets, not wait for a first toggle"
+        );
+
+        for shown in [false, true] {
+            app.world_mut()
+                .get_mut::<UiPanelShown>(outer)
+                .ok_or("the outer panel lost its `UiPanelShown`")?
+                .0 = shown;
+            app.update();
+        }
+
+        assert_eq!(
+            app.world().get::<TabIndex>(outer_button).copied(),
+            Some(TabIndex(1)),
+            "the re-opened panel's own widget must come back"
+        );
+        assert!(
+            app.world().get::<TabIndex>(inner_button).is_none(),
+            "the still-closed nested panel's widget must not: it is `Display::None`"
+        );
+
+        app.world_mut()
+            .get_mut::<UiPanelShown>(inner)
+            .ok_or("the inner panel lost its `UiPanelShown`")?
+            .0 = true;
+        app.update();
+        assert_eq!(
+            app.world().get::<TabIndex>(inner_button).copied(),
+            Some(TabIndex(2)),
+            "opening the nested panel itself must give its widget the index back"
+        );
+        Ok(())
+    }
+
+    /// A panel opening *inside* a closed one must not hand the keyboard back.
+    ///
+    /// The mirror of the case above, and the reason the restore also walks
+    /// *upwards*: a tab switch, or a settings-driven sub-panel, can toggle while
+    /// the floater holding it is shut, and un-parking then would put `Tab` back
+    /// into a subtree nobody can see.
+    #[test]
+    fn opening_a_panel_inside_a_closed_one_keeps_it_parked() -> Result<(), TestError> {
+        let mut app = App::new();
+        app.init_resource::<InputFocus>()
+            .add_systems(Update, apply_panel_visibility);
+        let outer = app
+            .world_mut()
+            .spawn((Node::default(), UiPanelShown(false)))
+            .id();
+        let inner = app
+            .world_mut()
+            .spawn((Node::default(), UiPanelShown(false), ChildOf(outer)))
+            .id();
+        let button = app
+            .world_mut()
+            .spawn((Node::default(), TabIndex(7), ChildOf(inner)))
+            .id();
+        app.update();
+
+        app.world_mut()
+            .get_mut::<UiPanelShown>(inner)
+            .ok_or("the inner panel lost its `UiPanelShown`")?
+            .0 = true;
+        app.update();
+        assert!(
+            app.world().get::<TabIndex>(button).is_none(),
+            "a panel opening inside a closed one is still off screen: its stops stay parked"
+        );
+
+        app.world_mut()
+            .get_mut::<UiPanelShown>(outer)
+            .ok_or("the outer panel lost its `UiPanelShown`")?
+            .0 = true;
+        app.update();
+        assert_eq!(
+            app.world().get::<TabIndex>(button).copied(),
+            Some(TabIndex(7)),
+            "and comes back when the panel around it finally opens"
+        );
+        Ok(())
+    }
+
+    /// A focusable spawned into an already-hidden subtree is parked — and only
+    /// if that subtree said it manages its tab stops.
+    ///
+    /// The first half is the normal build order, not an edge case: a container
+    /// is stood up with its off-screen panels hidden and *then* filled, so
+    /// nothing ever sees the hide as a transition.
+    ///
+    /// The second half is why [`TabStopsFollowVisibility`] has to be asked for.
+    /// `Visibility::Hidden` and `Display::None` mean a dozen unrelated things in
+    /// this viewer — a pooled virtual-list row, a scrollbar whose content fits,
+    /// a tooltip with no pointer on it — and none of their owners would ever
+    /// un-park a stop this had taken.
+    #[test]
+    fn a_tab_stop_born_in_a_hidden_subtree_is_parked() -> Result<(), TestError> {
+        let mut app = App::new();
+        app.init_resource::<InputFocus>().add_systems(
+            Update,
+            (
+                apply_panel_visibility,
+                park_new_tab_stops_in_hidden_subtrees,
+            )
+                .chain(),
+        );
+        let managed = app
+            .world_mut()
+            .spawn((
+                Node::default(),
+                Visibility::Hidden,
+                TabStopsFollowVisibility,
+            ))
+            .id();
+        let unmanaged = app
+            .world_mut()
+            .spawn((Node::default(), Visibility::Hidden))
+            .id();
+        app.update();
+
+        let parked = app
+            .world_mut()
+            .spawn((Node::default(), TabIndex(4), ChildOf(managed)))
+            .id();
+        let left_alone = app
+            .world_mut()
+            .spawn((Node::default(), TabIndex(5), ChildOf(unmanaged)))
+            .id();
+        app.update();
+
+        assert!(
+            app.world().get::<TabIndex>(parked).is_none(),
+            "a stop spawned under a hidden managed subtree was never reachable"
+        );
+        assert_eq!(
+            app.world().get::<TabIndex>(left_alone).copied(),
+            Some(TabIndex(5)),
+            "a subtree that did not opt in owns its own stops: taking one is unrecoverable"
         );
         Ok(())
     }

@@ -58,7 +58,8 @@ use crate::pie_menu::{FIXTURE_PIE, OpenPieMenu, PieMenuPlugin};
 use crate::skin::SkinSelection;
 use crate::ui::{
     UiDirection, UiScaffoldSystems, apply_panel_visibility, apply_ui_direction, column,
-    invalidate_logical_boxes, resolve_logical_boxes, row, scroll_focus_into_view, spawn_ui_root,
+    invalidate_logical_boxes, park_new_tab_stops_in_hidden_subtrees, resolve_logical_boxes, row,
+    scroll_focus_into_view, spawn_ui_root,
 };
 use crate::ui_element::{ElementCx, SCRIPTS, SampleText, UiAction};
 use crate::ui_elements::ELEMENTS;
@@ -324,6 +325,7 @@ pub fn run() {
             PostUpdate,
             (
                 apply_panel_visibility,
+                park_new_tab_stops_in_hidden_subtrees,
                 invalidate_logical_boxes,
                 resolve_logical_boxes,
                 apply_ui_direction,
