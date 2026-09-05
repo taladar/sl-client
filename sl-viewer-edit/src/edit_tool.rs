@@ -66,10 +66,10 @@ pub const BUILD_TOOLS_FLOATER_ID: &str = "build-tools";
 const FIELD_WIDTH_GLYPHS: f32 = 8.0;
 
 /// The toggle-row check glyph while on.
-pub(crate) const CHECKED_GLYPH: &str = "☑";
+pub const CHECKED_GLYPH: &str = "☑";
 
 /// The toggle-row check glyph while off.
-pub(crate) const UNCHECKED_GLYPH: &str = "☐";
+pub const UNCHECKED_GLYPH: &str = "☐";
 
 /// The skin class for the floater's label / summary text
 /// (`--text-muted`-driven; see `assets/skins/common.css`).
@@ -285,6 +285,30 @@ impl Plugin for EditToolPlugin {
     }
 }
 
+/// The build tools floater's [`FloaterSpec`] — shared with the `FLOATERS`
+/// registry, so the swept window is the one the viewer spawns.
+#[must_use]
+pub fn build_tools_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: BUILD_TOOLS_FLOATER_ID,
+        title: String::from("Build Tools"),
+        position: Vec2::new(60.0, 80.0),
+        // A definite, resizable content area (like the profile floater):
+        // the tab bar and pages track the window and the pages scroll
+        // their overflow, so the parameter editors stay reachable at any
+        // size.
+        default_size: Some(Vec2::new(420.0, 640.0)),
+        min_size: Some(Vec2::new(340.0, 400.0)),
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: true,
+            minimizable: true,
+            closable: true,
+            dockable: false,
+        },
+    }
+}
+
 /// Spawn the Build Tools floater: tool buttons, toggles, grid unit, the
 /// selection summary, the nine transform fields, and the placeholder tab
 /// shell.
@@ -292,28 +316,7 @@ fn spawn_build_floater(mut commands: Commands, root: Option<Res<UiRoot>>) {
     let Some(root) = root.map(|root| root.0) else {
         return;
     };
-    let handle = spawn_floater(
-        &mut commands,
-        root,
-        FloaterSpec {
-            id: BUILD_TOOLS_FLOATER_ID,
-            title: String::from("Build Tools"),
-            position: Vec2::new(60.0, 80.0),
-            // A definite, resizable content area (like the profile floater):
-            // the tab bar and pages track the window and the pages scroll
-            // their overflow, so the parameter editors stay reachable at any
-            // size.
-            default_size: Some(Vec2::new(420.0, 640.0)),
-            min_size: Some(Vec2::new(340.0, 400.0)),
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: true,
-                minimizable: true,
-                closable: true,
-                dockable: false,
-            },
-        },
-    );
+    let handle = spawn_floater(&mut commands, root, build_tools_floater_spec());
     commands
         .entity(handle.title_text)
         .insert(Translated::new("build-tools-floater-title"));
@@ -548,10 +551,20 @@ fn build_build_tools_content(In(handle): In<FloaterHandle>, mut commands: Comman
         let label = spawn_row_label(&mut commands, transform_row, key);
         commands.entity(label).insert(BuildTransformLabel(group));
         for axis in 0_usize..3_usize {
-            let element = match group {
-                FieldGroup::Position => "build-pos",
-                FieldGroup::Rotation => "build-rot",
-                FieldGroup::Size => "build-size",
+            // One element name per *axis*, not per row: the name is the node's
+            // address (`{element}:field`), and three fields sharing one would be
+            // three nodes a lookup cannot tell apart — the gallery would show
+            // one, and a test aiming at Z would drive X.
+            let element = match (group, axis) {
+                (FieldGroup::Position, 0) => "build-pos-x",
+                (FieldGroup::Position, 1) => "build-pos-y",
+                (FieldGroup::Position, _z) => "build-pos-z",
+                (FieldGroup::Rotation, 0) => "build-rot-x",
+                (FieldGroup::Rotation, 1) => "build-rot-y",
+                (FieldGroup::Rotation, _z) => "build-rot-z",
+                (FieldGroup::Size, 0) => "build-size-x",
+                (FieldGroup::Size, 1) => "build-size-y",
+                (FieldGroup::Size, _z) => "build-size-z",
             };
             let slot_index = group_index.saturating_mul(3).saturating_add(axis);
             let field = spawn_text_input(

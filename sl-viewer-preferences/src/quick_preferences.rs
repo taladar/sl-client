@@ -88,17 +88,35 @@ const CHECK_SIZE: f32 = 16.0;
 /// The width of a setting row's trailing value readout, in logical pixels.
 const VALUE_WIDTH: f32 = 44.0;
 
-/// The floater's default content size, in logical pixels.
+/// The extent [`anchor_quick_prefs`] assumes the window has when it places it
+/// against the bottom-right corner, in logical pixels.
+///
+/// **Not** the floater's `default_size`, which is deliberately `None` — see
+/// [`quick_prefs_floater_spec`]. The anchor needs *some* estimate of the
+/// window's size to subtract from the screen's, and a content-driven window has
+/// none until it has been laid out; this is that estimate, and being a little
+/// out only shifts the opening corner by a few pixels.
 const DEFAULT_SIZE: Vec2 = Vec2::new(300.0, 232.0);
 /// The floater's minimum content size, in logical pixels.
 const MIN_SIZE: Vec2 = Vec2::new(240.0, 160.0);
 /// The gap from the screen's bottom-right corner when the floater first anchors
 /// itself, in logical pixels.
 const ANCHOR_MARGIN: f32 = 12.0;
-/// The spawn-time position sentinel: [`anchor_quick_prefs`] anchors the floater
-/// to the bottom-right corner only while its position still equals this (i.e. no
-/// saved geometry moved it), so a persisted position is respected.
-const SPAWN_POSITION: Vec2 = Vec2::new(-4096.0, -4096.0);
+/// The spawn-time position: [`anchor_quick_prefs`] anchors the floater to the
+/// bottom-right corner only while its position still equals this (i.e. no saved
+/// geometry moved it), so a persisted position is respected.
+///
+/// It doubles as a marker, but it is a **real position** rather than a
+/// far-off-screen sentinel — and specifically the position
+/// [`anchor_quick_prefs`] itself computes for a window too small to fit the
+/// floater bottom-right, since both of its offsets floor at [`ANCHOR_MARGIN`].
+/// The sentinel it replaces was `(-4096, -4096)`, which made the window's
+/// declared placement depend entirely on a second system having run: anything
+/// that opened it first — a headless sweep, the gallery, a `PrimaryWindow` that
+/// is not there yet — put it four thousand pixels off the corner of the screen
+/// with no way back. Found by `every_floater_survives_a_long_translation_at_\
+/// every_scale` the first time the floater registry was swept.
+const SPAWN_POSITION: Vec2 = Vec2::splat(ANCHOR_MARGIN);
 
 /// Section-heading colour.
 const SECTION_COLOR: Color = Color::srgb(0.78, 0.83, 0.9);
@@ -581,26 +599,41 @@ impl Plugin for QuickPreferencesPlugin {
     }
 }
 
+/// The quick prefs floater's [`FloaterSpec`] — shared with the `FLOATERS`
+/// registry, so the swept window is the one the viewer spawns.
+#[must_use]
+pub fn quick_prefs_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: QUICK_PREFS_FLOATER_ID,
+        title: "Quick Preferences".to_owned(),
+        position: SPAWN_POSITION,
+        // **Content-driven**, per the scaffold's convention: a definite rect is
+        // the carve-out for a scroll-list window (the inventory), and this is a
+        // handful of rows with a natural height. It used to open at a fixed
+        // 300x232 — a rect measured against the English strings at 15 px — and
+        // the floater's content slot clips, so every longer translation lost
+        // the bottom of the panel: 273 px of content in a 232 px box under
+        // pseudolocalisation, 465 px at a 22 px UI font, with the last slider
+        // sliced through the middle. The grip still resizes it; a content-driven
+        // floater seeds its `content_size` from the measured box on the first
+        // drag (`seed_content_size`). Found by
+        // `every_floater_survives_every_script` on the floater registry's first
+        // sweep.
+        default_size: None,
+        min_size: Some(MIN_SIZE),
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: true,
+            minimizable: true,
+            closable: true,
+            dockable: false,
+        },
+    }
+}
+
 /// Startup: spawn the floater chrome (hidden), its content deferred to first open.
 fn spawn_quick_prefs_floater(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = spawn_floater(
-        &mut commands,
-        root.0,
-        FloaterSpec {
-            id: QUICK_PREFS_FLOATER_ID,
-            title: "Quick Preferences".to_owned(),
-            position: SPAWN_POSITION,
-            default_size: Some(DEFAULT_SIZE),
-            min_size: Some(MIN_SIZE),
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: true,
-                minimizable: true,
-                closable: true,
-                dockable: false,
-            },
-        },
-    );
+    let handle = spawn_floater(&mut commands, root.0, quick_prefs_floater_spec());
     commands
         .entity(handle.title_text)
         .insert(Translated::new("quick-prefs-title"));

@@ -615,27 +615,30 @@ fn spawn_blocked_button(commands: &mut Commands, parent: Entity, button: Blocked
         .observe(on_blocked_button_press);
 }
 
+/// The block by name floater's [`FloaterSpec`] — shared with the `FLOATERS`
+/// registry, so the swept window is the one the viewer spawns.
+#[must_use]
+pub fn block_by_name_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: BLOCK_BY_NAME_FLOATER_ID,
+        title: "Block Object by Name".to_owned(),
+        position: Vec2::new(360.0, 200.0),
+        default_size: None,
+        min_size: None,
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: false,
+            minimizable: false,
+            closable: true,
+            dockable: false,
+        },
+    }
+}
+
 /// Spawn the "Block Object by Name" floater (hidden): the prompt, the name
 /// field, the reference's "only blocks object text" note, and OK / Cancel.
 fn spawn_block_by_name_floater(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = spawn_floater(
-        &mut commands,
-        root.0,
-        FloaterSpec {
-            id: BLOCK_BY_NAME_FLOATER_ID,
-            title: "Block Object by Name".to_owned(),
-            position: Vec2::new(360.0, 200.0),
-            default_size: None,
-            min_size: None,
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: false,
-                minimizable: false,
-                closable: true,
-                dockable: false,
-            },
-        },
-    );
+    let handle = spawn_floater(&mut commands, root.0, block_by_name_floater_spec());
     commands
         .entity(handle.title_text)
         .insert(Translated::new("block-by-name-title"));

@@ -1,10 +1,10 @@
-//! The registry sweeps: every element in `crate::ui_elements::ELEMENTS`, run
-//! through the layout harness across the matrix of viewport, scale factor, UI
-//! scale and direction.
+//! The registry sweeps: every element in `crate::ui_elements::ELEMENTS` and
+//! every window in `crate::floaters::FLOATERS`, run through the layout harness
+//! across the matrix of viewport, scale factor, UI scale and direction.
 //!
 //! The harness itself is `sl-viewer-testkit`, which sits below the widgets so
 //! they can test against it too. What stays here is what the harness cannot
-//! see: the element registry, and the feature modules a few checks reach into.
+//! see: the two registries, and the feature modules a few checks reach into.
 //! Re-exported under this module's old name so the existing
 //! `crate::ui_test::…` paths keep resolving.
 
@@ -14,10 +14,12 @@ pub(crate) use sl_viewer_testkit::*;
 #[cfg(test)]
 mod tests {
     use super::{
-        LayoutTest, TestError, activate, drain_actions, find_by_name, layout_violations,
-        overflow_violations, settle, spawn_element,
+        LayoutTest, TestError, activate, drain_actions, enable_action_recording, find_by_name,
+        layout_violations, overflow_violations, settle, spawn_element,
     };
-    use crate::ui::UiDirection;
+    use crate::floater::{FloaterElement, register_floater_layout};
+    use crate::floaters::FLOATERS;
+    use crate::ui::{UiDirection, UiRoot, UiScaffoldSystems};
     use crate::ui_element::{ElementCx, SCRIPTS, SampleText, UiAction};
     use crate::ui_elements::ELEMENTS;
     use crate::ui_font::UiFont;
@@ -532,6 +534,237 @@ mod tests {
     fn the_matrix_covers_the_whole_registry() {
         assert!(!ELEMENTS.is_empty(), "no elements to sweep");
         assert!(SCRIPTS.len() >= 2, "a one-script matrix is not a matrix");
+    }
+
+    // -----------------------------------------------------------------------
+    // The floater matrix. Every registered window, in every cell.
+    // -----------------------------------------------------------------------
+
+    /// Build an app and spawn one registered **floater** into it, settled.
+    ///
+    /// The floater half of [`spawn_element`], and it differs in exactly two
+    /// ways, both forced by what a floater is.
+    ///
+    /// It parents to the scaffold's UI root directly rather than to a card,
+    /// because a floater is placed by an absolute `LogicalInset` measured from
+    /// its parent — hosting it in a card would move every window and make the
+    /// swept placement one the viewer never has.
+    ///
+    /// And it runs [`register_floater_layout`], without which
+    /// `FloaterSpec::default_size` never reaches the content slot and every
+    /// sized window would be swept as a content-driven one — the whole
+    /// "does this fit its own default rect" question, silently not asked.
+    ///
+    /// This lives here rather than in `sl-viewer-testkit` because the harness
+    /// deliberately depends on the UI *vocabulary* and never on the widgets it
+    /// tests; the floater manager is a widget, and the registry naming three
+    /// dozen feature modules is in this crate for the same reason `ELEMENTS`
+    /// is.
+    fn spawn_registered_floater(test: LayoutTest, floater: &FloaterElement, cx: ElementCx) -> App {
+        let mut app = test.build();
+        enable_action_recording(&mut app);
+        register_floater_layout(&mut app);
+        let spawn = *floater;
+        app.add_systems(
+            Startup,
+            (move |mut commands: Commands, root: Res<UiRoot>| {
+                spawn.spawn(&mut commands, root.0, cx);
+            })
+            .after(UiScaffoldSystems::SpawnRoot),
+        );
+        settle(&mut app);
+        app
+    }
+
+    /// **Every floater × every script.**
+    ///
+    /// The window's own chrome is what this reaches that the element sweep
+    /// cannot: a title bar whose title is the only thing in it that translates,
+    /// a button cluster pinned to the trailing edge that has to mirror, and a
+    /// content slot that **clips** — so a window whose content outgrows its
+    /// declared default rect is caught by `clipping_violations` rather than
+    /// discovered by a user whose language runs long.
+    #[test]
+    fn every_floater_survives_every_script() {
+        let mut failures = Vec::new();
+        for floater in FLOATERS {
+            for sample in SCRIPTS {
+                let direction = match sample.name {
+                    "Arabic" | "Hebrew" => UiDirection::Rtl,
+                    _other => UiDirection::Ltr,
+                };
+                let test = LayoutTest::new().with_direction(direction);
+                let cx = ElementCx {
+                    text: SampleText::Script(sample),
+                    ..ElementCx::new()
+                };
+                let mut app = spawn_registered_floater(test, floater, cx);
+                let violations = layout_violations(&mut app, test);
+                if !violations.is_empty() {
+                    failures.push(format!(
+                        "floater `{}` in {} ({direction:?}): {violations:#?}",
+                        floater.id, sample.name
+                    ));
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    /// **Every floater × pseudolocalisation × font size × scale factor.**
+    ///
+    /// A window's chrome is the part most likely to be sized by eye against one
+    /// English title at one font size: the title bar's `SpaceBetween` gives the
+    /// buttons the width the title leaves, so a 40%-longer title at 22 px is
+    /// exactly where a glyph gets squeezed out of its box.
+    #[test]
+    fn every_floater_survives_a_long_translation_at_every_scale() {
+        let mut failures = Vec::new();
+        for floater in FLOATERS {
+            for font_size in FONT_SIZES {
+                for scale_factor in SCALE_FACTORS {
+                    let test = LayoutTest::new().with_scale_factor(scale_factor);
+                    let cx = ElementCx {
+                        text: SampleText::Pseudo,
+                        font_size,
+                    };
+                    let mut app = spawn_registered_floater(test, floater, cx);
+                    let violations = layout_violations(&mut app, test);
+                    if !violations.is_empty() {
+                        failures.push(format!(
+                            "floater `{}` pseudolocalised at {font_size}px, scale \
+                             {scale_factor}: {violations:#?}",
+                            floater.id,
+                        ));
+                    }
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    /// **Every floater × direction × `UiScale`.**
+    ///
+    /// A floater is the scaffold's one absolutely-placed thing, and its inset
+    /// is written *logically* so the whole window mirrors — the position is an
+    /// inline-start offset, not a left one. That is precisely the sort of claim
+    /// that holds until somebody writes `left:` once, and nothing but a sweep
+    /// notices.
+    ///
+    /// **The viewport grows with `UiScale`,** which the element sweep has no
+    /// reason to do and this one does. `UiScale` multiplies every `Val::Px`, so
+    /// it divides the room the UI has in its *own* units — and a floater's
+    /// position is stated in those units. Holding the window fixed while
+    /// doubling `UiScale` therefore halves the screen out from under every
+    /// window's declared position and reports it as off-screen, which says
+    /// nothing about the floater and everything about the screen. That is the
+    /// argument `LayoutTest::logical_viewport` already makes for the
+    /// scale-factor axis, and it applies here for exactly the same reason.
+    ///
+    /// Whether a window's default rect fits a *genuinely* small screen is a
+    /// separate question, and [`every_floater_fits_a_laptop_window`] asks it
+    /// once rather than smuggling it into every cell of three sweeps.
+    #[test]
+    fn every_floater_survives_both_directions_at_every_ui_scale() {
+        /// Each `UiScale` with the window that leaves the UI the harness's
+        /// default 1600x1200 of room *in its own units*. Written out rather
+        /// than multiplied so the numbers are exact and the intent is on the
+        /// page.
+        const CELLS: [(f32, u32, u32); 3] =
+            [(1.0, 1600, 1200), (1.25, 2000, 1500), (2.0, 3200, 2400)];
+
+        let mut failures = Vec::new();
+        for floater in FLOATERS {
+            for direction in [UiDirection::Ltr, UiDirection::Rtl] {
+                for (ui_scale, width, height) in CELLS {
+                    let test = LayoutTest::new()
+                        .with_viewport(width, height)
+                        .with_direction(direction)
+                        .with_ui_scale(ui_scale);
+                    let mut app = spawn_registered_floater(test, floater, ElementCx::new());
+                    let violations = layout_violations(&mut app, test);
+                    if !violations.is_empty() {
+                        failures.push(format!(
+                            "floater `{}` {direction:?} at UiScale {ui_scale}: {violations:#?}",
+                            floater.id,
+                        ));
+                    }
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    /// Every floater must actually **open** — chrome, a title and a content
+    /// slot with a real box.
+    ///
+    /// The vacuity guard, and for a floater it guards against something
+    /// specific rather than hypothetical: [`spawn_floater`] starts a window
+    /// **hidden**, a hidden subtree lays out at zero size, and every check
+    /// above would then pass by measuring nothing at all. It is
+    /// `FloaterElement::spawn`'s job to leave the window shown, and this is
+    /// what holds it to that.
+    ///
+    /// [`spawn_floater`]: crate::floater::spawn_floater
+    #[test]
+    fn every_floater_actually_opens() -> Result<(), TestError> {
+        for floater in FLOATERS {
+            let mut app = spawn_registered_floater(LayoutTest::new(), floater, ElementCx::new());
+            for part in ["floater-title-bar", "floater-title", "floater-content"] {
+                let entity = find_by_name(&mut app, part)
+                    .ok_or_else(|| format!("floater `{}` spawned no `{part}` node", floater.id))?;
+                let sized = app
+                    .world()
+                    .entity(entity)
+                    .get::<ComputedNode>()
+                    .is_some_and(|computed| computed.size.x > 0.0 && computed.size.y > 0.0);
+                assert!(
+                    sized,
+                    "floater `{}` laid `{part}` out at zero size — the window did not open, and \
+                     every other floater check is passing vacuously",
+                    floater.id
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// Every floater must open **fully on screen** on a laptop.
+    ///
+    /// The placement question, asked once and directly: a floater's default
+    /// position is an absolute pixel offset written by whoever added the
+    /// window, and the only thing standing between a badly chosen one and a
+    /// window half off the edge is `clamp_floaters_on_screen` — which
+    /// deliberately guarantees only that a 16 px sliver stays reachable, not
+    /// that the window is usable.
+    ///
+    /// 1280x800 is the small end of what people actually have, and the strings
+    /// are pseudolocalised because a window's chrome grows with its title. The
+    /// clamp is not installed (see [`register_floater_layout`]): correcting the
+    /// placement here would be the sweep hiding the thing it is looking for.
+    #[test]
+    fn every_floater_fits_a_laptop_window() {
+        let mut failures = Vec::new();
+        for floater in FLOATERS {
+            let test = LayoutTest::new().with_viewport(1280, 800);
+            let cx = ElementCx {
+                text: SampleText::Pseudo,
+                font_size: 15.0,
+            };
+            let mut app = spawn_registered_floater(test, floater, cx);
+            let violations = layout_violations(&mut app, test);
+            if !violations.is_empty() {
+                failures.push(format!("floater `{}`: {violations:#?}", floater.id));
+            }
+        }
+        assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    /// The floater sweep covers the whole registry, and the registry is not a
+    /// list of one.
+    #[test]
+    fn the_matrix_covers_the_whole_floater_registry() {
+        assert!(!FLOATERS.is_empty(), "no floaters to sweep");
     }
 
     /// Every element must fit a **narrow** window, at the longest strings.

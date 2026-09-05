@@ -184,26 +184,29 @@ impl Plugin for InventoryGalleryPlugin {
     }
 }
 
+/// The inventory gallery floater's [`FloaterSpec`] — shared with the `FLOATERS`
+/// registry, so the swept window is the one the viewer spawns.
+#[must_use]
+pub fn inventory_gallery_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: "inventory-gallery",
+        title: "Inventory Gallery".to_owned(),
+        position: Vec2::new(400.0, 70.0),
+        default_size: None,
+        min_size: None,
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: false,
+            minimizable: true,
+            closable: true,
+            dockable: true,
+        },
+    }
+}
+
 /// Spawn the gallery floater: the navigation row and the scrollable grid.
 fn spawn_gallery_floater(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = spawn_floater(
-        &mut commands,
-        root.0,
-        FloaterSpec {
-            id: "inventory-gallery",
-            title: "Inventory Gallery".to_owned(),
-            position: Vec2::new(400.0, 70.0),
-            default_size: None,
-            min_size: None,
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: false,
-                minimizable: true,
-                closable: true,
-                dockable: true,
-            },
-        },
-    );
+    let handle = spawn_floater(&mut commands, root.0, inventory_gallery_floater_spec());
     commands
         .entity(handle.title_text)
         .insert(Translated::new("inventory-gallery-title"));

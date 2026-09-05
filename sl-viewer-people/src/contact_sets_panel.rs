@@ -883,27 +883,30 @@ fn spawn_panel_button(commands: &mut Commands, parent: Entity, button: ContactSe
         .observe(on_panel_button_press);
 }
 
+/// The add to set floater's [`FloaterSpec`] — shared with the `FLOATERS`
+/// registry, so the swept window is the one the viewer spawns.
+#[must_use]
+pub fn add_to_set_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: ADD_TO_SET_FLOATER_ID,
+        title: "Add to Contact Set".to_owned(),
+        position: Vec2::new(380.0, 220.0),
+        default_size: None,
+        min_size: None,
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: false,
+            minimizable: false,
+            closable: true,
+            dockable: false,
+        },
+    }
+}
+
 /// Spawn the add-to-set floater (hidden): the prompt, the set combo, and
 /// Add / New Set… / Cancel — the reference's `floater_fs_contact_add`.
 fn spawn_add_to_set_floater(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = spawn_floater(
-        &mut commands,
-        root.0,
-        FloaterSpec {
-            id: ADD_TO_SET_FLOATER_ID,
-            title: "Add to Contact Set".to_owned(),
-            position: Vec2::new(380.0, 220.0),
-            default_size: None,
-            min_size: None,
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: false,
-                minimizable: false,
-                closable: true,
-                dockable: false,
-            },
-        },
-    );
+    let handle = spawn_floater(&mut commands, root.0, add_to_set_floater_spec());
     commands
         .entity(handle.title_text)
         .insert(Translated::new("add-to-contact-set-title"));
@@ -985,29 +988,32 @@ fn spawn_add_to_set_floater(mut commands: Commands, root: Res<UiRoot>) {
     });
 }
 
+/// The contact set config floater's [`FloaterSpec`] — shared with the `FLOATERS`
+/// registry, so the swept window is the one the viewer spawns.
+#[must_use]
+pub fn contact_set_config_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: CONFIG_FLOATER_ID,
+        title: "Contact Set Settings".to_owned(),
+        position: Vec2::new(420.0, 260.0),
+        default_size: None,
+        min_size: None,
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: false,
+            minimizable: false,
+            closable: true,
+            dockable: false,
+        },
+    }
+}
+
 /// Spawn the set-settings floater (hidden): the name field with its Rename
 /// button, the colour swatch, and Close — the reference's
 /// `floater_fs_contact_set_configuration`, minus the knobs whose features are not
 /// built.
 fn spawn_config_floater(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = spawn_floater(
-        &mut commands,
-        root.0,
-        FloaterSpec {
-            id: CONFIG_FLOATER_ID,
-            title: "Contact Set Settings".to_owned(),
-            position: Vec2::new(420.0, 260.0),
-            default_size: None,
-            min_size: None,
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: false,
-                minimizable: false,
-                closable: true,
-                dockable: false,
-            },
-        },
-    );
+    let handle = spawn_floater(&mut commands, root.0, contact_set_config_floater_spec());
     let content = handle.content;
     let name_row = commands
         .spawn((

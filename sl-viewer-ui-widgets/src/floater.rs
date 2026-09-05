@@ -56,6 +56,17 @@
 //! observers on top of the same chrome, so what the harness sweeps is the layout
 //! the viewer actually ships.
 //!
+//! # Every floater registers
+//!
+//! The specimen is the *chrome*, once. The windows themselves — About, Inventory,
+//! the world map, three dozen others — are opened imperatively by an id nobody
+//! kept a list of, so no sweep and no gallery could reach them. [`FloaterElement`]
+//! is that list's entry type and `FLOATERS` (in the viewer binary, beside
+//! `ELEMENTS`, for the same reason: it names three dozen feature modules) is the
+//! list. **A new floater belongs in `FLOATERS`** — see [`FloaterElement`] for
+//! what registering buys and for why the registry calls the viewer's own
+//! [`FloaterSpec`] constructor rather than keeping a copy of it.
+//!
 //! # Where we deliberately differ from the reference
 //!
 //! - **Docking hosts as a vertical stack, not a tabbed `LLMultiFloater`.** The
@@ -1505,14 +1516,35 @@ fn close_active_floater_shortcut(
 /// back). It reads last frame's measured size, which is close enough: a window's
 /// size changes slowly, and a frame-stale value can never let it escape by more
 /// than one drag step. Only the free ones: a docked floater is in its host's flow.
+///
+/// # The viewport has to be measured in the floater's own units
+///
+/// [`Floater::position`] is a `Val::Px` offset, so it is in **UI-logical**
+/// pixels — the units `UiScale` multiplies. A `Window`'s `width()` is
+/// **window-logical**: physical pixels over the display's scale factor, with no
+/// `UiScale` in it. The two are the same only while `UiScale` is 1, and this
+/// used to compare them directly.
+///
+/// At `UiScale` 2 that told the clamp the screen was twice as wide as the UI
+/// actually had room for, so it never fired: a window whose right half was off
+/// the edge of the screen was, as far as the clamp could see, comfortably
+/// inside it — and the one guarantee this system exists to make, that a window
+/// can always be dragged back, quietly did not hold for anyone who had turned
+/// their UI size up. Dividing by `UiScale` puts both sides in the floater's own
+/// units. Found by the floater registry sweep
+/// (`every_floater_survives_both_directions_at_every_ui_scale`).
 fn clamp_floaters_on_screen(
     mut floaters: Query<(&mut Floater, &ComputedNode, &UiPanelShown)>,
     windows: Query<&Window, With<PrimaryWindow>>,
+    ui_scale: Res<UiScale>,
 ) {
     let Ok(window) = windows.single() else {
         return;
     };
-    let viewport = Vec2::new(window.width(), window.height());
+    // A non-positive `UiScale` is not a configuration; treat it as 1 rather than
+    // dividing the viewport to infinity and clamping every window to nothing.
+    let scale = if ui_scale.0 > 0.0 { ui_scale.0 } else { 1.0 };
+    let viewport = Vec2::new(window.width() / scale, window.height() / scale);
     for (mut floater, computed, shown) in &mut floaters {
         if !shown.0 || floater.docked_in.is_some() {
             continue;
@@ -1581,19 +1613,186 @@ pub fn spawn_floater_specimen(commands: &mut Commands, parent: Entity, cx: Eleme
     floater
 }
 
+// ---------------------------------------------------------------------------
+// The floater registry
+// ---------------------------------------------------------------------------
+
+/// A **registered floater**: one of the viewer's real windows, openable with no
+/// login, no grid and no world.
+///
+/// The floater half of [`sl_viewer_ui_core::ui_element::UiElement`], and it
+/// exists for the same reason. Floaters are opened imperatively — a menu entry
+/// or a toolbar button writes a [`FloaterCommand`] or flips a
+/// [`UiPanelShown`] the opener found by id — so until this list existed there
+/// was nowhere a sweep or a gallery could learn that a window *is* one. The
+/// panels inside them were registered and swept; the windows around them were
+/// reachable only by starting the viewer and clicking.
+///
+/// **A new floater belongs in `FLOATERS`.** That is the whole obligation, and
+/// it buys the window every check the harness has now and every one added
+/// later, in every script, direction, font size and UI scale.
+///
+/// # Why a spec function rather than a copy of the spec
+///
+/// The registry does not restate a window's geometry; it calls the same
+/// [`FloaterSpec`] constructor the viewer's own `Startup` system calls. A
+/// registry holding its own copy of a position, a default size and a set of
+/// [`FloaterCaps`] would be a second opinion about the window, and the moment
+/// the two disagree the sweep is checking a floater nobody ships. Two callers,
+/// one source.
+///
+/// The one field a live spawn may legitimately override is
+/// [`FloaterSpec::position`] — the minimap and the world map centre themselves
+/// on the actual window — and [`FloaterSpec::dock_host`], which is a live
+/// entity no `const` can name. Both are stated in the spec function's default
+/// form, which is what the sweep measures.
+#[derive(Clone, Copy)]
+pub struct FloaterElement {
+    /// The stable id — the very string the live window carries in
+    /// [`Floater::id`], and what a failing check names. Held here as well as in
+    /// the spec so the registry reads as a list; `a_registered_floater_agrees_\
+    /// with_its_own_spec` holds the two to each other.
+    pub id: &'static str,
+    /// One line on what this window is, shown beside it in the gallery.
+    pub summary: &'static str,
+    /// The window's [`FloaterSpec`], shared with the viewer's own spawn.
+    pub spec: fn() -> FloaterSpec,
+    /// What goes in the content slot.
+    pub content: FloaterContent,
+}
+
+/// What a registered floater puts in its content slot.
+///
+/// The split the roadmap item asks for, and it is a real distinction rather
+/// than a convenience: a window's chrome is always constructible, while its
+/// *content* is sometimes a live view of a session — an inventory tree, a
+/// profile, a parcel. Where a module has already written the static specimen of
+/// that content for [`sl_viewer_ui_core::ui_element::UiElement`], the floater
+/// reuses it and the sweep measures the window around the real layout. Where it
+/// has not, the window is swept with a stub, which still holds the chrome to
+/// account — a title that runs long in Arabic, a button glyph clipped at 22 px,
+/// a window that opens off screen — and leaves an obvious, greppable place for
+/// the specimen when someone writes one.
+#[derive(Debug, Clone, Copy)]
+pub enum FloaterContent {
+    /// The module's own static content specimen, spawned into the content slot
+    /// exactly as a registered element is spawned into a gallery card.
+    Specimen(fn(&mut Commands, Entity, ElementCx) -> Entity),
+    /// No content of its own: a single line naming what the live window fills
+    /// itself with. The `&'static str` is that line, and it is deliberately
+    /// prose rather than a placeholder box — the sweep's question for a stubbed
+    /// floater is whether the *chrome* survives the cell, and a line of the
+    /// cell's own sample text is what makes the content slot non-empty enough
+    /// to answer it.
+    Stub(&'static str),
+}
+
+impl core::fmt::Debug for FloaterElement {
+    /// Hand-written for the same reason [`UiElement`](sl_viewer_ui_core::ui_element::UiElement)'s
+    /// is: a `fn` pointer has no useful `Debug` and the derive would print an
+    /// address.
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("FloaterElement")
+            .field("id", &self.id)
+            .field("summary", &self.summary)
+            .finish_non_exhaustive()
+    }
+}
+
+impl FloaterElement {
+    /// **Spawn this floater** under `root`, open, with its content in place.
+    ///
+    /// The live [`spawn_floater`] — the same chrome, the same absolute
+    /// placement, the same observers — and then the one thing the viewer does
+    /// separately: it is left **shown**. A floater spawns hidden so its opener
+    /// can decide when it appears; a registry consumer has no opener, and a
+    /// hidden window lays out at zero size, which would quietly turn every
+    /// check below into a check of nothing.
+    ///
+    /// The cell's [`ElementCx`] reaches the title, so a long translation or a
+    /// large UI font grows the title bar here exactly as it does live.
+    pub fn spawn(&self, commands: &mut Commands, root: Entity, cx: ElementCx) -> FloaterHandle {
+        let mut spec = (self.spec)();
+        spec.title = cx.text(&spec.title);
+        let handle = spawn_floater(commands, root, spec);
+        commands.entity(handle.root).insert(UiPanelShown(true));
+        match self.content {
+            FloaterContent::Specimen(spawn) => {
+                spawn(commands, handle.content, cx);
+            }
+            FloaterContent::Stub(prose) => {
+                commands.spawn((
+                    Text::new(cx.text(prose)),
+                    cx.font(UiFont::Sans),
+                    TextColor(STUB_TEXT_COLOR),
+                    Node {
+                        max_width: Val::Px(STUB_MAX_WIDTH),
+                        ..default()
+                    },
+                    Name::new("floater-stub-content"),
+                    ChildOf(handle.content),
+                ));
+            }
+        }
+        handle
+    }
+}
+
+/// The colour a [`FloaterContent::Stub`]'s prose is drawn in — dimmer than real
+/// content, so a person looking at the gallery can tell at a glance which
+/// windows are still standing in for themselves.
+const STUB_TEXT_COLOR: Color = Color::srgb(0.62, 0.66, 0.74);
+
+/// The width a stub's prose wraps at, in logical pixels. A bound, not a size:
+/// a window with a `default_size` is wider than this and the stub simply sits
+/// inside it, while a content-driven one is sized by the stub and must not run
+/// off the screen.
+const STUB_MAX_WIDTH: f32 = 360.0;
+
+/// Register the floater manager's **layout-affecting** systems into a harness
+/// app, for [`sl_viewer_ui_core`]-level tests that lay a registered floater out.
+///
+/// `sl-viewer-testkit`'s `LayoutTest` installs `bevy_ui` and the
+/// scaffold but not this crate's plugin, and three of the plugin's systems are
+/// the difference between measuring the window the viewer ships and measuring a
+/// different one: `apply_floater_content` is what turns
+/// [`FloaterSpec::default_size`] into an actual width and height on the content
+/// slot, `apply_floater_inset` writes the position onto the node, and
+/// `apply_floater_glyphs` settles the minimize / dock glyphs. Without the
+/// first, every sized window would be swept as a content-driven one and the
+/// question "does this fit its default rect" would never be asked.
+///
+/// The rest of [`FloaterPlugin`] is deliberately absent: the command path, the
+/// z-order and the highlight change no box, and `clamp_floaters_on_screen`
+/// needs a real `PrimaryWindow`. Leaving the clamp out is the point — a sweep
+/// that clamped would quietly correct a default position that does not fit and
+/// report nothing.
+pub fn register_floater_layout(app: &mut App) {
+    app.add_systems(
+        Update,
+        (
+            apply_floater_inset,
+            apply_floater_content,
+            apply_floater_glyphs,
+        )
+            .chain(),
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         ActiveFloater, DefaultDockHost, DeferredFloaterContent, Floater, FloaterCaps,
         FloaterCommand, FloaterHandle, FloaterOp, FloaterParts, FloaterSpec, FloaterZTop,
         MIN_VISIBLE, RESIZE_FLOOR, apply_floater_commands, apply_floater_content,
-        apply_floater_glyphs, apply_floater_inset, build_deferred_floater_content, clamp_position,
-        drag_position, floater_panel, highlight_active_floater, resize_size, spawn_floater,
-        toggle_floater,
+        apply_floater_glyphs, apply_floater_inset, build_deferred_floater_content,
+        clamp_floaters_on_screen, clamp_position, drag_position, floater_panel,
+        highlight_active_floater, resize_size, spawn_floater, toggle_floater,
     };
     use bevy::picking::backend::HitData;
     use bevy::picking::pointer::PointerId;
     use bevy::prelude::*;
+    use bevy::window::PrimaryWindow;
     use pretty_assertions::assert_eq;
     use sl_viewer_ui_core::ui::{UiDirection, UiPanelShown, UiRoot};
 
@@ -1744,6 +1943,88 @@ mod tests {
         let near = clamp_position(Vec2::new(-2000.0, -2000.0), size, viewport);
         assert_eq!(near.x, MIN_VISIBLE - size.x);
         assert_eq!(near.y, 0.0);
+    }
+
+    /// The on-screen clamp measures the viewport in the **floater's** units, so
+    /// it still fires when the user has turned `UiScale` up.
+    ///
+    /// The regression for the bug the floater registry sweep found. A
+    /// `Window`'s `width()` has no `UiScale` in it, while `Floater::position` is
+    /// a `Val::Px` offset that `UiScale` multiplies — so comparing them directly
+    /// told the clamp a `UiScale` 2 screen had twice the room the UI really had,
+    /// and a window dragged off the right edge was never pulled back.
+    ///
+    /// Driven through the real system rather than `clamp_position`, because the
+    /// unit mix-up was in how the system *derived* the viewport and a test of
+    /// the pure helper could not have seen it.
+    #[test]
+    fn the_clamp_reads_the_viewport_in_ui_scale_units() -> Result<(), TestError> {
+        /// The window's width in physical / window-logical pixels; the UI has
+        /// half of this in its own units once `UiScale` is 2.
+        const WINDOW_WIDTH: u32 = 1000;
+        /// The window's height, likewise.
+        const WINDOW_HEIGHT: u32 = 800;
+        /// A position well past the UI-logical right edge (500) but comfortably
+        /// inside the window-logical one (1000) — the gap the bug lived in.
+        const OFF_SCREEN_X: f32 = 900.0;
+
+        let mut app = App::new();
+        app.insert_resource(UiScale(2.0))
+            .add_systems(Update, clamp_floaters_on_screen);
+        app.world_mut().spawn((
+            Window {
+                resolution: bevy::window::WindowResolution::new(WINDOW_WIDTH, WINDOW_HEIGHT),
+                ..Window::default()
+            },
+            PrimaryWindow,
+        ));
+        let floater = app
+            .world_mut()
+            .spawn((
+                Floater {
+                    id: "clamped",
+                    position: Vec2::new(OFF_SCREEN_X, 20.0),
+                    content_size: None,
+                    minimized: false,
+                    docked_in: None,
+                    last_host: None,
+                    preferred_host: None,
+                    min_size: RESIZE_FLOOR,
+                    caps: FloaterCaps {
+                        resizable: true,
+                        minimizable: true,
+                        closable: true,
+                        dockable: true,
+                    },
+                },
+                // A measured box, as the previous frame's layout would leave: 200
+                // UI-logical pixels wide at `UiScale` 2 is 400 physical.
+                ComputedNode {
+                    size: Vec2::new(400.0, 200.0),
+                    inverse_scale_factor: 0.5,
+                    ..ComputedNode::default()
+                },
+                UiPanelShown(true),
+            ))
+            .id();
+        app.update();
+
+        let clamped = app
+            .world()
+            .entity(floater)
+            .get::<Floater>()
+            .ok_or("the floater lost its state")?
+            .position;
+        // The UI has 500 of its own pixels of width, so the far bound is
+        // 500 - MIN_VISIBLE. Before the fix the clamp compared against 1000 and
+        // left the window exactly where it was.
+        assert!(
+            clamped.x < OFF_SCREEN_X,
+            "the clamp did not fire at UiScale 2: the window is still at \
+             {clamped:?}, {OFF_SCREEN_X} UI-logical pixels along a screen only \
+             500 wide in those units"
+        );
+        Ok(())
     }
 
     /// Bring-to-front hands out strictly increasing z values, so the last-raised
@@ -2154,5 +2435,383 @@ mod tests {
             "the grip drag gave the window a manual size"
         );
         Ok(())
+    }
+
+    /// **The window, driven** (`viewer-ui-widget-interaction-suite`): the title
+    /// bar dragged, the grip dragged, the close button clicked — by a pointer
+    /// that has to find each of them where it is drawn.
+    ///
+    /// The tests above are split between the pure geometry functions
+    /// (`drag_position`, `resize_size`) and hand-triggered `Pointer<Drag>`s
+    /// aimed at an entity looked up through [`parts_of`]. What neither reaches
+    /// is the chrome's **layout**: the grip is an absolutely-positioned node
+    /// pinned to the trailing-bottom corner through a logical inset, drawn over
+    /// the content and blocking it, and the title bar is stretched across a
+    /// window whose width is its content's. A grip that mirrored to the wrong
+    /// corner, or a title bar that stopped filling the header, would pass every
+    /// test above and be un-grabbable in the viewer.
+    mod scenarios {
+        use bevy::prelude::*;
+        use pretty_assertions::assert_eq;
+
+        use super::{Floater, TestError};
+        use crate::floater::{
+            DefaultDockHost, FloaterCaps, FloaterCommand, FloaterOp, FloaterPlugin, FloaterSpec,
+            spawn_floater,
+        };
+        use crate::ui_test::interact::{self, InteractionTest, centre_of};
+        use crate::ui_test::{find_by_name, settle};
+        use sl_viewer_ui_core::ui::{UiPanelShown, UiRoot, UiScaffoldSystems};
+
+        /// Where the fixture floater opens, in logical pixels.
+        const START_POSITION: Vec2 = Vec2::new(120.0, 90.0);
+
+        /// The fixture floater's content area, in logical pixels — a definite
+        /// size, because the grip adjusts the *content* size and a purely
+        /// content-driven window has none to adjust.
+        const START_SIZE: Vec2 = Vec2::new(320.0, 220.0);
+
+        /// One resizable floater under the real pointer stack.
+        fn floater_app() -> App {
+            let mut app = InteractionTest::new().build();
+            app.add_plugins(FloaterPlugin);
+            app.add_systems(
+                Startup,
+                (|mut commands: Commands, root: Res<UiRoot>| {
+                    spawn_floater(
+                        &mut commands,
+                        root.0,
+                        FloaterSpec {
+                            id: "scenario",
+                            title: "Scenario".to_owned(),
+                            position: START_POSITION,
+                            default_size: Some(START_SIZE),
+                            min_size: None,
+                            dock_host: None,
+                            caps: FloaterCaps {
+                                resizable: true,
+                                minimizable: true,
+                                closable: true,
+                                dockable: false,
+                            },
+                        },
+                    );
+                })
+                .after(UiScaffoldSystems::SpawnRoot),
+            );
+            settle(&mut app);
+            // A floater spawns **hidden** — its opener shows it — and a
+            // `Display::None` window has no box for a pointer to find, so the
+            // fixture is its own opener.
+            let root = find_by_name(&mut app, "floater:scenario").unwrap_or(Entity::PLACEHOLDER);
+            if let Some(mut shown) = app.world_mut().get_mut::<UiPanelShown>(root) {
+                shown.0 = true;
+            }
+            settle(&mut app);
+            app
+        }
+
+        /// The floater's root entity.
+        fn floater(app: &mut App) -> Option<Entity> {
+            find_by_name(app, "floater:scenario")
+        }
+
+        /// Its remembered position and content size.
+        fn geometry(app: &mut App) -> Option<(Vec2, Option<Vec2>)> {
+            let root = floater(app)?;
+            app.world()
+                .get::<Floater>(root)
+                .map(|state| (state.position, state.content_size))
+        }
+
+        /// Dragging the title bar moves the window by what the pointer
+        /// travelled — and the grip, which sits on the opposite corner, moves
+        /// with it.
+        #[test]
+        fn a_title_bar_drag_moves_the_window() -> Result<(), TestError> {
+            const TRAVEL: Vec2 = Vec2::new(60.0, 40.0);
+
+            let mut app = floater_app();
+            assert_eq!(
+                geometry(&mut app).map(|(position, _size)| position),
+                Some(START_POSITION)
+            );
+            let grip_before = centre_of(&mut app, "floater-resize").ok_or("no grip")?;
+
+            let bar = centre_of(&mut app, "floater-title-bar").ok_or("no title bar")?;
+            // Component-wise `f32` throughout: the workspace's
+            // `arithmetic_side_effects` lint fires on `glam`'s operators.
+            let to = Vec2::new(bar.x + TRAVEL.x, bar.y + TRAVEL.y);
+            interact::drag(&mut app, bar, to, 4, MouseButton::Left);
+            settle(&mut app);
+
+            let (position, size) = geometry(&mut app).ok_or("the floater lost its state")?;
+            let wanted = Vec2::new(START_POSITION.x + TRAVEL.x, START_POSITION.y + TRAVEL.y);
+            assert!(
+                position.distance(wanted) < 1.0,
+                "the window follows the pointer: {position:?} vs {wanted:?}"
+            );
+            assert_eq!(size, Some(START_SIZE), "moving a window does not resize it");
+
+            let grip_after =
+                centre_of(&mut app, "floater-resize").ok_or("the grip went missing")?;
+            let grip_wanted = Vec2::new(grip_before.x + TRAVEL.x, grip_before.y + TRAVEL.y);
+            assert!(
+                grip_after.distance(grip_wanted) < 2.0,
+                "the chrome travelled with the window: {grip_before:?} -> {grip_after:?}"
+            );
+            Ok(())
+        }
+
+        /// Dragging the grip resizes the content area, and the window's own box
+        /// grows with it — the grip is on the corner the drag pushes.
+        #[test]
+        fn a_grip_drag_resizes_the_content_area() -> Result<(), TestError> {
+            const TRAVEL: Vec2 = Vec2::new(50.0, 30.0);
+
+            let mut app = floater_app();
+            let root = floater(&mut app).ok_or("no floater")?;
+            let width_before = app
+                .world()
+                .get::<ComputedNode>(root)
+                .map(|node| node.size().x)
+                .ok_or("the floater never laid out")?;
+
+            let grip = centre_of(&mut app, "floater-resize").ok_or("no grip")?;
+            let to = Vec2::new(grip.x + TRAVEL.x, grip.y + TRAVEL.y);
+            interact::drag(&mut app, grip, to, 4, MouseButton::Left);
+            settle(&mut app);
+
+            let size = geometry(&mut app)
+                .and_then(|(_position, size)| size)
+                .ok_or("the floater lost its size")?;
+            let wanted = Vec2::new(START_SIZE.x + TRAVEL.x, START_SIZE.y + TRAVEL.y);
+            assert!(
+                size.distance(wanted) < 1.5,
+                "the content area follows the grip: {size:?} vs {wanted:?}"
+            );
+            let width_after = app
+                .world()
+                .get::<ComputedNode>(root)
+                .map(|node| node.size().x)
+                .ok_or("the floater lost its box")?;
+            assert!(
+                width_after > width_before,
+                "and the window grew with it: {width_before} -> {width_after}"
+            );
+            Ok(())
+        }
+
+        /// The close button closes the window it is drawn on.
+        #[test]
+        fn the_close_button_closes_the_window() -> Result<(), TestError> {
+            let mut app = floater_app();
+            let root = floater(&mut app).ok_or("no floater")?;
+            assert_eq!(
+                app.world().get::<UiPanelShown>(root).map(|shown| shown.0),
+                Some(true),
+                "the fixture opens shown"
+            );
+
+            interact::click_node(&mut app, "floater-button:close")?;
+            settle(&mut app);
+
+            assert_eq!(
+                app.world().get::<UiPanelShown>(root).map(|shown| shown.0),
+                Some(false),
+                "the × closed it"
+            );
+            Ok(())
+        }
+
+        // -------------------------------------------------------------------
+        // Two windows, and one docked: the parts of the manager a single free
+        // floater cannot show.
+        // -------------------------------------------------------------------
+
+        /// Where the two-window fixture opens its pair, far enough apart that
+        /// neither window's chrome sits under the other's — the pointer has to
+        /// be able to reach *both* title bars for the z-order to mean anything.
+        const PAIR_POSITIONS: [Vec2; 2] = [Vec2::new(60.0, 60.0), Vec2::new(700.0, 60.0)];
+
+        /// The pair's content size, in logical pixels: small enough that the two
+        /// windows cannot overlap at [`PAIR_POSITIONS`].
+        const PAIR_SIZE: Vec2 = Vec2::new(240.0, 140.0);
+
+        /// Two live windows, side by side, under the real pointer stack.
+        fn two_floater_app() -> App {
+            let mut app = InteractionTest::new().build();
+            app.add_plugins(FloaterPlugin);
+            app.add_systems(
+                Startup,
+                (|mut commands: Commands, root: Res<UiRoot>| {
+                    for (id, position) in ["lower", "upper"].into_iter().zip(PAIR_POSITIONS) {
+                        let handle = spawn_floater(
+                            &mut commands,
+                            root.0,
+                            FloaterSpec {
+                                id,
+                                title: id.to_owned(),
+                                position,
+                                default_size: Some(PAIR_SIZE),
+                                min_size: None,
+                                dock_host: None,
+                                caps: FloaterCaps {
+                                    resizable: false,
+                                    minimizable: false,
+                                    closable: false,
+                                    dockable: true,
+                                },
+                            },
+                        );
+                        commands
+                            .entity(handle.root)
+                            .insert(super::UiPanelShown(true));
+                    }
+                })
+                .after(UiScaffoldSystems::SpawnRoot),
+            );
+            settle(&mut app);
+            app
+        }
+
+        /// One of the pair's roots.
+        fn window(app: &mut App, id: &str) -> Option<Entity> {
+            find_by_name(app, &format!("floater:{id}"))
+        }
+
+        /// That window's title bar — through [`FloaterParts`], because both
+        /// windows carry a node named `floater-title-bar` and a name lookup
+        /// would always return the same one.
+        fn title_bar_of(app: &App, root: Entity) -> Option<Entity> {
+            app.world()
+                .get::<super::FloaterParts>(root)
+                .map(|parts| parts.title_bar)
+        }
+
+        /// The window's paint order.
+        fn z_of(app: &App, root: Entity) -> Option<i32> {
+            app.world().get::<GlobalZIndex>(root).map(|index| index.0)
+        }
+
+        /// **A press brings its window to the front**, and the front-most one is
+        /// the one whose title bar is lit.
+        ///
+        /// The ordering half of `FloaterZTop`, which needs two windows to be
+        /// visible at all: the counter's own test proves the values increase,
+        /// and this proves the increase lands on the window that was pressed —
+        /// through a pointer that had to find each title bar where it is drawn.
+        #[test]
+        fn pressing_a_window_raises_it_above_the_other() -> Result<(), TestError> {
+            let mut app = two_floater_app();
+            let lower = window(&mut app, "lower").ok_or("no lower window")?;
+            let upper = window(&mut app, "upper").ok_or("no upper window")?;
+            let lower_bar = title_bar_of(&app, lower).ok_or("the lower window has no title bar")?;
+            let upper_bar = title_bar_of(&app, upper).ok_or("the upper window has no title bar")?;
+
+            let at = interact::centre_of_entity(&app, upper_bar).ok_or("it never laid out")?;
+            interact::click(&mut app, at, MouseButton::Left);
+            settle(&mut app);
+            assert!(
+                z_of(&app, upper) > z_of(&app, lower),
+                "the pressed window is not on top: {:?} vs {:?}",
+                z_of(&app, upper),
+                z_of(&app, lower)
+            );
+
+            // The other one, pressed, takes the front — a raise hands out a new
+            // value rather than swapping two fixed planes.
+            let at = interact::centre_of_entity(&app, lower_bar).ok_or("it never laid out")?;
+            interact::click(&mut app, at, MouseButton::Left);
+            settle(&mut app);
+            assert!(
+                z_of(&app, lower) > z_of(&app, upper),
+                "the second press did not raise its window: {:?} vs {:?}",
+                z_of(&app, lower),
+                z_of(&app, upper)
+            );
+
+            // And the highlight follows the front, on both windows at once:
+            // the active one is washed, the other is not.
+            let lit = |app: &App, bar: Entity| {
+                app.world()
+                    .get::<BackgroundColor>(bar)
+                    .is_some_and(|colour| colour.0.alpha() > 0.0)
+            };
+            assert!(lit(&app, lower_bar), "the active window is not highlighted");
+            assert!(
+                !lit(&app, upper_bar),
+                "the window behind is still wearing the active highlight"
+            );
+            Ok(())
+        }
+
+        /// **A docked window tears off only once the drag means it.**
+        ///
+        /// The reference's undock slop, and the one path in the manager that a
+        /// hand-written `Pointer<Drag>` cannot honestly exercise: it is a
+        /// function of how far the pointer has travelled *since the press*, so
+        /// a single synthetic event with a made-up `distance` would be pinning
+        /// the number rather than the gesture.
+        #[test]
+        fn a_docked_window_tears_off_past_the_slop() -> Result<(), TestError> {
+            /// A nudge well inside the slop.
+            const NUDGE: f32 = 4.0;
+            /// A drag well past it.
+            const PULL: f32 = 60.0;
+
+            let mut app = two_floater_app();
+            let root = window(&mut app, "lower").ok_or("no window")?;
+            let host = app
+                .world()
+                .resource::<DefaultDockHost>()
+                .0
+                .ok_or("the plugin spawned no dock host")?;
+            app.world_mut()
+                .resource_mut::<Messages<FloaterCommand>>()
+                .write(FloaterCommand {
+                    floater: root,
+                    op: FloaterOp::ToggleDock,
+                });
+            settle(&mut app);
+            assert_eq!(
+                app.world().get::<ChildOf>(root).map(ChildOf::parent),
+                Some(host),
+                "the window did not dock"
+            );
+
+            let bar = title_bar_of(&app, root).ok_or("the docked window has no title bar")?;
+            let at = interact::centre_of_entity(&app, bar).ok_or("it never laid out")?;
+            interact::drag(
+                &mut app,
+                at,
+                Vec2::new(at.x + NUDGE, at.y + NUDGE),
+                2,
+                MouseButton::Left,
+            );
+            settle(&mut app);
+            assert_eq!(
+                app.world().get::<ChildOf>(root).map(ChildOf::parent),
+                Some(host),
+                "a {NUDGE} px nudge tore the window off its host"
+            );
+
+            let at = interact::centre_of_entity(&app, bar).ok_or("the title bar went missing")?;
+            interact::drag(
+                &mut app,
+                at,
+                Vec2::new(at.x + PULL, at.y + PULL),
+                4,
+                MouseButton::Left,
+            );
+            settle(&mut app);
+            let root_entity = app.world().resource::<UiRoot>().0;
+            assert_eq!(
+                app.world().get::<ChildOf>(root).map(ChildOf::parent),
+                Some(root_entity),
+                "a {PULL} px pull left the window docked"
+            );
+            Ok(())
+        }
     }
 }

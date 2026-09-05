@@ -12,14 +12,11 @@
 //! in the parent module: every focus stop needs a row here (an explicitly inert
 //! one counts), and every row must address a node that still exists.
 //!
-//! # What the first sweep found, and what is still pinned
+//! # What the first sweep found, and what became of it
 //!
-//! Two groups of rows describe behaviour that is *not* what the viewer wants.
-//! They are pinned exactly, so the correction has to pass through this file:
+//! One group of rows still describes behaviour that is *not* what the reference
+//! viewer does, and it is deliberately *not* flagged as a defect:
 //!
-//! - **`.known_broken("viewer-chat-volume-dropdown-opens-off-screen")`** — the
-//!   chat volume panel, hand-positioned upward with no fallback, laid out above
-//!   the top of the window.
 //! - The **arrow keys on a tab strip and a radio group**, which move the
 //!   selection on all four arrows regardless of the widget's orientation. That
 //!   one is upstream *by design* — `bevy_ui_widgets`' `radio.rs` reads
@@ -28,11 +25,13 @@
 //!   is recorded as ordinary `Row::emits` rather than flagged. It is a parity
 //!   gap with the reference viewer, not a defect.
 //!
-//! A `Row::emits` row is exact in both directions, so any of these becoming
-//! right fails the sweep and the table is corrected in the same commit. That is
-//! the point of pinning rather than tolerating.
+//! A `Row::emits` row is exact in both directions, so this becoming right fails
+//! the sweep and the table is corrected in the same commit. That is the point
+//! of pinning rather than tolerating.
 //!
-//! There was a third group, and how it left is the point of pinning at all.
+//! Two groups of pinned defects have already left the table, and how they left
+//! is the point of pinning at all.
+//!
 //! 124 rows recorded every control that answered a **middle or secondary
 //! click** as readily as a primary one, against
 //! `viewer-widget-any-mouse-button-activates` — upstream in `bevy_ui_widgets`,
@@ -41,6 +40,12 @@
 //! sweep failures saying "emitted [], the contract wants […]", and a correction
 //! that is the table diff deleting them. Those two clicks are inert now, which
 //! needs no row at all.
+//!
+//! Two rows on the chat volume button were `known_broken` against
+//! `viewer-chat-volume-dropdown-opens-off-screen`: the whisper/say/shout panel
+//! was hand-positioned upward with no fallback placement and no window margin,
+//! so it laid out above the top of the window. It is a `Popover` now, which
+//! asks which side has room, and the pin failed the day that landed.
 
 use super::{ElementContract, Gesture, NodeContract, Probe, Row};
 use bevy::input_focus::InputFocus;
@@ -458,16 +463,17 @@ pub(crate) const CONTRACTS: &[ElementContract] = &[
             NodeContract::new(
                 "local-chat-volume-button",
                 &[
-                    // Opening the whisper/say/shout panel puts it above the top
-                    // edge of the window: it is hand-positioned at
-                    // `bottom: 100%` with no fallback placement and no window
-                    // margin, so three of its four rows are unreachable. Both
-                    // gestures that open it are pinned as canaries — they fail
-                    // when the panel becomes a `Popover`, which is the fix.
-                    Row::emits(Gesture::PrimaryClick, &[])
-                        .known_broken("viewer-chat-volume-dropdown-opens-off-screen"),
-                    Row::emits(Gesture::DragAcross, &[])
-                        .known_broken("viewer-chat-volume-dropdown-opens-off-screen"),
+                    // Both gestures open the whisper/say/shout panel, and both
+                    // used to be pinned `known_broken` against
+                    // `viewer-chat-volume-dropdown-opens-off-screen`: the panel
+                    // was hand-positioned at `bottom: 100%` with no fallback
+                    // placement and no window margin, so it laid out above the
+                    // top edge of the window and three of its four rows were
+                    // unreachable. It is a `Popover` now, so the rows are clean
+                    // — and a clean layout here is the whole assertion, since
+                    // opening a drop-down emits no action.
+                    Row::emits(Gesture::PrimaryClick, &[]),
+                    Row::emits(Gesture::DragAcross, &[]),
                 ],
             ),
         ],

@@ -4,8 +4,8 @@
 //! `ui_test.rs` sweeps the registry for *layout* — an element in eight scripts,
 //! at three font sizes, in two directions. This module sweeps it for
 //! *behaviour*, and the two compose: after every gesture the whole of
-//! `layout_violations` is re-asserted, so each layout check the harness owns
-//! doubles as a post-interaction regression check for free.
+//! `interaction_violations` is re-asserted, so each layout check the harness
+//! owns doubles as a post-interaction regression check for free.
 //!
 //! # The default expectation is inert-and-harmless
 //!
@@ -239,69 +239,72 @@ pub(crate) struct ElementContract {
 mod contracts;
 pub(crate) use contracts::CONTRACTS;
 
+/// Stand up the registrations an element's spawn-attached observers read.
+///
+/// The registry's `spawn` functions attach observers belonging to widgets
+/// whose **plugins** declare the messages and non-send handles those
+/// observers take as system parameters — `PieMenuPlugin` declares
+/// `OpenPieMenu`, `MediaEnginePlugin` inserts `MediaSurfaces`. The gallery
+/// adds the whole plugins; a sweep that wants the widget's reaction and not
+/// its runtime adds the registrations alone, so a `MessageWriter` has
+/// somewhere inert to write and a `NonSend` handle exists to be read.
+///
+/// Each line here was found the same way: without it the observer fails
+/// parameter validation on the first gesture and takes the app down, which
+/// is the sweep's inert-and-harmless default doing its job. Anything a new
+/// element needs belongs here beside them.
+///
+/// Shared with [`crate::floater_chrome`], whose sweep spawns the *same*
+/// content specimens inside their windows and drives a pointer over them — two
+/// sweeps with one answer to "what does a specimen need to be live", so a new
+/// element's hosting is added once.
+pub(crate) fn install_element_hosting(app: &mut App) {
+    // The widgets' runtime halves, exactly the set the gallery adds and no
+    // more: pure logic, no renderer, no engine. A specimen without its
+    // plugin is an inert shell, so a contract row taken from one would be
+    // pinning the shell rather than the widget.
+    app.add_plugins((
+        crate::menu::MenuWidgetPlugin,
+        crate::ui_tab::TabWidgetPlugin,
+        crate::ui_radio::RadioWidgetPlugin,
+        crate::ui_text_input::TextInputPlugin,
+        crate::ui_search::SearchFieldPlugin,
+        crate::emoji_complete::ColonCompletePlugin,
+        crate::chat_input::ChatInputPlugin,
+        crate::local_chat_input::LocalChatInputPlugin,
+    ));
+    // The messages whose *writers* are attached by a spawn but whose
+    // registration lives in a plugin the sweep does not want whole.
+    // `radial-menu-target`'s right-click observer opens a pie; the chat
+    // input's emoji button opens the picker floater; a linkified link
+    // reaches for the session and the web browser.
+    app.add_message::<crate::pie_menu::OpenPieMenu>();
+    app.add_message::<crate::emoji_picker::OpenEmojiPicker>();
+    app.add_message::<sl_client_bevy::SlCommand>();
+    app.add_message::<crate::world_api::OpenWebBrowser>();
+    // `browser-view`: every pointer and key observer reads the surface
+    // table before it reaches the disabled check. Empty is the right
+    // fixture — no CEF, no engine, and the widget stays the placeholder.
+    app.insert_non_send(crate::media_engine::MediaSurfaces::default());
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         CONTRACTS, ElementContract, Gesture, KEYBOARD_ALPHABET, LayoutClaim, NodeContract,
-        POINTER_ALPHABET, Row,
+        POINTER_ALPHABET, Row, install_element_hosting,
     };
-    use crate::media_engine::MediaSurfaces;
-    use crate::pie_menu::OpenPieMenu;
     use crate::ui_element::{ElementCx, UiAction, UiElement};
     use crate::ui_elements::ELEMENTS;
     use crate::ui_test::interact::{self, InteractionTest};
     use crate::ui_test::{
-        drain_actions, find_by_name, focusable_nodes, interactive_nodes, layout_violations, settle,
-        spawn_element_into,
+        TestError, drain_actions, find_by_name, focusable_nodes, interaction_violations,
+        interactive_nodes, settle, spawn_element_into,
     };
     use bevy::input::keyboard::Key;
     use bevy::prelude::*;
     use bevy::ui_widgets::Activate;
     use pretty_assertions::assert_eq;
-
-    /// Stand up the registrations an element's spawn-attached observers read.
-    ///
-    /// The registry's `spawn` functions attach observers belonging to widgets
-    /// whose **plugins** declare the messages and non-send handles those
-    /// observers take as system parameters — `PieMenuPlugin` declares
-    /// `OpenPieMenu`, `MediaEnginePlugin` inserts `MediaSurfaces`. The gallery
-    /// adds the whole plugins; a sweep that wants the widget's reaction and not
-    /// its runtime adds the registrations alone, so a `MessageWriter` has
-    /// somewhere inert to write and a `NonSend` handle exists to be read.
-    ///
-    /// Each line here was found the same way: without it the observer fails
-    /// parameter validation on the first gesture and takes the app down, which
-    /// is the sweep's inert-and-harmless default doing its job. Anything a new
-    /// element needs belongs here beside them.
-    fn install_element_hosting(app: &mut App) {
-        // The widgets' runtime halves, exactly the set the gallery adds and no
-        // more: pure logic, no renderer, no engine. A specimen without its
-        // plugin is an inert shell, so a contract row taken from one would be
-        // pinning the shell rather than the widget.
-        app.add_plugins((
-            crate::menu::MenuWidgetPlugin,
-            crate::ui_tab::TabWidgetPlugin,
-            crate::ui_radio::RadioWidgetPlugin,
-            crate::ui_text_input::TextInputPlugin,
-            crate::ui_search::SearchFieldPlugin,
-            crate::emoji_complete::ColonCompletePlugin,
-            crate::chat_input::ChatInputPlugin,
-            crate::local_chat_input::LocalChatInputPlugin,
-        ));
-        // The messages whose *writers* are attached by a spawn but whose
-        // registration lives in a plugin the sweep does not want whole.
-        // `radial-menu-target`'s right-click observer opens a pie; the chat
-        // input's emoji button opens the picker floater; a linkified link
-        // reaches for the session and the web browser.
-        app.add_message::<OpenPieMenu>();
-        app.add_message::<crate::emoji_picker::OpenEmojiPicker>();
-        app.add_message::<sl_client_bevy::SlCommand>();
-        app.add_message::<crate::world_api::OpenWebBrowser>();
-        // `browser-view`: every pointer and key observer reads the surface
-        // table before it reaches the disabled check. Empty is the right
-        // fixture — no CEF, no engine, and the widget stays the placeholder.
-        app.insert_non_send(MediaSurfaces::default());
-    }
 
     /// An interactive app with one registered element spawned and settled.
     ///
@@ -467,25 +470,31 @@ mod tests {
             ));
         }
 
-        let violations = layout_violations(app, test.layout());
-        match row.map_or(LayoutClaim::Clean, |row| row.layout) {
-            LayoutClaim::Clean => {
-                if !violations.is_empty() {
-                    failures.push(format!(
-                        "element `{element}` node `{node}` after {gesture:?}: {violations:#?}"
-                    ));
-                }
-            }
-            LayoutClaim::KnownBroken(bug) => {
-                if violations.is_empty() {
-                    failures.push(format!(
-                        "element `{element}` node `{node}` after {gesture:?}: the layout is clean, \
-                         but the row pins it as broken against `{bug}`. If that bug is fixed, \
-                         delete the `.known_broken({bug:?})` from this row — the pin exists to \
-                         tell you exactly this."
-                    ));
-                }
-            }
+        let violations = interaction_violations(app, test.layout());
+        let claim = row.map_or(LayoutClaim::Clean, |row| row.layout);
+        if let Some(why) = judge_layout(claim, &violations) {
+            failures.push(format!(
+                "element `{element}` node `{node}` after {gesture:?}: {why}"
+            ));
+        }
+    }
+
+    /// What `claim` says about the `violations` a settled gesture left behind:
+    /// `None` when the claim holds, else what is wrong with it.
+    ///
+    /// Split out of [`judge`] so both directions of the **inverted** claim can
+    /// be driven directly — see `a_known_broken_pin_fails_the_day_it_is_fixed`.
+    /// A canary that has never been heard is not a canary.
+    fn judge_layout(claim: LayoutClaim, violations: &[String]) -> Option<String> {
+        match claim {
+            LayoutClaim::Clean => (!violations.is_empty()).then(|| format!("{violations:#?}")),
+            LayoutClaim::KnownBroken(bug) => violations.is_empty().then(|| {
+                format!(
+                    "the layout is clean, but the row pins it as broken against `{bug}`. If that \
+                     bug is fixed, delete the `.known_broken({bug:?})` from this row — the pin \
+                     exists to tell you exactly this."
+                )
+            }),
         }
     }
 
@@ -825,6 +834,50 @@ mod tests {
             !CONTRACTS.is_empty(),
             "no element declares a contract, so every cell is running on the default"
         );
+    }
+
+    /// **The canary's teeth.** A pinned-broken layout must fail once it is fixed.
+    ///
+    /// [`LayoutClaim::KnownBroken`] is the one check in this module that runs
+    /// *backwards* — it asserts a bug is still present — and a backwards check
+    /// that is never exercised is the easiest kind to get wrong, because a
+    /// silently-inverted one passes on every row forever. Both directions are
+    /// driven here through the real [`judge_layout`], so the day a pin's bug is
+    /// fixed the sweep is known to say so rather than quietly agreeing.
+    ///
+    /// Its first subject was the chat volume dropdown, which laid out above the
+    /// top of the window until it became a `Popover`; that fix is what turned
+    /// this from a mechanism with a user into a mechanism with a test.
+    #[test]
+    fn a_known_broken_pin_fails_the_day_it_is_fixed() -> Result<(), TestError> {
+        const PIN: &str = "viewer-chat-volume-dropdown-opens-off-screen";
+        let pinned = Row::emits(Gesture::PrimaryClick, &[]).known_broken(PIN);
+        let breach = vec!["`some-panel`: laid out outside the viewport".to_owned()];
+
+        // The pin holds while the breakage is there, and fires the moment it is
+        // not — naming the row to delete.
+        assert!(
+            judge_layout(pinned.layout, &breach).is_none(),
+            "a pinned-broken row failed while its breakage was still present"
+        );
+        let complaint = judge_layout(pinned.layout, &[])
+            .ok_or("a pinned-broken row passed on a clean layout, so the pin means nothing")?;
+        assert!(
+            complaint.contains(PIN),
+            "the complaint does not name the bug to unpin: {complaint}"
+        );
+
+        // And the ordinary claim is the other way round, so the two are not the
+        // same check wearing different names.
+        assert!(
+            judge_layout(LayoutClaim::Clean, &[]).is_none(),
+            "a clean layout failed the default claim"
+        );
+        assert!(
+            judge_layout(LayoutClaim::Clean, &breach).is_some(),
+            "a broken layout passed the default claim"
+        );
+        Ok(())
     }
 
     /// The registry's plainest control, and the subject of the teeth below:

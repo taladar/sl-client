@@ -901,28 +901,31 @@ fn register_group_profile_settings(settings: Option<ResMut<ViewerSettings>>) {
 /// [`open_group_profile`] looks the panel up by.
 const GROUP_PROFILE_FLOATER_ID: &str = "group-profile";
 
+/// The group profile floater's [`FloaterSpec`] — shared with the `FLOATERS`
+/// registry, so the swept window is the one the viewer spawns.
+#[must_use]
+pub fn group_profile_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: GROUP_PROFILE_FLOATER_ID,
+        title: "Group".to_owned(),
+        position: Vec2::new(340.0, 90.0),
+        default_size: Some(Vec2::new(520.0, 620.0)),
+        min_size: Some(Vec2::new(420.0, 440.0)),
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: true,
+            minimizable: false,
+            closable: true,
+            dockable: false,
+        },
+    }
+}
+
 /// Spawn the (hidden) group profile floater's chrome; the three-tab container
 /// and the persistent list viewports + rebuild-target containers are built on
 /// the first open ([`DeferredFloaterContent`]).
 fn spawn_group_profile_floater(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = spawn_floater(
-        &mut commands,
-        root.0,
-        FloaterSpec {
-            id: GROUP_PROFILE_FLOATER_ID,
-            title: "Group".to_owned(),
-            position: Vec2::new(340.0, 90.0),
-            default_size: Some(Vec2::new(520.0, 620.0)),
-            min_size: Some(Vec2::new(420.0, 440.0)),
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: true,
-                minimizable: false,
-                closable: true,
-                dockable: false,
-            },
-        },
-    );
+    let handle = spawn_floater(&mut commands, root.0, group_profile_floater_spec());
     // Subject-bound: the target group is not persisted, so neither is the floater
     // — no restored rectangle, no restored "open" (an empty shell).
     commands

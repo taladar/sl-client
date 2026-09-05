@@ -187,26 +187,29 @@ impl Plugin for AboutLandmarkPlugin {
     }
 }
 
+/// The about landmark floater's [`FloaterSpec`] — shared with the `FLOATERS`
+/// registry, so the swept window is the one the viewer spawns.
+#[must_use]
+pub fn about_landmark_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: "about-landmark",
+        title: "About Landmark".to_owned(),
+        position: Vec2::new(420.0, 110.0),
+        default_size: None,
+        min_size: None,
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: false,
+            minimizable: false,
+            closable: true,
+            dockable: false,
+        },
+    }
+}
+
 /// Spawn the floater shell, hidden.
 fn spawn_about_landmark_floater(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = spawn_floater(
-        &mut commands,
-        root.0,
-        FloaterSpec {
-            id: "about-landmark",
-            title: "About Landmark".to_owned(),
-            position: Vec2::new(420.0, 110.0),
-            default_size: None,
-            min_size: None,
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: false,
-                minimizable: false,
-                closable: true,
-                dockable: false,
-            },
-        },
-    );
+    let handle = spawn_floater(&mut commands, root.0, about_landmark_floater_spec());
     // Subject-bound: the shown landmark is not persisted, so neither is the
     // floater (like the item-properties / preview floaters).
     commands

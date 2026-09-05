@@ -175,27 +175,63 @@ impl Plugin for InventoryPropertiesPlugin {
     }
 }
 
+/// The Item Properties floater's [`FloaterSpec`] — shared with the `FLOATERS`
+/// registry, so the swept window is the one the viewer spawns.
+#[must_use]
+pub fn item_properties_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: "item-properties",
+        title: "Item Properties".to_owned(),
+        position: Vec2::new(360.0, 90.0),
+        default_size: None,
+        min_size: None,
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: false,
+            minimizable: false,
+            closable: true,
+            dockable: false,
+        },
+    }
+}
+
+/// The texture-preview floater's [`FloaterSpec`], for the `FLOATERS` registry.
+#[must_use]
+pub fn texture_preview_floater_spec() -> FloaterSpec {
+    preview_floater_spec("preview-texture", "Texture")
+}
+
+/// The animation-preview floater's [`FloaterSpec`], for the `FLOATERS` registry.
+#[must_use]
+pub fn animation_preview_floater_spec() -> FloaterSpec {
+    preview_floater_spec("preview-animation", "Animation")
+}
+
+/// One preview floater's [`FloaterSpec`]. The two previews differ only in their
+/// id and title, so the shell is written once and named twice — once per
+/// registry entry, because a registry entry is a window and there are two of
+/// them.
+fn preview_floater_spec(id: &'static str, title: &str) -> FloaterSpec {
+    FloaterSpec {
+        id,
+        title: title.to_owned(),
+        position: Vec2::new(420.0, 120.0),
+        default_size: None,
+        min_size: None,
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: false,
+            minimizable: false,
+            closable: true,
+            dockable: false,
+        },
+    }
+}
+
 /// Spawn the properties floater and the preview floaters, all hidden.
 fn spawn_preview_floaters(mut commands: Commands, root: Res<UiRoot>) {
     // Properties.
-    let properties = spawn_floater(
-        &mut commands,
-        root.0,
-        FloaterSpec {
-            id: "item-properties",
-            title: "Item Properties".to_owned(),
-            position: Vec2::new(360.0, 90.0),
-            default_size: None,
-            min_size: None,
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: false,
-                minimizable: false,
-                closable: true,
-                dockable: false,
-            },
-        },
-    );
+    let properties = spawn_floater(&mut commands, root.0, item_properties_floater_spec());
     // Subject-bound: the shown item is not persisted, so neither is the
     // floater (`FloaterPersistExempt` — see the avatar profile).
     commands
@@ -216,9 +252,9 @@ fn spawn_preview_floaters(mut commands: Commands, root: Res<UiRoot>) {
     // landmarks in the About Landmark floater (`crate::about_landmark`) — not
     // here.
     // Texture.
-    let texture = spawn_preview_floater(&mut commands, root.0, "preview-texture", "Texture");
+    let texture = spawn_preview_floater(&mut commands, root.0, texture_preview_floater_spec());
     // Animation.
-    let animation = spawn_preview_floater(&mut commands, root.0, "preview-animation", "Animation");
+    let animation = spawn_preview_floater(&mut commands, root.0, animation_preview_floater_spec());
     commands.insert_resource(PreviewUi { texture, animation });
 }
 
@@ -226,27 +262,9 @@ fn spawn_preview_floaters(mut commands: Commands, root: Res<UiRoot>) {
 fn spawn_preview_floater(
     commands: &mut Commands,
     root: Entity,
-    id: &'static str,
-    title: &str,
+    spec: FloaterSpec,
 ) -> PreviewFloater {
-    let handle = spawn_floater(
-        commands,
-        root,
-        FloaterSpec {
-            id,
-            title: title.to_owned(),
-            position: Vec2::new(420.0, 120.0),
-            default_size: None,
-            min_size: None,
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: false,
-                minimizable: false,
-                closable: true,
-                dockable: false,
-            },
-        },
-    );
+    let handle = spawn_floater(commands, root, spec);
     // Subject-bound, like the properties floater: not persisted.
     commands
         .entity(handle.root)

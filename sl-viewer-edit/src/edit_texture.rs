@@ -1065,6 +1065,10 @@ fn spawn_info_row(commands: &mut Commands, parent: Entity, info: TexInfo, label_
         TextColor(Color::WHITE),
         ClassList::new_with_classes([VALUE_CLASS]),
         info,
+        // Named, like every other value node worth pointing at: this line is
+        // what tells the user which faces an edit will hit, so a test asking
+        // whether the tab followed a face selection has to be able to read it.
+        Name::new(format!("build-tex-info:{info:?}")),
         ChildOf(info_row),
     ));
 }

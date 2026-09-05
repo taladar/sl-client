@@ -93,11 +93,17 @@ pub type TestError = Box<dyn core::error::Error>;
 /// A node's border box, in physical pixels, from its computed size and where the
 /// layout put it.
 ///
+/// Public because it is the harness's one answer to *where did this end up*, and
+/// a widget's own test asking that question (which side of its anchor a drop-down
+/// opened on) should not reinvent the centre-plus-half-size arithmetic — see
+/// [`box_of`], which is this plus the lookup.
+///
 /// Built per-component in plain `f32` rather than with the `glam` operators, per
 /// the convention the viewer follows (`ik`, `camera`):
 /// the workspace's `arithmetic_side_effects` lint fires on `glam`'s overloaded
 /// operators but not on plain floating-point arithmetic.
-fn border_box(computed: &ComputedNode, transform: &UiGlobalTransform) -> Rect {
+#[must_use]
+pub fn border_box(computed: &ComputedNode, transform: &UiGlobalTransform) -> Rect {
     let centre = transform.translation;
     let (half_x, half_y) = (computed.size.x / 2.0, computed.size.y / 2.0);
     Rect {
@@ -472,6 +478,32 @@ pub fn settle(app: &mut App) {
 fn describe(name: Option<&Name>, entity: Entity) -> String {
     name.map_or_else(|| format!("{entity}"), |name| format!("`{name}`"))
 }
+
+/// The [`Popover`] nodes that are actually **up** — laid out with a box, rather
+/// than merely resident in the tree.
+///
+/// The distinction exists because the two ways a viewer widget owns a drop-down
+/// disagree about it. A menu or a combo spawns its popover on open and despawns
+/// it on close, so carrying the component and being open are the same thing; the
+/// chat volume select builds its panel once and toggles `Display::None`, so its
+/// popover is in the tree whether or not it is showing.
+///
+/// A closed popover floats over nothing and must exempt nothing — otherwise one
+/// resident-but-hidden panel would silently retire the overflow check for its
+/// whole ancestor chain, for every cell of the sweep, forever. A `Display::None`
+/// node lays out at zero size, which is exactly the question being asked, and is
+/// the same test [`viewport_violations`] uses to skip a closed panel.
+fn open_popovers(app: &mut App) -> HashSet<Entity> {
+    let mut popovers = app
+        .world_mut()
+        .query_filtered::<(Entity, &ComputedNode), With<Popover>>();
+    popovers
+        .iter(app.world())
+        .filter(|(_entity, computed)| !computed.size.cmple(Vec2::ZERO).any())
+        .map(|(entity, _computed)| entity)
+        .collect()
+}
+
 /// Every node with an open [`Popover`] somewhere beneath it, plus the popovers
 /// themselves.
 ///
@@ -486,10 +518,11 @@ fn describe(name: Option<&Name>, entity: Entity) -> String {
 /// escape propagates: taffy adds the popover's box to `content_size` at every
 /// level, so an open menu makes its host, the menu bar and the panel around them
 /// all report content bigger than their boxes.
+///
+/// Only the **open** ones count — see [`open_popovers`].
 fn popover_ancestors(app: &mut App) -> HashSet<Entity> {
+    let roots: Vec<Entity> = open_popovers(app).into_iter().collect();
     let world = app.world_mut();
-    let mut popovers = world.query_filtered::<Entity, With<Popover>>();
-    let roots: Vec<Entity> = popovers.iter(world).collect();
     let mut parents = world.query::<&ChildOf>();
     let mut hosting = HashSet::new();
     for popover in roots {
@@ -648,9 +681,10 @@ fn may_be_clipped(world: &World, node: Entity) -> bool {
 /// (a floater, a menu, a tooltip) contributes nothing to `content_size` and can
 /// sail straight out of its parent with the content check none the wiser.
 ///
-/// The one legitimate escapee is a [`Popover`], which is *defined* by sitting
-/// outside the anchor it is a child of — see `popover_ancestors`. It is
-/// skipped here, and its ancestors are skipped by [`overflow_violations`], but
+/// The one legitimate escapee is an **open** [`Popover`], which is *defined* by
+/// sitting outside the anchor it is a child of — see `open_popovers` and
+/// `popover_ancestors`. It is skipped here, and its ancestors are skipped by
+/// [`overflow_violations`], but
 /// **not** by [`viewport_violations`]: a drop-down is allowed to leave its
 /// parent and never allowed to leave the window, and that division is what keeps
 /// the exemption from covering the bug it would otherwise hide.
@@ -659,10 +693,7 @@ fn may_be_clipped(world: &World, node: Entity) -> bool {
 /// purpose there, and [`clipping_violations`] takes over the question of whether
 /// the result is *readable*.
 pub fn containment_violations(app: &mut App) -> Vec<String> {
-    let popovers: HashSet<Entity> = {
-        let mut query = app.world_mut().query_filtered::<Entity, With<Popover>>();
-        query.iter(app.world()).collect()
-    };
+    let popovers = open_popovers(app);
     let world = app.world_mut();
     let mut query = world.query::<(
         Entity,
@@ -1022,6 +1053,61 @@ fn angular_difference(left: f32, right: f32) -> f32 {
     }
 }
 
+/// **Universal.** A text field must be tall enough to show a line of its text.
+///
+/// The check the gallery's eye caught before the harness did. A field sized in
+/// *visible lines* that is allowed to yield height to a short container (see
+/// `ui_text_input`'s `fill`) has a floor, and the floor is the whole point: put
+/// the same field in a container that wants more room than it has — a scrolling
+/// page holding more cards than fit — and without one it is squashed to nothing.
+/// Every other check in this list is happy with that. The box is inside its
+/// parent, inside the viewport, aligned correctly and overflowing nothing; it
+/// simply shows no text.
+///
+/// Measured against the field's own **font size** rather than its shaped line
+/// height, which nothing here can ask parley for: a field shorter than one em
+/// cannot be showing a line, whatever the face does with leading. So it is a
+/// floor under the floor — it does not police a field that is merely *tight*,
+/// only one that has collapsed.
+///
+/// A field that is not laid out at all (a `Display::None` subtree lays out at
+/// zero on **both** axes) is skipped; a collapsed one keeps its width, which is
+/// what tells the two apart. So is a field whose size is declared relative to
+/// the viewport or the rem rather than in pixels — every field in this UI
+/// declares [`FontSize::Px`], and evaluating the others here would be inventing
+/// a viewport the check does not have.
+///
+/// **Only meaningful where the editable-text stack is installed**, which is why
+/// this is not in [`layout_violations`] but in [`interaction_violations`]. A
+/// field's height is a `ContentSize` measure that
+/// `update_editable_text_content_size` installs
+/// ([`interact::install_text_editing`]); in a plain [`LayoutTest`] app that
+/// system is absent, every field lays out at its own padding, and this would be
+/// reporting the harness rather than the UI.
+pub fn field_violations(app: &mut App) -> Vec<String> {
+    let mut query = app
+        .world_mut()
+        .query_filtered::<(Entity, &ComputedNode, &TextFont, Option<&Name>), With<EditableText>>();
+    let mut violations = Vec::new();
+    for (entity, computed, font, name) in query.iter(app.world()) {
+        if computed.size.x <= 0.0 && computed.size.y <= 0.0 {
+            continue;
+        }
+        let FontSize::Px(font_size) = font.font_size else {
+            continue;
+        };
+        let height = computed.size.y * computed.inverse_scale_factor;
+        if height < font_size {
+            violations.push(format!(
+                "{}: laid out {height} logical px tall, less than the {font_size} px font it \
+                 draws — the field is collapsed and shows no text at all",
+                describe(name, entity),
+            ));
+        }
+    }
+    violations
+}
+
 /// Every check, over the whole tree, as one list.
 ///
 /// The shape every matrix cell uses: assert the result is empty and print it on
@@ -1040,6 +1126,26 @@ pub fn layout_violations(app: &mut App, test: LayoutTest) -> Vec<String> {
     violations.extend(alignment_violations(app, test.direction()));
     violations.extend(radial_violations(app));
     violations.extend(radial_overlap_violations(app));
+    violations
+}
+
+/// Every check for an app built by [`interact::InteractionTest`]: the whole of
+/// [`layout_violations`] plus the ones that need a stack the layout harness
+/// deliberately does without.
+///
+/// The split is not tidiness. A check that cannot run in a plain
+/// [`LayoutTest`] app must not be in that app's list, because "the harness left
+/// the system out" and "the widget is broken" look identical from inside the
+/// check — [`field_violations`] would fail every text field in the viewer for
+/// the want of `update_editable_text_content_size`.
+///
+/// **A new check that needs the pointer or the text stack belongs here**, and
+/// gets the same retroactive reach over the interaction sweeps that
+/// [`layout_violations`] has over the layout matrix.
+pub fn interaction_violations(app: &mut App, test: LayoutTest) -> Vec<String> {
+    let mut violations = layout_violations(app, test);
+    violations.extend(field_violations(app));
+    violations.extend(orphan_root_violations(app));
     violations
 }
 
@@ -1093,6 +1199,76 @@ pub fn spawn_element_into(app: &mut App, element: &UiElement, cx: ElementCx) {
         })
         .after(UiScaffoldSystems::SpawnRoot),
     );
+}
+
+/// Spawn a fixture node **under the scaffold's UI root**, and hand back its
+/// entity — the way every node in the viewer is born, and the only way a
+/// hit-tested one may be born here.
+///
+/// A `Node` spawned with no parent is not merely "a node at the top level": it
+/// is a **second UI root**, a sibling of [`spawn_ui_root`]'s. Two sibling roots
+/// have no defined order in the UI stack, and the scaffold's root is
+/// deliberately `Pickable { should_block_lower: false }` (so a click on empty UI
+/// space reaches the world behind it). Put those together and a click on the
+/// fixture node lands on **both** roots about half the time, in an order decided
+/// by the hover map's hash: `bevy_input_focus`' `click_to_focus` then raises one
+/// `AcquireFocus` per hit, the fixture's focuses it, and the scaffold root's —
+/// carrying no `TabIndex` — bubbles all the way to the window, where
+/// `acquire_focus` **clears the focus the fixture just gained**. Which one lands
+/// last is a coin flip on entity ids, so the click-to-focus check that stands on
+/// it passes or fails depending on how many entities the app happened to spawn
+/// first ([[viewer-testkit-click-focus-resource-sensitive]]).
+///
+/// The registry's own fixtures never had this problem — [`spawn_element_into`]
+/// has always spawned under `UiRoot` — so this is the same guarantee for a
+/// hand-built fixture, and [`orphan_root_violations`] is the check that says so.
+///
+/// The root is spawned at `Startup`, so an app that has not run a frame yet has
+/// none. Rather than make every caller remember that, this runs one frame first
+/// when the root is missing.
+pub fn spawn_under_root(app: &mut App, bundle: impl Bundle) -> Entity {
+    if !app.world().contains_resource::<UiRoot>() {
+        app.update();
+    }
+    let root = app.world().get_resource::<UiRoot>().map(|root| root.0);
+    let entity = app.world_mut().spawn(bundle).id();
+    if let Some(root) = root {
+        app.world_mut().entity_mut(root).add_child(entity);
+    }
+    entity
+}
+
+/// Every UI node that is a **root of its own** other than the scaffold's.
+///
+/// A fixture that spawns a `Node` without a parent gets a second UI root, whose
+/// stacking order against the scaffold's is undefined — see [`spawn_under_root`]
+/// for what that costs a click. Nothing in the viewer produces one: every panel,
+/// floater and widget is spawned into [`UiRoot`], so a second root here means the
+/// fixture is shaped like nothing the viewer ever runs, and any hit-test over it
+/// is answering about a tree that does not exist.
+///
+/// **Only meaningful where the pointer is installed**, which is why this is in
+/// [`interaction_violations`] rather than [`layout_violations`]: a pure layout
+/// fixture has no hit-testing for the second root to disturb, and several of them
+/// legitimately lay a bare node out on its own.
+pub fn orphan_root_violations(app: &mut App) -> Vec<String> {
+    let scaffold = app.world().get_resource::<UiRoot>().map(|root| root.0);
+    let mut query = app
+        .world_mut()
+        .query_filtered::<(Entity, Option<&Name>), (With<Node>, Without<ChildOf>)>();
+    let mut violations = Vec::new();
+    for (entity, name) in query.iter(app.world()) {
+        if Some(entity) == scaffold {
+            continue;
+        }
+        violations.push(format!(
+            "{}: a `Node` with no parent is a second UI root, and its stacking against the \
+             scaffold's root is undefined — spawn it with `spawn_under_root` so a click on it \
+             cannot also land on the root behind it",
+            describe(name, entity),
+        ));
+    }
+    violations
 }
 
 /// Every named node that can **react** to input, in a stable order.
@@ -1165,6 +1341,21 @@ pub fn find_by_name(app: &mut App, name: &str) -> Option<Entity> {
         .iter(app.world())
         .find(|(_, node_name)| node_name.as_str() == name)
         .map(|(entity, _)| entity)
+}
+
+/// Where a named node ended up: its [`border_box`], in physical pixels.
+///
+/// The question a placement test asks — did the drop-down open above or below,
+/// and did it stay inside the window — in the one form the harness measures
+/// everything else in, so a widget's own test and [`viewport_violations`] cannot
+/// disagree about what "outside" means. `None` when nothing carries the name, or
+/// when it does but is not a laid-out node.
+pub fn box_of(app: &mut App, name: &str) -> Option<Rect> {
+    let entity = find_by_name(app, name)?;
+    let world = app.world();
+    let computed = world.get::<ComputedNode>(entity)?;
+    let transform = world.get::<UiGlobalTransform>(entity)?;
+    Some(border_box(computed, transform))
 }
 
 /// Activate a widget as a click or `Enter` would, and settle.

@@ -53,6 +53,16 @@ Two obligations on a new panel or widget, both cheap and both load-bearing:
   rather than calling into a `Session`, so the viewer can route it to a real
   handler while the gallery routes it nowhere and a test reads it off a queue.
 
+A new **floater** carries the same obligation against its own list:
+
+- **Register it in `floaters::FLOATERS`**, pointing the entry at the module's
+  own `*_floater_spec()` constructor so the registry and the viewer's `Startup`
+  spawn cannot drift. The window is then swept across the same matrix, and the
+  gallery grows a chip that opens it — live, draggable, resizable. The rule is
+  checked, not merely written down:
+  `every_floater_spec_in_the_workspace_is_registered` scans the source for
+  constructors nobody registered.
+
 The gallery is where bugs get *found*; the harness is where they stay found. A
 human spots something, and the fix is a **check** — which from then on runs
 against every element forever.

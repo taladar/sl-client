@@ -373,6 +373,134 @@ pub(crate) fn world_app_with_ui_and_edit() -> Result<App, Box<dyn core::error::E
     compose_ui_over(app)
 }
 
+/// [`world_app_with_ui`] **with the whole Build Tools window in it** — the
+/// fold [[viewer-build-floater-interaction-tests]] drives: the floater and its
+/// five per-aspect editor tabs, over the selection and the gizmos, over a world
+/// that can be seeded with prims.
+///
+/// This is the densest fold in the file, and deliberately so: the build floater
+/// is where a *selection* (world tier), a *window* (floater tier) and a
+/// *field* (text tier) meet, and none of the three narrower folds can show what
+/// the meeting does. A test here selects a prim by clicking it in the world,
+/// reads the number that appears in the window, types a different one, and
+/// watches the command go out.
+///
+/// The widget plugins come first because the floater's content is built from
+/// them — the tab container, the tool radio, the text fields, the line menus
+/// the Content tab's rows hang off, and the virtualized list that pools those
+/// rows. Then the build tools themselves, in the running viewer's order
+/// ([`crate::viewer_plugins::ViewerEditPlugins`]), minus the pieces that are
+/// whole other windows (the notecard / script / wearable editors) or that want
+/// a renderer (the material-preview spheres).
+///
+/// # Errors
+///
+/// As [`world_app_with_ui`].
+pub(crate) fn world_app_with_build_tools() -> Result<App, Box<dyn core::error::Error>> {
+    let mut app = world_app_with_hud()?;
+    add_edit_plugins(&mut app);
+    // The widgets the floater's content is spawned from. Without them a field
+    // is an inert box: `TextInputPlugin` is what turns a click into a caret and
+    // a keystroke into an edit, `RadioWidgetPlugin` what moves the dot,
+    // `TabWidgetPlugin` what switches a page.
+    app.add_plugins((
+        crate::floater::FloaterPlugin,
+        crate::ui_tab::TabWidgetPlugin,
+        crate::ui_radio::RadioWidgetPlugin,
+        crate::ui_text_input::TextInputPlugin,
+        crate::ui_combo::ComboWidgetPlugin,
+        crate::ui_color_picker::ColorPickerPlugin,
+        crate::menu::MenuWidgetPlugin,
+        crate::virtual_list::VirtualListPlugin,
+    ));
+    // The top menu bar, because the build tools' keyboard chords *are* menu
+    // entries: `Ctrl+B`, `Ctrl+L`/`Ctrl+Shift+L` and `Ctrl+Z`/`Ctrl+Y` are
+    // accelerators drawn against the Build menu's lines and dispatched to them
+    // by `sl_viewer_ui_widgets::menu_accel`, not chords any edit system reads
+    // for itself. Without the bar spawned there is no entry to carry them and
+    // every one of those shortcuts is silently inert.
+    //
+    // The bar is the whole viewer's menu, so its action handler writes to
+    // channels owned by groups this fold leaves out — the land / region / people
+    // windows and the session's quit request. They are registered here for the
+    // same reason `LocalChatNotice` is below: an unregistered `MessageWriter`
+    // fails parameter validation and takes the whole schedule down with it,
+    // where an unread channel simply goes nowhere.
+    app.add_plugins(crate::menu_bar::TopMenuBarPlugin);
+    app.add_message::<crate::about_land::OpenAboutLand>();
+    app.add_message::<crate::about_region::OpenAboutRegion>();
+    app.add_message::<crate::people::OpenPeopleSubTab>();
+    app.add_message::<crate::session::QuitRequested>();
+    // The build tools: the shell, the five tabs' editors, the Create tool, and
+    // the linking / undo shortcuts that act on the same selection.
+    app.add_plugins((
+        crate::edit_tool::EditToolPlugin,
+        crate::edit_params::EditParamsPlugin,
+        crate::edit_texture::EditTexturePlugin,
+        crate::edit_material::EditMaterialPlugin,
+        crate::edit_contents::EditContentsPlugin,
+        crate::edit_create::EditCreatePlugin,
+        crate::edit_link::EditLinkPlugin,
+        crate::edit_undo::EditUndoPlugin,
+    ));
+    // The local-chat channel the editors post a refused edit's notice on; its
+    // owner is the chat group, which this fold leaves out.
+    app.add_message::<crate::world_api::LocalChatNotice>();
+    // The group-name cache the General tab's group row resolves through; its
+    // owner is the people group's `GroupsPlugin`.
+    app.init_resource::<crate::world_api::GroupsModel>();
+    // The string lookup the selection summary and every `Translated` label
+    // read, with no bundles behind it: every key resolves to itself, so a test
+    // asserts which strings a line is built from and never a translation's
+    // wording.
+    sl_viewer_ui_core::i18n::install_untranslated(&mut app);
+    compose_ui_over(app)
+}
+
+/// Show the Build Tools window and let its deferred content build — what
+/// `Ctrl+B` and the Build menu do, reduced to the one flip so a test that is
+/// not *about* the shortcut does not have to drive it.
+///
+/// The window's content is lazily built on first open
+/// ([`crate::floater::DeferredFloaterContent`]), and the per-aspect editors
+/// fill their pages a frame later still (they run on `BuildTabPages` appearing),
+/// so nothing inside the window exists until this has settled.
+///
+/// It is also **parked to fit**: the shipped window is 420 × 640 logical pixels
+/// and the fixture viewport is 800 × 600, so at its own opening position its
+/// lower third — the whole tab shell, which is where the per-aspect editors are
+/// — hangs off the bottom of the screen. A control laid out past the viewport
+/// edge is one a synthetic pointer cannot click, so a test that did not park it
+/// would be measuring the 800 × 600 window rather than the floater. The geometry
+/// is set through the manager's own [`FloaterGeometry`](crate::floater::FloaterGeometry)
+/// restore path — the same one the persisted-geometry seed uses — so nothing
+/// here bypasses the window's own clamping.
+pub(crate) fn open_build_floater(app: &mut App) {
+    /// Where the parked window's top-leading corner sits, logical pixels.
+    const PARK_AT: Vec2 = Vec2::new(24.0, 4.0);
+    /// The parked window's **content-area** size, logical pixels: above the
+    /// floater's own 340 × 400 floor, and short enough that the chrome around it
+    /// still fits the 600-pixel-tall fixture viewport.
+    const PARK_SIZE: Vec2 = Vec2::new(420.0, 520.0);
+
+    let mut floaters = app.world_mut().query::<(
+        &mut crate::floater::Floater,
+        &mut sl_viewer_ui_core::ui::UiPanelShown,
+    )>();
+    for (mut floater, mut shown) in floaters.iter_mut(app.world_mut()) {
+        if floater.id == crate::edit_tool::BUILD_TOOLS_FLOATER_ID {
+            floater.restore_geometry(crate::floater::FloaterGeometry {
+                position: PARK_AT,
+                content_size: Some(PARK_SIZE),
+                minimized: false,
+                docked: false,
+            });
+            shown.0 = true;
+        }
+    }
+    settle(app, 4);
+}
+
 /// [`world_app_with_ui`] **with the input group underneath it** — the fixture
 /// world a camera test needs when a gesture has to meet a real UI panel (the
 /// wheel a floater's scrolling list eats) or a real focused field (the text
@@ -566,7 +694,11 @@ pub(crate) fn seed_child_prim(
 /// distinct on both), at `position`, with the ordinary editable agent-flag mask
 /// plus `extra_flags`. A zero mask would read as "may not move" and refuse a
 /// gizmo drag.
-fn fixture_prim(local_id: u32, position: sl_client_bevy::Vector, extra_flags: u32) -> Object {
+pub(crate) fn fixture_prim(
+    local_id: u32,
+    position: sl_client_bevy::Vector,
+    extra_flags: u32,
+) -> Object {
     let mut object: Object = crate::objects::fixture_object(pcode::PRIMITIVE);
     object.local_id = sl_client_bevy::RegionLocalObjectId(local_id);
     object.full_id =

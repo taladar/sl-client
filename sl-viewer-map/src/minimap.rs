@@ -704,6 +704,32 @@ const TOOLTIP_FONT_SIZE: f32 = 12.0;
 /// rasters at 512 too; a larger widget upscales).
 const MAX_SURFACE_PX: u32 = 512;
 
+/// The minimap floater's [`FloaterSpec`] — shared with the `FLOATERS` registry,
+/// so the swept window is the one the viewer spawns.
+///
+/// Its [`position`](FloaterSpec::position) is the **no-window fallback**: the
+/// live spawn measures the real window and pushes the map toward the trailing
+/// edge instead. The registry sweeps the fallback, which is the placement a
+/// window too small to compute one lands on anyway.
+#[must_use]
+pub fn minimap_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: MINIMAP_FLOATER_ID,
+        title: String::from("Mini-map"),
+        position: Vec2::new(760.0, 60.0),
+        default_size: Some(Vec2::splat(DEFAULT_SIZE)),
+        min_size: Some(Vec2::splat(MIN_SIZE)),
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: true,
+            // The Vintage-style free-floating map: minimize disabled.
+            minimizable: false,
+            closable: true,
+            dockable: false,
+        },
+    }
+}
+
 /// Startup: build the minimap floater — surface image node, compass labels,
 /// tooltip — and wire the input observers.
 fn spawn_minimap(
@@ -712,29 +738,12 @@ fn spawn_minimap(
     mut images: ResMut<Assets<Image>>,
     windows: Query<&Window, With<PrimaryWindow>>,
 ) {
+    let mut spec = minimap_floater_spec();
     // Vintage-skin placement: free-floating, spawning toward the top-right.
-    let position = windows.single().map_or(Vec2::new(760.0, 60.0), |window| {
-        Vec2::new((window.width() - DEFAULT_SIZE - 80.0).max(40.0), 60.0)
-    });
-    let handle = spawn_floater(
-        &mut commands,
-        root.0,
-        FloaterSpec {
-            id: MINIMAP_FLOATER_ID,
-            title: String::from("Mini-map"),
-            position,
-            default_size: Some(Vec2::splat(DEFAULT_SIZE)),
-            min_size: Some(Vec2::splat(MIN_SIZE)),
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: true,
-                // The Vintage-style free-floating map: minimize disabled.
-                minimizable: false,
-                closable: true,
-                dockable: false,
-            },
-        },
-    );
+    if let Ok(window) = windows.single() {
+        spec.position = Vec2::new((window.width() - DEFAULT_SIZE - 80.0).max(40.0), 60.0);
+    }
+    let handle = spawn_floater(&mut commands, root.0, spec);
     commands
         .entity(handle.title_text)
         .insert(Translated::new("minimap-floater-title"));

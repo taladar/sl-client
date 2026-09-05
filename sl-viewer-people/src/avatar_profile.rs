@@ -505,33 +505,36 @@ impl Plugin for AvatarProfilePlugin {
 /// [`open_profile`] looks the panel up by.
 const PROFILE_FLOATER_ID: &str = "avatar-profile";
 
+/// The avatar profile floater's [`FloaterSpec`] — shared with the `FLOATERS`
+/// registry, so the swept window is the one the viewer spawns.
+#[must_use]
+pub fn avatar_profile_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: PROFILE_FLOATER_ID,
+        title: "Profile".to_owned(),
+        position: Vec2::new(300.0, 80.0),
+        // A definite, resizable content area — the reference profile
+        // floater has a default rect and `can_resize="true"` (485×510,
+        // min 480×510; ours differs because the tab panels bound their
+        // content width). Roomy enough that the 2nd Life tab fits without
+        // scrolling; smaller sizes scroll with a trailing scrollbar.
+        default_size: Some(Vec2::new(420.0, 600.0)),
+        min_size: Some(Vec2::new(370.0, 420.0)),
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: true,
+            minimizable: false,
+            closable: true,
+            dockable: false,
+        },
+    }
+}
+
 /// Spawn the (hidden) profile floater shell's chrome; the six-tab container
 /// is built on the first open ([`DeferredFloaterContent`]), and tab contents
 /// are rebuilt per open.
 fn spawn_profile_floater(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = spawn_floater(
-        &mut commands,
-        root.0,
-        FloaterSpec {
-            id: PROFILE_FLOATER_ID,
-            title: "Profile".to_owned(),
-            position: Vec2::new(300.0, 80.0),
-            // A definite, resizable content area — the reference profile
-            // floater has a default rect and `can_resize="true"` (485×510,
-            // min 480×510; ours differs because the tab panels bound their
-            // content width). Roomy enough that the 2nd Life tab fits without
-            // scrolling; smaller sizes scroll with a trailing scrollbar.
-            default_size: Some(Vec2::new(420.0, 600.0)),
-            min_size: Some(Vec2::new(370.0, 420.0)),
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: true,
-                minimizable: false,
-                closable: true,
-                dockable: false,
-            },
-        },
-    );
+    let handle = spawn_floater(&mut commands, root.0, avatar_profile_floater_spec());
     // Subject-bound: the target avatar is not persisted, so neither is the
     // floater — no restored rectangle, no restored "open" (an empty shell).
     commands

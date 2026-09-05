@@ -624,4 +624,213 @@ mod tests {
             "clamped on decode"
         );
     }
+
+    /// **The whole lifecycle, driven** (`viewer-floater-interaction-tests`): a
+    /// window moved and resized by a real pointer comes back where it was left,
+    /// in a second session that starts from nothing but the stored values.
+    ///
+    /// The tests above are the codec — a [`FloaterGeometry`] in, a rect out and
+    /// back. What they cannot reach is the four-stage lifecycle around it:
+    /// whether a **drag** reaches the store at all (the write-back is gated on
+    /// `FloaterSeeded`, so a seed in the wrong order would leave every user's window
+    /// adjustments unsaved and no codec test would notice), and whether what is
+    /// stored is what a fresh session applies.
+    mod scenarios {
+        use super::super::{
+            FloaterPersistPlugin, docked_key, minimized_key, rect_key, visible_key,
+        };
+        use crate::floater::{
+            Floater, FloaterCaps, FloaterGeometry, FloaterPlugin, FloaterSpec, spawn_floater,
+        };
+        use crate::ui_test::interact::{self, InteractionTest, centre_of};
+        use crate::ui_test::{TestError, find_by_name, settle};
+        use bevy::prelude::*;
+        use pretty_assertions::assert_eq;
+        use sl_settings::{SettingValue, SettingsStore};
+        use sl_viewer_settings::ViewerSettings;
+        use sl_viewer_ui_core::ui::{UiPanelShown, UiRoot, UiScaffoldSystems};
+
+        /// The fixture window's id — the key every stored value is named by.
+        const FIXTURE_ID: &str = "persist-fixture";
+
+        /// Where it opens, in logical pixels.
+        const START_POSITION: Vec2 = Vec2::new(220.0, 140.0);
+
+        /// Its content area at that opening, in logical pixels.
+        const START_SIZE: Vec2 = Vec2::new(300.0, 200.0);
+
+        /// How far the first session drags the window and its grip, in logical
+        /// pixels — both far enough that a session that restored the *spec*
+        /// defaults instead of the stored values would be obvious.
+        const TRAVEL: Vec2 = Vec2::new(70.0, 50.0);
+
+        /// The fixture's spec, identical in both sessions: the second session
+        /// has to start from the same declared defaults the first did, or the
+        /// check could not tell a restored value from an unchanged one.
+        fn fixture_spec() -> FloaterSpec {
+            FloaterSpec {
+                id: FIXTURE_ID,
+                title: "Persisted".to_owned(),
+                position: START_POSITION,
+                default_size: Some(START_SIZE),
+                min_size: None,
+                dock_host: None,
+                caps: FloaterCaps {
+                    resizable: true,
+                    minimizable: true,
+                    closable: true,
+                    dockable: false,
+                },
+            }
+        }
+
+        /// One session: the window, the manager, the persistence layer and a
+        /// settings store with no file behind it.
+        ///
+        /// `account_loaded` says whether this session has reached the point a
+        /// login does — the seed is gated on it, so a second session can
+        /// register its settings *first* and be handed the stored values after,
+        /// which is the order the real one runs in (register at spawn, load at
+        /// login, seed after).
+        fn session(account_loaded: bool) -> App {
+            let mut app = InteractionTest::new().build();
+            app.add_plugins((FloaterPlugin, FloaterPersistPlugin));
+            let mut settings = ViewerSettings::from_store_for_test(SettingsStore::new());
+            if account_loaded {
+                settings.mark_account_loaded_for_test();
+            }
+            app.insert_resource(settings);
+            app.add_systems(
+                Startup,
+                (|mut commands: Commands, root: Res<UiRoot>| {
+                    let handle = spawn_floater(&mut commands, root.0, fixture_spec());
+                    commands.entity(handle.root).insert(UiPanelShown(true));
+                })
+                .after(UiScaffoldSystems::SpawnRoot),
+            );
+            settle(&mut app);
+            app
+        }
+
+        /// The fixture's live geometry.
+        fn geometry(app: &mut App) -> Option<FloaterGeometry> {
+            let root = find_by_name(app, &format!("floater:{FIXTURE_ID}"))?;
+            app.world().get::<Floater>(root).map(Floater::geometry)
+        }
+
+        /// A window moved and resized by the pointer is written to the store,
+        /// and a second session restores exactly that.
+        #[test]
+        fn a_window_comes_back_where_the_pointer_left_it() -> Result<(), TestError> {
+            // Session one: the user drags the window and its grip.
+            let mut first = session(true);
+            let bar = centre_of(&mut first, "floater-title-bar").ok_or("no title bar")?;
+            // Component-wise `f32`: the workspace's `arithmetic_side_effects`
+            // lint fires on `glam`'s overloaded operators.
+            interact::drag(
+                &mut first,
+                bar,
+                Vec2::new(bar.x + TRAVEL.x, bar.y + TRAVEL.y),
+                4,
+                MouseButton::Left,
+            );
+            settle(&mut first);
+            let grip = centre_of(&mut first, "floater-resize").ok_or("no grip")?;
+            interact::drag(
+                &mut first,
+                grip,
+                Vec2::new(grip.x + TRAVEL.x, grip.y + TRAVEL.y),
+                4,
+                MouseButton::Left,
+            );
+            settle(&mut first);
+            let left_at = geometry(&mut first).ok_or("the window lost its state")?;
+            assert!(
+                left_at.position.distance(START_POSITION) > 1.0,
+                "the fixture never moved, so this would round-trip nothing"
+            );
+
+            // What the file would hold.
+            let stored = {
+                let store = first.world().resource::<ViewerSettings>().store();
+                assert!(
+                    store.is_overridden(&rect_key(FIXTURE_ID)),
+                    "the drag never reached the store, so nothing would be saved"
+                );
+                (
+                    store.get_rect(&rect_key(FIXTURE_ID))?,
+                    store.get_bool(&visible_key(FIXTURE_ID))?,
+                    store.get_bool(&minimized_key(FIXTURE_ID))?,
+                    store.get_bool(&docked_key(FIXTURE_ID))?,
+                )
+            };
+
+            // Session two: the window opens at its spec defaults, then the
+            // account scope arrives — as it does at login — carrying the values
+            // above.
+            let mut second = session(false);
+            assert_eq!(
+                geometry(&mut second).map(|state| state.position),
+                Some(START_POSITION),
+                "before the account scope loads, a floater keeps its spec default"
+            );
+            {
+                let (rect, visible, minimized, docked) = stored;
+                let mut settings = second.world_mut().resource_mut::<ViewerSettings>();
+                settings.set_account(&rect_key(FIXTURE_ID), SettingValue::Rect(rect));
+                settings.set_account(&visible_key(FIXTURE_ID), SettingValue::Bool(visible));
+                settings.set_account(&minimized_key(FIXTURE_ID), SettingValue::Bool(minimized));
+                settings.set_account(&docked_key(FIXTURE_ID), SettingValue::Bool(docked));
+                settings.mark_account_loaded_for_test();
+            }
+            settle(&mut second);
+
+            let restored = geometry(&mut second).ok_or("the second window lost its state")?;
+            assert_eq!(
+                restored.position, left_at.position,
+                "the window did not come back where it was left"
+            );
+            assert_eq!(
+                restored.content_size, left_at.content_size,
+                "the window came back a different size"
+            );
+            assert_eq!(restored.minimized, left_at.minimized);
+            Ok(())
+        }
+
+        /// Minimizing is remembered too — the state a user is most likely to
+        /// find surprising if it were not, since a restored-but-minimized
+        /// window is a strip with no content.
+        #[test]
+        fn a_minimized_window_comes_back_minimized() -> Result<(), TestError> {
+            let mut first = session(true);
+            interact::click_node(&mut first, "floater-button:minimize")?;
+            settle(&mut first);
+            assert_eq!(
+                geometry(&mut first).map(|state| state.minimized),
+                Some(true),
+                "the fixture did not minimize"
+            );
+            let stored = first
+                .world()
+                .resource::<ViewerSettings>()
+                .store()
+                .get_bool(&minimized_key(FIXTURE_ID))?;
+            assert!(stored, "the minimize never reached the store");
+
+            let mut second = session(false);
+            {
+                let mut settings = second.world_mut().resource_mut::<ViewerSettings>();
+                settings.set_account(&minimized_key(FIXTURE_ID), SettingValue::Bool(stored));
+                settings.mark_account_loaded_for_test();
+            }
+            settle(&mut second);
+            assert_eq!(
+                geometry(&mut second).map(|state| state.minimized),
+                Some(true),
+                "the window came back expanded"
+            );
+            Ok(())
+        }
+    }
 }

@@ -112,6 +112,8 @@ mod bottom_toolbar;
 // each module is aliased under its old name so every `crate::<module>::…`
 // path in the viewer still resolves.
 pub(crate) use sl_viewer_media::browser_widget;
+#[cfg(test)]
+mod build_floater_test;
 mod build_info;
 pub(crate) use sl_viewer_chat::chat;
 pub(crate) use sl_viewer_chat::chat_input;
@@ -155,7 +157,10 @@ pub(crate) use sl_viewer_notices::experience_permission;
 pub(crate) use sl_viewer_notices::experiences_floater;
 pub(crate) use sl_viewer_platform::environment_assets;
 pub(crate) use sl_viewer_ui_widgets::floater;
+#[cfg(test)]
+mod floater_chrome;
 pub(crate) use sl_viewer_ui_widgets::floater_persist;
+mod floaters;
 pub(crate) use sl_viewer_world_scene::environment;
 pub(crate) use sl_viewer_world_scene::exposure;
 pub mod gallery;

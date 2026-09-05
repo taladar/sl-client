@@ -183,27 +183,30 @@ pub(crate) struct ExperiencesUi {
     blocked_list: Entity,
 }
 
+/// The experiences floater's [`FloaterSpec`] — shared with the `FLOATERS`
+/// registry, so the swept window is the one the viewer spawns.
+#[must_use]
+pub fn experiences_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: EXPERIENCES_FLOATER_ID,
+        title: "Experiences".to_owned(),
+        position: Vec2::new(360.0, 140.0),
+        default_size: None,
+        min_size: None,
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: false,
+            minimizable: false,
+            closable: true,
+            dockable: false,
+        },
+    }
+}
+
 /// Spawn the Experiences floater (hidden): a Refresh row, then the Allowed and
 /// Blocked headed list columns the rebuild fills.
 fn spawn_experiences_floater(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = spawn_floater(
-        &mut commands,
-        root.0,
-        FloaterSpec {
-            id: EXPERIENCES_FLOATER_ID,
-            title: "Experiences".to_owned(),
-            position: Vec2::new(360.0, 140.0),
-            default_size: None,
-            min_size: None,
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: false,
-                minimizable: false,
-                closable: true,
-                dockable: false,
-            },
-        },
-    );
+    let handle = spawn_floater(&mut commands, root.0, experiences_floater_spec());
     commands
         .entity(handle.title_text)
         .insert(Translated::new("experiences-title"));

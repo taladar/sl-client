@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 309 |
-| blocked | 56 |
+| ready | 306 |
+| blocked | 55 |
 | in-progress | 18 |
 | bugs | 59 |
-| done | 992 |
+| done | 998 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1571** |
+| **total** | **1573** |
 
 ## ideas (98)
 
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (309)
+## ready (306)
 
 ### protocol
 
@@ -367,9 +367,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-build-display-options`](ready/viewer-build-display-options.md) —
   Build-mode display/overlay toggles (blocked by `viewer-object-selection-core`
   (done))
-- [`viewer-build-floater-interaction-tests`](ready/viewer-build-floater-interaction-tests.md)
-  — The build floater — reflect, edit, commit (blocked by
-  `viewer-ui-keyboard-text-harness` (done), `viewer-world-test-harness` (done))
 - [`viewer-build-general-sale-clickaction`](ready/viewer-build-general-sale-clickaction.md)
   — General tab — for-sale, click action, show in search, locked
 - [`viewer-build-grid-options`](ready/viewer-build-grid-options.md) —
@@ -483,8 +480,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-experiences-floater`](ready/viewer-experiences-floater.md) —
   Experiences floater — lists, profile, search (blocked by
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
-- [`viewer-floater-registry`](ready/viewer-floater-registry.md) — A FLOATERS
-  registry, so floaters can be swept at all
 - [`viewer-floater-update-in-place`](ready/viewer-floater-update-in-place.md) —
   Detail/property floaters — update values in place, don't rebuild structure
 - [`viewer-flycam-avatar-movement-keys`](ready/viewer-flycam-avatar-movement-keys.md)
@@ -895,10 +890,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-styling-interaction-tests`](ready/viewer-ui-styling-interaction-tests.md)
   — bevy_flair state styling under synthetic hover and focus (blocked by
   `viewer-ui-interaction-harness` (done))
-- [`viewer-ui-widget-interaction-suite`](ready/viewer-ui-widget-interaction-suite.md)
-  — Deep interaction tests for the stateful widgets (blocked by
-  `viewer-ui-interaction-harness` (done), `viewer-ui-keyboard-text-harness`
-  (done))
 - [`viewer-url-context-menus`](ready/viewer-url-context-menus.md) — Right-click
   context menus on linkified text and names
 - [`viewer-usb-route-map-display`](ready/viewer-usb-route-map-display.md) — USB
@@ -963,7 +954,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-binary-duplication`](ready/repl-audit-binary-duplication.md) —
   The two REPL binaries share ~400 near-verbatim lines and have already drifted
 
-## blocked (56)
+## blocked (55)
 
 ### viewer
 
@@ -974,9 +965,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Day-cycle editor (blocked by `viewer-environment-fixed-editor`)
 - [`viewer-environment-my-environments`](blocked/viewer-environment-my-environments.md)
   — My Environments library (blocked by `viewer-environment-fixed-editor`)
-- [`viewer-floater-interaction-tests`](blocked/viewer-floater-interaction-tests.md)
-  — Floater chrome under a real pointer (blocked by
-  `viewer-ui-interaction-harness` (done), `viewer-floater-registry`)
 - [`viewer-fs-bridge-protocol`](blocked/viewer-fs-bridge-protocol.md) —
   Firestorm LSL bridge — the viewer↔script protocol and what it exposes (blocked
   by `viewer-fs-bridge-lifecycle`)
@@ -1249,8 +1237,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The world map keeps a second live arboard handle
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
   — Mesh-head brow spikes forward from face-bone shape deformation
-- [`viewer-chat-volume-dropdown-opens-off-screen`](bugs/viewer-chat-volume-dropdown-opens-off-screen.md)
-  — The chat volume select opens upward into nothing
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
   — Check clouds vs the waterline at the horizon against Firestorm
 - [`viewer-combo-stops-opening`](bugs/viewer-combo-stops-opening.md) — A combo
@@ -1277,6 +1263,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A blocked resident's chat and IMs are still shown
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
+- [`viewer-nonblocking-overlay-steals-focus`](bugs/viewer-nonblocking-overlay-steals-focus.md)
+  — A see-through container in front of a field clears its focus, at random
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
   — Own avatar looks broken after a teleport
 - [`viewer-own-avatar-facing-drifts-idle`](bugs/viewer-own-avatar-facing-drifts-idle.md)
@@ -1321,7 +1309,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (992)
+## done (998)
 
 ### protocol
 
@@ -1672,6 +1660,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-bom-mesh-alpha-feet-through-boots`](done/viewer-bom-mesh-alpha-feet-through-boots.md)
   — BoM mesh body feet render through mesh boots (bake alpha ignored on BoM
   faces)
+- [`viewer-build-floater-interaction-tests`](done/viewer-build-floater-interaction-tests.md)
+  — The build floater — reflect, edit, commit (blocked by
+  `viewer-ui-keyboard-text-harness` (done), `viewer-world-test-harness` (done))
 - [`viewer-build-material-tab-permission-gate`](done/viewer-build-material-tab-permission-gate.md)
   — Build tools — gate the Material tab on modify permission (grey + notice)
 - [`viewer-build-systems-gate-on-build-mode`](done/viewer-build-systems-gate-on-build-mode.md)
@@ -1731,6 +1722,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-chat-sender-name-links`](done/viewer-chat-sender-name-links.md) —
   Chat sender names — clickable agent / object links (blocked by
   `viewer-url-linkification` (done))
+- [`viewer-chat-volume-dropdown-opens-off-screen`](done/viewer-chat-volume-dropdown-opens-off-screen.md)
+  — The chat volume select opens upward into nothing
 - [`viewer-clickable-name-widgets`](done/viewer-clickable-name-widgets.md) —
   Reusable clickable avatar-name / group-name widgets
 - [`viewer-clipped-links-still-pickable`](done/viewer-clipped-links-still-pickable.md)
@@ -1834,6 +1827,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   prims against their simulated geometry
 - [`viewer-flexi-resettle-after-snapshot`](done/viewer-flexi-resettle-after-snapshot.md)
   — Flexi prims re-settle after taking a snapshot
+- [`viewer-floater-interaction-tests`](done/viewer-floater-interaction-tests.md)
+  — Floater chrome under a real pointer (blocked by
+  `viewer-ui-interaction-harness` (done), `viewer-floater-registry` (done))
+- [`viewer-floater-registry`](done/viewer-floater-registry.md) — A FLOATERS
+  registry, so floaters can be swept at all
 - [`viewer-flycam-stop-button-overlaps-chat`](done/viewer-flycam-stop-button-overlaps-chat.md)
   — "Stop flycam" button overlaps the "Chat" button in the bottom bar
 - [`viewer-fps-label-intermittent`](done/viewer-fps-label-intermittent.md) — FPS
@@ -2663,6 +2661,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Terrain seam / misalignment at region edges on slopes
 - [`viewer-test-baseline-format`](done/viewer-test-baseline-format.md) — One
   baseline format for UI and render facts
+- [`viewer-testkit-click-focus-resource-sensitive`](done/viewer-testkit-click-focus-resource-sensitive.md)
+  — A click stops focusing its field when the harness gains any resource
 - [`viewer-texture-picker-inventory-tree`](done/viewer-texture-picker-inventory-tree.md)
   — Texture picker — inventory folder tree navigation (blocked by
   `viewer-ui-texture-picker` (done))
@@ -2772,6 +2772,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-virtualized-list`](done/viewer-ui-virtualized-list.md) —
   Virtualized (windowed-recycling) list (blocked by `viewer-ui-widget-scaffold`
+  (done))
+- [`viewer-ui-widget-interaction-suite`](done/viewer-ui-widget-interaction-suite.md)
+  — Deep interaction tests for the stateful widgets (blocked by
+  `viewer-ui-interaction-harness` (done), `viewer-ui-keyboard-text-harness`
   (done))
 - [`viewer-ui-widget-scaffold`](done/viewer-ui-widget-scaffold.md) — UI widget
   scaffold (bevy_ui plugin + conventions anchor) (blocked by

@@ -90,26 +90,28 @@ impl Plugin for WebFloaterPlugin {
     }
 }
 
+/// The web floater's [`FloaterSpec`] — shared with the `FLOATERS`
+/// registry, so the swept window is the one the viewer spawns.
+pub(crate) fn web_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: WEB_FLOATER_ID,
+        title: String::from("Web Browser"),
+        position: Vec2::new(160.0, 90.0),
+        default_size: Some(Vec2::new(760.0, 520.0)),
+        min_size: Some(Vec2::new(420.0, 300.0)),
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: true,
+            minimizable: true,
+            closable: true,
+            dockable: true,
+        },
+    }
+}
+
 /// Startup: build the floater — toolbar, browser view, status row.
 fn spawn_web_floater(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = spawn_floater(
-        &mut commands,
-        root.0,
-        FloaterSpec {
-            id: WEB_FLOATER_ID,
-            title: String::from("Web Browser"),
-            position: Vec2::new(160.0, 90.0),
-            default_size: Some(Vec2::new(760.0, 520.0)),
-            min_size: Some(Vec2::new(420.0, 300.0)),
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: true,
-                minimizable: true,
-                closable: true,
-                dockable: true,
-            },
-        },
-    );
+    let handle = spawn_floater(&mut commands, root.0, web_floater_spec());
     commands
         .entity(handle.title_text)
         .insert(Translated::new("web-floater-title"));

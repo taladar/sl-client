@@ -280,6 +280,17 @@ pub fn cursor(app: &mut App) -> Option<Vec2> {
 #[must_use]
 pub fn centre_of(app: &mut App, name: &str) -> Option<Vec2> {
     let entity = crate::find_by_name(app, name)?;
+    centre_of_entity(app, entity)
+}
+
+/// The centre of **this** node, in logical pixels.
+///
+/// The by-entity half of [`centre_of`], for the case a name cannot address: two
+/// live floaters carry the same chrome names (`floater-title-bar`,
+/// `floater-button:close`), so a test that drives *both* windows has to aim at
+/// the entity it already holds rather than at the first node with that name.
+#[must_use]
+pub fn centre_of_entity(app: &App, entity: Entity) -> Option<Vec2> {
     let node = app.world().get::<ComputedNode>(entity)?;
     let transform = app.world().get::<UiGlobalTransform>(entity)?;
     // `UiGlobalTransform` is in physical pixels; the driver speaks logical.
@@ -696,10 +707,7 @@ mod tests {
     #[test]
     fn a_click_lands_on_the_node_under_the_pointer() {
         let mut app = interactive_app();
-        let node = app
-            .world_mut()
-            .spawn(solid_node(10.0, 10.0, 100.0, 40.0))
-            .id();
+        let node = crate::spawn_under_root(&mut app, solid_node(10.0, 10.0, 100.0, 40.0));
         observe_clicks(&mut app, node, "target");
         settle(&mut app);
 
@@ -718,16 +726,10 @@ mod tests {
     #[test]
     fn an_overlay_on_top_of_a_node_takes_its_click() {
         let mut app = interactive_app();
-        let below = app
-            .world_mut()
-            .spawn(solid_node(10.0, 10.0, 100.0, 40.0))
-            .id();
+        let below = crate::spawn_under_root(&mut app, solid_node(10.0, 10.0, 100.0, 40.0));
         observe_clicks(&mut app, below, "below");
         // Spawned later at the same spot: later in the UI stack, so on top.
-        let overlay = app
-            .world_mut()
-            .spawn(solid_node(0.0, 0.0, 200.0, 200.0))
-            .id();
+        let overlay = crate::spawn_under_root(&mut app, solid_node(0.0, 0.0, 200.0, 200.0));
         observe_clicks(&mut app, overlay, "overlay");
         settle(&mut app);
 
@@ -764,10 +766,7 @@ mod tests {
     #[test]
     fn two_clicks_are_two_singles_and_a_double_click_counts_two() {
         let mut app = interactive_app();
-        let node = app
-            .world_mut()
-            .spawn(solid_node(10.0, 10.0, 100.0, 40.0))
-            .id();
+        let node = crate::spawn_under_root(&mut app, solid_node(10.0, 10.0, 100.0, 40.0));
         observe_clicks(&mut app, node, "target");
         settle(&mut app);
 
@@ -827,14 +826,10 @@ mod tests {
     fn a_key_reaches_only_the_focused_node() {
         let mut app = interactive_app();
         app.init_resource::<Keys>();
-        let first = app
-            .world_mut()
-            .spawn((solid_node(10.0, 10.0, 100.0, 40.0), TabIndex(0)))
-            .id();
-        let second = app
-            .world_mut()
-            .spawn((solid_node(10.0, 60.0, 100.0, 40.0), TabIndex(1)))
-            .id();
+        let first =
+            crate::spawn_under_root(&mut app, (solid_node(10.0, 10.0, 100.0, 40.0), TabIndex(0)));
+        let second =
+            crate::spawn_under_root(&mut app, (solid_node(10.0, 60.0, 100.0, 40.0), TabIndex(1)));
         observe_keys(&mut app, first, "first");
         observe_keys(&mut app, second, "second");
         settle(&mut app);
@@ -874,16 +869,16 @@ mod tests {
     #[test]
     fn the_tab_key_moves_focus() {
         let mut app = interactive_app();
-        let first = app
-            .world_mut()
-            .spawn((solid_node(10.0, 10.0, 100.0, 40.0), TabIndex(0)))
-            .id();
-        let second = app
-            .world_mut()
-            .spawn((solid_node(10.0, 60.0, 100.0, 40.0), TabIndex(1)))
-            .id();
+        let first =
+            crate::spawn_under_root(&mut app, (solid_node(10.0, 10.0, 100.0, 40.0), TabIndex(0)));
+        let second =
+            crate::spawn_under_root(&mut app, (solid_node(10.0, 60.0, 100.0, 40.0), TabIndex(1)));
+        let group = crate::spawn_under_root(
+            &mut app,
+            (solid_node(0.0, 0.0, 200.0, 200.0), TabGroup::new(0)),
+        );
         app.world_mut()
-            .spawn((solid_node(0.0, 0.0, 200.0, 200.0), TabGroup::new(0)))
+            .entity_mut(group)
             .add_children(&[first, second]);
         settle(&mut app);
         // `set_initial_focus` parks the focus on the primary window until
@@ -932,8 +927,9 @@ mod tests {
         editor.allow_newlines = false;
         editor.visible_lines = Some(1.0);
         editor.visible_width = Some(16.0);
-        app.world_mut()
-            .spawn((
+        crate::spawn_under_root(
+            app,
+            (
                 editor,
                 Node {
                     position_type: PositionType::Absolute,
@@ -943,8 +939,8 @@ mod tests {
                 },
                 TabIndex(0),
                 Name::new(name.to_owned()),
-            ))
-            .id()
+            ),
+        )
     }
 
     /// **Typing lands in the focused field and nowhere else** — the whole
@@ -1005,6 +1001,80 @@ mod tests {
             "clicking a field must give it the keyboard"
         );
         Ok(())
+    }
+
+    /// **Click-to-focus does not depend on which entity ids the app happened to
+    /// hand out** — the property [[viewer-testkit-click-focus-resource-sensitive]]
+    /// was filed for.
+    ///
+    /// The symptom that opened that entry was that adding *any* resource while
+    /// [`install_text_editing`] built the app made
+    /// [`a_click_focuses_the_field_it_lands_on`] fail. The resource was a red
+    /// herring: what actually decided the outcome was the field's **entity id**,
+    /// and a resource was merely one of the things that moved it. Sweeping the id
+    /// directly — pad the world with empty entities before spawning the field —
+    /// showed a clean period-4 pattern, four ids in eight focusing the field and
+    /// four leaving [`InputFocus`] empty.
+    ///
+    /// The cause is in [`crate::spawn_under_root`]: a fixture node spawned with no
+    /// parent is a second UI root, the scaffold's root does not block picking, so
+    /// half the time the click lands on both and the root's `AcquireFocus` bubbles
+    /// to the window and clears the focus the field just gained.
+    ///
+    /// This is the check that holds the fix down. Perturbing the ids is the point,
+    /// so it must stay a *sweep*: a single app cannot tell "focus works" from
+    /// "this run drew a lucky id", which is exactly how the original test passed
+    /// for months.
+    #[test]
+    fn a_click_focuses_the_field_at_any_entity_id() -> Result<(), crate::TestError> {
+        let mut missed = Vec::new();
+        for pad in 0_u32..8 {
+            let mut app = interactive_app();
+            for _ in 0..pad {
+                app.world_mut().spawn_empty();
+            }
+            let field = text_field(&mut app, "clickable", "abc", 10.0, 10.0);
+            settle(&mut app);
+            let at = super::centre_of(&mut app, "clickable").ok_or("the field has no centre")?;
+            click(&mut app, at, MouseButton::Left);
+            let focus = app.world().resource::<InputFocus>().get();
+            if focus != Some(field) {
+                missed.push(format!("{pad} entities ahead of it: focus is {focus:?}"));
+            }
+        }
+        assert!(
+            missed.is_empty(),
+            "a click must focus the field it lands on whatever the field's entity id is, and \
+             it did not at: {missed:?}"
+        );
+        Ok(())
+    }
+
+    /// **A fixture node spawned without a parent is reported**, so the next
+    /// harness to grow one finds out from the check rather than from a click that
+    /// works four times in eight.
+    #[test]
+    fn a_parentless_fixture_node_is_a_violation() {
+        let mut app = interactive_app();
+        let orphan = app
+            .world_mut()
+            .spawn((solid_node(10.0, 10.0, 100.0, 40.0), Name::new("orphan")))
+            .id();
+        settle(&mut app);
+        let violations = crate::orphan_root_violations(&mut app);
+        assert!(
+            violations.iter().any(|line| line.contains("orphan")),
+            "a `Node` with no parent must be reported as a second UI root (got {violations:?})"
+        );
+
+        app.world_mut().entity_mut(orphan).despawn();
+        let under_root = crate::spawn_under_root(&mut app, solid_node(10.0, 10.0, 100.0, 40.0));
+        settle(&mut app);
+        assert!(
+            crate::orphan_root_violations(&mut app).is_empty(),
+            "the scaffold's own root is not a violation, and neither is a node under it \
+             ({under_root})"
+        );
     }
 
     /// **An IME preedit stays out of the value until it is committed.**

@@ -2170,4 +2170,419 @@ mod tests {
         );
         Ok(())
     }
+
+    /// **The table, driven** (`viewer-ui-widget-interaction-suite`): header
+    /// clicks that sort, a border drag that resizes without sorting, and the
+    /// three selection gestures — all through a laid-out table under the real
+    /// pointer.
+    ///
+    /// The tests above trigger `Pointer<Press>` / `Pointer<Drag>` straight at
+    /// an entity, so they prove the *observers* are right and say nothing about
+    /// whether the pointer can reach them. Two of this widget's controls
+    /// overlap by design: the border resizer sits **on top of** the trailing
+    /// edge of a header cell that sorts when clicked. Which of the two a
+    /// gesture reaches is decided by hit-testing and by
+    /// `should_block_lower` — neither of which a triggered event exercises at
+    /// all.
+    mod scenarios {
+        use bevy::input::keyboard::Key;
+        use bevy::prelude::*;
+        use pretty_assertions::assert_eq;
+
+        use super::{SORTABLE_SPEC, TableState, TestError, spawn_table, spawn_table_row};
+        use crate::ui_table::{TableRow, TableWidgetPlugin};
+        use crate::ui_test::interact::{self, InteractionTest, centre_of};
+        use crate::ui_test::{find_by_name, settle};
+        use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems};
+        use sl_viewer_ui_core::virtual_list::{
+            VirtualList, VirtualListPlugin, VirtualRow, index_to_f32,
+        };
+
+        /// How many rows the fixture's consumer has. Small enough that the
+        /// pool covers all of them at once, so a row's data index and its
+        /// pooled entity stay paired for the length of a test.
+        const ITEM_COUNT: usize = 8;
+
+        /// The fixture host's size, in logical pixels — a definite box, because
+        /// the table's viewport grows into its parent and would otherwise lay
+        /// out at zero height with no row to click.
+        const HOST_SIZE: Vec2 = Vec2::new(520.0, 240.0);
+
+        /// A laid-out table under the real pointer stack, with [`ITEM_COUNT`]
+        /// rows.
+        fn table_app() -> App {
+            table_app_with(ITEM_COUNT)
+        }
+
+        /// A laid-out table under the real pointer stack: the widget's plugin,
+        /// the virtual-list pool that positions its rows, and a consumer that
+        /// binds each pooled row and names it for its data index.
+        fn table_app_with(items: usize) -> App {
+            let mut app = InteractionTest::new().build();
+            app.add_plugins((TableWidgetPlugin, VirtualListPlugin));
+            app.add_systems(
+                Startup,
+                (move |mut commands: Commands, root: Res<UiRoot>| {
+                    let host = commands
+                        .spawn((
+                            Node {
+                                width: Val::Px(HOST_SIZE.x),
+                                height: Val::Px(HOST_SIZE.y),
+                                flex_direction: FlexDirection::Column,
+                                ..Node::default()
+                            },
+                            Name::new("table-host"),
+                            ChildOf(root.0),
+                        ))
+                        .id();
+                    let handle = spawn_table(&mut commands, host, &SORTABLE_SPEC);
+                    // The consumer's half of the virtual list: how many items
+                    // it is presenting. The pool follows from there.
+                    commands
+                        .entity(handle.viewport)
+                        .entry::<VirtualList>()
+                        .and_modify(move |mut list: Mut<VirtualList>| {
+                            list.item_count = items;
+                        });
+                })
+                .after(UiScaffoldSystems::SpawnRoot),
+            );
+            app.add_systems(Update, bind_rows);
+            settle(&mut app);
+            settle(&mut app);
+            app
+        }
+
+        /// The consumer half: give each pooled row the widget's row parts (once)
+        /// and a `Name` naming the data index it is currently showing, so a test
+        /// can aim at "row 3" the way a user aims at the fourth line.
+        fn bind_rows(
+            mut commands: Commands,
+            table: Query<Entity, With<TableState>>,
+            rows: Query<(Entity, &VirtualRow, Has<TableRow>), Changed<VirtualRow>>,
+        ) {
+            let Ok(root) = table.single() else {
+                return;
+            };
+            for (entity, row, bound) in &rows {
+                if !bound {
+                    spawn_table_row(&mut commands, entity, root, &SORTABLE_SPEC);
+                }
+                let name = row
+                    .index
+                    .map_or_else(|| "row:parked".to_owned(), |index| format!("row:{index}"));
+                commands.entity(entity).insert(Name::new(name));
+            }
+        }
+
+        /// The table's state.
+        fn state(app: &mut App) -> Option<&TableState> {
+            let root = find_by_name(app, "test:table")?;
+            app.world().get::<TableState>(root)
+        }
+
+        /// The primary sort level: the column ordered by, and its direction.
+        fn primary_sort(app: &mut App) -> Option<(usize, bool)> {
+            let key = state(app)?.sort().primary()?;
+            Some((key.column, key.ascending))
+        }
+
+        /// The glyph the named column's sort arrow is showing.
+        fn arrow(app: &mut App, column: usize) -> Option<String> {
+            let entity = find_by_name(app, &format!("test:table-header-arrow:{column}"))?;
+            app.world().get::<Text>(entity).map(|text| text.0.clone())
+        }
+
+        /// A header click sorts by that column, and clicking it again flips the
+        /// direction — with the arrow following.
+        #[test]
+        fn a_header_click_sorts_and_the_arrow_follows() -> Result<(), TestError> {
+            let mut app = table_app();
+            assert_eq!(
+                primary_sort(&mut app),
+                Some((0, true)),
+                "the fixture rests on its declared default sort"
+            );
+
+            interact::click_node(&mut app, "test:table-header-cell:1")?;
+            settle(&mut app);
+            assert_eq!(
+                primary_sort(&mut app),
+                Some((1, true)),
+                "a fresh column is promoted ascending"
+            );
+            assert_eq!(
+                arrow(&mut app, 1),
+                Some(super::super::SORT_ASCENDING_GLYPH.to_owned())
+            );
+            assert_eq!(
+                arrow(&mut app, 0),
+                Some(String::new()),
+                "the demoted column drops its arrow"
+            );
+
+            interact::click_node(&mut app, "test:table-header-cell:1")?;
+            settle(&mut app);
+            assert_eq!(
+                primary_sort(&mut app),
+                Some((1, false)),
+                "re-clicking the front column flips it"
+            );
+            assert_eq!(
+                arrow(&mut app, 1),
+                Some(super::super::SORT_DESCENDING_GLYPH.to_owned())
+            );
+            Ok(())
+        }
+
+        /// Dragging the border between two columns resizes them — and does
+        /// **not** sort, even though the handle sits inside the header cell
+        /// whose every other pixel does.
+        ///
+        /// This is the one test in the widget that can tell those two apart:
+        /// the handle blocks lower and swallows its press, and both halves of
+        /// that are hit-test behaviour.
+        #[test]
+        fn a_border_drag_resizes_without_sorting() -> Result<(), TestError> {
+            const TRAVEL: f32 = 30.0;
+
+            let mut app = table_app();
+            let before = state(&mut app).map(|state| state.widths.clone());
+            let sort_before = primary_sort(&mut app);
+            let revision = state(&mut app).map(TableState::sort_revision);
+
+            let grip = centre_of(&mut app, "test:table-border-resizer:1")
+                .ok_or("the column border never laid out")?;
+            interact::drag(
+                &mut app,
+                grip,
+                Vec2::new(grip.x + TRAVEL, grip.y),
+                3,
+                MouseButton::Left,
+            );
+            settle(&mut app);
+
+            let widths = state(&mut app)
+                .map(|state| state.widths.clone())
+                .ok_or("the table lost its state")?;
+            let before = before.ok_or("the table lost its state")?;
+            let grown = widths.get(1).copied().ok_or("no column 1")?;
+            let was = before.get(1).copied().ok_or("no column 1")?;
+            assert!(
+                (grown - was - TRAVEL).abs() < 1.0,
+                "dragging the border {TRAVEL} px right widens column 1 by {TRAVEL}: {was} -> {grown}"
+            );
+            let shrunk = widths.get(2).copied().ok_or("no column 2")?;
+            let was_right = before.get(2).copied().ok_or("no column 2")?;
+            assert!(
+                (was_right - shrunk - TRAVEL).abs() < 1.0,
+                "and takes it from column 2: {was_right} -> {shrunk}"
+            );
+            assert_eq!(
+                primary_sort(&mut app),
+                sort_before,
+                "grabbing the resize handle must not sort the table"
+            );
+            assert_eq!(
+                state(&mut app).map(TableState::sort_revision),
+                revision,
+                "and must not tell the consumer to re-sort"
+            );
+            Ok(())
+        }
+
+        /// The three row-selection gestures, on rows the pointer actually
+        /// finds: a plain click selects one, `Ctrl`+click adds a second,
+        /// `Shift`+click takes the range from the anchor.
+        #[test]
+        fn clicks_select_rows_and_the_modifiers_extend() -> Result<(), TestError> {
+            let mut app = table_app();
+            let selected = |app: &mut App| -> Vec<usize> {
+                state(app)
+                    .map(|state| state.selected().to_vec())
+                    .unwrap_or_default()
+            };
+            assert!(
+                selected(&mut app).is_empty(),
+                "a fresh table selects nothing"
+            );
+
+            interact::click_node(&mut app, "row:2")?;
+            settle(&mut app);
+            assert_eq!(selected(&mut app), vec![2], "a plain click selects one row");
+
+            interact::with_modifier(&mut app, KeyCode::ControlLeft, Key::Control, |app| {
+                let _clicked = interact::click_node(app, "row:5");
+            });
+            settle(&mut app);
+            assert_eq!(
+                selected(&mut app),
+                vec![2, 5],
+                "Ctrl+click adds a row without dropping the first"
+            );
+
+            interact::with_modifier(&mut app, KeyCode::ShiftLeft, Key::Shift, |app| {
+                let _clicked = interact::click_node(app, "row:7");
+            });
+            settle(&mut app);
+            assert_eq!(
+                selected(&mut app),
+                vec![5, 6, 7],
+                "Shift+click takes the range from the last row Ctrl left as the anchor"
+            );
+            Ok(())
+        }
+
+        /// How many rows the scrolling fixture presents — far more than fit, so
+        /// the window has somewhere to move to.
+        const LONG_LIST: usize = 400;
+
+        /// The list's scroll offset.
+        fn scroll_offset(app: &mut App) -> Option<f32> {
+            let viewport = find_by_name(app, "test:table-viewport")?;
+            app.world()
+                .get::<VirtualList>(viewport)
+                .map(VirtualList::scroll_offset)
+        }
+
+        /// Every live pooled row's data index, ascending — the rows a user can
+        /// see something in.
+        fn live_indices(app: &mut App) -> Vec<usize> {
+            let mut query = app.world_mut().query::<(&VirtualRow, &Node)>();
+            let mut rows: Vec<usize> = query
+                .iter(app.world())
+                .filter(|(_row, node)| node.display != Display::None)
+                .filter_map(|(row, _node)| row.index)
+                .collect();
+            rows.sort_unstable();
+            rows
+        }
+
+        /// **The wheel, and where it belongs**: a notch over the rows scrolls
+        /// the list, the window moves, no live row is left blank or misplaced —
+        /// and the same notch over the header, which is *not* inside the
+        /// viewport, scrolls nothing.
+        ///
+        /// This is the virtual list's own pointer test, driven through its main
+        /// consumer. It lives here rather than beside `virtual_list.rs` because
+        /// this harness is built on that crate: a dev-dependency back onto
+        /// `sl-viewer-ui-core` links two copies of it into one test binary — the
+        /// `cfg(test)` one and the harness's — and a fixture's `Res<UiRoot>`
+        /// then names a type nothing ever inserted. A table is the right
+        /// stand-in anyway: it has a header the wheel must ignore, which a bare
+        /// list fixture would not.
+        #[test]
+        fn the_wheel_scrolls_the_rows_and_not_the_header() -> Result<(), TestError> {
+            let mut app = table_app_with(LONG_LIST);
+            assert_eq!(scroll_offset(&mut app), Some(0.0), "it starts at the top");
+            let before = live_indices(&mut app);
+            assert!(!before.is_empty(), "the pool covers the viewport");
+
+            let rows =
+                centre_of(&mut app, "test:table-viewport").ok_or("the viewport never laid out")?;
+            // Negative y is a notch towards the user: the content moves up.
+            for _notch in 0..3 {
+                interact::scroll(&mut app, rows, Vec2::new(0.0, -3.0));
+            }
+            settle(&mut app);
+
+            let scrolled = scroll_offset(&mut app).ok_or("the list lost its scroll")?;
+            assert!(scrolled > 0.0, "the wheel over the rows scrolls them");
+            let after = live_indices(&mut app);
+            assert!(
+                after.first() > before.first(),
+                "the window moved down the list: {:?} -> {:?}",
+                before.first(),
+                after.first()
+            );
+            // The window stays a window: bounded whatever the list's length —
+            // at the top it is short (the overscan above is clamped away), in
+            // the middle it is full, and never anywhere near the item count.
+            assert!(
+                after.len() <= 32,
+                "a {LONG_LIST}-row list must not put {} rows on screen",
+                after.len()
+            );
+            // And contiguous: a virtualised window is a run of consecutive
+            // items, so a gap in it is a hole in the list.
+            for pair in after.windows(2) {
+                let (low, high) = (pair.first().copied(), pair.get(1).copied());
+                let (low, high) = (
+                    low.ok_or("a pair without a first")?,
+                    high.ok_or("a pair without a second")?,
+                );
+                assert_eq!(
+                    high,
+                    low.saturating_add(1),
+                    "the live rows must be consecutive: {after:?}"
+                );
+            }
+            // No dead rows: every live row sits where its item belongs — one
+            // row-height per item below the top, less the scroll. A blank or
+            // duplicated line is exactly what a row that failed this looks
+            // like on screen.
+            let mut query = app.world_mut().query::<(&VirtualRow, &Node)>();
+            let mut placed = Vec::new();
+            for (row, node) in query.iter(app.world()) {
+                if node.display == Display::None {
+                    continue;
+                }
+                let index = row.index.ok_or("a live row shows no item")?;
+                placed.push((index, node.top));
+            }
+            for (index, top) in placed {
+                let wanted = index_to_f32(index) * SORTABLE_SPEC.row_height - scrolled;
+                assert_eq!(
+                    top,
+                    Val::Px(wanted),
+                    "row {index} is drawn where row {index} belongs"
+                );
+            }
+
+            let header = centre_of(&mut app, "test:table-header").ok_or("no header")?;
+            interact::scroll(&mut app, header, Vec2::new(0.0, -3.0));
+            settle(&mut app);
+            assert_eq!(
+                scroll_offset(&mut app),
+                Some(scrolled),
+                "a notch over the header is not the list's"
+            );
+            Ok(())
+        }
+
+        /// Dragging the overlay scrollbar's thumb scrolls by the **track's**
+        /// ratio: a short thumb over a long list means one pixel of thumb is
+        /// many rows of content, so the list moves much further than the
+        /// pointer did.
+        #[test]
+        fn dragging_the_scrollbar_thumb_scrolls_further_than_the_pointer() -> Result<(), TestError>
+        {
+            const TRAVEL: f32 = 40.0;
+
+            let mut app = table_app_with(LONG_LIST);
+            let thumb = centre_of(&mut app, "virtual-list:scrollbar-thumb")
+                .ok_or("the scrollbar never laid out")?;
+            interact::drag(
+                &mut app,
+                thumb,
+                Vec2::new(thumb.x, thumb.y + TRAVEL),
+                4,
+                MouseButton::Left,
+            );
+            settle(&mut app);
+
+            let scrolled = scroll_offset(&mut app).ok_or("the list lost its scroll")?;
+            assert!(
+                scrolled > TRAVEL,
+                "{TRAVEL} px of thumb is many rows of a {LONG_LIST}-row list, not {scrolled} px"
+            );
+            let visible = live_indices(&mut app);
+            let first = visible.first().copied().ok_or("the pool emptied")?;
+            assert!(
+                first > 0,
+                "and the window followed the thumb rather than staying at the top"
+            );
+            Ok(())
+        }
+    }
 }
