@@ -65,11 +65,58 @@ multi-region offsets, in-flight asset leaks, NPC appearance delivery.
   milliseconds; the scripted timeline emits the same message from a step.
 - `sl-fake-grid` is reproducible on demand:
   `FakeGridBuilder::deterministic(seed)` seeds every minted identifier (session,
-  secure session, circuit code, capability tokens, agent and region ids) and
+  secure session, circuit code, capability tokens, agent and region ids, and
+  the object keys and inventory item ids a write path mints) and
   `FakeGridBuilder::clock(now)` replaces every grid-side stamp — nothing in the
   crate reaches for `Instant::now()` on its own, and
   `sl_fake_grid::tokio_clock()` is what a paused-timer test passes. Tier F
   records the grid produces are therefore comparable run to run.
+- The region's world is **the region's**, not each session's: one
+  `SceneFixtures` behind one lock on the `RegionEntry`, so a rez by one avatar
+  is an object the region's other avatars see. The scenario states what the
+  region starts as; the store is what it has become. Two regions never share
+  one, which is what a handover needs. A write publishes a `RegionUpdate` and a
+  per-session watcher turns it into the `ObjectUpdate` / `KillObject` each other
+  circuit needs, because there is no simulation loop to sweep for it.
+- **An asset id names bytes.** `sl_test_assets::inventory` is one real body per
+  inventory class the workspace can write one for, with the id an item declares
+  and a *second* body of the same class; the stock scenario seeds one item per
+  entry. A round trip that re-fetches the id it was handed proves nothing if
+  the bytes never changed — a grid that swallowed the save and one that stored
+  it answer identically — which is why there are two. `uploads.rs` folds every
+  completed save (the two-stage CAPS uploader, the legacy UDP transaction
+  upload, and the `UpdateInventoryItem` that binds it) into the grid-wide store
+  and repoints the item that named it; a task item resolves through its own
+  `asset_id` against that same store, so an item **dropped into a prim at
+  runtime** — minted a fresh id no fixture could have stated bytes for — can be
+  read back at all. Two classes deliberately have no fixture and
+  `inventory::unsupported_classes()` records why (`AssetType::Object` has no
+  codec; `Gesture` has no decoder), and a crate test fails a class that has both
+  a body and a recorded reason, or neither.
+- **A client's edits land**, in three modules under that same lock:
+  `object_edits.rs` (the build floater), `parcel_edits.rs` (About Land and
+  the land a client buys, deeds, abandons or reclaims) and `estate.rs` (the
+  Region/Estate floater, which is one message and a switch on a method name).
+  The thing to keep straight is *which message carries the change back*: an
+  object has two records travelling in two messages — the `ObjectUpdate` for
+  its motion, material, click action and flags, and `ObjectProperties` for its
+  name, description, category, sale state and permissions, which the update
+  carries none of — while a parcel has one record that a
+  `ParcelPropertiesUpdate` re-asserts whole. An estate command from an agent
+  with no estate power is refused **in silence**, as OpenSim refuses it, which
+  is what makes the gate observable at all.
+- **The region's other avatars are told**, each surface by its own
+  subscription: an object's properties reach the sessions holding it
+  *selected* (a prim's contents serial rides on that record and nowhere
+  else), a parcel reaches the avatars standing on it, a region's
+  configuration reaches everyone. There is nothing to arbitrate with —
+  Second Life has no edit lock, so a conflict is the steady state and
+  last-write-wins is the whole policy — which makes converging the viewer's
+  job and the unsolicited push its only material. The property under test is
+  therefore not "who won" but that a viewer's *next* write carries the pushed
+  values for the fields it never touched; `client_end_to_end` stages one
+  two-avatar case per surface, which a live grid could not, since without
+  locking its interleaving is luck.
 - `sl-conformance`'s **offline tier** — the same fake grid, asserted on the
   wire instead of in pixels. `Grid::Fake` starts a grid inside the test
   process (the catalogue region plus the border scene east of it as its

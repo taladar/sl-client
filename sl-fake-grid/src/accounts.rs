@@ -52,6 +52,18 @@ impl AccountConfig {
         self.estate_manager = true;
         self
     }
+
+    /// The same account, with the agent id fixed rather than minted at start.
+    ///
+    /// A minted id is stable within a run and (on a seeded grid) across runs,
+    /// but it is not something a *caller* can name before the grid exists —
+    /// which is what a harness needs when it has to tell a case "this is the
+    /// other avatar" without logging that avatar in.
+    #[must_use]
+    pub const fn with_agent_id(mut self, agent_id: AgentKey) -> Self {
+        self.agent_id = Some(agent_id);
+        self
+    }
 }
 
 /// A registered account after the grid started: the config plus the minted

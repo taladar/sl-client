@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 309 |
 | blocked | 56 |
 | in-progress | 18 |
-| bugs | 58 |
-| done | 988 |
+| bugs | 59 |
+| done | 992 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1566** |
+| **total** | **1571** |
 
 ## ideas (98)
 
@@ -933,6 +933,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
+- [`test-asset-save-mutation-survey`](ready/test-asset-save-mutation-survey.md)
+  — Does a grid hand back the asset you saved?
 - [`test-assets-gesture-codec`](ready/test-assets-gesture-codec.md) — Read and
   write a gesture asset (LLMultiGesture)
 - [`test-assets-object-asset-codec`](ready/test-assets-object-asset-codec.md) —
@@ -949,8 +951,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The login refusals and handover timeouts nothing tests
 - [`test-fake-grid-object-sounds`](ready/test-fake-grid-object-sounds.md) — The
   fake grid can serve a sound but cannot play one
-- [`test-fake-grid-object-write-path`](ready/test-fake-grid-object-write-path.md)
-  — The fake grid has no way to rez, take or fill an object
 - [`test-fake-grid-timeline`](ready/test-fake-grid-timeline.md) — Scripted
   scenario timelines with markers (blocked by `test-fake-grid-determinism`
   (done), `viewer-fake-grid-render-harness` (done))
@@ -1178,7 +1178,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (58)
+## bugs (59)
 
 ### viewer
 
@@ -1260,6 +1260,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   terrain)
 - [`viewer-edit-outline-skinned-mesh`](bugs/viewer-edit-outline-skinned-mesh.md)
   — Edit-selection outline can't shell a skinned / animesh object
+- [`viewer-floaters-never-reread-after-a-push`](bugs/viewer-floaters-never-reread-after-a-push.md)
+  — A floater seeds its draft once and reverts what it never saw
 - [`viewer-hover-tooltip-202ms-frame-spike`](bugs/viewer-hover-tooltip-202ms-frame-spike.md)
   — update_hover_tooltip spikes to 202 ms on a single frame
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
@@ -1319,7 +1321,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (988)
+## done (992)
 
 ### protocol
 
@@ -3176,10 +3178,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — request / set experience permission
 - [`test-fake-grid-animation-assets`](done/test-fake-grid-animation-assets.md) —
   A synthetic animation asset the fake grid can actually serve
+- [`test-fake-grid-asset-round-trip`](done/test-fake-grid-asset-round-trip.md) —
+  An asset id the grid hands out should name bytes the grid can serve
 - [`test-fake-grid-builtin-textures`](done/test-fake-grid-builtin-textures.md) —
   Serve the built-in sky, water and prim textures the viewer asks for
+- [`test-fake-grid-concurrent-edits`](done/test-fake-grid-concurrent-edits.md) —
+  Somebody else changed it and nobody was told
 - [`test-fake-grid-determinism`](done/test-fake-grid-determinism.md) — An
   injectable clock and seeded ids for sl-fake-grid
+- [`test-fake-grid-edit-surfaces`](done/test-fake-grid-edit-surfaces.md) — A
+  viewer can edit nothing on the fake grid
 - [`test-fake-grid-fixed-port-scenario`](done/test-fake-grid-fixed-port-scenario.md)
   — Named scenarios and a fixed-port launcher for the fake grid
 - [`test-fake-grid-neighbours-crossing`](done/test-fake-grid-neighbours-crossing.md)
@@ -3188,6 +3196,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-npc-avatars`](done/test-fake-grid-npc-avatars.md) — NPC
   avatars with appearance, animations and attachments (blocked by
   `test-fake-grid-render-fixtures` (done))
+- [`test-fake-grid-object-write-path`](done/test-fake-grid-object-write-path.md)
+  — The fake grid has no way to rez, take or fill an object
 - [`test-fake-grid-own-avatar-appearance`](done/test-fake-grid-own-avatar-appearance.md)
   — The arriving agent never got its own AvatarAppearance
 - [`test-fake-grid-render-fixtures`](done/test-fake-grid-render-fixtures.md) —

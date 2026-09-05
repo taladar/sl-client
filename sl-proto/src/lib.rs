@@ -121,7 +121,8 @@ pub use sim_session::{
     AgentPresence, AgentUpdateInfo, ArrivalPlacement, CapsUploadMetadata, FlowMirrorStatus,
     ObjectMediaState, PARCEL_OVERLAY_CHUNK_BYTES, RejectionReason, SESSION_FLOW_COVERAGE,
     ServerEvent, SimChatSession, SimChatSessionKind, SimParcel, SimSession, SitTransform,
-    TERRAIN_PATCHES_PER_MESSAGE, TransferRequestSource, UserRightsEntry, teleport_strings,
+    TERRAIN_PATCHES_PER_MESSAGE, TransferRequestSource, UpdatedInventoryItem, UserRightsEntry,
+    teleport_strings,
 };
 pub use sim_voice::{
     SimVoice, VoiceChannel, VoiceConnection, VoiceProvisionOutcome, VoiceProvisionRefusal,
@@ -129,10 +130,10 @@ pub use sim_voice::{
 };
 pub use terrain::encode_layer;
 pub use types::{
-    ASSET_CODE_LINK, ASSET_CODE_LINK_FOLDER, ActiveGroup, AgentOrObjectKey, AlertInfo, Asset,
-    AssetType, AssetUpdateLocation, AttachmentMode, AttachmentPoint, AvatarAppearance,
-    AvatarAttachment, AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarName,
-    AvatarPick, AvatarPickerResult, AvatarProperties, BUILTIN_BUMPMAP_TEXTURES,
+    ASSET_CODE_LINK, ASSET_CODE_LINK_FOLDER, ActiveGroup, AddPrimParams, AgentOrObjectKey,
+    AlertInfo, Asset, AssetType, AssetUpdateLocation, AttachmentMode, AttachmentPoint,
+    AvatarAppearance, AvatarAttachment, AvatarClassified, AvatarGroupMembership, AvatarInterests,
+    AvatarName, AvatarPick, AvatarPickerResult, AvatarProperties, BUILTIN_BUMPMAP_TEXTURES,
     BUILTIN_ENVIRONMENT_TEXTURES, BUILTIN_VIEWER_TEXTURES, BUILTIN_WATER_PLANE_TEXTURES, Camera,
     CameraError, ChatAudible, ChatMessage, ChatSource, ChatSourceType, ChatType,
     ChatTypeNotAVolume, Child, ClassifiedCategory, ClassifiedInfo, ClassifiedUpdate, ClickAction,
@@ -186,7 +187,8 @@ pub use types::{
     UpdatableAssetType, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
     ViewerEffectType, WaterSettings, Wearable, WearableType, attachment_state_from_point,
     avatar_texture, azimuth_altitude_to_rotation, global_to_handle, grid_to_handle, group_powers,
-    handle_to_global, handle_to_grid, hexdump, particle_pattern, pcode, texture_anim_mode,
+    handle_to_global, handle_to_grid, hexdump, particle_pattern, pcode, prim_flags,
+    texture_anim_mode,
 };
 
 // Re-export `Uuid`: it appears in public types (chat/IM ids) and command APIs,

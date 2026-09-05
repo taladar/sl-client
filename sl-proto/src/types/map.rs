@@ -50,6 +50,63 @@ impl EstateAccessDelta {
             Self::ManagerRemove => 1 << 9,
         }
     }
+
+    /// The change an `estateaccessdelta` flag value names, or [`None`] for a
+    /// value that names none.
+    ///
+    /// The viewer ORs a "no reply" bit onto the change, and may in principle
+    /// send more than one change at a time, so the value is matched on the
+    /// change bits it carries rather than compared whole — first match wins,
+    /// in the order the changes are declared.
+    ///
+    /// [`None`] rather than a default, for the reason
+    /// [`PermissionField::from_code`](crate::PermissionField::from_code)
+    /// returns one: there is no "the default estate list", and guessing wrong
+    /// bans somebody nobody asked to ban.
+    #[must_use]
+    pub const fn from_u32(flags: u32) -> Option<Self> {
+        // A `match` cannot test bits, and the list is short enough that the
+        // chain reads as the table it is.
+        if flags & Self::AllowedAgentAdd.to_u32() != 0 {
+            Some(Self::AllowedAgentAdd)
+        } else if flags & Self::AllowedAgentRemove.to_u32() != 0 {
+            Some(Self::AllowedAgentRemove)
+        } else if flags & Self::AllowedGroupAdd.to_u32() != 0 {
+            Some(Self::AllowedGroupAdd)
+        } else if flags & Self::AllowedGroupRemove.to_u32() != 0 {
+            Some(Self::AllowedGroupRemove)
+        } else if flags & Self::BannedAgentAdd.to_u32() != 0 {
+            Some(Self::BannedAgentAdd)
+        } else if flags & Self::BannedAgentRemove.to_u32() != 0 {
+            Some(Self::BannedAgentRemove)
+        } else if flags & Self::ManagerAdd.to_u32() != 0 {
+            Some(Self::ManagerAdd)
+        } else if flags & Self::ManagerRemove.to_u32() != 0 {
+            Some(Self::ManagerRemove)
+        } else {
+            None
+        }
+    }
+
+    /// Which of the estate's four lists this change edits.
+    #[must_use]
+    pub const fn list(self) -> EstateAccessKind {
+        match self {
+            Self::AllowedAgentAdd | Self::AllowedAgentRemove => EstateAccessKind::AllowedAgents,
+            Self::AllowedGroupAdd | Self::AllowedGroupRemove => EstateAccessKind::AllowedGroups,
+            Self::BannedAgentAdd | Self::BannedAgentRemove => EstateAccessKind::BannedAgents,
+            Self::ManagerAdd | Self::ManagerRemove => EstateAccessKind::Managers,
+        }
+    }
+
+    /// Whether this change adds to its list (rather than removing from it).
+    #[must_use]
+    pub const fn is_add(self) -> bool {
+        matches!(
+            self,
+            Self::AllowedAgentAdd | Self::AllowedGroupAdd | Self::BannedAgentAdd | Self::ManagerAdd
+        )
+    }
 }
 
 /// Which estate access list a [`Event::EstateAccessList`](crate::Event::EstateAccessList) carries.

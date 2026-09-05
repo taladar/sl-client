@@ -405,13 +405,11 @@ else:
   session and re-armed after each serve, since a `SimSession`
   registration is consumed by the `RequestXfer` that names it. An unknown
   name gets the machine's own `AbortXfer`.
-- **Task inventories** (`task_inventories`, by region-local object id) —
-  answered with `serve_task_inventory` on `RequestTaskInventory`; an
-  unknown id is ignored, as a real simulator ignores a bogus one.
-- **`TransferRequest` sources** — task-item asset bodies by `(task, item)`
-  (`task_item_assets`) and the estate covenant notecard
-  (`estate_covenant`); a miss is refused with `UnknownSource`, which the
-  client surfaces as `TransferFailed` instead of hanging.
+- **The estate covenant notecard** (`estate_covenant`) — the one
+  `TransferRequest` source that is still a fixture, because it belongs to
+  no inventory item: it is addressed by estate asset type, not by an asset
+  id. A miss is refused with `UnknownSource`, which the client surfaces as
+  `TransferFailed` instead of hanging.
 - **The terrain RAW heightmap** (`terrain_raw`) — offered with
   `send_initiate_download` on an estate "download filename" request, and
   *replaced* by a completed upload (`request_xfer_upload` → `XferReceived`),
@@ -423,9 +421,22 @@ else:
   builds a flat 256 × 256 RAW32 file for a fixture that deliberately
   differs.
 
-The stock scenario ships `motd.txt`, one scripted object
-(`STOCK_SCRIPTED_OBJECT_LOCAL_ID`) whose task inventory holds a script with
-a body, and a covenant. Behaviour the fixtures do
+Task inventories used to live here too. They do not any more: a contents
+*serial* only means anything if the store that answers it is the store a
+write advances, so the listings moved to the region's world (below), where
+an `UpdateTaskInventory` lands. Their **bodies** followed, for the same
+reason one step further out. They were a `(task, item)` map stated up
+front, which no fixture could extend: an item dropped into a prim is
+minted a fresh task item id, so its bytes could never have been stated,
+and the `TransferRequest` for it was refused — the one item whose contents
+serial a test had just watched advance was the one item whose asset could
+not be read back. A task item now resolves the way every other asset fetch
+does: through the item's own `asset_id`, against the one grid-wide store
+(`udp_assets::task_item_asset`). The request's own `asset_id` field is not
+trusted, which is what makes a save observable — the fetch after one
+returns the new bytes because the item now names them.
+
+The stock scenario ships `motd.txt` and a covenant. Behaviour the fixtures do
 not cover goes in `Scenario::on_event`, a hook that sees every drained
 `ServerEvent` with the live `SimSession` (after the stock behaviour ran).
 `client_end_to_end.rs` drives each of these flows through the real
@@ -434,8 +445,15 @@ not cover goes in `Scenario::on_event`, a hook that sees every drained
 ## The world fixtures
 
 `Scenario::world` (`SceneFixtures`) holds the region's parcels
-(`ParcelInfo`) and objects (`Object`) — the records the client decodes, so
-a test asserts exactly what it seeded. A real simulator pushes a burst of
+(`ParcelInfo`), objects (`Object`) and per-object task inventories — the
+records the client decodes, so a test asserts exactly what it seeded. The
+scenario states what the region *starts* as; what it has *become* lives on
+the `RegionEntry` (`RegionWorld`, one `SceneFixtures` behind one lock),
+shared by every session in that region rather than cloned into each. Two
+regions never share one, which is what a handover needs: the region an
+object left and the region it arrived in disagree for a moment by design.
+
+A real simulator pushes a burst of
 world state at an arriving viewer that nothing requested, and the driver
 does the same on `AgentArrived`, right after `AgentMovementComplete`:
 
@@ -472,8 +490,173 @@ common fixtures.
 The stock scenario's world is one region-wide public parcel
 (`STOCK_PARCEL_NAME`, `STOCK_PARCEL_LOCAL_ID`, flying and rezzing
 allowed) and the stock scripted object as a 1 m box at
-`STOCK_SCRIPTED_OBJECT_POSITION` — so the task-inventory fixtures describe
-an object a viewer can actually see and click.
+`STOCK_SCRIPTED_OBJECT_POSITION`, holding the stock script item in its task
+inventory — so the listing describes an object a viewer can actually see
+and click, and the two are stated in one place.
+
+### The write path
+
+Everything above is content the region was *handed*. Three client messages
+change what it holds, and all three are answered against the region world:
+
+- **`ObjectAdd` → `ServerEvent::RezObject`.** The simulator mints the
+  object's region-local id (`SceneFixtures::mint_local_id`, always above
+  every id in use *and* every id ever minted, so a rez after a derez cannot
+  reuse a handle a viewer is still keyed on) and its full key, builds the
+  prim from the client's `PrimShape` (`prim_from_shape`), adds it to the
+  region and streams it straight back — the rezzing client cannot use the
+  object until it learns the ids it did not choose.
+- **`DeRezObject` → `ServerEvent::DerezObjects`.** The destination decides
+  both halves and nothing else does: `DeRezDestination::agent_folder` names
+  the folder an inventory item is minted in (answered with an
+  `UpdateCreateInventoryItem`, and filed into the session's own
+  `SimInventoryTree` so a later `UpdateTaskInventory` can resolve it), and
+  `removes_from_world` says whether the world copy then goes (answered with
+  a `KillObject`). A destination that does neither gets a `DeRezAck`. The
+  split follows OpenSim's own `Scene.DeRezObjects`, whose
+  `takeCopyGroups` / `takeDeleteGroups` lists are exactly these two
+  predicates. An id the region does not have is killed on the client
+  anyway, so the two agree again.
+- **`UpdateTaskInventory` → `ServerEvent::UpdateTaskInventory`.** The item
+  is resolved **by id from the agent's own inventory**, not trusted from
+  the copy the client sent, minted a fresh task item id (a task copy is a
+  new item that happens to name the same asset), and written in — which
+  advances the object's contents serial. The listing a following
+  `RequestTaskInventory` serves is re-generated from the live store, so it
+  can never disagree with the serial that announced it.
+
+Because the world is the region's, one avatar's rez is a change every
+avatar in the region sees. There is no simulation loop to sweep for it, so
+the session that made the change publishes a `RegionUpdate` and a
+per-session `run_region_watcher` task turns it back into the message its own
+circuit needs — an `ObjectUpdate`, a `KillObject`, or one of the three
+subscription pushes below — skipping the changes its own session published,
+which were sent directly. A watcher that falls behind
+its broadcast logs a warning rather than swallowing it: a lost `KillObject`
+is a ghost object standing in that viewer until its next refetch.
+
+`sl-conformance`'s `task-inventory` case runs the whole of this offline —
+rez a container, rez and take a donor, drop it in, watch the serial
+advance, read the listing back over Xfer, trash the container.
+
+### The edit surfaces
+
+Rezzing, derezzing and dropping into a prim were once the *only* writes.
+Everything else a viewer can change — the build floater, About Land, the
+Region/Estate floater — was decoded by `SimSession` and dropped, so no tier
+below a live grid could answer "did my edit reach the grid". The three
+families now land, each in a module of its own, and each answered under the
+region's own lock:
+
+- **`object_edits.rs`** — the build floater. Two stores travelling in two
+  messages, which is the thing to keep straight: the `Object` itself (its
+  motion, scale, material, click action and `PrimFlags`) goes out in an
+  `ObjectUpdate` and reaches the whole region, while its `ObjectProperties`
+  (name, description, category, sale state, permissions, owner, group) go
+  out in a message of their own that a simulator sends to whoever holds the
+  object *selected*. An `ObjectUpdate` carries none of those fields, so a
+  client that renames an object learns the rename took only from
+  `SimSession::send_object_properties` — which is why the family needed a
+  sender for the full form before any of it was observable.
+
+  Linking is not only a parent id: a child's placement is stated in its
+  root's frame, so a link restates it and a delink puts it back. Undo and
+  redo are the *simulator's* — the messages name objects and nothing else,
+  and address them by full id rather than by the region-local id the rest of
+  the family uses — so each edited object carries a short history of whole
+  `Object` snapshots (`EditHistory`), which is the only definition of "undo"
+  that composes across edits of different kinds.
+
+- **`parcel_edits.rs`** — About Land, and the land a client buys, deeds,
+  abandons and reclaims. A parcel has **one** record and a
+  `ParcelPropertiesUpdate` carries the whole of it, so an edit is "read the
+  parcel, change one field, send it all back" (`ParcelInfo::to_update` is
+  that read). A changed parcel is re-sent as a sequence-zero
+  `ParcelProperties`, the unsolicited form the arrival burst already uses.
+  The access lists are the one parcel record that does not travel in the
+  properties reply — they have their own request and reply, and live beside
+  the parcels rather than on them.
+
+- **`estate.rs`** — the Region/Estate floater, which is not shaped like the
+  other two at all: an estate command is one `EstateOwnerMessage` carrying a
+  method name and a list of byte parameters, so the whole floater is a
+  switch on a string. `getinfo`, `estatechangeinfo`, `setregioninfo`,
+  `setregionterrain`, `texturedetail` / `textureheights` / `texturecommit`,
+  `estateaccessdelta`, `estatechangecovenantid` and the map-tile nudge are
+  answered; the region's own configuration (`RegionInfo`) and terrain
+  composition become writable stores the first time one of them changes
+  them, and stay derived from the region's identity until then.
+
+  Every estate command is refused **in silence** for an agent with no estate
+  power, which is what OpenSim does and the only thing that makes the gate
+  observable. The estate itself is a record and not a rule: a banned agent
+  may still log in, because the fake grid enforces nothing.
+
+One deliberate limit: the estate is stored **per region**, because the fake
+grid's regions are independent worlds with no store above them; nothing
+reads an estate from two regions yet.
+
+### Somebody else changed it
+
+An edit that only its editor is told about is not a simulator's behaviour,
+and the difference matters because Second Life has **no arbitration at all**
+— no edit lock, no two-phase commit, no consensus. Selection is a
+subscription, not a mutex; two residents may hold the same prim or the same
+About Land form open indefinitely; latency alone makes conflicting edits the
+steady state rather than an error case, and last-write-wins is very probably
+the whole of a grid's policy. What makes that survivable is only that the
+loser is *told*, so the burden of converging is the viewer's.
+
+Which is why the interesting bug is not "loses the race" — somebody has to —
+but **silently reasserting stale state afterwards**. A
+`ParcelPropertiesUpdate` carries the *whole* record, so a floater populated
+from a read minutes old, with one checkbox flipped, sends every other field
+back as it was and reverts whatever somebody else changed in between. The
+property worth testing is therefore convergence: after a push, a viewer's
+*next* write must carry the pushed values for the fields it did not itself
+touch.
+
+`RegionChange` grew the three pushes that make that observable, each going
+to a different set of sessions because each surface's subscription is
+different:
+
+- **An object's properties** go to the sessions holding it *selected*, and
+  to nobody else. `ObjectSelect` / `ObjectDeselect` are typed
+  (`ServerEvent::ObjectsSelected` / `ObjectsDeselected`) and each session
+  keeps its own selection set, which `run_region_watcher` consults before
+  forwarding. A prim's **task inventory** rides on this one: its contents
+  serial is a field of the properties record and travels nowhere else, so a
+  write into a prim now pushes the record as well as advancing it.
+- **A parcel** goes to the avatars standing on it — OpenSim's
+  `SendLandUpdateToAvatarsOverMe` — as a sequence-zero `ParcelProperties`,
+  the same unsolicited form the arrival burst uses. The fake grid tracks no
+  movement, so "standing on" is where the session arrived.
+- **The region's own configuration** goes to everyone in the region: there
+  is no subscription to belong to, since every avatar is standing in it. So
+  do its **ground textures** on a `texturecommit`, whose whole purpose is
+  that everybody sees them — the odd one out, because a terrain composition
+  travels only in a `RegionHandshake` and a handshake is stamped with the
+  *receiving* session's identity, so the region publishes the composition and
+  each watcher builds its own message.
+
+The `client_end_to_end` tests stage one two-avatar case per surface, which
+a live grid could not: without locking a live interleaving is luck, while
+the fake region's lock serialises writes so "A reads, B writes, A writes"
+gives the same answer every run. The parcel case runs the whole argument —
+a save built from the record read at open reverts the other resident's
+rename, and a save built from the pushed record does not.
+
+What a **real** grid does on the same collision is still worth one run to
+confirm rather than assume (`test-asset-save-mutation-survey`); the expected
+finding is that nothing arbitrates.
+
+Offline conformance: `object-edit` (the whole build surface, including the
+transform, the undo stack and the read-back through `ObjectProperties`),
+`object-link-delink`, `object-properties`, `parcel-edit` (the About Land
+form and the ban list, each refetched and restored), `region-info`,
+`estate-info`, `estate-access`, and `asset-round-trip` (every seeded
+inventory class fetched, every savable one saved and re-fetched, plus a prim
+this case rezzes and drops an item into).
 
 ### A parcel's other half
 
@@ -852,6 +1035,69 @@ This was per region until 2026-09-03, and the symptom was thoroughly
 misleading: the marker pillar across a border rendered untextured, so a
 checker oracle read "the neighbour region was never streamed" when the
 only thing that had not arrived was one JPEG2000 blob.
+
+### An upload goes into that store
+
+`uploads.rs` folds every completed save into the same store, and points the
+item that named it at the result. Until it existed the grid answered
+`complete` and forgot the bytes, which is not a gap a test can shrug at:
+**a save is only observable as a re-fetch.** A viewer that trusts its own
+in-memory copy after a save — the bug a round trip exists to catch —
+behaves identically against a grid that stored the bytes and one that
+dropped them, and so does an editor's Save button.
+
+Three paths reach it, because a viewer has three ways to save:
+
+- **The two-stage CAPS uploader** (`ServerEvent::CapsAssetUploaded`) —
+  `NewFileAgentInventory`, `UploadBakedTexture` and every
+  `Update{Gesture,Notecard,Script,Settings,Material}{Agent,Task}Inventory`.
+  The parked metadata says which: a new file creates an agent item, an
+  `Update*` repoints an existing one (in the agent tree, or in an object's
+  task inventory, where it also advances the contents serial — a changed
+  asset is a changed listing), and a bake names no item at all.
+- **The legacy UDP transaction upload** (`ServerEvent::AssetUploaded`) —
+  how a *wearable* save reaches a grid, there being no capability for one.
+  The bytes are stored under `combine(transaction_id, secure_session_id)`,
+  the id the client itself predicted.
+- **`UpdateInventoryItem`** (`ServerEvent::UpdateAgentInventoryItems`) —
+  the second half of that wearable save, and the only thing correlating it
+  with the first. A simulator that reads the upload and ignores this
+  message stores an asset no item points at: the item keeps naming what
+  the save replaced, and the viewer's next fetch of its own wearable
+  answers with the bytes it saved over.
+
+A completion's `new_inventory_item` is the item the upload *replaced* for
+every `Update*` family, not a freshly minted id — OpenSim's `ItemUpdater`
+answers `uploadComplete.new_inventory_item = m_inventoryItemID`, and it has
+to: handing a client an id nothing holds would have it file a second copy
+of a notecard it only edited. `NewFileAgentInventory` is the one family
+that mints one.
+
+### Every seeded item names bytes
+
+`sl_test_assets::inventory` is one real asset body per inventory class the
+workspace can write one for — texture, sound, landmark, clothing, body
+part, notecard, script, animation, gesture, mesh, settings, material — with
+the id an item declares and the bytes that id resolves to, plus a *second*
+body of the same class for the save half (a round trip that re-fetches the
+id it was handed proves nothing if the bytes never changed). The stock
+scenario seeds one item per entry, filed in the system folder its class
+belongs in.
+
+This replaced a "Party Hat" and a "Library Texture" whose asset ids were
+their item ids plus a constant, pointing at nothing, both declaring class
+`texture` whatever their names said. An id a viewer is given is an id it
+will eventually fetch, so those items looked fine in an inventory window
+and failed at every attempt to *use* them.
+
+Two classes have no fixture, and the absence is the finding.
+`AssetType::Object` has no codec in this workspace at all — an object asset
+is `LLViewerObject`'s nested-block text, unrelated to the `ObjectUpdate`
+wire form a fixture builds (`test-assets-object-asset-codec`). `Gesture`
+has a body but no *decoder*, so it is the one entry whose round trip is
+byte-level only. `inventory::unsupported_classes()` carries the reason for
+every class with neither, and a crate test fails if a class has both a body
+and a recorded reason, or neither.
 
 ## Walking over a border
 

@@ -48,7 +48,9 @@ use sl_client_tokio::{
 use crate::context::{Session, TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
-use crate::support::{REGION_TIMEOUT, REPLY_TIMEOUT, check, is_opensim, secs_metric};
+use crate::support::{
+    REGION_TIMEOUT, REPLY_TIMEOUT, check, content_is_ours, is_opensim, secs_metric,
+};
 
 /// The OpenSim start location: the "Default Region" (1000,1000), centred, where
 /// this workspace's test object lives and serves as the rez placement
@@ -103,7 +105,7 @@ impl GridTest for ObjectLinkDelink {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::Fake]
     }
 
     fn start_location(&self, grid: Grid) -> &'static str {
@@ -156,7 +158,7 @@ impl GridTest for ObjectLinkDelink {
 
             let reference = match reference {
                 Some(reference) => reference,
-                None if is_opensim(grid) => {
+                None if content_is_ours(grid) => {
                     return Err(TestFailure::Assertion(
                         "no primitive appeared in the Default Region object stream".to_owned(),
                     ));

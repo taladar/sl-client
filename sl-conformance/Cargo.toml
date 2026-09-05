@@ -38,6 +38,10 @@ serde_json = { workspace = true }
 sl-client-tokio = { workspace = true }
 sl-fake-grid = { path = "../sl-fake-grid", version = "0.1.0" }
 sl-repl = { workspace = true }
+# The seeded fixture table the fake grid's inventory is built from: the
+# asset-round-trip case asserts against the same bodies the grid serves, so
+# neither side can drift from the other.
+sl-test-assets = { workspace = true }
 sl-wire = { workspace = true, features = ["serde"] }
 thiserror = { workspace = true }
 time = { workspace = true, features = ["formatting", "parsing"] }

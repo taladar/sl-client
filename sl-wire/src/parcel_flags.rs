@@ -94,6 +94,16 @@ impl ParcelFlags {
             bits: self.bits | other.bits,
         }
     }
+
+    /// Returns this set with `other`'s flags cleared — the inverse of
+    /// [`union`](Self::union), for the edits that take a flag *off* a parcel
+    /// (a sale that completes clears `FOR_SALE`).
+    #[must_use]
+    pub const fn difference(self, other: Self) -> Self {
+        Self {
+            bits: self.bits & !other.bits,
+        }
+    }
 }
 
 /// The `RegionFlags` bitfield carried in `RegionHandshake`/`RegionInfo`. Only the

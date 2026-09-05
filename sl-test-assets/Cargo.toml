@@ -23,9 +23,14 @@ bytes = { workspace = true }
 sl-avatar = { workspace = true }
 sl-llsd = { workspace = true }
 sl-mesh = { workspace = true }
+# The notecard and landmark fixtures are written by the crates that own those
+# formats, so a fixture body and the bytes a grid really serves cannot drift.
+sl-notecard = { path = "../sl-notecard", version = "0.1.0" }
 sl-proto = { workspace = true }
 sl-sound = { path = "../sl-sound", version = "0.1.0" }
 sl-texture = { path = "../sl-texture", version = "0.1.0", features = ["encode"] }
+sl-types = { workspace = true }
+sl-wire = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
@@ -35,6 +40,9 @@ pretty_assertions = { workspace = true }
 # `sl-sound`'s own, and the wearable writer is `sl-avatar`'s, so those crates
 # are plain dependencies).
 sl-anim = { workspace = true }
+# The LSL fixture script is read back through the workspace's own parser, so a
+# fixture that stopped being valid LSL fails here rather than at a save.
+sl-lsl = { workspace = true }
 sl-material = { workspace = true }
 # The decoder behind `sl-audio`'s `decode_clip`, used directly so a fixture
 # sound is read back the way the viewer reads one without dragging the mixer

@@ -1,12 +1,16 @@
 //! The agent-directed asks a simulator answers about the agent itself: what it
-//! is wearing, where it just set its home, the estate commands it is allowed
-//! to issue, and the deprecated paths it is refused.
+//! is wearing, where it just set its home, and the deprecated paths it is
+//! refused.
 //!
 //! These have nothing in common with the world fixtures ([`crate::world`]) —
 //! none of them is about the region's content — but they share a shape: each
 //! is a policy question about *this* session's agent, answered either from
 //! state the session already holds or from the [`AgentPolicy`] the grid was
 //! built with.
+//!
+//! The estate commands themselves moved to [`crate::estate`] when the fake grid
+//! learned to answer more than one of them; what is left of the estate here is
+//! [`AgentPolicy::estate_manager`], the gate they are all behind.
 
 use std::time::Instant;
 
@@ -22,13 +26,6 @@ const HOME_SET: &str = "Home position set.";
 /// The alert a simulator answers a refused Set-Home with, verbatim from
 /// OpenSim's `LandManagementModule`.
 const HOME_REFUSED: &str = "You are not allowed to set your home location in this parcel.";
-
-/// The estate command a viewer's "regenerate the map tile" nudge issues.
-const REFRESH_MAP_VISIBILITY: &str = "refreshmapvisibility";
-
-/// The alert OpenSim's `refreshmapvisibility` handler answers with once the
-/// tile has been regenerated.
-const MAP_REGENERATED: &str = "Terrain map generated";
 
 /// The `ErrorMessage` a refused deprecated inventory fetch carries.
 const LEGACY_INVENTORY_REFUSED: &str = "The UDP inventory fetch is deprecated on this grid; use the \
@@ -110,22 +107,6 @@ pub(crate) fn answer_agent_request(
             };
             if let Err(error) = sim.send_agent_alert_message(agent_id, false, message, now) {
                 tracing::warn!("answering a set-home request failed: {error}");
-            }
-        }
-        // The one estate command the fake grid answers: the viewer's
-        // "regenerate the map tile" nudge, whose reply is a broadcast-style
-        // `AlertMessage` rather than an agent-addressed one.
-        ServerEvent::EstateOwnerRequest { method, .. } if method == REFRESH_MAP_VISIBILITY => {
-            if !policy.estate_manager {
-                tracing::debug!("{REFRESH_MAP_VISIBILITY} from an agent with no estate powers");
-                return;
-            }
-            // The fake grid's map tiles are static, so there is nothing to
-            // regenerate and the answer is the success one. The cool-down and
-            // generator-unavailable branches OpenSim also has are states this
-            // grid cannot be in.
-            if let Err(error) = sim.send_alert_message(MAP_REGENERATED, &[], &[], now) {
-                tracing::warn!("answering an estate map regeneration failed: {error}");
             }
         }
         // The deprecated UDP inventory fetch. It reaches the simulator half as

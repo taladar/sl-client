@@ -25,6 +25,7 @@
 
 use std::sync::Arc;
 
+use sl_client_tokio::{AgentKey, Uuid};
 use sl_repl::{Avatar, Credentials};
 
 use crate::context::{Session, TestContext, TestFailure};
@@ -52,11 +53,21 @@ const PASSWORD: &str = "conformance";
 /// ([`GridTest::accounts`]); registering them all costs one login-endpoint
 /// entry each and nothing at run time, since an account nobody logs in as is
 /// never minted a session.
-const ACCOUNTS: [(&str, &str); 3] = [
-    ("primary", "Conformance"),
-    ("secondary", "Bystander"),
-    ("tertiary", "Onlooker"),
+/// The agent ids are **fixed** rather than minted, so the harness can name one
+/// before anybody has logged in — which is what supplying the "other avatar"
+/// fixture ([`Fixtures::with_other_avatar`]) needs.
+const ACCOUNTS: [(&str, &str, u128); 3] = [
+    ("primary", "Conformance", 0xC0_4F_A6_00_01),
+    ("secondary", "Bystander", 0xC0_4F_A6_00_02),
+    ("tertiary", "Onlooker", 0xC0_4F_A6_00_03),
 ];
+
+/// The agent id of the account a case reaches for as "some other avatar": the
+/// secondary, which is registered but rarely logged in.
+fn other_avatar_id() -> AgentKey {
+    let (_label, _first_name, id) = ACCOUNTS[1];
+    AgentKey::from(Uuid::from_u128(id))
+}
 
 /// The credentials-file label of the account the fake grid registers as an
 /// **estate manager**.
@@ -116,6 +127,15 @@ pub const OFFLINE_CASES: &[&str] = &[
     "parcel-info-dwell",
     "agent-alert",
     "server-error",
+    "task-inventory",
+    "asset-round-trip",
+    "object-edit",
+    "object-link-delink",
+    "object-properties",
+    "parcel-edit",
+    "region-info",
+    "estate-info",
+    "estate-access",
     "logout-clean",
 ];
 
@@ -193,8 +213,9 @@ impl FakeGridHarness {
     /// would be a bug in this module, not in the caller's input).
     pub async fn start() -> Result<Self, TestFailure> {
         let mut builder = sl_fake_grid::FakeGridBuilder::new().deterministic(SEED);
-        for (label, first_name) in ACCOUNTS {
-            let account = sl_fake_grid::AccountConfig::new(first_name, LAST_NAME, PASSWORD);
+        for (label, first_name, agent_id) in ACCOUNTS {
+            let account = sl_fake_grid::AccountConfig::new(first_name, LAST_NAME, PASSWORD)
+                .with_agent_id(AgentKey::from(Uuid::from_u128(agent_id)));
             builder = builder.account(if label == ESTATE_MANAGER {
                 account.estate_manager()
             } else {
@@ -310,7 +331,7 @@ impl FakeGridHarness {
         let state_dir = std::env::temp_dir();
         let mut sessions: Vec<Session> = Vec::new();
         let mut control: Option<FakeControl> = None;
-        for (label, _first_name) in ACCOUNTS.iter().take(wanted) {
+        for (label, _first_name, _agent_id) in ACCOUNTS.iter().take(wanted) {
             let avatar = self.avatar(label)?;
             sessions.push(
                 crate::context::login(
@@ -338,7 +359,7 @@ impl FakeGridHarness {
             primary,
             sessions.next(),
             sessions.next(),
-            Fixtures::default(),
+            Fixtures::default().with_other_avatar(other_avatar_id()),
         );
         Ok(match control {
             Some(control) => context.with_fake(control),
@@ -360,7 +381,7 @@ fn credentials_for(login_uri: &url::Url) -> Result<Credentials, TestFailure> {
     use core::fmt::Write as _;
 
     let mut text = String::from("default_avatar = \"primary\"\n");
-    for (label, first_name) in ACCOUNTS {
+    for (label, first_name, _agent_id) in ACCOUNTS {
         // Writing into a `String` cannot fail, so the result carries nothing to
         // report; the alternative would be an error path no input can reach.
         let _infallible = write!(
@@ -430,7 +451,7 @@ mod tests {
             .map_err(|error| format!("{error}"))?;
         let credentials = credentials_for(&uri).map_err(|error| format!("{error}"))?;
         let mut names = Vec::new();
-        for (label, first_name) in ACCOUNTS {
+        for (label, first_name, _agent_id) in ACCOUNTS {
             let avatar = credentials
                 .select(Some(label))
                 .map_err(|error| format!("{label}: {error}"))?;

@@ -43,20 +43,30 @@
 //!    ([`DeRezDestination::Trash`]), confirmed by its [`Event::ObjectRemoved`]
 //!    (`KillObject`), leaving the world scene as found.
 //!
-//! `1av`, `[both]`. Exercises the Xfer task-inventory read path added in this
-//! effort ([`Command::FetchTaskInventory`] → [`Event::TaskInventoryContents`]),
-//! alongside the [`RequestTaskInventory`](Command::RequestTaskInventory) /
+//! `1av`, `[both]`, and **offline**. Exercises the Xfer task-inventory read path
+//! added in this effort ([`Command::FetchTaskInventory`] →
+//! [`Event::TaskInventoryContents`]), alongside the
+//! [`RequestTaskInventory`](Command::RequestTaskInventory) /
 //! [`UpdateTaskInventory`](Command::UpdateTaskInventory) surface it shares with
 //! the [`TaskInventoryKey`] / [`TaskInventoryReply`] re-exports.
+//!
+//! This is the one case that needs a grid to **write**, which is why it was the
+//! last of the request surfaces to come offline: every step above changes what
+//! the region holds. The fake grid's answer is a region-scoped world its
+//! sessions share, so a rez is a change to the region rather than to one
+//! circuit's view of it, and a task inventory that a write advances is the same
+//! store a read is answered from.
+//!
 //! On OpenSim the avatar is forced into the "Default Region", which holds this
 //! workspace's rezzed test object as the placement reference, so a primitive is
-//! guaranteed and its absence fails the case. On Second Life the landing
-//! region's contents are uncontrolled; a region that streams no primitive to
-//! place against within the window is recorded `partial` rather than failed. The
-//! take leaves the donor item in the Objects folder and the container's copy of
-//! it goes to Trash with the container — bounded inventory residue, acceptable
-//! on a throwaway grid. The aditi run is deferred with the rest of the Aditi
-//! batch (no aditi record this session).
+//! guaranteed and its absence fails the case; the fake grid's catalogue region
+//! is as much ours, so the same requirement holds there. On Second Life the
+//! landing region's contents are uncontrolled; a region that streams no
+//! primitive to place against within the window is recorded `partial` rather
+//! than failed. The take leaves the donor item in the Objects folder and the
+//! container's copy of it goes to Trash with the container — bounded inventory
+//! residue, acceptable on a throwaway grid. The aditi run is deferred with the
+//! rest of the Aditi batch (no aditi record this session).
 
 use std::collections::HashSet;
 use std::time::Duration;
@@ -70,7 +80,9 @@ use sl_client_tokio::{
 use crate::context::{TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
-use crate::support::{REGION_TIMEOUT, REPLY_TIMEOUT, check, count_metric, is_opensim, secs_metric};
+use crate::support::{
+    REGION_TIMEOUT, REPLY_TIMEOUT, check, content_is_ours, count_metric, is_opensim, secs_metric,
+};
 
 /// The OpenSim start location: the "Default Region" (1000,1000), centred, where
 /// this workspace's test object lives and serves as the rez placement
@@ -120,7 +132,7 @@ impl GridTest for TaskInventory {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::Fake]
     }
 
     fn start_location(&self, grid: Grid) -> &'static str {
@@ -184,9 +196,9 @@ impl GridTest for TaskInventory {
 
             let reference = match reference {
                 Some(reference) => reference,
-                None if is_opensim(grid) => {
+                None if content_is_ours(grid) => {
                     return Err(TestFailure::Assertion(
-                        "no primitive appeared in the Default Region object stream".to_owned(),
+                        "no primitive appeared in the region's object stream".to_owned(),
                     ));
                 }
                 None => {

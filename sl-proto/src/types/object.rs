@@ -19,6 +19,33 @@ use crate::types::SculptOrMeshKey;
 use crate::types::asset::{AssetType, InventoryType};
 use crate::types::editing::SaleType;
 
+/// Linden `PrimFlags` constants: the bits of an object update's
+/// [`update_flags`](Object::update_flags) field (the reference's
+/// `object_flags.h`).
+///
+/// Only the bits something in this workspace sets or reads are named. The
+/// field carries plenty more — the per-viewer permission summary a simulator
+/// computes (`FLAGS_OBJECT_MODIFY` and friends), the scripted and touch-handler
+/// markers, the navmesh bits — and naming a constant nothing uses would be a
+/// promise this crate does not keep.
+pub mod prim_flags {
+    /// The object is physical (`FLAGS_USE_PHYSICS`), the physics half of an
+    /// `ObjectFlagUpdate`.
+    pub const USE_PHYSICS: u32 = 1 << 0;
+    /// The object is phantom — no collisions (`FLAGS_PHANTOM`).
+    pub const PHANTOM: u32 = 1 << 10;
+    /// The object is listed in parcel search (`FLAGS_INCLUDE_IN_SEARCH`), what
+    /// an `ObjectIncludeInSearch` sets.
+    pub const INCLUDE_IN_SEARCH: u32 = 1 << 15;
+    /// The object is deleted a minute after it is rezzed
+    /// (`FLAGS_TEMPORARY_ON_REZ`) — the "temporary" checkbox of the build
+    /// floater, and the temporary half of an `ObjectFlagUpdate`.
+    ///
+    /// There was a second, region-persistent `FLAGS_TEMPORARY` at bit 30; it
+    /// has been unused for years and the checkbox has always sent this one.
+    pub const TEMPORARY_ON_REZ: u32 = 1 << 29;
+}
+
 /// Linden `PCode` constants: the object-class byte (`p_code`) in an object
 /// update, identifying what kind of entity an object is.
 pub mod pcode {

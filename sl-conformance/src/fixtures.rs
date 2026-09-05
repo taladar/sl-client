@@ -130,6 +130,19 @@ pub enum FixturesError {
 }
 
 impl Fixtures {
+    /// These fixtures with the second, stable avatar set — what the fake grid
+    /// supplies for itself.
+    ///
+    /// Every other grid reads this from a file an operator wrote, because on
+    /// every other grid the second avatar is an account somebody created. The
+    /// fake grid registers its own, so the one place that would have to be
+    /// written down is instead handed over directly.
+    #[must_use]
+    pub const fn with_other_avatar(mut self, other_avatar: AgentKey) -> Self {
+        self.other_avatar = Some(other_avatar);
+        self
+    }
+
     /// The default fixtures-file path for a grid (alongside the credentials
     /// file): `fixtures.toml` for OpenSim, `fixtures.<grid>.toml` otherwise,
     /// and `None` for a grid whose environment is not something an operator

@@ -2885,4 +2885,646 @@ mod test {
         );
         Ok(())
     }
+
+    /// One avatar's session, for a test that needs two of them on one grid and
+    /// so cannot let each own it (a [`Running`] drops its own grid).
+    struct Joined {
+        /// The client's root circuit id (for scoped ids).
+        circuit: sl_client_tokio::CircuitId,
+        /// The client event stream.
+        events: mpsc::Receiver<Event>,
+        /// The client command channel.
+        commands: mpsc::Sender<Command>,
+        /// This avatar's grid-side session handle, for the fixtures a test
+        /// reads off the grid rather than over the wire (the folder a take
+        /// files into).
+        agent: FakeAgent,
+        /// The run-loop task (aborted on teardown).
+        run: tokio::task::JoinHandle<Result<(), sl_client_tokio::Error>>,
+    }
+
+    impl Drop for Joined {
+        fn drop(&mut self) {
+            self.run.abort();
+        }
+    }
+
+    /// Logs `first_name` in against an already-started grid, starts its run
+    /// loop and waits for the region handshake.
+    async fn join(grid: &FakeGrid, first_name: &str) -> Result<Joined, TestError> {
+        // Subscribed before the login, or the notice this login raises is one
+        // nobody was listening for.
+        let mut logins = grid.logins();
+        let request = LoginRequest::new(
+            first_name,
+            "User",
+            "password",
+            StartLocation::Last,
+            "sl-fake-grid-e2e",
+            "0.0",
+        );
+        let client = Client::connect(LoginParams {
+            login_uri: grid.login_uri(),
+            request,
+        })
+        .await?;
+        let notice = tokio::time::timeout(WAIT, logins.recv()).await??;
+        let agent = grid.agent(&notice).await.ok_or("no live session")?;
+        let circuit = client.root_circuit_id().ok_or("no root circuit")?;
+        let (event_tx, mut events) = mpsc::channel::<Event>(256);
+        let (commands, command_rx) = mpsc::channel::<Command>(8);
+        let (diag_tx, _diag_rx) = mpsc::channel(16);
+        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+        wait_on(&mut events, |event| {
+            matches!(
+                event,
+                Event::RegionHandshakeComplete | Event::RegionChanged { .. }
+            )
+            .then_some(())
+        })
+        .await?;
+        Ok(Joined {
+            circuit,
+            events,
+            commands,
+            agent,
+            run,
+        })
+    }
+
+    /// Rezzes a cube at `position` from `avatar`'s client and returns the
+    /// object the simulator minted for it — the ids the client could not have
+    /// known before it asked.
+    async fn rez_cube(
+        avatar: &mut Joined,
+        position: &Vector,
+    ) -> Result<sl_client_tokio::Object, TestError> {
+        avatar
+            .commands
+            .send(Command::RezObject {
+                shape: sl_client_tokio::PrimShape::cube(position.clone()),
+                group_id: None,
+            })
+            .await?;
+        wait_on(&mut avatar.events, |event| match event {
+            Event::ObjectAdded(object) if object.motion.position == *position => {
+                Some((**object).clone())
+            }
+            _ => None,
+        })
+        .await
+    }
+
+    /// Selects `local_id` from `avatar`'s client and returns the full
+    /// properties record the simulator answers the selection with.
+    ///
+    /// A selection is a subscription, not a lock: it is what makes this client
+    /// one of the ones told when somebody *else* changes the object.
+    async fn select(
+        avatar: &mut Joined,
+        local_id: sl_client_tokio::RegionLocalObjectId,
+        object_id: sl_client_tokio::ObjectKey,
+    ) -> Result<sl_client_tokio::ObjectProperties, TestError> {
+        avatar
+            .commands
+            .send(Command::RequestObjectProperties {
+                local_ids: vec![sl_client_tokio::ScopedObjectId::new(
+                    avatar.circuit,
+                    local_id,
+                )],
+            })
+            .await?;
+        properties_of(avatar, object_id).await
+    }
+
+    /// The next full properties record `avatar` is sent for `object_id`,
+    /// however it was prompted.
+    async fn properties_of(
+        avatar: &mut Joined,
+        object_id: sl_client_tokio::ObjectKey,
+    ) -> Result<sl_client_tokio::ObjectProperties, TestError> {
+        wait_on(&mut avatar.events, |event| match event {
+            Event::ObjectProperties(properties) if properties.object_id == object_id => {
+                Some((**properties).clone())
+            }
+            _ => None,
+        })
+        .await
+    }
+
+    /// How long a test waits before concluding that a push it must **not**
+    /// receive is not coming.
+    ///
+    /// Every push in these tests is published inside the writing session's own
+    /// flush and forwarded by a watcher task on the same loopback grid, so the
+    /// real latency is sub-millisecond; the margin is three orders of magnitude
+    /// above it and is only there so a loaded machine cannot turn a working
+    /// subscription into a passing test.
+    const SILENCE: Duration = Duration::from_secs(2);
+
+    /// Asserts `avatar` is sent no properties for `object_id` within
+    /// [`SILENCE`] — that it is not on the subscription.
+    async fn expect_no_properties(
+        avatar: &mut Joined,
+        object_id: sl_client_tokio::ObjectKey,
+    ) -> Result<(), TestError> {
+        let quiet = tokio::time::timeout(SILENCE, async {
+            loop {
+                let Some(event) = avatar.events.recv().await else {
+                    return Ok(());
+                };
+                if matches!(&event, Event::ObjectProperties(properties)
+                    if properties.object_id == object_id)
+                {
+                    return Err("a deselected client was still sent the object's properties");
+                }
+            }
+        })
+        .await;
+        match quiet {
+            // The wait ran out with nothing matching, which is the pass.
+            Err(_elapsed) => Ok(()),
+            Ok(result) => result.map_err(Into::into),
+        }
+    }
+
+    /// A rez is a change to the **region**, not to the rezzing circuit's view
+    /// of it: the other avatar standing in the same region is shown the new
+    /// object without asking for it, and the derez that takes it away kills it
+    /// for both.
+    ///
+    /// This is what the region-scoped world buys. With a world cloned per
+    /// session the first avatar would rez into its own copy and the second
+    /// would never hear of it — and neither would the *next* avatar to arrive,
+    /// whose arrival burst is read from the same store.
+    #[tokio::test]
+    async fn a_rez_reaches_the_regions_other_avatar() -> Result<(), TestError> {
+        let grid = FakeGridBuilder::new()
+            .account(AccountConfig::new("First", "User", "password"))
+            .account(AccountConfig::new("Second", "User", "password"))
+            .event_queue_hold(Duration::from_secs(2))
+            .region(RegionConfig::default())
+            .start()
+            .await?;
+        let mut first = join(&grid, "First").await?;
+        let mut second = join(&grid, "Second").await?;
+
+        let position = Vector {
+            x: 140.0,
+            y: 128.0,
+            z: 26.0,
+        };
+        // The rezzing client is told directly, in the same breath as the
+        // mutation, because it cannot use the object until it knows the ids
+        // the simulator chose.
+        let rezzed = rez_cube(&mut first, &position).await?;
+
+        // The other avatar is told by the region.
+        let seen = wait_on(&mut second.events, |event| match event {
+            Event::ObjectAdded(object) if object.full_id == rezzed.full_id => {
+                Some((**object).clone())
+            }
+            _ => None,
+        })
+        .await?;
+        assert_eq!(seen.local_id, rezzed.local_id);
+        assert_eq!(seen.motion.position, position);
+        assert_eq!(seen.scale, rezzed.scale);
+
+        // A return mints no inventory item, so the requester gets a `DeRezAck`
+        // rather than an `UpdateCreateInventoryItem` -- and both avatars get
+        // the kill.
+        let expected_transaction =
+            sl_client_tokio::TransactionId::from(uuid::Uuid::from_u128(0x0DE5));
+        first
+            .commands
+            .send(Command::DerezObjects {
+                local_ids: vec![sl_client_tokio::ScopedObjectId::new(
+                    first.circuit,
+                    rezzed.local_id,
+                )],
+                destination: sl_client_tokio::DeRezDestination::ReturnToOwner,
+                transaction_id: expected_transaction,
+                group_id: None,
+            })
+            .await?;
+        let acked = wait_on(&mut first.events, |event| match event {
+            Event::DeRezAck {
+                transaction,
+                success,
+            } if *transaction == expected_transaction => Some(*success),
+            _ => None,
+        })
+        .await?;
+        assert!(acked, "a return of an object the region has is refused");
+        for (name, avatar) in [("the rezzer", &mut first), ("the bystander", &mut second)] {
+            let removed = wait_on(&mut avatar.events, |event| match event {
+                Event::ObjectRemoved { local_id, .. } if local_id.id() == rezzed.local_id => {
+                    Some(*local_id)
+                }
+                _ => None,
+            })
+            .await;
+            assert!(
+                removed.is_ok(),
+                "{name} was never told the returned object went away"
+            );
+        }
+
+        // And the region itself has forgotten it, so the next avatar to arrive
+        // is not shown a ghost.
+        let held = grid
+            .sessions_in(&grid.region_names().first().ok_or("no regions")?.clone())
+            .await;
+        let session = held.first().ok_or("no live session")?;
+        let still_there = session
+            .with_world(|world, _sim| world.object_by_local_id(rezzed.local_id))
+            .await;
+        assert_eq!(
+            still_there, None,
+            "the region still holds the returned object"
+        );
+        Ok(())
+    }
+
+    /// A grid serving two accounts in one region.
+    async fn two_avatar_grid() -> Result<FakeGrid, TestError> {
+        Ok(FakeGridBuilder::new()
+            .account(AccountConfig::new("First", "User", "password").estate_manager())
+            .account(AccountConfig::new("Second", "User", "password"))
+            .event_queue_hold(Duration::from_secs(2))
+            .region(RegionConfig::default())
+            .start()
+            .await?)
+    }
+
+    /// Takes a freshly rezzed cube into `avatar`'s Objects folder and returns
+    /// the inventory item the simulator minted — a donor a task-inventory
+    /// write can drop into something else.
+    async fn take_a_donor_item(
+        avatar: &mut Joined,
+        position: &Vector,
+    ) -> Result<sl_client_tokio::InventoryItem, TestError> {
+        let donor = rez_cube(avatar, position).await?;
+        let objects_folder = avatar
+            .agent
+            .with_sim(|sim| {
+                sim.agent_inventory()
+                    .folders()
+                    .find(|folder| {
+                        folder.folder_type == sl_client_tokio::FolderType::Object.to_code()
+                    })
+                    .map(|folder| folder.folder_id)
+            })
+            .await
+            .ok_or("the seeded account has no Objects folder")?;
+        avatar
+            .commands
+            .send(Command::DerezObjects {
+                local_ids: vec![sl_client_tokio::ScopedObjectId::new(
+                    avatar.circuit,
+                    donor.local_id,
+                )],
+                destination: sl_client_tokio::DeRezDestination::TakeIntoAgentInventory(
+                    objects_folder,
+                ),
+                transaction_id: sl_client_tokio::TransactionId::from(uuid::Uuid::from_u128(0x0D02)),
+                group_id: None,
+            })
+            .await?;
+        wait_on(&mut avatar.events, |event| match event {
+            Event::InventoryItemCreated { item, .. } => Some(item.clone()),
+            _ => None,
+        })
+        .await
+    }
+
+    /// The `UpdateTaskInventory` payload that drops `item` into a prim. The
+    /// simulator resolves the item by id from the agent's own inventory, so the
+    /// masks and CRC carried here are along for the ride.
+    fn task_item(item: &sl_client_tokio::InventoryItem) -> sl_client_tokio::RestoreItem {
+        sl_client_tokio::RestoreItem {
+            item_id: item.item_id,
+            folder_id: item.folder_id,
+            creator_id: item.creator_id,
+            owner: item.owner,
+            group: item.group,
+            permissions: item.permissions,
+            transaction_id: uuid::Uuid::from_u128(0x0D03),
+            asset_type: item.item_type,
+            inv_type: item.inv_type,
+            flags: item.flags,
+            sale_type: sl_client_tokio::SaleType::from_code(item.sale_type),
+            sale_price: item.sale_price.clone(),
+            name: item.name.clone(),
+            description: item.description.clone(),
+            creation_date: item.creation_date,
+            crc: 0,
+        }
+    }
+
+    /// Two residents with the same prim selected: one writes into its task
+    /// inventory and the other is told, unasked, by the contents serial on the
+    /// properties record — and stops being told the moment it deselects.
+    ///
+    /// This is the collision that has no arbitration behind it. Second Life has
+    /// no edit lock: selection is a subscription, both residents may hold the
+    /// prim indefinitely, and the loser of a race is simply the one who wrote
+    /// second. What makes that survivable is that the loser is *told* — the
+    /// contents serial is a prim's whole freshness marker, it travels in the
+    /// properties record rather than in an `ObjectUpdate`, and a viewer that
+    /// never receives it keeps a listing the region no longer holds and cannot
+    /// tell the difference.
+    #[tokio::test]
+    async fn a_prims_contents_change_reaches_the_other_selector() -> Result<(), TestError> {
+        let grid = two_avatar_grid().await?;
+        let mut first = join(&grid, "First").await?;
+        let mut second = join(&grid, "Second").await?;
+
+        let container = rez_cube(
+            &mut first,
+            &Vector {
+                x: 141.0,
+                y: 129.0,
+                z: 26.0,
+            },
+        )
+        .await?;
+        // The region told the second avatar about the rez; it can select what
+        // it was shown.
+        let seen = wait_on(&mut second.events, |event| match event {
+            Event::ObjectAdded(object) if object.full_id == container.full_id => {
+                Some((**object).clone())
+            }
+            _ => None,
+        })
+        .await?;
+
+        // Both look. A fresh prim holds nothing, so both read serial zero.
+        let mine = select(&mut first, container.local_id, container.full_id).await?;
+        let theirs = select(&mut second, seen.local_id, container.full_id).await?;
+        assert_eq!(
+            mine.inventory_serial, 0,
+            "a freshly rezzed prim reported a non-zero contents serial"
+        );
+        assert_eq!(
+            theirs.inventory_serial, mine.inventory_serial,
+            "the two selectors were answered different contents serials"
+        );
+
+        // One of them writes.
+        let donor = take_a_donor_item(
+            &mut first,
+            &Vector {
+                x: 143.0,
+                y: 129.0,
+                z: 26.0,
+            },
+        )
+        .await?;
+        first
+            .commands
+            .send(Command::UpdateTaskInventory {
+                target: sl_client_tokio::ScopedObjectId::new(first.circuit, container.local_id),
+                key: sl_client_tokio::TaskInventoryKey::Item,
+                item: Box::new(task_item(&donor)),
+            })
+            .await?;
+
+        // The writer is told in the same breath as the mutation...
+        let written = properties_of(&mut first, container.full_id).await?;
+        assert!(
+            written.inventory_serial > mine.inventory_serial,
+            "the writer's own contents serial did not advance ({} then {})",
+            mine.inventory_serial,
+            written.inventory_serial
+        );
+        // ...and the other resident, who asked for nothing, by the region.
+        let told = properties_of(&mut second, container.full_id).await?;
+        assert_eq!(
+            told.inventory_serial, written.inventory_serial,
+            "the other selector was not told the prim's contents changed"
+        );
+
+        // A read from either now returns the surviving record, which is the
+        // whole of what "converged" means when nothing arbitrates.
+        let reread = select(&mut second, seen.local_id, container.full_id).await?;
+        assert_eq!(
+            reread.inventory_serial, written.inventory_serial,
+            "a re-read returned a serial neither write left behind"
+        );
+
+        // Deselecting ends the subscription: a resident who has stopped looking
+        // is not sent the next change, exactly as a simulator stops sending it.
+        second
+            .commands
+            .send(Command::DeselectObjects {
+                local_ids: vec![sl_client_tokio::ScopedObjectId::new(
+                    second.circuit,
+                    seen.local_id,
+                )],
+            })
+            .await?;
+        first
+            .commands
+            .send(Command::UpdateTaskInventory {
+                target: sl_client_tokio::ScopedObjectId::new(first.circuit, container.local_id),
+                key: sl_client_tokio::TaskInventoryKey::Item,
+                item: Box::new(task_item(&donor)),
+            })
+            .await?;
+        let again = properties_of(&mut first, container.full_id).await?;
+        assert!(
+            again.inventory_serial > written.inventory_serial,
+            "the second write did not advance the contents serial"
+        );
+        expect_no_properties(&mut second, container.full_id).await?;
+        Ok(())
+    }
+
+    /// Two residents standing on the same parcel: one saves About Land and the
+    /// other is sent the whole record unasked — and a save built from that push
+    /// carries the first resident's change forward, where a save built from the
+    /// record read at open silently reverts it.
+    ///
+    /// The revert is the sharp end of the whole task.
+    /// `ParcelPropertiesUpdate` carries the *entire* record, not the field that
+    /// changed, so a floater populated once and never re-read asserts every
+    /// other field as it stood minutes ago. No grid stops it — there is nothing
+    /// on the grid side that could tell a re-asserted field from an unchanged
+    /// one — which makes converging the viewer's job and the unsolicited push
+    /// the only material it has to do it with.
+    #[tokio::test]
+    async fn an_about_land_save_reaches_the_parcels_other_occupant() -> Result<(), TestError> {
+        let grid = two_avatar_grid().await?;
+        let mut first = join(&grid, "First").await?;
+        let mut second = join(&grid, "Second").await?;
+
+        // What each avatar's About Land floater would have been seeded from:
+        // the parcel it was pushed on arrival.
+        let opened_first = next_parcel(&mut first).await?;
+        let opened_second = next_parcel(&mut second).await?;
+        assert_eq!(
+            opened_second.local_id, opened_first.local_id,
+            "the two avatars did not arrive on the same parcel"
+        );
+
+        // The first resident renames the parcel.
+        let mut renamed = opened_first.to_update();
+        renamed.name = "First's Land".to_owned();
+        first.commands.send(Command::UpdateParcel(renamed)).await?;
+        let echoed = next_parcel(&mut first).await?;
+        assert_eq!(echoed.name, "First's Land");
+
+        // The second resident, who asked for nothing, is sent the whole record
+        // under the sequence id of an unsolicited push.
+        let pushed = next_parcel(&mut second).await?;
+        assert_eq!(
+            pushed.name, "First's Land",
+            "the parcel's other occupant was not told about the About Land save"
+        );
+        assert_eq!(
+            pushed.sequence_id, 0,
+            "a pushed parcel record carried a request's sequence id"
+        );
+
+        // The hazard, staged: a save built from the record the second resident
+        // read at open re-asserts the old name and undoes the rename.
+        let mut stale = opened_second.to_update();
+        stale.description = "Second's description".to_owned();
+        second.commands.send(Command::UpdateParcel(stale)).await?;
+        let reverted = next_parcel(&mut second).await?;
+        assert_eq!(
+            reverted.description, "Second's description",
+            "the second resident's own edit did not take"
+        );
+        assert_eq!(
+            reverted.name, opened_second.name,
+            "a save from a stale record was expected to revert the rename"
+        );
+
+        // And the property that matters: a save built from the *pushed* record
+        // changes the one field the resident touched and leaves the other
+        // resident's change standing.
+        let restored = next_parcel(&mut first).await?;
+        let mut converged = restored.to_update();
+        converged.name = "First's Land".to_owned();
+        first
+            .commands
+            .send(Command::UpdateParcel(converged))
+            .await?;
+        let settled = next_parcel(&mut first).await?;
+        assert_eq!(settled.name, "First's Land");
+        assert_eq!(
+            settled.description, "Second's description",
+            "a save from the pushed record reverted a field it never touched"
+        );
+        Ok(())
+    }
+
+    /// The next parcel record `avatar` is sent, however it was prompted.
+    async fn next_parcel(avatar: &mut Joined) -> Result<sl_client_tokio::ParcelInfo, TestError> {
+        wait_on(&mut avatar.events, |event| match event {
+            Event::ParcelProperties(parcel) => Some((**parcel).clone()),
+            _ => None,
+        })
+        .await
+    }
+
+    /// An estate manager saves the Region tab and every avatar in the region is
+    /// sent the new `RegionInfo`, not only the one who saved it.
+    ///
+    /// A region's configuration has no subscription to belong to — every avatar
+    /// in the region is standing in it — so this is the one push of the three
+    /// that goes to everybody.
+    #[tokio::test]
+    async fn a_region_info_save_reaches_the_regions_other_avatar() -> Result<(), TestError> {
+        let grid = two_avatar_grid().await?;
+        let mut first = join(&grid, "First").await?;
+        let mut second = join(&grid, "Second").await?;
+
+        second.commands.send(Command::RequestRegionInfo).await?;
+        let before = next_region_limits(&mut second).await?;
+        let raised = before.max_agents.saturating_add(7);
+
+        // The save re-asserts the whole tab, so the two fields this case does
+        // not touch are carried over from what it just read -- the same shape
+        // as the About Land form, and the same hazard if they were not.
+        let update = sl_client_tokio::RegionInfoUpdate {
+            agent_limit: i32::try_from(raised)?,
+            object_bonus: before.object_bonus_factor,
+            maturity: before.maturity,
+            ..sl_client_tokio::RegionInfoUpdate::default()
+        };
+        first.commands.send(Command::SetRegionInfo(update)).await?;
+
+        let saved = next_region_limits(&mut first).await?;
+        assert_eq!(
+            saved.max_agents, raised,
+            "the estate manager's own region save did not take"
+        );
+        let told = next_region_limits(&mut second).await?;
+        assert_eq!(
+            told.max_agents, raised,
+            "the region's other avatar was not told its configuration changed"
+        );
+        Ok(())
+    }
+
+    /// The next region-limits record `avatar` is sent, however it was prompted.
+    async fn next_region_limits(
+        avatar: &mut Joined,
+    ) -> Result<sl_client_tokio::RegionLimits, TestError> {
+        wait_on(&mut avatar.events, |event| match event {
+            Event::RegionLimits(limits) => Some(limits.clone()),
+            _ => None,
+        })
+        .await
+    }
+
+    /// An estate manager applies new ground textures and every avatar in the
+    /// region is re-handshaked, not only the one who applied them.
+    ///
+    /// The commit is the only estate command whose whole purpose is that
+    /// *everybody* sees it — a `RegionHandshake` is the one message a terrain
+    /// composition travels in, and a viewer that never receives it keeps
+    /// drawing the ground it arrived on. The handshake is stamped with the
+    /// receiving session's own identity, so what the region publishes is the
+    /// composition and each watcher builds its own message.
+    #[tokio::test]
+    async fn a_terrain_texture_commit_reaches_the_regions_other_avatar() -> Result<(), TestError> {
+        let grid = two_avatar_grid().await?;
+        let mut first = join(&grid, "First").await?;
+        let mut second = join(&grid, "Second").await?;
+
+        let ground = uuid::Uuid::from_u128(0xF0_0DBEEF);
+        let terrain = sl_client_tokio::RegionTerrainUpdate {
+            detail_textures: [ground; 4],
+            ..sl_client_tokio::RegionTerrainUpdate::default()
+        };
+        first
+            .commands
+            .send(Command::SetRegionTerrain(terrain))
+            .await?;
+
+        for (name, avatar) in [
+            ("the estate manager", &mut first),
+            ("the bystander", &mut second),
+        ] {
+            let handshake = wait_on(&mut avatar.events, |event| match event {
+                Event::RegionInfoHandshake(identity)
+                    if identity.terrain.detail_textures[0] == ground =>
+                {
+                    Some((**identity).clone())
+                }
+                _ => None,
+            })
+            .await;
+            assert!(
+                handshake.is_ok(),
+                "{name} was never re-handshaked after the terrain commit"
+            );
+        }
+        Ok(())
+    }
 }

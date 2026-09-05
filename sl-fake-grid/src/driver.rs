@@ -20,7 +20,8 @@ use crate::terrain::TerrainFixture;
 use crate::time::Now;
 use crate::udp_assets::{UdpAssetFixtures, answer_from_fixtures};
 use crate::world::{
-    AvatarIdentity, SceneFixtures, answer_world_request, push_arrival_world, push_child_world,
+    AvatarIdentity, REAL_TIME_DILATION, RegionChange, RegionUpdate, RegionWorld,
+    answer_world_request, push_arrival_world, push_child_world,
 };
 
 /// The lockable state of one logged-in session: the protocol machine, its
@@ -47,9 +48,24 @@ pub(crate) struct SimState {
     pub(crate) udp_assets: UdpAssetFixtures,
     /// The region's ground, streamed as `LayerData` in the arrival burst.
     pub(crate) terrain: TerrainFixture,
-    /// The region's parcels and objects (pushed on arrival, replayed on
-    /// request).
-    pub(crate) world: SceneFixtures,
+    /// The **region's** parcels and objects (pushed on arrival, replayed on
+    /// request), shared with every other session in the same region.
+    ///
+    /// Shared rather than cloned per session because a rez is a change to the
+    /// region, not to one circuit's view of it: an object one avatar rezzes is
+    /// an object the next one to arrive is shown. A session in a *different*
+    /// region holds a different store, which is what a handover needs — the
+    /// region an object left and the region it arrived in disagree for a
+    /// moment by design.
+    pub(crate) world: RegionWorld,
+    /// Publishes every change this session makes to [`world`](Self::world), so
+    /// the region's other sessions can stream it
+    /// ([`run_region_watcher`]). Shared with the region, like the store.
+    pub(crate) changes: broadcast::Sender<RegionUpdate>,
+    /// The grid's identifier minter, for the ids a write path chooses: a
+    /// rezzed object's key, a taken object's inventory item. Seeded on a
+    /// deterministic grid, so the same run mints the same ids.
+    pub(crate) minter: crate::runtime::IdMinter,
     /// The grid's price list and this region's object budget, answered to an
     /// `EconomyDataRequest`. Grid-wide, like the helper policy it comes from.
     pub(crate) economy: sl_proto::EconomyData,
@@ -58,6 +74,15 @@ pub(crate) struct SimState {
     pub(crate) policy: crate::agent_requests::AgentPolicy,
     /// Who the agent is, for its own avatar object.
     pub(crate) avatar: AvatarIdentity,
+    /// What this client holds **selected**, which is the subscription an
+    /// object's properties are pushed to: a select opens it, a deselect closes
+    /// it, and [`run_region_watcher`] reads it to decide whether a properties
+    /// change another session published is any of this client's business.
+    ///
+    /// Per session rather than per region, because that is what it is — two
+    /// residents may hold the same prim selected at once, and neither of them
+    /// is thereby holding a lock on it.
+    pub(crate) selection: crate::object_edits::Selection,
     /// This session's sequence number (its CAPS path component and the key
     /// in the grid's session table).
     pub(crate) seq: u64,
@@ -138,8 +163,15 @@ impl SharedSim {
     /// way for library users and tests to call `send_*` / `set_*` /
     /// `enqueue_*` on the live session.
     pub(crate) async fn with_sim<R>(&self, f: impl FnOnce(&mut SimSession) -> R) -> R {
+        self.with_state(|state| f(&mut state.sim)).await
+    }
+
+    /// [`with_sim`](Self::with_sim) for the callers that need more of the
+    /// session than its machine — the region watcher, which decides what to
+    /// forward from this session's own selection and where its avatar stands.
+    pub(crate) async fn with_state<R>(&self, f: impl FnOnce(&mut SimState) -> R) -> R {
         let mut guard = self.state.lock().await;
-        let result = f(&mut guard.sim);
+        let result = f(&mut guard);
         let outcome = self.flush_locked(&mut guard);
         drop(guard);
         self.finish_flush(outcome).await;
@@ -173,7 +205,7 @@ impl SharedSim {
                 // standing in.
                 if matches!(state.role, SessionRole::Child) {
                     push_child_world(
-                        &state.world,
+                        &state.world.lock(),
                         &state.terrain,
                         &state.identity,
                         &mut state.sim,
@@ -201,7 +233,7 @@ impl SharedSim {
                 // ground, and every object in view — before the scenario's
                 // own hook.
                 push_arrival_world(
-                    &state.world,
+                    &state.world.lock(),
                     &state.terrain,
                     &state.avatar,
                     &state.assets,
@@ -214,19 +246,63 @@ impl SharedSim {
             }
             answer_from_fixtures(
                 &mut state.udp_assets,
+                &state.assets,
+                &state.world,
                 &mut state.sim,
                 state.identity.region_id,
                 &event,
                 now,
             );
-            answer_world_request(
+            // Before the world block, not inside it: this takes the region lock
+            // itself for a task-inventory write, and the crate's one lock rule
+            // is session → region, never region → region.
+            let _upload = crate::uploads::answer_upload(
+                &state.assets,
                 &state.world,
-                &state.avatar,
-                &state.identity,
                 &mut state.sim,
                 &event,
                 now,
             );
+            {
+                let minter = state.minter.clone();
+                let mut world = state.world.lock();
+                let mut changes = answer_world_request(
+                    &mut world,
+                    &state.avatar,
+                    &state.identity,
+                    &move || minter.uuid(),
+                    &mut state.selection,
+                    &mut state.sim,
+                    &event,
+                    now,
+                );
+                // The estate is answered under the same lock as the rest of the
+                // region, and after it: an estate command changes the region's
+                // own configuration, which the world's other answers read.
+                changes.extend(
+                    crate::estate::answer_estate_request(
+                        &mut world,
+                        &state.identity,
+                        state.policy,
+                        &mut state.sim,
+                        &event,
+                        now,
+                    )
+                    .unwrap_or_default(),
+                );
+                // Published while the store is still held, so a watcher that
+                // wakes on the change and re-reads the region cannot see a
+                // world the change has not landed in yet.
+                for change in changes {
+                    // A region whose other sessions have all gone has no
+                    // subscribers; that is not a failure.
+                    drop(state.changes.send(RegionUpdate {
+                        source: state.seq,
+                        change,
+                    }));
+                }
+                drop(world);
+            }
             crate::economy_policy::answer_economy_request(
                 &state.economy,
                 &mut state.sim,
@@ -235,7 +311,7 @@ impl SharedSim {
             );
             crate::agent_requests::answer_agent_request(
                 state.policy,
-                &state.world,
+                &state.world.lock(),
                 state.avatar.agent_id,
                 &mut state.sim,
                 &event,
@@ -390,6 +466,131 @@ pub(crate) async fn run_udp_pump(shared: SharedSim) {
             }
         }
     }
+}
+
+/// The region watcher: streams the changes *other* sessions in this region
+/// made to the shared world — an object rezzed, an object taken away — to this
+/// session's viewer.
+///
+/// A real simulator has one update loop per region that sweeps the scene and
+/// sends every viewer what changed. The fake grid has no loop: the session
+/// that made the change publishes it and this task, one per session, turns it
+/// back into the `ObjectUpdate` or `KillObject` its own circuit needs. A
+/// watcher skips the changes its own session published: that client was told
+/// directly, in the same breath as the mutation, and telling it again would
+/// put every rez down its circuit twice.
+///
+/// A lagging watcher would silently lose changes, which for a `KillObject`
+/// means a ghost object standing in that viewer for good — so a lag is
+/// reported rather than swallowed, and the watcher resynchronises by carrying
+/// on with the changes it can still see.
+pub(crate) async fn run_region_watcher(
+    shared: SharedSim,
+    seq: u64,
+    mut changes: broadcast::Receiver<RegionUpdate>,
+) {
+    let mut shutdown_rx = shared.shutdown_rx.clone();
+    let mut closed_rx = shared.closed_tx.subscribe();
+    loop {
+        tokio::select! {
+            changed = closed_rx.changed() => {
+                if changed.is_err() || *closed_rx.borrow() {
+                    break;
+                }
+            }
+            received = changes.recv() => {
+                match received {
+                    Ok(RegionUpdate { source, .. }) if source == seq => {}
+                    Ok(RegionUpdate { change, .. }) => {
+                        let now = shared.now();
+                        shared
+                            .with_state(|state| {
+                                let result = match &change {
+                                    RegionChange::Rezzed(object)
+                                    | RegionChange::Updated(object) => state.sim.send_object_update(
+                                        std::slice::from_ref(object.as_ref()),
+                                        REAL_TIME_DILATION,
+                                        now,
+                                    ),
+                                    RegionChange::Killed(local_id) => {
+                                        state.sim.send_kill_object(&[*local_id], now)
+                                    }
+                                    // The one change that is a subscription
+                                    // rather than a broadcast: a client that is
+                                    // not looking at the object is not told,
+                                    // exactly as a simulator does not tell it.
+                                    RegionChange::PropertiesChanged {
+                                        local_id,
+                                        properties,
+                                    } => {
+                                        if !state.selection.contains(local_id) {
+                                            return;
+                                        }
+                                        state.sim.send_object_properties(properties, now)
+                                    }
+                                    // A parcel push goes to the avatars standing
+                                    // on that parcel -- OpenSim's
+                                    // `SendLandUpdateToAvatarsOverMe` -- so a
+                                    // resident on the other side of the region
+                                    // is not sent a record of land they are not
+                                    // on.
+                                    RegionChange::ParcelChanged(parcel) => {
+                                        if !stands_on(state, parcel.local_id) {
+                                            return;
+                                        }
+                                        state.sim.send_parcel_properties(parcel, now)
+                                    }
+                                    RegionChange::RegionConfigured(limits) => {
+                                        state.sim.send_region_info(limits, now)
+                                    }
+                                    RegionChange::TerrainRetextured(composition) => {
+                                        let mut identity = state.identity.clone();
+                                        identity.terrain = **composition;
+                                        state.sim.send_region_handshake(&identity, now)
+                                    }
+                                };
+                                if let Err(error) = result {
+                                    tracing::debug!(
+                                        "streaming a neighbouring session's world change failed: \
+                                         {error}"
+                                    );
+                                }
+                            })
+                            .await;
+                    }
+                    Err(broadcast::error::RecvError::Lagged(missed)) => {
+                        tracing::warn!(
+                            "this session missed {missed} of its region's world changes; its \
+                             view of the region is now stale until the next refetch"
+                        );
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+            changed = shutdown_rx.changed() => {
+                if changed.is_err() || *shutdown_rx.borrow() {
+                    break;
+                }
+            }
+        }
+    }
+}
+
+/// Whether this session's avatar is standing on `parcel` — who a changed
+/// parcel's record is pushed to.
+///
+/// The position is the one the session was opened at, since the fake grid
+/// tracks no movement: an avatar that walked across a parcel line since it
+/// arrived is still counted where it landed. That is a limit of the grid, not
+/// of the push — the alternative, telling the whole region, would make a test
+/// of "who is told" pass for the wrong reason.
+fn stands_on(state: &SimState, parcel: sl_proto::RegionLocalParcelId) -> bool {
+    let placement = state.sim.arrival_position().position;
+    state
+        .world
+        .lock()
+        .parcel_at(placement.x(), placement.y())
+        .is_some_and(|standing| standing.local_id == parcel)
 }
 
 /// Sleeps until `deadline`, or forever when there is none (the machine has

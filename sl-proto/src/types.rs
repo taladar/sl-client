@@ -434,7 +434,7 @@ pub use directory::{
 pub use display_name::{DisplayNameUpdate, SetDisplayNameReply};
 pub use economy::{EconomyData, LandImpact, MoneyBalance, MoneyTransaction, MoneyTransactionType};
 pub use editing::{
-    ClickAction, DeRezDestination, Material, Maturity, NotecardRez, ObjectBuyItem,
+    AddPrimParams, ClickAction, DeRezDestination, Material, Maturity, NotecardRez, ObjectBuyItem,
     ObjectFlagSettings, ObjectTransform, PermissionField, PrimShape, ProductType, RestoreItem,
     RezObjectParams, RezScriptParams, SaleType, SurfaceInfo, TaskInventoryKey, TeleportFlags,
 };
@@ -477,7 +477,7 @@ pub use object::{
     ObjectMotion, ObjectPlayingAnimation, ObjectProperties, ObjectPropertiesFamily, ParticleSystem,
     PrimShapeParams, ReflectionProbe, RenderMaterialRef, SculptData, TaskInventoryItem,
     TaskInventoryReply, TextureAnimation, attachment_state_from_point, particle_pattern, pcode,
-    texture_anim_mode,
+    prim_flags, texture_anim_mode,
 };
 pub use open_region::OpenRegionInfo;
 pub use parcel::{
