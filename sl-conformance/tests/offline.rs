@@ -73,6 +73,13 @@ mod test {
         agent_alert => "agent-alert",
         server_error => "server-error",
         task_inventory => "task-inventory",
+        object_edit => "object-edit",
+        object_link_delink => "object-link-delink",
+        object_properties => "object-properties",
+        parcel_edit => "parcel-edit",
+        region_info => "region-info",
+        estate_info => "estate-info",
+        estate_access => "estate-access",
         logout_clean => "logout-clean",
     }
 

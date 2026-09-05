@@ -291,6 +291,42 @@ impl ParcelInfo {
         sl_wire::ParcelFlags::from_bits(self.raw_parcel_flags)
     }
 
+    /// This record as the About Land form a viewer would populate from it, for
+    /// [`Session::update_parcel`](crate::Session::update_parcel).
+    ///
+    /// A `ParcelPropertiesUpdate` carries the **whole** record and not the
+    /// field that changed, so an edit is "read the parcel, change one field of
+    /// this, send it back" — which is what a viewer does, and what makes an
+    /// edit built any other way quietly revert every field it forgot.
+    ///
+    /// Only the fields the update message has are carried: the tallies, the
+    /// bitmap, the area, the claim date and the region-wide settings a
+    /// `ParcelProperties` also reports are the simulator's to state, and a
+    /// client that sent them back would be asserting facts it does not own.
+    #[must_use]
+    pub fn to_update(&self) -> ParcelUpdate {
+        ParcelUpdate {
+            local_id: self.local_id,
+            parcel_flags: self.flags(),
+            sale_price: self.sale_price.clone(),
+            name: self.name.clone(),
+            description: self.description.clone(),
+            music_url: self.music_url.clone(),
+            media_url: self.media_url.clone(),
+            media_id: self.media_id,
+            media_auto_scale: self.media_auto_scale,
+            group_id: self.group,
+            pass_price: self.pass_price.clone(),
+            pass_hours: self.pass_hours,
+            category: self.category,
+            auth_buyer_id: self.auth_buyer_id,
+            snapshot_id: self.snapshot_id,
+            user_location: self.user_location,
+            user_look_at: self.user_look_at,
+            landing_type: self.landing_type.to_u8(),
+        }
+    }
+
     /// Anyone may fly over the parcel (the viewer's `PF_ALLOW_FLY` /
     /// `LLParcel::getAllowFly`, one input to [`Session::can_fly`](crate::Session::can_fly)).
     #[must_use]

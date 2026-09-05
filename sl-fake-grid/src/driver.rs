@@ -247,6 +247,17 @@ impl SharedSim {
                     &event,
                     now,
                 );
+                // The estate is answered under the same lock as the rest of the
+                // region, and after it: an estate command changes the region's
+                // own configuration, which the world's other answers read.
+                let _estate = crate::estate::answer_estate_request(
+                    &mut world,
+                    &state.identity,
+                    state.policy,
+                    &mut state.sim,
+                    &event,
+                    now,
+                );
                 // Published while the store is still held, so a watcher that
                 // wakes on the change and re-reads the region cannot see a
                 // world the change has not landed in yet.
@@ -463,7 +474,8 @@ pub(crate) async fn run_region_watcher(
                         shared
                             .with_sim(|sim| {
                                 let result = match &change {
-                                    RegionChange::Rezzed(object) => sim.send_object_update(
+                                    RegionChange::Rezzed(object)
+                                    | RegionChange::Updated(object) => sim.send_object_update(
                                         std::slice::from_ref(object.as_ref()),
                                         REAL_TIME_DILATION,
                                         now,

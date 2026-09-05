@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 313 |
+| ready | 312 |
 | blocked | 56 |
 | in-progress | 18 |
 | bugs | 64 |
-| done | 982 |
+| done | 983 |
 | deferred | 25 |
 | wont-do | 14 |
 | **total** | **1570** |
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (313)
+## ready (312)
 
 ### protocol
 
@@ -953,8 +953,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   The built-in UI sounds the viewer plays on arrival 404
 - [`test-fake-grid-concurrent-edits`](ready/test-fake-grid-concurrent-edits.md)
   — Somebody else changed it and nobody was told
-- [`test-fake-grid-edit-surfaces`](ready/test-fake-grid-edit-surfaces.md) — A
-  viewer can edit nothing on the fake grid
 - [`test-fake-grid-login-matrix-and-timeouts`](ready/test-fake-grid-login-matrix-and-timeouts.md)
   — The login refusals and handover timeouts nothing tests
 - [`test-fake-grid-object-sounds`](ready/test-fake-grid-object-sounds.md) — The
@@ -1340,7 +1338,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (982)
+## done (983)
 
 ### protocol
 
@@ -3186,6 +3184,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Serve the built-in sky, water and prim textures the viewer asks for
 - [`test-fake-grid-determinism`](done/test-fake-grid-determinism.md) — An
   injectable clock and seeded ids for sl-fake-grid
+- [`test-fake-grid-edit-surfaces`](done/test-fake-grid-edit-surfaces.md) — A
+  viewer can edit nothing on the fake grid
 - [`test-fake-grid-fixed-port-scenario`](done/test-fake-grid-fixed-port-scenario.md)
   — Named scenarios and a fixed-port launcher for the fake grid
 - [`test-fake-grid-neighbours-crossing`](done/test-fake-grid-neighbours-crossing.md)

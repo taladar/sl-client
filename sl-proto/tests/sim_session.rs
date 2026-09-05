@@ -4866,13 +4866,18 @@ mod test {
         let (_client, mut sim) = setup(now)?;
         drain_server(&mut sim);
 
-        // A RequestRegionInfo is a client message with no dedicated ServerEvent
-        // variant; it must be surfaced verbatim as ClientMessage.
-        let request = AnyMessage::RequestRegionInfo(sl_wire::messages::RequestRegionInfo {
-            agent_data: sl_wire::messages::RequestRegionInfoAgentDataBlock {
+        // A MuteListRequest is a client message with no dedicated ServerEvent
+        // variant; it must be surfaced verbatim as ClientMessage. (It stands in
+        // for whatever is still raw-forwarded: `RequestRegionInfo` was this
+        // test's subject until the parcel and region edit surfaces gave it a
+        // typed arm. The ledger in `tests/sim_session_symmetry.rs` is the list
+        // to pick a replacement from.)
+        let request = AnyMessage::MuteListRequest(sl_wire::messages::MuteListRequest {
+            agent_data: sl_wire::messages::MuteListRequestAgentDataBlock {
                 agent_id: uuid::Uuid::from_u128(1),
                 session_id: uuid::Uuid::from_u128(2),
             },
+            mute_data: sl_wire::messages::MuteListRequestMuteDataBlock { mute_crc: 0 },
         });
         let datagram = client_datagram(&request, 600, false)?;
         sim.handle_datagram(client_addr(), &datagram, now)?;
@@ -4881,9 +4886,9 @@ mod test {
         assert!(
             events.iter().any(|e| matches!(
                 e,
-                ServerEvent::ClientMessage(message) if matches!(**message, AnyMessage::RequestRegionInfo(_))
+                ServerEvent::ClientMessage(message) if matches!(**message, AnyMessage::MuteListRequest(_))
             )),
-            "expected a ClientMessage(RequestRegionInfo), got {events:?}"
+            "expected a ClientMessage(MuteListRequest), got {events:?}"
         );
         Ok(())
     }
@@ -8128,6 +8133,743 @@ mod test {
             )),
             "expected the taken object to be killed"
         );
+        Ok(())
+    }
+
+    /// Every edit the build floater makes to an object arrives at the simulator
+    /// as a typed event naming the object and the new value — the read side of
+    /// `test-fake-grid-edit-surfaces`, and what took the object family off the
+    /// `RAW_FORWARDED` ledger in `tests/sim_session_symmetry.rs`.
+    ///
+    /// One test rather than twenty because the point is the *set*: a message
+    /// this family forgets falls back to `ServerEvent::ClientMessage`, which no
+    /// simulator built on `SimSession` can act on, and the assertion that
+    /// catches that is "nothing came through untyped".
+    #[test]
+    fn object_edits_reach_the_simulator_typed() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        let circuit = client.root_circuit_id().ok_or("no circuit")?;
+        let one = ScopedObjectId::new(circuit, RegionLocalObjectId(1));
+        let two = ScopedObjectId::new(circuit, RegionLocalObjectId(2));
+        let group = GroupKey::from(uuid::Uuid::from_u128(0x6711));
+
+        // Undo/Redo name objects by *full* id, which the client reads out of
+        // its object cache; rez two so it has them.
+        let rest = sl_proto::Vector {
+            x: 10.0,
+            y: 10.0,
+            z: 25.0,
+        };
+        sim.send_object_update(
+            &[box_prim(1, 0x0B1, rest.clone()), box_prim(2, 0x0B2, rest)],
+            0xFFFF,
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+        drain_client(&mut client);
+        drain_server(&mut sim);
+
+        let position = sl_proto::Vector {
+            x: 128.0,
+            y: 64.0,
+            z: 25.5,
+        };
+        // A rotation the packed three-float form can round-trip: the packer
+        // throws the real component away and the unpacker recovers the
+        // non-negative root, so a rotation with a negative `s` comes back as
+        // its equally-valid negation and would fail an equality assertion for
+        // a reason that is not a bug.
+        let rotation = sl_proto::Rotation {
+            x: 0.0,
+            y: 0.0,
+            z: 0.707_106_77,
+            s: 0.707_106_77,
+        };
+        let scale = sl_proto::Vector {
+            x: 2.0,
+            y: 0.5,
+            z: 1.0,
+        };
+        client.update_object(
+            one,
+            &sl_proto::ObjectTransform {
+                position: Some(position.clone()),
+                rotation: Some(rotation.clone()),
+                scale: Some(scale.clone()),
+                group: true,
+                uniform: true,
+            },
+            now,
+        )?;
+        client.set_object_name(one, "Cube", now)?;
+        client.set_object_description(one, "a cube", now)?;
+        client.set_object_category(one, 3, now)?;
+        client.set_object_click_action(one, sl_proto::ClickAction::Sit, now)?;
+        client.set_object_material(one, sl_proto::Material::Metal, now)?;
+        client.set_object_for_sale(one, SaleType::Copy, Some(LindenAmount(250)), now)?;
+        client.set_object_flags(
+            one,
+            &sl_proto::ObjectFlagSettings {
+                use_physics: true,
+                is_phantom: true,
+                ..sl_proto::ObjectFlagSettings::default()
+            },
+            now,
+        )?;
+        client.set_object_include_in_search(one, true, now)?;
+        client.set_object_permissions(
+            &[one, two],
+            sl_proto::PermissionField::NextOwner,
+            true,
+            Permissions::COPY,
+            now,
+        )?;
+        client.set_object_group(&[one], group, now)?;
+        client.deed_objects_to_group(&[one], group, now)?;
+        client.link_objects(&[one, two], now)?;
+        client.delink_objects(&[two], now)?;
+        client.duplicate_objects(
+            &[one],
+            sl_proto::Vector {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            None,
+            now,
+        )?;
+        client.request_object_properties(&[one], now)?;
+        client.deselect_objects(&[one], now)?;
+        client.undo_objects(&[one], now)?;
+        client.redo_objects(&[one], now)?;
+        client.delete_objects(&[two], now)?;
+        pump(&mut client, &mut sim, now)?;
+        let events = drain_server(&mut sim);
+
+        let untyped: Vec<&ServerEvent> = events
+            .iter()
+            .filter(|event| matches!(event, ServerEvent::ClientMessage(_)))
+            .collect();
+        assert!(
+            untyped.is_empty(),
+            "every object edit is typed by now; these were forwarded raw: {untyped:?}"
+        );
+
+        let one_id = RegionLocalObjectId(1);
+        let two_id = RegionLocalObjectId(2);
+        let moved = events
+            .iter()
+            .find_map(|event| match event {
+                ServerEvent::ObjectTransformSet {
+                    local_id,
+                    transform,
+                } if *local_id == one_id => Some(transform.clone()),
+                _ => None,
+            })
+            .ok_or_else(|| format!("expected the move/rotate/resize, got {events:?}"))?;
+        assert_eq!(moved.position.as_ref(), Some(&position));
+        assert_eq!(moved.scale.as_ref(), Some(&scale));
+        assert!(moved.group);
+        assert!(moved.uniform);
+        // The rotation is *not* asserted for equality: the wire form throws the
+        // real component away and the reader recovers it as a square root, so a
+        // component that was exact on the way out comes back one ulp off. That
+        // is the encoding, not a bug — what matters is that the rotation is the
+        // same one, to within the round trip.
+        let seen_rotation = moved.rotation.ok_or("the rotation did not survive")?;
+        for (sent, seen) in [
+            (rotation.x, seen_rotation.x),
+            (rotation.y, seen_rotation.y),
+            (rotation.z, seen_rotation.z),
+            (rotation.s, seen_rotation.s),
+        ] {
+            assert!(
+                (sent - seen).abs() < 1.0e-6,
+                "the rotation came back as {seen_rotation:?}, not {rotation:?}"
+            );
+        }
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ServerEvent::ObjectNameSet { local_id, name }
+                    if *local_id == one_id && name == "Cube"
+            )),
+            "expected the rename, got {events:?}"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ServerEvent::ObjectDescriptionSet { local_id, description }
+                    if *local_id == one_id && description == "a cube"
+            )),
+            "expected the re-description, got {events:?}"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ServerEvent::ObjectCategorySet { local_id, category }
+                    if *local_id == one_id && *category == 3
+            )),
+            "expected the category, got {events:?}"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ServerEvent::ObjectClickActionSet { local_id, click_action }
+                    if *local_id == one_id && *click_action == sl_proto::ClickAction::Sit
+            )),
+            "expected the click action, got {events:?}"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ServerEvent::ObjectMaterialSet { local_id, material }
+                    if *local_id == one_id && *material == sl_proto::Material::Metal
+            )),
+            "expected the material, got {events:?}"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ServerEvent::ObjectSaleInfoSet { local_id, sale_type, sale_price }
+                    if *local_id == one_id
+                        && *sale_type == SaleType::Copy
+                        && *sale_price == Some(LindenAmount(250))
+            )),
+            "expected the sale listing, got {events:?}"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ServerEvent::ObjectFlagsSet { local_id, flags }
+                    if *local_id == one_id && flags.use_physics && flags.is_phantom
+                        && !flags.is_temporary
+            )),
+            "expected the flag update, got {events:?}"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ServerEvent::ObjectIncludeInSearchSet { local_id, include_in_search }
+                    if *local_id == one_id && *include_in_search
+            )),
+            "expected the search listing, got {events:?}"
+        );
+        // One block per object: a viewer sends its whole selection.
+        let permissions: Vec<RegionLocalObjectId> = events
+            .iter()
+            .filter_map(|event| match event {
+                ServerEvent::ObjectPermissionsSet {
+                    local_id,
+                    field,
+                    set,
+                    mask,
+                    god_override,
+                } if *field == sl_proto::PermissionField::NextOwner
+                    && *set
+                    && *mask == Permissions::COPY
+                    && !god_override =>
+                {
+                    Some(*local_id)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(permissions, vec![one_id, two_id]);
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ServerEvent::ObjectGroupSet { local_ids, group_id }
+                    if local_ids.as_slice() == [one_id] && *group_id == Some(group)
+            )),
+            "expected the group change, got {events:?}"
+        );
+        // A deed names the group as the *owner*, with no agent.
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ServerEvent::ObjectOwnerSet { local_ids, owner, .. }
+                    if local_ids.as_slice() == [one_id] && *owner == OwnerKey::Group(group)
+            )),
+            "expected the deed, got {events:?}"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ServerEvent::ObjectsLinked { local_ids }
+                    if local_ids.as_slice() == [one_id, two_id]
+            )),
+            "expected the link, got {events:?}"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ServerEvent::ObjectsDelinked { local_ids } if local_ids.as_slice() == [two_id]
+            )),
+            "expected the delink, got {events:?}"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ServerEvent::ObjectsDuplicated { local_ids, offset, group_id, .. }
+                    if local_ids.as_slice() == [one_id]
+                        && offset.x.to_bits() == 1.0_f32.to_bits()
+                        && group_id.is_none()
+            )),
+            "expected the duplicate, got {events:?}"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ServerEvent::ObjectsSelected { local_ids } if local_ids.as_slice() == [one_id]
+            )),
+            "expected the selection, got {events:?}"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ServerEvent::ObjectsDeselected { local_ids } if local_ids.as_slice() == [one_id]
+            )),
+            "expected the deselection, got {events:?}"
+        );
+        // The undo stack is the simulator's, and the message names the object
+        // by full id rather than by the region-local one everything else uses.
+        let one_key = ObjectKey::from(uuid::Uuid::from_u128(0x0B1));
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ServerEvent::ObjectsUndone { object_ids } if object_ids.as_slice() == [one_key]
+            )),
+            "expected the undo, got {events:?}"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ServerEvent::ObjectsRedone { object_ids } if object_ids.as_slice() == [one_key]
+            )),
+            "expected the redo, got {events:?}"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ServerEvent::ObjectsDeleted { local_ids, force }
+                    if local_ids.as_slice() == [two_id] && !force
+            )),
+            "expected the force-delete, got {events:?}"
+        );
+        Ok(())
+    }
+
+    /// The full `ObjectProperties` — the only message carrying an object's name,
+    /// description and task-inventory serial — reaches the client and lands on
+    /// the object it names.
+    #[test]
+    fn server_object_properties_reach_the_client() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        let local_id = RegionLocalObjectId(3);
+        let object_id = ObjectKey::from(uuid::Uuid::from_u128(0x0B3));
+        let owner = AgentKey::from(uuid::Uuid::from_u128(0x0A1));
+        let texture = TextureKey::from(uuid::Uuid::from_u128(0x7E));
+
+        let resting = sl_proto::Vector {
+            x: 10.0,
+            y: 10.0,
+            z: 25.0,
+        };
+        sim.send_object_update(&[box_prim(local_id.0, 0x0B3, resting)], 0xFFFF, now)?;
+        pump(&mut client, &mut sim, now)?;
+        drain_client(&mut client);
+
+        let properties = sl_proto::ObjectProperties {
+            object_id,
+            creator_id: owner,
+            owner: OwnerKey::Agent(owner),
+            group: None,
+            last_owner_id: uuid::Uuid::nil(),
+            creation_date: 1_700_000_000,
+            permissions: Permissions5 {
+                base: Permissions::ALL,
+                owner: Permissions::ALL,
+                group: Permissions::empty(),
+                everyone: Permissions::empty(),
+                next_owner: Permissions::COPY,
+            },
+            ownership_cost: LindenAmount(0),
+            sale_type: SaleType::Copy.to_code(),
+            sale_price: Some(LindenAmount(250)),
+            category: 3,
+            inventory_serial: 7,
+            item_id: InventoryKey::from(uuid::Uuid::nil()),
+            folder_id: None,
+            from_task_id: None,
+            aggregate_perms: 0,
+            aggregate_perm_textures: 0,
+            aggregate_perm_textures_owner: 0,
+            name: "Cube".to_owned(),
+            description: "a cube".to_owned(),
+            touch_name: "Poke".to_owned(),
+            sit_name: "Perch".to_owned(),
+            texture_ids: vec![texture],
+        };
+        sim.send_object_properties(&properties, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let seen = drain_client(&mut client)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::ObjectProperties(seen) => Some(*seen),
+                _ => None,
+            })
+            .ok_or("expected an ObjectProperties client event")?;
+        assert_eq!(seen, properties);
+        // And it landed on the object, which is how a viewer's build floater
+        // reads a name it never got in an `ObjectUpdate`.
+        let held = client
+            .object(ScopedObjectId::new(
+                client.root_circuit_id().ok_or("no circuit")?,
+                local_id,
+            ))
+            .ok_or("the object left the client's cache")?;
+        assert_eq!(
+            held.properties.as_ref().map(|held| held.name.as_str()),
+            Some("Cube")
+        );
+        Ok(())
+    }
+
+    /// Every edit and ask the About Land floater makes — and the region's own
+    /// configuration request — arrives typed, the parcel half of
+    /// `test-fake-grid-edit-surfaces`.
+    ///
+    /// One test for the family, for the reason the object one gives: what fails
+    /// when a message is forgotten is that it falls back to
+    /// `ServerEvent::ClientMessage`, and the assertion that catches it is
+    /// "nothing came through untyped".
+    #[test]
+    fn parcel_edits_and_region_requests_reach_the_simulator_typed() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        let circuit = client.root_circuit_id().ok_or("no circuit")?;
+        let parcel_id = RegionLocalParcelId(7);
+        let parcel = ScopedParcelId::new(circuit, parcel_id);
+        let group = GroupKey::from(uuid::Uuid::from_u128(0x6712));
+        let banned = uuid::Uuid::from_u128(0x55);
+        let other = AgentKey::from(uuid::Uuid::from_u128(0x99));
+
+        let update = sl_proto::ParcelUpdate {
+            local_id: parcel_id,
+            parcel_flags: sl_proto::ParcelFlags::CREATE_OBJECTS
+                .union(sl_proto::ParcelFlags::USE_BAN_LIST)
+                .union(sl_proto::ParcelFlags::FOR_SALE),
+            name: "My Parcel".to_owned(),
+            description: "A test parcel".to_owned(),
+            category: ParcelCategory::Residential,
+            sale_price: Some(LindenAmount(100)),
+            ..sl_proto::ParcelUpdate::default()
+        };
+        client.update_parcel(&update, now)?;
+        client.buy_parcel(parcel, 512, 1024, None, false, now)?;
+        client.deed_parcel_to_group(parcel, group, now)?;
+        client.release_parcel(parcel, now)?;
+        client.reclaim_parcel(parcel, now)?;
+        client.return_parcel_objects(
+            parcel,
+            ParcelReturnType::OTHER,
+            &[OwnerKey::Agent(other)],
+            &[],
+            now,
+        )?;
+        client.select_parcel_objects(parcel, ParcelReturnType::OTHER, &[], now)?;
+        client.request_parcel_access_list(parcel, sl_proto::ParcelAccessScope::Ban, now)?;
+        client.update_parcel_access_list(
+            parcel,
+            sl_proto::ParcelAccessScope::Access,
+            &[sl_proto::ParcelAccessEntry {
+                id: banned,
+                time: 0,
+                flags: sl_proto::ParcelAccessFlags::ALLOW_EXPERIENCE,
+            }],
+            uuid::Uuid::from_u128(0x7A),
+            now,
+        )?;
+        client.request_land_stat(LandStatReportType::TopScripts, 0, "", parcel, now)?;
+        client.request_region_info(now)?;
+        pump(&mut client, &mut sim, now)?;
+        let events = drain_server(&mut sim);
+
+        let untyped: Vec<&ServerEvent> = events
+            .iter()
+            .filter(|event| matches!(event, ServerEvent::ClientMessage(_)))
+            .collect();
+        assert!(
+            untyped.is_empty(),
+            "every parcel edit is typed by now; these were forwarded raw: {untyped:?}"
+        );
+
+        // The About Land form arrives as the whole record, not as the field the
+        // resident touched — which is what makes a stale floater able to revert
+        // somebody else's change.
+        let saved = events
+            .iter()
+            .find_map(|event| match event {
+                ServerEvent::ParcelPropertiesUpdated { update } => Some(update.as_ref().clone()),
+                _ => None,
+            })
+            .ok_or("expected a ParcelPropertiesUpdated server event")?;
+        assert_eq!(saved, update);
+
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ServerEvent::ParcelBought { local_id, price, area, .. }
+                    if *local_id == parcel_id && *price == LindenAmount(512) && *area == 1024
+            )),
+            "expected the purchase, got {events:?}"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ServerEvent::ParcelDeededToGroup { local_id, group_id }
+                    if *local_id == parcel_id && *group_id == group
+            )),
+            "expected the deed, got {events:?}"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ServerEvent::ParcelReleased { local_id } if *local_id == parcel_id
+            )),
+            "expected the release, got {events:?}"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ServerEvent::ParcelReclaimed { local_id } if *local_id == parcel_id
+            )),
+            "expected the reclaim, got {events:?}"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ServerEvent::ParcelObjectsReturned { local_id, return_type, owner_ids, .. }
+                    if *local_id == parcel_id
+                        && *return_type == ParcelReturnType::OTHER
+                        && owner_ids.as_slice() == [OwnerKey::Agent(other)]
+            )),
+            "expected the return, got {events:?}"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ServerEvent::ParcelObjectsSelected { local_id, return_type, .. }
+                    if *local_id == parcel_id && *return_type == ParcelReturnType::OTHER
+            )),
+            "expected the highlight, got {events:?}"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ServerEvent::RequestParcelAccessList { local_id, scope, .. }
+                    if *local_id == parcel_id && *scope == sl_proto::ParcelAccessScope::Ban
+            )),
+            "expected the access-list request, got {events:?}"
+        );
+        let listed = events
+            .iter()
+            .find_map(|event| match event {
+                ServerEvent::ParcelAccessListUpdated { entries, scope, .. } => {
+                    Some((*scope, entries.clone()))
+                }
+                _ => None,
+            })
+            .ok_or("expected a ParcelAccessListUpdated server event")?;
+        assert_eq!(listed.0, sl_proto::ParcelAccessScope::Access);
+        assert_eq!(
+            listed.1.iter().map(|entry| entry.id).collect::<Vec<_>>(),
+            vec![banned]
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ServerEvent::RequestLandStat { report_type, local_id, .. }
+                    if *report_type == LandStatReportType::TopScripts && *local_id == parcel_id
+            )),
+            "expected the land-stat request, got {events:?}"
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, ServerEvent::RequestRegionInfo)),
+            "expected the region-info request, got {events:?}"
+        );
+        Ok(())
+    }
+
+    /// A parcel's ban list and the region's own configuration reach the client
+    /// — the two answers the parcel and region edit surfaces are read back
+    /// through. An empty list travels as one nil-agent placeholder, which is a
+    /// simulator's way of saying "empty" and not a member.
+    #[test]
+    fn server_parcel_access_list_and_region_info_reach_the_client() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        let circuit = client.root_circuit_id().ok_or("no circuit")?;
+        let parcel_id = RegionLocalParcelId(7);
+        let banned = uuid::Uuid::from_u128(0x55);
+
+        sim.send_parcel_access_list_reply(
+            parcel_id,
+            sl_proto::ParcelAccessScope::Ban,
+            3,
+            &[sl_proto::ParcelAccessEntry {
+                id: banned,
+                time: 0,
+                flags: sl_proto::ParcelAccessFlags::NONE,
+            }],
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+        let listed = drain_client(&mut client)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::ParcelAccessList {
+                    local_id,
+                    scope,
+                    entries,
+                } => Some((local_id, scope, entries)),
+                _ => None,
+            })
+            .ok_or("expected a ParcelAccessList client event")?;
+        assert_eq!(listed.0, ScopedParcelId::new(circuit, parcel_id));
+        assert_eq!(listed.1, sl_proto::ParcelAccessScope::Ban);
+        assert_eq!(
+            listed.2.iter().map(|entry| entry.id).collect::<Vec<_>>(),
+            vec![banned]
+        );
+
+        sim.send_parcel_access_list_reply(
+            parcel_id,
+            sl_proto::ParcelAccessScope::Access,
+            4,
+            &[],
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+        let empty = drain_client(&mut client)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::ParcelAccessList { entries, .. } => Some(entries),
+                _ => None,
+            })
+            .ok_or("expected a second ParcelAccessList client event")?;
+        assert!(
+            empty.is_empty(),
+            "the nil-agent placeholder was read as a member: {empty:?}"
+        );
+
+        let limits = sl_proto::RegionLimits {
+            sim_name: region("Fake Region"),
+            max_agents: 40,
+            hard_max_agents: 100,
+            hard_max_objects: 15_000,
+            region_flags: 0x40,
+            region_flags_extended: 0x1_0000_0040,
+            maturity: Maturity::Mature,
+            estate_id: 1,
+            parent_estate_id: 1,
+            water_height: 20.0,
+            billable_factor: 1.0,
+            object_bonus_factor: 1.0,
+            terrain_raise_limit: 4.0,
+            terrain_lower_limit: -4.0,
+            price_per_meter: LindenAmount(1),
+            redirect_grid_x: 0,
+            redirect_grid_y: 0,
+            use_estate_sun: true,
+            sun_hour: 6.0,
+            chat_settings: None,
+            combat_settings: None,
+        };
+        sim.send_region_info(&limits, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let seen = drain_client(&mut client)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::RegionLimits(limits) => Some(limits),
+                _ => None,
+            })
+            .ok_or("expected a RegionLimits client event")?;
+        assert_eq!(seen.max_agents, 40);
+        assert_eq!(seen.hard_max_objects, 15_000);
+        assert_eq!(seen.region_flags_extended, 0x1_0000_0040);
+        assert_eq!(seen.maturity, Maturity::Mature);
+        assert_eq!(
+            seen.sim_name.as_ref().map(ToString::to_string),
+            Some("Fake Region".to_owned())
+        );
+        Ok(())
+    }
+
+    /// The estate channel's two answers reach the client: the configuration a
+    /// `getinfo` is answered with, and one of the four access lists.
+    ///
+    /// Both travel in the same message under different method names, and the
+    /// access list's members are raw 16-byte ids in the field the configuration
+    /// fills with decimal text — so the two together are what says the sender
+    /// got the channel's shape right rather than one of its shapes.
+    #[test]
+    fn server_estate_replies_reach_the_client() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        let invoice = uuid::Uuid::from_u128(0x1_0CE);
+        let owner = uuid::Uuid::from_u128(0x0E5);
+        let banned = uuid::Uuid::from_u128(0x0BA);
+
+        let info = sl_proto::EstateInfo {
+            estate_name: "Fake Estate".to_owned(),
+            estate_owner: owner,
+            estate_id: 1,
+            estate_flags: 0x8,
+            sun_position: 6,
+            parent_estate: 1,
+            covenant_id: Some(uuid::Uuid::from_u128(0xC0FE)),
+            covenant_timestamp: 42,
+            abuse_email: "abuse@example.invalid".to_owned(),
+        };
+        sim.send_estate_info(&info, invoice, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let seen = drain_client(&mut client)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::EstateInfo(seen) => Some(*seen),
+                _ => None,
+            })
+            .ok_or("expected an EstateInfo client event")?;
+        assert_eq!(seen, info);
+
+        sim.send_estate_access_list(
+            info.estate_id,
+            sl_proto::EstateAccessKind::BannedAgents,
+            &[banned],
+            invoice,
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+        let listed = drain_client(&mut client)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::EstateAccessList {
+                    estate_id,
+                    kind,
+                    members,
+                } => Some((estate_id, kind, members)),
+                _ => None,
+            })
+            .ok_or("expected an EstateAccessList client event")?;
+        assert_eq!(listed.0, info.estate_id);
+        assert_eq!(listed.1, sl_proto::EstateAccessKind::BannedAgents);
+        assert_eq!(listed.2, vec![banned]);
         Ok(())
     }
 

@@ -30,6 +30,7 @@ use sl_types::key::{
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::map::{GridCoordinates, RegionCoordinates};
+use sl_types::money::LindenAmount;
 use sl_wire::messages::{
     AcceptCallingCard, AcceptCallingCardAgentDataBlock, AcceptCallingCardTransactionBlockBlock,
     DeclineCallingCard, DeclineCallingCardAgentDataBlock, DeclineCallingCardTransactionBlockBlock,
@@ -59,13 +60,15 @@ use sl_wire::messages::{
     DirPeopleReply, DirPeopleReplyAgentDataBlock, DirPeopleReplyQueryDataBlock,
     DirPeopleReplyQueryRepliesBlock, DirPlacesReply, DirPlacesReplyAgentDataBlock,
     DirPlacesReplyQueryDataBlock, DirPlacesReplyQueryRepliesBlock, DirPlacesReplyStatusDataBlock,
-    EstateCovenantReply, EstateCovenantReplyDataBlock, EstateOwnerMessageParamListBlock,
-    EventInfoReply, EventInfoReplyAgentDataBlock, EventInfoReplyEventDataBlock, FindAgent,
-    FindAgentAgentBlockBlock, FindAgentLocationBlockBlock, LogoutReply, LogoutReplyAgentDataBlock,
-    PlacesReply, PlacesReplyAgentDataBlock, PlacesReplyQueryDataBlock,
-    PlacesReplyTransactionDataBlock, StartPingCheck, StartPingCheckPingIDBlock, UUIDGroupNameReply,
-    UUIDGroupNameReplyUUIDNameBlockBlock, UUIDNameReply, UUIDNameReplyUUIDNameBlockBlock,
-    ViewerEffect as ViewerEffectMessage, ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
+    EstateCovenantReply, EstateCovenantReplyDataBlock, EstateOwnerMessage,
+    EstateOwnerMessageAgentDataBlock, EstateOwnerMessageMethodDataBlock,
+    EstateOwnerMessageParamListBlock, EventInfoReply, EventInfoReplyAgentDataBlock,
+    EventInfoReplyEventDataBlock, FindAgent, FindAgentAgentBlockBlock, FindAgentLocationBlockBlock,
+    LogoutReply, LogoutReplyAgentDataBlock, PlacesReply, PlacesReplyAgentDataBlock,
+    PlacesReplyQueryDataBlock, PlacesReplyTransactionDataBlock, StartPingCheck,
+    StartPingCheckPingIDBlock, UUIDGroupNameReply, UUIDGroupNameReplyUUIDNameBlockBlock,
+    UUIDNameReply, UUIDNameReplyUUIDNameBlockBlock, ViewerEffect as ViewerEffectMessage,
+    ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
 };
 use sl_wire::messages::{
     AgentWearablesUpdate, AgentWearablesUpdateAgentDataBlock,
@@ -131,14 +134,22 @@ use sl_wire::messages::{
     RebakeAvatarTexturesTextureDataBlock,
 };
 use sl_wire::messages::{
+    ObjectProperties as ObjectPropertiesMessage,
     ObjectPropertiesFamily as ObjectPropertiesFamilyMessage,
     ObjectPropertiesFamilyObjectDataBlock as ObjectPropertiesFamilyObjectDataBlockMessage,
-    ParcelDwellReply, ParcelDwellReplyAgentDataBlock, ParcelDwellReplyDataBlock, ParcelInfoReply,
+    ObjectPropertiesObjectDataBlock as ObjectPropertiesObjectDataBlockMessage, ParcelDwellReply,
+    ParcelDwellReplyAgentDataBlock, ParcelDwellReplyDataBlock, ParcelInfoReply,
     ParcelInfoReplyAgentDataBlock, ParcelInfoReplyDataBlock, ParcelObjectOwnersReply,
     ParcelObjectOwnersReplyDataBlock, PayPriceReply, PayPriceReplyButtonDataBlock,
     PayPriceReplyObjectDataBlock, ScriptRunningReply, ScriptRunningReplyScriptBlock,
     TelehubInfo as TelehubInfoMessage, TelehubInfoSpawnPointBlockBlock,
     TelehubInfoTelehubBlockBlock,
+};
+use sl_wire::messages::{
+    ParcelAccessListReply, ParcelAccessListReplyDataBlock, ParcelAccessListReplyListBlock,
+    RegionInfo as RegionInfoMessage, RegionInfoAgentDataBlock, RegionInfoCombatSettingsBlock,
+    RegionInfoRegionInfo2Block, RegionInfoRegionInfo3Block, RegionInfoRegionInfo5Block,
+    RegionInfoRegionInfoBlock,
 };
 use sl_wire::{
     AnyMessage, CircuitCode, ControlFlags, EventQueueEvent, ExperienceInfo, ExperiencePermission,
@@ -176,28 +187,31 @@ use crate::sim_voice::{SimVoice, VoiceProvisionOutcome, VoiceProvisionRefusal};
 use crate::types::directory::category_from_wire;
 use crate::types::{
     AddPrimParams, AlertInfo, AssetType, AttachmentMode, AttachmentPoint, AvatarAppearance,
-    AvatarName, AvatarPickerResult, Camera, ChatSource, ChatType, ClassifiedCategory,
+    AvatarName, AvatarPickerResult, Camera, ChatSource, ChatType, ClassifiedCategory, ClickAction,
     CoarseLocation, DEFAULT_SKY_FRAME, DEFAULT_WATER_FRAME, DayCycle, DayCycleFrame,
     DeRezDestination, DetachOrder, DirClassifiedResult, DirEventResult, DirFindFlags,
     DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, DirectoryVisibility,
     DisplayNameUpdate, EconomyData, EjectAction, EnvironmentSettings, EnvironmentUpdate,
-    EstateCovenant, EventInfo, FeatureDisabled, FollowCamPropertyValue, FreezeAction, FriendRights,
-    GenericMessage, GenericStreamingMessage, GestureActivation, GodRegionUpdate,
-    GroupAccountDetails, GroupAccountSummary, GroupAccountTransactions, GroupActiveProposalItem,
-    GroupName, GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
-    InventoryItemMove, InventoryType, Kick, LandBrushAction, LandBrushSize, LandEdit,
-    LandSearchType, LandStatItem, LandStatReportType, MapItem, MapItemType, MapLayer,
-    MapRegionInfo, MapRequestFlags, Material, MeanCollision, MovementMode, NavMeshStatus,
-    NewInventoryLink, NotecardRez, Object, ObjectBuyItem, ObjectExtraParams,
-    ObjectPlayingAnimation, ObjectPropertiesFamily, OpenRegionInfo, ParcelCategory, ParcelDetails,
-    ParcelInfo, ParcelObjectOwner, PlacesResult, PlayingAnimation, Postcard, PrimShape,
-    PrimShapeParams, ProposalVoteId, RegionIdentity, RegionStats, Reliability,
-    RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType,
-    ScriptControl, ScriptPermissionRequest, ScriptPermissions, ServerError, SetDisplayNameReply,
-    SimWideDeleteFlags, SimulatorTime, SkySettings, StartLocationSlot, TaskInventoryItem,
-    TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea, TerrainLayerType,
-    TerrainPatch, TextureEntry, Throttle, TransferStatus, Transmit, UpdateGroupInfoParams,
-    UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings, Wearable,
+    EstateAccessKind, EstateCovenant, EstateInfo, EventInfo, FeatureDisabled,
+    FollowCamPropertyValue, FreezeAction, FriendRights, GenericMessage, GenericStreamingMessage,
+    GestureActivation, GodRegionUpdate, GroupAccountDetails, GroupAccountSummary,
+    GroupAccountTransactions, GroupActiveProposalItem, GroupName, GroupVoteHistoryItem, ImDialog,
+    InstantMessage, InventoryFolder, InventoryItem, InventoryItemMove, InventoryType, Kick,
+    LandBrushAction, LandBrushSize, LandEdit, LandSearchType, LandStatItem, LandStatReportType,
+    MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Material, MeanCollision,
+    MovementMode, NavMeshStatus, NewInventoryLink, NotecardRez, Object, ObjectBuyItem,
+    ObjectExtraParams, ObjectFlagSettings, ObjectPlayingAnimation, ObjectProperties,
+    ObjectPropertiesFamily, ObjectTransform, OpenRegionInfo, ParcelAccessEntry, ParcelAccessFlags,
+    ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelInfo, ParcelObjectOwner,
+    ParcelReturnType, ParcelUpdate, PermissionField, PlacesResult, PlayingAnimation, Postcard,
+    PrimShape, PrimShapeParams, ProposalVoteId, RegionIdentity, RegionLimits, RegionStats,
+    Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams,
+    RezScriptParams, SaleType, ScriptControl, ScriptPermissionRequest, ScriptPermissions,
+    ServerError, SetDisplayNameReply, SimWideDeleteFlags, SimulatorTime, SkySettings,
+    StartLocationSlot, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo,
+    TerraformArea, TerrainLayerType, TerrainPatch, TextureEntry, Throttle, TransferStatus,
+    Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    WaterSettings, Wearable,
 };
 use crate::types::{Event, EventId};
 use sl_wire::AbuseReport;
@@ -374,6 +388,36 @@ const SEEN_CAPACITY: usize = 4096;
 /// `UUIDGroupNameReply`. Smaller than the request batch because each entry also
 /// carries the (variable-length) name strings.
 const UUID_NAMES_PER_REPLY: usize = 40;
+
+/// The `EstateOwnerMessage` method a simulator answers an estate `getinfo`
+/// with: the estate's configuration.
+const ESTATE_UPDATE_INFO_METHOD: &str = "estateupdateinfo";
+
+/// The `EstateOwnerMessage` method one of the estate's access lists is sent
+/// under.
+const SET_ACCESS_METHOD: &str = "setaccess";
+
+/// The `setaccess` category bit of the allowed-agents list.
+const ESTATE_ACCESS_ALLOWED_AGENTS: u32 = 1;
+
+/// The `setaccess` category bit of the allowed-groups list.
+const ESTATE_ACCESS_ALLOWED_GROUPS: u32 = 2;
+
+/// The `setaccess` category bit of the banned-agents list.
+const ESTATE_ACCESS_BANNED_AGENTS: u32 = 4;
+
+/// The `setaccess` category bit of the estate-managers list.
+const ESTATE_ACCESS_MANAGERS: u32 = 8;
+
+/// The `setaccess` category bit an [`EstateAccessKind`] is sent under.
+const fn estate_access_code(kind: EstateAccessKind) -> u32 {
+    match kind {
+        EstateAccessKind::AllowedAgents => ESTATE_ACCESS_ALLOWED_AGENTS,
+        EstateAccessKind::AllowedGroups => ESTATE_ACCESS_ALLOWED_GROUPS,
+        EstateAccessKind::BannedAgents => ESTATE_ACCESS_BANNED_AGENTS,
+        EstateAccessKind::Managers => ESTATE_ACCESS_MANAGERS,
+    }
+}
 
 /// Computes `now + duration`, saturating at `now` on (impossible) overflow.
 fn deadline(now: Instant, duration: Duration) -> Instant {
@@ -2071,6 +2115,376 @@ pub enum ServerEvent {
         /// The object's complete extra-parameter state.
         params: ObjectExtraParams,
     },
+    /// The client renamed an object (`ObjectName`). The inverse of the client's
+    /// [`Session::set_object_name`](crate::Session::set_object_name). One event
+    /// is emitted per object block in the message.
+    ObjectNameSet {
+        /// The region-local id of the object being renamed.
+        local_id: RegionLocalObjectId,
+        /// The object's new name.
+        name: String,
+    },
+    /// The client re-described an object (`ObjectDescription`). The inverse of
+    /// the client's
+    /// [`Session::set_object_description`](crate::Session::set_object_description).
+    /// One event is emitted per object block in the message.
+    ObjectDescriptionSet {
+        /// The region-local id of the object being re-described.
+        local_id: RegionLocalObjectId,
+        /// The object's new description.
+        description: String,
+    },
+    /// The client set an object's search category (`ObjectCategory`). The
+    /// inverse of the client's
+    /// [`Session::set_object_category`](crate::Session::set_object_category).
+    /// One event is emitted per object block in the message.
+    ObjectCategorySet {
+        /// The region-local id of the object being categorised.
+        local_id: RegionLocalObjectId,
+        /// The `LLCategory` code the object is filed under.
+        category: u32,
+    },
+    /// The client set an object's left-click behaviour (`ObjectClickAction`).
+    /// The inverse of the client's
+    /// [`Session::set_object_click_action`](crate::Session::set_object_click_action).
+    /// One event is emitted per object block in the message.
+    ObjectClickActionSet {
+        /// The region-local id of the object being changed.
+        local_id: RegionLocalObjectId,
+        /// The new click behaviour.
+        click_action: ClickAction,
+    },
+    /// The client set an object's physical material (`ObjectMaterial`). The
+    /// inverse of the client's
+    /// [`Session::set_object_material`](crate::Session::set_object_material).
+    /// One event is emitted per object block in the message.
+    ObjectMaterialSet {
+        /// The region-local id of the object being changed.
+        local_id: RegionLocalObjectId,
+        /// The new physical material.
+        material: Material,
+    },
+    /// The client put an object up for sale, or took it off sale
+    /// (`ObjectSaleInfo`). The inverse of the client's
+    /// [`Session::set_object_for_sale`](crate::Session::set_object_for_sale).
+    /// One event is emitted per object block in the message.
+    ObjectSaleInfoSet {
+        /// The region-local id of the object being (un)listed.
+        local_id: RegionLocalObjectId,
+        /// What is sold: the original, a copy, or its contents.
+        /// [`SaleType::NotForSale`] takes it off sale.
+        sale_type: SaleType,
+        /// The asking price, or [`None`] when the object is not for sale. A
+        /// for-sale object may still be free (`Some(LindenAmount(0))`).
+        sale_price: Option<LindenAmount>,
+    },
+    /// The client set an object's physics/temporary/phantom flags
+    /// (`ObjectFlagUpdate`). The inverse of the client's
+    /// [`Session::set_object_flags`](crate::Session::set_object_flags).
+    ///
+    /// Unlike its neighbours the wire message names exactly one object, so
+    /// this is one event per message rather than per block.
+    ObjectFlagsSet {
+        /// The region-local id of the object being changed.
+        local_id: RegionLocalObjectId,
+        /// The object's complete new flag state (all four are sent every time,
+        /// so this is the state and not a delta).
+        flags: ObjectFlagSettings,
+    },
+    /// The client listed an object in (or removed it from) parcel search
+    /// (`ObjectIncludeInSearch`). The inverse of the client's
+    /// [`Session::set_object_include_in_search`](crate::Session::set_object_include_in_search).
+    /// One event is emitted per object block in the message.
+    ObjectIncludeInSearchSet {
+        /// The region-local id of the object being (un)listed.
+        local_id: RegionLocalObjectId,
+        /// Whether the object is now listed in search.
+        include_in_search: bool,
+    },
+    /// The client granted or revoked permission bits on an object
+    /// (`ObjectPermissions`). The inverse of the client's
+    /// [`Session::set_object_permissions`](crate::Session::set_object_permissions).
+    /// One event is emitted per object block in the message, because a viewer
+    /// sends one block per (object, mask) pair it is changing.
+    ///
+    /// A block whose `Field` byte names no mask is dropped rather than
+    /// surfaced: there is no default mask to fall back on, and applying the
+    /// change to the wrong one would hand out rights nobody granted.
+    ObjectPermissionsSet {
+        /// The region-local id of the object being changed.
+        local_id: RegionLocalObjectId,
+        /// Which of the five masks the change applies to.
+        field: PermissionField,
+        /// Whether the bits in [`mask`](Self::ObjectPermissionsSet::mask) are
+        /// being granted (`true`) or revoked (`false`).
+        set: bool,
+        /// The permission bits being granted or revoked.
+        mask: Permissions,
+        /// Whether the client claims god powers for the change (the
+        /// `HeaderData` `Override` flag). A simulator that honours it lets an
+        /// administrator change permissions the owner could not.
+        god_override: bool,
+    },
+    /// The client set the group an object is shared with (`ObjectGroup`). The
+    /// inverse of the client's
+    /// [`Session::set_object_group`](crate::Session::set_object_group).
+    ///
+    /// One event per message: a viewer sends its whole selection under one
+    /// group id.
+    ObjectGroupSet {
+        /// The region-local ids of the objects being changed.
+        local_ids: Vec<RegionLocalObjectId>,
+        /// The group the objects are set to, or [`None`] to clear it.
+        group_id: Option<GroupKey>,
+    },
+    /// The client changed who owns an object (`ObjectOwner`) — in practice the
+    /// deed-to-group the build floater offers, which names the group and no
+    /// agent. The inverse of the client's
+    /// [`Session::deed_objects_to_group`](crate::Session::deed_objects_to_group).
+    ObjectOwnerSet {
+        /// The region-local ids of the objects being changed.
+        local_ids: Vec<RegionLocalObjectId>,
+        /// The new owner: an agent, or the group an object is deeded to.
+        owner: OwnerKey,
+        /// Whether the client claims god powers for the change (the
+        /// `HeaderData` `Override` flag).
+        god_override: bool,
+    },
+    /// The client linked a selection into one linkset (`ObjectLink`). The
+    /// inverse of the client's
+    /// [`Session::link_objects`](crate::Session::link_objects).
+    ///
+    /// The **first** id is the root the others are parented to (the reference
+    /// packs the selection's root first, and OpenSim's `HandleObjectLink`
+    /// reads it that way).
+    ObjectsLinked {
+        /// The region-local ids of the objects being linked, root first.
+        local_ids: Vec<RegionLocalObjectId>,
+    },
+    /// The client broke objects out of their linkset (`ObjectDelink`). The
+    /// inverse of the client's
+    /// [`Session::delink_objects`](crate::Session::delink_objects).
+    ObjectsDelinked {
+        /// The region-local ids of the objects being unlinked.
+        local_ids: Vec<RegionLocalObjectId>,
+    },
+    /// The client copied a selection in place (`ObjectDuplicate`). The inverse
+    /// of the client's
+    /// [`Session::duplicate_objects`](crate::Session::duplicate_objects).
+    ///
+    /// The simulator mints the copies' ids the way it does for a rez, so the
+    /// duplicating client learns them from the `ObjectUpdate` that follows.
+    ObjectsDuplicated {
+        /// The region-local ids of the objects being copied.
+        local_ids: Vec<RegionLocalObjectId>,
+        /// How far the copies are offset from the originals, in metres.
+        offset: Vector,
+        /// The group the copies are set to (`None` for none).
+        group_id: Option<GroupKey>,
+        /// The `DuplicateFlags` bitfield the client sent.
+        duplicate_flags: u32,
+    },
+    /// The client force-deleted a selection (`ObjectDelete`). The inverse of
+    /// the client's [`Session::delete_objects`](crate::Session::delete_objects).
+    ///
+    /// This is the reference viewer's *force*-delete, which generally needs
+    /// estate powers; the ordinary delete-to-trash is a
+    /// [`DerezObjects`](Self::DerezObjects) with
+    /// [`DeRezDestination::Trash`].
+    ObjectsDeleted {
+        /// The region-local ids of the objects being deleted.
+        local_ids: Vec<RegionLocalObjectId>,
+        /// Whether the client claims god powers for the deletion (`Force`).
+        force: bool,
+    },
+    /// The client moved, rotated and/or resized an object
+    /// (`MultipleObjectUpdate`). The inverse of the client's
+    /// [`Session::update_object`](crate::Session::update_object). One event is
+    /// emitted per object block in the message.
+    ///
+    /// Only the components the client is changing are [`Some`]; the rest keep
+    /// whatever the object already has.
+    ObjectTransformSet {
+        /// The region-local id of the object being moved.
+        local_id: RegionLocalObjectId,
+        /// The components being changed, and the linkset/uniform modifiers.
+        transform: ObjectTransform,
+    },
+    /// The client asked to undo its last edit of the named objects (`Undo`).
+    /// The inverse of the client's
+    /// [`Session::undo_objects`](crate::Session::undo_objects).
+    ///
+    /// The undo stack is the *simulator's*: the message names objects and
+    /// nothing else, so what one step undoes is whatever the region recorded
+    /// for them. The objects are named by full id, not region-local id, which
+    /// is the one place in the object family that is true.
+    ObjectsUndone {
+        /// The objects whose last edit is to be undone.
+        object_ids: Vec<ObjectKey>,
+    },
+    /// The client asked to redo an edit it had undone (`Redo`). The inverse of
+    /// the client's [`Session::redo_objects`](crate::Session::redo_objects).
+    ObjectsRedone {
+        /// The objects whose undone edit is to be reapplied.
+        object_ids: Vec<ObjectKey>,
+    },
+    /// The client selected objects (`ObjectSelect`) — the subscription a
+    /// simulator answers with the full `ObjectProperties`
+    /// ([`send_object_properties`](SimSession::send_object_properties)) and
+    /// keeps pushing to while the selection stands. The inverse of the
+    /// client's
+    /// [`Session::request_object_properties`](crate::Session::request_object_properties).
+    ObjectsSelected {
+        /// The region-local ids of the objects now selected.
+        local_ids: Vec<RegionLocalObjectId>,
+    },
+    /// The client dropped its selection of objects (`ObjectDeselect`), ending
+    /// the subscription [`ObjectsSelected`](Self::ObjectsSelected) opened. The
+    /// inverse of the client's
+    /// [`Session::deselect_objects`](crate::Session::deselect_objects).
+    ObjectsDeselected {
+        /// The region-local ids of the objects no longer selected.
+        local_ids: Vec<RegionLocalObjectId>,
+    },
+    /// The client saved the About Land form (`ParcelPropertiesUpdate`). The
+    /// inverse of the client's
+    /// [`Session::update_parcel`](crate::Session::update_parcel).
+    ///
+    /// The message carries the **whole** record, not the fields that changed:
+    /// a viewer starts from what it last read, sets the one field the resident
+    /// touched and sends everything back. A simulator therefore cannot tell an
+    /// unchanged field from a re-asserted one — which is what makes a stale
+    /// About Land floater able to revert somebody else's change without either
+    /// of them noticing.
+    ParcelPropertiesUpdated {
+        /// The complete record the client is asserting.
+        update: Box<ParcelUpdate>,
+    },
+    /// The client changed a parcel's allow or ban list
+    /// (`ParcelAccessListUpdate`). The inverse of the client's
+    /// [`Session::update_parcel_access_list`](crate::Session::update_parcel_access_list).
+    ///
+    /// Like the About Land form this is a whole-list assertion rather than a
+    /// delta, and a long list is split across several messages — `sections`
+    /// says how many the client is sending and `sequence_id` which of them this
+    /// is.
+    ParcelAccessListUpdated {
+        /// The parcel's region-local id.
+        local_id: RegionLocalParcelId,
+        /// Which list is being replaced.
+        scope: ParcelAccessScope,
+        /// The entries of this section of the list.
+        entries: Vec<ParcelAccessEntry>,
+        /// The client's correlation id for the whole multi-section update.
+        transaction_id: TransactionId,
+        /// Which section of the update this is.
+        sequence_id: i32,
+        /// How many sections the client is sending.
+        sections: i32,
+    },
+    /// The client asked for a parcel's allow or ban list
+    /// (`ParcelAccessListRequest`). The inverse of the client's
+    /// [`Session::request_parcel_access_list`](crate::Session::request_parcel_access_list);
+    /// a simulator answers with
+    /// [`send_parcel_access_list_reply`](SimSession::send_parcel_access_list_reply).
+    RequestParcelAccessList {
+        /// The parcel's region-local id.
+        local_id: RegionLocalParcelId,
+        /// Which list is wanted.
+        scope: ParcelAccessScope,
+        /// The client's sequence id, echoed in the reply.
+        sequence_id: i32,
+    },
+    /// The client bought a parcel (`ParcelBuy`). The inverse of the client's
+    /// [`Session::buy_parcel`](crate::Session::buy_parcel).
+    ParcelBought {
+        /// The parcel's region-local id.
+        local_id: RegionLocalParcelId,
+        /// The group buying it, when the purchase is for a group.
+        group_id: Option<GroupKey>,
+        /// Whether the parcel is bought *by* the group rather than deeded to it
+        /// later.
+        is_group_owned: bool,
+        /// Whether the buyer's land contribution to the group is to be removed.
+        remove_contribution: bool,
+        /// The price the client believes it is paying, in L$ — a simulator
+        /// checks this against its own asking price rather than trusting it.
+        price: LindenAmount,
+        /// The area the client believes it is buying, in square metres.
+        area: i32,
+    },
+    /// The client deeded a parcel to a group (`ParcelDeedToGroup`). The inverse
+    /// of the client's
+    /// [`Session::deed_parcel_to_group`](crate::Session::deed_parcel_to_group).
+    ParcelDeededToGroup {
+        /// The parcel's region-local id.
+        local_id: RegionLocalParcelId,
+        /// The group the parcel is deeded to.
+        group_id: GroupKey,
+    },
+    /// The client abandoned a parcel back to the estate (`ParcelRelease`). The
+    /// inverse of the client's
+    /// [`Session::release_parcel`](crate::Session::release_parcel).
+    ParcelReleased {
+        /// The parcel's region-local id.
+        local_id: RegionLocalParcelId,
+    },
+    /// An estate manager reclaimed an abandoned parcel (`ParcelReclaim`). The
+    /// inverse of the client's
+    /// [`Session::reclaim_parcel`](crate::Session::reclaim_parcel).
+    ParcelReclaimed {
+        /// The parcel's region-local id.
+        local_id: RegionLocalParcelId,
+    },
+    /// The client returned objects on a parcel to their owners
+    /// (`ParcelReturnObjects`). The inverse of the client's
+    /// [`Session::return_parcel_objects`](crate::Session::return_parcel_objects).
+    ParcelObjectsReturned {
+        /// The parcel's region-local id.
+        local_id: RegionLocalParcelId,
+        /// Which class of objects is being returned.
+        return_type: ParcelReturnType,
+        /// The specific objects named, when the client is returning a
+        /// selection rather than a class.
+        task_ids: Vec<ObjectKey>,
+        /// The owners whose objects are being returned.
+        owner_ids: Vec<OwnerKey>,
+    },
+    /// The client asked the simulator to highlight a class of objects on a
+    /// parcel (`ParcelSelectObjects`) — the "show me what I would be returning"
+    /// half of the About Land objects panel. The inverse of the client's
+    /// [`Session::select_parcel_objects`](crate::Session::select_parcel_objects);
+    /// a simulator answers with
+    /// [`send_force_object_select`](SimSession::send_force_object_select).
+    ParcelObjectsSelected {
+        /// The parcel's region-local id.
+        local_id: RegionLocalParcelId,
+        /// Which class of objects to highlight.
+        return_type: ParcelReturnType,
+        /// The owners whose objects to highlight.
+        owner_ids: Vec<OwnerKey>,
+    },
+    /// The client asked for a region's top-scripts or top-colliders report
+    /// (`LandStatRequest`). The inverse of the client's
+    /// [`Session::request_land_stat`](crate::Session::request_land_stat); a
+    /// simulator answers with
+    /// [`send_land_stat_reply`](SimSession::send_land_stat_reply).
+    RequestLandStat {
+        /// Which report is wanted.
+        report_type: LandStatReportType,
+        /// The request flags (the reference sends the filter mode here).
+        request_flags: u32,
+        /// The name filter, empty for none.
+        filter: String,
+        /// The parcel the report is scoped to, or the whole region when zero.
+        local_id: RegionLocalParcelId,
+    },
+    /// The client asked for the region's configuration (`RequestRegionInfo`) —
+    /// the Region/Estate floater's first round trip. The inverse of the
+    /// client's [`Session::request_region_info`](crate::Session::request_region_info);
+    /// a simulator answers with
+    /// [`send_region_info`](SimSession::send_region_info).
+    RequestRegionInfo,
     /// The client rezzed a **new** primitive from a shape it built itself
     /// (`ObjectAdd`). The inverse of the client's
     /// [`Session::rez_object`](crate::Session::rez_object).
@@ -5662,6 +6076,347 @@ impl SimSession {
                     num_votes: vote.num_votes,
                 })
                 .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends an `EstateOwnerMessage`: the simulator's half of the estate
+    /// channel, which is one message carrying a **method name** and a list of
+    /// byte parameters rather than a message per answer.
+    ///
+    /// The parameters are bytes, not strings, because the channel's are: a
+    /// `setaccess` reply carries raw 16-byte UUIDs in the same field an
+    /// `estateupdateinfo` carries NUL-terminated decimal text.
+    /// [`send_estate_info`](Self::send_estate_info) and
+    /// [`send_estate_access_list`](Self::send_estate_access_list) build the two
+    /// the client decodes; this is what everything else goes out through.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_estate_owner_message(
+        &mut self,
+        method: &str,
+        invoice: Uuid,
+        params: &[Vec<u8>],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::EstateOwnerMessage(EstateOwnerMessage {
+            agent_data: EstateOwnerMessageAgentDataBlock {
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |agent| agent.uuid()),
+                session_id: self.session_id.unwrap_or_else(Uuid::nil),
+                transaction_id: Uuid::nil(),
+            },
+            method_data: EstateOwnerMessageMethodDataBlock {
+                method: with_nul(method),
+                invoice,
+            },
+            param_list: params
+                .iter()
+                .map(|parameter| EstateOwnerMessageParamListBlock {
+                    parameter: parameter.clone(),
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends the `estateupdateinfo` answer to an estate `getinfo`: the estate's
+    /// name, owner, flags, sun and covenant, as the ten text parameters the
+    /// method is defined by.
+    ///
+    /// Parameter 8 is the literal `"1"` every simulator sends and no viewer
+    /// reads — OpenSim's own source marks it "what is this?". It is sent
+    /// because the parameters are positional: leaving it out would move the
+    /// abuse-report address into its place.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_estate_info(
+        &mut self,
+        info: &EstateInfo,
+        invoice: Uuid,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let text = |value: &str| with_nul(value);
+        let params = vec![
+            text(&info.estate_name),
+            text(&info.estate_owner.to_string()),
+            text(&info.estate_id.to_string()),
+            text(&info.estate_flags.to_string()),
+            text(&info.sun_position.to_string()),
+            text(&info.parent_estate.to_string()),
+            text(&info.covenant_id.unwrap_or_else(Uuid::nil).to_string()),
+            text(&info.covenant_timestamp.to_string()),
+            text("1"),
+            text(&info.abuse_email),
+        ];
+        self.send_estate_owner_message(ESTATE_UPDATE_INFO_METHOD, invoice, &params, now)
+    }
+
+    /// Sends one of the estate's four access lists as a `setaccess`.
+    ///
+    /// The layout is positional and shared with every simulator: the estate id,
+    /// the single category bit, one count per category (the count of *this*
+    /// list against its own category and zero against the other three), and
+    /// then the members as raw 16-byte ids rather than as text.
+    ///
+    /// An empty list is still sent: "nobody is banned" is an answer, and a
+    /// viewer that receives nothing cannot tell it from a reply that was lost.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_estate_access_list(
+        &mut self,
+        estate_id: u32,
+        kind: EstateAccessKind,
+        members: &[Uuid],
+        invoice: Uuid,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let code = estate_access_code(kind);
+        let count = members.len().to_string();
+        let zero = "0".to_owned();
+        let per_category = |bit: u32| {
+            with_nul(if code & bit == 0 {
+                zero.as_str()
+            } else {
+                count.as_str()
+            })
+        };
+        let mut params = vec![
+            with_nul(&estate_id.to_string()),
+            with_nul(&code.to_string()),
+            per_category(ESTATE_ACCESS_ALLOWED_AGENTS),
+            per_category(ESTATE_ACCESS_ALLOWED_GROUPS),
+            per_category(ESTATE_ACCESS_BANNED_AGENTS),
+            per_category(ESTATE_ACCESS_MANAGERS),
+        ];
+        params.extend(members.iter().map(|member| member.as_bytes().to_vec()));
+        self.send_estate_owner_message(SET_ACCESS_METHOD, invoice, &params, now)
+    }
+
+    /// Sends a `ParcelAccessListReply`: one parcel's allow or ban list, in
+    /// response to a client's `ParcelAccessListRequest` (surfaced as
+    /// [`ServerEvent::RequestParcelAccessList`]).
+    ///
+    /// An **empty** list goes out as a single nil-agent placeholder block rather
+    /// than as no blocks at all, which is what a simulator does and what a
+    /// viewer reads as "this list is empty" — a reply with no blocks reads as no
+    /// reply.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_parcel_access_list_reply(
+        &mut self,
+        local_id: RegionLocalParcelId,
+        scope: ParcelAccessScope,
+        sequence_id: i32,
+        entries: &[ParcelAccessEntry],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let list: Vec<ParcelAccessListReplyListBlock> = if entries.is_empty() {
+            vec![ParcelAccessListReplyListBlock {
+                id: Uuid::nil(),
+                time: 0,
+                flags: 0,
+            }]
+        } else {
+            entries
+                .iter()
+                .map(|entry| ParcelAccessListReplyListBlock {
+                    id: entry.id,
+                    time: entry.time,
+                    flags: entry.flags.0,
+                })
+                .collect()
+        };
+        let message = AnyMessage::ParcelAccessListReply(ParcelAccessListReply {
+            data: ParcelAccessListReplyDataBlock {
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |agent| agent.uuid()),
+                sequence_id,
+                flags: scope.to_u32(),
+                local_id: local_id.0,
+            },
+            list,
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `RegionInfo`: the region's configuration and limits, in response
+    /// to a client's `RequestRegionInfo` (surfaced as
+    /// [`ServerEvent::RequestRegionInfo`]) — the Region/Estate floater's first
+    /// round trip.
+    ///
+    /// The optional blocks are sent when [`RegionLimits`] carries them: the
+    /// extended region flags always (a modern grid sends them), and the chat and
+    /// combat settings only when the region has any, since an absent block and
+    /// an all-zero one are different answers.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_region_info(&mut self, limits: &RegionLimits, now: Instant) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::RegionInfo(RegionInfoMessage {
+            agent_data: RegionInfoAgentDataBlock {
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |agent| agent.uuid()),
+                session_id: self.session_id.unwrap_or_else(Uuid::nil),
+            },
+            region_info: RegionInfoRegionInfoBlock {
+                sim_name: with_nul(&sl_wire::region_name_to_wire(limits.sim_name.as_ref())),
+                estate_id: limits.estate_id,
+                parent_estate_id: limits.parent_estate_id,
+                region_flags: limits.region_flags,
+                sim_access: limits.maturity.to_sim_access(),
+                // The legacy 8-bit cap saturates rather than wrapping: a region
+                // that allows more agents than a byte can say is reported as
+                // "as many as this field can hold", and the 32-bit field below
+                // carries the real number.
+                max_agents: u8::try_from(limits.max_agents).unwrap_or(u8::MAX),
+                billable_factor: limits.billable_factor,
+                object_bonus_factor: limits.object_bonus_factor,
+                water_height: limits.water_height,
+                terrain_raise_limit: limits.terrain_raise_limit,
+                terrain_lower_limit: limits.terrain_lower_limit,
+                price_per_meter: crate::types::linden_to_wire(
+                    "PricePerMeter",
+                    &limits.price_per_meter,
+                )?,
+                redirect_grid_x: limits.redirect_grid_x,
+                redirect_grid_y: limits.redirect_grid_y,
+                use_estate_sun: limits.use_estate_sun,
+                sun_hour: limits.sun_hour,
+            },
+            region_info2: RegionInfoRegionInfo2Block {
+                product_sku: with_nul(""),
+                product_name: with_nul(""),
+                max_agents32: limits.max_agents,
+                hard_max_agents: limits.hard_max_agents,
+                hard_max_objects: limits.hard_max_objects,
+            },
+            region_info3: vec![RegionInfoRegionInfo3Block {
+                region_flags_extended: limits.region_flags_extended,
+            }],
+            region_info5: limits
+                .chat_settings
+                .as_ref()
+                .map(|chat| RegionInfoRegionInfo5Block {
+                    chat_whisper_range: chat.whisper_range,
+                    chat_normal_range: chat.normal_range,
+                    chat_shout_range: chat.shout_range,
+                    chat_whisper_offset: chat.whisper_offset,
+                    chat_normal_offset: chat.normal_offset,
+                    chat_shout_offset: chat.shout_offset,
+                    chat_flags: chat.flags,
+                })
+                .into_iter()
+                .collect(),
+            combat_settings: limits
+                .combat_settings
+                .as_ref()
+                .map(|combat| RegionInfoCombatSettingsBlock {
+                    combat_flags: combat.flags,
+                    on_death: combat.on_death,
+                    damage_throttle: combat.damage_throttle,
+                    regeneration_rate: combat.regeneration_rate,
+                    invulnerabily_time: combat.invulnerability_time,
+                    damage_limit: combat.damage_limit,
+                })
+                .into_iter()
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends an `ObjectProperties`: an object's **full** properties — its name,
+    /// description, creator, permissions, sale state and task-inventory serial
+    /// — which a simulator sends to every client holding the object *selected*
+    /// (surfaced as [`ServerEvent::ObjectsSelected`]), and again whenever any
+    /// of them changes.
+    ///
+    /// This is the read side of the whole object-edit family: an `ObjectUpdate`
+    /// carries none of these fields, so a client that renames an object learns
+    /// the rename took only from this message. The condensed
+    /// [`send_object_properties_family`](Self::send_object_properties_family)
+    /// is the hover / pay-dialog form and needs no selection.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_object_properties(
+        &mut self,
+        properties: &ObjectProperties,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let object_owner_wire =
+            crate::types::object_owner_to_wire(properties.owner, properties.group);
+        let mut texture_ids = Vec::new();
+        for texture in &properties.texture_ids {
+            texture_ids.extend_from_slice(texture.uuid().as_bytes());
+        }
+        let message = AnyMessage::ObjectProperties(ObjectPropertiesMessage {
+            object_data: vec![ObjectPropertiesObjectDataBlockMessage {
+                object_id: properties.object_id.uuid(),
+                creator_id: properties.creator_id.uuid(),
+                owner_id: object_owner_wire.0,
+                group_id: object_owner_wire.1,
+                creation_date: properties.creation_date,
+                base_mask: properties.permissions.base.bits(),
+                owner_mask: properties.permissions.owner.bits(),
+                group_mask: properties.permissions.group.bits(),
+                everyone_mask: properties.permissions.everyone.bits(),
+                next_owner_mask: properties.permissions.next_owner.bits(),
+                ownership_cost: crate::types::linden_to_wire(
+                    "OwnershipCost",
+                    &properties.ownership_cost,
+                )?,
+                sale_type: properties.sale_type,
+                sale_price: crate::types::linden_price_to_wire(
+                    "SalePrice",
+                    properties.sale_price.as_ref(),
+                )?,
+                aggregate_perms: properties.aggregate_perms,
+                aggregate_perm_textures: properties.aggregate_perm_textures,
+                aggregate_perm_textures_owner: properties.aggregate_perm_textures_owner,
+                category: properties.category,
+                inventory_serial: properties.inventory_serial,
+                item_id: properties.item_id.uuid(),
+                folder_id: properties.folder_id.map_or_else(Uuid::nil, |id| id.uuid()),
+                from_task_id: properties
+                    .from_task_id
+                    .map_or_else(Uuid::nil, |id| id.uuid()),
+                last_owner_id: properties.last_owner_id,
+                name: with_nul(&properties.name),
+                description: with_nul(&properties.description),
+                touch_name: with_nul(&properties.touch_name),
+                sit_name: with_nul(&properties.sit_name),
+                texture_id: texture_ids,
+            }],
         });
         self.send(&message, Reliability::Reliable, now)?;
         Ok(())
@@ -9529,6 +10284,354 @@ impl SimSession {
                         params: decode_extra_param_blocks(blocks),
                     });
                 }
+            }
+            AnyMessage::ParcelPropertiesUpdate(update) => {
+                let data = &update.parcel_data;
+                self.events.push_back(ServerEvent::ParcelPropertiesUpdated {
+                    update: Box::new(ParcelUpdate {
+                        local_id: RegionLocalParcelId(data.local_id),
+                        parcel_flags: sl_wire::ParcelFlags::from_bits(data.parcel_flags),
+                        sale_price: crate::types::linden_price_from_wire(
+                            sl_wire::ParcelFlags::from_bits(data.parcel_flags)
+                                .contains(sl_wire::ParcelFlags::FOR_SALE),
+                            "SalePrice",
+                            data.sale_price,
+                        )?,
+                        name: trimmed_string(&data.name),
+                        description: trimmed_string(&data.desc),
+                        music_url: sl_wire::optional_url_from_wire(
+                            "MusicURL",
+                            &trimmed_string(&data.music_url),
+                        )?,
+                        media_url: sl_wire::optional_url_from_wire(
+                            "MediaURL",
+                            &trimmed_string(&data.media_url),
+                        )?,
+                        media_id: crate::types::optional_key_from_wire(data.media_id),
+                        media_auto_scale: data.media_auto_scale != 0,
+                        group_id: crate::types::group_from_wire(data.group_id),
+                        pass_price: crate::types::linden_from_wire("PassPrice", data.pass_price)?,
+                        pass_hours: data.pass_hours,
+                        category: ParcelCategory::from_u8(data.category),
+                        auth_buyer_id: crate::types::optional_key_from_wire(data.auth_buyer_id),
+                        snapshot_id: crate::types::optional_key_from_wire(data.snapshot_id),
+                        user_location: RegionCoordinates::new(
+                            data.user_location.x,
+                            data.user_location.y,
+                            data.user_location.z,
+                        ),
+                        user_look_at: sl_types::map::Direction::new(
+                            data.user_look_at.x,
+                            data.user_look_at.y,
+                            data.user_look_at.z,
+                        ),
+                        landing_type: data.landing_type,
+                    }),
+                });
+            }
+            AnyMessage::ParcelAccessListUpdate(update) => {
+                self.events.push_back(ServerEvent::ParcelAccessListUpdated {
+                    local_id: RegionLocalParcelId(update.data.local_id),
+                    scope: ParcelAccessScope::from_u32(update.data.flags),
+                    // The nil-agent placeholder a simulator and a viewer both
+                    // use to say "this list is empty" is not a member, and
+                    // storing it would put a nameless entry in the About Land
+                    // panel.
+                    entries: update
+                        .list
+                        .iter()
+                        .filter(|entry| !entry.id.is_nil())
+                        .map(|entry| ParcelAccessEntry {
+                            id: entry.id,
+                            time: entry.time,
+                            flags: ParcelAccessFlags(entry.flags),
+                        })
+                        .collect(),
+                    transaction_id: TransactionId::from(update.data.transaction_id),
+                    sequence_id: update.data.sequence_id,
+                    sections: update.data.sections,
+                });
+            }
+            AnyMessage::ParcelAccessListRequest(request) => {
+                self.events.push_back(ServerEvent::RequestParcelAccessList {
+                    local_id: RegionLocalParcelId(request.data.local_id),
+                    scope: ParcelAccessScope::from_u32(request.data.flags),
+                    sequence_id: request.data.sequence_id,
+                });
+            }
+            AnyMessage::ParcelBuy(buy) => {
+                self.events.push_back(ServerEvent::ParcelBought {
+                    local_id: RegionLocalParcelId(buy.data.local_id),
+                    group_id: crate::types::group_from_wire(buy.data.group_id),
+                    is_group_owned: buy.data.is_group_owned,
+                    remove_contribution: buy.data.remove_contribution,
+                    price: crate::types::linden_from_wire("Price", buy.parcel_data.price)?,
+                    area: buy.parcel_data.area,
+                });
+            }
+            AnyMessage::ParcelDeedToGroup(deed) => {
+                self.events.push_back(ServerEvent::ParcelDeededToGroup {
+                    local_id: RegionLocalParcelId(deed.data.local_id),
+                    group_id: GroupKey::from(deed.data.group_id),
+                });
+            }
+            AnyMessage::ParcelRelease(release) => {
+                self.events.push_back(ServerEvent::ParcelReleased {
+                    local_id: RegionLocalParcelId(release.data.local_id),
+                });
+            }
+            AnyMessage::ParcelReclaim(reclaim) => {
+                self.events.push_back(ServerEvent::ParcelReclaimed {
+                    local_id: RegionLocalParcelId(reclaim.data.local_id),
+                });
+            }
+            AnyMessage::ParcelReturnObjects(returned) => {
+                self.events.push_back(ServerEvent::ParcelObjectsReturned {
+                    local_id: RegionLocalParcelId(returned.parcel_data.local_id),
+                    return_type: ParcelReturnType(returned.parcel_data.return_type),
+                    task_ids: returned
+                        .task_i_ds
+                        .iter()
+                        .map(|block| ObjectKey::from(block.task_id))
+                        .collect(),
+                    owner_ids: returned
+                        .owner_i_ds
+                        .iter()
+                        .map(|block| OwnerKey::Agent(AgentKey::from(block.owner_id)))
+                        .collect(),
+                });
+            }
+            AnyMessage::ParcelSelectObjects(select) => {
+                self.events.push_back(ServerEvent::ParcelObjectsSelected {
+                    local_id: RegionLocalParcelId(select.parcel_data.local_id),
+                    return_type: ParcelReturnType(select.parcel_data.return_type),
+                    owner_ids: select
+                        .return_i_ds
+                        .iter()
+                        .map(|block| OwnerKey::Agent(AgentKey::from(block.return_id)))
+                        .collect(),
+                });
+            }
+            AnyMessage::LandStatRequest(request) => {
+                self.events.push_back(ServerEvent::RequestLandStat {
+                    report_type: LandStatReportType::from_u32(request.request_data.report_type),
+                    request_flags: request.request_data.request_flags,
+                    filter: trimmed_string(&request.request_data.filter),
+                    local_id: RegionLocalParcelId(request.request_data.parcel_local_id),
+                });
+            }
+            AnyMessage::RequestRegionInfo(_) => {
+                self.events.push_back(ServerEvent::RequestRegionInfo);
+            }
+            AnyMessage::ObjectName(rename) => {
+                for block in &rename.object_data {
+                    self.events.push_back(ServerEvent::ObjectNameSet {
+                        local_id: RegionLocalObjectId(block.local_id),
+                        name: trimmed_string(&block.name),
+                    });
+                }
+            }
+            AnyMessage::ObjectDescription(describe) => {
+                for block in &describe.object_data {
+                    self.events.push_back(ServerEvent::ObjectDescriptionSet {
+                        local_id: RegionLocalObjectId(block.local_id),
+                        description: trimmed_string(&block.description),
+                    });
+                }
+            }
+            AnyMessage::ObjectCategory(categorise) => {
+                for block in &categorise.object_data {
+                    self.events.push_back(ServerEvent::ObjectCategorySet {
+                        local_id: RegionLocalObjectId(block.local_id),
+                        category: block.category,
+                    });
+                }
+            }
+            AnyMessage::ObjectClickAction(click) => {
+                for block in &click.object_data {
+                    self.events.push_back(ServerEvent::ObjectClickActionSet {
+                        local_id: RegionLocalObjectId(block.object_local_id),
+                        click_action: ClickAction::from_code(block.click_action),
+                    });
+                }
+            }
+            AnyMessage::ObjectMaterial(material) => {
+                for block in &material.object_data {
+                    self.events.push_back(ServerEvent::ObjectMaterialSet {
+                        local_id: RegionLocalObjectId(block.object_local_id),
+                        material: Material::from_code(block.material),
+                    });
+                }
+            }
+            AnyMessage::ObjectSaleInfo(sale) => {
+                for block in &sale.object_data {
+                    self.events.push_back(ServerEvent::ObjectSaleInfoSet {
+                        local_id: RegionLocalObjectId(block.local_id),
+                        sale_type: SaleType::from_code(block.sale_type),
+                        sale_price: crate::types::linden_price_from_wire(
+                            block.sale_type != SaleType::NotForSale.to_code(),
+                            "SalePrice",
+                            block.sale_price,
+                        )?,
+                    });
+                }
+            }
+            AnyMessage::ObjectFlagUpdate(update) => {
+                let data = &update.agent_data;
+                self.events.push_back(ServerEvent::ObjectFlagsSet {
+                    local_id: RegionLocalObjectId(data.object_local_id),
+                    flags: ObjectFlagSettings {
+                        use_physics: data.use_physics,
+                        is_temporary: data.is_temporary,
+                        is_phantom: data.is_phantom,
+                        casts_shadows: data.casts_shadows,
+                    },
+                });
+            }
+            AnyMessage::ObjectIncludeInSearch(search) => {
+                for block in &search.object_data {
+                    self.events
+                        .push_back(ServerEvent::ObjectIncludeInSearchSet {
+                            local_id: RegionLocalObjectId(block.object_local_id),
+                            include_in_search: block.include_in_search,
+                        });
+                }
+            }
+            AnyMessage::ObjectPermissions(permissions) => {
+                let god_override = permissions.header_data.r#override;
+                for block in &permissions.object_data {
+                    let Some(field) = PermissionField::from_code(block.field) else {
+                        tracing::debug!(
+                            "an ObjectPermissions block named field {:#04x}, which is no mask",
+                            block.field
+                        );
+                        continue;
+                    };
+                    self.events.push_back(ServerEvent::ObjectPermissionsSet {
+                        local_id: RegionLocalObjectId(block.object_local_id),
+                        field,
+                        set: block.set != 0,
+                        mask: Permissions::from_bits(block.mask),
+                        god_override,
+                    });
+                }
+            }
+            AnyMessage::ObjectGroup(group) => {
+                self.events.push_back(ServerEvent::ObjectGroupSet {
+                    local_ids: group
+                        .object_data
+                        .iter()
+                        .map(|block| RegionLocalObjectId(block.object_local_id))
+                        .collect(),
+                    group_id: crate::types::group_from_wire(group.agent_data.group_id),
+                });
+            }
+            AnyMessage::ObjectOwner(owner) => {
+                let header = &owner.header_data;
+                self.events.push_back(ServerEvent::ObjectOwnerSet {
+                    local_ids: owner
+                        .object_data
+                        .iter()
+                        .map(|block| RegionLocalObjectId(block.object_local_id))
+                        .collect(),
+                    owner: crate::types::object_owner_from_wire(header.owner_id, header.group_id),
+                    god_override: header.r#override,
+                });
+            }
+            AnyMessage::ObjectLink(link) => {
+                self.events.push_back(ServerEvent::ObjectsLinked {
+                    local_ids: link
+                        .object_data
+                        .iter()
+                        .map(|block| RegionLocalObjectId(block.object_local_id))
+                        .collect(),
+                });
+            }
+            AnyMessage::ObjectDelink(delink) => {
+                self.events.push_back(ServerEvent::ObjectsDelinked {
+                    local_ids: delink
+                        .object_data
+                        .iter()
+                        .map(|block| RegionLocalObjectId(block.object_local_id))
+                        .collect(),
+                });
+            }
+            AnyMessage::ObjectDuplicate(duplicate) => {
+                self.events.push_back(ServerEvent::ObjectsDuplicated {
+                    local_ids: duplicate
+                        .object_data
+                        .iter()
+                        .map(|block| RegionLocalObjectId(block.object_local_id))
+                        .collect(),
+                    offset: duplicate.shared_data.offset.clone(),
+                    group_id: crate::types::group_from_wire(duplicate.agent_data.group_id),
+                    duplicate_flags: duplicate.shared_data.duplicate_flags,
+                });
+            }
+            AnyMessage::ObjectDelete(delete) => {
+                self.events.push_back(ServerEvent::ObjectsDeleted {
+                    local_ids: delete
+                        .object_data
+                        .iter()
+                        .map(|block| RegionLocalObjectId(block.object_local_id))
+                        .collect(),
+                    force: delete.agent_data.force,
+                });
+            }
+            AnyMessage::MultipleObjectUpdate(update) => {
+                for block in &update.object_data {
+                    let Some(transform) =
+                        crate::session::object_transform_from_wire(block.r#type, &block.data)
+                    else {
+                        tracing::debug!(
+                            "a MultipleObjectUpdate block of type {:#04x} carried {} bytes, too \
+                             few for the components it names",
+                            block.r#type,
+                            block.data.len()
+                        );
+                        continue;
+                    };
+                    self.events.push_back(ServerEvent::ObjectTransformSet {
+                        local_id: RegionLocalObjectId(block.object_local_id),
+                        transform,
+                    });
+                }
+            }
+            AnyMessage::Undo(undo) => {
+                self.events.push_back(ServerEvent::ObjectsUndone {
+                    object_ids: undo
+                        .object_data
+                        .iter()
+                        .map(|block| ObjectKey::from(block.object_id))
+                        .collect(),
+                });
+            }
+            AnyMessage::Redo(redo) => {
+                self.events.push_back(ServerEvent::ObjectsRedone {
+                    object_ids: redo
+                        .object_data
+                        .iter()
+                        .map(|block| ObjectKey::from(block.object_id))
+                        .collect(),
+                });
+            }
+            AnyMessage::ObjectSelect(select) => {
+                self.events.push_back(ServerEvent::ObjectsSelected {
+                    local_ids: select
+                        .object_data
+                        .iter()
+                        .map(|block| RegionLocalObjectId(block.object_local_id))
+                        .collect(),
+                });
+            }
+            AnyMessage::ObjectDeselect(deselect) => {
+                self.events.push_back(ServerEvent::ObjectsDeselected {
+                    local_ids: deselect
+                        .object_data
+                        .iter()
+                        .map(|block| RegionLocalObjectId(block.object_local_id))
+                        .collect(),
+                });
             }
             AnyMessage::ObjectAdd(add) => {
                 let data = &add.object_data;

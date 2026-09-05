@@ -17,13 +17,13 @@ use crate::types::{
     GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem, InventoryType,
     LandingType, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity,
     MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags, MuteType, NavMeshBuildStatus,
-    NavMeshStatus, NeighborInfo, Object, ObjectProperties, OpenRegionInfo, ParcelCategory,
-    ParcelInfo, ParcelRequestResult, ParcelStatus, PickInfo, PickKey, PlayingAnimation,
-    PrimShapeParams, ProductType, ProposalCandidateId, ProposalVoteId, RegionChatSettings,
-    RegionCombatSettings, RegionIdentity, RegionLimits, RegionTerrainComposition,
-    RequiredVoiceVersion, RestoreItem, SaleType, Scale, ScriptDialog, ScriptPermissionRequest,
-    ScriptPermissions, SetDisplayNameReply, SkySettings, TaskInventoryItem, WaterSettings,
-    avatar_texture,
+    NavMeshStatus, NeighborInfo, Object, ObjectProperties, ObjectTransform, OpenRegionInfo,
+    ParcelCategory, ParcelInfo, ParcelRequestResult, ParcelStatus, PickInfo, PickKey,
+    PlayingAnimation, PrimShapeParams, ProductType, ProposalCandidateId, ProposalVoteId,
+    RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionLimits,
+    RegionTerrainComposition, RequiredVoiceVersion, RestoreItem, SaleType, Scale, ScriptDialog,
+    ScriptPermissionRequest, ScriptPermissions, SetDisplayNameReply, SkySettings,
+    TaskInventoryItem, WaterSettings, avatar_texture,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::AgentKey;
@@ -5784,6 +5784,64 @@ pub(crate) fn pack_quaternion_to_vec3(rotation: &Rotation) -> [f32; 3] {
         z = -z;
     }
     [x, y, z]
+}
+
+/// Unpacks the three-float form a `MultipleObjectUpdate` `Data` blob carries
+/// back into a unit quaternion — the inverse of [`pack_quaternion_to_vec3`]
+/// (LL's `LLQuaternion::unpackFromVector3`).
+///
+/// The packing threw the real component away, so it is recovered as
+/// `w = sqrt(1 - x² - y² - z²)`, which is why the packer negates a vector part
+/// whose real component was negative: the reconstruction can only ever produce
+/// the non-negative root, and `q` and `-q` are the same rotation. A blob whose
+/// vector part is longer than unit length (rounding, or a client that packed a
+/// rotation it had not normalised) would put a negative number under the root,
+/// so the radicand is clamped at zero rather than yielding a `NaN` rotation.
+pub(crate) fn unpack_quaternion_from_vec3(packed: &Vector) -> Rotation {
+    let Vector { x, y, z } = *packed;
+    let s = z
+        .mul_add(-z, x.mul_add(-x, y.mul_add(-y, 1.0)))
+        .max(0.0)
+        .sqrt();
+    Rotation { x, y, z, s }
+}
+
+/// Decodes one `MultipleObjectUpdate` object-data block: the `Type` byte says
+/// which of position, rotation and scale the packed `Data` blob carries, in
+/// that order, plus the group and uniform modifiers.
+///
+/// A blob too short for the components its type byte claims is a malformed
+/// edit, not a partial one: the fields are positional, so a missing position
+/// would silently make the rotation the position. Such a block is rejected
+/// whole ([`None`]) rather than half-applied.
+pub(crate) fn object_transform_from_wire(type_byte: u8, data: &[u8]) -> Option<ObjectTransform> {
+    /// The `Type` bit saying the blob carries a position.
+    const HAS_POSITION: u8 = 0x01;
+    /// The `Type` bit saying the blob carries a (packed) rotation.
+    const HAS_ROTATION: u8 = 0x02;
+    /// The `Type` bit saying the blob carries a scale.
+    const HAS_SCALE: u8 = 0x04;
+    /// The `Type` bit applying the change to the whole linkset.
+    const LINK_SET: u8 = 0x08;
+    /// The `Type` bit scaling uniformly about the object's centre.
+    const UNIFORM: u8 = 0x10;
+
+    let mut reader = sl_wire::Reader::new(data);
+    let mut transform = ObjectTransform {
+        group: type_byte & LINK_SET != 0,
+        uniform: type_byte & UNIFORM != 0,
+        ..ObjectTransform::default()
+    };
+    if type_byte & HAS_POSITION != 0 {
+        transform.position = Some(reader.vector3().ok()?);
+    }
+    if type_byte & HAS_ROTATION != 0 {
+        transform.rotation = Some(unpack_quaternion_from_vec3(&reader.vector3().ok()?));
+    }
+    if type_byte & HAS_SCALE != 0 {
+        transform.scale = Some(reader.vector3().ok()?);
+    }
+    Some(transform)
 }
 
 /// Builds an [`Object`] from a full `ObjectUpdate` object-data block.

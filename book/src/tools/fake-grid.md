@@ -529,6 +529,72 @@ is a ghost object standing in that viewer until its next refetch.
 rez a container, rez and take a donor, drop it in, watch the serial
 advance, read the listing back over Xfer, trash the container.
 
+### The edit surfaces
+
+Rezzing, derezzing and dropping into a prim were once the *only* writes.
+Everything else a viewer can change — the build floater, About Land, the
+Region/Estate floater — was decoded by `SimSession` and dropped, so no tier
+below a live grid could answer "did my edit reach the grid". The three
+families now land, each in a module of its own, and each answered under the
+region's own lock:
+
+- **`object_edits.rs`** — the build floater. Two stores travelling in two
+  messages, which is the thing to keep straight: the `Object` itself (its
+  motion, scale, material, click action and `PrimFlags`) goes out in an
+  `ObjectUpdate` and reaches the whole region, while its `ObjectProperties`
+  (name, description, category, sale state, permissions, owner, group) go
+  out in a message of their own that a simulator sends to whoever holds the
+  object *selected*. An `ObjectUpdate` carries none of those fields, so a
+  client that renames an object learns the rename took only from
+  `SimSession::send_object_properties` — which is why the family needed a
+  sender for the full form before any of it was observable.
+
+  Linking is not only a parent id: a child's placement is stated in its
+  root's frame, so a link restates it and a delink puts it back. Undo and
+  redo are the *simulator's* — the messages name objects and nothing else,
+  and address them by full id rather than by the region-local id the rest of
+  the family uses — so each edited object carries a short history of whole
+  `Object` snapshots (`EditHistory`), which is the only definition of "undo"
+  that composes across edits of different kinds.
+
+- **`parcel_edits.rs`** — About Land, and the land a client buys, deeds,
+  abandons and reclaims. A parcel has **one** record and a
+  `ParcelPropertiesUpdate` carries the whole of it, so an edit is "read the
+  parcel, change one field, send it all back" (`ParcelInfo::to_update` is
+  that read). A changed parcel is re-sent as a sequence-zero
+  `ParcelProperties`, the unsolicited form the arrival burst already uses.
+  The access lists are the one parcel record that does not travel in the
+  properties reply — they have their own request and reply, and live beside
+  the parcels rather than on them.
+
+- **`estate.rs`** — the Region/Estate floater, which is not shaped like the
+  other two at all: an estate command is one `EstateOwnerMessage` carrying a
+  method name and a list of byte parameters, so the whole floater is a
+  switch on a string. `getinfo`, `estatechangeinfo`, `setregioninfo`,
+  `setregionterrain`, `texturedetail` / `textureheights` / `texturecommit`,
+  `estateaccessdelta`, `estatechangecovenantid` and the map-tile nudge are
+  answered; the region's own configuration (`RegionInfo`) and terrain
+  composition become writable stores the first time one of them changes
+  them, and stay derived from the region's identity until then.
+
+  Every estate command is refused **in silence** for an agent with no estate
+  power, which is what OpenSim does and the only thing that makes the gate
+  observable. The estate itself is a record and not a rule: a banned agent
+  may still log in, because the fake grid enforces nothing.
+
+Two deliberate limits. A **properties** change is pushed only to the
+client that made it — telling the region's *other* viewers needs a
+selection subscription, which is `test-fake-grid-concurrent-edits`'s work.
+And the estate is stored **per region**, because the fake grid's regions are
+independent worlds with no store above them; nothing reads an estate from
+two regions yet.
+
+Offline conformance: `object-edit` (the whole build surface, including the
+transform, the undo stack and the read-back through `ObjectProperties`),
+`object-link-delink`, `object-properties`, `parcel-edit` (the About Land
+form and the ban list, each refetched and restored), `region-info`,
+`estate-info` and `estate-access`.
+
 ### A parcel's other half
 
 A `ParcelProperties` record has no field for the parcel's **grid-wide** id,

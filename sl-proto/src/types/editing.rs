@@ -5,8 +5,8 @@ use sl_types::key::{AgentKey, GroupKey, InventoryFolderKey, InventoryKey, Object
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
 use sl_types::money::LindenAmount;
-use sl_wire::Permissions5;
 use sl_wire::RegionLocalObjectId;
+use sl_wire::{Permissions, Permissions5};
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
@@ -427,6 +427,42 @@ impl PermissionField {
             Self::Group => 0x04,
             Self::Everyone => 0x08,
             Self::NextOwner => 0x10,
+        }
+    }
+
+    /// The mask of `permissions` this field names, to change in place.
+    ///
+    /// A method rather than a `match` at the call site because
+    /// [`PermissionField`] is `#[non_exhaustive]`: a caller outside this crate
+    /// would need a wildcard arm, and a wildcard over "which of the five masks"
+    /// can only apply the change to the wrong one.
+    pub const fn select_mut(self, permissions: &mut Permissions5) -> &mut Permissions {
+        match self {
+            Self::Base => &mut permissions.base,
+            Self::Owner => &mut permissions.owner,
+            Self::Group => &mut permissions.group,
+            Self::Everyone => &mut permissions.everyone,
+            Self::NextOwner => &mut permissions.next_owner,
+        }
+    }
+
+    /// The mask a `Field` wire byte selects, or [`None`] for a byte that
+    /// selects none.
+    ///
+    /// Unknown returns [`None`] rather than a default: every other wire
+    /// classification here can fall back on the value a viewer means by
+    /// silence, and there is no such thing as "the default permission mask" —
+    /// applying a change to the wrong mask would hand out rights nobody
+    /// granted.
+    #[must_use]
+    pub const fn from_code(code: u8) -> Option<Self> {
+        match code {
+            0x01 => Some(Self::Base),
+            0x02 => Some(Self::Owner),
+            0x04 => Some(Self::Group),
+            0x08 => Some(Self::Everyone),
+            0x10 => Some(Self::NextOwner),
+            _ => None,
         }
     }
 }

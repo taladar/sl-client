@@ -29,20 +29,16 @@ mod test {
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
         AgentKey, AnimationKey, AssetType, AttachmentMode, AttachmentPoint, Camera, ChatChannel,
-        ChatSessionKind, ClassifiedCategory, ClassifiedKey, ClassifiedUpdate, ClickAction,
-        ControlFlags, CreateGroupParams, Event, FolderType, FriendKey, GridCoordinates, GroupKey,
-        GroupNoticeKey, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange,
-        GroupRoleUpdateType, InterestsUpdate, InventoryCallbackId, InventoryFolderKey,
-        InventoryItem, InventoryKey, InventoryType, LandStatReportType, LindenAmount, LoginParams,
-        LureId, Material, Maturity, MoneyTransactionType, MuteFlags, MuteType, NewInventoryItem,
-        ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey,
-        ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags,
-        ParcelReturnType, ParcelUpdate, PermissionField, Permissions, Permissions5, PickKey,
-        PickUpdate, PrimShapeParams, ProductType, ProfileUpdate, QueryId, RegionHandle,
-        RegionIdentity, RegionLocalObjectId, RegionLocalParcelId, RegionTerrainComposition,
-        RezAttachment, SaleType, ScopedObjectId, ScopedParcelId, ServerEvent, Session, SimSession,
-        TextureKey, TransactionId, Wearable, WearableType, group_powers,
-        parse_event_queue_response,
+        ChatSessionKind, ClassifiedCategory, ClassifiedKey, ClassifiedUpdate, ControlFlags,
+        CreateGroupParams, Event, FolderType, FriendKey, GridCoordinates, GroupKey, GroupNoticeKey,
+        GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, GroupRoleUpdateType,
+        InterestsUpdate, InventoryCallbackId, InventoryFolderKey, InventoryItem, InventoryKey,
+        InventoryType, LindenAmount, LoginParams, LureId, Maturity, MoneyTransactionType,
+        MuteFlags, MuteType, NewInventoryItem, ObjectExtraParams, ObjectKey, OwnerKey,
+        Permissions5, PickKey, PickUpdate, PrimShapeParams, ProductType, ProfileUpdate, QueryId,
+        RegionHandle, RegionIdentity, RegionLocalObjectId, RegionTerrainComposition, RezAttachment,
+        ScopedObjectId, ServerEvent, Session, SimSession, TextureKey, TransactionId, Wearable,
+        WearableType, group_powers, parse_event_queue_response,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::{
@@ -461,42 +457,12 @@ mod test {
         "GroupTitlesRequest",
         "GroupNoticesListRequest",
         "GroupNoticeRequest",
-        // object edits
-        "MultipleObjectUpdate",
-        "ObjectName",
-        "ObjectDescription",
-        "ObjectCategory",
-        "ObjectClickAction",
-        "ObjectMaterial",
-        "ObjectSaleInfo",
-        "ObjectFlagUpdate",
-        "ObjectIncludeInSearch",
-        "ObjectPermissions",
-        "ObjectGroup",
-        "ObjectOwner",
-        "ObjectLink",
-        "ObjectDelink",
-        "ObjectDuplicate",
-        "ObjectSelect",
-        "ObjectDeselect",
+        // object handling (the edits themselves are typed since
+        // `test-fake-grid-edit-surfaces`; what is left is the grab, which moves
+        // an object without changing what the region holds of it)
         "ObjectGrab",
         "ObjectDeGrab",
         "ObjectGrabUpdate",
-        "Undo",
-        "Redo",
-        "ObjectDelete",
-        // parcels / land / region
-        "ParcelPropertiesUpdate",
-        "ParcelBuy",
-        "ParcelDeedToGroup",
-        "ParcelRelease",
-        "ParcelReclaim",
-        "ParcelReturnObjects",
-        "ParcelSelectObjects",
-        "ParcelAccessListRequest",
-        "ParcelAccessListUpdate",
-        "LandStatRequest",
-        "RequestRegionInfo",
         // profile / picks / classifieds
         "AvatarPropertiesRequest",
         "AvatarPropertiesUpdate",
@@ -568,45 +534,7 @@ mod test {
         "GroupNoticeRequest",
     ];
     /// The raw-forwarded messages the matching family test sends, in order.
-    const OBJECT_FAMILY: &[&str] = &[
-        "MultipleObjectUpdate",
-        "ObjectName",
-        "ObjectDescription",
-        "ObjectCategory",
-        "ObjectClickAction",
-        "ObjectMaterial",
-        "ObjectSaleInfo",
-        "ObjectFlagUpdate",
-        "ObjectIncludeInSearch",
-        "ObjectPermissions",
-        "ObjectGroup",
-        "ObjectOwner",
-        "ObjectLink",
-        "ObjectDelink",
-        "ObjectDuplicate",
-        "ObjectSelect",
-        "ObjectDeselect",
-        "ObjectGrab",
-        "ObjectDeGrab",
-        "ObjectGrabUpdate",
-        "Undo",
-        "Redo",
-        "ObjectDelete",
-    ];
-    /// The raw-forwarded messages the matching family test sends, in order.
-    const PARCEL_FAMILY: &[&str] = &[
-        "ParcelPropertiesUpdate",
-        "ParcelBuy",
-        "ParcelDeedToGroup",
-        "ParcelRelease",
-        "ParcelReclaim",
-        "ParcelReturnObjects",
-        "ParcelSelectObjects",
-        "ParcelAccessListRequest",
-        "ParcelAccessListUpdate",
-        "LandStatRequest",
-        "RequestRegionInfo",
-    ];
+    const OBJECT_FAMILY: &[&str] = &["ObjectGrab", "ObjectDeGrab", "ObjectGrabUpdate"];
     /// The raw-forwarded messages the matching family test sends, in order.
     const PROFILE_FAMILY: &[&str] = &[
         "AvatarPropertiesRequest",
@@ -657,7 +585,6 @@ mod test {
             INVENTORY_FAMILY,
             GROUP_FAMILY,
             OBJECT_FAMILY,
-            PARCEL_FAMILY,
             PROFILE_FAMILY,
             MONEY_AND_MUTE_FAMILY,
             AGENT_FAMILY,
@@ -814,17 +741,15 @@ mod test {
     }
 
     #[test]
-    fn object_edits_forward_verbatim() -> Result<(), TestError> {
+    fn object_grabs_forward_verbatim() -> Result<(), TestError> {
         let now = Instant::now();
         let (mut client, mut sim) = setup(now)?;
         let circuit = client.root_circuit_id().ok_or("no circuit")?;
         let one = ScopedObjectId::new(circuit, RegionLocalObjectId(1));
-        let two = ScopedObjectId::new(circuit, RegionLocalObjectId(2));
-        let group = GroupKey::from(uuid::Uuid::from_u128(0x6711));
         let object = ObjectKey::from(uuid::Uuid::from_u128(0x0B1));
 
-        // Undo/Redo only name objects the client has seen; rez two first.
-        sim.send_object_update(&[box_prim(1, 0x0B1), box_prim(2, 0x0B2)], 0xFFFF, now)?;
+        // A grab names an object the client has seen; rez it first.
+        sim.send_object_update(&[box_prim(1, 0x0B1)], 0xFFFF, now)?;
         pump(&mut client, &mut sim, now)?;
         drain_client(&mut client);
         drain_server(&mut sim);
@@ -834,53 +759,6 @@ mod test {
             y: 64.0,
             z: 25.5,
         };
-        client.update_object(
-            one,
-            &ObjectTransform {
-                position: Some(position.clone()),
-                ..ObjectTransform::default()
-            },
-            now,
-        )?;
-        client.set_object_name(one, "Cube", now)?;
-        client.set_object_description(one, "a cube", now)?;
-        client.set_object_category(one, 3, now)?;
-        client.set_object_click_action(one, ClickAction::Sit, now)?;
-        client.set_object_material(one, Material::Metal, now)?;
-        client.set_object_for_sale(one, SaleType::Copy, Some(LindenAmount(250)), now)?;
-        client.set_object_flags(
-            one,
-            &ObjectFlagSettings {
-                use_physics: true,
-                is_phantom: true,
-                ..ObjectFlagSettings::default()
-            },
-            now,
-        )?;
-        client.set_object_include_in_search(one, true, now)?;
-        client.set_object_permissions(
-            &[one, two],
-            PermissionField::NextOwner,
-            true,
-            Permissions::COPY,
-            now,
-        )?;
-        client.set_object_group(&[one], group, now)?;
-        client.deed_objects_to_group(&[one], group, now)?;
-        client.link_objects(&[one, two], now)?;
-        client.delink_objects(&[two], now)?;
-        client.duplicate_objects(
-            &[one],
-            Vector {
-                x: 1.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            None,
-            now,
-        )?;
-        client.request_object_properties(&[one], now)?;
-        client.deselect_objects(&[one], now)?;
         client.touch_object(one, None, now)?;
         client.grab_object_update(
             object,
@@ -889,79 +767,18 @@ mod test {
                 y: 0.0,
                 z: 0.0,
             },
-            position.clone(),
+            position,
             10,
             None,
             now,
         )?;
-        client.undo_objects(&[one], now)?;
-        client.redo_objects(&[one], now)?;
-        client.delete_objects(&[two], now)?;
 
         let relayed = assert_family(&mut client, &mut sim, now, OBJECT_FAMILY)?;
-        let AnyMessage::ObjectSaleInfo(sale) = find(&relayed, "ObjectSaleInfo")? else {
-            return Err("expected an ObjectSaleInfo".into());
+        let AnyMessage::ObjectGrabUpdate(grab) = find(&relayed, "ObjectGrabUpdate")? else {
+            return Err("expected an ObjectGrabUpdate".into());
         };
-        let block = sale.object_data.first().ok_or("one sale block")?;
-        assert_eq!(block.local_id, 1);
-        assert_eq!(block.sale_price, 250);
-        Ok(())
-    }
-
-    #[test]
-    fn parcel_and_region_requests_forward_verbatim() -> Result<(), TestError> {
-        let now = Instant::now();
-        let (mut client, mut sim) = setup(now)?;
-        let circuit = client.root_circuit_id().ok_or("no circuit")?;
-        let parcel = ScopedParcelId::new(circuit, RegionLocalParcelId(7));
-        let group = GroupKey::from(uuid::Uuid::from_u128(0x6712));
-
-        client.update_parcel(
-            &ParcelUpdate {
-                local_id: RegionLocalParcelId(7),
-                parcel_flags: ParcelFlags::CREATE_OBJECTS.union(ParcelFlags::USE_BAN_LIST),
-                name: "My Parcel".to_owned(),
-                description: "A test parcel".to_owned(),
-                category: ParcelCategory::Residential,
-                sale_price: Some(LindenAmount(100)),
-                ..ParcelUpdate::default()
-            },
-            now,
-        )?;
-        client.buy_parcel(parcel, 512, 1024, None, false, now)?;
-        client.deed_parcel_to_group(parcel, group, now)?;
-        client.release_parcel(parcel, now)?;
-        client.reclaim_parcel(parcel, now)?;
-        client.return_parcel_objects(
-            parcel,
-            ParcelReturnType::OTHER,
-            &[OwnerKey::Agent(AgentKey::from(uuid::Uuid::from_u128(0x99)))],
-            &[],
-            now,
-        )?;
-        client.select_parcel_objects(parcel, ParcelReturnType::OTHER, &[], now)?;
-        client.request_parcel_access_list(parcel, ParcelAccessScope::Ban, now)?;
-        client.update_parcel_access_list(
-            parcel,
-            ParcelAccessScope::Access,
-            &[ParcelAccessEntry {
-                id: uuid::Uuid::from_u128(0x55),
-                time: 0,
-                flags: ParcelAccessFlags::ALLOW_EXPERIENCE,
-            }],
-            uuid::Uuid::from_u128(0x7A),
-            now,
-        )?;
-        client.request_land_stat(LandStatReportType::TopScripts, 0, "", parcel, now)?;
-        client.request_region_info(now)?;
-
-        let relayed = assert_family(&mut client, &mut sim, now, PARCEL_FAMILY)?;
-        let AnyMessage::ParcelBuy(buy) = find(&relayed, "ParcelBuy")? else {
-            return Err("expected a ParcelBuy".into());
-        };
-        assert_eq!(buy.data.local_id, 7);
-        assert_eq!(buy.parcel_data.price, 512);
-        assert_eq!(buy.parcel_data.area, 1024);
+        assert_eq!(grab.object_data.object_id, object.uuid());
+        assert_eq!(grab.object_data.time_since_last, 10);
         Ok(())
     }
 

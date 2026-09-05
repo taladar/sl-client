@@ -21,7 +21,20 @@
 //!   * make it phantom with [`Command::SetObjectFlags`] (the `FLAGS_PHANTOM` bit
 //!     of [`Object::update_flags`]),
 //!   * hollow the box with [`Command::SetObjectShape`]
-//!     ([`Object::shape`]`.profile_hollow`).
+//!     ([`Object::shape`]`.profile_hollow`),
+//!   * make it sit-on-click with [`Command::SetObjectClickAction`]
+//!     ([`Object::click_action`]),
+//!   * list it in search with [`Command::SetObjectIncludeInSearch`] (the
+//!     `FLAGS_INCLUDE_IN_SEARCH` bit),
+//!   * move, turn and resize it in one [`Command::UpdateObject`]
+//!     ([`Object::motion`] and [`Object::scale`]).
+//! * The **undo stack** is the simulator's and not the viewer's: a
+//!   [`Command::UndoObjects`] names objects and nothing else, so what one step
+//!   back restores is whatever the region recorded for them — here, the place
+//!   the object stood before the move. A grid with nothing recorded answers
+//!   with silence, so the outcome is recorded either way and only asserted on a
+//!   grid whose content is ours; the matching [`Command::RedoObjects`] puts it
+//!   back.
 //!
 //! The flow is: settle the initial scene (so the rezzed cube is recognised as
 //! new and a reference primitive supplies a rez position), rez the cube, read its
@@ -30,7 +43,11 @@
 //! facts changed as sent, then derez the cube to the Trash so the scene is left
 //! as found.
 //!
-//! `1av`, `[both]`. On OpenSim the avatar is forced into the "Default Region",
+//! `1av`, `[both]`, and **offline**: every surface it touches is one the fake
+//! grid answers since `test-fake-grid-edit-surfaces`, so the case runs on every
+//! `cargo test` as well as against a live grid.
+//!
+//! On OpenSim the avatar is forced into the "Default Region",
 //! which holds this workspace's rezzed test object as the placement reference, so
 //! a primitive is guaranteed and its absence fails the case. On Second Life the
 //! landing region's contents are uncontrolled; a region that streams no primitive
@@ -43,16 +60,18 @@ use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 use sl_client_tokio::{
-    Command, DeRezDestination, Event, FolderType, InventoryFolder, InventoryFolderKey,
-    LindenAmount, Material, Object, ObjectFlagSettings, ObjectProperties, PermissionField,
-    Permissions, PrimShape, PrimShapeParams, SaleType, ScopedObjectId, TransactionId, Uuid, Vector,
-    pcode,
+    ClickAction, Command, DeRezDestination, Event, FolderType, InventoryFolder, InventoryFolderKey,
+    LindenAmount, Material, Object, ObjectFlagSettings, ObjectProperties, ObjectTransform,
+    PermissionField, Permissions, PrimShape, PrimShapeParams, SaleType, ScopedObjectId,
+    TransactionId, Uuid, Vector, pcode,
 };
 
 use crate::context::{Session, TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
-use crate::support::{REGION_TIMEOUT, REPLY_TIMEOUT, check, check_eq, is_opensim, secs_metric};
+use crate::support::{
+    REGION_TIMEOUT, REPLY_TIMEOUT, check, check_eq, content_is_ours, is_opensim, secs_metric,
+};
 
 /// The OpenSim start location: the "Default Region" (1000,1000), centred, where
 /// this workspace's test object lives and serves as the rez placement reference.
@@ -102,6 +121,33 @@ const FLAGS_PHANTOM: u32 = 1 << 10;
 /// value confirms the shape edit round-tripped.
 const HOLLOW_25_PCT: u16 = 12_500;
 
+/// The include-in-search flag (`FLAGS_INCLUDE_IN_SEARCH`, `1 << 15`) as it
+/// appears in an object-update's `UpdateFlags`, from the viewer's
+/// `object_flags.h` — what an `ObjectIncludeInSearch` sets.
+const FLAGS_INCLUDE_IN_SEARCH: u32 = 1 << 15;
+
+/// The `LLCategory` code the category edit files the object under.
+const NEW_CATEGORY: u32 = 3;
+
+/// How far the transform edit moves the object, in metres — the move an undo
+/// then steps back out of.
+const MOVE_LIFT_M: f32 = 3.0;
+
+/// The X extent the resize applies, in metres (the default cube is 1 m).
+const RESIZED_X: f32 = 2.0;
+
+/// The size the transform edit resizes the object to, in metres.
+const RESIZED_SCALE: Vector = Vector {
+    x: RESIZED_X,
+    y: 0.5,
+    z: 1.0,
+};
+
+/// How far apart two positions may be and still count as the same place: a
+/// grid is free to answer a move with a terse update, which quantises a region
+/// position to about 4 mm.
+const POSITION_EPSILON_M: f32 = 0.05;
+
 /// Edits one owned prim across the whole build surface — name, description,
 /// permissions, for-sale, material, flags, shape — confirming the
 /// administrative edits via a fresh [`Event::ObjectProperties`] and the
@@ -115,11 +161,12 @@ impl GridTest for ObjectEdit {
     }
 
     fn description(&self) -> &'static str {
-        "Edit an object's name, description, flags, shape, material, permissions, and for-sale state"
+        "Edit an object's name, description, category, flags, shape, material, permissions, \
+         for-sale state, transform and undo history"
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::Fake]
     }
 
     fn start_location(&self, grid: Grid) -> &'static str {
@@ -132,7 +179,7 @@ impl GridTest for ObjectEdit {
 
     #[expect(
         clippy::too_many_lines,
-        reason = "one linear flow: settle, rez, baseline, seven edits, verify, clean up"
+        reason = "one linear flow: settle, rez, baseline, twelve edits, undo, verify, clean up"
     )]
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
         Box::pin(async move {
@@ -172,9 +219,9 @@ impl GridTest for ObjectEdit {
 
             let reference = match reference {
                 Some(reference) => reference,
-                None if is_opensim(grid) => {
+                None if content_is_ours(grid) => {
                     return Err(TestFailure::Assertion(
-                        "no primitive appeared in the Default Region object stream".to_owned(),
+                        "no primitive appeared in the region's object stream".to_owned(),
                     ));
                 }
                 None => {
@@ -196,7 +243,7 @@ impl GridTest for ObjectEdit {
             };
             session
                 .send(Command::RezObject {
-                    shape: PrimShape::cube(position),
+                    shape: PrimShape::cube(position.clone()),
                     group_id: None,
                 })
                 .await?;
@@ -258,6 +305,12 @@ impl GridTest for ObjectEdit {
                     sale_price: Some(LindenAmount(SALE_PRICE)),
                 })
                 .await?;
+            session
+                .send(Command::SetObjectCategory {
+                    local_id: scoped,
+                    category: NEW_CATEGORY,
+                })
+                .await?;
 
             // --- Geometric / physical edits (each confirmed by a re-broadcast) ---
             session
@@ -305,6 +358,107 @@ impl GridTest for ObjectEdit {
             )
             .await?;
 
+            session
+                .send(Command::SetObjectClickAction {
+                    local_id: scoped,
+                    action: ClickAction::Sit,
+                })
+                .await?;
+            let click_rtt = confirm_object_update(
+                session,
+                scoped,
+                |object| object.click_action == ClickAction::Sit.to_code(),
+                "the sit click action",
+            )
+            .await?;
+
+            session
+                .send(Command::SetObjectIncludeInSearch {
+                    local_id: scoped,
+                    include: true,
+                })
+                .await?;
+            let search_rtt = confirm_object_update(
+                session,
+                scoped,
+                |object| object.update_flags & FLAGS_INCLUDE_IN_SEARCH != 0,
+                "the include-in-search flag",
+            )
+            .await?;
+
+            // The transform: a move, a rotate and a resize in one message. The
+            // move is what the undo below steps back out of, so the position it
+            // started at is kept.
+            let moved_to = Vector {
+                x: position.x,
+                y: position.y,
+                z: position.z + MOVE_LIFT_M,
+            };
+            session
+                .send(Command::UpdateObject {
+                    local_id: scoped,
+                    transform: ObjectTransform {
+                        position: Some(moved_to.clone()),
+                        rotation: Some(quarter_turn()),
+                        scale: Some(RESIZED_SCALE),
+                        group: false,
+                        uniform: false,
+                    },
+                })
+                .await?;
+            let moved = moved_to.clone();
+            let transform_rtt = confirm_object_update(
+                session,
+                scoped,
+                move |object| {
+                    near(&object.motion.position, &moved) && near_scalar(object.scale.x, RESIZED_X)
+                },
+                "the move and resize",
+            )
+            .await?;
+
+            // The undo stack is the simulator's, not the viewer's: the message
+            // names objects and nothing else, and what a step back restores is
+            // whatever the region recorded for them. A grid with nothing
+            // recorded answers with silence, which is a finding rather than a
+            // failure — so the wait is allowed to time out and the outcome is
+            // recorded either way.
+            let undo_started = Instant::now();
+            session
+                .send(Command::UndoObjects {
+                    local_ids: vec![scoped],
+                })
+                .await?;
+            let started_at = position.clone();
+            let undone = confirm_object_update(
+                session,
+                scoped,
+                move |object| near(&object.motion.position, &started_at),
+                "the undone move",
+            )
+            .await
+            .is_ok();
+            let undo_rtt = undo_started.elapsed();
+            if content_is_ours(grid) {
+                check(
+                    undone,
+                    "an undo did not put the object back where it was before the move",
+                )?;
+                session
+                    .send(Command::RedoObjects {
+                        local_ids: vec![scoped],
+                    })
+                    .await?;
+                let moved_again = moved_to.clone();
+                confirm_object_update(
+                    session,
+                    scoped,
+                    move |object| near(&object.motion.position, &moved_again),
+                    "the redone move",
+                )
+                .await?;
+            }
+
             // Verify: re-read the extended properties and assert every
             // administrative edit landed.
             let edited = request_properties(session, &object).await?;
@@ -335,6 +489,12 @@ impl GridTest for ObjectEdit {
                 has_copy != had_copy,
                 "the next-owner copy permission did not toggle after the permission edit",
             )?;
+            // Second Life's category edit is a legacy surface no viewer exposes
+            // any more, so a live grid is allowed to ignore it; a grid whose
+            // content is ours is not.
+            if content_is_ours(grid) {
+                check_eq("edited category", &edited.category, &NEW_CATEGORY)?;
+            }
 
             // Clean up: derez the edited cube to Trash, confirmed by its
             // `KillObject`, leaving the scene as found.
@@ -368,9 +528,38 @@ impl GridTest for ObjectEdit {
             metrics.set_timing(&secs_metric("material_rtt"), material_rtt.as_secs_f64());
             metrics.set_timing(&secs_metric("flags_rtt"), flags_rtt.as_secs_f64());
             metrics.set_timing(&secs_metric("shape_rtt"), shape_rtt.as_secs_f64());
+            metrics.set_timing(&secs_metric("click_action_rtt"), click_rtt.as_secs_f64());
+            metrics.set_timing(&secs_metric("search_flag_rtt"), search_rtt.as_secs_f64());
+            metrics.set_timing(&secs_metric("transform_rtt"), transform_rtt.as_secs_f64());
+            metrics.set_timing(&secs_metric("undo_rtt"), undo_rtt.as_secs_f64());
+            metrics.set("undo_restored", undone.to_string());
+            metrics.set("category", i64::from(edited.category));
             Ok(())
         })
     }
+}
+
+/// A quarter turn about the Z axis — a rotation the packed three-float form a
+/// `MultipleObjectUpdate` carries can express, and one a freshly rezzed cube is
+/// never already at.
+const fn quarter_turn() -> sl_client_tokio::Rotation {
+    sl_client_tokio::Rotation {
+        x: 0.0,
+        y: 0.0,
+        z: std::f32::consts::FRAC_1_SQRT_2,
+        s: std::f32::consts::FRAC_1_SQRT_2,
+    }
+}
+
+/// Whether two positions are the same place, to within the quantisation a terse
+/// update applies.
+fn near(left: &Vector, right: &Vector) -> bool {
+    near_scalar(left.x, right.x) && near_scalar(left.y, right.y) && near_scalar(left.z, right.z)
+}
+
+/// Whether two metre values are the same, to within [`POSITION_EPSILON_M`].
+fn near_scalar(left: f32, right: f32) -> bool {
+    (left - right).abs() <= POSITION_EPSILON_M
 }
 
 /// The agent inventory root folder id from a login skeleton — the folder with no

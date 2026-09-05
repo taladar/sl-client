@@ -477,7 +477,7 @@ pub use object::{
     ObjectMotion, ObjectPlayingAnimation, ObjectProperties, ObjectPropertiesFamily, ParticleSystem,
     PrimShapeParams, ReflectionProbe, RenderMaterialRef, SculptData, TaskInventoryItem,
     TaskInventoryReply, TextureAnimation, attachment_state_from_point, particle_pattern, pcode,
-    texture_anim_mode,
+    prim_flags, texture_anim_mode,
 };
 pub use open_region::OpenRegionInfo;
 pub use parcel::{

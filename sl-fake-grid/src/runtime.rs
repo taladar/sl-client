@@ -168,7 +168,11 @@ impl RegionEntry {
     }
 
     /// Builds the identity the automatic `RegionHandshake` carries.
-    fn identity(&self) -> RegionIdentity {
+    ///
+    /// `estate_owner` is the grid's own ([`GridCore::estate_owner`]): a region
+    /// is owned by whoever holds its estate, and a region owned by nobody is
+    /// one whose About Land and Region/Estate floaters both name "(nobody)".
+    fn identity(&self, estate_owner: AgentKey) -> RegionIdentity {
         let handle = self.handle();
         RegionIdentity {
             sim_name: region_name_from_wire("fake-grid", &self.config.name)
@@ -189,7 +193,9 @@ impl RegionEntry {
             product_name: "Fake Region".to_owned(),
             cpu_class_id: 0,
             cpu_ratio: 1,
-            sim_owner: Uuid::nil(),
+            sim_owner: estate_owner.uuid(),
+            // Per session, not per region: set by the caller from the account's
+            // own estate power.
             is_estate_manager: false,
             water_height: self.config.water_height,
             billable_factor: 1.0,
@@ -332,6 +338,14 @@ pub struct LoginNotice {
 pub(crate) struct GridCore {
     /// The registered accounts.
     pub(crate) accounts: Vec<Account>,
+    /// The agent every region reports as its owner: the first account
+    /// registered with estate powers, or the nil key when no account has any.
+    ///
+    /// A grid whose regions are owned by nobody is one whose About Land and
+    /// Region/Estate floaters both name "(nobody)", and whose estate replies
+    /// disagree with the account actually issuing the commands — so the owner
+    /// is an account rather than a placeholder wherever there is one to name.
+    pub(crate) estate_owner: AgentKey,
     /// The registered regions (first entry = default start region).
     regions: Vec<RegionEntry>,
     /// The login policy gates applied to every account.
@@ -645,7 +659,11 @@ impl GridCore {
             sim,
             caps,
             assets: self.assets.clone(),
-            identity: region.identity(),
+            identity: {
+                let mut identity = region.identity(self.estate_owner);
+                identity.is_estate_manager = account.config.estate_manager;
+                identity
+            },
             on_agent_arrived: region.scenario.on_agent_arrived.clone(),
             on_event: region.scenario.on_event.clone(),
             udp_assets,
@@ -1214,12 +1232,18 @@ impl FakeGridBuilder {
         // region table never changes after start, so it is built once here
         // rather than per login.
         let map: Arc<[sl_proto::MapRegionInfo]> = crate::world_map::catalogue(&regions).into();
+        let accounts: Vec<Account> = self
+            .accounts
+            .into_iter()
+            .map(|config| Account::register(config, &minter))
+            .collect();
+        let estate_owner = accounts
+            .iter()
+            .find(|account| account.config.estate_manager)
+            .map_or_else(|| AgentKey::from(Uuid::nil()), |account| account.agent_id);
         let core = Arc::new(GridCore {
-            accounts: self
-                .accounts
-                .into_iter()
-                .map(|config| Account::register(config, &minter))
-                .collect(),
+            accounts,
+            estate_owner,
             regions,
             gates: self.gates,
             honor_options: self.honor_options,

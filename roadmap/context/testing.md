@@ -78,6 +78,20 @@ multi-region offsets, in-flight asset leaks, NPC appearance delivery.
   one, which is what a handover needs. A write publishes a `RegionUpdate` and a
   per-session watcher turns it into the `ObjectUpdate` / `KillObject` each other
   circuit needs, because there is no simulation loop to sweep for it.
+- **A client's edits land**, in three modules under that same lock:
+  `object_edits.rs` (the build floater), `parcel_edits.rs` (About Land and
+  the land a client buys, deeds, abandons or reclaims) and `estate.rs` (the
+  Region/Estate floater, which is one message and a switch on a method name).
+  The thing to keep straight is *which message carries the change back*: an
+  object has two records travelling in two messages — the `ObjectUpdate` for
+  its motion, material, click action and flags, and `ObjectProperties` for its
+  name, description, category, sale state and permissions, which the update
+  carries none of — while a parcel has one record that a
+  `ParcelPropertiesUpdate` re-asserts whole. A properties change is pushed to
+  the editing client only; telling the region's *other* viewers needs the
+  selection subscription `test-fake-grid-concurrent-edits` owns. An estate
+  command from an agent with no estate power is refused **in silence**, as
+  OpenSim refuses it, which is what makes the gate observable at all.
 - `sl-conformance`'s **offline tier** — the same fake grid, asserted on the
   wire instead of in pixels. `Grid::Fake` starts a grid inside the test
   process (the catalogue region plus the border scene east of it as its

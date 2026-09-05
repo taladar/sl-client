@@ -77,6 +77,7 @@ pub mod offline_msg_fetch;
 pub mod open_region_info;
 pub mod parcel_access_list;
 pub mod parcel_divide_join;
+pub mod parcel_edit;
 pub mod parcel_info_dwell;
 pub mod parcel_object_owners;
 pub mod parcel_properties;

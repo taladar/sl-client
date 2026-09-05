@@ -18,14 +18,16 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::estate::EstateFixture;
 use crate::fixtures::{NpcAppearance, NpcFixture};
 use crate::terrain::TerrainFixture;
 use sl_proto::{
     AnimationKey, AssetKey, AssetType, GlobalCoordinates, InventoryItem, InventoryType, Object,
-    ObjectExtraParams, ObjectMotion, ObjectPlayingAnimation, ParcelCategory, ParcelDetails,
-    ParcelInfo, ParcelRequestResult, ParcelStatus, PrimShape, PrimShapeParams, RegionIdentity,
-    RegionLocalObjectId, RegionLocalParcelId, SaleType, ServerEvent, SimSession, TaskInventoryItem,
-    TerrainLayerType, pcode,
+    ObjectExtraParams, ObjectMotion, ObjectPlayingAnimation, ObjectProperties, ParcelAccessEntry,
+    ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelInfo, ParcelRequestResult,
+    ParcelStatus, PrimShape, PrimShapeParams, RegionIdentity, RegionLocalObjectId,
+    RegionLocalParcelId, RegionTerrainComposition, SaleType, ServerEvent, SimSession,
+    TaskInventoryItem, TerrainLayerType, pcode,
 };
 use sl_types::key::{AgentKey, InventoryFolderKey, InventoryKey, ObjectKey, OwnerKey, ParcelKey};
 use sl_types::lsl::{Rotation, Vector};
@@ -122,6 +124,119 @@ pub struct SceneFixtures {
     ///
     /// [`mint_local_id`]: Self::mint_local_id
     last_minted_local_id: RegionLocalObjectId,
+    /// Each edited object's history, for the `Undo` / `Redo` a build floater
+    /// sends. Not a fixture: it is empty until something is edited, and an
+    /// object that leaves the region takes its history with it.
+    undo: BTreeMap<RegionLocalObjectId, EditHistory>,
+    /// Each parcel's allow and ban lists, keyed by the parcel and which list it
+    /// is. They live here rather than on the [`ParcelInfo`] because that is the
+    /// wire record a `ParcelProperties` carries and it has no field for them: a
+    /// viewer asks for a list with a request of its own and is answered with a
+    /// reply of its own.
+    ///
+    /// A parcel with no entry has two empty lists, which is the state of every
+    /// parcel a fixture did not speak about.
+    parcel_access: BTreeMap<RegionLocalParcelId, ParcelAccessLists>,
+    /// The region's estate record: what the Region/Estate floater reads and
+    /// writes ([`crate::estate`]).
+    pub estate: EstateFixture,
+    /// The region's configuration as an estate manager has changed it, or
+    /// [`None`] while it is still what [`region_limits`] derives from the
+    /// region's identity.
+    ///
+    /// Lazily written rather than stated, so a region nobody has reconfigured
+    /// reports exactly what its own identity says and cannot drift from it.
+    limits: Option<sl_proto::RegionLimits>,
+    /// The region's terrain textures and blend heights as an estate manager has
+    /// changed them, or [`None`] while they are still the identity's.
+    ///
+    /// Lazily written for the same reason as [`limits`](Self::limits), and kept
+    /// here rather than on the identity because the identity is a per-session
+    /// copy: a terrain texture is the region's, not one viewer's.
+    terrain_composition: Option<RegionTerrainComposition>,
+}
+
+/// One parcel's two access lists: who may come in, and who may not.
+///
+/// Two fields rather than a map keyed by the scope, because there are exactly
+/// two and a wire scope byte that named neither would have nowhere to go.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ParcelAccessLists {
+    /// The allow list (`AL_ACCESS`).
+    pub access: Vec<ParcelAccessEntry>,
+    /// The ban list (`AL_BAN`).
+    pub ban: Vec<ParcelAccessEntry>,
+}
+
+impl ParcelAccessLists {
+    /// The list `scope` names, to read.
+    #[must_use]
+    pub fn list(&self, scope: ParcelAccessScope) -> &[ParcelAccessEntry] {
+        match scope {
+            ParcelAccessScope::Ban => &self.ban,
+            _ => &self.access,
+        }
+    }
+
+    /// The list `scope` names, to change.
+    pub const fn list_mut(&mut self, scope: ParcelAccessScope) -> &mut Vec<ParcelAccessEntry> {
+        match scope {
+            ParcelAccessScope::Ban => &mut self.ban,
+            _ => &mut self.access,
+        }
+    }
+}
+
+/// How many edits of one object a region can undo.
+///
+/// The reference viewer's own stack is deeper, and it keeps asking after the
+/// simulator has run out: an `Undo` with nothing left to undo is answered with
+/// silence, not an error, which is why the depth can be a number rather than a
+/// negotiation.
+const UNDO_DEPTH: usize = 10;
+
+/// One object's edit history: what it was before each of the last
+/// [`UNDO_DEPTH`] edits, and — once something has been undone — what it was
+/// before each undo.
+///
+/// The unit is the whole [`Object`], not the field that changed. A simulator's
+/// undo is a restore, not an inverse operation: it puts the object back the way
+/// it was, which is the only definition that composes when the edits were of
+/// different kinds (a move, then a rename, then a resize).
+#[derive(Debug, Clone, Default, PartialEq)]
+struct EditHistory {
+    /// The states to go back to, oldest first.
+    past: Vec<Object>,
+    /// The states an undo stepped out of, oldest first — what a redo returns
+    /// to. Cleared by any fresh edit, because a new edit makes the branch it
+    /// held unreachable.
+    future: Vec<Object>,
+}
+
+impl EditHistory {
+    /// Records `before` as a state an undo can return to, dropping the oldest
+    /// when the stack is full and abandoning any redo branch.
+    fn record(&mut self, before: Object) {
+        if self.past.len() >= UNDO_DEPTH {
+            let _oldest = self.past.remove(0);
+        }
+        self.past.push(before);
+        self.future.clear();
+    }
+
+    /// Steps one place back (`backwards`) or forward, handing over the state to
+    /// restore and keeping `current` on the other stack. [`None`] when that
+    /// direction has run out.
+    fn step(&mut self, current: Object, backwards: bool) -> Option<Object> {
+        let (from, to) = if backwards {
+            (&mut self.past, &mut self.future)
+        } else {
+            (&mut self.future, &mut self.past)
+        };
+        let restored = from.pop()?;
+        to.push(current);
+        Some(restored)
+    }
 }
 
 /// One region's world behind its lock: a single store every session in that
@@ -163,6 +278,15 @@ pub enum RegionChange {
     /// An object was added to the region; every other viewer needs its
     /// `ObjectUpdate`.
     Rezzed(Box<Object>),
+    /// An object already in the region changed — it moved, was resized, was
+    /// relinked, changed material — and every other viewer needs its new
+    /// `ObjectUpdate`.
+    ///
+    /// Distinct from [`Rezzed`](Self::Rezzed) only in what it means, since a
+    /// full `ObjectUpdate` is how a simulator says both: a viewer that has the
+    /// object updates it, and one that does not rezzes it. Keeping them apart
+    /// is for the reader of a change stream, not for the wire.
+    Updated(Box<Object>),
     /// An object left the region; every other viewer needs its `KillObject`.
     Killed(RegionLocalObjectId),
 }
@@ -338,8 +462,11 @@ impl ObjectAnimationFixture {
 
 impl SceneFixtures {
     /// No parcels, no objects, no NPCs.
+    ///
+    /// Not `const`: the estate record it starts with names the estate, and a
+    /// name is a `String`.
     #[must_use]
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             parcels: Vec::new(),
             listings: Vec::new(),
@@ -349,6 +476,11 @@ impl SceneFixtures {
             task_inventories: BTreeMap::new(),
             avatar_local_id: RegionLocalObjectId(1),
             last_minted_local_id: RegionLocalObjectId(0),
+            undo: BTreeMap::new(),
+            parcel_access: BTreeMap::new(),
+            estate: EstateFixture::default(),
+            limits: None,
+            terrain_composition: None,
         }
     }
 
@@ -390,6 +522,79 @@ impl SceneFixtures {
             .find(|object| object.local_id == local_id)
     }
 
+    /// The prim with the given region-local id, to edit in place.
+    ///
+    /// Only [`objects`](Self::objects), for the reason
+    /// [`remove_object`](Self::remove_object) is: an NPC's body and its
+    /// attachments are scripted scenery, not prims a client may edit.
+    pub fn object_mut(&mut self, local_id: RegionLocalObjectId) -> Option<&mut Object> {
+        self.objects
+            .iter_mut()
+            .find(|object| object.local_id == local_id)
+    }
+
+    /// The region-local id of the object with the given full id — the lookup
+    /// the `Undo` / `Redo` messages need, being the only client messages in the
+    /// object family that name an object by its full id.
+    #[must_use]
+    pub fn local_id_of(&self, full_id: ObjectKey) -> Option<RegionLocalObjectId> {
+        self.all_objects()
+            .into_iter()
+            .find(|object| object.full_id == full_id)
+            .map(|object| object.local_id)
+    }
+
+    /// The full properties record of the object with the given region-local id:
+    /// what an `ObjectProperties` reply carries.
+    ///
+    /// Two stores meet here. The editable half — name, description, category,
+    /// sale state, permissions, owner — is kept on the object itself
+    /// ([`Object::properties`]), synthesised from the object the first time
+    /// something asks, so a fixture that states no properties describes a prim
+    /// nobody has named rather than one with no record at all. The task
+    /// inventory's *serial* comes from the inventory, because that is where a
+    /// write advances it, and a record that carried a stale one would tell a
+    /// viewer its cached contents listing is still good.
+    #[must_use]
+    pub fn properties_of(&self, local_id: RegionLocalObjectId) -> Option<ObjectProperties> {
+        let object = self.object_by_local_id(local_id)?;
+        let mut properties = object
+            .properties
+            .clone()
+            .unwrap_or_else(|| default_object_properties(&object));
+        properties.inventory_serial = self
+            .task_inventories
+            .get(&local_id)
+            .map_or(0, |contents| contents.serial);
+        Some(properties)
+    }
+
+    /// Records the object as it is now as a state an undo can return to.
+    ///
+    /// Called before a change rather than after it: what an undo restores is
+    /// the state the edit replaced.
+    pub fn record_undo(&mut self, local_id: RegionLocalObjectId) {
+        let Some(before) = self.object_by_local_id(local_id) else {
+            return;
+        };
+        self.undo.entry(local_id).or_default().record(before);
+    }
+
+    /// Steps the object one place back along its edit history (`backwards`) or
+    /// forward again, returning the object as restored — or [`None`] when that
+    /// direction has run out, or the object is not here.
+    pub fn step_history(
+        &mut self,
+        local_id: RegionLocalObjectId,
+        backwards: bool,
+    ) -> Option<Object> {
+        let current = self.object_by_local_id(local_id)?;
+        let restored = self.undo.get_mut(&local_id)?.step(current, backwards)?;
+        let held = self.object_mut(local_id)?;
+        held.clone_from(&restored);
+        Some(restored)
+    }
+
     /// Removes the prim with the given region-local id, returning it.
     ///
     /// Only [`objects`](Self::objects): an NPC's body is not a prim anybody
@@ -400,6 +605,7 @@ impl SceneFixtures {
             .iter()
             .position(|object| object.local_id == local_id)?;
         let _contents = self.task_inventories.remove(&local_id);
+        let _history = self.undo.remove(&local_id);
         Some(self.objects.remove(index))
     }
 
@@ -467,6 +673,81 @@ impl SceneFixtures {
         self.parcels
             .iter()
             .find(|parcel| parcel.local_id == local_id)
+    }
+
+    /// The parcel with the given region-local id, to edit in place — what an
+    /// About Land save, a purchase and an abandonment all write through.
+    pub fn parcel_mut(&mut self, local_id: RegionLocalParcelId) -> Option<&mut ParcelInfo> {
+        self.parcels
+            .iter_mut()
+            .find(|parcel| parcel.local_id == local_id)
+    }
+
+    /// The region-local id of the parcel a region position stands on — how an
+    /// object is decided to be *on* a parcel, for a return or a highlight.
+    #[must_use]
+    pub fn parcel_at_position(&self, position: &Vector) -> Option<RegionLocalParcelId> {
+        self.parcel_at(position.x, position.y)
+            .map(|parcel| parcel.local_id)
+    }
+
+    /// One of a parcel's two access lists, as it stands.
+    ///
+    /// A parcel with no lists reads as two empty ones rather than as nothing:
+    /// "nobody is banned" is the state of every parcel a fixture did not speak
+    /// about, and it is the answer a viewer's About Land access tab expects.
+    #[must_use]
+    pub fn access_list(
+        &self,
+        local_id: RegionLocalParcelId,
+        scope: ParcelAccessScope,
+    ) -> &[ParcelAccessEntry] {
+        self.parcel_access
+            .get(&local_id)
+            .map_or(&[], |lists| lists.list(scope))
+    }
+
+    /// One of a parcel's two access lists, to change — created empty on first
+    /// use, since an unmentioned list is an empty one.
+    pub fn access_list_mut(
+        &mut self,
+        local_id: RegionLocalParcelId,
+        scope: ParcelAccessScope,
+    ) -> &mut Vec<ParcelAccessEntry> {
+        self.parcel_access
+            .entry(local_id)
+            .or_default()
+            .list_mut(scope)
+    }
+
+    /// The region's configuration and limits as they stand: what an estate
+    /// manager has made them, or what `identity` says when nobody has.
+    #[must_use]
+    pub fn limits(&self, identity: &RegionIdentity) -> sl_proto::RegionLimits {
+        self.limits
+            .clone()
+            .unwrap_or_else(|| region_limits(identity))
+    }
+
+    /// The region's configuration and limits, to change — filled in from
+    /// `identity` the first time somebody does.
+    pub fn limits_mut(&mut self, identity: &RegionIdentity) -> &mut sl_proto::RegionLimits {
+        self.limits.get_or_insert_with(|| region_limits(identity))
+    }
+
+    /// The region's terrain textures and blend heights as they stand.
+    #[must_use]
+    pub fn terrain_composition(&self, identity: &RegionIdentity) -> RegionTerrainComposition {
+        self.terrain_composition.unwrap_or(identity.terrain)
+    }
+
+    /// The region's terrain textures and blend heights, to change — filled in
+    /// from `identity` the first time somebody does.
+    pub fn terrain_composition_mut(
+        &mut self,
+        identity: &RegionIdentity,
+    ) -> &mut RegionTerrainComposition {
+        self.terrain_composition.get_or_insert(identity.terrain)
     }
 
     /// The 4096-byte parcel overlay of a 256 m region (one ownership byte
@@ -1204,6 +1485,17 @@ pub(crate) fn answer_world_request(
     event: &ServerEvent,
     now: Instant,
 ) -> Vec<RegionChange> {
+    // The object and parcel edit families are bodies of work of their own; each
+    // answers first and says so, so nothing here has to enumerate what they
+    // cover.
+    if let Some(changes) = crate::object_edits::answer_object_edit(world, mint, sim, event, now) {
+        return changes;
+    }
+    if let Some(changes) =
+        crate::parcel_edits::answer_parcel_edit(world, region, identity.agent_id, sim, event, now)
+    {
+        return changes;
+    }
     match event {
         // A new prim. The simulator owns both of the object's ids -- the
         // region-local handle and the full key -- so the client cannot know
@@ -1478,6 +1770,106 @@ pub(crate) fn answer_world_request(
         _other => {}
     }
     Vec::new()
+}
+
+/// The agent cap a fake region reports — the number a viewer's Region/Estate
+/// floater shows, and what a full Second Life region allows.
+const MAX_AGENTS: u32 = 40;
+
+/// The hard agent cap: what the estate could raise the limit to.
+const HARD_MAX_AGENTS: u32 = 100;
+
+/// The region's object budget, matching the prim allowance
+/// [`region_wide_parcel`] states for its parcel — one region, one number, or a
+/// viewer's land panel and its region panel disagree.
+const HARD_MAX_OBJECTS: u32 = 15_000;
+
+/// How far a terraform may raise or lower the ground from its baked height, in
+/// metres — the estate default a region ships with.
+const TERRAIN_LIMIT_M: f32 = 4.0;
+
+/// The estate every fake region belongs to. One estate, so the region's own and
+/// its parent's id are the same, the way a standalone region reports them.
+const ESTATE_ID: u32 = 1;
+
+/// The hour of the estate's day the region reports (mid-morning). A fake grid's
+/// sky is driven by the environment fixtures, not by this, but a region that
+/// claimed hour zero would be one whose floater disagreed with its own sky.
+const ESTATE_SUN_HOUR: f32 = 6.0;
+
+/// The region's configuration and limits, as a `RegionInfo` reports them.
+///
+/// Derived from the region's own [`RegionIdentity`] wherever the two overlap —
+/// name, flags, maturity, water height, billable factor — so the region a
+/// handshake describes and the region the Region/Estate floater shows cannot
+/// disagree. The rest are the constants above: a fake region has no estate
+/// service to ask, and a number stated once here is one a test can assert.
+#[must_use]
+pub fn region_limits(identity: &RegionIdentity) -> sl_proto::RegionLimits {
+    sl_proto::RegionLimits {
+        sim_name: identity.sim_name.clone(),
+        max_agents: MAX_AGENTS,
+        hard_max_agents: HARD_MAX_AGENTS,
+        hard_max_objects: HARD_MAX_OBJECTS,
+        region_flags: identity.region_flags,
+        region_flags_extended: identity.region_flags_extended,
+        maturity: identity.maturity,
+        estate_id: ESTATE_ID,
+        parent_estate_id: ESTATE_ID,
+        water_height: identity.water_height,
+        billable_factor: identity.billable_factor,
+        object_bonus_factor: 1.0,
+        terrain_raise_limit: TERRAIN_LIMIT_M,
+        terrain_lower_limit: -TERRAIN_LIMIT_M,
+        price_per_meter: LindenAmount(1),
+        redirect_grid_x: 0,
+        redirect_grid_y: 0,
+        use_estate_sun: true,
+        sun_hour: ESTATE_SUN_HOUR,
+        // Absent rather than all-zero: a region that sends the block claims
+        // custom chat ranges and a custom combat ruleset, and this one has
+        // neither.
+        chat_settings: None,
+        combat_settings: None,
+    }
+}
+
+/// The properties record of an object nobody has edited: what a simulator
+/// holds about a freshly rezzed prim.
+///
+/// Named `Object` — the reference viewer's own `DEFAULT_OBJECT_NAME` — with no
+/// description, owned and created by whoever owns the object, fully
+/// permissive, not for sale, uncategorised: the state the build floater shows
+/// for a prim that was rezzed and left alone. The inventory serial is filled in
+/// by [`SceneFixtures::properties_of`], which is the only place that knows it.
+#[must_use]
+pub fn default_object_properties(object: &Object) -> ObjectProperties {
+    let owner = AgentKey::from(object.owner_id);
+    ObjectProperties {
+        object_id: object.full_id,
+        creator_id: owner,
+        owner: OwnerKey::Agent(owner),
+        group: None,
+        last_owner_id: uuid::Uuid::nil(),
+        creation_date: FIXTURE_CREATION_DATE.unsigned_abs().into(),
+        permissions: FULL_PERMISSIONS,
+        ownership_cost: LindenAmount(0),
+        sale_type: SaleType::NotForSale.to_code(),
+        sale_price: None,
+        category: 0,
+        inventory_serial: 0,
+        item_id: InventoryKey::from(uuid::Uuid::nil()),
+        folder_id: None,
+        from_task_id: None,
+        aggregate_perms: 0,
+        aggregate_perm_textures: 0,
+        aggregate_perm_textures_owner: 0,
+        name: DEFAULT_OBJECT_NAME.to_owned(),
+        description: String::new(),
+        touch_name: String::new(),
+        sit_name: String::new(),
+        texture_ids: Vec::new(),
+    }
 }
 
 /// The agent inventory item a **take** files an object away as.
@@ -1953,6 +2345,132 @@ mod test {
         assert_eq!(object.shape.path_curve, shape.path_curve);
         assert_eq!(object.shape.profile_curve, shape.profile_curve);
         assert_eq!(object.material, shape.material.to_code());
+    }
+
+    /// An object nobody has named reports the record a freshly rezzed prim has,
+    /// and its contents serial comes from the inventory a write advances —
+    /// never from a second copy on the object, which could then disagree with
+    /// the listing it describes.
+    #[test]
+    fn a_properties_record_is_synthesised_and_carries_the_live_serial() -> Result<(), String> {
+        let owner = agent(0x1);
+        let local_id = RegionLocalObjectId(4);
+        let mut world = SceneFixtures::new();
+        world.objects.push(box_prim(
+            local_id,
+            ObjectKey::from(uuid::Uuid::from_u128(4)),
+            owner,
+            ZERO,
+            ZERO,
+        ));
+
+        let fresh = world
+            .properties_of(local_id)
+            .ok_or("the object has no properties")?;
+        assert_eq!(fresh.name, DEFAULT_OBJECT_NAME);
+        assert_eq!(fresh.description, "");
+        assert_eq!(fresh.owner, OwnerKey::Agent(owner));
+        assert_eq!(fresh.sale_price, None);
+        assert_eq!(fresh.inventory_serial, 0);
+
+        world.add_task_inventory(local_id, TaskInventory::stated(3, Vec::new()));
+        let stocked = world
+            .properties_of(local_id)
+            .ok_or("the object has no properties")?;
+        assert_eq!(stocked.inventory_serial, 3);
+
+        // An edit is stored on the object, and the serial still comes from the
+        // inventory rather than from the record that was written.
+        let held = world.object_mut(local_id).ok_or("the object went away")?;
+        held.properties = Some(ObjectProperties {
+            name: "Renamed".to_owned(),
+            inventory_serial: 99,
+            ..stocked
+        });
+        let edited = world
+            .properties_of(local_id)
+            .ok_or("the object has no properties")?;
+        assert_eq!(edited.name, "Renamed");
+        assert_eq!(edited.inventory_serial, 3);
+        Ok(())
+    }
+
+    /// An undo restores the object as it was before the last edit, a redo puts
+    /// the edit back, and a fresh edit abandons the redo branch — the three
+    /// rules that make a history compose across edits of different kinds.
+    #[test]
+    fn an_edit_history_steps_back_and_forward() -> Result<(), String> {
+        let owner = agent(0x1);
+        let local_id = RegionLocalObjectId(4);
+        let mut world = SceneFixtures::new();
+        world.objects.push(box_prim(
+            local_id,
+            ObjectKey::from(uuid::Uuid::from_u128(4)),
+            owner,
+            ZERO,
+            ZERO,
+        ));
+        let moved = Vector {
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+        };
+
+        // Nothing recorded: an undo is silence, not an error.
+        assert_eq!(world.step_history(local_id, true), None);
+
+        world.record_undo(local_id);
+        world
+            .object_mut(local_id)
+            .ok_or("the object went away")?
+            .motion
+            .position = moved.clone();
+
+        let undone = world
+            .step_history(local_id, true)
+            .ok_or("the undo restored nothing")?;
+        assert_eq!(undone.motion.position, ZERO);
+        let redone = world
+            .step_history(local_id, false)
+            .ok_or("the redo restored nothing")?;
+        assert_eq!(redone.motion.position, moved);
+
+        // Back one step, then a fresh edit: the branch the redo would have
+        // returned to is now unreachable.
+        let _undone = world.step_history(local_id, true);
+        world.record_undo(local_id);
+        world
+            .object_mut(local_id)
+            .ok_or("the object went away")?
+            .motion
+            .position = Vector {
+            x: 9.0,
+            y: 9.0,
+            z: 9.0,
+        };
+        assert_eq!(world.step_history(local_id, false), None);
+        Ok(())
+    }
+
+    /// An object's full id resolves to its region-local one — the lookup the
+    /// `Undo` / `Redo` messages need, being the only client messages in the
+    /// object family that address an object that way.
+    #[test]
+    fn a_full_id_resolves_to_a_region_local_one() {
+        let full_id = ObjectKey::from(uuid::Uuid::from_u128(0x4444));
+        let mut world = SceneFixtures::new();
+        world.objects.push(box_prim(
+            RegionLocalObjectId(4),
+            full_id,
+            agent(0x1),
+            ZERO,
+            ZERO,
+        ));
+        assert_eq!(world.local_id_of(full_id), Some(RegionLocalObjectId(4)));
+        assert_eq!(
+            world.local_id_of(ObjectKey::from(uuid::Uuid::from_u128(0x5555))),
+            None
+        );
     }
 
     /// A task-inventory item fixture with a given id and name.
