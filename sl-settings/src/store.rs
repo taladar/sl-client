@@ -385,8 +385,8 @@ impl SettingsStore {
         }
     }
 
-    /// Write a scope's persistable overrides to a TOML file, creating or
-    /// truncating it.
+    /// Write a scope's persistable overrides to a TOML file, replacing it
+    /// atomically.
     ///
     /// Each override is written as a commented `name = value` line, grouped into
     /// its declared section (see [`register_in`](SettingsStore::register_in));
@@ -395,11 +395,18 @@ impl SettingsStore {
     /// of not-yet-registered settings are kept at the document root, so a value
     /// from a newer version is not lost on round-trip.
     ///
+    /// The write goes through [`crate::atomic_file::write_atomically`], not a truncating
+    /// whole-file write: this file is the only copy of the user's preferences,
+    /// and a crash, a full disk or a kill partway through an `O_TRUNC` write
+    /// leaves it empty or half-written. A reader here sees the whole old file or
+    /// the whole new one.
+    ///
     /// # Errors
     ///
-    /// [`SettingError::Io`] if the file cannot be written.
+    /// [`SettingError::Io`] if the file cannot be written — in which case the
+    /// existing file is left exactly as it was.
     pub fn save_scope(&self, scope: Scope, path: impl AsRef<Path>) -> Result<(), SettingError> {
-        fs_err::write(path, self.serialize_scope(scope))?;
+        crate::atomic_file::write_atomically(path.as_ref(), &self.serialize_scope(scope))?;
         Ok(())
     }
 

@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 310 |
 | blocked | 56 |
 | in-progress | 18 |
-| bugs | 61 |
-| done | 984 |
+| bugs | 60 |
+| done | 985 |
 | deferred | 25 |
 | wont-do | 14 |
 | **total** | **1566** |
@@ -1180,7 +1180,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (61)
+## bugs (60)
 
 ### viewer
 
@@ -1240,8 +1240,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — RLV behaviour lookup is param-type-blind and has no modifier fallback
 - [`viewer-audit-search-sentinel-row`](bugs/viewer-audit-search-sentinel-row.md)
   — The directory 'there is more' sentinel row is rendered as a result
-- [`viewer-audit-settings-write-race`](bugs/viewer-audit-settings-write-race.md)
-  — Settings are written non-atomically from unordered detached tasks
 - [`viewer-audit-sit-camera-gating`](bugs/viewer-audit-sit-camera-gating.md) —
   The scripted sit camera arms on any SitResult and never clears forced
   mouselook
@@ -1328,7 +1326,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (984)
+## done (985)
 
 ### protocol
 
@@ -1611,6 +1609,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-scene-change-guards-day-cycle`](done/viewer-audit-scene-change-guards-day-cycle.md)
   — The scene crate's write-on-change guards were reasoned about under a pinned
   sky
+- [`viewer-audit-settings-write-race`](done/viewer-audit-settings-write-race.md)
+  — Settings are written non-atomically from unordered detached tasks
 - [`viewer-audit-stale-globaltransform-readers`](done/viewer-audit-stale-globaltransform-readers.md)
   — Depth-reconstructing passes and the interest camera read a frame-old camera
   pose

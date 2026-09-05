@@ -409,21 +409,26 @@ pub(crate) fn request_logout(
     session.quit_deadline = Some(now + QUIT_GRACE_SECS);
 }
 
-/// Persist the settings store once, when a logout is first requested, so a tuned
-/// value (e.g. a SpaceNavigator sensitivity) survives to the next session.
+/// Persist the settings store when the app is actually exiting, so a tuned value
+/// (e.g. a SpaceNavigator sensitivity) survives to the next session.
 ///
-/// Keyed off the quit deadline being armed rather than the `LoggedOut` event, so
-/// the save happens even if the grid never acknowledges the logout and
-/// [`enforce_quit_deadline`] forces the exit.
-pub fn save_settings_on_logout(
-    session: Res<ViewerSession>,
-    settings: Res<ViewerSettings>,
-    mut saved: Local<bool>,
-) {
-    if *saved || session.quit_deadline.is_none() {
+/// Keyed off [`AppExit`] rather than off the quit deadline being armed, and run
+/// in [`Last`], because the deadline is armed the frame the *logout* is
+/// requested and the process lives on for as much as the whole grace period
+/// after that: every setting changed in between was lost, an in-flight async
+/// write could still land on top of the save, and the `Local<bool>` that made it
+/// happen once meant a second logout in the same process never saved at all.
+///
+/// [`AppExit`] catches every way out — the acknowledged logout, the forced
+/// [`enforce_quit_deadline`] exit, a login-outcome restart, a window close — and
+/// Bevy checks for it only after the whole schedule has run, so a `Last` system
+/// is the last point at which the newest state can still reach the disk.
+/// [`ViewerSettings::save`] waits for any flush already in flight before writing,
+/// so nothing older can complete after it.
+pub fn save_settings_on_exit(mut exit: MessageReader<AppExit>, settings: Res<ViewerSettings>) {
+    if exit.read().count() == 0 {
         return;
     }
-    *saved = true;
     settings.save();
 }
 
@@ -711,6 +716,61 @@ mod tests {
              GlobalTransform's ({:?})",
             crate::coords::bevy_to_sl_vec(stale.translation),
         );
+        Ok(())
+    }
+
+    /// **The exit save happens, and it happens before the app stops.**
+    ///
+    /// The whole exit fix rests on one assumption the settings crate's own tests
+    /// cannot check: that a `Last` system still runs in the frame an `AppExit`
+    /// written from `Update` ends, because Bevy asks whether to exit only after
+    /// the schedule has run. So this drives a **real** [`App`] to its own exit
+    /// and then looks at the file — if the ordering assumption were wrong there
+    /// would be no file at all, which is exactly the settings loss the task
+    /// records.
+    #[test]
+    fn the_exit_save_runs_before_the_app_stops() -> Result<(), TestError> {
+        use super::save_settings_on_exit;
+
+        /// Quit the way the viewer does: from `Update`, mid-frame.
+        fn quit(mut exit: MessageWriter<AppExit>) {
+            exit.write(AppExit::Success);
+        }
+
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("sl-viewer-world-view-exit-save-{nanos}"));
+        let path = dir.join("viewer-settings.toml");
+
+        let mut store = sl_settings::SettingsStore::new();
+        store.register(SETTING_DRAW_DISTANCE, SettingValue::F32(512.0), "metres")?;
+        store.set(
+            Scope::Global,
+            SETTING_DRAW_DISTANCE,
+            SettingValue::F32(96.0),
+        )?;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(ViewerSettings::persisting_to_for_test(
+                store,
+                path.clone(),
+                None,
+            ))
+            .add_systems(Update, quit)
+            .add_systems(Last, save_settings_on_exit);
+        assert!(app.run().is_success(), "the app did not exit cleanly");
+
+        let mut reloaded = sl_settings::SettingsStore::new();
+        reloaded.register(SETTING_DRAW_DISTANCE, SettingValue::F32(512.0), "metres")?;
+        reloaded.load_scope(Scope::Global, &path)?;
+        assert_eq!(
+            reloaded.get_f32(SETTING_DRAW_DISTANCE).ok(),
+            Some(96.0),
+            "the app exited without saving the settings it was holding"
+        );
+        drop(fs_err::remove_dir_all(&dir));
         Ok(())
     }
 }

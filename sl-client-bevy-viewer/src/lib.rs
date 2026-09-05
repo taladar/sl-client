@@ -412,9 +412,9 @@ use crate::script_permission::ScriptPermissionPlugin;
 use crate::session::{
     PlayOnLogin, ViewerSession, apply_draw_distance, drive_session, enforce_quit_deadline,
     handle_quit_requests, repeat_debug_animation, report_agent_viewport, report_camera_interest,
-    save_settings_on_logout,
+    save_settings_on_exit,
 };
-use crate::settings::{AccountContext, ViewerSettings, load_account_settings};
+use crate::settings::{AccountContext, ViewerSettings, flush_settings, load_account_settings};
 use crate::settings_binding::SettingsBindingPlugin;
 use crate::stand_stop_button::StandStopButtonPlugin;
 use crate::ui::{UiScaffoldSystems, ViewerUiPlugin};
@@ -1725,11 +1725,17 @@ fn run_session(
                     // Load the per-avatar account settings once the agent UUID is
                     // known at login (once; a no-op every frame thereafter).
                     load_account_settings,
-                    // Persist the settings store when a logout is requested.
-                    save_settings_on_logout,
                 ),
             ),
         )
+        // Settings persistence. The in-session flush runs in `PostUpdate`, after
+        // every system that can change a setting, and writes on the `IoTaskPool`
+        // with at most one write in flight. The exit save runs in `Last` and is
+        // synchronous, because Bevy checks for `AppExit` only once the whole
+        // schedule has run, so there is no later point at which the newest state
+        // can still reach the disk.
+        .add_systems(PostUpdate, flush_settings)
+        .add_systems(Last, save_settings_on_exit)
         // UI text & font foundation and the text-input widget demo panels.
         .add_systems(
             Update,
