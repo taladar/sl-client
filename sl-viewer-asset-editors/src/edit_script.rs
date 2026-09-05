@@ -91,8 +91,15 @@ const CHECKED_GLYPH: &str = "\u{2611}";
 /// The empty-box glyph for an unticked toggle (`☐`).
 const UNCHECKED_GLYPH: &str = "\u{2610}";
 
-/// The body field's height, in visible text lines.
+/// The body field's height, in visible text lines. The window is sized by this
+/// (it is content-driven), not the other way round — a field's height is its
+/// intrinsic control size and cannot be flexed; see `ui_text_input`'s `fill`.
 const BODY_VISIBLE_LINES: f32 = 22.0;
+
+/// The tallest the compile-diagnostics list grows before it scrolls, in logical
+/// pixels — about five rows, enough to read the first errors without the list
+/// taking the window away from the script it is complaining about.
+const DIAGNOSTICS_HEIGHT: f32 = 96.0;
 
 /// The read-only body block's viewport height, in logical pixels.
 const READONLY_BODY_HEIGHT: f32 = 380.0;
@@ -179,7 +186,14 @@ pub fn script_editor_floater_spec() -> FloaterSpec {
         id: "script-editor",
         title: "Script".to_owned(),
         position: Vec2::new(360.0, 90.0),
-        default_size: Some(Vec2::new(READONLY_BODY_WIDTH, READONLY_BODY_HEIGHT + 80.0)),
+        // Content-driven, for the reason the notecard editor is: the window
+        // used to open at a rect measured against the read-only block, the
+        // editable body is taller than that, and the content slot clips — so
+        // the Save & Compile row and the diagnostics under it were cut off the
+        // bottom of the window. A field's height is intrinsic and cannot be
+        // flexed into a rect (`ui_text_input`'s `fill`), so the window follows
+        // the field. The grip resizes it from there.
+        default_size: None,
         min_size: Some(Vec2::new(300.0, 200.0)),
         dock_host: None,
         caps: FloaterCaps {
@@ -394,14 +408,26 @@ fn populate_editor(
             ))
             .id();
         // The diagnostics list is rebuilt under this column on every compile.
+        // Bounded and scrollable, because a failed compile hands back as many
+        // rows as the script has errors: unbounded, the twentieth diagnostic
+        // would push the list past the window's clipping content slot (and
+        // squeeze the body field, which shrinks to fit, into nothing) — the
+        // window's height is fixed, so this list's growth has to stop somewhere
+        // reachable.
         let errors = commands
             .spawn((
                 Node {
+                    max_height: Val::Px(DIAGNOSTICS_HEIGHT),
+                    overflow: Overflow::scroll_y(),
                     ..column(Val::Px(2.0))
                 },
+                ScrollPosition::default(),
+                Pickable::default(),
+                Name::new("script-diagnostics"),
                 ChildOf(content),
             ))
             .id();
+        commands.entity(errors).observe(on_diagnostics_scroll);
         if live && let Some(field) = body_field {
             attach_save(commands, save, source, field);
         }
@@ -730,6 +756,20 @@ fn spawn_error_row(
         TextColor(ERROR_COLOR),
         ChildOf(parent),
     ));
+}
+
+/// Scroll the bounded diagnostics list with the mouse wheel (its own
+/// [`ScrollPosition`]), matching the notecard reader and the result lists.
+fn on_diagnostics_scroll(
+    mut event: On<Pointer<Scroll>>,
+    mut positions: Query<&mut ScrollPosition>,
+) {
+    /// Logical pixels one wheel notch scrolls.
+    const LINE_SCROLL_PIXELS: f32 = 24.0;
+    if let Ok(mut position) = positions.get_mut(event.entity) {
+        position.0.y = (position.0.y - event.y * LINE_SCROLL_PIXELS).max(0.0);
+    }
+    event.propagate(false);
 }
 
 /// Spawn the Save & Compile button, returning its entity for the caller to wire.

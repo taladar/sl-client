@@ -2455,7 +2455,10 @@ mod tests {
         use pretty_assertions::assert_eq;
 
         use super::{Floater, TestError};
-        use crate::floater::{FloaterCaps, FloaterPlugin, FloaterSpec, spawn_floater};
+        use crate::floater::{
+            DefaultDockHost, FloaterCaps, FloaterCommand, FloaterOp, FloaterPlugin, FloaterSpec,
+            spawn_floater,
+        };
         use crate::ui_test::interact::{self, InteractionTest, centre_of};
         use crate::ui_test::{find_by_name, settle};
         use sl_viewer_ui_core::ui::{UiPanelShown, UiRoot, UiScaffoldSystems};
@@ -2617,6 +2620,196 @@ mod tests {
                 app.world().get::<UiPanelShown>(root).map(|shown| shown.0),
                 Some(false),
                 "the × closed it"
+            );
+            Ok(())
+        }
+
+        // -------------------------------------------------------------------
+        // Two windows, and one docked: the parts of the manager a single free
+        // floater cannot show.
+        // -------------------------------------------------------------------
+
+        /// Where the two-window fixture opens its pair, far enough apart that
+        /// neither window's chrome sits under the other's — the pointer has to
+        /// be able to reach *both* title bars for the z-order to mean anything.
+        const PAIR_POSITIONS: [Vec2; 2] = [Vec2::new(60.0, 60.0), Vec2::new(700.0, 60.0)];
+
+        /// The pair's content size, in logical pixels: small enough that the two
+        /// windows cannot overlap at [`PAIR_POSITIONS`].
+        const PAIR_SIZE: Vec2 = Vec2::new(240.0, 140.0);
+
+        /// Two live windows, side by side, under the real pointer stack.
+        fn two_floater_app() -> App {
+            let mut app = InteractionTest::new().build();
+            app.add_plugins(FloaterPlugin);
+            app.add_systems(
+                Startup,
+                (|mut commands: Commands, root: Res<UiRoot>| {
+                    for (id, position) in ["lower", "upper"].into_iter().zip(PAIR_POSITIONS) {
+                        let handle = spawn_floater(
+                            &mut commands,
+                            root.0,
+                            FloaterSpec {
+                                id,
+                                title: id.to_owned(),
+                                position,
+                                default_size: Some(PAIR_SIZE),
+                                min_size: None,
+                                dock_host: None,
+                                caps: FloaterCaps {
+                                    resizable: false,
+                                    minimizable: false,
+                                    closable: false,
+                                    dockable: true,
+                                },
+                            },
+                        );
+                        commands
+                            .entity(handle.root)
+                            .insert(super::UiPanelShown(true));
+                    }
+                })
+                .after(UiScaffoldSystems::SpawnRoot),
+            );
+            settle(&mut app);
+            app
+        }
+
+        /// One of the pair's roots.
+        fn window(app: &mut App, id: &str) -> Option<Entity> {
+            find_by_name(app, &format!("floater:{id}"))
+        }
+
+        /// That window's title bar — through [`FloaterParts`], because both
+        /// windows carry a node named `floater-title-bar` and a name lookup
+        /// would always return the same one.
+        fn title_bar_of(app: &App, root: Entity) -> Option<Entity> {
+            app.world()
+                .get::<super::FloaterParts>(root)
+                .map(|parts| parts.title_bar)
+        }
+
+        /// The window's paint order.
+        fn z_of(app: &App, root: Entity) -> Option<i32> {
+            app.world().get::<GlobalZIndex>(root).map(|index| index.0)
+        }
+
+        /// **A press brings its window to the front**, and the front-most one is
+        /// the one whose title bar is lit.
+        ///
+        /// The ordering half of `FloaterZTop`, which needs two windows to be
+        /// visible at all: the counter's own test proves the values increase,
+        /// and this proves the increase lands on the window that was pressed —
+        /// through a pointer that had to find each title bar where it is drawn.
+        #[test]
+        fn pressing_a_window_raises_it_above_the_other() -> Result<(), TestError> {
+            let mut app = two_floater_app();
+            let lower = window(&mut app, "lower").ok_or("no lower window")?;
+            let upper = window(&mut app, "upper").ok_or("no upper window")?;
+            let lower_bar = title_bar_of(&app, lower).ok_or("the lower window has no title bar")?;
+            let upper_bar = title_bar_of(&app, upper).ok_or("the upper window has no title bar")?;
+
+            let at = interact::centre_of_entity(&app, upper_bar).ok_or("it never laid out")?;
+            interact::click(&mut app, at, MouseButton::Left);
+            settle(&mut app);
+            assert!(
+                z_of(&app, upper) > z_of(&app, lower),
+                "the pressed window is not on top: {:?} vs {:?}",
+                z_of(&app, upper),
+                z_of(&app, lower)
+            );
+
+            // The other one, pressed, takes the front — a raise hands out a new
+            // value rather than swapping two fixed planes.
+            let at = interact::centre_of_entity(&app, lower_bar).ok_or("it never laid out")?;
+            interact::click(&mut app, at, MouseButton::Left);
+            settle(&mut app);
+            assert!(
+                z_of(&app, lower) > z_of(&app, upper),
+                "the second press did not raise its window: {:?} vs {:?}",
+                z_of(&app, lower),
+                z_of(&app, upper)
+            );
+
+            // And the highlight follows the front, on both windows at once:
+            // the active one is washed, the other is not.
+            let lit = |app: &App, bar: Entity| {
+                app.world()
+                    .get::<BackgroundColor>(bar)
+                    .is_some_and(|colour| colour.0.alpha() > 0.0)
+            };
+            assert!(lit(&app, lower_bar), "the active window is not highlighted");
+            assert!(
+                !lit(&app, upper_bar),
+                "the window behind is still wearing the active highlight"
+            );
+            Ok(())
+        }
+
+        /// **A docked window tears off only once the drag means it.**
+        ///
+        /// The reference's undock slop, and the one path in the manager that a
+        /// hand-written `Pointer<Drag>` cannot honestly exercise: it is a
+        /// function of how far the pointer has travelled *since the press*, so
+        /// a single synthetic event with a made-up `distance` would be pinning
+        /// the number rather than the gesture.
+        #[test]
+        fn a_docked_window_tears_off_past_the_slop() -> Result<(), TestError> {
+            /// A nudge well inside the slop.
+            const NUDGE: f32 = 4.0;
+            /// A drag well past it.
+            const PULL: f32 = 60.0;
+
+            let mut app = two_floater_app();
+            let root = window(&mut app, "lower").ok_or("no window")?;
+            let host = app
+                .world()
+                .resource::<DefaultDockHost>()
+                .0
+                .ok_or("the plugin spawned no dock host")?;
+            app.world_mut()
+                .resource_mut::<Messages<FloaterCommand>>()
+                .write(FloaterCommand {
+                    floater: root,
+                    op: FloaterOp::ToggleDock,
+                });
+            settle(&mut app);
+            assert_eq!(
+                app.world().get::<ChildOf>(root).map(ChildOf::parent),
+                Some(host),
+                "the window did not dock"
+            );
+
+            let bar = title_bar_of(&app, root).ok_or("the docked window has no title bar")?;
+            let at = interact::centre_of_entity(&app, bar).ok_or("it never laid out")?;
+            interact::drag(
+                &mut app,
+                at,
+                Vec2::new(at.x + NUDGE, at.y + NUDGE),
+                2,
+                MouseButton::Left,
+            );
+            settle(&mut app);
+            assert_eq!(
+                app.world().get::<ChildOf>(root).map(ChildOf::parent),
+                Some(host),
+                "a {NUDGE} px nudge tore the window off its host"
+            );
+
+            let at = interact::centre_of_entity(&app, bar).ok_or("the title bar went missing")?;
+            interact::drag(
+                &mut app,
+                at,
+                Vec2::new(at.x + PULL, at.y + PULL),
+                4,
+                MouseButton::Left,
+            );
+            settle(&mut app);
+            let root_entity = app.world().resource::<UiRoot>().0;
+            assert_eq!(
+                app.world().get::<ChildOf>(root).map(ChildOf::parent),
+                Some(root_entity),
+                "a {PULL} px pull left the window docked"
             );
             Ok(())
         }

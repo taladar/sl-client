@@ -1053,6 +1053,61 @@ fn angular_difference(left: f32, right: f32) -> f32 {
     }
 }
 
+/// **Universal.** A text field must be tall enough to show a line of its text.
+///
+/// The check the gallery's eye caught before the harness did. A field sized in
+/// *visible lines* that is allowed to yield height to a short container (see
+/// `ui_text_input`'s `fill`) has a floor, and the floor is the whole point: put
+/// the same field in a container that wants more room than it has — a scrolling
+/// page holding more cards than fit — and without one it is squashed to nothing.
+/// Every other check in this list is happy with that. The box is inside its
+/// parent, inside the viewport, aligned correctly and overflowing nothing; it
+/// simply shows no text.
+///
+/// Measured against the field's own **font size** rather than its shaped line
+/// height, which nothing here can ask parley for: a field shorter than one em
+/// cannot be showing a line, whatever the face does with leading. So it is a
+/// floor under the floor — it does not police a field that is merely *tight*,
+/// only one that has collapsed.
+///
+/// A field that is not laid out at all (a `Display::None` subtree lays out at
+/// zero on **both** axes) is skipped; a collapsed one keeps its width, which is
+/// what tells the two apart. So is a field whose size is declared relative to
+/// the viewport or the rem rather than in pixels — every field in this UI
+/// declares [`FontSize::Px`], and evaluating the others here would be inventing
+/// a viewport the check does not have.
+///
+/// **Only meaningful where the editable-text stack is installed**, which is why
+/// this is not in [`layout_violations`] but in [`interaction_violations`]. A
+/// field's height is a `ContentSize` measure that
+/// `update_editable_text_content_size` installs
+/// ([`interact::install_text_editing`]); in a plain [`LayoutTest`] app that
+/// system is absent, every field lays out at its own padding, and this would be
+/// reporting the harness rather than the UI.
+pub fn field_violations(app: &mut App) -> Vec<String> {
+    let mut query = app
+        .world_mut()
+        .query_filtered::<(Entity, &ComputedNode, &TextFont, Option<&Name>), With<EditableText>>();
+    let mut violations = Vec::new();
+    for (entity, computed, font, name) in query.iter(app.world()) {
+        if computed.size.x <= 0.0 && computed.size.y <= 0.0 {
+            continue;
+        }
+        let FontSize::Px(font_size) = font.font_size else {
+            continue;
+        };
+        let height = computed.size.y * computed.inverse_scale_factor;
+        if height < font_size {
+            violations.push(format!(
+                "{}: laid out {height} logical px tall, less than the {font_size} px font it \
+                 draws — the field is collapsed and shows no text at all",
+                describe(name, entity),
+            ));
+        }
+    }
+    violations
+}
+
 /// Every check, over the whole tree, as one list.
 ///
 /// The shape every matrix cell uses: assert the result is empty and print it on
@@ -1071,6 +1126,25 @@ pub fn layout_violations(app: &mut App, test: LayoutTest) -> Vec<String> {
     violations.extend(alignment_violations(app, test.direction()));
     violations.extend(radial_violations(app));
     violations.extend(radial_overlap_violations(app));
+    violations
+}
+
+/// Every check for an app built by [`interact::InteractionTest`]: the whole of
+/// [`layout_violations`] plus the ones that need a stack the layout harness
+/// deliberately does without.
+///
+/// The split is not tidiness. A check that cannot run in a plain
+/// [`LayoutTest`] app must not be in that app's list, because "the harness left
+/// the system out" and "the widget is broken" look identical from inside the
+/// check — [`field_violations`] would fail every text field in the viewer for
+/// the want of `update_editable_text_content_size`.
+///
+/// **A new check that needs the pointer or the text stack belongs here**, and
+/// gets the same retroactive reach over the interaction sweeps that
+/// [`layout_violations`] has over the layout matrix.
+pub fn interaction_violations(app: &mut App, test: LayoutTest) -> Vec<String> {
+    let mut violations = layout_violations(app, test);
+    violations.extend(field_violations(app));
     violations
 }
 

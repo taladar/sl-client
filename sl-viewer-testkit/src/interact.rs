@@ -280,6 +280,17 @@ pub fn cursor(app: &mut App) -> Option<Vec2> {
 #[must_use]
 pub fn centre_of(app: &mut App, name: &str) -> Option<Vec2> {
     let entity = crate::find_by_name(app, name)?;
+    centre_of_entity(app, entity)
+}
+
+/// The centre of **this** node, in logical pixels.
+///
+/// The by-entity half of [`centre_of`], for the case a name cannot address: two
+/// live floaters carry the same chrome names (`floater-title-bar`,
+/// `floater-button:close`), so a test that drives *both* windows has to aim at
+/// the entity it already holds rather than at the first node with that name.
+#[must_use]
+pub fn centre_of_entity(app: &App, entity: Entity) -> Option<Vec2> {
     let node = app.world().get::<ComputedNode>(entity)?;
     let transform = app.world().get::<UiGlobalTransform>(entity)?;
     // `UiGlobalTransform` is in physical pixels; the driver speaks logical.

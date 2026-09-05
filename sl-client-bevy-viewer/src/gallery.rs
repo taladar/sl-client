@@ -803,6 +803,15 @@ fn card_bundle(parent: Entity) -> impl Bundle {
         Node {
             padding: UiRect::all(Val::Px(10.0)),
             max_width: Val::Px(760.0),
+            // A card is never squashed by the page it sits on. The page is a
+            // definite-height scroll container holding far more cards than fit,
+            // so any card that *can* shrink is asked to absorb that whole
+            // shortfall — and a card showing its element at a height the viewer
+            // never gives it is the one thing this gallery must not do. It cost
+            // nothing while nothing inside a card could shrink; the first
+            // element with a yielding field (the editors' body) collapsed to
+            // less than a line of text.
+            flex_shrink: 0.0,
             ..column(Val::Px(6.0))
         },
         BackgroundColor(CARD_BACKGROUND),

@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 309 |
+| ready | 308 |
 | blocked | 55 |
 | in-progress | 18 |
-| bugs | 63 |
-| done | 984 |
+| bugs | 64 |
+| done | 985 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1566** |
+| **total** | **1567** |
 
 ## ideas (98)
 
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (309)
+## ready (308)
 
 ### protocol
 
@@ -485,9 +485,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-experiences-floater`](ready/viewer-experiences-floater.md) —
   Experiences floater — lists, profile, search (blocked by
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
-- [`viewer-floater-interaction-tests`](ready/viewer-floater-interaction-tests.md)
-  — Floater chrome under a real pointer (blocked by
-  `viewer-ui-interaction-harness` (done), `viewer-floater-registry` (done))
 - [`viewer-floater-update-in-place`](ready/viewer-floater-update-in-place.md) —
   Detail/property floaters — update values in place, don't rebuild structure
 - [`viewer-flycam-avatar-movement-keys`](ready/viewer-flycam-avatar-movement-keys.md)
@@ -1174,7 +1171,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (63)
+## bugs (64)
 
 ### viewer
 
@@ -1297,6 +1294,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A sunlit opaque face pins red and green rather than showing its texture
 - [`viewer-takeoff-hold-jumps-instead-of-flying`](bugs/viewer-takeoff-hold-jumps-instead-of-flying.md)
   — Holding the fly key jumps instead of taking off
+- [`viewer-testkit-click-focus-resource-sensitive`](bugs/viewer-testkit-click-focus-resource-sensitive.md)
+  — A click stops focusing its field when the harness gains any resource
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
@@ -1326,7 +1325,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (984)
+## done (985)
 
 ### protocol
 
@@ -1830,6 +1829,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   prims against their simulated geometry
 - [`viewer-flexi-resettle-after-snapshot`](done/viewer-flexi-resettle-after-snapshot.md)
   — Flexi prims re-settle after taking a snapshot
+- [`viewer-floater-interaction-tests`](done/viewer-floater-interaction-tests.md)
+  — Floater chrome under a real pointer (blocked by
+  `viewer-ui-interaction-harness` (done), `viewer-floater-registry` (done))
 - [`viewer-floater-registry`](done/viewer-floater-registry.md) — A FLOATERS
   registry, so floaters can be swept at all
 - [`viewer-flycam-stop-button-overlaps-chat`](done/viewer-flycam-stop-button-overlaps-chat.md)

@@ -79,7 +79,9 @@ const DIM_COLOR: Color = Color::srgb(0.62, 0.66, 0.74);
 /// A red-tinted colour for a failed-save status.
 const ERROR_COLOR: Color = Color::srgb(0.92, 0.55, 0.50);
 
-/// The body field's height, in visible text lines.
+/// The body field's height, in visible text lines. The window is sized by this
+/// (it is content-driven), not the other way round — a field's height is its
+/// intrinsic control size and cannot be flexed; see `ui_text_input`'s `fill`.
 const BODY_VISIBLE_LINES: f32 = 18.0;
 
 /// The read-only body block's viewport height, in logical pixels.
@@ -157,7 +159,16 @@ pub fn notecard_editor_floater_spec() -> FloaterSpec {
         id: "notecard-editor",
         title: "Notecard".to_owned(),
         position: Vec2::new(400.0, 100.0),
-        default_size: Some(Vec2::new(READONLY_BODY_WIDTH, READONLY_BODY_HEIGHT + 60.0)),
+        // Content-driven (the scaffold's convention 2), and here that is a
+        // correction rather than a preference. The window used to open at a
+        // rect measured against the *read-only* block — narrower and shorter
+        // than the editable body it actually opens with — and a floater's
+        // content slot clips, so the Save row underneath was cut off the bottom
+        // of the window at the default font size and further at every larger
+        // one. A field's height is its intrinsic control size and cannot be
+        // flexed to a rect (see `ui_text_input`'s `fill`), so the window is
+        // sized by the field instead. The grip still resizes it from there.
+        default_size: None,
         min_size: Some(Vec2::new(260.0, 160.0)),
         dock_host: None,
         caps: FloaterCaps {
@@ -492,6 +503,10 @@ fn spawn_reader_block(
         .spawn((
             Node {
                 width: Val::Percent(100.0),
+                // A reading measure, and a *bound* rather than a size: the
+                // window is content-driven, so without it a long unbroken run
+                // of prose would decide how wide the notecard window opens.
+                max_width: Val::Px(READONLY_BODY_WIDTH),
                 max_height: Val::Px(READONLY_BODY_HEIGHT),
                 overflow: Overflow::scroll_y(),
                 flex_direction: FlexDirection::Column,

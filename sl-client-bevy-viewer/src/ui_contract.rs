@@ -4,8 +4,8 @@
 //! `ui_test.rs` sweeps the registry for *layout* — an element in eight scripts,
 //! at three font sizes, in two directions. This module sweeps it for
 //! *behaviour*, and the two compose: after every gesture the whole of
-//! `layout_violations` is re-asserted, so each layout check the harness owns
-//! doubles as a post-interaction regression check for free.
+//! `interaction_violations` is re-asserted, so each layout check the harness
+//! owns doubles as a post-interaction regression check for free.
 //!
 //! # The default expectation is inert-and-harmless
 //!
@@ -266,67 +266,70 @@ pub(crate) struct ElementContract {
 mod contracts;
 pub(crate) use contracts::CONTRACTS;
 
+/// Stand up the registrations an element's spawn-attached observers read.
+///
+/// The registry's `spawn` functions attach observers belonging to widgets
+/// whose **plugins** declare the messages and non-send handles those
+/// observers take as system parameters — `PieMenuPlugin` declares
+/// `OpenPieMenu`, `MediaEnginePlugin` inserts `MediaSurfaces`. The gallery
+/// adds the whole plugins; a sweep that wants the widget's reaction and not
+/// its runtime adds the registrations alone, so a `MessageWriter` has
+/// somewhere inert to write and a `NonSend` handle exists to be read.
+///
+/// Each line here was found the same way: without it the observer fails
+/// parameter validation on the first gesture and takes the app down, which
+/// is the sweep's inert-and-harmless default doing its job. Anything a new
+/// element needs belongs here beside them.
+///
+/// Shared with [`crate::floater_chrome`], whose sweep spawns the *same*
+/// content specimens inside their windows and drives a pointer over them — two
+/// sweeps with one answer to "what does a specimen need to be live", so a new
+/// element's hosting is added once.
+pub(crate) fn install_element_hosting(app: &mut App) {
+    // The widgets' runtime halves, exactly the set the gallery adds and no
+    // more: pure logic, no renderer, no engine. A specimen without its
+    // plugin is an inert shell, so a contract row taken from one would be
+    // pinning the shell rather than the widget.
+    app.add_plugins((
+        crate::menu::MenuWidgetPlugin,
+        crate::ui_tab::TabWidgetPlugin,
+        crate::ui_radio::RadioWidgetPlugin,
+        crate::ui_text_input::TextInputPlugin,
+        crate::ui_search::SearchFieldPlugin,
+        crate::emoji_complete::ColonCompletePlugin,
+        crate::chat_input::ChatInputPlugin,
+        crate::local_chat_input::LocalChatInputPlugin,
+    ));
+    // The messages whose *writers* are attached by a spawn but whose
+    // registration lives in a plugin the sweep does not want whole.
+    // `radial-menu-target`'s right-click observer opens a pie; the chat
+    // input's emoji button opens the picker floater; a linkified link
+    // reaches for the session and the web browser.
+    app.add_message::<crate::pie_menu::OpenPieMenu>();
+    app.add_message::<crate::emoji_picker::OpenEmojiPicker>();
+    app.add_message::<sl_client_bevy::SlCommand>();
+    app.add_message::<crate::world_api::OpenWebBrowser>();
+    // `browser-view`: every pointer and key observer reads the surface
+    // table before it reaches the disabled check. Empty is the right
+    // fixture — no CEF, no engine, and the widget stays the placeholder.
+    app.insert_non_send(crate::media_engine::MediaSurfaces::default());
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         CONTRACTS, ElementContract, Gesture, KEYBOARD_ALPHABET, LayoutClaim, NodeContract,
-        POINTER_ALPHABET, Row,
+        POINTER_ALPHABET, Row, install_element_hosting,
     };
-    use crate::media_engine::MediaSurfaces;
-    use crate::pie_menu::OpenPieMenu;
     use crate::ui_element::{ElementCx, UiAction, UiElement};
     use crate::ui_elements::ELEMENTS;
     use crate::ui_test::interact::{self, InteractionTest};
     use crate::ui_test::{
-        TestError, drain_actions, find_by_name, focusable_nodes, interactive_nodes,
-        layout_violations, settle, spawn_element_into,
+        TestError, drain_actions, find_by_name, focusable_nodes, interaction_violations,
+        interactive_nodes, settle, spawn_element_into,
     };
     use bevy::input::keyboard::Key;
     use bevy::prelude::*;
-
-    /// Stand up the registrations an element's spawn-attached observers read.
-    ///
-    /// The registry's `spawn` functions attach observers belonging to widgets
-    /// whose **plugins** declare the messages and non-send handles those
-    /// observers take as system parameters — `PieMenuPlugin` declares
-    /// `OpenPieMenu`, `MediaEnginePlugin` inserts `MediaSurfaces`. The gallery
-    /// adds the whole plugins; a sweep that wants the widget's reaction and not
-    /// its runtime adds the registrations alone, so a `MessageWriter` has
-    /// somewhere inert to write and a `NonSend` handle exists to be read.
-    ///
-    /// Each line here was found the same way: without it the observer fails
-    /// parameter validation on the first gesture and takes the app down, which
-    /// is the sweep's inert-and-harmless default doing its job. Anything a new
-    /// element needs belongs here beside them.
-    fn install_element_hosting(app: &mut App) {
-        // The widgets' runtime halves, exactly the set the gallery adds and no
-        // more: pure logic, no renderer, no engine. A specimen without its
-        // plugin is an inert shell, so a contract row taken from one would be
-        // pinning the shell rather than the widget.
-        app.add_plugins((
-            crate::menu::MenuWidgetPlugin,
-            crate::ui_tab::TabWidgetPlugin,
-            crate::ui_radio::RadioWidgetPlugin,
-            crate::ui_text_input::TextInputPlugin,
-            crate::ui_search::SearchFieldPlugin,
-            crate::emoji_complete::ColonCompletePlugin,
-            crate::chat_input::ChatInputPlugin,
-            crate::local_chat_input::LocalChatInputPlugin,
-        ));
-        // The messages whose *writers* are attached by a spawn but whose
-        // registration lives in a plugin the sweep does not want whole.
-        // `radial-menu-target`'s right-click observer opens a pie; the chat
-        // input's emoji button opens the picker floater; a linkified link
-        // reaches for the session and the web browser.
-        app.add_message::<OpenPieMenu>();
-        app.add_message::<crate::emoji_picker::OpenEmojiPicker>();
-        app.add_message::<sl_client_bevy::SlCommand>();
-        app.add_message::<crate::world_api::OpenWebBrowser>();
-        // `browser-view`: every pointer and key observer reads the surface
-        // table before it reaches the disabled check. Empty is the right
-        // fixture — no CEF, no engine, and the widget stays the placeholder.
-        app.insert_non_send(MediaSurfaces::default());
-    }
 
     /// An interactive app with one registered element spawned and settled.
     ///
@@ -492,7 +495,7 @@ mod tests {
             ));
         }
 
-        let violations = layout_violations(app, test.layout());
+        let violations = interaction_violations(app, test.layout());
         let claim = row.map_or(LayoutClaim::Clean, |row| row.layout);
         if let Some(why) = judge_layout(claim, &violations) {
             failures.push(format!(

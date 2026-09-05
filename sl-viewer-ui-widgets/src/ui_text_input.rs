@@ -347,6 +347,21 @@ pub struct TextInputSpec {
     /// has no `visible_width`; it takes the room its container gives it and
     /// scrolls. Ignored for the multi-line kind. Used by the search-field widget,
     /// whose box sets the width and lets the field fill it up to the clear button.
+    ///
+    /// There is deliberately no height-filling counterpart for a multi-line
+    /// field, and it is worth writing down why, because the obvious way to build
+    /// one is a trap. A field's height comes from a `ContentSize` measure
+    /// (`TextInputMeasure`: `visible_lines` × the resolved line height), and
+    /// `bevy_ui` resolves that measure's constraints as
+    /// `effective = known.or(preferred.or(min).maybe_clamp(min, max))`
+    /// (`measurement::resolve_axis`). So a `min_height` added to let the field
+    /// shrink does not *floor* the intrinsic height — it **replaces** it. A
+    /// `min_height: 0` erases it altogether, and the field then lays out at zero
+    /// in any container with no spare height to grow it back: no text at all.
+    ///
+    /// A window too short for its field's declared lines is therefore the
+    /// **window's** problem, not the field's; the notecard and script editors
+    /// are content-driven for exactly this reason.
     pub fill: bool,
 }
 
@@ -447,6 +462,10 @@ pub fn spawn_text_input(commands: &mut Commands, parent: Entity, spec: &TextInpu
     // field's width is its intrinsic control size (set on the editor above) unless
     // it fills, in which case it grows to its container and shrinks below its
     // content so the container's width — not the text — decides the field's.
+    //
+    // A multi-line field's *height* stays untouched — never a `min_height`, not
+    // even zero, which would replace the intrinsic height rather than floor it.
+    // See [`TextInputSpec::fill`].
     if multiline {
         node.max_width = Val::Px(MULTILINE_MAX_WIDTH);
     } else if spec.fill {
