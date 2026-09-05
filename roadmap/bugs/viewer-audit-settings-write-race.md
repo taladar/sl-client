@@ -31,8 +31,18 @@ Three compounding defects in the settings-persistence path:
 
 Together these are the mechanism behind the recorded settings-clobber hazard.
 
+**The helper now exists.** `sl-settings/src/atomic_file.rs` —
+`write_atomically` (sibling temp file, `sync_all`, rename, directory sync) and
+`move_aside` — was built for
+[[viewer-audit-notification-store-overwrite]], which had the same
+overwrite hazard in the notification store. `save_scope` and
+`sl-viewer-settings`' writes still call `fs_err::write`, so the first bullet is
+now a matter of routing them through it rather than of writing it. The other two
+defects are untouched.
+
 Scope: one serialized writer (a monotonic version stamp, or funnel every save
-through one channel), an atomic temp-and-rename helper in `sl-settings`, and
-move the final save to actual exit. `sl-viewer-settings` has **zero tests**;
+through one channel), the existing atomic temp-and-rename helper wired into both
+write sites, and move the final save to actual exit. `sl-viewer-settings` has
+**zero tests**;
 `from_store_for_test` / `declared_for_test` already exist, so a round-trip test
 over every `SettingValue` variant needs no filesystem.

@@ -34,6 +34,7 @@
 //! assert_eq!(store.get_f32("RenderFarClip").unwrap(), 256.0);
 //! ```
 
+pub mod atomic_file;
 pub mod error;
 pub mod store;
 mod toml_format;

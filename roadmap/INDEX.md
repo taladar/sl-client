@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 310 |
 | blocked | 56 |
 | in-progress | 18 |
-| bugs | 62 |
-| done | 983 |
+| bugs | 61 |
+| done | 984 |
 | deferred | 25 |
 | wont-do | 14 |
 | **total** | **1566** |
@@ -1180,7 +1180,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (62)
+## bugs (61)
 
 ### viewer
 
@@ -1227,8 +1227,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A transient map-tile fetch error is cached as permanently missing
 - [`viewer-audit-media-url-scheme-allowlist`](bugs/viewer-audit-media-url-scheme-allowlist.md)
   — Parcel media URLs reach CEF and GStreamer with no scheme allowlist
-- [`viewer-audit-notification-store-overwrite`](bugs/viewer-audit-notification-store-overwrite.md)
-  — A malformed notification store is overwritten, destroying unanswered notices
 - [`viewer-audit-parcel-audio-autoplay`](bugs/viewer-audit-parcel-audio-autoplay.md)
   — A transient empty parcel resets the user's stop decision and re-autoplays
 - [`viewer-audit-parcel-borders-retessellation`](bugs/viewer-audit-parcel-borders-retessellation.md)
@@ -1330,7 +1328,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (983)
+## done (984)
 
 ### protocol
 
@@ -1597,6 +1595,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Pick slots are recycled with no generation, and a lost try_insert leaks one
 - [`viewer-audit-name-tag-viewport-gate`](done/viewer-audit-name-tag-viewport-gate.md)
   — The name-tag viewport-changed gate is exactly inverted
+- [`viewer-audit-notification-store-overwrite`](done/viewer-audit-notification-store-overwrite.md)
+  — A malformed notification store is overwritten, destroying unanswered notices
 - [`viewer-audit-parcel-access-list-accumulate`](done/viewer-audit-parcel-access-list-accumulate.md)
   — Editing a multi-packet parcel ban list unbans everyone not in the last
   packet
