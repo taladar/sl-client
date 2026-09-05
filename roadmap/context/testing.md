@@ -102,11 +102,21 @@ multi-region offsets, in-flight asset leaks, NPC appearance delivery.
   its motion, material, click action and flags, and `ObjectProperties` for its
   name, description, category, sale state and permissions, which the update
   carries none of — while a parcel has one record that a
-  `ParcelPropertiesUpdate` re-asserts whole. A properties change is pushed to
-  the editing client only; telling the region's *other* viewers needs the
-  selection subscription `test-fake-grid-concurrent-edits` owns. An estate
-  command from an agent with no estate power is refused **in silence**, as
-  OpenSim refuses it, which is what makes the gate observable at all.
+  `ParcelPropertiesUpdate` re-asserts whole. An estate command from an agent
+  with no estate power is refused **in silence**, as OpenSim refuses it, which
+  is what makes the gate observable at all.
+- **The region's other avatars are told**, each surface by its own
+  subscription: an object's properties reach the sessions holding it
+  *selected* (a prim's contents serial rides on that record and nowhere
+  else), a parcel reaches the avatars standing on it, a region's
+  configuration reaches everyone. There is nothing to arbitrate with —
+  Second Life has no edit lock, so a conflict is the steady state and
+  last-write-wins is the whole policy — which makes converging the viewer's
+  job and the unsolicited push its only material. The property under test is
+  therefore not "who won" but that a viewer's *next* write carries the pushed
+  values for the fields it never touched; `client_end_to_end` stages one
+  two-avatar case per surface, which a live grid could not, since without
+  locking its interleaving is luck.
 - `sl-conformance`'s **offline tier** — the same fake grid, asserted on the
   wire instead of in pixels. `Grid::Fake` starts a grid inside the test
   process (the catalogue region plus the border scene east of it as its

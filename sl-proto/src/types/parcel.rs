@@ -1012,8 +1012,13 @@ pub use sl_types::parcel::ParcelReturnType;
 
 /// The settings to apply to a parcel via
 /// [`Session::update_parcel`](crate::Session::update_parcel)
-/// (`ParcelPropertiesUpdate`). Start from [`ParcelUpdate::default`] and set the
-/// fields to change; `local_id` is required (from [`ParcelInfo::local_id`]).
+/// (`ParcelPropertiesUpdate`).
+///
+/// The message carries the **whole** record, not the fields that changed, so
+/// build it with [`ParcelInfo::to_update`] and change what the resident
+/// touched. [`ParcelUpdate::default`] is the other way in and asserts a blank
+/// parcel: only for a caller setting every field itself. `local_id` is
+/// required either way (from [`ParcelInfo::local_id`]).
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ParcelUpdate {
     /// The parcel's region-local id (from [`ParcelInfo::local_id`]).

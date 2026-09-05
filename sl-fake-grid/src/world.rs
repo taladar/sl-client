@@ -289,6 +289,37 @@ pub enum RegionChange {
     Updated(Box<Object>),
     /// An object left the region; every other viewer needs its `KillObject`.
     Killed(RegionLocalObjectId),
+    /// An object's **properties** record changed — it was renamed, deeded,
+    /// re-priced, or something was written into its task inventory (which is
+    /// what [`inventory_serial`](sl_proto::ObjectProperties::inventory_serial)
+    /// announces).
+    ///
+    /// The one change in this enum that does not go to the whole region.
+    /// Properties travel in a message a simulator sends to the clients holding
+    /// the object *selected*, so the watcher forwards this only to a session
+    /// whose selection names it — which is what makes the push a subscription
+    /// rather than a broadcast, and why the local id travels alongside the
+    /// record a selection is keyed by.
+    PropertiesChanged {
+        /// The region-local id the selection subscription is keyed by.
+        local_id: RegionLocalObjectId,
+        /// The record as it now stands, contents serial included.
+        properties: Box<ObjectProperties>,
+    },
+    /// A parcel's record changed — an About Land save, a purchase, a deed, an
+    /// abandonment. A parcel has one record and a simulator re-sends the whole
+    /// of it as an unsolicited `ParcelProperties`, to the avatars standing on
+    /// that parcel.
+    ParcelChanged(Box<ParcelInfo>),
+    /// The region's own configuration changed (the estate floater's Region and
+    /// Terrain tabs); every session in the region needs the new `RegionInfo`.
+    RegionConfigured(Box<sl_proto::RegionLimits>),
+    /// The region's ground textures changed (the estate floater's Terrain tab,
+    /// on "Apply"). The only message a terrain composition travels in is a
+    /// `RegionHandshake`, and a handshake is stamped with the *receiving*
+    /// session's identity, so what travels here is the composition rather than
+    /// a finished message.
+    TerrainRetextured(Box<RegionTerrainComposition>),
 }
 
 /// The name a viewer gives a prim nobody has named — the reference viewer's
@@ -1476,11 +1507,21 @@ fn push_terrain(terrain: &TerrainFixture, sim: &mut SimSession, now: Instant) {
 /// `mint` supplies the ids the simulator chooses (object keys, inventory item
 /// ids): the grid's own [`IdMinter`](crate::runtime::IdMinter) reaches through
 /// here, so a seeded grid rezzes the same object twice.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the parameters are the two stores an answer reads and writes -- \
+              the region's world and this session's machine and selection -- \
+              over the three identities that decide what the answer says (the \
+              agent, the region, and the minter the simulator's own ids come \
+              from); bundling them would hide which of them a given arm \
+              touches, which is the one thing this switch is read for"
+)]
 pub(crate) fn answer_world_request(
     world: &mut SceneFixtures,
     identity: &AvatarIdentity,
     region: &RegionIdentity,
     mint: &dyn Fn() -> uuid::Uuid,
+    selection: &mut crate::object_edits::Selection,
     sim: &mut SimSession,
     event: &ServerEvent,
     now: Instant,
@@ -1488,7 +1529,9 @@ pub(crate) fn answer_world_request(
     // The object and parcel edit families are bodies of work of their own; each
     // answers first and says so, so nothing here has to enumerate what they
     // cover.
-    if let Some(changes) = crate::object_edits::answer_object_edit(world, mint, sim, event, now) {
+    if let Some(changes) =
+        crate::object_edits::answer_object_edit(world, mint, selection, sim, event, now)
+    {
         return changes;
     }
     if let Some(changes) =
@@ -1606,6 +1649,13 @@ pub(crate) fn answer_world_request(
         // the copy the client sent, mints a fresh task item id for it (a task
         // copy is a new item, not the same one in two places), and the write
         // advances the object's contents serial.
+        //
+        // That serial is the whole of a prim's contents freshness marker, and
+        // it does not travel in an `ObjectUpdate` — it is a field of the
+        // properties record. So the write owes two pushes: the writing client
+        // its own new record, and every *other* session holding the prim
+        // selected the same one, or a resident with the prim's contents open
+        // keeps a listing the region no longer holds and cannot tell.
         ServerEvent::UpdateTaskInventory { local_id, item, .. } => {
             let Some(object) = world.object_by_local_id(*local_id) else {
                 tracing::debug!("a task inventory write named {local_id:?}, which is not here");
@@ -1623,6 +1673,16 @@ pub(crate) fn answer_world_request(
                 .entry(*local_id)
                 .or_default()
                 .write(task_item_from(&source, object.full_id, mint));
+            let Some(properties) = world.properties_of(*local_id) else {
+                return Vec::new();
+            };
+            if let Err(error) = sim.send_object_properties(&properties, now) {
+                tracing::warn!("pushing a written prim's contents serial failed: {error}");
+            }
+            return vec![RegionChange::PropertiesChanged {
+                local_id: *local_id,
+                properties: Box::new(properties),
+            }];
         }
         // The agent asked to sit on something. A simulator answers a sit on an
         // object it has with an `AvatarSitResponse` and simply does not answer

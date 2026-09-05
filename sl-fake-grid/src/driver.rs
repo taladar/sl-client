@@ -74,6 +74,15 @@ pub(crate) struct SimState {
     pub(crate) policy: crate::agent_requests::AgentPolicy,
     /// Who the agent is, for its own avatar object.
     pub(crate) avatar: AvatarIdentity,
+    /// What this client holds **selected**, which is the subscription an
+    /// object's properties are pushed to: a select opens it, a deselect closes
+    /// it, and [`run_region_watcher`] reads it to decide whether a properties
+    /// change another session published is any of this client's business.
+    ///
+    /// Per session rather than per region, because that is what it is — two
+    /// residents may hold the same prim selected at once, and neither of them
+    /// is thereby holding a lock on it.
+    pub(crate) selection: crate::object_edits::Selection,
     /// This session's sequence number (its CAPS path component and the key
     /// in the grid's session table).
     pub(crate) seq: u64,
@@ -154,8 +163,15 @@ impl SharedSim {
     /// way for library users and tests to call `send_*` / `set_*` /
     /// `enqueue_*` on the live session.
     pub(crate) async fn with_sim<R>(&self, f: impl FnOnce(&mut SimSession) -> R) -> R {
+        self.with_state(|state| f(&mut state.sim)).await
+    }
+
+    /// [`with_sim`](Self::with_sim) for the callers that need more of the
+    /// session than its machine — the region watcher, which decides what to
+    /// forward from this session's own selection and where its avatar stands.
+    pub(crate) async fn with_state<R>(&self, f: impl FnOnce(&mut SimState) -> R) -> R {
         let mut guard = self.state.lock().await;
-        let result = f(&mut guard.sim);
+        let result = f(&mut guard);
         let outcome = self.flush_locked(&mut guard);
         drop(guard);
         self.finish_flush(outcome).await;
@@ -250,11 +266,12 @@ impl SharedSim {
             {
                 let minter = state.minter.clone();
                 let mut world = state.world.lock();
-                let changes = answer_world_request(
+                let mut changes = answer_world_request(
                     &mut world,
                     &state.avatar,
                     &state.identity,
                     &move || minter.uuid(),
+                    &mut state.selection,
                     &mut state.sim,
                     &event,
                     now,
@@ -262,13 +279,16 @@ impl SharedSim {
                 // The estate is answered under the same lock as the rest of the
                 // region, and after it: an estate command changes the region's
                 // own configuration, which the world's other answers read.
-                let _estate = crate::estate::answer_estate_request(
-                    &mut world,
-                    &state.identity,
-                    state.policy,
-                    &mut state.sim,
-                    &event,
-                    now,
+                changes.extend(
+                    crate::estate::answer_estate_request(
+                        &mut world,
+                        &state.identity,
+                        state.policy,
+                        &mut state.sim,
+                        &event,
+                        now,
+                    )
+                    .unwrap_or_default(),
                 );
                 // Published while the store is still held, so a watcher that
                 // wakes on the change and re-reads the region cannot see a
@@ -484,16 +504,49 @@ pub(crate) async fn run_region_watcher(
                     Ok(RegionUpdate { change, .. }) => {
                         let now = shared.now();
                         shared
-                            .with_sim(|sim| {
+                            .with_state(|state| {
                                 let result = match &change {
                                     RegionChange::Rezzed(object)
-                                    | RegionChange::Updated(object) => sim.send_object_update(
+                                    | RegionChange::Updated(object) => state.sim.send_object_update(
                                         std::slice::from_ref(object.as_ref()),
                                         REAL_TIME_DILATION,
                                         now,
                                     ),
                                     RegionChange::Killed(local_id) => {
-                                        sim.send_kill_object(&[*local_id], now)
+                                        state.sim.send_kill_object(&[*local_id], now)
+                                    }
+                                    // The one change that is a subscription
+                                    // rather than a broadcast: a client that is
+                                    // not looking at the object is not told,
+                                    // exactly as a simulator does not tell it.
+                                    RegionChange::PropertiesChanged {
+                                        local_id,
+                                        properties,
+                                    } => {
+                                        if !state.selection.contains(local_id) {
+                                            return;
+                                        }
+                                        state.sim.send_object_properties(properties, now)
+                                    }
+                                    // A parcel push goes to the avatars standing
+                                    // on that parcel -- OpenSim's
+                                    // `SendLandUpdateToAvatarsOverMe` -- so a
+                                    // resident on the other side of the region
+                                    // is not sent a record of land they are not
+                                    // on.
+                                    RegionChange::ParcelChanged(parcel) => {
+                                        if !stands_on(state, parcel.local_id) {
+                                            return;
+                                        }
+                                        state.sim.send_parcel_properties(parcel, now)
+                                    }
+                                    RegionChange::RegionConfigured(limits) => {
+                                        state.sim.send_region_info(limits, now)
+                                    }
+                                    RegionChange::TerrainRetextured(composition) => {
+                                        let mut identity = state.identity.clone();
+                                        identity.terrain = **composition;
+                                        state.sim.send_region_handshake(&identity, now)
                                     }
                                 };
                                 if let Err(error) = result {
@@ -521,6 +574,23 @@ pub(crate) async fn run_region_watcher(
             }
         }
     }
+}
+
+/// Whether this session's avatar is standing on `parcel` — who a changed
+/// parcel's record is pushed to.
+///
+/// The position is the one the session was opened at, since the fake grid
+/// tracks no movement: an avatar that walked across a parcel line since it
+/// arrived is still counted where it landed. That is a limit of the grid, not
+/// of the push — the alternative, telling the whole region, would make a test
+/// of "who is told" pass for the wrong reason.
+fn stands_on(state: &SimState, parcel: sl_proto::RegionLocalParcelId) -> bool {
+    let placement = state.sim.arrival_position().position;
+    state
+        .world
+        .lock()
+        .parcel_at(placement.x(), placement.y())
+        .is_some_and(|standing| standing.local_id == parcel)
 }
 
 /// Sleeps until `deadline`, or forever when there is none (the machine has

@@ -528,9 +528,10 @@ change what it holds, and all three are answered against the region world:
 Because the world is the region's, one avatar's rez is a change every
 avatar in the region sees. There is no simulation loop to sweep for it, so
 the session that made the change publishes a `RegionUpdate` and a
-per-session `run_region_watcher` task turns it back into the `ObjectUpdate`
-or `KillObject` its own circuit needs — skipping the changes its own
-session published, which were sent directly. A watcher that falls behind
+per-session `run_region_watcher` task turns it back into the message its own
+circuit needs — an `ObjectUpdate`, a `KillObject`, or one of the three
+subscription pushes below — skipping the changes its own session published,
+which were sent directly. A watcher that falls behind
 its broadcast logs a warning rather than swallowing it: a lost `KillObject`
 is a ghost object standing in that viewer until its next refetch.
 
@@ -591,12 +592,63 @@ region's own lock:
   observable. The estate itself is a record and not a rule: a banned agent
   may still log in, because the fake grid enforces nothing.
 
-Two deliberate limits. A **properties** change is pushed only to the
-client that made it — telling the region's *other* viewers needs a
-selection subscription, which is `test-fake-grid-concurrent-edits`'s work.
-And the estate is stored **per region**, because the fake grid's regions are
-independent worlds with no store above them; nothing reads an estate from
-two regions yet.
+One deliberate limit: the estate is stored **per region**, because the fake
+grid's regions are independent worlds with no store above them; nothing
+reads an estate from two regions yet.
+
+### Somebody else changed it
+
+An edit that only its editor is told about is not a simulator's behaviour,
+and the difference matters because Second Life has **no arbitration at all**
+— no edit lock, no two-phase commit, no consensus. Selection is a
+subscription, not a mutex; two residents may hold the same prim or the same
+About Land form open indefinitely; latency alone makes conflicting edits the
+steady state rather than an error case, and last-write-wins is very probably
+the whole of a grid's policy. What makes that survivable is only that the
+loser is *told*, so the burden of converging is the viewer's.
+
+Which is why the interesting bug is not "loses the race" — somebody has to —
+but **silently reasserting stale state afterwards**. A
+`ParcelPropertiesUpdate` carries the *whole* record, so a floater populated
+from a read minutes old, with one checkbox flipped, sends every other field
+back as it was and reverts whatever somebody else changed in between. The
+property worth testing is therefore convergence: after a push, a viewer's
+*next* write must carry the pushed values for the fields it did not itself
+touch.
+
+`RegionChange` grew the three pushes that make that observable, each going
+to a different set of sessions because each surface's subscription is
+different:
+
+- **An object's properties** go to the sessions holding it *selected*, and
+  to nobody else. `ObjectSelect` / `ObjectDeselect` are typed
+  (`ServerEvent::ObjectsSelected` / `ObjectsDeselected`) and each session
+  keeps its own selection set, which `run_region_watcher` consults before
+  forwarding. A prim's **task inventory** rides on this one: its contents
+  serial is a field of the properties record and travels nowhere else, so a
+  write into a prim now pushes the record as well as advancing it.
+- **A parcel** goes to the avatars standing on it — OpenSim's
+  `SendLandUpdateToAvatarsOverMe` — as a sequence-zero `ParcelProperties`,
+  the same unsolicited form the arrival burst uses. The fake grid tracks no
+  movement, so "standing on" is where the session arrived.
+- **The region's own configuration** goes to everyone in the region: there
+  is no subscription to belong to, since every avatar is standing in it. So
+  do its **ground textures** on a `texturecommit`, whose whole purpose is
+  that everybody sees them — the odd one out, because a terrain composition
+  travels only in a `RegionHandshake` and a handshake is stamped with the
+  *receiving* session's identity, so the region publishes the composition and
+  each watcher builds its own message.
+
+The `client_end_to_end` tests stage one two-avatar case per surface, which
+a live grid could not: without locking a live interleaving is luck, while
+the fake region's lock serialises writes so "A reads, B writes, A writes"
+gives the same answer every run. The parcel case runs the whole argument —
+a save built from the record read at open reverts the other resident's
+rename, and a save built from the pushed record does not.
+
+What a **real** grid does on the same collision is still worth one run to
+confirm rather than assume (`test-asset-save-mutation-survey`); the expected
+finding is that nothing arbitrates.
 
 Offline conformance: `object-edit` (the whole build surface, including the
 transform, the undo stack and the read-back through `ObjectProperties`),

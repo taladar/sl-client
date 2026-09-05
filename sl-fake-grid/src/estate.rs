@@ -38,7 +38,7 @@ use sl_proto::{
 };
 
 use crate::agent_requests::AgentPolicy;
-use crate::world::SceneFixtures;
+use crate::world::{RegionChange, SceneFixtures};
 
 /// The estate command a viewer's "regenerate the map tile" nudge issues.
 const REFRESH_MAP_VISIBILITY: &str = "refreshmapvisibility";
@@ -194,8 +194,9 @@ impl EstateFixture {
 }
 
 /// Answers one drained [`ServerEvent`] that reads or writes the estate,
-/// returning `true` when it was one — so the driver knows the event has been
-/// dealt with.
+/// returning the [`RegionChange`]s the region's other sessions have to be told
+/// about — or [`None`] when there was nothing to answer, because the event was
+/// not an estate one at all or named a method this grid has no answer for.
 ///
 /// Every command is refused in silence when `policy` says this agent holds no
 /// estate power, which is what OpenSim does and the only thing that makes the
@@ -212,7 +213,7 @@ pub(crate) fn answer_estate_request(
     sim: &mut SimSession,
     event: &ServerEvent,
     now: Instant,
-) -> bool {
+) -> Option<Vec<RegionChange>> {
     let (method, invoice, params) = match event {
         // The covenant is the one estate read with a message of its own, and
         // the one command a resident may issue: a covenant is what somebody is
@@ -222,18 +223,18 @@ pub(crate) fn answer_estate_request(
             if let Err(error) = sim.send_estate_covenant_reply(&covenant, now) {
                 tracing::warn!("answering an estate covenant request failed: {error}");
             }
-            return true;
+            return Some(Vec::new());
         }
         ServerEvent::EstateOwnerRequest {
             method,
             invoice,
             params,
         } => (method.as_str(), *invoice, params.as_slice()),
-        _other => return false,
+        _other => return None,
     };
     if !policy.estate_manager {
         tracing::debug!("the estate command {method} came from an agent with no estate powers");
-        return true;
+        return Some(Vec::new());
     }
     match method {
         // The floater's opening round trip: the estate's configuration, then
@@ -286,6 +287,7 @@ pub(crate) fn answer_estate_request(
             if let Err(error) = sim.send_region_info(&limits, now) {
                 tracing::warn!("answering a region info save failed: {error}");
             }
+            return Some(vec![RegionChange::RegionConfigured(Box::new(limits))]);
         }
         // The floater's Terrain tab: the water line, how far a terraform may
         // move the ground, and the sun.
@@ -312,6 +314,7 @@ pub(crate) fn answer_estate_request(
             if let Err(error) = sim.send_region_info(&limits, now) {
                 tracing::warn!("answering a region terrain save failed: {error}");
             }
+            return Some(vec![RegionChange::RegionConfigured(Box::new(limits))]);
         }
         // One parameter per corner being changed, each `"<corner> <uuid>"`.
         TEXTURE_DETAIL => {
@@ -356,25 +359,31 @@ pub(crate) fn answer_estate_request(
         // every viewer is told, and a `RegionHandshake` is the only message
         // they travel in.
         TEXTURE_COMMIT => {
+            let composition = world.terrain_composition(identity);
             let mut updated = identity.clone();
-            updated.terrain = world.terrain_composition(identity);
+            updated.terrain = composition;
             if let Err(error) = sim.send_region_handshake(&updated, now) {
                 tracing::warn!("re-handshaking after a terrain texture commit failed: {error}");
             }
+            // "Every viewer" is the whole point of the commit, and the region's
+            // other sessions each need the handshake stamped with their *own*
+            // identity, so the change carries the composition rather than a
+            // finished message.
+            return Some(vec![RegionChange::TerrainRetextured(Box::new(composition))]);
         }
         // One add or remove against one of the four lists. The viewer sends its
         // own id first, the change second and the target third.
         ACCESS_DELTA => {
             let Some(delta) = number(params, 1).and_then(EstateAccessDelta::from_u32) else {
                 tracing::debug!("an estateaccessdelta named no change this grid knows");
-                return true;
+                return Some(Vec::new());
             };
             let Some(target) = params
                 .get(2)
                 .and_then(|value| value.parse::<uuid::Uuid>().ok())
             else {
                 tracing::debug!("an estateaccessdelta named an unparsable target");
-                return true;
+                return Some(Vec::new());
             };
             let kind = delta.list();
             let list = world.estate.list_mut(kind);
@@ -417,10 +426,10 @@ pub(crate) fn answer_estate_request(
         }
         other => {
             tracing::debug!("the estate command {other} has no answer on this grid");
-            return false;
+            return None;
         }
     }
-    true
+    Some(Vec::new())
 }
 
 /// Sends all four of the estate's access lists, which is what a `getinfo`
@@ -445,10 +454,17 @@ fn push_access_lists(
     }
 }
 
-/// Parameter `index` as an unsigned number, or [`None`] when it is absent or
-/// says something else.
+/// Parameter `index` as an unsigned number, its whole part taken if it is
+/// spelled as a decimal, or [`None`] when it is absent or says something else.
 fn number(params: &[String], index: usize) -> Option<u32> {
-    params.get(index)?.trim().parse().ok()
+    // A decimal spelling counts. `setregioninfo` formats every numeric
+    // parameter with six decimal places, so the region's agent limit arrives as
+    // `"100.000000"` and a parser that took digits alone would read the field
+    // as absent and leave that half of the save silently unapplied — which is
+    // exactly what it did until a two-avatar test asked whether the other
+    // avatar was told.
+    let value = params.get(index)?.trim();
+    value.split('.').next()?.parse().ok()
 }
 
 /// Parameter `index` as a decimal, or [`None`] when it is absent or says

@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 311 |
+| ready | 310 |
 | blocked | 56 |
 | in-progress | 18 |
-| bugs | 64 |
-| done | 984 |
+| bugs | 65 |
+| done | 985 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1570** |
+| **total** | **1571** |
 
 ## ideas (98)
 
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (311)
+## ready (310)
 
 ### protocol
 
@@ -949,8 +949,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
 - [`test-fake-grid-builtin-sounds`](ready/test-fake-grid-builtin-sounds.md) —
   The built-in UI sounds the viewer plays on arrival 404
-- [`test-fake-grid-concurrent-edits`](ready/test-fake-grid-concurrent-edits.md)
-  — Somebody else changed it and nobody was told
 - [`test-fake-grid-login-matrix-and-timeouts`](ready/test-fake-grid-login-matrix-and-timeouts.md)
   — The login refusals and handover timeouts nothing tests
 - [`test-fake-grid-object-sounds`](ready/test-fake-grid-object-sounds.md) — The
@@ -1182,7 +1180,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (64)
+## bugs (65)
 
 ### viewer
 
@@ -1273,6 +1271,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   terrain)
 - [`viewer-edit-outline-skinned-mesh`](bugs/viewer-edit-outline-skinned-mesh.md)
   — Edit-selection outline can't shell a skinned / animesh object
+- [`viewer-floaters-never-reread-after-a-push`](bugs/viewer-floaters-never-reread-after-a-push.md)
+  — A floater seeds its draft once and reverts what it never saw
 - [`viewer-hover-tooltip-202ms-frame-spike`](bugs/viewer-hover-tooltip-202ms-frame-spike.md)
   — update_hover_tooltip spikes to 202 ms on a single frame
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
@@ -1336,7 +1336,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (984)
+## done (985)
 
 ### protocol
 
@@ -3182,6 +3182,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   An asset id the grid hands out should name bytes the grid can serve
 - [`test-fake-grid-builtin-textures`](done/test-fake-grid-builtin-textures.md) —
   Serve the built-in sky, water and prim textures the viewer asks for
+- [`test-fake-grid-concurrent-edits`](done/test-fake-grid-concurrent-edits.md) —
+  Somebody else changed it and nobody was told
 - [`test-fake-grid-determinism`](done/test-fake-grid-determinism.md) — An
   injectable clock and seeded ids for sl-fake-grid
 - [`test-fake-grid-edit-surfaces`](done/test-fake-grid-edit-surfaces.md) — A

@@ -9,16 +9,17 @@
 //! unsolicited form the arrival burst already uses. That single record is also
 //! what makes a parcel edit dangerous in a way an object edit is not: the About
 //! Land form carries every field back, so a floater populated from a stale read
-//! reverts whatever somebody else changed in the meantime. Reproducing that is
-//! [`test-fake-grid-concurrent-edits`]'s job; storing the write is this
-//! module's.
+//! reverts whatever somebody else changed in the meantime. Nothing here stops
+//! that, and nothing on a real grid does either — a simulator cannot tell a
+//! re-asserted field from an unchanged one. What it can do is make the revert
+//! *avoidable*, by re-sending the whole record to the parcel's other occupants
+//! ([`RegionChange::ParcelChanged`]) so a floater that re-seeds from the push
+//! carries the other resident's change forward instead of undoing it.
 //!
 //! The **access lists** are the one parcel record that does not travel in the
 //! properties reply. They have their own request and their own reply, and they
 //! live here beside the parcels rather than on them, because a `ParcelInfo` is
 //! the wire record and has no field for them.
-//!
-//! [`test-fake-grid-concurrent-edits`]: https://example.invalid/roadmap
 
 use std::time::Instant;
 
@@ -77,7 +78,7 @@ pub(crate) fn answer_parcel_edit(
             parcel.user_location = update.user_location;
             parcel.user_look_at = update.user_look_at;
             parcel.landing_type = sl_proto::LandingType::from_u8(update.landing_type);
-            push_parcel(world, update.local_id, sim, now);
+            return Some(push_parcel(world, update.local_id, sim, now));
         }
         // A purchase: the buyer owns it and it comes off the market. The fake
         // grid charges nobody — its economy is a price list, not a ledger — so
@@ -93,7 +94,7 @@ pub(crate) fn answer_parcel_edit(
                 _ => OwnerKey::Agent(agent_id),
             };
             set_owner(world, *local_id, owner, ParcelStatus::Leased);
-            push_parcel(world, *local_id, sim, now);
+            return Some(push_parcel(world, *local_id, sim, now));
         }
         ServerEvent::ParcelDeededToGroup { local_id, group_id } => {
             set_owner(
@@ -102,7 +103,7 @@ pub(crate) fn answer_parcel_edit(
                 OwnerKey::Group(*group_id),
                 ParcelStatus::Leased,
             );
-            push_parcel(world, *local_id, sim, now);
+            return Some(push_parcel(world, *local_id, sim, now));
         }
         // Abandoning hands the land back to the estate: the region's owner
         // holds it, and its status says nobody chose to.
@@ -113,7 +114,7 @@ pub(crate) fn answer_parcel_edit(
                 OwnerKey::Agent(AgentKey::from(identity.sim_owner)),
                 ParcelStatus::Abandoned,
             );
-            push_parcel(world, *local_id, sim, now);
+            return Some(push_parcel(world, *local_id, sim, now));
         }
         // Reclaiming is the estate manager taking abandoned land back into use.
         ServerEvent::ParcelReclaimed { local_id } => {
@@ -123,7 +124,7 @@ pub(crate) fn answer_parcel_edit(
                 OwnerKey::Agent(AgentKey::from(identity.sim_owner)),
                 ParcelStatus::Leased,
             );
-            push_parcel(world, *local_id, sim, now);
+            return Some(push_parcel(world, *local_id, sim, now));
         }
         // A return takes the objects out of the world. A real grid also files
         // each one into its owner's Lost and Found; the fake grid has one
@@ -264,19 +265,21 @@ fn set_owner(
 
 /// Re-sends a changed parcel's whole record to the editing client, under the
 /// sequence id of an unsolicited push — the only message a parcel's fields
-/// travel in.
+/// travel in — and returns the same record as the change the parcel's other
+/// occupants have to be told about.
 fn push_parcel(
     world: &SceneFixtures,
     local_id: RegionLocalParcelId,
     sim: &mut SimSession,
     now: Instant,
-) {
+) -> Vec<RegionChange> {
     let Some(parcel) = world.parcel_by_local_id(local_id) else {
-        return;
+        return Vec::new();
     };
     let mut record: ParcelInfo = parcel.clone();
     record.sequence_id = UNSOLICITED_SEQUENCE_ID;
     if let Err(error) = sim.send_parcel_properties(&record, now) {
         tracing::warn!("re-sending an edited parcel failed: {error}");
     }
+    vec![RegionChange::ParcelChanged(Box::new(record))]
 }

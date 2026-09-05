@@ -681,6 +681,7 @@ impl GridCore {
                 first_name: account.config.first_name.clone(),
                 last_name: account.config.last_name.clone(),
             },
+            selection: crate::object_edits::Selection::new(),
             seq,
             region: region_index,
             ids,
