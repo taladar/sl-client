@@ -357,27 +357,30 @@ impl Plugin for DebugSettingsPlugin {
 // Spawn.
 // ---------------------------------------------------------------------------
 
+/// The debug settings floater's [`FloaterSpec`] — shared with the `FLOATERS`
+/// registry, so the swept window is the one the viewer spawns.
+#[must_use]
+pub fn debug_settings_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: DEBUG_SETTINGS_FLOATER_ID,
+        title: "Debug settings".to_owned(),
+        position: Vec2::new(200.0, 100.0),
+        default_size: Some(Vec2::new(720.0, 480.0)),
+        min_size: Some(Vec2::new(520.0, 340.0)),
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: true,
+            minimizable: true,
+            closable: true,
+            dockable: false,
+        },
+    }
+}
+
 /// Startup: spawn the floater's chrome, hidden; the content is built on first
 /// open ([`DeferredFloaterContent`]).
 fn spawn_debug_settings_floater(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = spawn_floater(
-        &mut commands,
-        root.0,
-        FloaterSpec {
-            id: DEBUG_SETTINGS_FLOATER_ID,
-            title: "Debug settings".to_owned(),
-            position: Vec2::new(200.0, 100.0),
-            default_size: Some(Vec2::new(720.0, 480.0)),
-            min_size: Some(Vec2::new(520.0, 340.0)),
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: true,
-                minimizable: true,
-                closable: true,
-                dockable: false,
-            },
-        },
-    );
+    let handle = spawn_floater(&mut commands, root.0, debug_settings_floater_spec());
     commands
         .entity(handle.title_text)
         .insert(Translated::new("debug-settings-title"));

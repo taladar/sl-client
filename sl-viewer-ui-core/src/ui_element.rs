@@ -16,7 +16,9 @@
 //!
 //! **A new panel or widget belongs in `ELEMENTS`.** That is the whole
 //! obligation, and it is what buys the element every check that exists now and
-//! every check added later.
+//! every check added later. A whole **window** carries the same obligation
+//! against `FLOATERS` (`sl_viewer_ui_widgets::floater::FloaterElement`), which
+//! is this mechanism applied to the floater manager rather than a second one.
 //!
 //! # The rule this registry enforces: construction without wiring
 //!

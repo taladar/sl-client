@@ -349,26 +349,28 @@ fn register_render_settings_table(settings: Option<ResMut<ViewerSettings>>) {
 
 // --- Floater --------------------------------------------------------------
 
+/// The render settings floater's [`FloaterSpec`] — shared with the `FLOATERS`
+/// registry, so the swept window is the one the viewer spawns.
+pub(crate) fn render_settings_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: RENDER_SETTINGS_FLOATER_ID,
+        title: "Avatar Render Settings".to_owned(),
+        position: Vec2::new(330.0, 180.0),
+        default_size: Some(Vec2::new(620.0, 320.0)),
+        min_size: Some(Vec2::new(430.0, 200.0)),
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: true,
+            minimizable: false,
+            closable: true,
+            dockable: false,
+        },
+    }
+}
+
 /// Startup: spawn the floater chrome; the content builds on first open.
 fn spawn_render_settings_floater(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = spawn_floater(
-        &mut commands,
-        root.0,
-        FloaterSpec {
-            id: RENDER_SETTINGS_FLOATER_ID,
-            title: "Avatar Render Settings".to_owned(),
-            position: Vec2::new(330.0, 180.0),
-            default_size: Some(Vec2::new(620.0, 320.0)),
-            min_size: Some(Vec2::new(430.0, 200.0)),
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: true,
-                minimizable: false,
-                closable: true,
-                dockable: false,
-            },
-        },
-    );
+    let handle = spawn_floater(&mut commands, root.0, render_settings_floater_spec());
     commands
         .entity(handle.title_text)
         .insert(Translated::new("avatar-render-title"));

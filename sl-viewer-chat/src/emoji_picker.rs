@@ -831,32 +831,35 @@ fn apply_emoji_picker_anchor(
 // Spawning
 // ---------------------------------------------------------------------------
 
+/// The emoji picker floater's [`FloaterSpec`] — shared with the `FLOATERS`
+/// registry, so the swept window is the one the viewer spawns.
+#[must_use]
+pub fn emoji_picker_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: EMOJI_FLOATER_ID,
+        title: "Emoji".to_owned(),
+        position: Vec2::new(360.0, 120.0),
+        // A fixed, content-driven palette: the grid viewport carries the
+        // definite size, so the window sizes to it rather than taking a
+        // resizable rect.
+        default_size: None,
+        min_size: None,
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: false,
+            minimizable: true,
+            closable: true,
+            dockable: true,
+        },
+    }
+}
+
 /// Startup: spawn the picker's floater and its content — the search field, the
 /// category strip, the scrolling grid, the tone-swatch row and the preview line —
 /// and publish [`EmojiPickerUi`]. Registers [`toggle_emoji_picker`] here (rather
 /// than in `build`) so the toggle exists exactly when the floater does.
 fn spawn_emoji_picker(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = spawn_floater(
-        &mut commands,
-        root.0,
-        FloaterSpec {
-            id: EMOJI_FLOATER_ID,
-            title: "Emoji".to_owned(),
-            position: Vec2::new(360.0, 120.0),
-            // A fixed, content-driven palette: the grid viewport carries the
-            // definite size, so the window sizes to it rather than taking a
-            // resizable rect.
-            default_size: None,
-            min_size: None,
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: false,
-                minimizable: true,
-                closable: true,
-                dockable: true,
-            },
-        },
-    );
+    let handle = spawn_floater(&mut commands, root.0, emoji_picker_floater_spec());
     commands
         .entity(handle.title_text)
         .insert(Translated::new("emoji-picker-title"));

@@ -823,27 +823,30 @@ impl Plugin for AboutLandPlugin {
 /// [`open_about_land`] looks the panel up by.
 const ABOUT_LAND_FLOATER_ID: &str = "about-land";
 
+/// The about land floater's [`FloaterSpec`] — shared with the `FLOATERS`
+/// registry, so the swept window is the one the viewer spawns.
+#[must_use]
+pub fn about_land_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: ABOUT_LAND_FLOATER_ID,
+        title: "About Land".to_owned(),
+        position: Vec2::new(360.0, 80.0),
+        default_size: Some(Vec2::new(500.0, 480.0)),
+        min_size: Some(Vec2::new(420.0, 320.0)),
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: true,
+            minimizable: false,
+            closable: true,
+            dockable: false,
+        },
+    }
+}
+
 /// Spawn the (hidden) About Land floater's chrome; every tab is built once, on
 /// the first open ([`DeferredFloaterContent`]).
 fn spawn_about_land_floater(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = spawn_floater(
-        &mut commands,
-        root.0,
-        FloaterSpec {
-            id: ABOUT_LAND_FLOATER_ID,
-            title: "About Land".to_owned(),
-            position: Vec2::new(360.0, 80.0),
-            default_size: Some(Vec2::new(500.0, 480.0)),
-            min_size: Some(Vec2::new(420.0, 320.0)),
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: true,
-                minimizable: false,
-                closable: true,
-                dockable: false,
-            },
-        },
-    );
+    let handle = spawn_floater(&mut commands, root.0, about_land_floater_spec());
     commands
         .entity(handle.root)
         .insert(crate::floater_persist::FloaterPersistExempt);

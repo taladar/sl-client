@@ -286,6 +286,30 @@ impl Plugin for EditToolPlugin {
     }
 }
 
+/// The build tools floater's [`FloaterSpec`] — shared with the `FLOATERS`
+/// registry, so the swept window is the one the viewer spawns.
+#[must_use]
+pub fn build_tools_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: BUILD_TOOLS_FLOATER_ID,
+        title: String::from("Build Tools"),
+        position: Vec2::new(60.0, 80.0),
+        // A definite, resizable content area (like the profile floater):
+        // the tab bar and pages track the window and the pages scroll
+        // their overflow, so the parameter editors stay reachable at any
+        // size.
+        default_size: Some(Vec2::new(420.0, 640.0)),
+        min_size: Some(Vec2::new(340.0, 400.0)),
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: true,
+            minimizable: true,
+            closable: true,
+            dockable: false,
+        },
+    }
+}
+
 /// Spawn the Build Tools floater: tool buttons, toggles, grid unit, the
 /// selection summary, the nine transform fields, and the placeholder tab
 /// shell.
@@ -293,28 +317,7 @@ fn spawn_build_floater(mut commands: Commands, root: Option<Res<UiRoot>>) {
     let Some(root) = root.map(|root| root.0) else {
         return;
     };
-    let handle = spawn_floater(
-        &mut commands,
-        root,
-        FloaterSpec {
-            id: BUILD_TOOLS_FLOATER_ID,
-            title: String::from("Build Tools"),
-            position: Vec2::new(60.0, 80.0),
-            // A definite, resizable content area (like the profile floater):
-            // the tab bar and pages track the window and the pages scroll
-            // their overflow, so the parameter editors stay reachable at any
-            // size.
-            default_size: Some(Vec2::new(420.0, 640.0)),
-            min_size: Some(Vec2::new(340.0, 400.0)),
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: true,
-                minimizable: true,
-                closable: true,
-                dockable: false,
-            },
-        },
-    );
+    let handle = spawn_floater(&mut commands, root, build_tools_floater_spec());
     commands
         .entity(handle.title_text)
         .insert(Translated::new("build-tools-floater-title"));

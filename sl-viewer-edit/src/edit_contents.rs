@@ -671,29 +671,32 @@ fn spawn_contents_tab(mut commands: Commands, pages: Option<Res<BuildTabPages>>)
     });
 }
 
+/// The object contents floater's [`FloaterSpec`] — shared with the `FLOATERS`
+/// registry, so the swept window is the one the viewer spawns.
+#[must_use]
+pub fn object_contents_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: "object-contents",
+        title: String::from("Object Contents"),
+        position: Vec2::new(120.0, 120.0),
+        default_size: Some(Vec2::new(320.0, 420.0)),
+        min_size: Some(Vec2::new(260.0, 260.0)),
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: true,
+            minimizable: true,
+            closable: true,
+            dockable: false,
+        },
+    }
+}
+
 /// Spawn the standalone Object Contents floater (the Open floater).
 fn spawn_open_object_floater(mut commands: Commands, root: Option<Res<UiRoot>>) {
     let Some(root) = root.map(|root| root.0) else {
         return;
     };
-    let handle: FloaterHandle = spawn_floater(
-        &mut commands,
-        root,
-        FloaterSpec {
-            id: "object-contents",
-            title: String::from("Object Contents"),
-            position: Vec2::new(120.0, 120.0),
-            default_size: Some(Vec2::new(320.0, 420.0)),
-            min_size: Some(Vec2::new(260.0, 260.0)),
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: true,
-                minimizable: true,
-                closable: true,
-                dockable: false,
-            },
-        },
-    );
+    let handle: FloaterHandle = spawn_floater(&mut commands, root, object_contents_floater_spec());
     commands
         .entity(handle.title_text)
         .insert(Translated::new("object-contents-floater-title"));

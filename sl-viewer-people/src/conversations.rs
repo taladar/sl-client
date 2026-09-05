@@ -1129,6 +1129,30 @@ impl Plugin for ConversationsPlugin {
 #[derive(Component, Debug, Clone, Copy)]
 struct ConversationsDockHost;
 
+/// The Conversations floater's [`FloaterSpec`] — shared with the `FLOATERS`
+/// registry, so the swept window is the one the viewer spawns.
+///
+/// Its [`dock_host`](FloaterSpec::dock_host) is `None` here and filled in by the
+/// live spawn with the host it creates beside the nearby-chat bar: a host is an
+/// entity, which no registry constructor can name.
+#[must_use]
+pub fn conversations_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: CONVERSATIONS_FLOATER_ID,
+        title: "Conversations".to_owned(),
+        position: Vec2::new(60.0, 80.0),
+        default_size: Some(DEFAULT_SIZE),
+        min_size: Some(MIN_SIZE),
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: true,
+            minimizable: true,
+            closable: true,
+            dockable: true,
+        },
+    }
+}
+
 /// Startup: spawn the Conversations floater's own dock host, then the floater
 /// chrome (wired to that host); the strip/pane content and the seeded Nearby
 /// tab are built on the first open ([`DeferredFloaterContent`]).
@@ -1163,27 +1187,15 @@ fn spawn_conversations_floater(mut commands: Commands, root: Res<UiRoot>) {
         .id();
 
     commands.entity(dock_host).insert(ConversationsDockHost);
-    let handle = spawn_floater(
-        &mut commands,
-        root.0,
-        FloaterSpec {
-            id: CONVERSATIONS_FLOATER_ID,
-            title: "Conversations".to_owned(),
-            position: Vec2::new(60.0, 80.0),
-            default_size: Some(DEFAULT_SIZE),
-            min_size: Some(MIN_SIZE),
-            // Docks into this floater's own host beside the nearby-chat bar (see
-            // `dock_host` above) rather than the shared top-trailing host — the
-            // dock button and free-floating tear-off work as usual.
-            dock_host: Some(dock_host),
-            caps: FloaterCaps {
-                resizable: true,
-                minimizable: true,
-                closable: true,
-                dockable: true,
-            },
-        },
-    );
+    // Docks into this floater's own host beside the nearby-chat bar (spawned
+    // just above) rather than the shared top-trailing host — the dock button and
+    // free-floating tear-off work as usual. A live entity, so it cannot be part
+    // of the registry's spec.
+    let spec = FloaterSpec {
+        dock_host: Some(dock_host),
+        ..conversations_floater_spec()
+    };
+    let handle = spawn_floater(&mut commands, root.0, spec);
     commands
         .entity(handle.title_text)
         .insert(crate::i18n::Translated::new("conversations-title"));

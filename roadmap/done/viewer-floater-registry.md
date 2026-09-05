@@ -2,7 +2,7 @@
 id: viewer-floater-registry
 title: A FLOATERS registry, so floaters can be swept at all
 topic: viewer
-status: ready
+status: done
 origin: user request (2026-07) — end manual re-testing of UI interactions
 points: 3
 refs: [viewer-ui-test-harness]

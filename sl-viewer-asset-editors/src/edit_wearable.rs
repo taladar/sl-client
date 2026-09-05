@@ -234,30 +234,33 @@ impl Plugin for EditWearablePlugin {
     }
 }
 
+/// The wearable editor floater's [`FloaterSpec`] — shared with the `FLOATERS`
+/// registry, so the swept window is the one the viewer spawns.
+#[must_use]
+pub fn wearable_editor_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: "wearable-editor",
+        title: "Edit Wearable".to_owned(),
+        position: Vec2::new(300.0, 80.0),
+        default_size: Some(Vec2::new(320.0, 520.0)),
+        min_size: Some(Vec2::new(280.0, 240.0)),
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: true,
+            minimizable: true,
+            closable: true,
+            dockable: false,
+        },
+    }
+}
+
 /// Spawn the (hidden) editor floater and stash its handles.
 fn spawn_wearable_editor(mut commands: Commands, root: Res<UiRoot>) {
     let FloaterHandle {
         root: panel,
         content,
         title_text,
-    } = spawn_floater(
-        &mut commands,
-        root.0,
-        FloaterSpec {
-            id: "wearable-editor",
-            title: "Edit Wearable".to_owned(),
-            position: Vec2::new(300.0, 80.0),
-            default_size: Some(Vec2::new(320.0, 520.0)),
-            min_size: Some(Vec2::new(280.0, 240.0)),
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: true,
-                minimizable: true,
-                closable: true,
-                dockable: false,
-            },
-        },
-    );
+    } = spawn_floater(&mut commands, root.0, wearable_editor_floater_spec());
     // Subject-bound: it opens on whatever item you clicked, so its geometry is
     // meaningless across sessions.
     commands

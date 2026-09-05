@@ -254,31 +254,34 @@ impl Plugin for ColorPickerPlugin {
     }
 }
 
+/// The color picker floater's [`FloaterSpec`] — shared with the `FLOATERS`
+/// registry, so the swept window is the one the viewer spawns.
+#[must_use]
+pub fn color_picker_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: "color-picker",
+        title: String::from("Color Picker"),
+        // Clear of the Build Tools floater (which spans the upper-left), so
+        // the picker is never hidden behind it.
+        position: Vec2::new(520.0, 220.0),
+        default_size: None,
+        min_size: None,
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: false,
+            minimizable: false,
+            closable: true,
+            dockable: false,
+        },
+    }
+}
+
 /// Build the shared colour-picker floater (hidden until opened).
 fn spawn_color_picker_floater(mut commands: Commands, root: Option<Res<UiRoot>>) {
     let Some(root) = root.map(|root| root.0) else {
         return;
     };
-    let handle = spawn_floater(
-        &mut commands,
-        root,
-        FloaterSpec {
-            id: "color-picker",
-            title: String::from("Color Picker"),
-            // Clear of the Build Tools floater (which spans the upper-left), so
-            // the picker is never hidden behind it.
-            position: Vec2::new(520.0, 220.0),
-            default_size: None,
-            min_size: None,
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: false,
-                minimizable: false,
-                closable: true,
-                dockable: false,
-            },
-        },
-    );
+    let handle = spawn_floater(&mut commands, root, color_picker_floater_spec());
     // Subject-bound: it opens on whatever swatch requested it, disconnected from
     // saved app state, so it is exempt from floater persistence — never restored
     // open, no remembered rectangle (as the avatar profile / item previews are).

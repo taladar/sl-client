@@ -411,27 +411,29 @@ impl Plugin for AboutFloaterPlugin {
     }
 }
 
+/// The About window's [`FloaterSpec`] — shared with the `FLOATERS` registry, so
+/// the swept window is the one the viewer spawns.
+pub(crate) fn about_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: ABOUT_FLOATER_ID,
+        title: "About".to_owned(),
+        position: Vec2::new(300.0, 120.0),
+        default_size: Some(Vec2::new(560.0, 480.0)),
+        min_size: Some(Vec2::new(420.0, 320.0)),
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: true,
+            minimizable: false,
+            closable: true,
+            dockable: false,
+        },
+    }
+}
+
 /// Spawn the (hidden) About floater's chrome; the tabs are built once, on the
 /// first open ([`DeferredFloaterContent`]).
 fn spawn_about_floater(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = spawn_floater(
-        &mut commands,
-        root.0,
-        FloaterSpec {
-            id: ABOUT_FLOATER_ID,
-            title: "About".to_owned(),
-            position: Vec2::new(300.0, 120.0),
-            default_size: Some(Vec2::new(560.0, 480.0)),
-            min_size: Some(Vec2::new(420.0, 320.0)),
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: true,
-                minimizable: false,
-                closable: true,
-                dockable: false,
-            },
-        },
-    );
+    let handle = spawn_floater(&mut commands, root.0, about_floater_spec());
     commands
         .entity(handle.title_text)
         .insert(Translated::new("about-title"));

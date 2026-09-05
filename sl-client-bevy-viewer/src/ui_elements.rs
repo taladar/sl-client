@@ -10,6 +10,13 @@
 //! of the registry — the gallery renders what is listed here and nothing
 //! hand-picked, so an element added here is covered by the gallery sweep and
 //! the contract tests without touching either.
+//!
+//! A **floater** — a whole window rather than a panel inside one — belongs in
+//! [`crate::floaters::FLOATERS`] instead, which is the same mechanism against
+//! the same matrix. The two lists are separate because a floater is spawned
+//! differently: absolutely placed under the scaffold root, from a
+//! [`FloaterSpec`](crate::floater::FloaterSpec) the viewer's own `Startup`
+//! system also uses, yielding a `FloaterHandle` rather than a plain entity.
 
 use crate::ui_element::UiElement;
 

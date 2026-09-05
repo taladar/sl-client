@@ -432,6 +432,29 @@ const MAX_RESULTS: usize = 30;
 /// The most region-name labels the pool grows to.
 const MAX_LABELS: usize = 48;
 
+/// The world-map floater's [`FloaterSpec`] — shared with the `FLOATERS`
+/// registry, so the swept window is the one the viewer spawns.
+///
+/// Its [`position`](FloaterSpec::position) is the **no-window fallback**; the
+/// live spawn (`spawn_world_map`) centres the map on the real window instead.
+#[must_use]
+pub fn world_map_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: WORLD_MAP_FLOATER_ID,
+        title: String::from("World Map"),
+        position: Vec2::new(120.0, 80.0),
+        default_size: Some(DEFAULT_SIZE),
+        min_size: Some(MIN_SIZE),
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: true,
+            minimizable: true,
+            closable: true,
+            dockable: false,
+        },
+    }
+}
+
 /// Startup: build the world-map floater — the surface image node with its
 /// input observers and tooltip, and the search side panel.
 fn spawn_world_map(
@@ -439,30 +462,14 @@ fn spawn_world_map(
     root: Res<UiRoot>,
     windows: Query<&Window, With<PrimaryWindow>>,
 ) {
-    let position = windows.single().map_or(Vec2::new(120.0, 80.0), |window| {
-        Vec2::new(
+    let mut spec = world_map_floater_spec();
+    if let Ok(window) = windows.single() {
+        spec.position = Vec2::new(
             ((window.width() - DEFAULT_SIZE.x) / 2.0).max(40.0),
             ((window.height() - DEFAULT_SIZE.y) / 2.0 - 40.0).max(40.0),
-        )
-    });
-    let handle = spawn_floater(
-        &mut commands,
-        root.0,
-        FloaterSpec {
-            id: WORLD_MAP_FLOATER_ID,
-            title: String::from("World Map"),
-            position,
-            default_size: Some(DEFAULT_SIZE),
-            min_size: Some(MIN_SIZE),
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: true,
-                minimizable: true,
-                closable: true,
-                dockable: false,
-            },
-        },
-    );
+        );
+    }
+    let handle = spawn_floater(&mut commands, root.0, spec);
     commands
         .entity(handle.title_text)
         .insert(Translated::new("worldmap-floater-title"));

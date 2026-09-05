@@ -439,27 +439,30 @@ enum SnapshotToggle {
 // Spawn.
 // ---------------------------------------------------------------------------
 
+/// The snapshot floater's [`FloaterSpec`](crate::floater::FloaterSpec) — shared
+/// with the `FLOATERS` registry, so the swept window is the one the viewer
+/// spawns.
+pub(crate) fn snapshot_floater_spec() -> crate::floater::FloaterSpec {
+    crate::floater::FloaterSpec {
+        id: SNAPSHOT_FLOATER_ID,
+        title: "Snapshot".to_owned(),
+        position: Vec2::new(320.0, 90.0),
+        default_size: None,
+        min_size: None,
+        dock_host: None,
+        caps: crate::floater::FloaterCaps {
+            resizable: false,
+            minimizable: false,
+            closable: true,
+            dockable: false,
+        },
+    }
+}
+
 /// Spawn the (hidden) snapshot floater: the preview frame, the include toggles, the
 /// Refresh button, the format picker and the destination tabs.
 fn spawn_snapshot_floater(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = crate::floater::spawn_floater(
-        &mut commands,
-        root.0,
-        crate::floater::FloaterSpec {
-            id: SNAPSHOT_FLOATER_ID,
-            title: "Snapshot".to_owned(),
-            position: Vec2::new(320.0, 90.0),
-            default_size: None,
-            min_size: None,
-            dock_host: None,
-            caps: crate::floater::FloaterCaps {
-                resizable: false,
-                minimizable: false,
-                closable: true,
-                dockable: false,
-            },
-        },
-    );
+    let handle = crate::floater::spawn_floater(&mut commands, root.0, snapshot_floater_spec());
     commands
         .entity(handle.title_text)
         .insert(Translated::new("snapshot-title"));

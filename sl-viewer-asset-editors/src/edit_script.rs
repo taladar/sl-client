@@ -171,26 +171,29 @@ struct ScriptEditorState {
     pending_running: Option<(ObjectKey, InventoryKey)>,
 }
 
+/// The script editor floater's [`FloaterSpec`] — shared with the `FLOATERS`
+/// registry, so the swept window is the one the viewer spawns.
+#[must_use]
+pub fn script_editor_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: "script-editor",
+        title: "Script".to_owned(),
+        position: Vec2::new(360.0, 90.0),
+        default_size: Some(Vec2::new(READONLY_BODY_WIDTH, READONLY_BODY_HEIGHT + 80.0)),
+        min_size: Some(Vec2::new(300.0, 200.0)),
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: true,
+            minimizable: true,
+            closable: true,
+            dockable: false,
+        },
+    }
+}
+
 /// Spawn the script editor floater, hidden, and stash its handles.
 fn spawn_script_floater(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = spawn_floater(
-        &mut commands,
-        root.0,
-        FloaterSpec {
-            id: "script-editor",
-            title: "Script".to_owned(),
-            position: Vec2::new(360.0, 90.0),
-            default_size: Some(Vec2::new(READONLY_BODY_WIDTH, READONLY_BODY_HEIGHT + 80.0)),
-            min_size: Some(Vec2::new(300.0, 200.0)),
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: true,
-                minimizable: true,
-                closable: true,
-                dockable: false,
-            },
-        },
-    );
+    let handle = spawn_floater(&mut commands, root.0, script_editor_floater_spec());
     // Subject-bound: the shown script is not persisted, so neither is the
     // floater's position (matching the notecard editor / previews).
     commands

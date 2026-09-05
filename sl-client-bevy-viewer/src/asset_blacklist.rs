@@ -318,26 +318,28 @@ fn register_blacklist_settings(settings: Option<ResMut<ViewerSettings>>) {
 
 // --- Floater --------------------------------------------------------------
 
+/// The blacklist floater's [`FloaterSpec`] — shared with the `FLOATERS`
+/// registry, so the swept window is the one the viewer spawns.
+pub(crate) fn blacklist_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: BLACKLIST_FLOATER_ID,
+        title: "Asset Blacklist".to_owned(),
+        position: Vec2::new(300.0, 160.0),
+        default_size: Some(Vec2::new(660.0, 340.0)),
+        min_size: Some(Vec2::new(440.0, 200.0)),
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: true,
+            minimizable: false,
+            closable: true,
+            dockable: false,
+        },
+    }
+}
+
 /// Startup: spawn the floater chrome; the content builds on first open.
 fn spawn_blacklist_floater(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = spawn_floater(
-        &mut commands,
-        root.0,
-        FloaterSpec {
-            id: BLACKLIST_FLOATER_ID,
-            title: "Asset Blacklist".to_owned(),
-            position: Vec2::new(300.0, 160.0),
-            default_size: Some(Vec2::new(660.0, 340.0)),
-            min_size: Some(Vec2::new(440.0, 200.0)),
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: true,
-                minimizable: false,
-                closable: true,
-                dockable: false,
-            },
-        },
-    );
+    let handle = spawn_floater(&mut commands, root.0, blacklist_floater_spec());
     commands
         .entity(handle.title_text)
         .insert(Translated::new("blacklist-title"));

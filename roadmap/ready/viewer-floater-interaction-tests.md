@@ -2,7 +2,7 @@
 id: viewer-floater-interaction-tests
 title: Floater chrome under a real pointer
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07) — end manual re-testing of UI interactions
 points: 5
 blocked_by: [viewer-ui-interaction-harness, viewer-floater-registry]

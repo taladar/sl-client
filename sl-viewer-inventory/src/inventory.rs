@@ -3062,6 +3062,35 @@ fn depth_indent(depth: usize) -> f32 {
 // Spawn
 // ---------------------------------------------------------------------------
 
+/// The inventory floater's [`FloaterSpec`] — shared with the `FLOATERS`
+/// registry, so the swept window is the one the viewer spawns.
+#[must_use]
+pub fn inventory_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: INVENTORY_FLOATER_ID,
+        // A fallback shown only until the bundle loads and `Translated`
+        // resolves `inventory-title`; the localized title lives on the key.
+        title: "Inventory".to_owned(),
+        position: Vec2::new(20.0, 60.0),
+        // A definite, resizable content area (the reference inventory has a
+        // default rect and `can_resize`): the grip grows *and* shrinks it, and
+        // the tabs / search / list below fill it.
+        default_size: Some(Vec2::new(PANEL_WIDTH, VIEWPORT_HEIGHT)),
+        // Don't let the grip shrink it below what the tabs, toolbar and search
+        // need plus a few list rows — smaller than this the chrome would be
+        // clipped by the window edge with nothing usable left.
+        min_size: Some(Vec2::new(INVENTORY_MIN_WIDTH, INVENTORY_MIN_HEIGHT)),
+        // Uses the shared top-trailing dock host.
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: true,
+            minimizable: true,
+            closable: true,
+            dockable: true,
+        },
+    }
+}
+
 /// Spawn the inventory window's **chrome**: a **floater** ([`crate::floater`])
 /// with title bar (drag), close / minimize / dock chrome and resize grip.
 /// Starts hidden; its content — the tab / expand / collapse toolbar, the
@@ -3069,33 +3098,7 @@ fn depth_indent(depth: usize) -> f32 {
 /// ([`DeferredFloaterContent`]), so the closed window costs bevy_ui's
 /// per-frame walks only its chrome.
 fn spawn_inventory_panel(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = spawn_floater(
-        &mut commands,
-        root.0,
-        FloaterSpec {
-            id: INVENTORY_FLOATER_ID,
-            // A fallback shown only until the bundle loads and `Translated`
-            // resolves `inventory-title`; the localized title lives on the key.
-            title: "Inventory".to_owned(),
-            position: Vec2::new(20.0, 60.0),
-            // A definite, resizable content area (the reference inventory has a
-            // default rect and `can_resize`): the grip grows *and* shrinks it, and
-            // the tabs / search / list below fill it.
-            default_size: Some(Vec2::new(PANEL_WIDTH, VIEWPORT_HEIGHT)),
-            // Don't let the grip shrink it below what the tabs, toolbar and search
-            // need plus a few list rows — smaller than this the chrome would be
-            // clipped by the window edge with nothing usable left.
-            min_size: Some(Vec2::new(INVENTORY_MIN_WIDTH, INVENTORY_MIN_HEIGHT)),
-            // Uses the shared top-trailing dock host.
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: true,
-                minimizable: true,
-                closable: true,
-                dockable: true,
-            },
-        },
-    );
+    let handle = spawn_floater(&mut commands, root.0, inventory_floater_spec());
     // Localize the floater's title bar: bind its text node to the Fluent key so
     // it tracks the active locale like the rest of the window.
     commands

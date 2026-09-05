@@ -220,30 +220,33 @@ impl Plugin for EditMaterialAssetPlugin {
     }
 }
 
+/// The material editor floater's [`FloaterSpec`] — shared with the `FLOATERS`
+/// registry, so the swept window is the one the viewer spawns.
+#[must_use]
+pub fn material_editor_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: "material-editor",
+        title: "Edit Material".to_owned(),
+        position: Vec2::new(340.0, 90.0),
+        default_size: None,
+        min_size: None,
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: false,
+            minimizable: true,
+            closable: true,
+            dockable: false,
+        },
+    }
+}
+
 /// Spawn the (hidden) editor floater and stash its handles.
 fn spawn_material_editor(mut commands: Commands, root: Res<UiRoot>) {
     let FloaterHandle {
         root: panel,
         content,
         title_text,
-    } = spawn_floater(
-        &mut commands,
-        root.0,
-        FloaterSpec {
-            id: "material-editor",
-            title: "Edit Material".to_owned(),
-            position: Vec2::new(340.0, 90.0),
-            default_size: None,
-            min_size: None,
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: false,
-                minimizable: true,
-                closable: true,
-                dockable: false,
-            },
-        },
-    );
+    } = spawn_floater(&mut commands, root.0, material_editor_floater_spec());
     commands
         .entity(panel)
         .insert(crate::floater_persist::FloaterPersistExempt);

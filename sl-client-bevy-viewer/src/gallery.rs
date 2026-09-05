@@ -1,5 +1,6 @@
-//! The **UI gallery** (`viewer-ui-test-harness`): every registered UI element,
-//! rendered on its own, with **no login, no grid and no world**.
+//! The **UI gallery** (`viewer-ui-test-harness`): every registered UI element
+//! rendered on its own and every registered floater openable, with **no login,
+//! no grid and no world**.
 //!
 //! ```console
 //! sl-client-bevy-viewer-gallery
@@ -41,6 +42,11 @@
 //! | `S` | cycle the UI font size |
 //! | `Escape` | quit |
 //!
+//! The **floater switcher** at the top of the page is the other half: one chip
+//! per window in `crate::floaters::FLOATERS`, and the floater manager is live
+//! here, so a click opens a real window that drags, resizes, minimizes, docks
+//! and closes. That is what a picture of a floater cannot answer.
+//!
 //! `L` and `D` are the matrix, hand-drivable. They are here not to *check* the
 //! cells — the harness does that — but so a person can look at the cell a failing
 //! check just named.
@@ -54,12 +60,14 @@ use bevy::window::PresentMode;
 use bevy_flair::style::components::ClassList;
 use tracing::info;
 
+use crate::floater::{Floater, FloaterPlugin, toggle_floater};
+use crate::floaters::FLOATERS;
 use crate::pie_menu::{FIXTURE_PIE, OpenPieMenu, PieMenuPlugin};
 use crate::skin::SkinSelection;
 use crate::ui::{
-    UiDirection, UiScaffoldSystems, apply_panel_visibility, apply_ui_direction, column,
-    invalidate_logical_boxes, park_new_tab_stops_in_hidden_subtrees, resolve_logical_boxes, row,
-    scroll_focus_into_view, spawn_ui_root,
+    UiDirection, UiPanelShown, UiRoot, UiScaffoldSystems, apply_panel_visibility,
+    apply_ui_direction, column, invalidate_logical_boxes, park_new_tab_stops_in_hidden_subtrees,
+    resolve_logical_boxes, row, scroll_focus_into_view, spawn_ui_root,
 };
 use crate::ui_element::{ElementCx, SCRIPTS, SampleText, UiAction};
 use crate::ui_elements::ELEMENTS;
@@ -193,6 +201,7 @@ pub fn run() {
     let _tracing_guards = crate::init_tracing();
     info!(
         elements = ELEMENTS.len(),
+        floaters = FLOATERS.len(),
         scripts = SCRIPTS.len(),
         "starting the UI gallery: no login, no world; D flips direction, L cycles \
          script/pseudoloc, S cycles font size"
@@ -223,6 +232,13 @@ pub fn run() {
         // not navigation, so without this `Tab` is inert — and a gallery in which
         // nothing can be focused cannot show that anything is focusable.
         .add_plugins(TabNavigationPlugin)
+        // The floater manager, so every window in `FLOATERS` is **live** here:
+        // drag the title bar, drag the grip, minimize, dock, close, and watch
+        // the front-most one take the highlight. A gallery that only drew a
+        // window would answer none of the questions a floater actually raises,
+        // and the manager needs no session — it is the same reason the pie is
+        // the live widget below rather than a picture of one.
+        .add_plugins(FloaterPlugin)
         // The radial menu (`viewer-ui-radial-menu`), which brings its own ring
         // material and the systems that drive a live pie. The gallery wants the
         // whole widget rather than a picture of one: a pie is almost entirely
@@ -486,6 +502,98 @@ fn setup_gallery(mut commands: Commands, root: Res<crate::ui::UiRoot>, cell: Res
         ))
         .id();
     spawn_element_cards(&mut commands, elements, *cell);
+    spawn_gallery_floaters(&mut commands, root.0, *cell);
+}
+
+/// A marker on a gallery-spawned floater's root, so a cell change can clear and
+/// respawn the windows without touching the page around them.
+#[derive(Component, Debug, Clone, Copy)]
+struct GalleryFloater;
+
+/// Spawn every registered floater under the scaffold root, **closed**.
+///
+/// Under the root rather than inside a card, because a floater's placement is an
+/// absolute logical inset measured from its parent: put one in a card and every
+/// window opens somewhere the viewer would never open it.
+///
+/// Closed, because thirty-odd windows at their default positions are one heap.
+/// [`FloaterElement::spawn`](crate::floater::FloaterElement::spawn) leaves a
+/// window shown — which is what the headless sweep needs, since a hidden subtree
+/// lays out at zero size and would make every check vacuous — so the gallery
+/// closes it again straight afterwards and lets the chip strip open them one at
+/// a time.
+fn spawn_gallery_floaters(commands: &mut Commands, root: Entity, cell: GalleryCell) {
+    for floater in FLOATERS {
+        let handle = floater.spawn(commands, root, cell.cx());
+        commands
+            .entity(handle.root)
+            .insert((UiPanelShown(false), GalleryFloater));
+    }
+}
+
+/// The floater a chip opens, carried on the chip.
+#[derive(Component, Debug, Clone, Copy)]
+struct GalleryFloaterChip(&'static str);
+
+/// Spawn the floater switcher card: one chip per registered window, each
+/// toggling its own floater.
+///
+/// The gallery's answer to the fact that a floater has no card of its own — it
+/// is not laid out in the page flow, it floats over it. So the page carries the
+/// *openers* and the windows appear on top, which is exactly the relationship
+/// the bottom toolbar and the menu bar have to them in the viewer.
+fn spawn_floater_switcher(commands: &mut Commands, parent: Entity) {
+    let card = commands.spawn(card_bundle(parent)).id();
+    commands.spawn((
+        Text::new(format!(
+            "floaters — {} registered windows; click a name to open one, then drag its title \
+             bar, grab the grip, minimize, dock or close it. Every floater in `FLOATERS` is \
+             here, and nothing hand-picked.",
+            FLOATERS.len()
+        )),
+        UiFont::Mono.at(CHROME_FONT_SIZE),
+        TextColor(CHROME_COLOR),
+        Node {
+            max_width: Val::Px(740.0),
+            ..default()
+        },
+        ChildOf(card),
+    ));
+    let strip = commands
+        .spawn((
+            Node {
+                align_items: AlignItems::Center,
+                flex_wrap: FlexWrap::Wrap,
+                row_gap: Val::Px(6.0),
+                ..row(Val::Px(6.0))
+            },
+            ChildOf(card),
+        ))
+        .id();
+    for floater in FLOATERS {
+        commands
+            .spawn((
+                switcher_button(),
+                GalleryFloaterChip(floater.id),
+                Name::new(format!("gallery-floater-chip:{}", floater.id)),
+                ChildOf(strip),
+            ))
+            .with_child(chip_text(floater.id))
+            .observe(toggle_gallery_floater);
+    }
+}
+
+/// Observer: open or close the chip's floater.
+fn toggle_gallery_floater(
+    activate: On<Activate>,
+    chips: Query<&GalleryFloaterChip>,
+    floaters: Query<(Entity, &Floater)>,
+    mut panels: Query<&mut UiPanelShown>,
+) {
+    let Ok(chip) = chips.get(activate.entity) else {
+        return;
+    };
+    toggle_floater(&floaters, &mut panels, chip.0);
 }
 
 /// The label prefix in front of the live skin selection on the switcher.
@@ -709,6 +817,9 @@ fn card_bundle(parent: Entity) -> impl Bundle {
 /// the registry shows up here for free — the same property that gets it swept by
 /// the harness.
 fn spawn_element_cards(commands: &mut Commands, parent: Entity, cell: GalleryCell) {
+    // First, because the windows it opens float over everything below it and a
+    // person should not have to scroll to the bottom to find the openers.
+    spawn_floater_switcher(commands, parent);
     for element in ELEMENTS {
         let card = commands.spawn(card_bundle(parent)).id();
         commands.spawn((
@@ -826,7 +937,9 @@ fn drive_gallery_keys(
 fn respawn_elements_on_cell_change(
     mut commands: Commands,
     cell: Res<GalleryCell>,
+    root: Res<UiRoot>,
     lists: Query<Entity, With<GalleryElements>>,
+    windows: Query<Entity, With<GalleryFloater>>,
 ) {
     if !cell.is_changed() || cell.is_added() {
         return;
@@ -835,6 +948,15 @@ fn respawn_elements_on_cell_change(
         commands.entity(list).despawn_related::<Children>();
         spawn_element_cards(&mut commands, list, *cell);
     }
+    // The floaters too, and for the same reason: a window's title is baked in at
+    // construction, so the only way to see it in the new cell is to rebuild it.
+    // Any window that was open closes — the alternative is remembering which
+    // ones were, which is a live-viewer concern (`floater_persist`) rather than
+    // something the gallery should grow its own version of.
+    for window in &windows {
+        commands.entity(window).despawn();
+    }
+    spawn_gallery_floaters(&mut commands, root.0, *cell);
 }
 
 /// Keep the header reporting the live cell, so a person always knows which of the
@@ -848,9 +970,10 @@ fn update_gallery_header(
         return;
     }
     let wanted = format!(
-        "UI gallery — {} elements | strings: {} (L) | size: {} px (S) | direction: {} (D) | \
-         Tab walks, Enter activates (inert), Escape quits",
+        "UI gallery — {} elements, {} floaters | strings: {} (L) | size: {} px (S) | \
+         direction: {} (D) | Tab walks, Enter activates (inert), Escape quits",
         ELEMENTS.len(),
+        FLOATERS.len(),
         cell.text.name(),
         cell.font_size,
         if direction.is_rtl() { "RTL" } else { "LTR" },

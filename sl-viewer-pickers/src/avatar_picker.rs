@@ -263,27 +263,30 @@ impl Plugin for AvatarPickerPlugin {
     }
 }
 
+/// The avatar picker floater's [`FloaterSpec`] — shared with the `FLOATERS`
+/// registry, so the swept window is the one the viewer spawns.
+#[must_use]
+pub fn avatar_picker_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: PICKER_FLOATER_ID,
+        title: "Choose Resident".to_owned(),
+        position: Vec2::new(320.0, 120.0),
+        default_size: None,
+        min_size: None,
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: false,
+            minimizable: false,
+            closable: true,
+            dockable: false,
+        },
+    }
+}
+
 /// Spawn the picker floater (hidden): the source tabs, the search row, the
 /// result list, and the OK / Cancel row.
 fn spawn_picker_floater(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = spawn_floater(
-        &mut commands,
-        root.0,
-        FloaterSpec {
-            id: PICKER_FLOATER_ID,
-            title: "Choose Resident".to_owned(),
-            position: Vec2::new(320.0, 120.0),
-            default_size: None,
-            min_size: None,
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: false,
-                minimizable: false,
-                closable: true,
-                dockable: false,
-            },
-        },
-    );
+    let handle = spawn_floater(&mut commands, root.0, avatar_picker_floater_spec());
     commands
         .entity(handle.title_text)
         .insert(Translated::new("avatar-picker-title"));

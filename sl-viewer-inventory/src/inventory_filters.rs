@@ -401,28 +401,31 @@ impl Plugin for InventoryFiltersPlugin {
     }
 }
 
+/// The inventory filters floater's [`FloaterSpec`] — shared with the `FLOATERS`
+/// registry, so the swept window is the one the viewer spawns.
+#[must_use]
+pub fn inventory_filters_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: FILTERS_FLOATER_ID,
+        title: "Inventory Filters".to_owned(),
+        position: Vec2::new(380.0, 80.0),
+        default_size: None,
+        min_size: None,
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: false,
+            minimizable: false,
+            closable: true,
+            dockable: false,
+        },
+    }
+}
+
 /// Spawn the filters floater (hidden until the gear menu opens it): the
 /// thirteen type toggles with All / None buttons, the worn and since-login
 /// toggles, the newer / older direction pair, and the hours / days fields.
 fn spawn_filters_floater(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = spawn_floater(
-        &mut commands,
-        root.0,
-        FloaterSpec {
-            id: FILTERS_FLOATER_ID,
-            title: "Inventory Filters".to_owned(),
-            position: Vec2::new(380.0, 80.0),
-            default_size: None,
-            min_size: None,
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: false,
-                minimizable: false,
-                closable: true,
-                dockable: false,
-            },
-        },
-    );
+    let handle = spawn_floater(&mut commands, root.0, inventory_filters_floater_spec());
     commands
         .entity(handle.title_text)
         .insert(Translated::new("inventory-filters-title"));

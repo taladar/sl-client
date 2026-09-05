@@ -156,6 +156,7 @@ pub(crate) use sl_viewer_notices::experiences_floater;
 pub(crate) use sl_viewer_platform::environment_assets;
 pub(crate) use sl_viewer_ui_widgets::floater;
 pub(crate) use sl_viewer_ui_widgets::floater_persist;
+mod floaters;
 pub(crate) use sl_viewer_world_scene::environment;
 pub(crate) use sl_viewer_world_scene::exposure;
 pub mod gallery;

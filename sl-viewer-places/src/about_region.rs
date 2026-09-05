@@ -776,27 +776,30 @@ impl Plugin for AboutRegionPlugin {
 /// key [`open_about_region`] looks the panel up by.
 const ABOUT_REGION_FLOATER_ID: &str = "about-region";
 
+/// The about region floater's [`FloaterSpec`] — shared with the `FLOATERS`
+/// registry, so the swept window is the one the viewer spawns.
+#[must_use]
+pub fn about_region_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: ABOUT_REGION_FLOATER_ID,
+        title: "Region / Estate".to_owned(),
+        position: Vec2::new(400.0, 80.0),
+        default_size: Some(Vec2::new(500.0, 500.0)),
+        min_size: Some(Vec2::new(430.0, 340.0)),
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: true,
+            minimizable: false,
+            closable: true,
+            dockable: false,
+        },
+    }
+}
+
 /// Spawn the (hidden) Region / Estate floater's chrome; every tab is built
 /// once, on the first open ([`DeferredFloaterContent`]).
 fn spawn_about_region_floater(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = spawn_floater(
-        &mut commands,
-        root.0,
-        FloaterSpec {
-            id: ABOUT_REGION_FLOATER_ID,
-            title: "Region / Estate".to_owned(),
-            position: Vec2::new(400.0, 80.0),
-            default_size: Some(Vec2::new(500.0, 500.0)),
-            min_size: Some(Vec2::new(430.0, 340.0)),
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: true,
-                minimizable: false,
-                closable: true,
-                dockable: false,
-            },
-        },
-    );
+    let handle = spawn_floater(&mut commands, root.0, about_region_floater_spec());
     commands
         .entity(handle.root)
         .insert(crate::floater_persist::FloaterPersistExempt);

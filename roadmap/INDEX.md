@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 98 |
 | ready | 309 |
-| blocked | 56 |
+| blocked | 55 |
 | in-progress | 18 |
 | bugs | 63 |
-| done | 983 |
+| done | 984 |
 | deferred | 25 |
 | wont-do | 14 |
 | **total** | **1566** |
@@ -485,8 +485,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-experiences-floater`](ready/viewer-experiences-floater.md) —
   Experiences floater — lists, profile, search (blocked by
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
-- [`viewer-floater-registry`](ready/viewer-floater-registry.md) — A FLOATERS
-  registry, so floaters can be swept at all
+- [`viewer-floater-interaction-tests`](ready/viewer-floater-interaction-tests.md)
+  — Floater chrome under a real pointer (blocked by
+  `viewer-ui-interaction-harness` (done), `viewer-floater-registry` (done))
 - [`viewer-floater-update-in-place`](ready/viewer-floater-update-in-place.md) —
   Detail/property floaters — update values in place, don't rebuild structure
 - [`viewer-flycam-avatar-movement-keys`](ready/viewer-flycam-avatar-movement-keys.md)
@@ -961,7 +962,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-binary-duplication`](ready/repl-audit-binary-duplication.md) —
   The two REPL binaries share ~400 near-verbatim lines and have already drifted
 
-## blocked (56)
+## blocked (55)
 
 ### viewer
 
@@ -972,9 +973,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Day-cycle editor (blocked by `viewer-environment-fixed-editor`)
 - [`viewer-environment-my-environments`](blocked/viewer-environment-my-environments.md)
   — My Environments library (blocked by `viewer-environment-fixed-editor`)
-- [`viewer-floater-interaction-tests`](blocked/viewer-floater-interaction-tests.md)
-  — Floater chrome under a real pointer (blocked by
-  `viewer-ui-interaction-harness` (done), `viewer-floater-registry`)
 - [`viewer-fs-bridge-protocol`](blocked/viewer-fs-bridge-protocol.md) —
   Firestorm LSL bridge — the viewer↔script protocol and what it exposes (blocked
   by `viewer-fs-bridge-lifecycle`)
@@ -1328,7 +1326,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (983)
+## done (984)
 
 ### protocol
 
@@ -1832,6 +1830,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   prims against their simulated geometry
 - [`viewer-flexi-resettle-after-snapshot`](done/viewer-flexi-resettle-after-snapshot.md)
   — Flexi prims re-settle after taking a snapshot
+- [`viewer-floater-registry`](done/viewer-floater-registry.md) — A FLOATERS
+  registry, so floaters can be swept at all
 - [`viewer-flycam-stop-button-overlaps-chat`](done/viewer-flycam-stop-button-overlaps-chat.md)
   — "Stop flycam" button overlaps the "Chat" button in the bottom bar
 - [`viewer-fps-label-intermittent`](done/viewer-fps-label-intermittent.md) — FPS

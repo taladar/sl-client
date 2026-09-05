@@ -391,30 +391,33 @@ fn reflect_texture_swatch_disabled(
     }
 }
 
+/// The texture picker floater's [`FloaterSpec`] — shared with the `FLOATERS`
+/// registry, so the swept window is the one the viewer spawns.
+#[must_use]
+pub fn texture_picker_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: "texture-picker",
+        title: String::from("Pick: Texture"),
+        // Clear of the Build Tools floater (which spans the upper-left).
+        position: Vec2::new(520.0, 90.0),
+        default_size: None,
+        min_size: None,
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: false,
+            minimizable: false,
+            closable: true,
+            dockable: false,
+        },
+    }
+}
+
 /// Build the shared texture-picker floater (hidden until opened).
 fn spawn_texture_picker_floater(mut commands: Commands, root: Option<Res<UiRoot>>) {
     let Some(root) = root.map(|root| root.0) else {
         return;
     };
-    let handle = spawn_floater(
-        &mut commands,
-        root,
-        FloaterSpec {
-            id: "texture-picker",
-            title: String::from("Pick: Texture"),
-            // Clear of the Build Tools floater (which spans the upper-left).
-            position: Vec2::new(520.0, 90.0),
-            default_size: None,
-            min_size: None,
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: false,
-                minimizable: false,
-                closable: true,
-                dockable: false,
-            },
-        },
-    );
+    let handle = spawn_floater(&mut commands, root, texture_picker_floater_spec());
     // Subject-bound: it opens on whatever swatch requested it, disconnected from
     // saved app state, so it is exempt from floater persistence.
     commands

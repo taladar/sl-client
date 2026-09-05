@@ -149,26 +149,29 @@ struct NotecardEditorState {
     status: Option<Entity>,
 }
 
+/// The notecard editor floater's [`FloaterSpec`] — shared with the `FLOATERS`
+/// registry, so the swept window is the one the viewer spawns.
+#[must_use]
+pub fn notecard_editor_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: "notecard-editor",
+        title: "Notecard".to_owned(),
+        position: Vec2::new(400.0, 100.0),
+        default_size: Some(Vec2::new(READONLY_BODY_WIDTH, READONLY_BODY_HEIGHT + 60.0)),
+        min_size: Some(Vec2::new(260.0, 160.0)),
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: true,
+            minimizable: true,
+            closable: true,
+            dockable: false,
+        },
+    }
+}
+
 /// Spawn the notecard editor floater, hidden, and stash its handles.
 fn spawn_notecard_floater(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = spawn_floater(
-        &mut commands,
-        root.0,
-        FloaterSpec {
-            id: "notecard-editor",
-            title: "Notecard".to_owned(),
-            position: Vec2::new(400.0, 100.0),
-            default_size: Some(Vec2::new(READONLY_BODY_WIDTH, READONLY_BODY_HEIGHT + 60.0)),
-            min_size: Some(Vec2::new(260.0, 160.0)),
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: true,
-                minimizable: true,
-                closable: true,
-                dockable: false,
-            },
-        },
-    );
+    let handle = spawn_floater(&mut commands, root.0, notecard_editor_floater_spec());
     // Subject-bound: the shown notecard is not persisted, so neither is the
     // floater's position (matching the previews / properties floater). The root
     // is the inventory-drag drop target (no drop accepted until a modifiable

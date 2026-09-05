@@ -1092,29 +1092,32 @@ impl Plugin for SearchFloaterPlugin {
 // Spawn.
 // ---------------------------------------------------------------------------
 
+/// The search floater's [`FloaterSpec`] — shared with the `FLOATERS`
+/// registry, so the swept window is the one the viewer spawns.
+#[must_use]
+pub fn search_floater_spec() -> FloaterSpec {
+    FloaterSpec {
+        id: SEARCH_FLOATER_ID,
+        title: "Search".to_owned(),
+        position: Vec2::new(200.0, 80.0),
+        default_size: Some(Vec2::new(720.0, 460.0)),
+        min_size: Some(Vec2::new(560.0, 340.0)),
+        dock_host: None,
+        caps: FloaterCaps {
+            resizable: true,
+            minimizable: true,
+            closable: true,
+            dockable: false,
+        },
+    }
+}
+
 /// Spawn the floater's chrome (hidden); the left column (query, maturity,
 /// tabs) and the shared details pane are built once, on the first open
 /// ([`DeferredFloaterContent`]) — which also defers the embedded web-search
 /// browser view (and so its CEF browser) until the window is actually used.
 fn spawn_search_floater(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = spawn_floater(
-        &mut commands,
-        root.0,
-        FloaterSpec {
-            id: SEARCH_FLOATER_ID,
-            title: "Search".to_owned(),
-            position: Vec2::new(200.0, 80.0),
-            default_size: Some(Vec2::new(720.0, 460.0)),
-            min_size: Some(Vec2::new(560.0, 340.0)),
-            dock_host: None,
-            caps: FloaterCaps {
-                resizable: true,
-                minimizable: true,
-                closable: true,
-                dockable: false,
-            },
-        },
-    );
+    let handle = spawn_floater(&mut commands, root.0, search_floater_spec());
     commands
         .entity(handle.title_text)
         .insert(Translated::new("search-title"));
