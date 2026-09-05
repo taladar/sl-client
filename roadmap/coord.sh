@@ -66,8 +66,12 @@ SLOTS=2
 POLL_INTERVAL=5
 # The branch unmerged work is measured against. Empty = autodetect.
 BASE_BRANCH=''
-# Extended regex of commands considered "heavy" by the PreToolUse hook.
-HEAVY_PATTERNS='(^|[;&|[:space:]])(cargo|git[[:space:]]+(commit|push)|make|ninja)([[:space:]]|$)'
+# Extended regex of commands considered "heavy" by the PreToolUse hook. Gate on
+# what actually costs memory: `git commit` is here because a pre-commit hook
+# typically runs the whole build and test suite, so committing *is* a build.
+# `git push` is network-bound and deliberately absent -- making it wait for a
+# build slot buys nothing and delays the one command that publishes work.
+HEAVY_PATTERNS='(^|[;&|[:space:]])(cargo|git[[:space:]]+commit|make|ninja)([[:space:]]|$)'
 # Refuse to start a heavy command below this much available memory (MiB).
 MIN_AVAIL_MB=0
 MIN_AVAIL_EXCLUSIVE_MB=0
@@ -516,6 +520,14 @@ do_heavy() {
   _dh_status=0
   run_command "$@" || _dh_status=$?
 
+  # Say a failure out loud. Callers routinely append `| tail -40` or `; grep
+  # ...` to a wrapped build, and that discards the wrapper's status before the
+  # shell ever reports it -- so the captured output is the only place a failure
+  # can be seen reliably. This line is what makes it visible there.
+  if [ "${_dh_status}" -ne 0 ]; then
+    note "'${_dh_label}' exited ${_dh_status}"
+  fi
+
   if [ "${_dh_status}" -eq 137 ]; then
     note ''
     note "the command was KILLED (exit 137) -- it exceeded MemoryMax=${_rc_max:-?},"
@@ -525,7 +537,13 @@ do_heavy() {
     note 'Confirm with:  journalctl -u systemd-oomd --since "5 min ago"'
     note 'Retry with --exclusive, or narrow the command (-p <crate>).'
   fi
-  return "${_dh_status}"
+
+  # `exit`, not `return`: `heavy` is a terminal command, so the wrapped
+  # command's status *is* the script's. Returning it and leaving the rest to
+  # errexit works, but reads as an accident of `set -e` rather than the
+  # contract it is -- and `heavy` being transparent to the exit status is a
+  # contract callers depend on.
+  exit "${_dh_status}"
 }
 
 # --------------------------------------------------------------------------
@@ -631,7 +649,10 @@ do_hook() {
   # shellcheck disable=SC2016
   case "${_dh_cmd}" in
   *'|'* | *';'* | *'&'* | *'>'* | *'<'* | *'$('* | *'`'*)
-    _dh_suggest="roadmap/coord.sh heavy -- sh -c '<the command, quotes escaped>'"
+    # `set -o pipefail` because the common shape here is `<build> 2>&1 | tail
+    # -50`, and a pipeline reports its *last* command's status -- so without it
+    # the wrapper faithfully passes through a 0 that means nothing.
+    _dh_suggest="roadmap/coord.sh heavy -- sh -c 'set -o pipefail; <the command, quotes escaped>'"
     ;;
   *)
     _dh_suggest="roadmap/coord.sh heavy -- ${_dh_cmd}"
@@ -646,7 +667,11 @@ systemd scope (an OOM kill then loses the build, not your whole session):
 
 Add --exclusive before the -- for a full or release build of the largest crate.
 A leading VAR=value assignment is fine as-is. If you really must bypass, prefix
-the command with ROADMAP_COORD_BYPASS=1."
+the command with ROADMAP_COORD_BYPASS=1.
+
+Keep any '| tail' or '; grep' INSIDE the sh -c. Appended after the wrapper they
+become the shell's last command, so its exit status -- not the build's -- is
+what you get back, and a failed build then looks like a success."
 
   jq -n --arg reason "${_dh_reason}" \
     '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $reason}}'

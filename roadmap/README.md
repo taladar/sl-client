@@ -164,8 +164,17 @@ Use `--exclusive` for a full or release build of `sl-client-bevy-viewer`: a
 single rustc for that crate has been measured near 16 GiB, and two of them do
 not fit. A `PreToolUse` hook in `.claude/settings.json` denies an unwrapped
 heavy command and tells you the wrapped form, so this cannot be forgotten;
-`ROADMAP_COORD_BYPASS=1` is the escape hatch. Tuning lives in
+`ROADMAP_COORD_BYPASS=1` is the escape hatch. `git push` is not gated — it is
+network-bound and costs nothing worth serialising. Tuning lives in
 `roadmap/coord.conf`.
+
+`heavy` exits with the wrapped command's status and prints
+`coord: '<label>' exited N` when it is non-zero. Watch out for the shape that
+loses it: appending `| tail -40` or `; grep -E '^error' build.log` to a wrapped
+build makes the filter the shell's last command, so a failed compile comes back
+as success. Keep the filtering *inside* the wrapper —
+`heavy -- sh -c 'set -o pipefail; cargo clippy … 2>&1 | tail -40'` — or read
+the `coord:` line.
 
 Before adding a worktree, `export CEF_PATH=$HOME/.cache/cef` —
 `.cargo/config.toml` pins `CEF_PATH` relative, so a fresh worktree otherwise
