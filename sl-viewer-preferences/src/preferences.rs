@@ -1753,7 +1753,10 @@ mod tests {
             "Level",
             SettingValue::F32(55.0),
         );
-        app.world_mut().trigger(Activate { entity: ok_button });
+        app.world_mut().trigger(Activate {
+            entity: ok_button,
+            button: None,
+        });
         app.update();
         assert_eq!(
             app.world()
@@ -1803,6 +1806,7 @@ mod tests {
         set_open(&mut app, fixture.root, true);
         app.world_mut().trigger(Activate {
             entity: cancel_button,
+            button: None,
         });
         app.update();
         let close_requested = app

@@ -2231,7 +2231,10 @@ mod tests {
             state.selected = Some("Level".to_owned());
             state.scope = Scope::Account;
         }
-        app.world_mut().trigger(Activate { entity: button });
+        app.world_mut().trigger(Activate {
+            entity: button,
+            button: None,
+        });
         app.update();
         assert_eq!(
             store(&app).get_override(Scope::Account, "Level"),

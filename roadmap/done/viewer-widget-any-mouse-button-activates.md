@@ -2,7 +2,7 @@
 id: viewer-widget-any-mouse-button-activates
 title: A secondary or middle click presses every button in the viewer
 topic: viewer
-status: bugs
+status: done
 origin: viewer-ui-interaction-contracts sweep (2026-09-04)
 points: 3
 refs: [viewer-ui-interaction-contracts]
@@ -66,12 +66,38 @@ escapes it. The same widget can hold both halves: a combo anchor carries
 `Button` *and* a `Primary`-filtered `toggle_combo_popover`, so a `Secondary`
 click on it fires the action but does not open the dropdown.
 
-**Fix**: in the `taladar/bevy` fork this workspace already pins, gate
-`button_on_pointer_down` / `_up` / `_click` on `PointerButton::Primary` and give
-`Activate` a `button` field so a consumer that *wants* `Secondary` (the
-inventory and radar context menus) can still have it. One place, against 89 call
-sites for any downstream workaround. Worth an upstream PR.
+**Fixed** in the `taladar/bevy` fork this workspace already pins, at rev
+`76dc042f8`: every widget in `bevy_ui_widgets` now acts on
+`PointerButton::Primary` alone, and `Activate` carries
+`button: Option<PointerButton>` (`None` for a keyboard activation) so the button
+is no longer discarded at the boundary.
 
-Until then the behaviour is pinned as-is in `ui_contract::contracts`, with the
-offending rows commented against this id — so the fix arrives as a table diff
-that deletes them.
+The gate went wider than the button, because the button was not alone in the
+defect — a middle or secondary click equally ticked a checkbox, picked a radio,
+selected a list row, chose a menu item and started a slider or scrollbar drag.
+`text_input` was already the exception, and its `if press.button !=
+PointerButton::Primary { return; }` is the idiom the other seven files now
+follow: `button.rs`, `checkbox.rs`, `radio.rs`, `list.rs`, `menu.rs`,
+`slider.rs`, `scrollbar.rs`.
+
+The guard returns *before* the handler stops propagation, matching
+`text_input`'s. A widget that has decided to ignore a button must not swallow it
+too, or an ancestor that does want the secondary click — a context menu on the
+panel behind a caption — would never see it.
+
+`Pointer<Cancel>` carries no button, so the cancel handlers are unchanged: they
+only clear a `Pressed` that a primary press put there.
+
+It arrived here as exactly what the pin promised. The 124 rows in
+`ui_contract::contracts` that recorded the wrong emission failed together with
+"emitted [], the contract wants […]", and the correction is the table diff that
+deletes them; middle and secondary clicks are inert now, which needs no row at
+all. `Row::emits_wrongly` and `Row::bug` went with the last of their rows —
+`LayoutClaim::KnownBroken` remains for a *layout* pin, and the census a bug id
+in the table bought is recoverable from this commit.
+
+The other half — that the button survives the boundary at all — could not be
+pinned by absence, so it has a test of its own:
+`an_activation_says_which_pointer_button_raised_it` asserts a primary click
+raises `Some(PointerButton::Primary)`, `Enter` raises `None`, and the other two
+buttons raise nothing.

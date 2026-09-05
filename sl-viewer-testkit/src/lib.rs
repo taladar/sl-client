@@ -1176,8 +1176,17 @@ pub fn find_by_name(app: &mut App, name: &str) -> Option<Entity> {
 /// whether the button is where the user thinks it is. That is what
 /// [`containment_violations`] and [`viewport_violations`] are for, and the two
 /// together are the claim.
+///
+/// The `Activate` it raises carries no pointer button, which is what a keyboard
+/// activation looks like — a pointer one says `Some(PointerButton::Primary)`,
+/// the only button any `bevy_ui_widgets` widget answers for. An observer that
+/// reads the button therefore needs a real gesture, which
+/// [`crate::interact`] drives.
 pub fn activate(app: &mut App, entity: Entity) {
-    app.world_mut().trigger(Activate { entity });
+    app.world_mut().trigger(Activate {
+        entity,
+        button: None,
+    });
     settle(app);
 }
 

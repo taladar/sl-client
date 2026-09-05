@@ -1456,7 +1456,10 @@ fn attach_row_press(commands: &mut Commands, row: Entity) {
             if disabled.get(row).unwrap_or(false) {
                 return;
             }
-            commands.trigger(Activate { entity: row });
+            commands.trigger(Activate {
+                entity: row,
+                button: Some(PointerButton::Primary),
+            });
             dismiss_all(&mut hosts, &free, &mut commands);
         },
     );
@@ -2330,7 +2333,10 @@ fn commit_row(
         keyboard.pending_first = Some(row);
     } else if entries.get(row).is_ok() {
         // Emission and dismissal go through the same points a mouse press uses.
-        commands.trigger(Activate { entity: row });
+        commands.trigger(Activate {
+            entity: row,
+            button: None,
+        });
         dismiss_all(hosts, free, commands);
         *keyboard = MenuKeyboard::default();
     }
@@ -3329,7 +3335,10 @@ mod tests {
             .ok_or("the second dynamic row did not spawn")?;
         // Trigger without settling: an observer runs at once, and a settle would
         // age the message out of its double buffer before it can be read.
-        app.world_mut().trigger(Activate { entity: second });
+        app.world_mut().trigger(Activate {
+            entity: second,
+            button: None,
+        });
         let messages = app.world().resource::<Messages<MenuDynamicPick>>();
         let mut cursor = messages.get_cursor();
         let picks: Vec<MenuDynamicPick> = cursor.read(messages).copied().collect();

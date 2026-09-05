@@ -169,9 +169,6 @@ pub(crate) struct Row {
     pub(crate) probe: Option<Probe>,
     /// What this cell claims about the layout afterwards.
     pub(crate) layout: LayoutClaim,
-    /// The roadmap id this row's *emission* is wrong against, where it is —
-    /// see [`Row::emits_wrongly`].
-    pub(crate) bug: Option<&'static str>,
 }
 
 impl Row {
@@ -182,29 +179,6 @@ impl Row {
             emits: actions,
             probe: None,
             layout: LayoutClaim::Clean,
-            bug: None,
-        }
-    }
-
-    /// A gesture that emits `actions` — and **should not**, against `bug`.
-    ///
-    /// Identical in force to [`Self::emits`]: the emission is pinned exactly, so
-    /// the row fails the moment the bug is fixed and the correction has to be
-    /// made here, in the same commit. What naming the bug adds is the census —
-    /// grep the id and every control it reaches is listed, which is how "62
-    /// controls" in
-    /// `roadmap/bugs/viewer-widget-any-mouse-button-activates.md` was counted.
-    pub(crate) const fn emits_wrongly(
-        gesture: Gesture,
-        actions: &'static [&'static str],
-        bug: &'static str,
-    ) -> Self {
-        Self {
-            gesture,
-            emits: actions,
-            probe: None,
-            layout: LayoutClaim::Clean,
-            bug: Some(bug),
         }
     }
 
@@ -215,7 +189,6 @@ impl Row {
             emits: &[],
             probe: Some(probe),
             layout: LayoutClaim::Clean,
-            bug: None,
         }
     }
 
@@ -283,6 +256,8 @@ mod tests {
     };
     use bevy::input::keyboard::Key;
     use bevy::prelude::*;
+    use bevy::ui_widgets::Activate;
+    use pretty_assertions::assert_eq;
 
     /// Stand up the registrations an element's spawn-attached observers read.
     ///
@@ -579,6 +554,70 @@ mod tests {
         assert!(failures.is_empty(), "{failures:#?}");
     }
 
+    /// **An activation says which pointer button raised it.**
+    ///
+    /// The sweep above proves the *absence* — a middle or secondary click emits
+    /// nothing — which is the half of `viewer-widget-any-mouse-button-activates`
+    /// a user notices. This pins the other half: that the button survives the
+    /// `Pointer<Click>` → `Activate` boundary at all. It used not to, which is
+    /// why no downstream observer could have filtered even if it had wanted to,
+    /// and why the fix had to be a fork of `bevy_ui_widgets` rather than 89
+    /// `On<Activate>` observers each learning to check.
+    ///
+    /// A keyboard activation carries no button, and that is the distinction
+    /// worth being able to draw: the same `Activate` reaches the same observer
+    /// whether a pointer or `Enter` raised it.
+    ///
+    /// # Errors
+    ///
+    /// When the registry has lost its `button` element, or its node cannot be
+    /// aimed at — either of which the sweep would report too, but this test
+    /// would otherwise report as a silent empty recording.
+    #[test]
+    fn an_activation_says_which_pointer_button_raised_it() -> Result<(), String> {
+        /// Every `Activate` the app raised, in order, each with its button.
+        #[derive(Resource, Default)]
+        struct Raised(Vec<Option<PointerButton>>);
+
+        /// What the recorder holds after `gesture` at `button:save`.
+        fn raised_by(
+            test: InteractionTest,
+            gesture: Gesture,
+        ) -> Result<Vec<Option<PointerButton>>, String> {
+            let element = ELEMENTS
+                .iter()
+                .find(|element| element.id == "button")
+                .ok_or("the registry has no `button` element")?;
+            let mut app = element_app(test, element);
+            app.init_resource::<Raised>();
+            app.add_observer(|activate: On<Activate>, mut raised: ResMut<Raised>| {
+                raised.0.push(activate.button);
+            });
+            drive(&mut app, "button:save", gesture)?;
+            Ok(app.world().resource::<Raised>().0.clone())
+        }
+
+        let test = InteractionTest::new();
+        assert_eq!(
+            raised_by(test, Gesture::PrimaryClick)?,
+            vec![Some(PointerButton::Primary)],
+            "a primary click must name the button it came from"
+        );
+        assert_eq!(
+            raised_by(test, Gesture::Enter)?,
+            vec![None],
+            "a keyboard activation has no pointer button to name"
+        );
+        for silent in [Gesture::MiddleClick, Gesture::SecondaryClick] {
+            assert_eq!(
+                raised_by(test, silent)?,
+                Vec::new(),
+                "{silent:?} must raise no activation at all"
+            );
+        }
+        Ok(())
+    }
+
     /// **Every element × every interactive node × scrolling and dragging.**
     ///
     /// The gestures that reach a control without a press ever landing on it:
@@ -741,11 +780,7 @@ mod tests {
         for contract in CONTRACTS {
             for node in contract.nodes {
                 for row in node.rows {
-                    let pinned = match row.layout {
-                        LayoutClaim::KnownBroken(bug) => Some(bug),
-                        LayoutClaim::Clean => row.bug,
-                    };
-                    let Some(bug) = pinned else {
+                    let LayoutClaim::KnownBroken(bug) = row.layout else {
                         continue;
                     };
                     let found = [

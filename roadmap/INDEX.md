@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 310 |
 | blocked | 56 |
 | in-progress | 18 |
-| bugs | 64 |
-| done | 981 |
+| bugs | 63 |
+| done | 982 |
 | deferred | 25 |
 | wont-do | 14 |
 | **total** | **1566** |
@@ -1180,7 +1180,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (64)
+## bugs (63)
 
 ### viewer
 
@@ -1313,8 +1313,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   instead of the `Data` genome (fix landed, needs live verify)
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
-- [`viewer-widget-any-mouse-button-activates`](bugs/viewer-widget-any-mouse-button-activates.md)
-  — A secondary or middle click presses every button in the viewer
 
 ### test
 
@@ -1334,7 +1332,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (981)
+## done (982)
 
 ### protocol
 
@@ -2802,6 +2800,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   the origin
 - [`viewer-web-openid-auth`](done/viewer-web-openid-auth.md) — Second Life
   website auto-login (OpenID cookie) in the in-viewer browser
+- [`viewer-widget-any-mouse-button-activates`](done/viewer-widget-any-mouse-button-activates.md)
+  — A secondary or middle click presses every button in the viewer
 - [`viewer-world-drag-drop-reactions`](done/viewer-world-drag-drop-reactions.md)
   — Inventory drag&drop onto the world (blocked by
   `viewer-ui-interaction-harness` (done), `viewer-world-test-harness` (done))
