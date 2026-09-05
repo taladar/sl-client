@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 310 |
 | blocked | 56 |
 | in-progress | 18 |
-| bugs | 60 |
-| done | 985 |
+| bugs | 59 |
+| done | 986 |
 | deferred | 25 |
 | wont-do | 14 |
 | **total** | **1566** |
@@ -1180,7 +1180,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (60)
+## bugs (59)
 
 ### viewer
 
@@ -1247,9 +1247,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Update tuples claim a pipeline order the scheduler does not enforce
 - [`viewer-audit-texture-align-material-channels`](bugs/viewer-audit-texture-align-material-channels.md)
   — Align planar faces does not propagate to the normal and specular transforms
-- [`viewer-audit-toast-starvation-dnd-queue`](bugs/viewer-audit-toast-starvation-dnd-queue.md)
-  — A low-priority toast can be queued forever, and the DND hold list is
-  unbounded
 - [`viewer-audit-ui-texture-poll-leak`](bugs/viewer-audit-ui-texture-poll-leak.md)
   — Eight copied texture-poll systems each leak Image assets for the session
 - [`viewer-audit-world-map-clipboard`](bugs/viewer-audit-world-map-clipboard.md)
@@ -1326,7 +1323,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (985)
+## done (986)
 
 ### protocol
 
@@ -1618,6 +1615,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Inactive tab panels keep their keyboard tab stops
 - [`viewer-audit-table-interaction-disabled`](done/viewer-audit-table-interaction-disabled.md)
   — The table widget ignores InteractionDisabled
+- [`viewer-audit-toast-starvation-dnd-queue`](done/viewer-audit-toast-starvation-dnd-queue.md)
+  — A low-priority toast can be queued forever, and the DND hold list is
+  unbounded
 - [`viewer-audit-tonemap-legacy-sky`](done/viewer-audit-tonemap-legacy-sky.md) —
   ACES tonemapping is applied to legacy skies the reference exempts
 - [`viewer-audit-ui-widget-per-frame-writes`](done/viewer-audit-ui-widget-per-frame-writes.md)

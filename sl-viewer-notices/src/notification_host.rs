@@ -178,6 +178,40 @@ const CYCLE_GLYPH: &str = "\u{25b8}";
 /// screen edge, so the rest wait behind the "N more ▸" control.
 const MAX_VISIBLE_TOASTS: usize = 1;
 
+/// How long a queued toast waits, in seconds, before its rank in the stack is
+/// raised one priority step ([`aged_rank`]). Classic scheduler aging, and the
+/// reason a low-priority toast cannot be held behind a stream of higher-priority
+/// arrivals for ever: after four of these it has reached the top rank with the
+/// longest wait of anything there, so it is next by construction.
+///
+/// The reference has no equivalent because it has no queue — a toast it has no
+/// room for is `hide()`n straight into the notification well
+/// (`llscreenchannel.cpp:736`, STORM-391), and the well is a list the user reads
+/// at leisure. Our "N more ▸" control *is* that well, but it holds live toasts,
+/// so their turn has to come round on its own.
+const QUEUE_AGING_SECS: f32 = 20.0;
+
+/// The most toasts queued behind the visible cap. Past this a **fading** queued
+/// toast is dropped (resolved with no button, so it is answered exactly as a
+/// close × answers it, and its history entry survives) rather than letting an
+/// in-world notification flood grow the entity count without limit.
+///
+/// A toast that never expires on its own — an alert waiting for its answer — is
+/// never dropped, whatever the depth: it is the class of notification the user
+/// still owes a decision, and discarding one silently is the failure this cap
+/// exists to avoid, not a licence for it.
+///
+/// Larger than [`MAX_HELD_NOTIFICATIONS`] so the Do Not Disturb drain, which
+/// raises everything it held in one frame, cannot immediately overflow the queue
+/// it drains into.
+const MAX_QUEUED_TOASTS: usize = 64;
+
+/// The most raises [`DoNotDisturbQueue`] holds. Past this the **oldest** held
+/// raise is dropped (with a warning naming it) so a long Do Not Disturb session
+/// under a notification flood is bounded; the newest are kept, being the ones
+/// whose context is most likely still live when the mode ends.
+const MAX_HELD_NOTIFICATIONS: usize = 32;
+
 /// The env var that, when set, raises a staggered sequence of sample
 /// notifications shortly after startup, so the live stacking / timeout / fade /
 /// modal behaviour can be watched without a server alert. A source-level debug
@@ -221,6 +255,7 @@ impl Plugin for NotificationHostPlugin {
             .add_message::<DismissNotification>()
             .add_message::<ResolveNotification>()
             .add_message::<CycleToasts>()
+            .add_message::<RestackToasts>()
             .init_resource::<NotificationManager>()
             .init_resource::<DoNotDisturbQueue>()
             .add_systems(
@@ -242,15 +277,18 @@ impl Plugin for NotificationHostPlugin {
                 )
                     .chain(),
             )
-            // Reorders the stack when a toast lands (keyed on `Added<Toast>`),
-            // caps the visible count each frame, and cycles the queue on request —
-            // ordered so a fresh sort, then the cap, then a click-cycle compose.
+            // Reorders the stack when a toast lands or a queued one's wait has
+            // earned it a promotion, caps the visible count each frame, bounds the
+            // queue behind it, and cycles the queue on request — ordered so a fresh
+            // sort, then the cap, then a click-cycle compose.
             .add_systems(
                 Update,
                 (
                     order_channel_by_priority,
                     cycle_toasts,
                     apply_toast_overflow,
+                    cap_queued_toasts,
+                    update_overflow_control,
                 )
                     .chain(),
             );
@@ -270,11 +308,38 @@ impl Plugin for NotificationHostPlugin {
 /// channel carries.
 #[derive(Resource, Debug, Default)]
 struct DoNotDisturbQueue {
-    /// The raises held back, oldest first.
+    /// The raises held back, oldest first, bounded at
+    /// [`MAX_HELD_NOTIFICATIONS`].
     held: Vec<ShowNotification>,
     /// Whether Do Not Disturb was on last frame, so the drain runs on the
     /// falling edge only.
     was_busy: bool,
+    /// How many raises the bound has discarded this Do Not Disturb session, so
+    /// the drain can say so rather than letting them vanish quietly. Reset on
+    /// the drain.
+    dropped: usize,
+}
+
+impl DoNotDisturbQueue {
+    /// Hold one raise for the end of Do Not Disturb, discarding the oldest held
+    /// raise if that would take the queue past [`MAX_HELD_NOTIFICATIONS`].
+    ///
+    /// Something has to give once a flood outlasts the mode — an unbounded list
+    /// is what this task was filed for — and the oldest is the one whose context
+    /// (the object that asked, the session it belonged to) is least likely to
+    /// still exist when the user comes back.
+    fn hold(&mut self, request: ShowNotification) {
+        if self.held.len() >= MAX_HELD_NOTIFICATIONS {
+            let discarded = self.held.remove(0);
+            self.dropped = self.dropped.saturating_add(1);
+            warn!(
+                template = discarded.template,
+                held = self.held.len(),
+                "notification: the do-not-disturb hold list is full, dropping the oldest"
+            );
+        }
+        self.held.push(request);
+    }
 }
 
 /// The channel container and its overflow control, so `raise_notifications`
@@ -324,6 +389,13 @@ struct Toast {
     /// ([`apply_toast_overflow`]) — hidden and its timer paused until a visible
     /// toast is dismissed or the overflow control cycles it into view.
     overflowed: bool,
+    /// Seconds this toast has spent queued off-screen, advanced by
+    /// [`age_and_fade_toasts`] exactly when [`age`](Self::age) is not. It never
+    /// resets: it is the toast's claim on the stack, raising its rank one step
+    /// per [`QUEUE_AGING_SECS`] ([`aged_rank`]) and breaking ties within a rank,
+    /// so a toast that has waited keeps the slot it finally won until it expires
+    /// rather than being displaced by the next arrival.
+    queued: f32,
     /// Whether a resolve has already been written for this toast, so
     /// [`age_and_fade_toasts`] does not write a second on the frame before the
     /// despawn is applied.
@@ -857,6 +929,7 @@ pub fn adopt_toast(
             opacity: 1.0,
             hovered: false,
             overflowed: false,
+            queued: 0.0,
             resolved: false,
             input_field: None,
         },
@@ -1001,9 +1074,11 @@ fn raise_notifications(
     let busy = presence.is_some_and(|presence| presence.is_do_not_disturb());
     let mut pending: Vec<ShowNotification> = if !busy && queue.was_busy {
         let held = std::mem::take(&mut queue.held);
+        let dropped = std::mem::take(&mut queue.dropped);
         if !held.is_empty() {
             info!(
-                "notification: do-not-disturb ended, showing {} held notification(s)",
+                "notification: do-not-disturb ended, showing {} held notification(s) \
+                 ({dropped} older one(s) were dropped to bound the hold list)",
                 held.len()
             );
         }
@@ -1024,7 +1099,7 @@ fn raise_notifications(
         // Do Not Disturb: hold the corner toast for later rather than
         // interrupting. A modal is never held (see [`DoNotDisturbQueue`]).
         if busy && !tmpl.kind.is_modal() {
-            queue.held.push(request.clone());
+            queue.hold(request.clone());
             debug!(template = tmpl.name, "notification held for do-not-disturb");
             continue;
         }
@@ -1116,6 +1191,7 @@ fn raise_notifications(
             opacity: 1.0,
             hovered: false,
             overflowed: false,
+            queued: 0.0,
             resolved: false,
             input_field: card.input,
         });
@@ -1244,19 +1320,33 @@ fn raise_notifications(
 /// [`crate::notifications::TOAST_FADE_SECS`], and resolve it (with its default
 /// button) once it has fully faded. Alerts and modals ([`lifetime`](Toast::lifetime)
 /// `0`) never auto-expire.
+///
+/// A toast queued off-screen advances [`Toast::queued`] instead — the timer it
+/// *does* get to run, and the only thing that ever brings it back to the front
+/// of a busy stack.
 fn age_and_fade_toasts(
     time: Res<Time>,
     mut toasts: Query<(Entity, &mut Toast)>,
     mut resolves: MessageWriter<ResolveNotification>,
+    mut restack: MessageWriter<RestackToasts>,
 ) {
     let dt = time.delta_secs();
     for (entity, mut toast) in &mut toasts {
-        if toast.lifetime <= 0.0 || toast.resolved {
+        if toast.resolved {
             continue;
         }
-        // Paused while hovered (the reference `stopToastTimer`) or queued
-        // off-screen past the visible cap, so a queued toast does not expire unseen.
-        if toast.hovered || toast.overflowed {
+        // A queued toast advances its *wait* instead of its age, which is what
+        // eventually promotes it (see `queued` / `aged_rank`). Crossing an aging
+        // step changes the stack order, so ask for a restack — nothing else
+        // would, since no toast was added.
+        if toast.overflowed {
+            let before = aged_rank(toast.priority, toast.queued);
+            toast.queued += dt;
+            if aged_rank(toast.priority, toast.queued) != before {
+                restack.write(RestackToasts);
+            }
+        }
+        if !should_age(toast.overflowed, toast.hovered, toast.lifetime) {
             continue;
         }
         toast.age += dt;
@@ -1400,18 +1490,95 @@ fn apply_toast_opacity(
     }
 }
 
-/// Keep the corner channel ordered by priority: a higher-priority toast floats to
-/// the more visible top of the stack, ties broken by age so a newer toast of
-/// equal priority sits above an older one. Runs when a toast is added (a removal
-/// preserves the surviving order, so no reorder is needed).
+/// Whether a toast's on-screen timer runs this frame: only a kind that expires
+/// at all ([`Toast::lifetime`] above zero), only while the pointer is off it (the
+/// reference `stopToastTimer`), and only while it is actually on screen — a
+/// queued toast must not expire unseen.
+///
+/// Extracted because it is half of the starvation bug: pausing a queued toast is
+/// right, and is only safe while something else guarantees the queue drains
+/// ([`aged_rank`]).
+const fn should_age(overflowed: bool, hovered: bool, lifetime: f32) -> bool {
+    lifetime > 0.0 && !hovered && !overflowed
+}
+
+/// A priority's index, `0` (least prominent) to [`TOP_PRIORITY_RANK`], so a
+/// queued toast's rank can be raised a step at a time.
+const fn priority_rank(priority: NotificationPriority) -> u8 {
+    match priority {
+        NotificationPriority::Unspecified => 0,
+        NotificationPriority::Low => 1,
+        NotificationPriority::Normal => 2,
+        NotificationPriority::High => 3,
+        NotificationPriority::Critical => 4,
+    }
+}
+
+/// The highest [`priority_rank`], the ceiling aging raises a queued toast to.
+const TOP_PRIORITY_RANK: u8 = priority_rank(NotificationPriority::Critical);
+
+/// The rank a toast sorts at: its own priority, raised one step per whole
+/// [`QUEUE_AGING_SECS`] it has spent queued, capped at [`TOP_PRIORITY_RANK`].
+///
+/// This is the whole of the anti-starvation guarantee. A toast that has waited
+/// `4 × QUEUE_AGING_SECS` sorts at the top rank whatever it was raised at, and
+/// the wait tie-break inside a rank then puts it above every *fresh* toast of
+/// that rank — so no number of higher-priority arrivals can keep it queued
+/// beyond that bound. Below the bound priority still wins, which is why aging is
+/// gradual rather than a single "queued too long, go first" flag: a critical
+/// alert raised now is not made to wait behind a tip that has been queued a
+/// while.
+fn aged_rank(priority: NotificationPriority, queued: f32) -> u8 {
+    let mut rank = priority_rank(priority);
+    let mut waited = queued;
+    while rank < TOP_PRIORITY_RANK && waited >= QUEUE_AGING_SECS {
+        rank = rank.saturating_add(1);
+        waited -= QUEUE_AGING_SECS;
+    }
+    rank
+}
+
+/// Order two toasts in the stack: highest [`aged_rank`] first (the top, most
+/// visible end), then the longest-queued first so a toast that has waited takes
+/// the slot ahead of a fresh one of the same rank *and* keeps it once promoted,
+/// then the newer (smaller age) first so a fresh toast of equal standing sits
+/// above an older one.
+fn compare_toasts(first: &Toast, second: &Toast) -> Ordering {
+    aged_rank(second.priority, second.queued)
+        .cmp(&aged_rank(first.priority, first.queued))
+        .then_with(|| second.queued.total_cmp(&first.queued))
+        .then_with(|| first.age.total_cmp(&second.age))
+}
+
+/// Split a stack order into the toasts that are shown and the toasts that queue
+/// behind them, at [`MAX_VISIBLE_TOASTS`].
+fn visible_split<T>(ordered: &[T]) -> (&[T], &[T]) {
+    ordered.split_at(ordered.len().min(MAX_VISIBLE_TOASTS))
+}
+
+/// Asks [`order_channel_by_priority`] to re-sort the stack for a reason other
+/// than a toast being added — today, a queued toast whose wait has raised its
+/// [`aged_rank`]. Deliberately *not* a per-frame sort: an unconditional re-sort
+/// would fight the manual `cycle_toasts` rotation (and rewrite the channel's
+/// children every frame, which is the per-frame-write pattern the UI audit
+/// records).
+#[derive(Message, Debug, Clone, Copy)]
+struct RestackToasts;
+
+/// Keep the corner channel ordered by [`compare_toasts`]: a higher-ranked toast
+/// floats to the more visible top of the stack. Runs when a toast is added (a
+/// removal preserves the surviving order, so no reorder is needed) or when a
+/// queued toast's wait has changed its rank ([`RestackToasts`]).
 fn order_channel_by_priority(
     mut commands: Commands,
     channel: Option<Res<NotificationChannelRoot>>,
     added: Query<(), Added<Toast>>,
+    mut restack: MessageReader<RestackToasts>,
     children: Query<&Children>,
     toasts: Query<&Toast>,
 ) {
-    if added.is_empty() {
+    let asked = restack.read().count() > 0;
+    if added.is_empty() && !asked {
         return;
     }
     let Some(channel) = channel else {
@@ -1426,12 +1593,7 @@ fn order_channel_by_priority(
         .collect();
     ordered.sort_by(
         |first, second| match (toasts.get(*first), toasts.get(*second)) {
-            // Highest priority first (top); within a priority, the newer (smaller
-            // age) first, so a fresh toast of equal priority sits above an older.
-            (Ok(first), Ok(second)) => second
-                .priority
-                .cmp(&first.priority)
-                .then_with(|| first.age.total_cmp(&second.age)),
+            (Ok(first), Ok(second)) => compare_toasts(first, second),
             _unexpected => Ordering::Equal,
         },
     );
@@ -1441,17 +1603,16 @@ fn order_channel_by_priority(
 }
 
 /// Cap the visible stack at `MAX_VISIBLE_TOASTS`: show the top toasts in the
-/// channel's order and hide (and pause) the rest, then drive the overflow control
-/// — shown as a "N more ▸" button when toasts are queued, hidden otherwise. Runs
-/// every frame (cheap: a handful of nodes), so a dismissal promotes the next
-/// queued toast and the count stays current.
+/// channel's order and hide (and pause) the rest. Runs every frame (cheap: a
+/// handful of nodes), so a dismissal promotes the next queued toast.
+///
+/// Split from [`update_overflow_control`], which paints the "N more ▸" button,
+/// so this half — the one carrying the visible/queued decision the starvation
+/// invariant is about — can be driven headlessly without an i18n bundle.
 fn apply_toast_overflow(
     channel: Option<Res<NotificationChannelRoot>>,
-    translator: Translator,
     children: Query<&Children>,
     mut toasts: Query<(&mut Toast, &mut Node)>,
-    mut control_node: Query<&mut Node, (With<OverflowControl>, Without<Toast>)>,
-    mut control_text: Query<&mut Text, With<OverflowControl>>,
 ) {
     let Some(channel) = channel else {
         return;
@@ -1459,12 +1620,17 @@ fn apply_toast_overflow(
     let Ok(current) = children.get(channel.channel) else {
         return;
     };
-    let mut shown: usize = 0;
-    for child in current.iter() {
-        let Ok((mut toast, mut node)) = toasts.get_mut(child) else {
+    let stack: Vec<Entity> = current
+        .iter()
+        .filter(|entity| toasts.contains(*entity))
+        .collect();
+    let (visible, _queued) = visible_split(&stack);
+    let shown = visible.len();
+    for (index, child) in stack.iter().enumerate() {
+        let Ok((mut toast, mut node)) = toasts.get_mut(*child) else {
             continue;
         };
-        let visible = shown < MAX_VISIBLE_TOASTS;
+        let visible = index < shown;
         let display = if visible {
             Display::Flex
         } else {
@@ -1476,8 +1642,92 @@ fn apply_toast_overflow(
         if toast.overflowed == visible {
             toast.overflowed = !visible;
         }
-        shown = shown.saturating_add(1);
     }
+}
+
+/// Drop the toasts past [`MAX_QUEUED_TOASTS`] so a flood of in-world
+/// notifications cannot grow the channel without limit.
+///
+/// The ones dropped are the **most recently raised**, not the lowest-ranked: a
+/// full queue refuses new arrivals rather than discarding a toast that has been
+/// waiting, which is what the aging in [`aged_rank`] spent that wait earning. A
+/// cap that dropped the tail of the stack order would delete exactly the starving
+/// toast this task exists to rescue.
+///
+/// Only a **fading** toast is eligible: one that waits for an answer is kept
+/// however deep the queue is (see [`MAX_QUEUED_TOASTS`]), and a queue made
+/// entirely of those is left alone rather than silently thinned.
+///
+/// A drop is a resolve with no button — exactly what the close × writes — so the
+/// notification's history entry, dedup index and persistence are torn down by the
+/// one path that knows how, and the drop is logged rather than silent.
+fn cap_queued_toasts(
+    channel: Option<Res<NotificationChannelRoot>>,
+    children: Query<&Children>,
+    toasts: Query<&Toast>,
+    mut resolves: MessageWriter<ResolveNotification>,
+) {
+    let Some(channel) = channel else {
+        return;
+    };
+    let Ok(current) = children.get(channel.channel) else {
+        return;
+    };
+    let stack: Vec<Entity> = current
+        .iter()
+        .filter(|entity| toasts.get(*entity).is_ok_and(|toast| !toast.resolved))
+        .collect();
+    let (_visible, queued) = visible_split(&stack);
+    let excess = queued.len().saturating_sub(MAX_QUEUED_TOASTS);
+    if excess == 0 {
+        return;
+    }
+    // Youngest first, by how long the toast has existed at all: `age` runs while
+    // it is shown and `queued` while it is not, so their sum is its life so far
+    // however often it changed places.
+    let mut eligible: Vec<(f32, Entity)> = queued
+        .iter()
+        .filter_map(|entity| {
+            let toast = toasts.get(*entity).ok()?;
+            // An alert waiting for its answer is not ours to discard.
+            (toast.lifetime > 0.0).then_some((toast.age + toast.queued, *entity))
+        })
+        .collect();
+    eligible.sort_by(|first, second| first.0.total_cmp(&second.0));
+    for (_life, entity) in eligible.iter().take(excess) {
+        let template = toasts.get(*entity).map_or("", |toast| toast.template);
+        warn!(
+            template,
+            queued = queued.len(),
+            "notification: the toast queue is full, dropping the newest queued toast"
+        );
+        resolves.write(ResolveNotification {
+            toast: *entity,
+            button: None,
+        });
+    }
+}
+
+/// Drive the overflow control — shown as a "N more ▸" button when toasts are
+/// queued, hidden otherwise. Runs every frame so the count stays current.
+fn update_overflow_control(
+    channel: Option<Res<NotificationChannelRoot>>,
+    translator: Translator,
+    children: Query<&Children>,
+    toasts: Query<&Toast>,
+    mut control_node: Query<&mut Node, (With<OverflowControl>, Without<Toast>)>,
+    mut control_text: Query<&mut Text, With<OverflowControl>>,
+) {
+    let Some(channel) = channel else {
+        return;
+    };
+    let Ok(current) = children.get(channel.channel) else {
+        return;
+    };
+    let shown = current
+        .iter()
+        .filter(|entity| toasts.contains(*entity))
+        .count();
     let hidden = shown.saturating_sub(MAX_VISIBLE_TOASTS);
     if let Ok(mut node) = control_node.get_mut(channel.overflow) {
         let display = if hidden > 0 {
@@ -1980,10 +2230,17 @@ mod tests {
         WireError,
     };
 
+    use bevy::ecs::schedule::IntoScheduleConfigs as _;
+    use bevy::prelude::{ChildOf, Entity, Node};
+    use core::cmp::Ordering;
+
     use super::{
-        IgnoreCheckbox, ResolveNotification, SETTING_COLLECT_DIAGNOSTICS, Toast,
-        announce_command_failures, apply_diagnostics_setting, auto_response_button,
-        ingest_protocol_diagnostics, resolve_notifications,
+        DoNotDisturbQueue, IgnoreCheckbox, MAX_HELD_NOTIFICATIONS, MAX_QUEUED_TOASTS,
+        MAX_VISIBLE_TOASTS, NotificationChannelRoot, QUEUE_AGING_SECS, ResolveNotification,
+        RestackToasts, SETTING_COLLECT_DIAGNOSTICS, TOP_PRIORITY_RANK, Toast, age_and_fade_toasts,
+        aged_rank, announce_command_failures, apply_diagnostics_setting, apply_toast_overflow,
+        auto_response_button, cap_queued_toasts, compare_toasts, ingest_protocol_diagnostics,
+        order_channel_by_priority, priority_rank, resolve_notifications, should_age, visible_split,
     };
     use crate::notifications::{
         NOTIFICATIONS, NotificationButton, NotificationIgnore, NotificationKind,
@@ -2092,6 +2349,7 @@ mod tests {
                 opacity: 1.0,
                 hovered: false,
                 overflowed: false,
+                queued: 0.0,
                 resolved: false,
                 input_field: Some(field),
             })
@@ -2137,6 +2395,7 @@ mod tests {
                 opacity: 1.0,
                 hovered: false,
                 overflowed: false,
+                queued: 0.0,
                 resolved: false,
                 input_field: None,
             })
@@ -2530,5 +2789,274 @@ mod tests {
                 _other => None,
             })
             .collect()
+    }
+
+    /// A toast's timer runs only when it is on screen, unhovered, and of a kind
+    /// that expires at all — the three-way pause the queue depends on.
+    #[test]
+    fn only_a_shown_unhovered_fading_toast_ages() {
+        let tip = NotificationKind::Tip.lifetime_secs();
+        assert!(should_age(false, false, tip), "shown and unhovered ages");
+        assert!(!should_age(true, false, tip), "a queued toast is paused");
+        assert!(!should_age(false, true, tip), "a hovered toast is paused");
+        assert!(
+            !should_age(false, false, NotificationKind::Alert.lifetime_secs()),
+            "an alert never expires on its own"
+        );
+    }
+
+    /// The visible/queued split is exactly `MAX_VISIBLE_TOASTS` wide, and a
+    /// shorter stack is all visible with nothing queued.
+    #[test]
+    fn the_stack_splits_at_the_visible_cap() {
+        let stack: Vec<u8> = (0..5).collect();
+        let (visible, queued) = visible_split(&stack);
+        assert_eq!(visible.len(), MAX_VISIBLE_TOASTS);
+        assert_eq!(queued.len(), 5_usize.saturating_sub(MAX_VISIBLE_TOASTS));
+        let short: Vec<u8> = Vec::new();
+        let empty: &[u8] = &short;
+        assert_eq!(visible_split(&short), (empty, empty));
+    }
+
+    /// Waiting raises a queued toast one priority step per `QUEUE_AGING_SECS`,
+    /// and stops at the top — so the bound is four steps, not unbounded.
+    #[test]
+    fn a_wait_raises_a_toast_one_priority_step_at_a_time() {
+        let low = NotificationPriority::Low;
+        assert_eq!(aged_rank(low, 0.0), priority_rank(low), "a fresh toast");
+        assert_eq!(
+            aged_rank(low, QUEUE_AGING_SECS),
+            priority_rank(NotificationPriority::Normal)
+        );
+        assert_eq!(
+            aged_rank(low, QUEUE_AGING_SECS * 2.0),
+            priority_rank(NotificationPriority::High)
+        );
+        assert_eq!(
+            aged_rank(low, QUEUE_AGING_SECS * 3.0),
+            TOP_PRIORITY_RANK,
+            "three steps take Low to the top"
+        );
+        assert_eq!(
+            aged_rank(low, QUEUE_AGING_SECS * 100.0),
+            TOP_PRIORITY_RANK,
+            "and it stops there"
+        );
+    }
+
+    /// A `Toast` for the ordering and flood tests: the given priority and kind,
+    /// otherwise fresh.
+    fn probe_toast(priority: NotificationPriority, kind: NotificationKind) -> Toast {
+        Toast {
+            // The id only matters where a response is matched back, which the
+            // ordering tests do not do; `raise_probe` overwrites it with one the
+            // manager allocated.
+            id: NotificationManager::default().allocate_id(),
+            template: "SyntheticFlood",
+            priority,
+            default_button: None,
+            age: 0.0,
+            lifetime: kind.lifetime_secs(),
+            opacity: 1.0,
+            hovered: false,
+            overflowed: false,
+            queued: 0.0,
+            resolved: false,
+            input_field: None,
+        }
+    }
+
+    /// Priority decides the order between fresh toasts, and a long enough wait
+    /// overturns it — the ordering half of the anti-starvation guarantee, with
+    /// the wait itself breaking the tie once both sort at the top rank.
+    #[test]
+    fn a_long_wait_outranks_a_fresh_higher_priority_toast() {
+        let critical = probe_toast(NotificationPriority::Critical, NotificationKind::Notify);
+        let mut tip = probe_toast(NotificationPriority::Unspecified, NotificationKind::Tip);
+        assert_eq!(
+            compare_toasts(&critical, &tip),
+            Ordering::Less,
+            "fresh, the critical toast sorts first"
+        );
+        tip.queued = QUEUE_AGING_SECS * 2.0;
+        assert_eq!(
+            compare_toasts(&critical, &tip),
+            Ordering::Less,
+            "a partial wait does not yet overturn the priority"
+        );
+        tip.queued = QUEUE_AGING_SECS * 4.0;
+        assert_eq!(
+            compare_toasts(&critical, &tip),
+            Ordering::Greater,
+            "a full wait puts the queued toast first"
+        );
+    }
+
+    /// One simulated frame: advance the clock by `dt` seconds and run the
+    /// schedule.
+    fn step(app: &mut App, dt: f32) {
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(core::time::Duration::from_secs_f32(dt));
+        app.update();
+    }
+
+    /// An app running the stack systems (age, order, overflow, cap, resolve)
+    /// over an empty channel, plus the channel resource. No i18n: the overflow
+    /// control's label is a separate system.
+    fn stack_app() -> (App, NotificationChannelRoot) {
+        let mut app = App::new();
+        app.add_message::<ResolveNotification>()
+            .add_message::<NotificationResponse>()
+            .add_message::<RestackToasts>()
+            .init_resource::<NotificationManager>()
+            .init_resource::<Time>()
+            .add_systems(
+                Update,
+                (
+                    age_and_fade_toasts,
+                    order_channel_by_priority,
+                    apply_toast_overflow,
+                    cap_queued_toasts,
+                    resolve_notifications,
+                )
+                    .chain(),
+            );
+        let channel = app.world_mut().spawn(Node::default()).id();
+        let overflow = app
+            .world_mut()
+            .spawn((Node::default(), ChildOf(channel)))
+            .id();
+        let root = NotificationChannelRoot { channel, overflow };
+        app.insert_resource(root);
+        (app, root)
+    }
+
+    /// Raise one toast of `priority` / `kind` into the channel.
+    fn raise_probe(
+        app: &mut App,
+        channel: &NotificationChannelRoot,
+        priority: NotificationPriority,
+        kind: NotificationKind,
+    ) -> Entity {
+        let id = app
+            .world_mut()
+            .resource_mut::<NotificationManager>()
+            .allocate_id();
+        let mut toast = probe_toast(priority, kind);
+        toast.id = id;
+        app.world_mut()
+            .spawn((toast, Node::default(), ChildOf(channel.channel)))
+            .id()
+    }
+
+    /// Whether `entity`'s toast is still alive and on screen.
+    fn is_shown(app: &App, entity: Entity) -> bool {
+        app.world()
+            .get::<Toast>(entity)
+            .is_some_and(|toast| !toast.overflowed)
+    }
+
+    /// How many live toasts the channel holds.
+    fn live_toasts(app: &mut App) -> usize {
+        app.world_mut()
+            .query::<&Toast>()
+            .iter(app.world())
+            .filter(|toast| !toast.resolved)
+            .count()
+    }
+
+    /// **The invariant.** Under an unending stream of `Critical` arrivals — one
+    /// every frame, each outranking it — a single low-priority toast is still
+    /// shown, within the bound the aging sets, and not before its rank has been
+    /// earned. Without the aging it waits for ever, which is the filed bug.
+    #[test]
+    fn a_flood_of_higher_priority_arrivals_cannot_queue_a_toast_for_ever() -> Result<(), TestError>
+    {
+        /// One simulated frame, in seconds.
+        const DT: f32 = 0.25;
+        /// Frames to run: 80 s at `DT`. Three aging steps (60 s) take `Low` to
+        /// the top rank, where the wait tie-break puts it above every fresh
+        /// arrival; the fourth step is slack. A **fixed frame count**, not a
+        /// `while elapsed < QUEUE_AGING_SECS * 4.0` — raising that constant would
+        /// then make this test run for ever rather than fail.
+        const FRAMES: usize = 320;
+        let (mut app, channel) = stack_app();
+        let victim = raise_probe(
+            &mut app,
+            &channel,
+            NotificationPriority::Low,
+            NotificationKind::Tip,
+        );
+        step(&mut app, DT);
+        let mut elapsed = DT;
+        let mut shown_at = None;
+        let mut peak = 0_usize;
+        for _frame in 0..FRAMES {
+            raise_probe(
+                &mut app,
+                &channel,
+                NotificationPriority::Critical,
+                NotificationKind::Notify,
+            );
+            step(&mut app, DT);
+            elapsed += DT;
+            peak = peak.max(live_toasts(&mut app));
+            if shown_at.is_none() && is_shown(&app, victim) {
+                shown_at = Some(elapsed);
+            }
+        }
+        let shown_at = shown_at.ok_or("the queued toast was never shown")?;
+        assert!(
+            shown_at >= QUEUE_AGING_SECS * 3.0,
+            "priority still wins in the short term; shown after {shown_at} s"
+        );
+        assert!(
+            peak <= MAX_VISIBLE_TOASTS.saturating_add(MAX_QUEUED_TOASTS),
+            "the channel stays bounded under the flood; peaked at {peak}"
+        );
+        Ok(())
+    }
+
+    /// A queue made of alerts — each waiting for an answer — is never thinned by
+    /// the cap, however far past it the flood goes.
+    #[test]
+    fn the_queue_cap_never_discards_a_toast_awaiting_an_answer() {
+        let (mut app, channel) = stack_app();
+        let flood = MAX_VISIBLE_TOASTS
+            .saturating_add(MAX_QUEUED_TOASTS)
+            .saturating_add(8);
+        for _index in 0..flood {
+            raise_probe(
+                &mut app,
+                &channel,
+                NotificationPriority::Normal,
+                NotificationKind::Alert,
+            );
+        }
+        step(&mut app, 0.25);
+        step(&mut app, 0.25);
+        assert_eq!(live_toasts(&mut app), flood, "every alert survives the cap");
+    }
+
+    /// The Do Not Disturb hold list is bounded, drops the **oldest** when full,
+    /// and counts what it dropped so the drain can say so.
+    #[test]
+    fn the_do_not_disturb_hold_list_is_bounded() -> Result<(), TestError> {
+        let mut queue = DoNotDisturbQueue::default();
+        for index in 0..MAX_HELD_NOTIFICATIONS.saturating_add(5) {
+            let mut request = ShowNotification::new("SyntheticFlood");
+            request.context = Some(index.to_string());
+            queue.hold(request);
+        }
+        assert_eq!(queue.held.len(), MAX_HELD_NOTIFICATIONS);
+        assert_eq!(queue.dropped, 5);
+        let oldest = queue.held.first().ok_or("a bounded queue still holds")?;
+        assert_eq!(
+            oldest.context.as_deref(),
+            Some("5"),
+            "the five oldest were the ones dropped"
+        );
+        Ok(())
     }
 }
