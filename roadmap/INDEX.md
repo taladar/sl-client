@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 310 |
+| ready | 309 |
 | blocked | 56 |
 | in-progress | 18 |
-| bugs | 59 |
-| done | 986 |
+| bugs | 58 |
+| done | 988 |
 | deferred | 25 |
 | wont-do | 14 |
 | **total** | **1566** |
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (310)
+## ready (309)
 
 ### protocol
 
@@ -320,8 +320,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — There is no restart-note idiom, so 'restart required' is baked into labels
 - [`viewer-audit-render-fixtures-crate`](ready/viewer-audit-render-fixtures-crate.md)
   — 3297 lines of test fixtures ship in the production scene crate
-- [`viewer-audit-rlv-behaviour-table-test`](ready/viewer-audit-rlv-behaviour-table-test.md)
-  — Pin the whole RLV behaviour table with one table-driven test
 - [`viewer-audit-scene-live-daycycle-fixture`](ready/viewer-audit-scene-live-daycycle-fixture.md)
   — A test fixture that advances the day cycle between samples
 - [`viewer-audit-search-map-edge`](ready/viewer-audit-search-map-edge.md) —
@@ -1180,7 +1178,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (59)
+## bugs (58)
 
 ### viewer
 
@@ -1236,8 +1234,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   its cloud
 - [`viewer-audit-plugin-resource-registration`](bugs/viewer-audit-plugin-resource-registration.md)
   — Two plugins read resources they never register
-- [`viewer-audit-rlv-behaviour-lookup`](bugs/viewer-audit-rlv-behaviour-lookup.md)
-  — RLV behaviour lookup is param-type-blind and has no modifier fallback
 - [`viewer-audit-search-sentinel-row`](bugs/viewer-audit-search-sentinel-row.md)
   — The directory 'there is more' sentinel row is rendered as a result
 - [`viewer-audit-sit-camera-gating`](bugs/viewer-audit-sit-camera-gating.md) —
@@ -1323,7 +1319,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (986)
+## done (988)
 
 ### protocol
 
@@ -1603,6 +1599,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-render-path-env-reads`](done/viewer-audit-render-path-env-reads.md)
   — About a dozen getenv calls and allocations per frame in the sky and post
   chain
+- [`viewer-audit-rlv-behaviour-lookup`](done/viewer-audit-rlv-behaviour-lookup.md)
+  — RLV behaviour lookup is param-type-blind and has no modifier fallback
+- [`viewer-audit-rlv-behaviour-table-test`](done/viewer-audit-rlv-behaviour-table-test.md)
+  — Pin the whole RLV behaviour table with one table-driven test
 - [`viewer-audit-scene-change-guards-day-cycle`](done/viewer-audit-scene-change-guards-day-cycle.md)
   — The scene crate's write-on-change guards were reasoned about under a pinned
   sky

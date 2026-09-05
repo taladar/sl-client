@@ -29,6 +29,11 @@
 //! // A query names the channel its answer is chatted back on.
 //! let version = &parse_chat_line("@version=2222").unwrap()[0];
 //! assert_eq!(version.as_ref().unwrap().param, RlvParam::Reply { channel: 2222 });
+//!
+//! // The keyword alone does not identify a behaviour: `@tpto` is an action, so
+//! // there is no `tpto` restriction to add.
+//! let nonsense = &parse_chat_line("@tpto=n").unwrap()[0];
+//! assert_eq!(nonsense.as_ref().unwrap().behaviour, RlvBehaviour::Unknown);
 //! ```
 //!
 //! The grammar and classification follow Firestorm's `rlvhandler.cpp` /
@@ -40,8 +45,8 @@
 mod behaviour;
 mod command;
 
-pub use behaviour::RlvBehaviour;
-pub use command::{RLV_PREFIX, RlvCommand, RlvParam, RlvParseError};
+pub use behaviour::{RlvBehaviour, RlvLocalModifier, RlvResolvedBehaviour};
+pub use command::{RLV_PREFIX, RlvCommand, RlvParam, RlvParamKind, RlvParseError};
 
 /// Whether `line` is an RLV command line — i.e. begins with the `@`
 /// ([`RLV_PREFIX`]).
@@ -76,7 +81,7 @@ pub fn parse_chat_line(line: &str) -> Option<Vec<Result<RlvCommand, RlvParseErro
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pretty_assertions::assert_eq;
+    use pretty_assertions::{assert_eq, assert_ne};
 
     /// A boxed error so tests can use `?` on `Result` and `Option` instead of
     /// the disallowed `unwrap` / `expect` / indexing.
@@ -173,12 +178,121 @@ mod tests {
 
     #[test]
     fn clear_add_precedence_matches_reference() -> Result<(), TestError> {
-        // `n` classifies as Add before the `clear` behaviour check, even though
-        // the behaviour is still Clear.
+        // `n` classifies as Add before the `clear` behaviour check, so the
+        // param is Add — and the behaviour lookup then asks for a `clear`
+        // *restriction*, which does not exist. The reference lands in exactly
+        // the same place: its key is ("clear", RLV_TYPE_ADDREM), which is not
+        // in `m_String2InfoMap`, so `@clear=n` is RLV_BHVR_UNKNOWN with param
+        // type RLV_TYPE_ADD.
         let cmd = RlvCommand::parse_field("clear=n")?;
-        assert_eq!(cmd.behaviour, RlvBehaviour::Clear);
+        assert_eq!(cmd.behaviour, RlvBehaviour::Unknown);
+        assert_eq!(cmd.keyword, "clear");
         assert_eq!(cmd.param, RlvParam::Add);
         Ok(())
+    }
+
+    #[test]
+    fn param_kind_gates_the_behaviour_lookup() -> Result<(), TestError> {
+        // Force-only: `@tpto` teleports, there is no restriction by that name.
+        assert_eq!(
+            RlvCommand::parse_field("tpto:128/128/25=force")?.behaviour,
+            RlvBehaviour::Tpto
+        );
+        let as_restriction = RlvCommand::parse_field("tpto=n")?;
+        assert_eq!(as_restriction.behaviour, RlvBehaviour::Unknown);
+        assert_eq!(as_restriction.keyword, "tpto");
+
+        // Reply-only: `@version` answers on a channel, it does not restrict.
+        assert_eq!(
+            RlvCommand::parse_field("version=n")?.behaviour,
+            RlvBehaviour::Unknown
+        );
+
+        // Restriction-only: `@showloc` blocks, it is not an action.
+        assert_eq!(
+            RlvCommand::parse_field("showloc=n")?.behaviour,
+            RlvBehaviour::Showloc
+        );
+        assert_eq!(
+            RlvCommand::parse_field("showloc=force")?.behaviour,
+            RlvBehaviour::Unknown
+        );
+
+        // Declared for both: `@sit` is a restriction *and* an action.
+        assert_eq!(
+            RlvCommand::parse_field("sit=n")?.behaviour,
+            RlvBehaviour::Sit
+        );
+        assert_eq!(
+            RlvCommand::parse_field("sit=force")?.behaviour,
+            RlvBehaviour::Sit
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn local_modifier_fallback() -> Result<(), TestError> {
+        // `<behaviour>_<modifier>=force` addresses a modifier of the base
+        // restriction, and reports as that base behaviour.
+        let cmd = RlvCommand::parse_field("setsphere_mode:1=force")?;
+        assert_eq!(cmd.behaviour, RlvBehaviour::Setsphere);
+        assert_eq!(cmd.modifier, Some(RlvLocalModifier::SphereMode));
+        assert_eq!(cmd.keyword, "setsphere_mode");
+        assert_eq!(cmd.option.as_deref(), Some("1"));
+
+        let alpha = RlvCommand::parse_field("setoverlay_alpha:0.5=force")?;
+        assert_eq!(alpha.behaviour, RlvBehaviour::Setoverlay);
+        assert_eq!(alpha.modifier, Some(RlvLocalModifier::OverlayAlpha));
+
+        // A behaviour of its own is not a modifier command, even though it is
+        // spelled the same way.
+        let tween = RlvCommand::parse_field("setoverlay_tween:2=force")?;
+        assert_eq!(tween.behaviour, RlvBehaviour::SetoverlayTween);
+        assert_eq!(tween.modifier, None);
+
+        // The fallback is `=force` only, and only for modifiers the base
+        // behaviour actually declares.
+        assert_eq!(
+            RlvCommand::parse_field("setsphere_mode=n")?.behaviour,
+            RlvBehaviour::Unknown
+        );
+        assert_eq!(
+            RlvCommand::parse_field("setsphere_frobnicate=force")?.behaviour,
+            RlvBehaviour::Unknown
+        );
+        // `tween` is a modifier of @setsphere, not of @setoverlay.
+        assert_eq!(
+            RlvCommand::parse_field("setoverlay_distmin=force")?.behaviour,
+            RlvBehaviour::Unknown
+        );
+        // A base with no modifiers at all.
+        assert_eq!(
+            RlvCommand::parse_field("fly_mode=force")?.behaviour,
+            RlvBehaviour::Unknown
+        );
+        // A strict keyword never takes the fallback.
+        assert_eq!(
+            RlvCommand::parse_field("setsphere_sec=force")?.behaviour,
+            RlvBehaviour::Unknown
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn local_modifier_table_roundtrips() {
+        for &modifier in RlvLocalModifier::ALL {
+            assert_eq!(
+                RlvLocalModifier::lookup(modifier.behaviour(), modifier.name()),
+                Some(modifier),
+                "{modifier:?} does not round-trip through its own base and name"
+            );
+            // A modifier hangs off a restriction, which is the only row the
+            // reference registers modifiers on.
+            assert!(
+                modifier.behaviour().accepts(RlvParamKind::AddRem),
+                "{modifier:?} hangs off a behaviour that is not a restriction"
+            );
+        }
     }
 
     #[test]
@@ -313,5 +427,201 @@ mod tests {
         assert_eq!(RlvBehaviour::from_keyword("nope"), None);
         assert!(RlvBehaviour::Recvim.has_strict());
         assert!(!RlvBehaviour::Fly.has_strict());
+    }
+
+    /// Every param kind, so a table row can be probed for the kinds it does
+    /// *not* declare as well as the ones it does.
+    const ALL_PARAM_KINDS: [RlvParamKind; 4] = [
+        RlvParamKind::AddRem,
+        RlvParamKind::Force,
+        RlvParamKind::Reply,
+        RlvParamKind::Clear,
+    ];
+
+    /// A command field that hands `keyword` a param of `kind`, or `None` when
+    /// no such field exists.
+    ///
+    /// Two kinds are unreachable for some keywords, both because of the `clear`
+    /// special case in the param classifier: a param-less field is a syntax
+    /// error for anything but `@clear`, and conversely `@clear=force` /
+    /// `@clear=1234` are *filtered clears*, not a force or a reply.
+    fn field_for(keyword: &str, kind: RlvParamKind) -> Option<String> {
+        match kind {
+            RlvParamKind::AddRem => Some(format!("{keyword}=n")),
+            RlvParamKind::Force => (keyword != "clear").then(|| format!("{keyword}=force")),
+            RlvParamKind::Reply => (keyword != "clear").then(|| format!("{keyword}=1234")),
+            RlvParamKind::Clear => (keyword == "clear").then(|| keyword.to_owned()),
+        }
+    }
+
+    #[test]
+    fn every_table_row_roundtrips() -> Result<(), TestError> {
+        let mut seen: std::collections::HashMap<&str, RlvBehaviour> =
+            std::collections::HashMap::new();
+
+        for &behaviour in RlvBehaviour::ALL {
+            let keyword = behaviour.keyword().ok_or("a declared row has no keyword")?;
+
+            assert_eq!(
+                RlvBehaviour::from_keyword(keyword),
+                Some(behaviour),
+                "`{keyword}` does not look up to {behaviour:?}"
+            );
+            assert_eq!(
+                seen.insert(keyword, behaviour),
+                None,
+                "`{keyword}` is declared twice"
+            );
+
+            let kinds = behaviour.param_kinds();
+            assert!(
+                !kinds.is_empty(),
+                "{behaviour:?} is declared for no param kind, so it can never resolve"
+            );
+            for (index, kind) in kinds.iter().enumerate() {
+                assert!(
+                    !kinds
+                        .iter()
+                        .skip(index.saturating_add(1))
+                        .any(|it| it == kind),
+                    "{behaviour:?} lists {kind:?} twice"
+                );
+            }
+        }
+
+        assert_eq!(
+            seen.len(),
+            RlvBehaviour::ALL.len(),
+            "the keyword set is smaller than the table"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn every_table_row_answers_only_its_own_param_kinds() -> Result<(), TestError> {
+        for &behaviour in RlvBehaviour::ALL {
+            let keyword = behaviour.keyword().ok_or("a declared row has no keyword")?;
+
+            // A bare keyword is a syntax error for everything but `@clear`.
+            if keyword != "clear" {
+                assert_eq!(
+                    RlvCommand::parse_field(keyword),
+                    Err(RlvParseError::MissingParam),
+                    "a bare `{keyword}` should not decode"
+                );
+            }
+
+            for kind in ALL_PARAM_KINDS {
+                let Some(field) = field_for(keyword, kind) else {
+                    continue;
+                };
+                let cmd = RlvCommand::parse_field(&field)?;
+                assert_eq!(cmd.keyword, keyword, "`{field}` lost its keyword");
+                assert_eq!(
+                    cmd.param.kind(),
+                    kind,
+                    "`{field}` classified as another kind"
+                );
+
+                let expected = if behaviour.accepts(kind) {
+                    behaviour
+                } else {
+                    RlvBehaviour::Unknown
+                };
+                assert_eq!(
+                    cmd.behaviour, expected,
+                    "`{field}` resolved to {:?}, expected {expected:?}",
+                    cmd.behaviour
+                );
+                assert_eq!(cmd.modifier, None, "`{field}` is not a modifier command");
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn every_table_row_answers_the_strict_suffix_it_declares() -> Result<(), TestError> {
+        for &behaviour in RlvBehaviour::ALL {
+            let keyword = behaviour.keyword().ok_or("a declared row has no keyword")?;
+            let field = format!("{keyword}_sec=n");
+            let cmd = RlvCommand::parse_field(&field)?;
+
+            // A strict keyword is only a keyword at all when the behaviour
+            // declares strict mode *and* is a restriction to begin with.
+            let strict_ok = behaviour.has_strict() && behaviour.accepts(RlvParamKind::AddRem);
+            assert_eq!(
+                cmd.strict, strict_ok,
+                "`{field}` reported strict={}, expected {strict_ok}",
+                cmd.strict
+            );
+            assert_eq!(
+                cmd.behaviour,
+                if strict_ok {
+                    behaviour
+                } else {
+                    RlvBehaviour::Unknown
+                },
+                "`{field}` resolved to {:?}",
+                cmd.behaviour
+            );
+            assert_eq!(cmd.keyword, format!("{keyword}_sec"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn hostile_owner_say_lines_are_decoded_without_panicking() {
+        // This crate's input is chat from an in-world object, so a malformed
+        // line has to come back as errors, never as a panic or a hang.
+        let long_option = "x".repeat(8192);
+        let many_commas = ",".repeat(4096);
+        let lines = [
+            "@".to_owned(),
+            "@,".to_owned(),
+            many_commas.clone(),
+            format!("@{many_commas}"),
+            format!("@detach=n{many_commas}fly=n"),
+            "@:::=:::".to_owned(),
+            "@====".to_owned(),
+            "@=".to_owned(),
+            "@:".to_owned(),
+            "@_sec=n".to_owned(),
+            "@_=force".to_owned(),
+            "@setsphere_=force".to_owned(),
+            "@sit:=force".to_owned(),
+            format!("@detach:{long_option}=n"),
+            format!("@{long_option}=n"),
+            format!("@{}=n", "a_".repeat(2048)),
+            "@version=99999999999999999999".to_owned(),
+            "@version=-99999999999999999999".to_owned(),
+            "@version=+2222".to_owned(),
+            "@version= 2222".to_owned(),
+            // Non-ASCII: the decoder lower-cases ASCII only, as the reference
+            // does, and must not split a multi-byte character.
+            "@ÜBERdetach=n".to_owned(),
+            "@detach:🔒=n".to_owned(),
+            "@\u{0}detach=n".to_owned(),
+            "@detach=n\u{0}".to_owned(),
+        ];
+
+        for line in &lines {
+            let Some(cmds) = parse_chat_line(line) else {
+                assert!(!line.starts_with(RLV_PREFIX), "`{line}` should have parsed");
+                continue;
+            };
+            for cmd in cmds.iter().flatten() {
+                // Whatever survives is internally consistent: an unknown
+                // keyword is never reported as strict or as a modifier.
+                if cmd.behaviour == RlvBehaviour::Unknown {
+                    assert!(!cmd.strict, "`{line}` reported an unknown strict behaviour");
+                    assert_eq!(cmd.modifier, None, "`{line}` reported a bare modifier");
+                }
+                assert_ne!(
+                    cmd.option.as_deref(),
+                    Some(""),
+                    "`{line}` kept an empty option"
+                );
+            }
+        }
     }
 }

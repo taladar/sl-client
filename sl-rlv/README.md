@@ -34,6 +34,8 @@ Each `RlvCommand` carries:
   the wire synonyms and deprecated aliases),
 - `strict` — whether the `_sec` suffix was present on a behaviour that supports
   it (`@recvim_sec=n`),
+- `modifier` — the local behaviour modifier the command addressed, if any (see
+  below),
 - the `option` between behaviour and `=` (a UUID, exception, modifier or path,
   left raw for the consumer to interpret), and
 - the classified `param` (`RlvParam`):
@@ -43,8 +45,32 @@ Each `RlvCommand` carries:
     (`@version=2222`, `@getoutfit=1234`),
   - `Clear { filter }` — `@clear[=<filter>]` drops restrictions.
 
-The param-classification precedence is faithful to the reference down to the
-edge cases (`@clear=n` classifies as `Add` while the behaviour stays `Clear`).
+## The keyword is only half the key
+
+A behaviour is identified by the pair `(keyword, param kind)`, not the keyword
+alone — the reference keys `m_String2InfoMap` on exactly that pair, with `add`
+and `rem` collapsed into one `RLV_TYPE_ADDREM`. Each table row therefore
+declares the `RlvParamKind`s it exists for, and a keyword used with a kind it
+was not declared for resolves to `RlvBehaviour::Unknown` while keeping its
+spelling:
+
+- `@tpto:128/128/25=force` teleports; `@tpto=n` is nothing — there is no such
+  restriction.
+- `@showloc=n` blocks the location; `@showloc=force` is nothing.
+- `@sit` is declared for both, so `@sit=n` and `@sit=force` are both real.
+- `@clear=n` classifies as `Add` (the param precedence puts `n` first), which
+  then asks for a `clear` *restriction* — so the behaviour is `Unknown`, as in
+  the reference.
+
+## Local behaviour modifiers
+
+A few restrictions expose named knobs that a `=force` command addresses as
+`@<behaviour>_<modifier>` — `@setsphere_mode=force`, `@setoverlay_alpha=force`.
+These are not behaviours of their own: when the direct lookup fails, a `=force`
+keyword is split at its last `_` and retried against the restriction rows, and
+the command comes back as the **base** behaviour with `modifier` set
+(`RlvLocalModifier`). `@setoverlay_tween=force`, which *is* a behaviour of its
+own, is unaffected.
 
 The grammar and classification follow Firestorm's `rlvhandler.cpp`,
 `rlvhelper.cpp` and `rlvdefines.h` (`ERlvBehaviour`, `ERlvParamType`,

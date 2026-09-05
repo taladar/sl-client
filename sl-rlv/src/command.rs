@@ -1,7 +1,7 @@
 //! The RLV command grammar: an `@behaviour[:option]=param` field and how it
 //! decodes into a typed [`RlvCommand`].
 
-use crate::behaviour::RlvBehaviour;
+use crate::behaviour::{RlvBehaviour, RlvLocalModifier};
 
 /// The RLV command prefix character (`RLV_CMD_PREFIX` in the reference).
 ///
@@ -39,6 +39,40 @@ pub enum RlvParam {
     },
 }
 
+/// The lookup dimension of a param — [`RlvParam`] with its payload dropped.
+///
+/// This is the second half of the reference's dictionary key. `m_String2InfoMap`
+/// is keyed on `(behaviour, paramType)` with add and remove collapsed into one
+/// `RLV_TYPE_ADDREM` (`rlvhelper.cpp:340`, `:445`), because a restriction that
+/// can be turned on can always be turned off again. Turning a *behaviour* on is
+/// a different question from *doing* it or *asking* about it, and the table
+/// answers each separately — see [`RlvBehaviour::accepts`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RlvParamKind {
+    /// [`RlvParam::Add`] or [`RlvParam::Remove`] — a restriction
+    /// (`RLV_TYPE_ADDREM`).
+    AddRem,
+    /// [`RlvParam::Force`] — an action (`RLV_TYPE_FORCE`).
+    Force,
+    /// [`RlvParam::Reply`] — a query (`RLV_TYPE_REPLY`).
+    Reply,
+    /// [`RlvParam::Clear`] — `@clear` (`RLV_TYPE_CLEAR`).
+    Clear,
+}
+
+impl RlvParam {
+    /// The lookup dimension of this param.
+    #[must_use]
+    pub const fn kind(&self) -> RlvParamKind {
+        match *self {
+            Self::Add | Self::Remove => RlvParamKind::AddRem,
+            Self::Force => RlvParamKind::Force,
+            Self::Reply { .. } => RlvParamKind::Reply,
+            Self::Clear { .. } => RlvParamKind::Clear,
+        }
+    }
+}
+
 /// A single decoded RLV command — one `behaviour[:option]=param` field of an
 /// owner-say chat line.
 ///
@@ -50,13 +84,21 @@ pub struct RlvCommand {
     /// The raw behaviour keyword as it appeared, lower-cased and with any
     /// strict `_sec` suffix still attached (`recvim_sec`).
     pub keyword: String,
-    /// The classified behaviour.
+    /// The classified behaviour, resolved against both the keyword and the
+    /// [`kind`](RlvParam::kind) of [`param`](RlvCommand::param). A keyword the
+    /// reference does not declare for that kind — `@tpto=n`, `@version=force` —
+    /// is [`RlvBehaviour::Unknown`], not a restriction on `tpto`.
     pub behaviour: RlvBehaviour,
     /// Whether the keyword carried the strict `_sec` suffix *and* the behaviour
     /// supports it (`@recvim_sec=n`). A `_sec` on a behaviour that does not
     /// support strict mode leaves `behaviour` as [`RlvBehaviour::Unknown`] and
     /// this `false`, matching the reference.
     pub strict: bool,
+    /// The local modifier this command addresses, when the keyword resolved as
+    /// `<behaviour>_<modifier>` on a `=force` command (`@setsphere_mode=force`
+    /// sets the `mode` modifier of the `@setsphere` restriction). `None` for an
+    /// ordinary command, where the keyword is the behaviour itself.
+    pub modifier: Option<RlvLocalModifier>,
     /// The `:option` between behaviour and `=`, lower-cased, if present and
     /// non-empty. Its meaning (a UUID, an exception, a modifier, a folder path)
     /// is behaviour-specific and left to the consumer to interpret.
@@ -143,32 +185,18 @@ impl RlvCommand {
             return Err(RlvParseError::UnknownParam(param_str.to_owned()));
         };
 
-        let (behaviour, strict) = resolve_behaviour(keyword);
+        // The behaviour is only knowable once the param is classified: the
+        // reference dictionary is keyed on the pair, so this lookup has to come
+        // last.
+        let resolved = RlvBehaviour::resolve(keyword, param.kind());
 
         Ok(Self {
             keyword: keyword.to_owned(),
-            behaviour,
-            strict,
+            behaviour: resolved.behaviour,
+            strict: resolved.strict,
+            modifier: resolved.modifier,
             option,
             param,
         })
-    }
-}
-
-/// Resolve a raw keyword into a behaviour plus its strict flag.
-///
-/// A trailing `_sec` selects the strict variant, but only if the base behaviour
-/// actually supports it ([`RlvBehaviour::has_strict`]); otherwise the whole
-/// keyword is treated as unknown, matching `getBehaviourInfo`.
-fn resolve_behaviour(keyword: &str) -> (RlvBehaviour, bool) {
-    match keyword.strip_suffix("_sec") {
-        Some(base) => match RlvBehaviour::from_keyword(base) {
-            Some(behaviour) if behaviour.has_strict() => (behaviour, true),
-            _ => (RlvBehaviour::Unknown, false),
-        },
-        None => (
-            RlvBehaviour::from_keyword(keyword).unwrap_or(RlvBehaviour::Unknown),
-            false,
-        ),
     }
 }
