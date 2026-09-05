@@ -1050,6 +1050,78 @@ mod tests {
         Ok(())
     }
 
+    /// **A see-through container in front of a field does not eat the field's
+    /// focus** — [[viewer-nonblocking-overlay-steals-focus]], the live relative
+    /// of the fixture bug above.
+    ///
+    /// `spawn_under_root` took the *second UI root* out of the harness, but the
+    /// two-hit shape it stood on is one the viewer really builds: a node with
+    /// `Pickable { should_block_lower: false, is_hoverable: true }` lifted in
+    /// front of a focusable that is not its descendant (the toast channel, over
+    /// whatever sits under the gap between two toasts). `bevy_picking` walks the
+    /// hits front to back and stops at the first blocker, so such an overlay
+    /// leaves **two** entries in the hover map, and `click_to_focus` used to
+    /// raise an `AcquireFocus` for each: the field's found its `TabIndex`, the
+    /// overlay's found none and bubbled to the window, where the clearing arm
+    /// threw the focus away again. Which landed last was `EntityHashMap` order,
+    /// so it was a coin flip on entity ids — hence the sweep, for the same
+    /// reason [`a_click_focuses_the_field_at_any_entity_id`] is one.
+    ///
+    /// Held down by the `bevy_input_focus` change in the pinned fork: only the
+    /// hit the press *stopped on* — the blocker, here the field — decides focus.
+    #[test]
+    fn a_click_focuses_a_field_under_a_nonblocking_overlay() -> Result<(), crate::TestError> {
+        let mut missed = Vec::new();
+        for pad in 0_u32..8 {
+            let mut app = interactive_app();
+            for _ in 0..pad {
+                app.world_mut().spawn_empty();
+            }
+            let field = text_field(&mut app, "covered", "abc", 10.0, 10.0);
+            let overlay = crate::spawn_under_root(
+                &mut app,
+                (
+                    solid_node(0.0, 0.0, 200.0, 100.0),
+                    GlobalZIndex(100),
+                    Pickable {
+                        should_block_lower: false,
+                        is_hoverable: true,
+                    },
+                    Name::new("overlay"),
+                ),
+            );
+            settle(&mut app);
+            let at = super::centre_of(&mut app, "covered").ok_or("the field has no centre")?;
+            click(&mut app, at, MouseButton::Left);
+
+            // The fixture is only worth anything if the press really did hit
+            // both, so say so rather than trust it.
+            let hits: Vec<Entity> = app
+                .world()
+                .resource::<bevy::picking::hover::HoverMap>()
+                .values()
+                .flat_map(|hits| hits.keys().copied())
+                .collect();
+            if !hits.contains(&overlay) || !hits.contains(&field) {
+                missed.push(format!(
+                    "{pad} entities ahead of it: the click hit {hits:?}, not both the overlay \
+                     {overlay} and the field {field}"
+                ));
+                continue;
+            }
+            let focus = app.world().resource::<InputFocus>().get();
+            if focus != Some(field) {
+                missed.push(format!("{pad} entities ahead of it: focus is {focus:?}"));
+            }
+        }
+        assert!(
+            missed.is_empty(),
+            "a click must focus the field under a non-blocking overlay whatever the entity ids \
+             are, and it did not at: {missed:?}"
+        );
+        Ok(())
+    }
+
     /// **A fixture node spawned without a parent is reported**, so the next
     /// harness to grow one finds out from the check rather than from a click that
     /// works four times in eight.

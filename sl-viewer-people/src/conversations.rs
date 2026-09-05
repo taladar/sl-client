@@ -1177,10 +1177,14 @@ fn spawn_conversations_floater(mut commands: Commands, root: Res<UiRoot>) {
             LogicalPadding(LogicalRect::all(Val::Px(4.0))),
             BackgroundColor(DOCK_HOST_BACKGROUND),
             GlobalZIndex(DOCK_HOST_Z),
-            Pickable {
-                should_block_lower: false,
-                is_hoverable: true,
-            },
+            // Transparent to the pick *and* out of the hover map: nothing
+            // observes the host itself, the docked floater is a child and picks
+            // for itself, and the host's padding rim is lifted in front of the
+            // bottom bar's buttons by `DOCK_HOST_Z`. A hoverable container in
+            // front of a focusable it does not own is a second hit for every
+            // press aimed at that focusable
+            // ([[viewer-nonblocking-overlay-steals-focus]]).
+            Pickable::IGNORE,
             Name::new("conversations-dock-host"),
             ChildOf(root.0),
         ))

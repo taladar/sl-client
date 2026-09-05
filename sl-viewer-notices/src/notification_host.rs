@@ -503,6 +503,16 @@ fn register_notification_settings(settings: Option<ResMut<ViewerSettings>>) {
 /// append below the older ones and [`order_channel_by_priority`] then floats the
 /// highest-priority / newest to the top. Transparent and non-blocking; the toast
 /// cards themselves take the clicks.
+///
+/// The channel is [`Pickable::IGNORE`] rather than merely non-blocking: its own
+/// box covers the toasts *and the gaps between them*, `GlobalZIndex` lifts it in
+/// front of every panel, and nothing observes the container itself — the hover
+/// observers are on the toast cards, which are its children and pick for
+/// themselves. A container that is `is_hoverable` without wanting a single hover
+/// event only puts itself in the hover map, where it becomes a second hit for
+/// every press aimed at whatever lies under one of those gaps
+/// ([[viewer-nonblocking-overlay-steals-focus]]). The minimap's mouselook
+/// transparency is the pattern.
 fn spawn_notification_channel(mut commands: Commands, root: Res<UiRoot>) {
     let channel = commands
         .spawn((
@@ -516,10 +526,7 @@ fn spawn_notification_channel(mut commands: Commands, root: Res<UiRoot>) {
                 ..LogicalRect::AUTO
             }),
             GlobalZIndex(TOAST_CHANNEL_Z),
-            Pickable {
-                should_block_lower: false,
-                is_hoverable: true,
-            },
+            Pickable::IGNORE,
             Name::new("notification-channel"),
             ChildOf(root.0),
         ))

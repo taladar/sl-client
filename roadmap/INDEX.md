@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 306 |
 | blocked | 55 |
 | in-progress | 18 |
-| bugs | 59 |
-| done | 998 |
+| bugs | 58 |
+| done | 999 |
 | deferred | 25 |
 | wont-do | 14 |
 | **total** | **1573** |
@@ -1166,7 +1166,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (59)
+## bugs (58)
 
 ### viewer
 
@@ -1263,8 +1263,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A blocked resident's chat and IMs are still shown
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
-- [`viewer-nonblocking-overlay-steals-focus`](bugs/viewer-nonblocking-overlay-steals-focus.md)
-  — A see-through container in front of a field clears its focus, at random
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
   — Own avatar looks broken after a teleport
 - [`viewer-own-avatar-facing-drifts-idle`](bugs/viewer-own-avatar-facing-drifts-idle.md)
@@ -1309,7 +1307,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (998)
+## done (999)
 
 ### protocol
 
@@ -2017,6 +2015,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   tags — preference toggles (blocked by `viewer-preferences-floater` (done))
 - [`viewer-nametags-occluded-by-clouds`](done/viewer-nametags-occluded-by-clouds.md)
   — Name tags render behind the cloud layer (near tag occluded by far clouds)
+- [`viewer-nonblocking-overlay-steals-focus`](done/viewer-nonblocking-overlay-steals-focus.md)
+  — A see-through container in front of a field clears its focus, at random
 - [`viewer-notecard-format`](done/viewer-notecard-format.md) — Notecard format —
   a pure crate (sl-notecard)
 - [`viewer-notification-catalogue`](done/viewer-notification-catalogue.md) —
