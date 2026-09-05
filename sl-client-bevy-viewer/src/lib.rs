@@ -112,6 +112,8 @@ mod bottom_toolbar;
 // each module is aliased under its old name so every `crate::<module>::…`
 // path in the viewer still resolves.
 pub(crate) use sl_viewer_media::browser_widget;
+#[cfg(test)]
+mod build_floater_test;
 mod build_info;
 pub(crate) use sl_viewer_chat::chat;
 pub(crate) use sl_viewer_chat::chat_input;

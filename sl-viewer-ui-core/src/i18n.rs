@@ -170,6 +170,35 @@ impl Plugin for ViewerI18nPlugin {
     }
 }
 
+/// Install the three resources a [`Translator`] reads, **with no bundles behind
+/// them** — the string half of a headless harness.
+///
+/// A test fixture that stands up a real panel needs this: a system taking
+/// `Translator` fails Bevy's system-parameter validation the moment it runs
+/// unless [`Localization`], [`UiLocale`] and [`LocaleFormatting`] all exist, and
+/// the whole [`ViewerI18nPlugin`] would drag the Fluent asset pipeline (and a
+/// folder load that finishes some unknown number of frames later) into a
+/// harness that has no renderer and wants no waiting.
+///
+/// With an empty lookup every key resolves to **itself**, which is Fluent's own
+/// miss convention and exactly what the harnesses want: a panel's text becomes
+/// the set of keys it chose, so a test can assert *which* strings a line is
+/// built from without pinning any translation's wording. What it cannot assert
+/// is a formatted argument — a miss returns the key and drops the arguments —
+/// so a number inside a line belongs in a test of the function that computes
+/// it, not in a test of the line.
+///
+/// The label-resolving system comes with it, so a [`Translated`] label really
+/// does resolve — to its key. Without it every bound label would keep the empty
+/// [`Text`] it spawned with, and a harness measuring a panel of empty labels
+/// would be measuring a panel that ships in no locale.
+pub fn install_untranslated(app: &mut App) {
+    app.init_resource::<Localization>()
+        .insert_resource(UiLocale::new(LocaleChoice::English))
+        .init_resource::<LocaleFormatting>()
+        .add_systems(Update, apply_translations);
+}
+
 /// A locale the viewer ships a bundle for, plus the pseudolocale — the fixed set
 /// the switcher (and the `SL_VIEWER_UI_LOCALE` seed) chooses from until a full
 /// locale selector lands.

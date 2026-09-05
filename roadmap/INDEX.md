@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 308 |
+| ready | 307 |
 | blocked | 55 |
 | in-progress | 18 |
 | bugs | 64 |
-| done | 985 |
+| done | 986 |
 | deferred | 25 |
 | wont-do | 14 |
 | **total** | **1567** |
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (308)
+## ready (307)
 
 ### protocol
 
@@ -369,9 +369,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-build-display-options`](ready/viewer-build-display-options.md) —
   Build-mode display/overlay toggles (blocked by `viewer-object-selection-core`
   (done))
-- [`viewer-build-floater-interaction-tests`](ready/viewer-build-floater-interaction-tests.md)
-  — The build floater — reflect, edit, commit (blocked by
-  `viewer-ui-keyboard-text-harness` (done), `viewer-world-test-harness` (done))
 - [`viewer-build-general-sale-clickaction`](ready/viewer-build-general-sale-clickaction.md)
   — General tab — for-sale, click action, show in search, locked
 - [`viewer-build-grid-options`](ready/viewer-build-grid-options.md) —
@@ -1325,7 +1322,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (985)
+## done (986)
 
 ### protocol
 
@@ -1665,6 +1662,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-bom-mesh-alpha-feet-through-boots`](done/viewer-bom-mesh-alpha-feet-through-boots.md)
   — BoM mesh body feet render through mesh boots (bake alpha ignored on BoM
   faces)
+- [`viewer-build-floater-interaction-tests`](done/viewer-build-floater-interaction-tests.md)
+  — The build floater — reflect, edit, commit (blocked by
+  `viewer-ui-keyboard-text-harness` (done), `viewer-world-test-harness` (done))
 - [`viewer-build-material-tab-permission-gate`](done/viewer-build-material-tab-permission-gate.md)
   — Build tools — gate the Material tab on modify permission (grey + notice)
 - [`viewer-build-systems-gate-on-build-mode`](done/viewer-build-systems-gate-on-build-mode.md)

@@ -66,10 +66,10 @@ pub const BUILD_TOOLS_FLOATER_ID: &str = "build-tools";
 const FIELD_WIDTH_GLYPHS: f32 = 8.0;
 
 /// The toggle-row check glyph while on.
-pub(crate) const CHECKED_GLYPH: &str = "☑";
+pub const CHECKED_GLYPH: &str = "☑";
 
 /// The toggle-row check glyph while off.
-pub(crate) const UNCHECKED_GLYPH: &str = "☐";
+pub const UNCHECKED_GLYPH: &str = "☐";
 
 /// The skin class for the floater's label / summary text
 /// (`--text-muted`-driven; see `assets/skins/common.css`).
@@ -552,10 +552,20 @@ fn build_build_tools_content(In(handle): In<FloaterHandle>, mut commands: Comman
         let label = spawn_row_label(&mut commands, transform_row, key);
         commands.entity(label).insert(BuildTransformLabel(group));
         for axis in 0_usize..3_usize {
-            let element = match group {
-                FieldGroup::Position => "build-pos",
-                FieldGroup::Rotation => "build-rot",
-                FieldGroup::Size => "build-size",
+            // One element name per *axis*, not per row: the name is the node's
+            // address (`{element}:field`), and three fields sharing one would be
+            // three nodes a lookup cannot tell apart — the gallery would show
+            // one, and a test aiming at Z would drive X.
+            let element = match (group, axis) {
+                (FieldGroup::Position, 0) => "build-pos-x",
+                (FieldGroup::Position, 1) => "build-pos-y",
+                (FieldGroup::Position, _z) => "build-pos-z",
+                (FieldGroup::Rotation, 0) => "build-rot-x",
+                (FieldGroup::Rotation, 1) => "build-rot-y",
+                (FieldGroup::Rotation, _z) => "build-rot-z",
+                (FieldGroup::Size, 0) => "build-size-x",
+                (FieldGroup::Size, 1) => "build-size-y",
+                (FieldGroup::Size, _z) => "build-size-z",
             };
             let slot_index = group_index.saturating_mul(3).saturating_add(axis);
             let field = spawn_text_input(
