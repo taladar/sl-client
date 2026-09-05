@@ -120,10 +120,16 @@ once the fake grid grew a
 If a case belongs offline and does not bite, the thing to fix is usually the
 grid.
 
-Four cases live on the fake grid **only**, because nothing else can host them:
+Five cases live on the fake grid **only**, because nothing else can host them:
 `region-crossing` and `neighbour-child-circuits` need two adjacent regions an
 avatar may walk between; `terrain-layerdata` and `avatar-appearance-npc` assert
-against ground and bakes this workspace declares. The first of those also needs
+against ground and bakes this workspace declares; and `asset-round-trip` walks
+the fake grid's own seeded inventory, one item per writable asset class, which
+no live account has. That last one is fake-only for a second reason worth
+keeping straight: it asserts a save comes back **byte for byte**, which is what
+the fake grid implements and very probably *not* what a real grid returns for
+several classes — measuring that is `test-asset-save-mutation-survey`'s job,
+and the assertion tightens when it has. The first of those also needs
 the harness to speak *as* the simulator — a crossing is a decision a region
 makes, and a grid that simulates no movement has to be told to make it — which
 is what `TestContext::fake()` hands a case. It is `None` on every live grid, and

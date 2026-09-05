@@ -405,10 +405,11 @@ else:
   session and re-armed after each serve, since a `SimSession`
   registration is consumed by the `RequestXfer` that names it. An unknown
   name gets the machine's own `AbortXfer`.
-- **`TransferRequest` sources** — task-item asset bodies by `(task, item)`
-  (`task_item_assets`) and the estate covenant notecard
-  (`estate_covenant`); a miss is refused with `UnknownSource`, which the
-  client surfaces as `TransferFailed` instead of hanging.
+- **The estate covenant notecard** (`estate_covenant`) — the one
+  `TransferRequest` source that is still a fixture, because it belongs to
+  no inventory item: it is addressed by estate asset type, not by an asset
+  id. A miss is refused with `UnknownSource`, which the client surfaces as
+  `TransferFailed` instead of hanging.
 - **The terrain RAW heightmap** (`terrain_raw`) — offered with
   `send_initiate_download` on an estate "download filename" request, and
   *replaced* by a completed upload (`request_xfer_upload` → `XferReceived`),
@@ -423,11 +424,19 @@ else:
 Task inventories used to live here too. They do not any more: a contents
 *serial* only means anything if the store that answers it is the store a
 write advances, so the listings moved to the region's world (below), where
-an `UpdateTaskInventory` lands. What is left here is genuinely fixture —
-bytes stated up front and served back unchanged.
+an `UpdateTaskInventory` lands. Their **bodies** followed, for the same
+reason one step further out. They were a `(task, item)` map stated up
+front, which no fixture could extend: an item dropped into a prim is
+minted a fresh task item id, so its bytes could never have been stated,
+and the `TransferRequest` for it was refused — the one item whose contents
+serial a test had just watched advance was the one item whose asset could
+not be read back. A task item now resolves the way every other asset fetch
+does: through the item's own `asset_id`, against the one grid-wide store
+(`udp_assets::task_item_asset`). The request's own `asset_id` field is not
+trusted, which is what makes a save observable — the fetch after one
+returns the new bytes because the item now names them.
 
-The stock scenario ships `motd.txt`, the asset behind the stock scripted
-object's script item, and a covenant. Behaviour the fixtures do
+The stock scenario ships `motd.txt` and a covenant. Behaviour the fixtures do
 not cover goes in `Scenario::on_event`, a hook that sees every drained
 `ServerEvent` with the live `SimSession` (after the stock behaviour ran).
 `client_end_to_end.rs` drives each of these flows through the real
@@ -593,7 +602,9 @@ Offline conformance: `object-edit` (the whole build surface, including the
 transform, the undo stack and the read-back through `ObjectProperties`),
 `object-link-delink`, `object-properties`, `parcel-edit` (the About Land
 form and the ban list, each refetched and restored), `region-info`,
-`estate-info` and `estate-access`.
+`estate-info`, `estate-access`, and `asset-round-trip` (every seeded
+inventory class fetched, every savable one saved and re-fetched, plus a prim
+this case rezzes and drops an item into).
 
 ### A parcel's other half
 
@@ -972,6 +983,69 @@ This was per region until 2026-09-03, and the symptom was thoroughly
 misleading: the marker pillar across a border rendered untextured, so a
 checker oracle read "the neighbour region was never streamed" when the
 only thing that had not arrived was one JPEG2000 blob.
+
+### An upload goes into that store
+
+`uploads.rs` folds every completed save into the same store, and points the
+item that named it at the result. Until it existed the grid answered
+`complete` and forgot the bytes, which is not a gap a test can shrug at:
+**a save is only observable as a re-fetch.** A viewer that trusts its own
+in-memory copy after a save — the bug a round trip exists to catch —
+behaves identically against a grid that stored the bytes and one that
+dropped them, and so does an editor's Save button.
+
+Three paths reach it, because a viewer has three ways to save:
+
+- **The two-stage CAPS uploader** (`ServerEvent::CapsAssetUploaded`) —
+  `NewFileAgentInventory`, `UploadBakedTexture` and every
+  `Update{Gesture,Notecard,Script,Settings,Material}{Agent,Task}Inventory`.
+  The parked metadata says which: a new file creates an agent item, an
+  `Update*` repoints an existing one (in the agent tree, or in an object's
+  task inventory, where it also advances the contents serial — a changed
+  asset is a changed listing), and a bake names no item at all.
+- **The legacy UDP transaction upload** (`ServerEvent::AssetUploaded`) —
+  how a *wearable* save reaches a grid, there being no capability for one.
+  The bytes are stored under `combine(transaction_id, secure_session_id)`,
+  the id the client itself predicted.
+- **`UpdateInventoryItem`** (`ServerEvent::UpdateAgentInventoryItems`) —
+  the second half of that wearable save, and the only thing correlating it
+  with the first. A simulator that reads the upload and ignores this
+  message stores an asset no item points at: the item keeps naming what
+  the save replaced, and the viewer's next fetch of its own wearable
+  answers with the bytes it saved over.
+
+A completion's `new_inventory_item` is the item the upload *replaced* for
+every `Update*` family, not a freshly minted id — OpenSim's `ItemUpdater`
+answers `uploadComplete.new_inventory_item = m_inventoryItemID`, and it has
+to: handing a client an id nothing holds would have it file a second copy
+of a notecard it only edited. `NewFileAgentInventory` is the one family
+that mints one.
+
+### Every seeded item names bytes
+
+`sl_test_assets::inventory` is one real asset body per inventory class the
+workspace can write one for — texture, sound, landmark, clothing, body
+part, notecard, script, animation, gesture, mesh, settings, material — with
+the id an item declares and the bytes that id resolves to, plus a *second*
+body of the same class for the save half (a round trip that re-fetches the
+id it was handed proves nothing if the bytes never changed). The stock
+scenario seeds one item per entry, filed in the system folder its class
+belongs in.
+
+This replaced a "Party Hat" and a "Library Texture" whose asset ids were
+their item ids plus a constant, pointing at nothing, both declaring class
+`texture` whatever their names said. An id a viewer is given is an id it
+will eventually fetch, so those items looked fine in an inventory window
+and failed at every attempt to *use* them.
+
+Two classes have no fixture, and the absence is the finding.
+`AssetType::Object` has no codec in this workspace at all — an object asset
+is `LLViewerObject`'s nested-block text, unrelated to the `ObjectUpdate`
+wire form a fixture builds (`test-assets-object-asset-codec`). `Gesture`
+has a body but no *decoder*, so it is the one entry whose round trip is
+byte-level only. `inventory::unsupported_classes()` carries the reason for
+every class with neither, and a crate test fails if a class has both a body
+and a recorded reason, or neither.
 
 ## Walking over a border
 

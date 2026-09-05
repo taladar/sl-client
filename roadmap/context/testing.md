@@ -78,6 +78,21 @@ multi-region offsets, in-flight asset leaks, NPC appearance delivery.
   one, which is what a handover needs. A write publishes a `RegionUpdate` and a
   per-session watcher turns it into the `ObjectUpdate` / `KillObject` each other
   circuit needs, because there is no simulation loop to sweep for it.
+- **An asset id names bytes.** `sl_test_assets::inventory` is one real body per
+  inventory class the workspace can write one for, with the id an item declares
+  and a *second* body of the same class; the stock scenario seeds one item per
+  entry. A round trip that re-fetches the id it was handed proves nothing if
+  the bytes never changed — a grid that swallowed the save and one that stored
+  it answer identically — which is why there are two. `uploads.rs` folds every
+  completed save (the two-stage CAPS uploader, the legacy UDP transaction
+  upload, and the `UpdateInventoryItem` that binds it) into the grid-wide store
+  and repoints the item that named it; a task item resolves through its own
+  `asset_id` against that same store, so an item **dropped into a prim at
+  runtime** — minted a fresh id no fixture could have stated bytes for — can be
+  read back at all. Two classes deliberately have no fixture and
+  `inventory::unsupported_classes()` records why (`AssetType::Object` has no
+  codec; `Gesture` has no decoder), and a crate test fails a class that has both
+  a body and a recorded reason, or neither.
 - **A client's edits land**, in three modules under that same lock:
   `object_edits.rs` (the build floater), `parcel_edits.rs` (About Land and
   the land a client buys, deeds, abandons or reclaims) and `estate.rs` (the

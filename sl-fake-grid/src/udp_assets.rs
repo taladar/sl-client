@@ -1,6 +1,5 @@
-//! Fixtures for the legacy UDP asset paths: named `Xfer` files, UDP
-//! `Transfer` sources (task-item assets, the estate covenant), and the estate
-//! terrain RAW heightmap.
+//! Fixtures for the legacy UDP asset paths: named `Xfer` files, the estate
+//! covenant, and the estate terrain RAW heightmap.
 //!
 //! An object's task inventory used to live here too. It does not any more: a
 //! contents *serial* is only meaningful if the store that answers it is the
@@ -8,6 +7,17 @@
 //! ([`SceneFixtures::task_inventories`](crate::SceneFixtures::task_inventories))
 //! where the writes land. What is left here is genuinely fixture — bytes
 //! stated up front and served back unchanged.
+//!
+//! The **bodies** of those task items followed, for the same reason one step
+//! further out. They were a `(task, item)` map stated up front, which no
+//! fixture could extend: an item dropped into a prim is minted a fresh task
+//! item id, so its bytes could never have been stated, and the `TransferRequest`
+//! for it was refused with `UnknownSource` — the item a test had just watched
+//! the contents serial advance for was the one item whose asset could not be
+//! read back. A task item now resolves the way every other asset fetch does:
+//! through the item's own `asset_id`, against the one grid-wide store
+//! (`assets.rs`). One place an asset id means something, rather than two
+//! that can disagree about the same item.
 //!
 //! `SimSession` implements the server half of every one of these flows but
 //! keeps no content of its own; the driver answers the corresponding
@@ -19,8 +29,11 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use sl_proto::{ServerEvent, SimSession, TransferRequestSource, TransferStatus, Uuid};
+use sl_proto::{
+    AssetSource as _, ServerEvent, SimSession, TransferRequestSource, TransferStatus, Uuid,
+};
 use sl_types::key::{InventoryKey, ObjectKey};
+use sl_wire::{TransferSourceParamsEstate, TransferSourceParamsInvItem};
 
 /// The scripted content behind the legacy UDP asset paths.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -29,10 +42,6 @@ pub struct UdpAssetFixtures {
     /// session and re-armed after each serve (a `SimSession` registration
     /// is consumed by the request that names it).
     pub xfer_files: HashMap<String, Vec<u8>>,
-    /// Task-item asset bodies by `(task, item)`, answered on a
-    /// task-inventory-item `TransferRequest`. A miss is refused with
-    /// [`TransferStatus::UnknownSource`].
-    pub task_item_assets: HashMap<(ObjectKey, InventoryKey), Vec<u8>>,
     /// The estate covenant notecard body, answered on the estate-covenant
     /// `TransferRequest`. `None` is refused with
     /// [`TransferStatus::UnknownSource`] (an estate without a covenant).
@@ -58,18 +67,6 @@ impl UdpAssetFixtures {
         self
     }
 
-    /// Adds the asset body of a task-inventory item.
-    #[must_use]
-    pub fn with_task_item_asset(
-        mut self,
-        task: ObjectKey,
-        item: InventoryKey,
-        data: impl Into<Vec<u8>>,
-    ) -> Self {
-        let _prev = self.task_item_assets.insert((task, item), data.into());
-        self
-    }
-
     /// Sets the estate covenant notecard body.
     #[must_use]
     pub fn with_estate_covenant(mut self, data: impl Into<Vec<u8>>) -> Self {
@@ -91,27 +88,49 @@ impl UdpAssetFixtures {
         }
     }
 
-    /// Resolves a UDP `Transfer` request source to the bytes to serve, or
-    /// `None` for a source these fixtures do not hold.
+    /// Resolves the estate half of a UDP `Transfer` request to the bytes to
+    /// serve, or `None` for an estate asset this estate has none of.
+    ///
+    /// The task-item half is not here: it resolves against the region's world
+    /// and the grid store (`task_item_asset`), neither of which is a fixture.
     #[must_use]
-    pub fn resolve_transfer(&self, source: &TransferRequestSource) -> Option<&[u8]> {
-        match source {
-            TransferRequestSource::TaskInventoryItem(params) => self
-                .task_item_assets
-                .get(&(
-                    ObjectKey::from(params.task_id),
-                    InventoryKey::from(params.item_id),
-                ))
-                .map(Vec::as_slice),
-            TransferRequestSource::Estate(params) => {
-                if params.estate_asset_type == sl_wire::ESTATE_ASSET_COVENANT {
-                    self.estate_covenant.as_deref()
-                } else {
-                    None
-                }
-            }
+    pub fn resolve_estate_transfer(&self, params: &TransferSourceParamsEstate) -> Option<&[u8]> {
+        if params.estate_asset_type == sl_wire::ESTATE_ASSET_COVENANT {
+            self.estate_covenant.as_deref()
+        } else {
+            None
         }
     }
+}
+
+/// The bytes behind a task-inventory item, resolved the way every other asset
+/// fetch resolves: the item's own `asset_id`, looked up in the grid-wide store.
+///
+/// The request's own `asset_id` field is **not** trusted — a client may send
+/// nil, or a stale id from a listing it fetched before somebody saved over the
+/// item. What the region holds is the answer, which is also what makes a save
+/// observable: the fetch that follows one returns the new bytes because the
+/// item now names them.
+#[must_use]
+pub(crate) fn task_item_asset(
+    world: &crate::world::RegionWorld,
+    assets: &crate::assets::GridAssets,
+    params: &TransferSourceParamsInvItem,
+) -> Option<Vec<u8>> {
+    let task = ObjectKey::from(params.task_id);
+    let item_id = InventoryKey::from(params.item_id);
+    let asset_id = {
+        let world = world.lock();
+        let local_id = world.local_id_of(task)?;
+        world
+            .task_inventories
+            .get(&local_id)?
+            .items
+            .iter()
+            .find(|held| held.item_id == item_id)?
+            .asset_id?
+    };
+    assets.read().get(asset_id).map(<[u8]>::to_vec)
 }
 
 /// The side length of a legacy-sized region's heightmap, in samples.
@@ -149,6 +168,8 @@ pub fn flat_terrain_raw(height_m: u8) -> Vec<u8> {
 /// unanswered request.
 pub(crate) fn answer_from_fixtures(
     fixtures: &mut UdpAssetFixtures,
+    assets: &crate::assets::GridAssets,
+    world: &crate::world::RegionWorld,
     sim: &mut SimSession,
     region_id: Uuid,
     event: &ServerEvent,
@@ -160,10 +181,18 @@ pub(crate) fn answer_from_fixtures(
             source,
             ..
         } => {
-            let result = match fixtures.resolve_transfer(source) {
-                Some(data) => sim.send_transfer_asset(*transfer_id, data, now),
+            let data = match source {
+                TransferRequestSource::TaskInventoryItem(params) => {
+                    task_item_asset(world, assets, params)
+                }
+                TransferRequestSource::Estate(params) => {
+                    fixtures.resolve_estate_transfer(params).map(<[u8]>::to_vec)
+                }
+            };
+            let result = match data {
+                Some(data) => sim.send_transfer_asset(*transfer_id, &data, now),
                 None => {
-                    tracing::debug!("no transfer fixture for {source:?}; refusing");
+                    tracing::debug!("nothing to serve for {source:?}; refusing");
                     sim.send_transfer_fail(*transfer_id, TransferStatus::UnknownSource, now)
                 }
             };
@@ -217,13 +246,16 @@ pub(crate) fn answer_from_fixtures(
 #[cfg(test)]
 mod test {
     use pretty_assertions::assert_eq;
-    use sl_wire::{TransferSourceParamsEstate, TransferSourceParamsInvItem};
+    use sl_proto::RegionLocalObjectId;
+    use sl_proto::TaskInventoryItem;
 
     use super::*;
 
-    /// A task-item request for the given task/item pair.
-    fn item_source(task: u128, item: u128) -> TransferRequestSource {
-        TransferRequestSource::TaskInventoryItem(TransferSourceParamsInvItem {
+    /// A task-item request for the given task/item pair, with a deliberately
+    /// **nil** asset id — the field a client may leave empty, and which the
+    /// resolver must not read.
+    fn item_params(task: u128, item: u128) -> TransferSourceParamsInvItem {
+        TransferSourceParamsInvItem {
             agent_id: uuid::Uuid::nil(),
             session_id: uuid::Uuid::nil(),
             owner_id: uuid::Uuid::nil(),
@@ -231,40 +263,100 @@ mod test {
             item_id: uuid::Uuid::from_u128(item),
             asset_id: uuid::Uuid::nil(),
             asset_type: 10,
-        })
+        }
     }
 
     /// An estate request of the given estate asset type.
-    fn estate_source(estate_asset_type: i32) -> TransferRequestSource {
-        TransferRequestSource::Estate(TransferSourceParamsEstate {
+    fn estate_params(estate_asset_type: i32) -> TransferSourceParamsEstate {
+        TransferSourceParamsEstate {
             agent_id: uuid::Uuid::nil(),
             session_id: uuid::Uuid::nil(),
             estate_asset_type,
-        })
+        }
+    }
+
+    /// A one-object region whose object holds one task item naming `asset`.
+    fn region_with_task_item(
+        task: u128,
+        item: u128,
+        asset: sl_proto::AssetKey,
+    ) -> crate::world::RegionWorld {
+        let mut fixtures = crate::world::SceneFixtures::new();
+        let full_id = ObjectKey::from(uuid::Uuid::from_u128(task));
+        let local_id = RegionLocalObjectId(9);
+        let unit = sl_types::lsl::Vector {
+            x: 1.0,
+            y: 1.0,
+            z: 1.0,
+        };
+        fixtures.objects.push(crate::world::box_prim(
+            local_id,
+            full_id,
+            sl_proto::AgentKey::from(uuid::Uuid::from_u128(1)),
+            unit.clone(),
+            unit,
+        ));
+        let held = TaskInventoryItem {
+            item_id: InventoryKey::from(uuid::Uuid::from_u128(item)),
+            parent_task: full_id,
+            asset_id: Some(asset),
+            ..crate::scenario::stock_script_item()
+        };
+        let _previous = fixtures
+            .task_inventories
+            .insert(local_id, crate::world::TaskInventory::stated(1, vec![held]));
+        std::sync::Arc::new(parking_lot::Mutex::new(fixtures))
+    }
+
+    /// A task item resolves through the item's own asset id against the grid
+    /// store — **not** through the request's `asset_id` field, which is nil
+    /// here, and not through a stated `(task, item)` map, which no longer
+    /// exists.
+    #[test]
+    fn a_task_item_resolves_through_its_own_asset_id() {
+        let asset = sl_proto::AssetKey::from(uuid::Uuid::from_u128(0xA55E7));
+        let world = region_with_task_item(1, 2, asset);
+        let assets = crate::assets::GridAssets::default();
+        assets.extend(
+            &sl_proto::InMemoryAssetSource::new().with_asset(asset, b"script body".to_vec()),
+        );
+        assert_eq!(
+            task_item_asset(&world, &assets, &item_params(1, 2)),
+            Some(b"script body".to_vec())
+        );
+        // An item the object does not hold, and an object the region does not
+        // have, both resolve to nothing rather than to somebody else's bytes.
+        assert_eq!(task_item_asset(&world, &assets, &item_params(1, 3)), None);
+        assert_eq!(task_item_asset(&world, &assets, &item_params(4, 2)), None);
+    }
+
+    /// An item whose asset id names nothing in the store resolves to nothing —
+    /// the honest answer, which the caller turns into `UnknownSource`.
+    #[test]
+    fn a_task_item_with_no_bytes_resolves_to_nothing() {
+        let asset = sl_proto::AssetKey::from(uuid::Uuid::from_u128(0xA55E8));
+        let world = region_with_task_item(1, 2, asset);
+        assert_eq!(
+            task_item_asset(
+                &world,
+                &crate::assets::GridAssets::default(),
+                &item_params(1, 2)
+            ),
+            None
+        );
     }
 
     #[test]
-    fn transfer_sources_resolve_against_the_maps() {
-        let fixtures = UdpAssetFixtures::new()
-            .with_task_item_asset(
-                ObjectKey::from(uuid::Uuid::from_u128(1)),
-                InventoryKey::from(uuid::Uuid::from_u128(2)),
-                b"script body".to_vec(),
-            )
-            .with_estate_covenant(b"covenant".to_vec());
+    fn the_covenant_resolves_against_the_fixture() {
+        let fixtures = UdpAssetFixtures::new().with_estate_covenant(b"covenant".to_vec());
         assert_eq!(
-            fixtures.resolve_transfer(&item_source(1, 2)),
-            Some(b"script body".as_slice())
-        );
-        assert_eq!(fixtures.resolve_transfer(&item_source(1, 3)), None);
-        assert_eq!(
-            fixtures.resolve_transfer(&estate_source(sl_wire::ESTATE_ASSET_COVENANT)),
+            fixtures.resolve_estate_transfer(&estate_params(sl_wire::ESTATE_ASSET_COVENANT)),
             Some(b"covenant".as_slice())
         );
-        assert_eq!(fixtures.resolve_transfer(&estate_source(7)), None);
+        assert_eq!(fixtures.resolve_estate_transfer(&estate_params(7)), None);
         assert_eq!(
             UdpAssetFixtures::new()
-                .resolve_transfer(&estate_source(sl_wire::ESTATE_ASSET_COVENANT)),
+                .resolve_estate_transfer(&estate_params(sl_wire::ESTATE_ASSET_COVENANT)),
             None
         );
     }

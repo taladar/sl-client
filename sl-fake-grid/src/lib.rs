@@ -25,6 +25,7 @@ mod teleport;
 pub mod terrain;
 pub mod time;
 pub mod udp_assets;
+mod uploads;
 pub mod world;
 mod world_map;
 

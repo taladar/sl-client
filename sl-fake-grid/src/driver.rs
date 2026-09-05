@@ -230,8 +230,20 @@ impl SharedSim {
             }
             answer_from_fixtures(
                 &mut state.udp_assets,
+                &state.assets,
+                &state.world,
                 &mut state.sim,
                 state.identity.region_id,
+                &event,
+                now,
+            );
+            // Before the world block, not inside it: this takes the region lock
+            // itself for a task-inventory write, and the crate's one lock rule
+            // is session → region, never region → region.
+            let _upload = crate::uploads::answer_upload(
+                &state.assets,
+                &state.world,
+                &mut state.sim,
                 &event,
                 now,
             );

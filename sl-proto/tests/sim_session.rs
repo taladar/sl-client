@@ -5416,6 +5416,30 @@ mod test {
             )),
             "expected the uploaded asset bytes, got {server_events:?}"
         );
+        // The *other* half of a wearable save: the `UpdateInventoryItem` that
+        // names which item the bytes belong to. Nothing else correlates the
+        // two, so a simulator that only reads the upload stores an asset no
+        // item points at — a save that looks like it worked and did not.
+        let (updated, txn_echo) = server_events
+            .iter()
+            .find_map(|event| match event {
+                ServerEvent::UpdateAgentInventoryItems {
+                    items,
+                    transaction_id,
+                } => Some((items.clone(), *transaction_id)),
+                _ => None,
+            })
+            .ok_or("expected an UpdateAgentInventoryItems server event")?;
+        assert_eq!(txn_echo, txn);
+        let bound = updated.first().ok_or("no updated item")?;
+        assert_eq!(bound.item.item_id, wearable_item().item_id);
+        assert_eq!(bound.item.name, wearable_item().name);
+        assert_eq!(
+            bound.bound_asset.map(|asset| asset.uuid()),
+            Some(expected_asset),
+            "the item update did not bind the transaction's asset"
+        );
+
         let client_events = drain_client(&mut client);
         assert!(
             client_events.iter().any(|e| matches!(
@@ -5424,6 +5448,35 @@ mod test {
             )),
             "expected InventoryAssetSaved, got {client_events:?}"
         );
+        Ok(())
+    }
+
+    /// A metadata-only item edit (a rename) binds **no** asset: its transaction
+    /// id is nil, so there is no upload to correlate with, and a simulator that
+    /// derived an id from a nil transaction would repoint the item at a
+    /// nonexistent asset every time somebody renamed something.
+    #[test]
+    fn a_rename_binds_no_asset() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        sim.set_secure_session_id(secure_session());
+
+        let mut item = wearable_item();
+        "Renamed".clone_into(&mut item.name);
+        client.update_inventory_item(&item, TransactionId::from(uuid::Uuid::nil()), now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let updated = drain_server(&mut sim)
+            .into_iter()
+            .find_map(|event| match event {
+                ServerEvent::UpdateAgentInventoryItems { items, .. } => Some(items),
+                _ => None,
+            })
+            .ok_or("expected an UpdateAgentInventoryItems server event")?;
+        let renamed = updated.first().ok_or("no updated item")?;
+        assert_eq!(renamed.item.name, "Renamed");
+        assert_eq!(renamed.bound_asset, None);
         Ok(())
     }
 

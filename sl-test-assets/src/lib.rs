@@ -23,6 +23,12 @@
 //! [`environment::night_sky_asset`] (an EEP settings asset, whose brightness is
 //! to an environment oracle the same thing).
 //!
+//! [`inventory`] is the table that ties those to inventory:
+//! [`inventory::seeded_assets`] is one real asset body per class a viewer can
+//! hold, with the id an item declares and the bytes that id has to resolve to —
+//! so a fixture grid's inventory item is openable rather than a number pointing
+//! at nothing.
+//!
 //! [`builtin`] is the odd one out: not fixtures a test names, but stand-ins for
 //! the Linden **library** textures a viewer asks every grid for on arrival — the
 //! sun and moon discs, the cloud noise, the sky overlays, the wave normal and
@@ -32,6 +38,7 @@
 pub mod anim;
 pub mod builtin;
 pub mod environment;
+pub mod inventory;
 pub mod mesh;
 pub mod rigged;
 pub mod sound;

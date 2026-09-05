@@ -8,9 +8,10 @@
 //! features, display names, …); the `on_agent_arrived` closure runs right
 //! after the agent's movement completes and the arrival world burst went
 //! out (content pushed at the arriving client); the asset store backs the binary asset-delivery caps
-//! (`GetTexture`, `GetMesh`, `ViewerAsset`); the [`UdpAssetFixtures`] back
-//! the legacy UDP asset paths (`Xfer`, `Transfer`, task inventory, the
-//! estate terrain RAW file); the [`SceneFixtures`] are the parcels and
+//! (`GetTexture`, `GetMesh`, `ViewerAsset`) and every save that lands in
+//! them (`uploads.rs`); the [`UdpAssetFixtures`] back what is left of
+//! the legacy UDP asset paths (`Xfer`, the estate covenant, the estate
+//! terrain RAW file); the [`SceneFixtures`] are the parcels and
 //! objects pushed at an arriving agent and replayed on request; the
 //! `on_event` hook sees every drained [`ServerEvent`] for behaviour the
 //! stock fixtures do not cover.
@@ -154,6 +155,26 @@ pub fn default_assets() -> sl_proto::InMemoryAssetSource {
     for (id, wearable) in sl_test_assets::builtin::library_wearables() {
         let _previous = assets.insert(AssetKey::from(id), wearable);
     }
+    // One real body per inventory class the stock account is seeded with. The
+    // ids are the fixture table's own, so the id in the item and the id in the
+    // store are the same id by construction rather than by two places agreeing
+    // -- which is the whole point: an asset id a grid hands out has to name
+    // bytes that grid can serve.
+    match sl_test_assets::inventory::seeded_assets() {
+        Ok(fixtures) => {
+            for fixture in fixtures {
+                let _previous = assets.insert(AssetKey::from(fixture.asset_id), fixture.body);
+            }
+        }
+        Err(error) => tracing::warn!("writing the seeded inventory bodies failed: {error}"),
+    }
+    // The stock scripted object's script, which used to be stated as task-item
+    // bytes and is now an ordinary asset like every other -- a task item
+    // resolves through its own `asset_id` against this store.
+    let _previous = assets.insert(
+        AssetKey::from(uuid::Uuid::from_u128(SCRIPT_ASSET)),
+        STOCK_SCRIPT_BODY.to_vec(),
+    );
     assets
 }
 
@@ -201,8 +222,50 @@ const AGENT_SYSTEM_FOLDERS: &[(i8, &str)] = &[
 /// The id base for the [`AGENT_SYSTEM_FOLDERS`]; each folder's id is this plus
 /// its folder type. Chosen clear of the other `0xFAxx` fixture ids.
 const AGENT_SYSTEM_FOLDER_BASE: u128 = 0xFA80;
-/// The stock "Party Hat" item inside "Clothing".
-const AGENT_HAT: u128 = 0xFA11;
+
+/// The id base for the seeded per-class fixture items; each item's id is this
+/// plus its `LLAssetType` code, so an item id names its class the way its asset
+/// id does ([`sl_test_assets::inventory::fixture_id`]).
+const AGENT_FIXTURE_ITEM_BASE: u128 = 0xFA_E000;
+
+/// The inventory item id for the seeded fixture of `asset_type`.
+fn fixture_item_id(asset_type: AssetType) -> InventoryKey {
+    let code = u128::try_from(asset_type.to_code()).unwrap_or(0);
+    InventoryKey::from(uuid::Uuid::from_u128(
+        AGENT_FIXTURE_ITEM_BASE.saturating_add(code),
+    ))
+}
+
+/// The system folder an item of `asset_type` belongs in.
+///
+/// A real grid files an item by its class, and the reference viewer's inventory
+/// validation complains about one filed in the wrong place. The folder *type*
+/// is the class's own code for every class that has a folder — LL uses one
+/// numbering for both — and a class with no folder of its own (a wearable
+/// layer, a material) falls back to the agent root, as it does on a real grid.
+fn class_folder(asset_type: AssetType) -> InventoryFolderKey {
+    let code = asset_type.to_code();
+    if AGENT_SYSTEM_FOLDERS
+        .iter()
+        .any(|&(folder_type, _name)| i32::from(folder_type) == code)
+    {
+        return folder_key(
+            AGENT_SYSTEM_FOLDER_BASE.saturating_add(u128::try_from(code).unwrap_or(0)),
+        );
+    }
+    // A clothing layer lives in Clothing, which is not a system folder here but
+    // is the folder the stock tree has always had.
+    if matches!(asset_type, AssetType::Clothing) {
+        return folder_key(AGENT_CLOTHING);
+    }
+    folder_key(AGENT_ROOT)
+}
+
+/// An `LLAssetType` / `LLInventoryType` code narrowed to the `i8` an inventory
+/// item's wire block carries, falling back to LL's own "none" sentinel.
+fn narrow_class(code: i32) -> i8 {
+    i8::try_from(code).unwrap_or(-1)
+}
 
 /// The id base for the body-part inventory items; each item's id is this plus
 /// its wearable type.
@@ -225,7 +288,8 @@ const FOLDER_TYPE_BODY_PARTS: i8 = 13;
 const FOLDER_TYPE_CURRENT_OUTFIT: i8 = 46;
 /// The stock library root folder id.
 const LIB_ROOT: u128 = 0xFB01;
-/// The stock "Library Texture" item inside the library root.
+/// The stock library item inside the library root — one of the library body
+/// parts the account wears, under Linden's own id, which the grid also serves.
 const LIB_TEXTURE: u128 = 0xFB11;
 /// The stock region-wide parcel id.
 const PARCEL: u128 = 0xFC01;
@@ -291,12 +355,16 @@ pub fn stock_script_item() -> TaskInventoryItem {
     }
 }
 
-/// The stock UDP asset fixtures: the `motd.txt` `Xfer` file, the asset behind
-/// the stock scripted object's script item ([`STOCK_SCRIPT_BODY`]), and the
-/// covenant notecard.
+/// The stock UDP asset fixtures: the `motd.txt` `Xfer` file and the covenant
+/// notecard.
 ///
-/// The *listing* the script item appears in is not here — it is the region's,
-/// stated by [`default_world`] beside the object that holds it.
+/// Neither the *listing* the stock script item appears in nor its *bytes* are
+/// here any more. The listing is the region's, stated by [`default_world`]
+/// beside the object that holds it; the bytes are an ordinary asset in the
+/// grid-wide store ([`default_assets`]), reached through the item's own
+/// `asset_id` — which is what lets an item written into a prim at runtime be
+/// read back at all. The covenant stays because it belongs to no item: it is
+/// addressed by estate asset type, not by an asset id.
 ///
 /// No terrain RAW heightmap: a session whose scenario names none serves the
 /// region's own ground
@@ -309,11 +377,6 @@ pub fn stock_script_item() -> TaskInventoryItem {
 pub fn default_udp_assets() -> UdpAssetFixtures {
     UdpAssetFixtures::new()
         .with_xfer_file(STOCK_XFER_FILE, STOCK_XFER_FILE_BODY)
-        .with_task_item_asset(
-            stock_scripted_object(),
-            stock_script_item().item_id,
-            STOCK_SCRIPT_BODY,
-        )
         .with_estate_covenant(STOCK_COVENANT_BODY)
 }
 
@@ -408,7 +471,8 @@ pub fn stock_parcel_id() -> ParcelKey {
 }
 
 /// Seeds the stock fixtures on a fresh session: agent inventory (root →
-/// Clothing → Party Hat), a library, one region-wide parcel, and WebRTC
+/// Clothing, and one item per writable asset class), a library, one
+/// region-wide parcel, and WebRTC
 /// voice — the stub answerer ([`WebRtcStub::default`]) plus the parcel's
 /// estate-wide voice channel (its `channel_uri` is the region id, as
 /// Second Life sends it), with the agent standing on that parcel. The
@@ -496,11 +560,33 @@ pub(crate) fn default_setup(sim: &mut SimSession, _now: Instant) {
     }
     sim.set_agent_wearables(worn);
 
-    sim.agent_inventory_mut().insert_item(stock_item(
-        AGENT_HAT,
-        folder_key(AGENT_CLOTHING),
-        "Party Hat",
-    ));
+    // One item per class the workspace can write a real body for, filed in the
+    // system folder its class belongs in. Every one names an asset the grid
+    // serves, so each is *openable*: a notecard opens, a shirt can be worn, a
+    // sound plays. That is the difference from what these used to be -- a
+    // "Party Hat" and a "Library Texture" whose asset ids were their item ids
+    // plus a constant, pointing at nothing, and whose declared class was
+    // `texture` whatever the name said.
+    for fixture in sl_test_assets::inventory::seeded_assets().unwrap_or_else(|error| {
+        // Seeding nothing rather than seeding items that name no bytes: an item
+        // with an unbacked asset id is the exact failure this whole fixture set
+        // exists to prevent, and a missing class fails loudly at the first test
+        // that looks for it.
+        tracing::warn!("writing the seeded inventory bodies failed: {error}");
+        Vec::new()
+    }) {
+        let mut item = stock_item(0, class_folder(fixture.asset_type), fixture.name);
+        item.item_id = fixture_item_id(fixture.asset_type);
+        item.asset_id = fixture.asset_id;
+        item.item_type = narrow_class(fixture.asset_type.to_code());
+        item.inv_type = narrow_class(fixture.inv_type.to_code());
+        // A wearable's slot rides in `flags`, which is how a viewer knows which
+        // layer an item fills before it fetches the asset.
+        if let Some(wearable_type) = fixture.wearable_type {
+            item.flags = u32::from(wearable_type.to_code());
+        }
+        sim.agent_inventory_mut().insert_item(item);
+    }
     sim.library_inventory_mut().insert_folder(InventoryFolder {
         folder_id: folder_key(LIB_ROOT),
         parent_id: None,
@@ -508,11 +594,19 @@ pub(crate) fn default_setup(sim: &mut SimSession, _now: Instant) {
         folder_type: 8,
         version: 1,
     });
-    sim.library_inventory_mut().insert_item(stock_item(
-        LIB_TEXTURE,
-        folder_key(LIB_ROOT),
-        "Library Texture",
-    ));
+    // The library's one item is a *library* asset -- one of the body parts the
+    // account is dressed in, under Linden's own id, which the grid also serves
+    // (`library_wearables`). A library item pointing at nothing was the same
+    // broken promise as the agent tree's.
+    if let Some(&(wearable_type, name, asset)) = sl_test_assets::builtin::DEFAULT_BODY_PARTS.first()
+    {
+        let mut item = stock_item(LIB_TEXTURE, folder_key(LIB_ROOT), name);
+        item.asset_id = asset;
+        item.item_type = ASSET_TYPE_BODYPART;
+        item.inv_type = ASSET_TYPE_BODYPART;
+        item.flags = u32::from(wearable_type.to_code());
+        sim.library_inventory_mut().insert_item(item);
+    }
     let region_id = sim.region_id();
     sim.voice_mut().enable_webrtc(WebRtcStub::default());
     sim.voice_mut().set_parcel_voice_info(ParcelVoiceInfo {
@@ -552,6 +646,9 @@ mod test {
 
     use super::*;
 
+    /// What a test here returns when a fixture it needs could not be written.
+    type TestError = Box<dyn core::error::Error>;
+
     #[test]
     fn the_stock_assets_hold_every_default_detail_texture() {
         let assets = default_assets();
@@ -567,7 +664,7 @@ mod test {
     /// costs no failed fetch — the sky's sun and moon in particular, which are
     /// discs a viewer draws and no viewer ships.
     #[test]
-    fn the_stock_assets_hold_every_builtin_library_texture() {
+    fn the_stock_assets_hold_every_builtin_library_texture() -> Result<(), TestError> {
         let assets = default_assets();
         for id in sl_proto::BUILTIN_ENVIRONMENT_TEXTURES {
             assert!(
@@ -623,12 +720,27 @@ mod test {
                 "no asset registered for the default {name} body part ({id})"
             );
         }
+        // Every seeded inventory item's asset is here too — the id in the item
+        // and the id in the store are the same id by construction.
+        for fixture in sl_test_assets::inventory::seeded_assets()? {
+            assert!(
+                assets.contains(AssetKey::from(fixture.asset_id)),
+                "no asset registered for the seeded {} ({})",
+                fixture.name,
+                fixture.asset_id
+            );
+        }
         // Four terrain solids, seven environment textures, the prim texture,
         // two avatar sentinels, fifteen bump maps, two viewer textures, two
         // water plane textures, five wearable layer textures and four body
-        // parts — and nothing else: a stock scenario's store is the library,
-        // not a fixture dump.
-        assert_eq!(assets.len(), 4 + 7 + 1 + 2 + 15 + 2 + 2 + 5 + 4);
+        // parts — the library — plus one body per seeded inventory class and
+        // the stock scripted object's script, and nothing else: a stock
+        // scenario's store is the library and what its own items name, not a
+        // fixture dump.
+        let library = 4 + 7 + 1 + 2 + 15 + 2 + 2 + 5 + 4;
+        let seeded = sl_test_assets::inventory::seeded_assets()?.len();
+        assert_eq!(assets.len(), library + seeded + 1);
+        Ok(())
     }
 
     #[test]

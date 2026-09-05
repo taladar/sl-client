@@ -32,13 +32,12 @@ mod test {
         ChatSessionKind, ClassifiedCategory, ClassifiedKey, ClassifiedUpdate, ControlFlags,
         CreateGroupParams, Event, FolderType, FriendKey, GridCoordinates, GroupKey, GroupNoticeKey,
         GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, GroupRoleUpdateType,
-        InterestsUpdate, InventoryCallbackId, InventoryFolderKey, InventoryItem, InventoryKey,
-        InventoryType, LindenAmount, LoginParams, LureId, Maturity, MoneyTransactionType,
-        MuteFlags, MuteType, NewInventoryItem, ObjectExtraParams, ObjectKey, OwnerKey,
-        Permissions5, PickKey, PickUpdate, PrimShapeParams, ProductType, ProfileUpdate, QueryId,
-        RegionHandle, RegionIdentity, RegionLocalObjectId, RegionTerrainComposition, RezAttachment,
-        ScopedObjectId, ServerEvent, Session, SimSession, TextureKey, TransactionId, Wearable,
-        WearableType, group_powers, parse_event_queue_response,
+        InterestsUpdate, InventoryCallbackId, InventoryFolderKey, InventoryKey, InventoryType,
+        LindenAmount, LoginParams, LureId, Maturity, MoneyTransactionType, MuteFlags, MuteType,
+        NewInventoryItem, ObjectExtraParams, ObjectKey, PickKey, PickUpdate, PrimShapeParams,
+        ProductType, ProfileUpdate, QueryId, RegionHandle, RegionIdentity, RegionLocalObjectId,
+        RegionTerrainComposition, RezAttachment, ScopedObjectId, ServerEvent, Session, SimSession,
+        TextureKey, Wearable, WearableType, group_powers, parse_event_queue_response,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::{
@@ -431,7 +430,6 @@ mod test {
         "MoveInventoryFolder",
         "RemoveInventoryFolder",
         "CreateInventoryItem",
-        "UpdateInventoryItem",
         "MoveInventoryItem",
         "CopyInventoryItem",
         "ChangeInventoryItemFlags",
@@ -504,7 +502,6 @@ mod test {
         "MoveInventoryFolder",
         "RemoveInventoryFolder",
         "CreateInventoryItem",
-        "UpdateInventoryItem",
         "MoveInventoryItem",
         "CopyInventoryItem",
         "ChangeInventoryItemFlags",
@@ -632,28 +629,9 @@ mod test {
             now,
         )?;
         assert_eq!(callback, InventoryCallbackId(1));
-        client.update_inventory_item(
-            &InventoryItem {
-                item_id: item,
-                folder_id: folder,
-                name: "Renamed".to_owned(),
-                description: String::new(),
-                asset_id: uuid::Uuid::nil(),
-                item_type: 0,
-                inv_type: 0,
-                flags: 0,
-                sale_type: 0,
-                sale_price: Some(LindenAmount(0)),
-                creation_date: 0,
-                owner: OwnerKey::Agent(AgentKey::from(own_agent())),
-                last_owner_id: uuid::Uuid::nil(),
-                creator_id: AgentKey::from(own_agent()),
-                group: None,
-                permissions: Permissions5::empty(),
-            },
-            TransactionId::from(uuid::Uuid::nil()),
-            now,
-        )?;
+        // `update_inventory_item` is **not** sent here: it is typed since
+        // `test-fake-grid-asset-round-trip` (a wearable save binds its asset
+        // through it), and `tests/sim_session.rs` asserts the typed event.
         client.move_inventory_items(&[(item, other, "Moved".to_owned())], false, now)?;
         client.copy_inventory_item(AgentKey::from(own_agent()), item, other, "Copy", now)?;
         client.change_inventory_item_flags(item, 0x100, now)?;

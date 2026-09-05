@@ -10,6 +10,7 @@ pub mod ais3_folder_lifecycle;
 pub mod animation_play_stop;
 pub mod asset_decode;
 pub mod asset_fetch_http;
+pub mod asset_round_trip;
 pub mod asset_upload;
 pub mod attach_detach;
 pub mod avatar_appearance_npc;

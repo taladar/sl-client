@@ -163,7 +163,7 @@ use crate::AssetKey;
 use crate::ack_flush::send_ack_packets;
 use crate::appearance::{MAX_FACES, decode_texture_entry};
 use crate::bookkeeping_ids::{
-    ImSessionId, LureId, PingId, QueryId, TransactionId, TransferId, XferId,
+    ImSessionId, InventoryCallbackId, LureId, PingId, QueryId, TransactionId, TransferId, XferId,
 };
 use crate::error::Error;
 use crate::extra_params::decode_extra_param_blocks;
@@ -2605,6 +2605,26 @@ pub enum ServerEvent {
         /// The inventory item id being removed.
         item_id: InventoryKey,
     },
+    /// The client rewrote the metadata of one or more **agent** inventory items
+    /// (`UpdateInventoryItem`). The inverse of the client's
+    /// [`Session::update_inventory_item`](crate::Session::update_inventory_item)
+    /// and of the second half of
+    /// [`Session::save_inventory_asset`](crate::Session::save_inventory_asset).
+    ///
+    /// This is also how a **wearable save** binds its asset: the legacy
+    /// transaction upload has no capability and no reply naming an item, so the
+    /// client sends the bytes as an `AssetUploadRequest` and then names the item
+    /// they belong to here, correlated by the transaction id alone. A simulator
+    /// that ignores this message stores the bytes and leaves the item pointing
+    /// at the asset it had before — a save that looks like it worked and
+    /// silently did not.
+    UpdateAgentInventoryItems {
+        /// One entry per `InventoryData` block, in wire order.
+        items: Vec<UpdatedInventoryItem>,
+        /// The `AgentData` transaction id, which the client repeats on every
+        /// block ([`UpdatedInventoryItem::bound_asset`] is derived per item).
+        transaction_id: TransactionId,
+    },
     /// The client asked to download a file over the legacy `Xfer` path
     /// (`RequestXfer`). When the named file was registered
     /// ([`SimSession::register_xfer_file`]) the simulator began streaming it;
@@ -3303,6 +3323,27 @@ pub struct SimParcel {
     pub north: f32,
 }
 
+/// One `InventoryData` block of an `UpdateInventoryItem`
+/// ([`ServerEvent::UpdateAgentInventoryItems`]): the item as the client sent it,
+/// the callback id it wants echoed, and the asset its transaction binds to it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct UpdatedInventoryItem {
+    /// The item's fields as the client sent them. The block carries **no asset
+    /// id** — an item's asset is named by [`bound_asset`](Self::bound_asset) or
+    /// left as it was.
+    pub item: RestoreItem,
+    /// The client's callback id for this block, echoed in the
+    /// `UpdateCreateInventoryItem` that confirms the write.
+    pub callback_id: InventoryCallbackId,
+    /// The asset id this block's transaction binds to the item —
+    /// `combine(transaction_id, secure_session_id)`, the same derivation the
+    /// matching `AssetUploadRequest` used, so the two halves of a wearable save
+    /// meet at one id. `None` when the block's transaction id is nil (a
+    /// metadata-only edit: a rename, a permissions change) or when the circuit
+    /// has no secure session id to derive it from.
+    pub bound_asset: Option<AssetKey>,
+}
+
 /// The parsed step-1 metadata of a two-stage CAPS upload, parked in
 /// [`SimSession`] until the raw-bytes step completes it. One variant per upload
 /// family; carries exactly what the completion event needs to describe the
@@ -3347,11 +3388,31 @@ impl CapsUploadMetadata {
         matches!(self, Self::UpdateScriptAgent(_) | Self::UpdateScriptTask(_))
     }
 
-    /// Whether this upload creates or updates an inventory item (so the
-    /// completion carries a `new_inventory_item`). `UploadBakedTexture` is the
-    /// sole exception — a temporary bake produces no inventory item.
+    /// The inventory item this upload replaces the asset of, when it replaces
+    /// one rather than creating one.
+    ///
+    /// The completion's `new_inventory_item` is this id for every `Update*`
+    /// family, **not** a freshly minted one: OpenSim's `ItemUpdater` answers
+    /// `uploadComplete.new_inventory_item = m_inventoryItemID`, and it has to —
+    /// the item already exists, and handing the client an id nothing holds
+    /// would have it file a second copy of a notecard it only edited.
+    /// `NewFileAgentInventory` is the one family that mints an id (it creates
+    /// the item), and `UploadBakedTexture` has no item at all.
+    pub(crate) const fn replaced_item(&self) -> Option<InventoryKey> {
+        match self {
+            Self::NewFileInventory(_) | Self::BakedTexture => None,
+            Self::UpdateAgentItem { item_id, .. } | Self::UpdateTaskItem { item_id, .. } => {
+                Some(*item_id)
+            }
+            Self::UpdateScriptAgent(request) => Some(request.item_id),
+            Self::UpdateScriptTask(request) => Some(request.item_id),
+        }
+    }
+
+    /// Whether this upload **creates** an inventory item, minting its id.
+    /// `NewFileAgentInventory` alone does; see [`replaced_item`](Self::replaced_item).
     const fn creates_inventory_item(&self) -> bool {
-        !matches!(self, Self::BakedTexture)
+        matches!(self, Self::NewFileInventory(_))
     }
 }
 
@@ -3834,9 +3895,11 @@ impl SimSession {
         data: Vec<u8>,
     ) -> (AssetKey, Option<InventoryKey>) {
         let new_asset = AssetKey::from(Uuid::from_u128(self.next_serial()));
-        let new_inventory_item = metadata
-            .creates_inventory_item()
-            .then(|| InventoryKey::from(Uuid::from_u128(self.next_serial())));
+        let new_inventory_item = metadata.replaced_item().or_else(|| {
+            metadata
+                .creates_inventory_item()
+                .then(|| InventoryKey::from(Uuid::from_u128(self.next_serial())))
+        });
         self.events.push_back(ServerEvent::CapsAssetUploaded {
             metadata: Box::new(metadata),
             new_asset,
@@ -7928,19 +7991,48 @@ impl SimSession {
         sim_approved: bool,
         now: Instant,
     ) -> Result<(), Error> {
+        self.send_inventory_items_created(
+            &items
+                .iter()
+                .map(|item| (item.clone(), InventoryCallbackId::new(0)))
+                .collect::<Vec<_>>(),
+            transaction,
+            sim_approved,
+            now,
+        )
+    }
+
+    /// [`send_inventory_item_created`](Self::send_inventory_item_created) with
+    /// each item's **callback id** — the number the client put on the request
+    /// that produced it, and the only thing correlating a reply with a pending
+    /// inventory operation when several are in flight.
+    ///
+    /// The two are one message; they are two methods because most server-side
+    /// creations (a take, an accepted offer) answer no client request and have
+    /// no callback to echo, and passing `0` at every such site would read as a
+    /// value rather than as its absence.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_inventory_items_created(
+        &mut self,
+        items: &[(InventoryItem, InventoryCallbackId)],
+        transaction: TransactionId,
+        sim_approved: bool,
+        now: Instant,
+    ) -> Result<(), Error> {
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
         let mut inventory_data = Vec::with_capacity(items.len());
-        for item in items {
+        for (item, callback) in items {
             let (owner_id, group_id) = crate::types::object_owner_to_wire(item.owner, item.group);
             inventory_data.push(UpdateCreateInventoryItemInventoryDataBlock {
                 item_id: item.item_id.uuid(),
                 folder_id: item.folder_id.uuid(),
-                // The async callback id is the *client's*, and only a request
-                // that carried one gets it echoed; a take carries none, so the
-                // simulator writes the "no callback" zero.
-                callback_id: 0,
+                callback_id: callback.get(),
                 creator_id: item.creator_id.uuid(),
                 owner_id,
                 group_id,
@@ -10752,6 +10844,31 @@ impl SimSession {
                     key: TaskInventoryKey::from_code(update.update_data.key),
                     item: restore_item_from_inventory_block!(&update.inventory_data),
                 });
+            }
+            AnyMessage::UpdateInventoryItem(update) => {
+                // The block carries no asset id: an item's bytes are named by
+                // the transaction the client also sent them under. Deriving the
+                // id here rather than in every driver keeps the derivation in
+                // one place, beside the `AssetUploadRequest` arm that uses it.
+                let secure = self.secure_session_id;
+                let mut items = Vec::new();
+                for block in &update.inventory_data {
+                    items.push(UpdatedInventoryItem {
+                        item: restore_item_from_inventory_block!(block),
+                        callback_id: InventoryCallbackId::new(block.callback_id),
+                        bound_asset: (!block.transaction_id.is_nil())
+                            .then(|| {
+                                secure.map(|secure| combine_uuids(block.transaction_id, secure))
+                            })
+                            .flatten()
+                            .map(AssetKey::from),
+                    });
+                }
+                self.events
+                    .push_back(ServerEvent::UpdateAgentInventoryItems {
+                        items,
+                        transaction_id: TransactionId::new(update.agent_data.transaction_id),
+                    });
             }
             AnyMessage::MoveTaskInventory(move_item) => {
                 self.events.push_back(ServerEvent::MoveTaskInventory {

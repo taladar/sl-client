@@ -42,6 +42,14 @@ pub enum AssetType {
     /// A wearable clothing layer (`AT_CLOTHING`).
     Clothing,
     /// An object / coalesced object (`AT_OBJECT`).
+    ///
+    /// The one class with **no codec in this workspace**, and the one gap in the
+    /// fixture table (`sl_test_assets::inventory`): an object asset is
+    /// `LLViewerObject`'s nested-block text, an encoding unrelated to the
+    /// `ObjectUpdate` wire form every in-world object travels as. Nothing reads
+    /// or writes it, so a take mints an id and leaves it unbacked, and rezzing
+    /// from inventory cannot be tested below a live grid
+    /// (`test-assets-object-asset-codec`).
     Object,
     /// A notecard (`AT_NOTECARD`).
     Notecard,

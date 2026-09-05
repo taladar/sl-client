@@ -2,7 +2,7 @@
 id: test-fake-grid-asset-round-trip
 title: An asset id the grid hands out should name bytes the grid can serve
 topic: test
-status: ready
+status: done
 origin: noticed doing test-fake-grid-object-write-path (2026-09-05)
 points: 5
 refs:
@@ -135,3 +135,75 @@ from the id the grid returned and match what a real grid returns for the same
 save; the same holds for an item saved into a prim's task inventory; and
 every `AssetType` a viewer can save has either a round trip or a recorded
 reason it has none.
+
+## What landed
+
+**The fixture table.** `sl_test_assets::inventory` is one real asset body per
+class the workspace can write one for — texture, sound, landmark, clothing,
+body part, notecard, script, animation, gesture, mesh, settings, material —
+carrying the id the item declares, the bytes it resolves to, and a **second**
+body of the same class. Two bodies rather than one because a round trip that
+re-fetches the id it was handed proves nothing if the bytes never changed: a
+grid that swallowed the save and one that stored it answer identically. Each
+body is read back through the decoder that owns its format in the crate's own
+tests, which is what lets a consumer assert "of the declared class" by
+comparing bytes alone.
+
+Two classes have no body and the absence is the finding, recorded in
+`inventory::unsupported_classes()` (plus seven more that are legacy or
+reserved). A crate test fails if any `AssetType` has both a body and a recorded
+reason, or neither, so a new variant cannot slip through undecided.
+
+**The stock scenario** seeds one agent item per entry, filed in the system
+folder its class belongs in, and gives the library item a real library body
+part. That replaced a "Party Hat" and a "Library Texture" whose asset ids were
+their item ids plus `0x1000` — pointing at nothing — and whose declared class
+was `texture` whatever their names said.
+
+**`sl-fake-grid/src/uploads.rs`** folds every completed save into `GridAssets`
+and repoints the item that named it: the two-stage CAPS uploader (creating an
+item for `NewFileAgentInventory`, repointing one for every `Update*` family,
+advancing the holding object's contents serial for a task item), the legacy UDP
+transaction upload, and the `UpdateInventoryItem` that binds it.
+
+**The task-item transfer** resolves through the item's own `asset_id` against
+that one store (`udp_assets::task_item_asset`); `UdpAssetFixtures
+::task_item_assets` is gone. The request's own `asset_id` field is deliberately
+not trusted.
+
+**`sl-conformance`'s `asset-round-trip`** (offline) walks every seeded class
+through a fetch, every savable one through a save and a re-fetch of the
+returned id, and the prim's task inventory through a rez, a drop, a listing, a
+UDP read and a task save.
+
+## What it changed on the way
+
+- **`UpdateInventoryItem` is typed** (`ServerEvent::UpdateAgentInventoryItems`,
+  `UpdatedInventoryItem`), out of `RAW_FORWARDED`. It carries `bound_asset` —
+  `combine(transaction_id, secure_session_id)` when the block's transaction is
+  non-nil — because that derivation is the *only* thing correlating a wearable
+  save's bytes with the item they belong to, and doing it once beside the
+  `AssetUploadRequest` arm beats doing it in every driver.
+- **A completion's `new_inventory_item` is the item it replaced**, for every
+  `Update*` family, not a freshly minted id. OpenSim's `ItemUpdater` answers
+  `uploadComplete.new_inventory_item = m_inventoryItemID`
+  (`BunchOfCaps/UpdateItemAsset.cs:326`), and it has to: handing a client an id
+  nothing holds would have it file a second copy of a notecard it only edited.
+- **`SimSession::send_inventory_items_created`** echoes each item's callback id;
+  the old method kept writing the "no callback" zero, which is right for a
+  server-side creation nobody asked for and wrong for a reply.
+- `AssetType::Object`'s doc comment now records why it has no fixture.
+
+## What is still open
+
+- **The object asset.** A take still mints an unbacked id, because nothing
+  serialises an object — [[test-assets-object-asset-codec]].
+- **Whether an echo is right.** The fake grid stores what it was given. A real
+  grid very probably re-serialises a settings or material asset, rewrites a
+  notecard's embedded ids, and produces a second (bytecode) asset for a script
+  save that the completion never names. [[test-asset-save-mutation-survey]]
+  measures it; where it finds a mutation the fake grid should **reproduce** it,
+  and this case's assertion tightens from "the bytes came back" to "the bytes a
+  real grid returns came back".
+- **The viewer tier.** No editor's Save has been observed through this yet;
+  [[viewer-task-inventory-open-and-save-back]] is the first that should be.
