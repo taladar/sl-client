@@ -384,7 +384,6 @@ impl Plugin for WorldMapPlugin {
             .init_resource::<WorldMapClipboard>()
             .add_message::<OpenWorldMap>()
             .add_systems(Startup, spawn_world_map.after(UiScaffoldSystems::SpawnRoot))
-            .add_systems(Update, toggle_world_map_shortcut)
             .add_systems(
                 Update,
                 (
@@ -889,26 +888,6 @@ fn handle_open_world_map(
         {
             shown.0 = true;
         }
-    }
-}
-
-/// `Ctrl+M` opens / closes the world map, matching the reference viewer's
-/// shortcut. The `Ctrl` modifier keeps it from firing while a bare `m` is
-/// typed (bare `M` is the mouselook toggle).
-fn toggle_world_map_shortcut(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    ui: Option<Res<WorldMapUi>>,
-    mut panels: Query<&mut UiPanelShown>,
-) {
-    let ctrl = keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight);
-    if !(ctrl && keyboard.just_pressed(KeyCode::KeyM)) {
-        return;
-    }
-    let Some(ui) = ui else {
-        return;
-    };
-    if let Ok(mut shown) = panels.get_mut(ui.root) {
-        shown.0 = !shown.0;
     }
 }
 

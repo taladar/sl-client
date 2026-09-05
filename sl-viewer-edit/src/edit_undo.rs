@@ -53,7 +53,6 @@ use sl_client_bevy::{Command, Permissions, ScopedObjectId, SlCommand};
 use crate::menu::TOP_MENU_ELEMENT;
 use crate::ui_element::UiAction;
 use crate::world_api::EditToolState;
-use crate::world_api::InputContext;
 use crate::world_api::{SelectedNode, SelectionSet};
 
 /// The Build-menu action string the Undo entry emits.
@@ -160,12 +159,17 @@ impl Plugin for EditUndoPlugin {
     }
 }
 
-/// Drive Undo / Redo from either the keyboard chords (`Ctrl+Z` / `Ctrl+Y`, while
-/// the build tool is active and the world owns the keyboard) or the Build-menu
-/// entries.
+/// Drive Undo / Redo from the Build-menu entries — picked, or reached by the
+/// `Ctrl+Z` / `Ctrl+Y` accelerators drawn against them.
+///
+/// There is no keyboard system here: the chords are the entries' accelerators,
+/// dispatched to them by `sl_viewer_ui_widgets::menu_accel`, which honours the
+/// same `CAN_UNDO` / `CAN_REDO` enable gates that grey the lines and stands down
+/// while a text field holds focus (so `Ctrl+Z` typed into a field never undoes
+/// an object edit). Fired once per press — the reference's `allow_key_repeat`
+/// OS-repeat is deliberately not reproduced, since holding the chord would undo
+/// far too fast at frame rate.
 fn drive_undo_redo(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    context: Res<InputContext>,
     tool: Res<EditToolState>,
     selection: Res<SelectionSet>,
     mut actions: MessageReader<UiAction>,
@@ -173,24 +177,6 @@ fn drive_undo_redo(
 ) {
     let mut do_undo = false;
     let mut do_redo = false;
-
-    // The keyboard chords: only while editing and only when the world (not a
-    // text field) owns the keyboard, so `Ctrl+Z` typed into a field never undoes
-    // an object edit. `Ctrl+Z` undoes; `Ctrl+Y` redoes — the reference
-    // accelerators. Fired once per press (the reference's `allow_key_repeat`
-    // OS-repeat is deliberately not reproduced — holding the chord would undo far
-    // too fast at frame rate).
-    if tool.active
-        && *context != InputContext::TextEntry
-        && (keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight))
-    {
-        if keyboard.just_pressed(KeyCode::KeyZ) {
-            do_undo = true;
-        }
-        if keyboard.just_pressed(KeyCode::KeyY) {
-            do_redo = true;
-        }
-    }
 
     // The Build-menu picks (the entries are greyed out when the operation is
     // unavailable, but re-check below regardless).

@@ -390,7 +390,7 @@ use crate::group_notice::GroupNoticePlugin;
 use crate::group_profile::GroupProfilePlugin;
 use crate::groups::GroupsPlugin;
 use crate::i18n::ViewerI18nPlugin;
-use crate::input_context::{CursorGrabAllowed, world_has_keyboard};
+use crate::input_context::CursorGrabAllowed;
 use crate::inventory::InventoryPlugin;
 use crate::inventory_actions::InventoryActionsPlugin;
 use crate::inventory_drag::InventoryDragPlugin;
@@ -411,8 +411,8 @@ use crate::script_dialog::ScriptDialogPlugin;
 use crate::script_permission::ScriptPermissionPlugin;
 use crate::session::{
     PlayOnLogin, ViewerSession, apply_draw_distance, drive_session, enforce_quit_deadline,
-    handle_quit_input, handle_quit_requests, repeat_debug_animation, report_agent_viewport,
-    report_camera_interest, save_settings_on_logout,
+    handle_quit_requests, repeat_debug_animation, report_agent_viewport, report_camera_interest,
+    save_settings_on_logout,
 };
 use crate::settings::{AccountContext, ViewerSettings, load_account_settings};
 use crate::settings_binding::SettingsBindingPlugin;
@@ -1707,17 +1707,16 @@ fn run_session(
                     restyle_chat_overlay,
                     position_chat_overlay,
                 ),
-                // Quit handling: request a clean logout on the quit key, then force the
-                // exit once the grace period lapses. Nested into one tuple to stay
-                // within Bevy's per-tuple system limit. Only the key half is gated on
-                // the input context — `Q` is a character a text field wants, and
-                // `Escape` there means "give the keyboard back" (see
-                // `input_context`) — while the deadline must still fire once a quit is
-                // under way, whatever has focus.
+                // Quit handling: request a clean logout, then force the exit once the
+                // grace period lapses. Nested into one tuple to stay within Bevy's
+                // per-tuple system limit. `Ctrl+Q` is no longer a system of its own:
+                // it is the accelerator drawn against Avatar ▸ Quit, dispatched to
+                // that entry by `sl_viewer_ui_widgets::menu_accel` like every other
+                // menu shortcut.
                 (
-                    handle_quit_input.run_if(world_has_keyboard),
-                    // Menu ▸ Quit and the window close button / compositor close
-                    // both route through a graceful logout here.
+                    // Menu ▸ Quit (whether picked or reached by its accelerator) and
+                    // the window close button / compositor close all route through a
+                    // graceful logout here.
                     handle_quit_requests,
                     // A harness (or a `Ctrl-C` in the terminal a run is watched
                     // from) asks for the same graceful logout with a signal.

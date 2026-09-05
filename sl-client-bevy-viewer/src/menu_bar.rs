@@ -471,8 +471,7 @@ static HELP_MENU: MenuDef = MenuDef {
 
 /// The Advanced menu — the reference viewer's power-user menu, after Help as
 /// in the reference's bar order. The debug-settings editor today; future
-/// developer / diagnostic commands join here. The accel string is display
-/// only; the live shortcut is `crate::debug_settings`'s own keyboard system.
+/// developer / diagnostic commands join here.
 static ADVANCED_MENU: MenuDef = MenuDef {
     label: "Advanced",
     items: &[
@@ -1054,6 +1053,7 @@ fn handle_top_menu_actions(
 mod tests {
     use pretty_assertions::assert_eq;
     use sl_viewer_ui_widgets::menu::action_paths;
+    use sl_viewer_ui_widgets::menu_accel::{Accelerator, accelerators};
 
     use super::TOP_MENU_BAR;
 
@@ -1200,6 +1200,67 @@ mod tests {
             actions.len(),
             count,
             "two menu-bar entries declare the same action string"
+        );
+    }
+
+    /// **Every accelerator the bar draws is one the keyboard can dispatch, and
+    /// no two entries claim the same chord.**
+    ///
+    /// The accelerator labels are live since `viewer-menu-accelerators-inert`:
+    /// [`sl_viewer_ui_widgets::menu_accel`] parses the drawn string and routes
+    /// the chord to the entry it is drawn against. A label it cannot parse is
+    /// therefore back to the bug that task fixed — a shortcut promised and not
+    /// delivered — and two entries claiming one chord would fire both at once.
+    /// Both are silent in the running viewer and loud here.
+    #[test]
+    fn every_drawn_accelerator_is_a_chord_the_keyboard_dispatches() {
+        let drawn: Vec<(&'static str, &'static str)> = TOP_MENU_BAR
+            .menus
+            .iter()
+            .flat_map(|menu| accelerators(menu))
+            .collect();
+        let unparsed: Vec<(&str, &str)> = drawn
+            .iter()
+            .filter(|(label, _action)| Accelerator::parse(label).is_none())
+            .copied()
+            .collect();
+        assert!(
+            unparsed.is_empty(),
+            "these drawn accelerators do not parse, so the keyboard cannot dispatch \
+             them and the label promises nothing: {unparsed:?}"
+        );
+        let mut seen: Vec<(Accelerator, &'static str)> = Vec::new();
+        for (label, action) in drawn {
+            let Some(chord) = Accelerator::parse(label) else {
+                continue;
+            };
+            assert!(
+                !seen.iter().any(|(other, _action)| *other == chord),
+                "two menu-bar entries claim {label}; {action} is the second"
+            );
+            seen.push((chord, action));
+        }
+        assert_eq!(
+            seen.into_iter()
+                .map(|(_chord, action)| action)
+                .collect::<Vec<_>>(),
+            vec![
+                "toggle-preferences",
+                "toggle-inventory",
+                "quit",
+                "toggle-conversations",
+                "toggle-world-map",
+                "toggle-build-tools",
+                crate::edit_undo::UNDO_ACTION,
+                crate::edit_undo::REDO_ACTION,
+                crate::edit_link::LINK_ACTION,
+                crate::edit_link::UNLINK_ACTION,
+                "toggle-search",
+                "toggle-debug-settings",
+            ],
+            "the entries that carry a shortcut, pinned: a drawn accelerator is a \
+             promise to the user's fingers, so gaining or losing one is a \
+             deliberate edit here"
         );
     }
 }

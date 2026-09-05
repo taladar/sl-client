@@ -175,7 +175,6 @@ impl Plugin for InventoryPlugin {
             .add_systems(
                 Update,
                 (
-                    toggle_inventory,
                     refresh_inventory_on_show,
                     ingest_inventory,
                     drain_skeleton_merge,
@@ -1889,32 +1888,10 @@ const fn wearable_label(wearable_type: WearableType) -> &'static str {
 /// ([`crate::floater_persist`]).
 pub const INVENTORY_FLOATER_ID: &str = "inventory";
 
-/// `Ctrl+I` opens / closes the window, matching the reference viewer's shortcut.
-/// Ungated by the input-context (like the `F`-key overlay toggles) so it always
-/// works; the `Ctrl` modifier keeps it from firing while a bare `i` is typed.
-fn toggle_inventory(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    ui: Option<Res<InventoryUi>>,
-    mut panels: Query<&mut UiPanelShown>,
-) {
-    let ctrl = keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight);
-    if !(ctrl && keyboard.just_pressed(KeyCode::KeyI)) {
-        return;
-    }
-    let Some(ui) = ui else {
-        return;
-    };
-    // Flip the floater's own shown flag; the refresh below (and any geometry
-    // persistence) reacts to the change, so there is no separate open-state to
-    // keep in step.
-    if let Ok(mut shown) = panels.get_mut(ui.panel) {
-        shown.0 = !shown.0;
-    }
-}
-
-/// Refresh the inventory whenever the window becomes visible — whether opened by
-/// `Ctrl+I` or **restored open** from saved settings ([`crate::floater_persist`]),
-/// since both just flip the floater's [`UiPanelShown`].
+/// Refresh the inventory whenever the window becomes visible — whether opened
+/// from the menu (by pick or by its `Ctrl+I` accelerator) or **restored open**
+/// from saved settings ([`crate::floater_persist`]), since both just flip the
+/// floater's [`UiPanelShown`].
 ///
 /// A cheap local snapshot each time: the login skeleton may have arrived after a
 /// previous open, and folders can be created during the session.

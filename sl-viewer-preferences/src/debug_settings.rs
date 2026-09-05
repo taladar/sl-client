@@ -7,7 +7,8 @@
 //! # Shape
 //!
 //! A separate floater (not a preferences tab), opened from the **Advanced**
-//! menu or `Ctrl+Alt+Shift+S`, mirroring the reference viewer's
+//! menu — by pick, or by the `Ctrl+Alt+Shift+S` accelerator drawn against that
+//! entry (`sl_viewer_ui_widgets::menu_accel`) — mirroring the reference viewer's
 //! `llfloatersettingsdebug`. Two panes:
 //!
 //! - **Left**: a search box (matching name *and* comment, case-insensitively),
@@ -46,14 +47,13 @@ use sl_settings::{Scope, SettingDecl, SettingKind, SettingValue};
 
 use crate::clipboard::{ViewerClipboard, copy_to_clipboard};
 use crate::floater::{
-    DeferredFloaterContent, Floater, FloaterCaps, FloaterHandle, FloaterSpec, floater_shown,
-    spawn_floater, toggle_floater,
+    DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, floater_shown, spawn_floater,
 };
 use crate::i18n::Translated;
 use crate::preferences::{CHECK_OFF, CHECK_SIZE, CONTROL_BORDER, PrefCheckboxBox};
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{SettingBinding, bound_checkbox};
-use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_element::ElementCx;
@@ -325,8 +325,6 @@ impl Plugin for DebugSettingsPlugin {
                 Startup,
                 spawn_debug_settings_floater.after(UiScaffoldSystems::SpawnRoot),
             )
-            // The shortcut stays ungated so it can perform the *first* open.
-            .add_systems(Update, toggle_debug_settings_shortcut)
             .add_systems(
                 Update,
                 (
@@ -385,22 +383,6 @@ fn spawn_debug_settings_floater(mut commands: Commands, root: Res<UiRoot>) {
     commands
         .entity(handle.root)
         .insert(DeferredFloaterContent { builder, handle });
-}
-
-/// `Ctrl+Alt+Shift+S` opens / closes the editor, the reference viewer's
-/// shortcut. Resolved by floater id (not a module resource), since the chrome
-/// exists from startup but the content only builds on first open.
-fn toggle_debug_settings_shortcut(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    floaters: Query<(Entity, &Floater)>,
-    mut panels: Query<&mut UiPanelShown>,
-) {
-    let ctrl = keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight);
-    let alt = keyboard.pressed(KeyCode::AltLeft) || keyboard.pressed(KeyCode::AltRight);
-    let shift = keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight);
-    if ctrl && alt && shift && keyboard.just_pressed(KeyCode::KeyS) {
-        toggle_floater(&floaters, &mut panels, DEBUG_SETTINGS_FLOATER_ID);
-    }
 }
 
 /// First-open content build: the left search + list pane, the right detail

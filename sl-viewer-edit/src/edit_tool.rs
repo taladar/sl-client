@@ -250,15 +250,14 @@ impl Plugin for EditToolPlugin {
                 Update,
                 crate::edit_params::spawn_param_tabs.run_if(resource_added::<BuildTabPages>),
             )
-            // The two activation drivers stay ungated: `Ctrl+B` toggles the
-            // floater and `mirror_floater_into_state` turns that shown/hidden
-            // state into [`EditToolState::active`] (clearing the selection on
-            // the close edge). Everything else is gated on build mode being
-            // active — see the second `add_systems` call.
-            .add_systems(
-                Update,
-                (toggle_build_floater_on_ctrl_b, mirror_floater_into_state).chain(),
-            )
+            // The activation driver stays ungated: `mirror_floater_into_state`
+            // turns the floater's shown/hidden state into
+            // [`EditToolState::active`] (clearing the selection on the close
+            // edge), and the floater is opened from the Build menu — by pick or
+            // by the `Ctrl+B` accelerator drawn against it
+            // (`sl_viewer_ui_widgets::menu_accel`). Everything else is gated on
+            // build mode being active — see the second `add_systems` call.
+            .add_systems(Update, mirror_floater_into_state)
             // The rest of the floater sync / commit systems only do work while
             // the tool is active (each already bailed on `!active`), so gating
             // them here hoists that check out of every system body into the
@@ -845,26 +844,6 @@ pub(crate) fn spawn_row_label(
             ChildOf(parent),
         ))
         .id()
-}
-
-/// `Ctrl+B` toggles the Build Tools floater (the reference's Build shortcut),
-/// while the world or a plain widget owns the keyboard.
-fn toggle_build_floater_on_ctrl_b(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    context: Res<InputContext>,
-    floaters: Query<(Entity, &crate::floater::Floater)>,
-    mut panels: Query<&mut UiPanelShown>,
-) {
-    if *context == InputContext::TextEntry {
-        return;
-    }
-    let ctrl = keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight);
-    if !(ctrl && keyboard.just_pressed(KeyCode::KeyB)) {
-        return;
-    }
-    // By stable id, not `BuildToolsUi` — Ctrl+B may be the first open, before
-    // the lazily-built content (and so the resource) exists.
-    crate::floater::toggle_floater(&floaters, &mut panels, BUILD_TOOLS_FLOATER_ID);
 }
 
 /// Mirror the floater's visibility into [`EditToolState::active`] — an open

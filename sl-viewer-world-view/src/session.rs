@@ -8,9 +8,11 @@
 //!   draw distance;
 //! - snap the fly-camera to the agent's own login position the first time the
 //!   agent's avatar object arrives;
-//! - on a quit key (`Esc` / `Q`), request a clean logout, then exit once the
-//!   grid acknowledges it (or after a short grace, so a lost `LogoutReply` can
-//!   never wedge the window open);
+//! - on a quit request — Avatar ▸ Quit (picked, or reached by the `Ctrl+Q`
+//!   accelerator drawn against it), the window's close button, or a termination
+//!   signal — request a clean logout, then exit once the grid acknowledges it
+//!   (or after a short grace, so a lost `LogoutReply` can never wedge the window
+//!   open);
 //! - exit on any `LoggedOut` / `Disconnected`.
 //!
 //! Rendering the scene (terrain, prims, meshes, sculpts, avatars, chat) lands
@@ -293,30 +295,6 @@ pub fn report_agent_viewport(
     }));
 }
 
-/// Request a clean logout on the quit chord (`Ctrl+Q`, matching the reference).
-///
-/// `Escape` is deliberately *not* the quit key: in the world it resets the camera
-/// (`crate::camera::reset_camera_view`) and in a focused UI it releases focus
-/// ([`crate::input_context`]), both of which a quit-on-`Escape` would pre-empt. The
-/// logout command is queued once; the actual `AppExit` is driven by
-/// [`drive_session`] (on `LoggedOut` / `Disconnected`) or by
-/// [`enforce_quit_deadline`] as a fallback.
-pub fn handle_quit_input(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    time: Res<Time>,
-    mut session: ResMut<ViewerSession>,
-    mut commands: MessageWriter<SlCommand>,
-) {
-    if session.quit_deadline.is_some() {
-        return;
-    }
-    let ctrl = keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight);
-    if ctrl && keyboard.just_pressed(KeyCode::KeyQ) {
-        info!("quit requested; logging out");
-        request_logout(&mut session, &mut commands, time.elapsed_secs());
-    }
-}
-
 /// A viewer-level request to quit — the menu ▸ Quit action (a [`QuitRequested`]
 /// message) or the window's close button / a compositor close
 /// ([`WindowCloseRequested`]). Both route here so the quit goes through a
@@ -416,8 +394,8 @@ pub fn handle_quit_requests(
 /// Request a clean grid logout and arm the quit deadline (idempotent): queue a
 /// [`Command::Logout`] and record the wall-clock time by which
 /// [`enforce_quit_deadline`] forces the exit if no `LoggedOut` arrives. Shared by
-/// the quit key ([`handle_quit_input`]) and the screenshot harness so both leave the
-/// avatar cleanly logged out — an abrupt process exit strands the grid session and
+/// the quit request ([`handle_quit_requests`]) and the screenshot harness so both
+/// leave the avatar cleanly logged out — an abrupt process exit strands the grid session and
 /// blocks the next login.
 pub(crate) fn request_logout(
     session: &mut ViewerSession,

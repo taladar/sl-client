@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 310 |
 | blocked | 56 |
 | in-progress | 18 |
-| bugs | 63 |
-| done | 982 |
+| bugs | 62 |
+| done | 983 |
 | deferred | 25 |
 | wont-do | 14 |
 | **total** | **1566** |
@@ -1180,7 +1180,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (63)
+## bugs (62)
 
 ### viewer
 
@@ -1276,8 +1276,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)
-- [`viewer-menu-accelerators-inert`](bugs/viewer-menu-accelerators-inert.md) —
-  Menu accelerators are drawn but dead (Ctrl+P / Ctrl+T / Ctrl+F / Ctrl+U)
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
   Some worn mesh hair does not render (visible in Firestorm)
 - [`viewer-minimap-avatar-dot-color`](bugs/viewer-minimap-avatar-dot-color.md) —
@@ -1332,7 +1330,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (982)
+## done (983)
 
 ### protocol
 
@@ -1974,6 +1972,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-lsl-parser-tree` (done), `protocol-lsl-syntax` (done))
 - [`viewer-material-swatch-sphere-preview`](done/viewer-material-swatch-sphere-preview.md)
   — Render a material-on-a-sphere preview for the PBR material swatch
+- [`viewer-menu-accelerators-inert`](done/viewer-menu-accelerators-inert.md) —
+  Menu accelerators are drawn but dead (Ctrl+P / Ctrl+T / Ctrl+F / Ctrl+U)
 - [`viewer-mesh-encoder`](done/viewer-mesh-encoder.md) — LLMesh encoder (inverse
   of the sl-mesh decoder)
 - [`viewer-mesh-lod-factor-preference`](done/viewer-mesh-lod-factor-preference.md)

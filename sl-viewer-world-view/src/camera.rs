@@ -534,8 +534,8 @@ fn toggle_flycam(
 /// Returns from mouselook / flycam, re-centres the focus on the avatar and resets
 /// the orbit; the smoothing then glides the view back rather than snapping. Only
 /// in the world context — a focused UI's `Escape` releases focus
-/// ([`crate::input_context`]) instead, and quit is now `Ctrl+Q`
-/// ([`crate::session::handle_quit_input`]), so `Escape` is free to mean this.
+/// ([`crate::input_context`]) instead, and quit is now `Ctrl+Q` — the accelerator
+/// drawn against Avatar ▸ Quit — so `Escape` is free to mean this.
 pub(crate) fn reset_camera_view(
     keyboard: Res<ButtonInput<KeyCode>>,
     context: Res<InputContext>,

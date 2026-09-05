@@ -744,7 +744,7 @@ pub(crate) struct ScreenshotSaveTask(Task<Result<PathBuf, String>>);
 /// avatar cleanly logged out: an abrupt process exit strands the grid session, and
 /// the next login is then rejected until the grid times the stale presence out. The
 /// actual exit is driven by the session systems (on `LoggedOut`, or the quit-deadline
-/// fallback), the same as the `Esc` / `Q` quit key.
+/// fallback), the same as a Menu ▸ Quit / `Ctrl+Q` request.
 #[expect(
     clippy::too_many_arguments,
     reason = "one system owns the whole schedule: when to arm (time, quiescence, schedule), what \

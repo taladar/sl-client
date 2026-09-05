@@ -307,8 +307,24 @@ pub(crate) fn update_action_input(
     // Which actions are down this frame: any bound key pressed, but only while the
     // world owns the keyboard. A focused UI leaves the set empty, so every action
     // releases.
+    //
+    // A held `Ctrl` / `Alt` leaves it empty too: that keystroke is an
+    // **accelerator**, not a movement key. The bindings here carry no modifier of
+    // their own (that is [[viewer-input-modifier-chords]]), so without this
+    // `Ctrl+F` — Content ▸ Search's accelerator, live since
+    // [[viewer-menu-accelerators-inert]] — would *also* toggle flying, and
+    // `Ctrl+M` would drop to mouselook on its way to the world map. The reference
+    // compares the whole modifier mask (`LLViewerInput::handleKey`), so a bare-key
+    // binding there does not fire under a modifier either; `Shift` is deliberately
+    // not in this test, since it is bound (Run) and is not an accelerator
+    // modifier.
+    let chording = keyboard.pressed(KeyCode::ControlLeft)
+        || keyboard.pressed(KeyCode::ControlRight)
+        || keyboard.pressed(KeyCode::AltLeft)
+        || keyboard.pressed(KeyCode::AltRight);
     let mut down = std::collections::HashSet::new();
     if context.is_world()
+        && !chording
         && let Some(profile) = bindings.profile(*mode)
     {
         for (key, target) in profile.iter() {
@@ -424,6 +440,40 @@ mod tests {
                 "{key:?} must not move the flycam"
             );
         }
+    }
+
+    /// A menu accelerator is not a movement key: `Ctrl+F` opens Search, and must
+    /// not also toggle flying on its way past the world.
+    ///
+    /// The bindings carry no modifier of their own yet
+    /// ([[viewer-input-modifier-chords]]), so the chord is filtered at the
+    /// resolution instead — the reference's exact-mask comparison, in the one
+    /// place that can see the whole keyboard.
+    #[test]
+    fn a_chord_is_not_a_movement_key() {
+        for (modifier, chord) in [
+            (KeyCode::ControlLeft, KeyCode::KeyF),
+            (KeyCode::ControlRight, KeyCode::KeyM),
+            (KeyCode::AltLeft, KeyCode::KeyW),
+        ] {
+            let mut app = action_app(InputContext::World);
+            press(&mut app, modifier);
+            press(&mut app, chord);
+            let actions = app.world().resource::<ButtonInput<Action>>();
+            assert!(
+                Action::ALL.iter().all(|&action| !actions.pressed(action)),
+                "{modifier:?}+{chord:?} is an accelerator, not a binding"
+            );
+        }
+        // The one modifier that *is* bound stays bound: Shift runs.
+        let mut app = action_app(InputContext::World);
+        press(&mut app, KeyCode::ShiftLeft);
+        press(&mut app, KeyCode::KeyW);
+        let actions = app.world().resource::<ButtonInput<Action>>();
+        assert!(
+            actions.pressed(Action::Run) && actions.pressed(Action::MoveForward),
+            "Shift+W still runs forward"
+        );
     }
 
     /// A focused UI takes every action away, so typing never drives the avatar or

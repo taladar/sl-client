@@ -16,8 +16,6 @@ map keys on a single `KeyCode`, so every viewer **chord** is instead a
 **hardcoded** direct-keyboard handler, each re-checking the modifiers and the
 world-keyboard gate by hand:
 
-- `Ctrl+L` / `Ctrl+Shift+L` — link / unlink (`edit_link.rs`).
-- `Ctrl+B` — toggle the Build Tools floater (`edit_tool.rs`).
 - ``Ctrl+` `` — quick snapshot to disk (`snapshot_floater.rs`,
   [[viewer-snapshot-quick-key]]).
 - The edit-drag `Ctrl` / `Ctrl+Shift` rotate / stretch modifiers
@@ -27,6 +25,18 @@ These work, but they are exactly the hardcoded keys the action map exists to
 replace, and none of them is **rebindable** — the rebinding UI
 ([[viewer-input-rebinding-ui]]) cannot see or change a key that never enters a
 `BindingProfile`.
+
+**Shorter than it was** (2026-09-05): every chord that is *drawn on a menu
+entry* — `Ctrl+L` / `Ctrl+Shift+L`, `Ctrl+B`, `Ctrl+Z` / `Ctrl+Y`, `Ctrl+I`,
+`Ctrl+M`, `Ctrl+Q`, `Ctrl+Alt+Shift+S` — no longer has a bespoke handler at all.
+[[viewer-menu-accelerators-inert]] made a `MenuCommand`'s `accel` label the
+binding: `sl-viewer-ui-widgets`' `menu_accel` parses it and routes the chord to
+the entry, honouring its `enabled_when`. So this task's migration list is the
+chords with *no* menu entry, and its remaining argument is **rebindability** —
+a menu accelerator is still authored in a `static`, and the rebinding UI
+([[viewer-input-rebinding-ui]]) cannot see it. Whatever this map grows should
+therefore feed the menu's drawn label rather than compete with it, or the two
+disagree again in the other direction.
 
 Scope: give a binding an optional required-modifier set (a
 `KeyChord { key, ctrl, shift, alt }` with `From<KeyCode>` so the existing
@@ -55,6 +65,8 @@ today), Ctrl+Shift+W Close All Windows and Ctrl+Alt+W Close Window
 Group (the floater manager has only Ctrl+W close-one), and Ctrl+. /
 Ctrl+, select-next/previous part-or-face (edit-face selection is done;
 its cycling keys can join the chord migration). The dead drawn
-accelerators (Ctrl+P/T/F/U) are the separate bug
-[[viewer-menu-accelerators-inert]], whose generic accel→command
-dispatch this map-level consolidation should compose with.
+accelerators (Ctrl+P/T/F/U) were the separate bug
+[[viewer-menu-accelerators-inert]], now fixed: its generic accel→command
+dispatch is what these defaults should be authored into — an entry with an
+`accel` label is a live chord, so several of the above need no map work at all,
+only a menu entry to hang on.

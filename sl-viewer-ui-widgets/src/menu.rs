@@ -118,7 +118,11 @@ pub struct MenuCommand {
     /// the line in place.
     pub visible_when: Option<&'static str>,
     /// The accelerator drawn against the entry (e.g. `"Ctrl+I"`), or `None`.
-    /// Display-only here — binding the key globally is the live wiring's job.
+    ///
+    /// Not display-only: [`crate::menu_accel`] parses this very string and
+    /// routes the chord to this entry, honouring its `enabled_when` /
+    /// `visible_when`. So authoring an accelerator here is the whole of binding
+    /// it, and a drawn shortcut cannot disagree with the keyboard.
     pub accelerator: Option<&'static str>,
 }
 
@@ -550,11 +554,11 @@ const MENU_Z_INDEX: i32 = 10_000;
 #[derive(Debug, Component)]
 pub struct MenuHost {
     /// The menu this host drops down.
-    def: &'static MenuDef,
+    pub(crate) def: &'static MenuDef,
     /// The `element` its actions are attributed to.
-    element: &'static str,
+    pub(crate) element: &'static str,
     /// The open drop-down popup entity, or `None` while closed.
-    open: Option<Entity>,
+    pub(crate) open: Option<Entity>,
 }
 
 /// A menu-bar (or gear) button, so `highlight_menu_hover` lights it on hover.
@@ -1856,7 +1860,7 @@ fn open_submenu_popup(
 /// The top menu bar puts one [`MenuConditions`] on its bar row and every button
 /// under it inherits it by ancestry, while a gear button that wants its own
 /// carries them directly (self wins over an ancestor).
-fn conditions_at<'q>(
+pub(crate) fn conditions_at<'q>(
     entity: Entity,
     child_of: &Query<&ChildOf>,
     conditions: &'q Query<&MenuConditions>,
@@ -2817,6 +2821,13 @@ impl Plugin for MenuWidgetPlugin {
                     open_context_menus,
                     open_filtered_menu,
                     dismiss_menus_on_escape,
+                    // The chord drawn against an entry runs that entry
+                    // (`crate::menu_accel`). Before the keyboard navigation
+                    // below, so a `Ctrl` chord is dispatched from the menu it
+                    // is drawn on rather than being read as a jump key by an
+                    // open drop-down.
+                    crate::menu_accel::dispatch_menu_accelerators
+                        .before(menu_keyboard_mouse_switch),
                     // Keyboard navigation runs first, then the hover systems
                     // stand down / paint against the state it left.
                     (

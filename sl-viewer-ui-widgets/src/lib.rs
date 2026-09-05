@@ -7,7 +7,8 @@
 //!
 //! - [`floater`], [`floater_persist`] — the window abstraction and the geometry
 //!   it remembers between sessions.
-//! - [`menu`] — the menu bar's dropdowns and the line-based context menu.
+//! - [`menu`] — the menu bar's dropdowns and the line-based context menu, and
+//!   [`menu_accel`] — the accelerator each entry draws, dispatched to it.
 //! - [`ui_text_input`], [`ui_search`], [`ui_combo`], [`ui_radio`],
 //!   [`ui_color_picker`] — the input controls.
 //! - [`ui_tab`], [`ui_table`] — tab strips and the sortable, virtualized table.
@@ -44,6 +45,7 @@ pub use sl_viewer_testkit as ui_test;
 pub mod floater;
 pub mod floater_persist;
 pub mod menu;
+pub mod menu_accel;
 pub mod settings_binding;
 pub mod ui_color_picker;
 pub mod ui_combo;

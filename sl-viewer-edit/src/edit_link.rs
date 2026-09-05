@@ -51,7 +51,6 @@ use sl_client_bevy::{Command, Permissions, ScopedObjectId, SlCommand};
 use crate::menu::TOP_MENU_ELEMENT;
 use crate::ui_element::UiAction;
 use crate::world_api::EditToolState;
-use crate::world_api::InputContext;
 use crate::world_api::ObjectState;
 use crate::world_api::{SelectedNode, SelectionSet};
 
@@ -205,12 +204,16 @@ impl Plugin for EditLinkPlugin {
     }
 }
 
-/// Drive Link / Unlink from either the keyboard chords (`Ctrl+L` /
-/// `Ctrl+Shift+L`, while the build tool is active and the world owns the
-/// keyboard) or the Build-menu entries.
+/// Drive Link / Unlink from the Build-menu entries — picked, or reached by the
+/// `Ctrl+L` / `Ctrl+Shift+L` accelerators drawn against them.
+///
+/// There is no keyboard system here: the chords are the entries' accelerators,
+/// dispatched to them by `sl_viewer_ui_widgets::menu_accel`, which honours the
+/// same `CAN_LINK` / `CAN_UNLINK` enable gates that grey the lines and stands
+/// down while a text field holds focus (so `Ctrl+L` typed into a field never
+/// links). The exact-modifier match is what keeps `Ctrl+Shift+L` off the Link
+/// entry and `Ctrl+L` off Unlink's.
 fn drive_link_unlink(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    context: Res<InputContext>,
     tool: Res<EditToolState>,
     selection: Res<SelectionSet>,
     objects: Res<ObjectState>,
@@ -219,21 +222,6 @@ fn drive_link_unlink(
 ) {
     let mut do_link = false;
     let mut do_unlink = false;
-
-    // The keyboard chords: only while editing and only when the world (not a
-    // text field) owns the keyboard, so `Ctrl+L` typed into a field never
-    // links. `Ctrl+Shift+L` unlinks; `Ctrl+L` links.
-    if tool.active
-        && *context != InputContext::TextEntry
-        && (keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight))
-        && keyboard.just_pressed(KeyCode::KeyL)
-    {
-        if keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight) {
-            do_unlink = true;
-        } else {
-            do_link = true;
-        }
-    }
 
     // The Build-menu picks (the entries are greyed out when the operation is
     // unavailable, but re-check below regardless).
