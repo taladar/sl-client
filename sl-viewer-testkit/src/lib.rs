@@ -1145,6 +1145,7 @@ pub fn layout_violations(app: &mut App, test: LayoutTest) -> Vec<String> {
 pub fn interaction_violations(app: &mut App, test: LayoutTest) -> Vec<String> {
     let mut violations = layout_violations(app, test);
     violations.extend(field_violations(app));
+    violations.extend(orphan_root_violations(app));
     violations
 }
 
@@ -1198,6 +1199,76 @@ pub fn spawn_element_into(app: &mut App, element: &UiElement, cx: ElementCx) {
         })
         .after(UiScaffoldSystems::SpawnRoot),
     );
+}
+
+/// Spawn a fixture node **under the scaffold's UI root**, and hand back its
+/// entity — the way every node in the viewer is born, and the only way a
+/// hit-tested one may be born here.
+///
+/// A `Node` spawned with no parent is not merely "a node at the top level": it
+/// is a **second UI root**, a sibling of [`spawn_ui_root`]'s. Two sibling roots
+/// have no defined order in the UI stack, and the scaffold's root is
+/// deliberately `Pickable { should_block_lower: false }` (so a click on empty UI
+/// space reaches the world behind it). Put those together and a click on the
+/// fixture node lands on **both** roots about half the time, in an order decided
+/// by the hover map's hash: `bevy_input_focus`' `click_to_focus` then raises one
+/// `AcquireFocus` per hit, the fixture's focuses it, and the scaffold root's —
+/// carrying no `TabIndex` — bubbles all the way to the window, where
+/// `acquire_focus` **clears the focus the fixture just gained**. Which one lands
+/// last is a coin flip on entity ids, so the click-to-focus check that stands on
+/// it passes or fails depending on how many entities the app happened to spawn
+/// first ([[viewer-testkit-click-focus-resource-sensitive]]).
+///
+/// The registry's own fixtures never had this problem — [`spawn_element_into`]
+/// has always spawned under `UiRoot` — so this is the same guarantee for a
+/// hand-built fixture, and [`orphan_root_violations`] is the check that says so.
+///
+/// The root is spawned at `Startup`, so an app that has not run a frame yet has
+/// none. Rather than make every caller remember that, this runs one frame first
+/// when the root is missing.
+pub fn spawn_under_root(app: &mut App, bundle: impl Bundle) -> Entity {
+    if !app.world().contains_resource::<UiRoot>() {
+        app.update();
+    }
+    let root = app.world().get_resource::<UiRoot>().map(|root| root.0);
+    let entity = app.world_mut().spawn(bundle).id();
+    if let Some(root) = root {
+        app.world_mut().entity_mut(root).add_child(entity);
+    }
+    entity
+}
+
+/// Every UI node that is a **root of its own** other than the scaffold's.
+///
+/// A fixture that spawns a `Node` without a parent gets a second UI root, whose
+/// stacking order against the scaffold's is undefined — see [`spawn_under_root`]
+/// for what that costs a click. Nothing in the viewer produces one: every panel,
+/// floater and widget is spawned into [`UiRoot`], so a second root here means the
+/// fixture is shaped like nothing the viewer ever runs, and any hit-test over it
+/// is answering about a tree that does not exist.
+///
+/// **Only meaningful where the pointer is installed**, which is why this is in
+/// [`interaction_violations`] rather than [`layout_violations`]: a pure layout
+/// fixture has no hit-testing for the second root to disturb, and several of them
+/// legitimately lay a bare node out on its own.
+pub fn orphan_root_violations(app: &mut App) -> Vec<String> {
+    let scaffold = app.world().get_resource::<UiRoot>().map(|root| root.0);
+    let mut query = app
+        .world_mut()
+        .query_filtered::<(Entity, Option<&Name>), (With<Node>, Without<ChildOf>)>();
+    let mut violations = Vec::new();
+    for (entity, name) in query.iter(app.world()) {
+        if Some(entity) == scaffold {
+            continue;
+        }
+        violations.push(format!(
+            "{}: a `Node` with no parent is a second UI root, and its stacking against the \
+             scaffold's root is undefined — spawn it with `spawn_under_root` so a click on it \
+             cannot also land on the root behind it",
+            describe(name, entity),
+        ));
+    }
+    violations
 }
 
 /// Every named node that can **react** to input, in a stable order.

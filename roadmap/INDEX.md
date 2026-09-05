@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 55 |
 | in-progress | 18 |
 | bugs | 64 |
-| done | 986 |
+| done | 987 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1567** |
+| **total** | **1568** |
 
 ## ideas (98)
 
@@ -1274,6 +1274,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A blocked resident's chat and IMs are still shown
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
+- [`viewer-nonblocking-overlay-steals-focus`](bugs/viewer-nonblocking-overlay-steals-focus.md)
+  — A see-through container in front of a field clears its focus, at random
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
   — Own avatar looks broken after a teleport
 - [`viewer-own-avatar-facing-drifts-idle`](bugs/viewer-own-avatar-facing-drifts-idle.md)
@@ -1291,8 +1293,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A sunlit opaque face pins red and green rather than showing its texture
 - [`viewer-takeoff-hold-jumps-instead-of-flying`](bugs/viewer-takeoff-hold-jumps-instead-of-flying.md)
   — Holding the fly key jumps instead of taking off
-- [`viewer-testkit-click-focus-resource-sensitive`](bugs/viewer-testkit-click-focus-resource-sensitive.md)
-  — A click stops focusing its field when the harness gains any resource
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
@@ -1322,7 +1322,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (986)
+## done (987)
 
 ### protocol
 
@@ -2661,6 +2661,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Terrain seam / misalignment at region edges on slopes
 - [`viewer-test-baseline-format`](done/viewer-test-baseline-format.md) — One
   baseline format for UI and render facts
+- [`viewer-testkit-click-focus-resource-sensitive`](done/viewer-testkit-click-focus-resource-sensitive.md)
+  — A click stops focusing its field when the harness gains any resource
 - [`viewer-texture-picker-inventory-tree`](done/viewer-texture-picker-inventory-tree.md)
   — Texture picker — inventory folder tree navigation (blocked by
   `viewer-ui-texture-picker` (done))
