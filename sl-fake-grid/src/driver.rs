@@ -270,6 +270,7 @@ impl SharedSim {
                     &mut world,
                     &state.avatar,
                     &state.identity,
+                    &state.assets,
                     &move || minter.uuid(),
                     &mut state.selection,
                     &mut state.sim,

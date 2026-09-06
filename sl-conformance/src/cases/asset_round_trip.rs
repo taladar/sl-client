@@ -29,6 +29,13 @@
 //! minted a *fresh* item id, so no stated `(task, item)` fixture could ever have
 //! carried its bytes.
 //!
+//! The fourth id is the odd one out: a **take** authors an object asset rather
+//! than storing one somebody uploaded, so for it "the id resolves" is only half
+//! the question. The other half is whether what it resolves to describes the
+//! object that was taken, which is asserted field by field — the prim key, the
+//! name the item carries, the scale, the face count, and the shape block
+//! re-quantizing to the object's own `PrimShapeParams`.
+//!
 //! Fake-grid only, and deliberately so. The fixtures are the fake grid's seeded
 //! inventory, which no live grid has; the live-grid question this case's shape
 //! comes from — *what a real grid returns for the same save*, which for several
@@ -41,11 +48,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use sl_client_tokio::{
-    AssetCacheLimits, AssetKey, AssetStore, AssetType, AssetUpdateLocation, Command, Event,
-    InventoryFolderKey, InventoryItem, InventoryKey, ObjectKey, PrimShape, ReqwestAssetFetcher,
-    RestoreItem, SaleType, ScopedObjectId, ScriptTarget, ScriptUploadLocation, TaskInventoryKey,
-    Throttle, TransactionId, TransferId, UpdatableAssetType, Uuid, Vector,
+    AssetCacheLimits, AssetKey, AssetStore, AssetType, AssetUpdateLocation, Command,
+    DeRezDestination, Event, InventoryFolderKey, InventoryItem, InventoryKey, Object, ObjectKey,
+    PrimShape, ReqwestAssetFetcher, RestoreItem, SaleType, ScopedObjectId, ScriptTarget,
+    ScriptUploadLocation, TaskInventoryKey, Throttle, TransactionId, TransferId,
+    UpdatableAssetType, Uuid, Vector,
 };
+use sl_object_asset::ObjectAsset;
 use sl_test_assets::inventory::{SavePath, SeededAsset};
 
 use crate::context::{Session, TestContext, TestFailure};
@@ -77,7 +86,7 @@ impl GridTest for AssetRoundTrip {
     }
 
     fn description(&self) -> &'static str {
-        "Every seeded inventory item's asset resolves, and a save is readable back"
+        "Every inventory asset id resolves, a save is readable back, and a take authors bytes"
     }
 
     fn grids(&self) -> &'static [Grid] {
@@ -156,10 +165,26 @@ impl GridTest for AssetRoundTrip {
             // --- the third store: an item inside a prim.
             let task_bytes = task_inventory_round_trip(ctx).await?;
 
+            // --- and the one asset nobody uploaded: the object a take authors.
+            let objects_folder = held
+                .get(TAKEN_OBJECT_FOLDER_SOURCE)
+                .map(|item| item.folder_id)
+                .ok_or_else(|| {
+                    TestFailure::Assertion(format!(
+                        "the grid's inventory has no item named {TAKEN_OBJECT_FOLDER_SOURCE}, \
+                         so the Objects folder a take files into is unknown"
+                    ))
+                })?;
+            let taken_bytes = taken_object_round_trip(ctx, &cap, objects_folder).await?;
+
             let metrics = ctx.metrics();
             metrics.set("classes_read", read);
             metrics.set("classes_saved", saved);
             metrics.set("task_item_bytes", i64::try_from(task_bytes).unwrap_or(-1));
+            metrics.set(
+                "taken_object_bytes",
+                i64::try_from(taken_bytes).unwrap_or(-1),
+            );
             metrics.set(
                 "classes_without_a_fixture",
                 i64::try_from(sl_test_assets::inventory::unsupported_classes().len()).unwrap_or(-1),
@@ -403,7 +428,8 @@ async fn task_inventory_round_trip(ctx: &mut TestContext) -> Result<usize, TestF
         fixture.edited_body.clone()
     };
 
-    let (container_id, container) = rez_container(ctx).await?;
+    let rezzed = rez_container(ctx).await?;
+    let (container_id, container) = (rezzed.scoped_id(), rezzed.full_id);
 
     // Drop the notecard in. The grid mints a *fresh* task item id for the copy,
     // which is the whole point — nothing could have stated its bytes ahead of
@@ -482,8 +508,98 @@ async fn task_inventory_round_trip(ctx: &mut TestContext) -> Result<usize, TestF
     Ok(after.len())
 }
 
-/// Rezzes a cube to hold a task inventory, returning its scoped and full ids.
-async fn rez_container(ctx: &mut TestContext) -> Result<(ScopedObjectId, ObjectKey), TestFailure> {
+/// The seeded item whose folder is the Objects folder — the folder a take files
+/// into. Read off a fixture rather than out of the login skeleton because the
+/// skeleton arrives at login, long before this case runs.
+const TAKEN_OBJECT_FOLDER_SOURCE: &str = "Fixture Object";
+
+/// The fourth place an asset id comes from: an object the grid **authored**.
+///
+/// Every other id in this case names bytes somebody uploaded. A take does not:
+/// the grid serialises the live object itself and mints an id for the result,
+/// so "does the id resolve" is only half the question — the other half is
+/// whether what it resolves to describes the object that was taken. Both are
+/// asserted here, which is why the rezzed object is carried down from the rez
+/// rather than just its id.
+async fn taken_object_round_trip(
+    ctx: &mut TestContext,
+    cap: &str,
+    objects_folder: InventoryFolderKey,
+) -> Result<usize, TestFailure> {
+    let rezzed = rez_container(ctx).await?;
+    ctx.primary()
+        .send(Command::DerezObjects {
+            local_ids: vec![rezzed.scoped_id()],
+            destination: DeRezDestination::TakeIntoAgentInventory(objects_folder),
+            transaction_id: TransactionId::from(Uuid::new_v4()),
+            group_id: None,
+        })
+        .await?;
+    let item = ctx
+        .primary()
+        .wait_for(LONG_TIMEOUT, |event| match event {
+            Event::InventoryItemCreated { item, .. } => Some(item.clone()),
+            _other => None,
+        })
+        .await?;
+    check(
+        !item.asset_id.is_nil(),
+        "the take filed an item with a nil asset id",
+    )?;
+    check(
+        i32::from(item.item_type) == AssetType::Object.to_code(),
+        &format!(
+            "the take filed an item declaring asset class {} rather than an object",
+            item.item_type
+        ),
+    )?;
+
+    let body = fetch(cap, AssetKey::from(item.asset_id), AssetType::Object).await?;
+    let asset = ObjectAsset::decode(&body).map_err(|error| {
+        TestFailure::Assertion(format!("the taken object's asset does not decode: {error}"))
+    })?;
+    let prim = asset
+        .root()
+        .ok_or_else(|| TestFailure::Assertion("the taken object's asset has no prim".to_owned()))?;
+    check(
+        prim.task_id == rezzed.full_id.uuid(),
+        &format!(
+            "the asset names prim {} but the object taken was {}",
+            prim.task_id, rezzed.full_id
+        ),
+    )?;
+    check(
+        prim.name == item.name,
+        &format!(
+            "the asset names the object {:?} but the item filed is {:?}",
+            prim.name, item.name
+        ),
+    )?;
+    check(
+        prim.shape.to_params() == rezzed.shape,
+        "the asset's shape block does not re-quantize to the shape of the object taken",
+    )?;
+    check(
+        prim.scale == rezzed.scale,
+        &format!(
+            "the asset states scale {:?}, the object taken was {:?}",
+            prim.scale, rezzed.scale
+        ),
+    )?;
+    check(
+        prim.faces.len() == sl_object_asset::rendered_face_count(&rezzed.shape),
+        &format!(
+            "the asset carries {} faces; the shape renders {}",
+            prim.faces.len(),
+            sl_object_asset::rendered_face_count(&rezzed.shape)
+        ),
+    )?;
+    Ok(body.len())
+}
+
+/// Rezzes a cube — a container for a task inventory, or an object to take —
+/// and returns it as the region streamed it back.
+async fn rez_container(ctx: &mut TestContext) -> Result<Object, TestFailure> {
     let session = ctx.primary();
     let mut seen = HashSet::new();
     // Drain whatever the region already streamed, so the object rezzed below is
@@ -511,7 +627,7 @@ async fn rez_container(ctx: &mut TestContext) -> Result<(ScopedObjectId, ObjectK
             _other => None,
         })
         .await?;
-    Ok((container.scoped_id(), container.full_id))
+    Ok(container)
 }
 
 /// The fresh task-inventory item id the grid minted for the dropped item,

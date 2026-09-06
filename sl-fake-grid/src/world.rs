@@ -1509,17 +1509,19 @@ fn push_terrain(terrain: &TerrainFixture, sim: &mut SimSession, now: Instant) {
 /// here, so a seeded grid rezzes the same object twice.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the parameters are the two stores an answer reads and writes -- \
-              the region's world and this session's machine and selection -- \
-              over the three identities that decide what the answer says (the \
-              agent, the region, and the minter the simulator's own ids come \
-              from); bundling them would hide which of them a given arm \
-              touches, which is the one thing this switch is read for"
+    reason = "the parameters are the stores an answer reads and writes -- the \
+              region's world, the grid's assets, and this session's machine \
+              and selection -- over the three identities that decide what the \
+              answer says (the agent, the region, and the minter the \
+              simulator's own ids come from); bundling them would hide which \
+              of them a given arm touches, which is the one thing this switch \
+              is read for"
 )]
 pub(crate) fn answer_world_request(
     world: &mut SceneFixtures,
     identity: &AvatarIdentity,
     region: &RegionIdentity,
+    assets: &crate::assets::GridAssets,
     mint: &dyn Fn() -> uuid::Uuid,
     selection: &mut crate::object_edits::Selection,
     sim: &mut SimSession,
@@ -1585,7 +1587,9 @@ pub(crate) fn answer_world_request(
                     continue;
                 };
                 if let Some(folder) = destination.agent_folder() {
-                    created.push(taken_item(&object, folder, identity.agent_id, mint));
+                    let item = taken_item(&object, folder, identity.agent_id, mint);
+                    store_taken_asset(assets, &item, &object);
+                    created.push(item);
                 }
                 if destination.removes_from_world() {
                     let _removed = world.remove_object(*local_id);
@@ -1932,13 +1936,49 @@ pub fn default_object_properties(object: &Object) -> ObjectProperties {
     }
 }
 
+/// The object asset a **take** authors, stored under the id the item names.
+///
+/// A take is not a round trip: nothing uploaded these bytes, the grid *writes*
+/// them from the live object, which is why the asset carries the item's name
+/// and description rather than the object's own (an object rezzed by
+/// `ObjectAdd` has no `ObjectProperties` yet, and the item is what a viewer
+/// shows). Until this existed the take minted an id and left it unbacked, so
+/// every path that opens what a take filed away — rezzing it again, reading it
+/// back to check the take — had nothing to fetch.
+///
+/// A linkset is not handled: the fake grid has no linking, so every taken
+/// object is one prim ([[test-fake-grid-object-write-path]] rezzes single
+/// prims and nothing links them).
+///
+/// The asset lock is taken while the caller still holds the region's, which is
+/// the order [`push_arrival_world`] already establishes (it writes an arriving
+/// agent's bakes under the same two locks). Nothing anywhere takes the region
+/// lock while holding the asset one, so the pair cannot invert.
+fn store_taken_asset(assets: &crate::assets::GridAssets, item: &InventoryItem, object: &Object) {
+    let faces = sl_object_asset::rendered_face_count(&object.shape);
+    let mut prim = sl_object_asset::PrimBlock::from_object(object, faces);
+    item.name.clone_into(&mut prim.name);
+    prim.description = Some(item.description.clone());
+    if prim.faces.is_empty() {
+        // A prim rezzed here carries no `TextureEntry` at all (`bare_object`
+        // leaves it empty and nothing fills it in), while a real simulator
+        // gives a new prim the default texture. The asset still has to state
+        // the faces the shape renders -- an object asset with no faces rezzes
+        // an object nothing can texture -- so they are stated as untextured
+        // rather than omitted.
+        prim.faces = vec![sl_object_asset::LegacyFace::default(); faces];
+    }
+    let asset = sl_object_asset::ObjectAsset::single(prim);
+    let _previous = assets
+        .write()
+        .insert(AssetKey::from(item.asset_id), asset.encode());
+}
+
 /// The agent inventory item a **take** files an object away as.
 ///
-/// A real grid also writes the object's serialisation as an asset and points
-/// the item at it; nothing here fetches that asset (the take is observable
-/// through the item and the `KillObject`), so the id is minted and left
-/// unbacked rather than invented as nil — an item with a nil asset id is a
-/// *broken* item, and a viewer says so.
+/// The minted asset id is backed by [`store_taken_asset`], which writes the
+/// object's serialisation under it — an item with an id nothing serves is as
+/// broken to a viewer as one with a nil id, it just fails later.
 fn taken_item(
     object: &Object,
     folder: InventoryFolderKey,

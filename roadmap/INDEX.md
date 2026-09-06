@@ -11,17 +11,22 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 98 |
+| ideas | 100 |
 | ready | 306 |
 | blocked | 55 |
 | in-progress | 18 |
 | bugs | 59 |
-| done | 998 |
+| done | 999 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1573** |
+| **total** | **1576** |
 
-## ideas (98)
+## ideas (100)
+
+### protocol
+
+- [`protocol-audit-legacy-permission-blocks`](ideas/protocol-audit-legacy-permission-blocks.md)
+  — The legacy permissions block has three writers and two readers
 
 ### viewer
 
@@ -181,6 +186,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
+- [`test-fake-grid-rezzed-prim-texture`](ideas/test-fake-grid-rezzed-prim-texture.md)
+  — A prim the fake grid rezzes carries no TextureEntry
 - [`test-firestorm-fake-grid-crosscheck`](ideas/test-firestorm-fake-grid-crosscheck.md)
   — Point Firestorm at the fake grid to calibrate oracles
 - [`test-reference-cpp-oracles`](ideas/test-reference-cpp-oracles.md) —
@@ -928,8 +935,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Does a grid hand back the asset you saved?
 - [`test-assets-gesture-codec`](ready/test-assets-gesture-codec.md) — Read and
   write a gesture asset (LLMultiGesture)
-- [`test-assets-object-asset-codec`](ready/test-assets-object-asset-codec.md) —
-  Read and write an inventory object asset
 - [`test-assets-remaining-class-audit`](ready/test-assets-remaining-class-audit.md)
   — Decide what the remaining asset classes are worth
 - [`test-audit-conformance-boilerplate`](ready/test-audit-conformance-boilerplate.md)
@@ -948,6 +953,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
+- [`test-object-asset-missing-fields`](ready/test-object-asset-missing-fields.md)
+  — A take through the object asset drops half a prim
 
 ### repl
 
@@ -1309,7 +1316,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (998)
+## done (999)
 
 ### protocol
 
@@ -3109,6 +3116,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — HTTP ViewerAsset fetch through the caching AssetStore (sl-asset crate)
 - [`test-asset-upload`](done/test-asset-upload-upload-an-asset-via-caps-newfileagentinventory-uploader.md)
   — upload an asset via CAPS NewFileAgentInventory uploader
+- [`test-assets-object-asset-codec`](done/test-assets-object-asset-codec.md) —
+  Read and write an inventory object asset
 - [`test-assets-rigged-mesh-encoder`](done/test-assets-rigged-mesh-encoder.md) —
   A rigged mesh fixture whose deformation is analytically checkable (blocked by
   `viewer-mesh-encoder` (done))

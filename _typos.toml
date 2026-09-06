@@ -38,6 +38,11 @@ extend-ignore-re = [
   # digits off, leaving a bare "ba" the identifier allow-list below cannot
   # reach. The whole id is one token to a reader, so ignore it as one.
   "ba4e[0-9a-f]{4}",
+  # A literal UUID is an id, not words, and arbitrary hex spells "typos" the
+  # same way a git-describe hash does (…ba1c… → by/be, …ue4b… → use/due). The
+  # reference object assets (sl-object-asset/tests/data) and the doc comments
+  # that quote them carry whole ids verbatim.
+  "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
 ]
 
 [default.extend-words]
@@ -73,6 +78,11 @@ Unsuported = "Unsuported"
 Wating = "Wating"
 Seach = "Seach"
 Dimentions = "Dimentions"
+# "offsett" is the object asset's own keyword for a face's T-axis texture
+# offset (LLTextureEntry's LLSD field name, beside "offsets" for S). Linden's
+# spelling, cited exactly by sl-object-asset and by the reference assets it is
+# pinned against; not ours to correct.
+offsett = "offsett"
 
 [default.extend-identifiers]
 # Hexadecimal ids cited verbatim in prose and doc comments: the fake grid's

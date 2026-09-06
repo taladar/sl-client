@@ -273,6 +273,45 @@ impl PrimShape {
         }
     }
 
+    /// Quantizes the float shape back into the wire
+    /// [`sl_proto::PrimShapeParams`], the inverse of
+    /// [`from_params`](Self::from_params) and a port of the reference viewer's
+    /// `LLVolumeMessage::packPathParams` / `packProfileParams`.
+    ///
+    /// Rounding is to the nearest wire integer (the reference's `ll_round`, not
+    /// a truncation — the comment above its own `pack_scale_x` records why:
+    /// truncating `0.50 / 0.01` yields 49, not 50). The pass is lossy by
+    /// construction, since the wire form has 0.01 or 0.00002 of resolution
+    /// where the float has an `f32`'s; a value that came from
+    /// [`from_params`](Self::from_params) survives the round trip exactly.
+    ///
+    /// Needed wherever a *float* shape has to be put on the wire or into a
+    /// message: a simulator answering a rez, an object asset being turned back
+    /// into an `ObjectUpdate`, or a viewer packing an edit.
+    #[must_use]
+    pub fn to_params(&self) -> PrimShapeParams {
+        PrimShapeParams {
+            path_curve: self.path_curve.to_byte(),
+            profile_curve: self.profile_curve.to_byte() | self.hole_type.to_byte(),
+            path_begin: round_to_u16(self.path_begin / CUT_QUANTA),
+            path_end: PATH_END_WIRE.saturating_sub(round_to_u16(self.path_end / CUT_QUANTA)),
+            path_scale_x: FULL_SCALE.saturating_sub(round_to_u8(self.path_scale_x / SCALE_QUANTA)),
+            path_scale_y: FULL_SCALE.saturating_sub(round_to_u8(self.path_scale_y / SCALE_QUANTA)),
+            path_shear_x: reinterpret_unsigned(round_to_i8(self.path_shear_x / SHEAR_QUANTA)),
+            path_shear_y: reinterpret_unsigned(round_to_i8(self.path_shear_y / SHEAR_QUANTA)),
+            path_twist: round_to_i8(self.twist_end / SCALE_QUANTA),
+            path_twist_begin: round_to_i8(self.twist_begin / SCALE_QUANTA),
+            path_radius_offset: round_to_i8(self.radius_offset / SCALE_QUANTA),
+            path_taper_x: round_to_i8(self.taper_x / TAPER_QUANTA),
+            path_taper_y: round_to_i8(self.taper_y / TAPER_QUANTA),
+            path_revolutions: round_to_u8((self.revolutions - 1.0) / REV_QUANTA),
+            path_skew: round_to_i8(self.skew / SCALE_QUANTA),
+            profile_begin: round_to_u16(self.profile_begin / CUT_QUANTA),
+            profile_end: PATH_END_WIRE.saturating_sub(round_to_u16(self.profile_end / CUT_QUANTA)),
+            profile_hollow: round_to_u16(self.hollow / CUT_QUANTA),
+        }
+    }
+
     /// Whether the prim is hollow (has a non-zero inner cutout).
     #[must_use]
     pub fn is_hollow(&self) -> bool {
@@ -301,11 +340,72 @@ const fn reinterpret_signed(byte: u8) -> i8 {
     i8::from_ne_bytes([byte])
 }
 
+/// Reinterprets a signed wire byte as the `u8` the wire types it (the inverse
+/// of `reinterpret_signed`), without an `as` cast.
+const fn reinterpret_unsigned(byte: i8) -> u8 {
+    byte.cast_unsigned()
+}
+
 /// Clamps a dequantized fraction into `[0, 1]`, matching the viewer's clamping
 /// of out-of-range cut / hollow values.
 const fn clamp_unit(value: f32) -> f32 {
     value.clamp(0.0, 1.0)
 }
+
+/// Rounds a quantum-count to the nearest `u16`, saturating at the ends of the
+/// range — the reference's `(U16) ll_round(x)`, minus its undefined behaviour
+/// for a value the type cannot hold.
+#[expect(
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "the value is rounded and clamped into 0..=u16::MAX first, so the conversion is exact"
+)]
+const fn round_to_u16(value: f32) -> u16 {
+    value.round().clamp(0.0, U16_MAX_AS_F32) as u16
+}
+
+/// Rounds a quantum-count to the nearest `u8`, saturating (`(U8) ll_round(x)`).
+#[expect(
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "the value is rounded and clamped into 0..=u8::MAX first, so the conversion is exact"
+)]
+const fn round_to_u8(value: f32) -> u8 {
+    value.round().clamp(0.0, U8_MAX_AS_F32) as u8
+}
+
+/// Rounds a quantum-count to the nearest `i8`, saturating (`(S8) ll_round(x)`).
+#[expect(
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    reason = "the value is rounded and clamped into i8::MIN..=i8::MAX first, so the conversion is \
+              exact"
+)]
+const fn round_to_i8(value: f32) -> i8 {
+    value.round().clamp(I8_MIN_AS_F32, I8_MAX_AS_F32) as i8
+}
+
+/// `u16::MAX` as the `f32` the rounding helpers clamp against.
+const U16_MAX_AS_F32: f32 = 65_535.0;
+
+/// `u8::MAX` as the `f32` the rounding helpers clamp against.
+const U8_MAX_AS_F32: f32 = 255.0;
+
+/// `i8::MIN` as the `f32` the rounding helpers clamp against.
+const I8_MIN_AS_F32: f32 = -128.0;
+
+/// `i8::MAX` as the `f32` the rounding helpers clamp against.
+const I8_MAX_AS_F32: f32 = 127.0;
+
+/// The wire integer for a fully open path/profile end, as the integer the
+/// packers subtract from (`50000`, the integer twin of `PATH_END_MAX`).
+const PATH_END_WIRE: u16 = 50_000;
+
+/// The wire byte for a top size equal to the bottom (`200`), which the scale
+/// packers subtract the quantized size from.
+const FULL_SCALE: u8 = 200;
 
 #[cfg(test)]
 mod tests {
