@@ -54,6 +54,12 @@ pub(crate) use sl_viewer_ui_core::ui_sounds;
 pub(crate) use sl_viewer_ui_core::ui_text;
 pub(crate) use sl_viewer_ui_core::virtual_list;
 pub(crate) use sl_viewer_ui_widgets::floater;
+#[expect(
+    unused_imports,
+    reason = "reached only by doc links (`crate::floater_persist`) now that this crate's \
+              subject-bound windows are keyed floaters, which persist nothing by construction \
+              and so no longer name FloaterPersistExempt in code"
+)]
 pub(crate) use sl_viewer_ui_widgets::floater_persist;
 pub(crate) use sl_viewer_ui_widgets::menu;
 pub(crate) use sl_viewer_ui_widgets::settings_binding;

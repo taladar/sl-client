@@ -195,7 +195,7 @@ pub(crate) const FLOATERS: &[FloaterElement] = &[
     FloaterElement {
         id: "group-profile",
         summary: "Group: a group's General / Roles / Members / Notices / Land tabs. \
-                  Subject-bound, so its geometry is not persisted.",
+                  One window per group, so its geometry is not persisted.",
         spec: crate::group_profile::group_profile_floater_spec,
         content: FloaterContent::Stub(
             "The group's tabs, rebuilt per open from the group profile and role replies.",

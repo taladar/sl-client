@@ -61,6 +61,16 @@ per-frame systems and both observers resolve their window; the Web tab's load
 clock is per browser view. Nothing spawns at `Startup` any more, so the profile
 no longer costs the per-frame UI walk of a never-opened window.
 
+## One thing this shipped wrong, fixed with the next conversion
+
+The raise above happened *before* the manager's command pass, and one press can
+ask for both: a click inside a floater raises that floater (its root observer's
+`BringToFront`) and may open a keyed window (a group row, a name link). The
+open won the first z and the click's raise then landed on top of it, so a
+window opened from inside another one appeared **behind** it. Found live while
+checking the group profile ([[viewer-keyed-floater-audit]]); fixed by
+`FloaterSystems::Commands`, which every keyed open system now orders after.
+
 ## Still to do
 
 The audit of the *other* per-subject singletons is

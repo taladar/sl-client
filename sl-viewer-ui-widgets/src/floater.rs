@@ -217,6 +217,26 @@ const CASCADE_WRAP: u32 = 8;
 #[derive(Debug, Clone, Copy, Default)]
 pub struct FloaterPlugin;
 
+/// The manager's system sets, for consumers that must order against it.
+///
+/// [`Commands`](Self::Commands) is the chrome command pass — the raise a press
+/// asks for. **A window that opens per subject must run after it**: one click
+/// can both raise the window it landed in (the root observer's
+/// `BringToFront`) and ask for a new window (the module's own open message),
+/// and whichever raise is applied last wins the z-order. Opening before the
+/// pass means the new window takes its z first and the click's raise then lands
+/// *on top of it* — the new window opens behind the one that spawned it, and
+/// every further click on that row repeats the trick.
+///
+/// [`KeyedFloaters`] therefore raises directly rather than through a
+/// [`FloaterCommand`], and its callers order themselves after this set so their
+/// raise is the frame's last word.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FloaterSystems {
+    /// `apply_floater_commands`: raise / close / minimize / dock.
+    Commands,
+}
+
 impl Plugin for FloaterPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<FloaterCommand>()
@@ -232,7 +252,7 @@ impl Plugin for FloaterPlugin {
                 (
                     build_deferred_floater_content,
                     close_active_floater_shortcut,
-                    apply_floater_commands,
+                    apply_floater_commands.in_set(FloaterSystems::Commands),
                     // Clamp the (drag-updated) position *before* it is written to
                     // the inset, so an overshoot is corrected in the same frame
                     // rather than snapping back a frame later. It reads last frame's
@@ -957,6 +977,14 @@ impl KeyedFloaters<'_, '_> {
     /// command pass would find nothing to raise and the new window would open
     /// *behind* the one already up — which is exactly the "did it even open?"
     /// this scaffold exists to stop.
+    ///
+    /// # Order your open system after [`FloaterSystems::Commands`]
+    ///
+    /// Because this raise bypasses the command pass, it must happen *after* it:
+    /// the click that opens a window usually also raises the window it landed
+    /// in (a group row inside a resident's profile does both), and the later of
+    /// the two raises wins. Opening first means the click's raise lands on top
+    /// of the window it just opened. See [`FloaterSystems`].
     pub fn open(&mut self, spec: FloaterSpec, key: FloaterKey) -> KeyedFloaterOpen {
         if let Some((entity, mut shown, mut z)) =
             self.floaters
@@ -2165,7 +2193,7 @@ mod tests {
     use super::{
         ActiveFloater, CASCADE_STEP, DefaultDockHost, DeferredFloaterContent, Floater, FloaterCaps,
         FloaterCommand, FloaterHandle, FloaterKey, FloaterOp, FloaterParts, FloaterSpec,
-        FloaterZTop, KeyedFloaterOpen, KeyedFloaters, MIN_VISIBLE, RESIZE_FLOOR,
+        FloaterSystems, FloaterZTop, KeyedFloaterOpen, KeyedFloaters, MIN_VISIBLE, RESIZE_FLOOR,
         apply_floater_commands, apply_floater_content, apply_floater_glyphs, apply_floater_inset,
         build_deferred_floater_content, clamp_floaters_on_screen, clamp_position, drag_position,
         floater_panel, highlight_active_floater, resize_size, spawn_floater, toggle_floater,
@@ -2195,7 +2223,11 @@ mod tests {
                 Update,
                 (
                     build_deferred_floater_content,
-                    apply_floater_commands,
+                    // In the set the plugin puts it in, so a test can order
+                    // against it exactly as a consumer does — an `.after` on a
+                    // set with no members is silently a no-op, which would make
+                    // the raise-ordering check pass for the wrong reason.
+                    apply_floater_commands.in_set(FloaterSystems::Commands),
                     apply_floater_inset,
                     apply_floater_content,
                     apply_floater_glyphs,
@@ -2815,6 +2847,65 @@ mod tests {
                 .get::<UiPanelShown>(singleton)
                 .map(|shown| shown.0),
             Some(false)
+        );
+        Ok(())
+    }
+
+    /// **The click that opens a window also raises the window it came from**,
+    /// and the new window must still land in front.
+    ///
+    /// Seen live: double-clicking a group row inside a resident's profile
+    /// opened the group's window *behind* the profile, and clicking the row
+    /// again just repeated it. Both effects are one press — the row's handler
+    /// asks for the new window, and the press bubbles to the profile's root
+    /// observer as a `BringToFront` — so whichever raise is applied last wins.
+    /// This drives that exact frame: a raise pending for the old window, an
+    /// open running after the command pass ([`FloaterSystems::Commands`]).
+    #[test]
+    fn a_window_opened_by_a_click_lands_above_the_window_clicked() -> Result<(), TestError> {
+        /// Set by the test for the frame the fixture should open on.
+        #[derive(Resource, Default)]
+        struct OpenRequest(Option<FloaterKey>);
+
+        let (mut app, root, _host) = floater_app();
+        app.init_resource::<OpenRequest>();
+        app.add_systems(
+            Update,
+            (|mut request: ResMut<OpenRequest>, mut floaters: KeyedFloaters| {
+                if let Some(key) = request.0.take() {
+                    let _opened = floaters.open(keyed_spec(), key);
+                }
+            })
+            .after(FloaterSystems::Commands),
+        );
+        let clicked = spawn_one(&mut app, root);
+
+        // One frame carrying both halves of the press.
+        app.world_mut().resource_mut::<OpenRequest>().0 = Some(FloaterKey::subject(&"resident-a"));
+        app.world_mut()
+            .resource_mut::<Messages<FloaterCommand>>()
+            .write(FloaterCommand {
+                floater: clicked,
+                op: FloaterOp::BringToFront,
+            });
+        app.update();
+
+        let opened = {
+            let world = app.world_mut();
+            world
+                .query::<(Entity, &Floater)>()
+                .iter(world)
+                .find_map(|(entity, floater)| (floater.id == KEYED_ID).then_some(entity))
+                .ok_or("the click opened no window")?
+        };
+        let world = app.world();
+        let z_of = |entity: Entity| world.get::<GlobalZIndex>(entity).map(|index| index.0);
+        let (Some(front), Some(back)) = (z_of(opened), z_of(clicked)) else {
+            return Err("a window lost its z-index".into());
+        };
+        assert!(
+            front > back,
+            "the window the click opened ({front}) is behind the window it was clicked in ({back})"
         );
         Ok(())
     }

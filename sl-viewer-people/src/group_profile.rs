@@ -11,12 +11,22 @@
 //! Assets, Money / accounting, Experiences, Banned Residents, and the group
 //! create / search / invite dialogs — all filed as `viewer-social-group-extras`.
 //!
-//! # Subject-bound → persistence-exempt
+//! # One window per group
 //!
-//! Like the [avatar profile](crate::avatar_profile) and the item previews, the
-//! floater opens on a particular **subject** (a group) rather than persistent app
-//! state, so it carries [`crate::floater_persist::FloaterPersistExempt`] on its
-//! root: no restored rectangle, no restored "open".
+//! Like the [avatar profile](crate::avatar_profile), a group profile is a
+//! **keyed floater** ([`FloaterKey`]): opening a second group opens a second
+//! window beside the first rather than re-pointing it, and closing one despawns
+//! it. Everything a window knows — the group it shows, everything received about
+//! it, which sub-panels need repainting, its list projections and where its
+//! fields are — lives in components on that window's floater root
+//! (`GroupProfileState`, `GroupProfileDirty`, `GroupProfileUi`, and the three
+//! view projections), and every system here iterates the open windows.
+//!
+//! Being subject-keyed also means nothing about the window is persisted: no
+//! restored rectangle, no restored "open" (which could only ever restore an
+//! empty shell). The *tables* inside it still persist their sort order and
+//! column widths, keyed by table name as the reference keys them, so two open
+//! windows agree about how a member list is sorted.
 //!
 //! # Rebuilt per change
 //!
@@ -53,13 +63,13 @@ use sl_client_bevy::{
 };
 
 use crate::floater::{
-    DeferredFloaterContent, Floater, FloaterCaps, FloaterHandle, FloaterSpec, floater_panel,
-    spawn_floater,
+    Floater, FloaterCaps, FloaterHandle, FloaterKey, FloaterSpec, FloaterSystems, KeyedFloaterOpen,
+    KeyedFloaters, host_floater,
 };
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::inventory_properties::format_unix_date;
 use crate::settings::ViewerSettings;
-use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use crate::ui::{column, row};
 use crate::ui_font::UiFont;
 use crate::ui_tab::{
     DEFAULT_ELLIPSIS, TabContainerHandle, TabPlacement, TabSpec, fill_tab_container,
@@ -431,12 +441,18 @@ enum DetailsFocus {
     Role(Option<GroupRoleKey>),
 }
 
-/// The group profile floater's live state: the shown group and everything received
-/// about it so far, plus the transient edit drafts kept outside the rebuilt
-/// widgets so a repaint does not lose them.
-#[derive(Resource, Debug, Default)]
+/// One open group-profile window's live state: the group it shows and everything
+/// received about it so far, plus the transient edit drafts kept outside the
+/// rebuilt widgets so a repaint does not lose them.
+///
+/// A **component on the floater root**, not a resource: group profiles are keyed
+/// windows (one per group, [`FloaterKey`]), so there are as many of these as
+/// there are open windows, and closing one despawns its window and this with it.
+#[derive(Component, Debug, Default)]
 pub(crate) struct GroupProfileState {
-    /// The group shown, or `None` before the first open.
+    /// The group this window shows. Fixed for the window's life: a group profile
+    /// is opened *on* a group and closing it ends the window, so this is only
+    /// `None` in the [`Default`] the component is built through.
     target: Option<GroupKey>,
     /// The group's profile (general facts + the requesting agent's powers).
     profile: Option<GroupProfile>,
@@ -481,15 +497,6 @@ pub(crate) struct GroupProfileState {
 }
 
 impl GroupProfileState {
-    /// Reset everything to a fresh open on `target`.
-    fn reset(&mut self, target: GroupKey) {
-        *self = Self {
-            target: Some(target),
-            list_in_profile: true,
-            ..Self::default()
-        };
-    }
-
     /// Whether the requesting agent holds `power` in this group.
     fn has_power(&self, power: u64) -> bool {
         self.profile
@@ -537,8 +544,8 @@ impl GeneralDraft {
 // ---------------------------------------------------------------------------
 
 /// The ordered, render-ready member projection the virtualized members list binds
-/// its recycled rows to.
-#[derive(Resource, Debug, Default)]
+/// its recycled rows to. One per window, beside its `GroupProfileState`.
+#[derive(Component, Debug, Default)]
 struct MembersView {
     /// The rows in display order.
     rows: Vec<MemberRow>,
@@ -564,8 +571,9 @@ struct MemberRow {
     is_owner: bool,
 }
 
-/// The ordered notice projection the virtualized notices list binds to.
-#[derive(Resource, Debug, Default)]
+/// The ordered notice projection the virtualized notices list binds to. One per
+/// window.
+#[derive(Component, Debug, Default)]
 struct NoticesView {
     /// The rows in display order (newest first by default).
     rows: Vec<NoticeRow>,
@@ -575,8 +583,9 @@ struct NoticesView {
     built_sort_revision: u64,
 }
 
-/// The ordered role projection the virtualized roles list binds to.
-#[derive(Resource, Debug, Default)]
+/// The ordered role projection the virtualized roles list binds to. One per
+/// window.
+#[derive(Component, Debug, Default)]
 struct RolesView {
     /// The rows in display order.
     rows: Vec<RoleRowData>,
@@ -620,13 +629,14 @@ struct NoticeRow {
 // Dirty flags for the rebuilt sub-panels.
 // ---------------------------------------------------------------------------
 
-/// Which rebuilt sub-panels need repainting from `GroupProfileState`.
+/// Which of **one window's** rebuilt sub-panels need repainting from its
+/// `GroupProfileState`.
 #[expect(
     clippy::struct_excessive_bools,
     reason = "one independent repaint flag per rebuilt sub-panel; a bitflags newtype \
               would only obscure the field-per-panel intent"
 )]
-#[derive(Resource, Debug, Default)]
+#[derive(Component, Debug, Default)]
 struct GroupProfileDirty {
     /// The General tab's **structure** — set only when the layout could change
     /// (profile powers / membership); the tab is despawned+rebuilt only then, never
@@ -705,10 +715,13 @@ struct GeneralHandles {
     title_text: Option<Entity>,
 }
 
-/// Entity handles for the group profile floater: the shell spawned once at
-/// startup, the persistent list viewports, the rebuild-target containers, and the
-/// per-rebuild field entities the action handlers read.
-#[derive(Resource)]
+/// Entity handles for **one** group-profile window: its persistent list
+/// viewports, the rebuild-target containers, and the per-rebuild field entities
+/// that window's action handlers read.
+///
+/// A component on the floater root beside [`GroupProfileState`], so two open
+/// windows keep their own tables, details area and fields.
+#[derive(Component)]
 pub(crate) struct GroupProfileUi {
     /// The title text node (set to the group's name once known).
     title_text: Entity,
@@ -830,37 +843,39 @@ enum GroupProfileAction {
 pub struct GroupProfilePlugin;
 
 impl Plugin for GroupProfilePlugin {
-    /// Register the state, the open message, and the spawn / open / ingest /
-    /// rebuild / poll systems.
+    /// Register the open message, the requested-notice set, the table settings,
+    /// and the open / ingest / rebuild / poll systems.
+    ///
+    /// Nothing spawns at `Startup`: a group-profile window exists only while a
+    /// group's profile is open, so `open_group_profile` both spawns the
+    /// instance and builds its content. The per-window systems are gated on
+    /// there being a window at all, so a session with none costs no dispatch.
     fn build(&self, app: &mut App) {
-        app.init_resource::<GroupProfileState>()
-            .init_resource::<GroupProfileDirty>()
-            .init_resource::<MembersView>()
-            .init_resource::<NoticesView>()
-            .init_resource::<RolesView>()
-            .init_resource::<RequestedGroupNotices>()
+        app.init_resource::<RequestedGroupNotices>()
             .add_message::<OpenGroupProfile>()
-            .add_systems(
-                Startup,
-                (
-                    register_group_profile_settings,
-                    spawn_group_profile_floater.after(UiScaffoldSystems::SpawnRoot),
-                ),
-            )
+            .add_systems(Startup, register_group_profile_settings)
             .add_systems(
                 Update,
                 (
-                    open_group_profile,
-                    ingest_group_profile_events,
-                    sync_members_view,
-                    sync_notices_view,
-                    sync_roles_view,
-                    build_general_tab,
-                    build_roles_new_button,
-                    rebuild_details_area,
-                    rebuild_compose_area,
-                    rebuild_notice_body,
-                    poll_group_profile_texture,
+                    // After the manager's command pass — see `FloaterSystems`:
+                    // the Info button (or a group row in a resident's profile)
+                    // raises its own window in the same frame, and the later
+                    // raise wins.
+                    open_group_profile.after(FloaterSystems::Commands),
+                    (
+                        ingest_group_profile_events,
+                        sync_members_view,
+                        sync_notices_view,
+                        sync_roles_view,
+                        build_general_tab,
+                        build_roles_new_button,
+                        rebuild_details_area,
+                        rebuild_compose_area,
+                        rebuild_notice_body,
+                        poll_group_profile_texture,
+                    )
+                        .chain()
+                        .run_if(any_with_component::<GroupProfileState>),
                 )
                     .chain()
                     .before(layout_virtual_lists),
@@ -876,6 +891,7 @@ impl Plugin for GroupProfilePlugin {
                     bind_role_rows,
                 )
                     .chain()
+                    .run_if(any_with_component::<GroupProfileState>)
                     .after(layout_virtual_lists),
             );
     }
@@ -897,9 +913,18 @@ fn register_group_profile_settings(settings: Option<ResMut<ViewerSettings>>) {
     register_table_settings(&mut settings, TABLE_SETTINGS_SECTION, &ROLES_TABLE);
 }
 
-/// The group-profile floater's stable [`crate::floater::Floater::id`], the key
-/// [`open_group_profile`] looks the panel up by.
+/// The group-profile floater's stable [`crate::floater::Floater::id`] — the
+/// **kind**; which group an instance shows is its [`FloaterKey`].
 const GROUP_PROFILE_FLOATER_ID: &str = "group-profile";
+
+/// The [`FloaterKey`] of the window showing `group`'s profile.
+///
+/// A [subject](FloaterKey::Subject) key: instances are told apart by the group
+/// id, and none of them persists geometry (a settings entry per group ever
+/// opened is what that variant exists to avoid).
+fn group_profile_key(group: GroupKey) -> FloaterKey {
+    FloaterKey::subject(&group)
+}
 
 /// The group profile floater's [`FloaterSpec`] — shared with the `FLOATERS`
 /// registry, so the swept window is the one the viewer spawns.
@@ -921,30 +946,20 @@ pub fn group_profile_floater_spec() -> FloaterSpec {
     }
 }
 
-/// Spawn the (hidden) group profile floater's chrome; the three-tab container
-/// and the persistent list viewports + rebuild-target containers are built on
-/// the first open ([`DeferredFloaterContent`]).
-fn spawn_group_profile_floater(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = spawn_floater(&mut commands, root.0, group_profile_floater_spec());
-    // Subject-bound: the target group is not persisted, so neither is the floater
-    // — no restored rectangle, no restored "open" (an empty shell).
-    commands
-        .entity(handle.root)
-        .insert(crate::floater_persist::FloaterPersistExempt);
-    commands
-        .entity(handle.title_text)
-        .insert(Translated::new("group-profile-title"));
-    let builder = commands.register_system(build_group_profile_content);
-    commands
-        .entity(handle.root)
-        .insert(DeferredFloaterContent { builder, handle });
-}
-
-/// First-open content build (see [`spawn_group_profile_floater`]): the tab
-/// container and the list scaffolds, ending with the [`GroupProfileUi`] insert
-/// whose appearance wakes the `Option<Res<GroupProfileUi>>` consumers (the
-/// [`GroupProfileDirty`] flags persist until then).
-fn build_group_profile_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
+/// Build one group-profile window's content into the chrome `handle`, and hang
+/// this window's model off its root: the three-tab container, the list
+/// scaffolds, a `GroupProfileState` on `target`, its dirty flags, its three view
+/// projections and its `GroupProfileUi` handles.
+///
+/// Called by [`open_group_profile`] the moment an instance is spawned — a keyed
+/// window is only ever created because someone opened *this* group, so there is
+/// nothing to defer.
+fn build_group_profile_content(
+    commands: &mut Commands,
+    handle: FloaterHandle,
+    target: GroupKey,
+    accept_notices: bool,
+) {
     let labels: Vec<String> = [
         "group-profile-tab-general",
         "group-profile-tab-members",
@@ -954,7 +969,7 @@ fn build_group_profile_content(In(handle): In<FloaterHandle>, mut commands: Comm
     .map(str::to_owned)
     .collect();
     let tabs: TabContainerHandle = spawn_tab_container(
-        &mut commands,
+        commands,
         handle.content,
         &TabSpec {
             element: "group-profile-tabs",
@@ -968,7 +983,7 @@ fn build_group_profile_content(In(handle): In<FloaterHandle>, mut commands: Comm
             translate_labels: true,
         },
     );
-    fill_tab_container(&mut commands, TabPlacement::BlockStart, &tabs);
+    fill_tab_container(commands, TabPlacement::BlockStart, &tabs);
     let general_panel = tabs.panels.first().copied().unwrap_or(handle.content);
     let members_panel = tabs.panels.get(1).copied().unwrap_or(handle.content);
     let notices_panel = tabs.panels.get(2).copied().unwrap_or(handle.content);
@@ -981,38 +996,56 @@ fn build_group_profile_content(In(handle): In<FloaterHandle>, mut commands: Comm
         roles_viewport,
         roles_new_container,
         details_area,
-    ) = build_members_scaffold(&mut commands, members_panel);
+    ) = build_members_scaffold(commands, members_panel);
     let (notices_table, notices_viewport, notice_body_area, compose_area) =
-        build_notices_scaffold(&mut commands, notices_panel);
+        build_notices_scaffold(commands, notices_panel);
 
-    commands.insert_resource(GroupProfileUi {
-        title_text: handle.title_text,
-        general_panel,
-        members_table,
-        members_viewport,
-        members_count_text,
-        roles_table,
-        roles_viewport,
-        roles_new_container,
-        roles_new_built: false,
-        details_area,
-        details_built: None,
-        compose_can_send: None,
-        notice_body_built: None,
-        notices_table,
-        notices_viewport,
-        notice_body_area,
-        compose_area,
-        general_sig: None,
-        general_handles: GeneralHandles::default(),
-        charter_field: None,
-        fee_field: None,
-        role_name_field: None,
-        role_title_field: None,
-        role_desc_field: None,
-        notice_subject_field: None,
-        notice_message_field: None,
-    });
+    // This window's whole model, on the window. Every sub-panel starts dirty —
+    // nothing has been drawn yet — and the membership toggle is seeded from the
+    // groups model the caller read.
+    let mut dirty = GroupProfileDirty::default();
+    dirty.mark_all();
+    let state = GroupProfileState {
+        target: Some(target),
+        accept_notices,
+        list_in_profile: true,
+        ..GroupProfileState::default()
+    };
+    commands.entity(handle.root).insert((
+        state,
+        dirty,
+        MembersView::default(),
+        NoticesView::default(),
+        RolesView::default(),
+        GroupProfileUi {
+            title_text: handle.title_text,
+            general_panel,
+            members_table,
+            members_viewport,
+            members_count_text,
+            roles_table,
+            roles_viewport,
+            roles_new_container,
+            roles_new_built: false,
+            details_area,
+            details_built: None,
+            compose_can_send: None,
+            notice_body_built: None,
+            notices_table,
+            notices_viewport,
+            notice_body_area,
+            compose_area,
+            general_sig: None,
+            general_handles: GeneralHandles::default(),
+            charter_field: None,
+            fee_field: None,
+            role_name_field: None,
+            role_title_field: None,
+            role_desc_field: None,
+            notice_subject_field: None,
+            notice_message_field: None,
+        },
+    ));
 }
 
 /// Build the persistent Members & Roles tab skeleton: a members column (the table
@@ -1205,68 +1238,42 @@ fn build_notices_scaffold(
 // Open / ingest.
 // ---------------------------------------------------------------------------
 
-/// Open the floater on a group: reset the state, fire the profile requests, and
-/// mark every sub-panel for rebuild. Opening on a **different** group is the one
-/// place the retained structure is torn down (a single, user-paced teardown —
-/// never a per-reply respawn).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the open \
-              messages, the state, the dirty flags, the UI handles + children query for the \
-              teardown, the groups model, the panel-shown query, and the command sinks"
-)]
+/// Open a group profile **per group** (`viewer-keyed-floater-audit`): raise this
+/// group's window when it is already up, and otherwise spawn one, build its
+/// content and fire the profile requests behind it.
+///
+/// Every open in the frame is honoured, not just the last: two Info buttons hit
+/// in the same frame are two groups, and each gets a window. Only a *new* window
+/// fetches — re-opening a group already on screen brings its window forward with
+/// everything it has already received (and its unsaved charter / notice drafts)
+/// intact.
 fn open_group_profile(
     mut opens: MessageReader<OpenGroupProfile>,
-    mut state: ResMut<GroupProfileState>,
-    mut dirty: ResMut<GroupProfileDirty>,
-    ui: Option<ResMut<GroupProfileUi>>,
-    floaters: Query<(Entity, &Floater)>,
+    mut floaters: KeyedFloaters,
     groups: Res<GroupsModel>,
-    children: Query<&Children>,
-    mut panels: Query<&mut UiPanelShown>,
+    mut dirty: Query<&mut GroupProfileDirty>,
     mut sl_commands: MessageWriter<SlCommand>,
     mut commands: Commands,
 ) {
-    let Some(open) = opens.read().last().copied() else {
-        return;
-    };
-    let group = open.group;
-    if state.target != Some(group) {
-        state.reset(group);
-        // Seed the membership toggles from the groups model (login-time push).
-        state.accept_notices = groups.accepts_notices(group).unwrap_or(true);
+    for open in opens.read().copied() {
+        let group = open.group;
+        let opened = floaters.open(group_profile_floater_spec(), group_profile_key(group));
+        let KeyedFloaterOpen::Spawned(handle) = opened else {
+            // Already up: repaint it from what it has, so an open after an edit
+            // shows the edit. Each sub-panel still skips itself when its own
+            // guard says nothing changed.
+            if let Ok(mut dirty) = dirty.get_mut(opened.root()) {
+                dirty.mark_all();
+            }
+            continue;
+        };
+        commands
+            .entity(handle.title_text)
+            .insert(Translated::new("group-profile-title"));
+        // The membership toggle is a login-time push the model already holds.
+        let accept_notices = groups.accepts_notices(group).unwrap_or(true);
+        build_group_profile_content(&mut commands, handle, group, accept_notices);
         fetch_group(group, &mut sl_commands);
-        // Clear the previous group's retained structure so each panel rebuilds for
-        // the new subject (the settled old content is safe to despawn here — a
-        // single user-paced teardown, never a per-reply respawn). On the very
-        // first open the content (and so `GroupProfileUi`) does not exist yet —
-        // there is nothing to tear down, the deferred build starts fresh.
-        if let Some(mut ui) = ui {
-            despawn_children(&children, &mut commands, ui.general_panel);
-            ui.general_sig = None;
-            ui.general_handles = GeneralHandles::default();
-            ui.charter_field = None;
-            ui.fee_field = None;
-            // The roles table's pooled rows are the widget's — they rebind to the
-            // new group's roles (RolesView rebuilds on the fetch), so only the
-            // once-built New Role button is torn down here.
-            despawn_children(&children, &mut commands, ui.roles_new_container);
-            ui.roles_new_built = false;
-            // The details / compose / notice-body panels self-despawn+rebuild once
-            // via their guards; resetting the guards makes them rebuild for the
-            // new subject.
-            ui.details_built = None;
-            ui.compose_can_send = None;
-            ui.notice_body_built = None;
-        }
-    }
-    dirty.mark_all();
-    // By stable id — this very open may be the first, which triggers the
-    // deferred content build.
-    if let Some(panel) = floater_panel(&floaters, GROUP_PROFILE_FLOATER_ID)
-        && let Ok(mut shown) = panels.get_mut(panel)
-    {
-        shown.0 = true;
     }
 }
 
@@ -1282,18 +1289,40 @@ fn fetch_group(group: GroupKey, sl_commands: &mut MessageWriter<SlCommand>) {
     sl_commands.write(SlCommand(Command::RequestGroupNotices(group)));
 }
 
-/// Fold group-related session events for the shown group into the state, marking
-/// the affected sub-panels dirty and bumping the list revisions.
+/// Fold group-related session events into **every** open window whose group they
+/// are about, marking that window's affected sub-panels dirty and bumping its
+/// list revisions.
+///
+/// The frame's events are collected once and replayed per window: a reader is
+/// consumed by the first pass over it, so with two group profiles open the
+/// second would otherwise see nothing.
 fn ingest_group_profile_events(
     mut events: MessageReader<SlEvent>,
-    mut state: ResMut<GroupProfileState>,
-    mut dirty: ResMut<GroupProfileDirty>,
+    mut windows: Query<(&mut GroupProfileState, &mut GroupProfileDirty)>,
     mut sl_commands: MessageWriter<SlCommand>,
 ) {
-    let Some(target) = state.target else {
+    let frame: Vec<&SlEvent> = events.read().collect();
+    if frame.is_empty() {
         return;
-    };
-    for event in events.read() {
+    }
+    for (mut state, mut dirty) in &mut windows {
+        let Some(target) = state.target else {
+            continue;
+        };
+        ingest_for_window(&frame, target, &mut state, &mut dirty, &mut sl_commands);
+    }
+}
+
+/// Fold this frame's events into one window's state (see
+/// [`ingest_group_profile_events`]).
+fn ingest_for_window(
+    frame: &[&SlEvent],
+    target: GroupKey,
+    state: &mut GroupProfileState,
+    dirty: &mut GroupProfileDirty,
+    sl_commands: &mut MessageWriter<SlCommand>,
+) {
+    for event in frame {
         match &event.0 {
             SlSessionEvent::GroupProfileReceived(profile) if profile.group_id == target => {
                 state.general_draft = GeneralDraft::from_profile(profile);
@@ -1371,65 +1400,59 @@ fn ingest_group_profile_events(
 /// Rebuild [`MembersView`] when the roster **or the table sort** advances,
 /// keeping the viewport's item count and the header count in step, and ordering
 /// by the table widget's current (persisted / clicked) sort.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the state, the \
-              view, the UI handles, the name source, the table-state + list + text queries"
-)]
 fn sync_members_view(
-    state: Res<GroupProfileState>,
-    mut view: ResMut<MembersView>,
-    ui: Option<Res<GroupProfileUi>>,
+    mut windows: Query<(&GroupProfileState, &mut MembersView, &GroupProfileUi)>,
     avatars: Res<AvatarState>,
     translator: Translator,
     tables: Query<&TableState>,
     mut lists: Query<&mut VirtualList>,
     mut texts: Query<&mut Text>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    // The current sort (revision + keys) from the widget; an empty default before
-    // the table exists just leaves the roster in arrival order.
-    let sort = tables
-        .get(ui.members_table)
-        .ok()
-        .map(|table| (table.sort_revision(), table.sort().keys().to_vec()));
-    let sort_revision = sort.as_ref().map_or(0, |(revision, _keys)| *revision);
-    if view.built_revision == state.members_revision && view.built_sort_revision == sort_revision {
-        return;
-    }
-    view.built_revision = state.members_revision;
-    view.built_sort_revision = sort_revision;
-    view.rows = state
-        .roster
-        .members
-        .iter()
-        .map(|member| MemberRow {
-            agent: member.agent_id,
-            title: member.title.clone(),
-            contribution: member.contribution.to_string(),
-            status: member.online_status.clone(),
-            is_owner: member.is_owner,
-        })
-        .collect();
-    let keys = sort.map(|(_revision, keys)| keys).unwrap_or_default();
-    view.rows
-        .sort_by(|left, right| compare_members(&keys, left, right, &avatars));
-    if let Ok(mut list) = lists.get_mut(ui.members_viewport) {
-        list.item_count = view.rows.len();
-        list.scroll_to_top();
-    }
-    let loaded = i64::try_from(state.roster.loaded()).unwrap_or(i64::MAX);
-    let total = i64::try_from(state.roster.total).unwrap_or(i64::MAX);
-    let label = translator.format(
-        "group-members-count",
-        &TransArgs::new().int("loaded", loaded).int("total", total),
-    );
-    if let Ok(mut text) = texts.get_mut(ui.members_count_text)
-        && text.0 != label
-    {
-        text.0 = label;
+    for (state, mut view, ui) in &mut windows {
+        // The current sort (revision + keys) from the widget; an empty default before
+        // the table exists just leaves the roster in arrival order.
+        let sort = tables
+            .get(ui.members_table)
+            .ok()
+            .map(|table| (table.sort_revision(), table.sort().keys().to_vec()));
+        let sort_revision = sort.as_ref().map_or(0, |(revision, _keys)| *revision);
+        if view.built_revision == state.members_revision
+            && view.built_sort_revision == sort_revision
+        {
+            continue;
+        }
+        view.built_revision = state.members_revision;
+        view.built_sort_revision = sort_revision;
+        view.rows = state
+            .roster
+            .members
+            .iter()
+            .map(|member| MemberRow {
+                agent: member.agent_id,
+                title: member.title.clone(),
+                contribution: member.contribution.to_string(),
+                status: member.online_status.clone(),
+                is_owner: member.is_owner,
+            })
+            .collect();
+        let keys = sort.map(|(_revision, keys)| keys).unwrap_or_default();
+        view.rows
+            .sort_by(|left, right| compare_members(&keys, left, right, &avatars));
+        if let Ok(mut list) = lists.get_mut(ui.members_viewport) {
+            list.item_count = view.rows.len();
+            list.scroll_to_top();
+        }
+        let loaded = i64::try_from(state.roster.loaded()).unwrap_or(i64::MAX);
+        let total = i64::try_from(state.roster.total).unwrap_or(i64::MAX);
+        let label = translator.format(
+            "group-members-count",
+            &TransArgs::new().int("loaded", loaded).int("total", total),
+        );
+        if let Ok(mut text) = texts.get_mut(ui.members_count_text)
+            && text.0 != label
+        {
+            text.0 = label;
+        }
     }
 }
 
@@ -1489,44 +1512,43 @@ fn member_sort_key(agent: AgentKey, avatars: &AvatarState) -> String {
 /// advances, keeping the viewport's item count in step and ordering by the table
 /// widget's current sort (default: newest first).
 fn sync_notices_view(
-    state: Res<GroupProfileState>,
-    mut view: ResMut<NoticesView>,
-    ui: Option<Res<GroupProfileUi>>,
+    mut windows: Query<(&GroupProfileState, &mut NoticesView, &GroupProfileUi)>,
     tables: Query<&TableState>,
     mut lists: Query<&mut VirtualList>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    let sort = tables
-        .get(ui.notices_table)
-        .ok()
-        .map(|table| (table.sort_revision(), table.sort().keys().to_vec()));
-    let sort_revision = sort.as_ref().map_or(0, |(revision, _keys)| *revision);
-    if view.built_revision == state.notices_revision && view.built_sort_revision == sort_revision {
-        return;
-    }
-    view.built_revision = state.notices_revision;
-    view.built_sort_revision = sort_revision;
-    let mut rows: Vec<NoticeRow> = state
-        .notices
-        .iter()
-        .enumerate()
-        .map(|(index, notice)| NoticeRow {
-            index,
-            subject: notice.subject.clone(),
-            from_name: notice.from_name.clone(),
-            date: format_unix_date(i64::from(notice.timestamp)),
-            timestamp: notice.timestamp,
-            has_attachment: notice.has_attachment,
-        })
-        .collect();
-    let keys = sort.map(|(_revision, keys)| keys).unwrap_or_default();
-    rows.sort_by(|left, right| compare_notices(&keys, left, right));
-    view.rows = rows;
-    if let Ok(mut list) = lists.get_mut(ui.notices_viewport) {
-        list.item_count = view.rows.len();
-        list.scroll_to_top();
+    for (state, mut view, ui) in &mut windows {
+        let sort = tables
+            .get(ui.notices_table)
+            .ok()
+            .map(|table| (table.sort_revision(), table.sort().keys().to_vec()));
+        let sort_revision = sort.as_ref().map_or(0, |(revision, _keys)| *revision);
+        if view.built_revision == state.notices_revision
+            && view.built_sort_revision == sort_revision
+        {
+            continue;
+        }
+        view.built_revision = state.notices_revision;
+        view.built_sort_revision = sort_revision;
+        let mut rows: Vec<NoticeRow> = state
+            .notices
+            .iter()
+            .enumerate()
+            .map(|(index, notice)| NoticeRow {
+                index,
+                subject: notice.subject.clone(),
+                from_name: notice.from_name.clone(),
+                date: format_unix_date(i64::from(notice.timestamp)),
+                timestamp: notice.timestamp,
+                has_attachment: notice.has_attachment,
+            })
+            .collect();
+        let keys = sort.map(|(_revision, keys)| keys).unwrap_or_default();
+        rows.sort_by(|left, right| compare_notices(&keys, left, right));
+        view.rows = rows;
+        if let Ok(mut list) = lists.get_mut(ui.notices_viewport) {
+            list.item_count = view.rows.len();
+            list.scroll_to_top();
+        }
     }
 }
 
@@ -1566,16 +1588,12 @@ fn notice_column_ordering(column: usize, left: &NoticeRow, right: &NoticeRow) ->
 /// Drive the General tab: build its **structure once** (per subject / signature)
 /// and update its **values in place** — never respawning the tab on a value
 /// reply, so no node is spawned and despawned in the same frame.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the dirty \
-              flags, the state, the UI handles, name / membership sources, the texture \
-              pipeline, and the spawn outputs"
-)]
 fn build_general_tab(
-    mut dirty: ResMut<GroupProfileDirty>,
-    mut state: ResMut<GroupProfileState>,
-    ui: Option<ResMut<GroupProfileUi>>,
+    mut windows: Query<(
+        &mut GroupProfileState,
+        &mut GroupProfileDirty,
+        &mut GroupProfileUi,
+    )>,
     avatars: Res<AvatarState>,
     groups: Res<GroupsModel>,
     mut boost: MessageWriter<BoostTexture>,
@@ -1583,70 +1601,67 @@ fn build_general_tab(
     mut texts: Query<(&mut Text, &mut TextColor)>,
     mut commands: Commands,
 ) {
-    // Before the dirty consume: while the lazily-built content (and so the
-    // resource) does not exist yet, the flags must survive for the build.
-    let Some(mut ui) = ui else {
-        return;
-    };
-    if !dirty.general && !dirty.general_values {
-        return;
-    }
-    let structure_dirty = dirty.general;
-    dirty.general = false;
-    dirty.general_values = false;
-    let Some(target) = state.target else {
-        return;
-    };
-    // Title: the group name once known (a plain string, not the Fluent key).
-    if let Some(profile) = state.profile.as_ref()
-        && !profile.name.is_empty()
-        && let Ok((mut text, _)) = texts.get_mut(ui.title_text)
-    {
-        profile.name.clone_into(&mut text.0);
-        commands.entity(ui.title_text).remove::<Translated>();
-    }
-    let panel = ui.general_panel;
-    let Some(profile) = state.profile.clone() else {
-        // No profile yet: a loading placeholder, built once on the fresh open (the
-        // open teardown cleared the panel and the signature). Not respawned on a
-        // value-only tick.
-        if structure_dirty && ui.general_sig.is_none() {
-            spawn_key_label(
+    for (mut state, mut dirty, mut ui) in &mut windows {
+        if !dirty.general && !dirty.general_values {
+            continue;
+        }
+        let structure_dirty = dirty.general;
+        dirty.general = false;
+        dirty.general_values = false;
+        let Some(target) = state.target else {
+            continue;
+        };
+        // Title: the group name once known (a plain string, not the Fluent key).
+        if let Some(profile) = state.profile.as_ref()
+            && !profile.name.is_empty()
+            && let Ok((mut text, _)) = texts.get_mut(ui.title_text)
+        {
+            profile.name.clone_into(&mut text.0);
+            commands.entity(ui.title_text).remove::<Translated>();
+        }
+        let panel = ui.general_panel;
+        let Some(profile) = state.profile.clone() else {
+            // No profile yet: a loading placeholder, built once on the fresh open (the
+            // open teardown cleared the panel and the signature). Not respawned on a
+            // value-only tick.
+            if structure_dirty && ui.general_sig.is_none() {
+                spawn_key_label(
+                    &mut commands,
+                    panel,
+                    "group-profile-loading",
+                    DIM_LABEL_COLOR,
+                );
+            }
+            continue;
+        };
+        let is_member = groups.is_member(target);
+        let sig = GeneralSig {
+            is_member,
+            can_edit_identity: has_power(profile.powers, group_powers::GROUP_CHANGE_IDENTITY),
+            can_edit_options: has_power(profile.powers, group_powers::MEMBER_OPTIONS),
+            join_shown: !is_member && profile.open_enrollment,
+        };
+        // (Re)build the structure only when the layout could differ — first profile,
+        // or a powers/membership change on a re-fetch (both rare and user-paced).
+        if ui.general_sig != Some(sig) {
+            despawn_children(&children, &mut commands, panel);
+            ui.charter_field = None;
+            ui.fee_field = None;
+            ui.general_handles = GeneralHandles::default();
+            build_general_structure(
                 &mut commands,
                 panel,
-                "group-profile-loading",
-                DIM_LABEL_COLOR,
+                target,
+                &profile,
+                sig,
+                &mut state,
+                &mut boost,
+                &mut ui,
             );
+            ui.general_sig = Some(sig);
         }
-        return;
-    };
-    let is_member = groups.is_member(target);
-    let sig = GeneralSig {
-        is_member,
-        can_edit_identity: has_power(profile.powers, group_powers::GROUP_CHANGE_IDENTITY),
-        can_edit_options: has_power(profile.powers, group_powers::MEMBER_OPTIONS),
-        join_shown: !is_member && profile.open_enrollment,
-    };
-    // (Re)build the structure only when the layout could differ — first profile,
-    // or a powers/membership change on a re-fetch (both rare and user-paced).
-    if ui.general_sig != Some(sig) {
-        despawn_children(&children, &mut commands, panel);
-        ui.charter_field = None;
-        ui.fee_field = None;
-        ui.general_handles = GeneralHandles::default();
-        build_general_structure(
-            &mut commands,
-            panel,
-            target,
-            &profile,
-            sig,
-            &mut state,
-            &mut boost,
-            &mut ui,
-        );
-        ui.general_sig = Some(sig);
+        update_general_values(&ui, &profile, &state, &avatars, &mut texts);
     }
-    update_general_values(&ui, &profile, &state, &avatars, &mut texts);
 }
 
 /// Spawn the General tab's fixed skeleton for `sig`, storing handles to every
@@ -1874,41 +1889,39 @@ fn update_general_values(
 /// keeping the viewport's item count in step and ordering by the roles table's
 /// current sort (default: name ascending).
 fn sync_roles_view(
-    state: Res<GroupProfileState>,
-    mut view: ResMut<RolesView>,
-    ui: Option<Res<GroupProfileUi>>,
+    mut windows: Query<(&GroupProfileState, &mut RolesView, &GroupProfileUi)>,
     tables: Query<&TableState>,
     mut lists: Query<&mut VirtualList>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    let sort = tables
-        .get(ui.roles_table)
-        .ok()
-        .map(|table| (table.sort_revision(), table.sort().keys().to_vec()));
-    let sort_revision = sort.as_ref().map_or(0, |(revision, _keys)| *revision);
-    if view.built_revision == state.roles_revision && view.built_sort_revision == sort_revision {
-        return;
-    }
-    view.built_revision = state.roles_revision;
-    view.built_sort_revision = sort_revision;
-    view.rows = state
-        .roles
-        .iter()
-        .map(|role| RoleRowData {
-            role_id: role.role_id,
-            name: role.name.clone(),
-            title: role.title.clone(),
-            members: role.members,
-        })
-        .collect();
-    let keys = sort.map(|(_revision, keys)| keys).unwrap_or_default();
-    view.rows
-        .sort_by(|left, right| compare_roles(&keys, left, right));
-    if let Ok(mut list) = lists.get_mut(ui.roles_viewport) {
-        list.item_count = view.rows.len();
-        list.scroll_to_top();
+    for (state, mut view, ui) in &mut windows {
+        let sort = tables
+            .get(ui.roles_table)
+            .ok()
+            .map(|table| (table.sort_revision(), table.sort().keys().to_vec()));
+        let sort_revision = sort.as_ref().map_or(0, |(revision, _keys)| *revision);
+        if view.built_revision == state.roles_revision && view.built_sort_revision == sort_revision
+        {
+            continue;
+        }
+        view.built_revision = state.roles_revision;
+        view.built_sort_revision = sort_revision;
+        view.rows = state
+            .roles
+            .iter()
+            .map(|role| RoleRowData {
+                role_id: role.role_id,
+                name: role.name.clone(),
+                title: role.title.clone(),
+                members: role.members,
+            })
+            .collect();
+        let keys = sort.map(|(_revision, keys)| keys).unwrap_or_default();
+        view.rows
+            .sort_by(|left, right| compare_roles(&keys, left, right));
+        if let Ok(mut list) = lists.get_mut(ui.roles_viewport) {
+            list.item_count = view.rows.len();
+            list.scroll_to_top();
+        }
     }
 }
 
@@ -1938,26 +1951,24 @@ fn role_column_ordering(column: usize, left: &RoleRowData, right: &RoleRowData) 
 /// Build the New Role button once, when the create power is known — its own
 /// build-once system now the roles list is a widget-owned table.
 fn build_roles_new_button(
-    state: Res<GroupProfileState>,
-    ui: Option<ResMut<GroupProfileUi>>,
+    mut windows: Query<(&GroupProfileState, &mut GroupProfileUi)>,
     mut commands: Commands,
 ) {
-    let Some(mut ui) = ui else {
-        return;
-    };
-    if ui.roles_new_built || !state.has_power(group_powers::ROLE_CREATE) {
-        return;
+    for (state, mut ui) in &mut windows {
+        if ui.roles_new_built || !state.has_power(group_powers::ROLE_CREATE) {
+            continue;
+        }
+        let new_container = ui.roles_new_container;
+        let row = spawn_button_row(&mut commands, new_container);
+        spawn_action_button(
+            &mut commands,
+            row,
+            "group-role-new",
+            GroupProfileAction::NewRole,
+            0,
+        );
+        ui.roles_new_built = true;
     }
-    let new_container = ui.roles_new_container;
-    let row = spawn_button_row(&mut commands, new_container);
-    spawn_action_button(
-        &mut commands,
-        row,
-        "group-role-new",
-        GroupProfileAction::NewRole,
-        0,
-    );
-    ui.roles_new_built = true;
 }
 
 /// The role a pooled row currently presents (its id, `None` = the "Everyone"
@@ -1974,16 +1985,18 @@ enum BoundRole {
 /// and press observer.
 fn populate_role_rows(
     mut commands: Commands,
-    ui: Option<Res<GroupProfileUi>>,
+    windows: Query<&GroupProfileUi>,
     new_rows: Query<(Entity, &ChildOf), Added<VirtualRow>>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
     for (row_entity, child_of) in &new_rows {
-        if child_of.parent() != ui.roles_viewport {
+        // Which window's list this row belongs to: every open window pools its
+        // own rows under its own viewport.
+        let Some(ui) = windows
+            .iter()
+            .find(|ui| ui.roles_viewport == child_of.parent())
+        else {
             continue;
-        }
+        };
         spawn_table_row(&mut commands, row_entity, ui.roles_table, &ROLES_TABLE);
         commands
             .entity(row_entity)
@@ -1994,9 +2007,7 @@ fn populate_role_rows(
 
 /// Bind each pooled role row to the [`RoleRowData`] it now points at.
 fn bind_role_rows(
-    view: Res<RolesView>,
-    state: Res<GroupProfileState>,
-    ui: Option<Res<GroupProfileUi>>,
+    windows: Query<(Ref<GroupProfileState>, Ref<RolesView>, &GroupProfileUi)>,
     mut rows: Query<(
         Entity,
         Ref<VirtualRow>,
@@ -2007,36 +2018,35 @@ fn bind_role_rows(
     mut backgrounds: Query<&mut BackgroundColor>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    let refresh_all = view.is_changed() || state.is_changed();
-    for (row_entity, row, child_of, cells, mut bound) in &mut rows {
-        if child_of.parent() != ui.roles_viewport {
-            continue;
-        }
-        if !refresh_all && !row.is_changed() {
-            continue;
-        }
-        let Some(index) = row.index else {
-            continue;
-        };
-        let Some(role_row) = view.rows.get(index) else {
-            continue;
-        };
-        *bound = BoundRole::Bound(role_row.role_id);
-        let selected = state.focus == DetailsFocus::Role(role_row.role_id);
-        set_row_cell(&mut texts, cells, 0, &role_row.name, selected);
-        set_row_cell(&mut texts, cells, 1, &role_row.title, false);
-        set_row_cell(&mut texts, cells, 2, &role_row.members.to_string(), false);
-        if let Ok(mut background) = backgrounds.get_mut(row_entity) {
-            let wanted = if selected {
-                SELECTED_ROW_BACKGROUND
-            } else {
-                Color::NONE
+    for (state, view, ui) in &windows {
+        let refresh_all = view.is_changed() || state.is_changed();
+        for (row_entity, row, child_of, cells, mut bound) in &mut rows {
+            if child_of.parent() != ui.roles_viewport {
+                continue;
+            }
+            if !refresh_all && !row.is_changed() {
+                continue;
+            }
+            let Some(index) = row.index else {
+                continue;
             };
-            if background.0 != wanted {
-                background.0 = wanted;
+            let Some(role_row) = view.rows.get(index) else {
+                continue;
+            };
+            *bound = BoundRole::Bound(role_row.role_id);
+            let selected = state.focus == DetailsFocus::Role(role_row.role_id);
+            set_row_cell(&mut texts, cells, 0, &role_row.name, selected);
+            set_row_cell(&mut texts, cells, 1, &role_row.title, false);
+            set_row_cell(&mut texts, cells, 2, &role_row.members.to_string(), false);
+            if let Ok(mut background) = backgrounds.get_mut(row_entity) {
+                let wanted = if selected {
+                    SELECTED_ROW_BACKGROUND
+                } else {
+                    Color::NONE
+                };
+                if background.0 != wanted {
+                    background.0 = wanted;
+                }
             }
         }
     }
@@ -2046,14 +2056,24 @@ fn bind_role_rows(
 fn on_role_row_press(
     press: On<Pointer<Press>>,
     rows: Query<&BoundRole>,
-    ui: Res<GroupProfileUi>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
+    mut windows: Query<(
+        &mut GroupProfileState,
+        &mut GroupProfileDirty,
+        &GroupProfileUi,
+    )>,
     mut focus: ResMut<InputFocus>,
-    mut state: ResMut<GroupProfileState>,
-    mut dirty: ResMut<GroupProfileDirty>,
 ) {
     if press.button != PointerButton::Primary {
         return;
     }
+    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+        return;
+    };
+    let Ok((mut state, mut dirty, ui)) = windows.get_mut(window) else {
+        return;
+    };
     focus.set(ui.roles_viewport, FocusCause::Navigated);
     let Ok(bound) = rows.get(press.entity) else {
         return;
@@ -2077,43 +2097,43 @@ fn on_role_row_press(
 /// Rebuild the Members & Roles details area when it is dirty, from the current
 /// selection focus (a member, a role, or nothing).
 fn rebuild_details_area(
-    mut dirty: ResMut<GroupProfileDirty>,
-    ui: Option<ResMut<GroupProfileUi>>,
-    state: Res<GroupProfileState>,
+    mut windows: Query<(
+        &GroupProfileState,
+        &mut GroupProfileDirty,
+        &mut GroupProfileUi,
+    )>,
     avatars: Res<AvatarState>,
     children: Query<&Children>,
     mut commands: Commands,
 ) {
-    // Before the dirty consume — see `build_general_tab`.
-    let Some(mut ui) = ui else {
-        return;
-    };
-    if !dirty.details {
-        return;
-    }
-    dirty.details = false;
-    // The hint (nothing selected) is built once and left alone through the reply
-    // burst; a member/role selection (user-paced) is what rebuilds the area.
-    if state.focus == DetailsFocus::None && ui.details_built == Some(DetailsFocus::None) {
-        return;
-    }
-    ui.details_built = Some(state.focus);
-    let area = ui.details_area;
-    despawn_children(&children, &mut commands, area);
-    ui.role_name_field = None;
-    ui.role_title_field = None;
-    ui.role_desc_field = None;
-    match state.focus {
-        DetailsFocus::None => {
-            spawn_key_label(&mut commands, area, "group-details-hint", DIM_LABEL_COLOR);
+    for (state, mut dirty, mut ui) in &mut windows {
+        if !dirty.details {
+            continue;
         }
-        DetailsFocus::Member(member) => {
-            spawn_details_header(&mut commands, area);
-            build_member_details(&mut commands, area, member, &state, &avatars);
+        dirty.details = false;
+        // The hint (nothing selected) is built once and left alone through the reply
+        // burst; a member/role selection (user-paced) is what rebuilds the area.
+        if state.focus == DetailsFocus::None && ui.details_built == Some(DetailsFocus::None) {
+            continue;
         }
-        DetailsFocus::Role(role_id) => {
-            spawn_details_header(&mut commands, area);
-            build_role_details(&mut commands, area, role_id, &state, &mut ui);
+        ui.details_built = Some(state.focus);
+        let area = ui.details_area;
+        despawn_children(&children, &mut commands, area);
+        ui.role_name_field = None;
+        ui.role_title_field = None;
+        ui.role_desc_field = None;
+        match state.focus {
+            DetailsFocus::None => {
+                spawn_key_label(&mut commands, area, "group-details-hint", DIM_LABEL_COLOR);
+            }
+            DetailsFocus::Member(member) => {
+                spawn_details_header(&mut commands, area);
+                build_member_details(&mut commands, area, member, state, &avatars);
+            }
+            DetailsFocus::Role(role_id) => {
+                spawn_details_header(&mut commands, area);
+                build_role_details(&mut commands, area, role_id, state, &mut ui);
+            }
         }
     }
 }
@@ -2288,127 +2308,127 @@ fn build_role_details(
 /// Rebuild the notice compose area when dirty: a subject + message editor and a
 /// Send button, shown only to members who may send notices.
 fn rebuild_compose_area(
-    mut dirty: ResMut<GroupProfileDirty>,
-    ui: Option<ResMut<GroupProfileUi>>,
-    state: Res<GroupProfileState>,
+    mut windows: Query<(
+        &GroupProfileState,
+        &mut GroupProfileDirty,
+        &mut GroupProfileUi,
+    )>,
     children: Query<&Children>,
     mut commands: Commands,
 ) {
-    // Before the dirty consume — see `build_general_tab`.
-    let Some(mut ui) = ui else {
-        return;
-    };
-    if !dirty.compose {
-        return;
+    for (state, mut dirty, mut ui) in &mut windows {
+        if !dirty.compose {
+            continue;
+        }
+        dirty.compose = false;
+        // Built once when the send power is known; the reply burst never respawns it.
+        let can_send = state.has_power(group_powers::NOTICES_SEND);
+        if ui.compose_can_send == Some(can_send) {
+            continue;
+        }
+        ui.compose_can_send = Some(can_send);
+        let area = ui.compose_area;
+        despawn_children(&children, &mut commands, area);
+        ui.notice_subject_field = None;
+        ui.notice_message_field = None;
+        if !can_send {
+            continue;
+        }
+        spawn_section_label(&mut commands, area, "group-notice-compose");
+        let subject_row = spawn_labeled_row(&mut commands, area, "group-notice-subject");
+        ui.notice_subject_field = Some(spawn_text_input(
+            &mut commands,
+            subject_row,
+            &TextInputSpec {
+                font_size: FONT_SIZE,
+                width_glyphs: 24.0,
+                tab_index: 0,
+                max_characters: Some(63),
+                ..TextInputSpec::new("group-notice-subject", TextInputKind::Line)
+            },
+        ));
+        ui.notice_message_field = Some(spawn_text_input(
+            &mut commands,
+            area,
+            &TextInputSpec {
+                font_size: FONT_SIZE,
+                visible_lines: 3.0,
+                tab_index: 0,
+                max_characters: Some(511),
+                ..TextInputSpec::new("group-notice-message", TextInputKind::Multiline)
+            },
+        ));
+        let row = spawn_button_row(&mut commands, area);
+        spawn_action_button(
+            &mut commands,
+            row,
+            "group-notice-send",
+            GroupProfileAction::SendNotice,
+            0,
+        );
     }
-    dirty.compose = false;
-    // Built once when the send power is known; the reply burst never respawns it.
-    let can_send = state.has_power(group_powers::NOTICES_SEND);
-    if ui.compose_can_send == Some(can_send) {
-        return;
-    }
-    ui.compose_can_send = Some(can_send);
-    let area = ui.compose_area;
-    despawn_children(&children, &mut commands, area);
-    ui.notice_subject_field = None;
-    ui.notice_message_field = None;
-    if !can_send {
-        return;
-    }
-    spawn_section_label(&mut commands, area, "group-notice-compose");
-    let subject_row = spawn_labeled_row(&mut commands, area, "group-notice-subject");
-    ui.notice_subject_field = Some(spawn_text_input(
-        &mut commands,
-        subject_row,
-        &TextInputSpec {
-            font_size: FONT_SIZE,
-            width_glyphs: 24.0,
-            tab_index: 0,
-            max_characters: Some(63),
-            ..TextInputSpec::new("group-notice-subject", TextInputKind::Line)
-        },
-    ));
-    ui.notice_message_field = Some(spawn_text_input(
-        &mut commands,
-        area,
-        &TextInputSpec {
-            font_size: FONT_SIZE,
-            visible_lines: 3.0,
-            tab_index: 0,
-            max_characters: Some(511),
-            ..TextInputSpec::new("group-notice-message", TextInputKind::Multiline)
-        },
-    ));
-    let row = spawn_button_row(&mut commands, area);
-    spawn_action_button(
-        &mut commands,
-        row,
-        "group-notice-send",
-        GroupProfileAction::SendNotice,
-        0,
-    );
 }
 
 /// Rebuild the notice body view when dirty: the selected notice's subject and full
 /// body (or a loading / hint line).
 fn rebuild_notice_body(
-    mut dirty: ResMut<GroupProfileDirty>,
-    ui: Option<ResMut<GroupProfileUi>>,
-    state: Res<GroupProfileState>,
+    mut windows: Query<(
+        &GroupProfileState,
+        &mut GroupProfileDirty,
+        &mut GroupProfileUi,
+    )>,
     children: Query<&Children>,
     mut commands: Commands,
 ) {
-    // Before the dirty consume — see `build_general_tab`.
-    let Some(mut ui) = ui else {
-        return;
-    };
-    if !dirty.notice_body {
-        return;
-    }
-    dirty.notice_body = false;
-    // Built once for the hint, then rebuilt only when the user-paced selection or
-    // its (later-arriving) body changes — never in the reply burst.
-    let body_present = state
-        .selected_notice
-        .and_then(|index| state.notices.get(index))
-        .is_some_and(|notice| state.notice_bodies.contains_key(&notice.notice_id));
-    let sig = (state.selected_notice, body_present);
-    if ui.notice_body_built == Some(sig) {
-        return;
-    }
-    ui.notice_body_built = Some(sig);
-    let area = ui.notice_body_area;
-    despawn_children(&children, &mut commands, area);
-    let Some(index) = state.selected_notice else {
-        spawn_key_label(&mut commands, area, "group-notice-hint", DIM_LABEL_COLOR);
-        return;
-    };
-    let Some(notice) = state.notices.get(index) else {
-        return;
-    };
-    let subject_row = spawn_labeled_row(&mut commands, area, "group-notice-subject");
-    spawn_value_label(
-        &mut commands,
-        subject_row,
-        notice.subject.clone(),
-        LABEL_COLOR,
-    );
-    match state.notice_bodies.get(&notice.notice_id) {
-        Some(body) => spawn_text_block(&mut commands, area, body.clone()),
-        None => spawn_key_label(
+    for (state, mut dirty, mut ui) in &mut windows {
+        if !dirty.notice_body {
+            continue;
+        }
+        dirty.notice_body = false;
+        // Built once for the hint, then rebuilt only when the user-paced selection or
+        // its (later-arriving) body changes — never in the reply burst.
+        let body_present = state
+            .selected_notice
+            .and_then(|index| state.notices.get(index))
+            .is_some_and(|notice| state.notice_bodies.contains_key(&notice.notice_id));
+        let sig = (state.selected_notice, body_present);
+        if ui.notice_body_built == Some(sig) {
+            continue;
+        }
+        ui.notice_body_built = Some(sig);
+        let area = ui.notice_body_area;
+        despawn_children(&children, &mut commands, area);
+        let Some(index) = state.selected_notice else {
+            spawn_key_label(&mut commands, area, "group-notice-hint", DIM_LABEL_COLOR);
+            continue;
+        };
+        let Some(notice) = state.notices.get(index) else {
+            continue;
+        };
+        let subject_row = spawn_labeled_row(&mut commands, area, "group-notice-subject");
+        spawn_value_label(
             &mut commands,
-            area,
-            "group-profile-loading",
-            DIM_LABEL_COLOR,
-        ),
-    }
-    if notice.has_attachment {
-        spawn_key_label(
-            &mut commands,
-            area,
-            "group-notice-has-attachment",
-            DIM_LABEL_COLOR,
+            subject_row,
+            notice.subject.clone(),
+            LABEL_COLOR,
         );
+        match state.notice_bodies.get(&notice.notice_id) {
+            Some(body) => spawn_text_block(&mut commands, area, body.clone()),
+            None => spawn_key_label(
+                &mut commands,
+                area,
+                "group-profile-loading",
+                DIM_LABEL_COLOR,
+            ),
+        }
+        if notice.has_attachment {
+            spawn_key_label(
+                &mut commands,
+                area,
+                "group-notice-has-attachment",
+                DIM_LABEL_COLOR,
+            );
+        }
     }
 }
 
@@ -2424,16 +2444,18 @@ struct BoundMember(Option<AgentKey>);
 /// clip + locale ellipsis), attaching the selection state and press observer.
 fn populate_member_rows(
     mut commands: Commands,
-    ui: Option<Res<GroupProfileUi>>,
+    windows: Query<&GroupProfileUi>,
     new_rows: Query<(Entity, &ChildOf), Added<VirtualRow>>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
     for (row_entity, child_of) in &new_rows {
-        if child_of.parent() != ui.members_viewport {
+        // Which window's list this row belongs to: every open window pools its
+        // own rows under its own viewport.
+        let Some(ui) = windows
+            .iter()
+            .find(|ui| ui.members_viewport == child_of.parent())
+        else {
             continue;
-        }
+        };
         spawn_table_row(&mut commands, row_entity, ui.members_table, &MEMBERS_TABLE);
         commands
             .entity(row_entity)
@@ -2444,10 +2466,8 @@ fn populate_member_rows(
 
 /// Bind each pooled member row to the [`MemberRow`] it now points at.
 fn bind_member_rows(
-    view: Res<MembersView>,
-    state: Res<GroupProfileState>,
+    windows: Query<(Ref<GroupProfileState>, Ref<MembersView>, &GroupProfileUi)>,
     avatars: Res<AvatarState>,
-    ui: Option<Res<GroupProfileUi>>,
     mut rows: Query<(
         Entity,
         Ref<VirtualRow>,
@@ -2458,38 +2478,37 @@ fn bind_member_rows(
     mut backgrounds: Query<&mut BackgroundColor>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    let refresh_all = view.is_changed() || state.is_changed() || avatars.is_changed();
-    for (row_entity, row, child_of, cells, mut bound) in &mut rows {
-        if child_of.parent() != ui.members_viewport {
-            continue;
-        }
-        if !refresh_all && !row.is_changed() {
-            continue;
-        }
-        let Some(index) = row.index else {
-            continue;
-        };
-        let Some(member_row) = view.rows.get(index) else {
-            continue;
-        };
-        bound.0 = Some(member_row.agent);
-        let selected = state.focus == DetailsFocus::Member(member_row.agent);
-        let name = name_of(member_row.agent, &avatars);
-        set_row_cell(&mut texts, cells, 0, &name, member_row.is_owner);
-        set_row_cell(&mut texts, cells, 1, &member_row.title, false);
-        set_row_cell(&mut texts, cells, 2, &member_row.contribution, false);
-        set_row_cell(&mut texts, cells, 3, &member_row.status, false);
-        if let Ok(mut background) = backgrounds.get_mut(row_entity) {
-            let wanted = if selected {
-                SELECTED_ROW_BACKGROUND
-            } else {
-                Color::NONE
+    for (state, view, ui) in &windows {
+        let refresh_all = view.is_changed() || state.is_changed() || avatars.is_changed();
+        for (row_entity, row, child_of, cells, mut bound) in &mut rows {
+            if child_of.parent() != ui.members_viewport {
+                continue;
+            }
+            if !refresh_all && !row.is_changed() {
+                continue;
+            }
+            let Some(index) = row.index else {
+                continue;
             };
-            if background.0 != wanted {
-                background.0 = wanted;
+            let Some(member_row) = view.rows.get(index) else {
+                continue;
+            };
+            bound.0 = Some(member_row.agent);
+            let selected = state.focus == DetailsFocus::Member(member_row.agent);
+            let name = name_of(member_row.agent, &avatars);
+            set_row_cell(&mut texts, cells, 0, &name, member_row.is_owner);
+            set_row_cell(&mut texts, cells, 1, &member_row.title, false);
+            set_row_cell(&mut texts, cells, 2, &member_row.contribution, false);
+            set_row_cell(&mut texts, cells, 3, &member_row.status, false);
+            if let Ok(mut background) = backgrounds.get_mut(row_entity) {
+                let wanted = if selected {
+                    SELECTED_ROW_BACKGROUND
+                } else {
+                    Color::NONE
+                };
+                if background.0 != wanted {
+                    background.0 = wanted;
+                }
             }
         }
     }
@@ -2515,14 +2534,24 @@ fn set_row_cell(
 fn on_member_row_press(
     press: On<Pointer<Press>>,
     rows: Query<&BoundMember>,
-    ui: Res<GroupProfileUi>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
+    mut windows: Query<(
+        &mut GroupProfileState,
+        &mut GroupProfileDirty,
+        &GroupProfileUi,
+    )>,
     mut focus: ResMut<InputFocus>,
-    mut state: ResMut<GroupProfileState>,
-    mut dirty: ResMut<GroupProfileDirty>,
 ) {
     if press.button != PointerButton::Primary {
         return;
     }
+    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+        return;
+    };
+    let Ok((mut state, mut dirty, ui)) = windows.get_mut(window) else {
+        return;
+    };
     focus.set(ui.members_viewport, FocusCause::Navigated);
     let Ok(bound) = rows.get(press.entity) else {
         return;
@@ -2542,16 +2571,18 @@ struct BoundNotice(Option<usize>);
 /// attach the selection state and press observer.
 fn populate_notice_rows(
     mut commands: Commands,
-    ui: Option<Res<GroupProfileUi>>,
+    windows: Query<&GroupProfileUi>,
     new_rows: Query<(Entity, &ChildOf), Added<VirtualRow>>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
     for (row_entity, child_of) in &new_rows {
-        if child_of.parent() != ui.notices_viewport {
+        // Which window's list this row belongs to: every open window pools its
+        // own rows under its own viewport.
+        let Some(ui) = windows
+            .iter()
+            .find(|ui| ui.notices_viewport == child_of.parent())
+        else {
             continue;
-        }
+        };
         spawn_table_row(&mut commands, row_entity, ui.notices_table, &NOTICES_TABLE);
         commands
             .entity(row_entity)
@@ -2562,9 +2593,7 @@ fn populate_notice_rows(
 
 /// Bind each pooled notice row to the [`NoticeRow`] it now points at.
 fn bind_notice_rows(
-    view: Res<NoticesView>,
-    state: Res<GroupProfileState>,
-    ui: Option<Res<GroupProfileUi>>,
+    windows: Query<(Ref<GroupProfileState>, Ref<NoticesView>, &GroupProfileUi)>,
     mut rows: Query<(
         Entity,
         Ref<VirtualRow>,
@@ -2575,41 +2604,40 @@ fn bind_notice_rows(
     mut backgrounds: Query<&mut BackgroundColor>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    let refresh_all = view.is_changed() || state.is_changed();
-    for (row_entity, row, child_of, cells, mut bound) in &mut rows {
-        if child_of.parent() != ui.notices_viewport {
-            continue;
-        }
-        if !refresh_all && !row.is_changed() {
-            continue;
-        }
-        let Some(row_index) = row.index else {
-            continue;
-        };
-        let Some(notice_row) = view.rows.get(row_index) else {
-            continue;
-        };
-        bound.0 = Some(notice_row.index);
-        let subject = if notice_row.has_attachment {
-            format!("\u{1F4CE} {}", notice_row.subject)
-        } else {
-            notice_row.subject.clone()
-        };
-        set_row_cell(&mut texts, cells, 0, &subject, false);
-        set_row_cell(&mut texts, cells, 1, &notice_row.from_name, false);
-        set_row_cell(&mut texts, cells, 2, &notice_row.date, false);
-        let selected = state.selected_notice == Some(notice_row.index);
-        if let Ok(mut background) = backgrounds.get_mut(row_entity) {
-            let wanted = if selected {
-                SELECTED_ROW_BACKGROUND
-            } else {
-                Color::NONE
+    for (state, view, ui) in &windows {
+        let refresh_all = view.is_changed() || state.is_changed();
+        for (row_entity, row, child_of, cells, mut bound) in &mut rows {
+            if child_of.parent() != ui.notices_viewport {
+                continue;
+            }
+            if !refresh_all && !row.is_changed() {
+                continue;
+            }
+            let Some(row_index) = row.index else {
+                continue;
             };
-            if background.0 != wanted {
-                background.0 = wanted;
+            let Some(notice_row) = view.rows.get(row_index) else {
+                continue;
+            };
+            bound.0 = Some(notice_row.index);
+            let subject = if notice_row.has_attachment {
+                format!("\u{1F4CE} {}", notice_row.subject)
+            } else {
+                notice_row.subject.clone()
+            };
+            set_row_cell(&mut texts, cells, 0, &subject, false);
+            set_row_cell(&mut texts, cells, 1, &notice_row.from_name, false);
+            set_row_cell(&mut texts, cells, 2, &notice_row.date, false);
+            let selected = state.selected_notice == Some(notice_row.index);
+            if let Ok(mut background) = backgrounds.get_mut(row_entity) {
+                let wanted = if selected {
+                    SELECTED_ROW_BACKGROUND
+                } else {
+                    Color::NONE
+                };
+                if background.0 != wanted {
+                    background.0 = wanted;
+                }
             }
         }
     }
@@ -2625,16 +2653,26 @@ fn bind_notice_rows(
 fn on_notice_row_press(
     press: On<Pointer<Press>>,
     rows: Query<&BoundNotice>,
-    ui: Res<GroupProfileUi>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
+    mut windows: Query<(
+        &mut GroupProfileState,
+        &mut GroupProfileDirty,
+        &GroupProfileUi,
+    )>,
     mut focus: ResMut<InputFocus>,
-    mut state: ResMut<GroupProfileState>,
-    mut dirty: ResMut<GroupProfileDirty>,
     mut requested: ResMut<RequestedGroupNotices>,
     mut sl_commands: MessageWriter<SlCommand>,
 ) {
     if press.button != PointerButton::Primary {
         return;
     }
+    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+        return;
+    };
+    let Ok((mut state, mut dirty, ui)) = windows.get_mut(window) else {
+        return;
+    };
     focus.set(ui.notices_viewport, FocusCause::Navigated);
     let Ok(bound) = rows.get(press.entity) else {
         return;
@@ -2672,9 +2710,13 @@ fn on_notice_row_press(
 fn on_group_profile_action(
     press: On<Pointer<Press>>,
     actions: Query<&GroupProfileAction>,
-    mut state: ResMut<GroupProfileState>,
-    mut dirty: ResMut<GroupProfileDirty>,
-    ui: Res<GroupProfileUi>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
+    mut windows: Query<(
+        &mut GroupProfileState,
+        &mut GroupProfileDirty,
+        &GroupProfileUi,
+    )>,
     fields: Query<&EditableText>,
     clipboard: Res<crate::clipboard::ViewerClipboard>,
     mut sl_commands: MessageWriter<SlCommand>,
@@ -2683,6 +2725,14 @@ fn on_group_profile_action(
         return;
     }
     let Ok(action) = actions.get(press.entity) else {
+        return;
+    };
+    // Which window this button belongs to — with two group profiles open, Save
+    // means save *this* window's group, from *this* window's fields.
+    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+        return;
+    };
+    let Ok((mut state, mut dirty, ui)) = windows.get_mut(window) else {
         return;
     };
     let Some(target) = state.target else {
@@ -2933,25 +2983,27 @@ fn send_accept_notices(
 
 /// Swap the group insignia into its box once the pipeline decodes it.
 fn poll_group_profile_texture(
-    mut state: ResMut<GroupProfileState>,
+    mut windows: Query<&mut GroupProfileState>,
     store: Res<DecodedTextures>,
     mut images: ResMut<Assets<Image>>,
     children: Query<&Children>,
     mut commands: Commands,
 ) {
-    let Some((key, node)) = state.pending_texture else {
-        return;
-    };
-    let Ok(mut entity) = commands.get_entity(node) else {
-        state.pending_texture = None;
-        return;
-    };
-    if let Some(decoded) = store.get(key) {
-        let handle = images.add(to_bevy_image(decoded));
-        entity.insert(ImageNode::new(handle));
-        // Drop the "(loading)" label under the image.
-        despawn_children(&children, &mut commands, node);
-        state.pending_texture = None;
+    for mut state in &mut windows {
+        let Some((key, node)) = state.pending_texture else {
+            continue;
+        };
+        let Ok(mut entity) = commands.get_entity(node) else {
+            state.pending_texture = None;
+            continue;
+        };
+        if let Some(decoded) = store.get(key) {
+            let handle = images.add(to_bevy_image(decoded));
+            entity.insert(ImageNode::new(handle));
+            // Drop the "(loading)" label under the image.
+            despawn_children(&children, &mut commands, node);
+            state.pending_texture = None;
+        }
     }
 }
 
@@ -3423,5 +3475,188 @@ mod tests {
         assert_eq!(role_or_everyone(None), GroupRoleKey::from(Uuid::nil()));
         let role = GroupRoleKey::from(Uuid::from_u128(7));
         assert_eq!(role_or_everyone(Some(role)), role);
+    }
+
+    /// **One window per group** (`viewer-keyed-floater-audit`): the open path
+    /// itself, driven by the very message the Groups list's Info button writes.
+    ///
+    /// The pure helpers above cannot see this one: what the conversion changed
+    /// is that there is a state *per window* rather than one for every group.
+    mod instances {
+        use super::super::{
+            GROUP_PROFILE_FLOATER_ID, GroupProfileState, GroupProfileUi, group_profile_key,
+            open_group_profile,
+        };
+        use crate::floater::{
+            ActiveFloater, Floater, FloaterCommand, FloaterOp, FloaterPlugin, FloaterZTop,
+        };
+        use crate::ui::UiRoot;
+        use crate::world_api::{GroupsModel, OpenGroupProfile};
+        use bevy::prelude::*;
+        use pretty_assertions::assert_eq;
+        use sl_client_bevy::{GroupKey, SlCommand, Uuid};
+
+        /// A boxed error so tests can use `?` rather than the disallowed
+        /// `unwrap` / `expect`.
+        type TestError = Box<dyn core::error::Error>;
+
+        /// Two distinct groups to open profiles on.
+        fn groups() -> (GroupKey, GroupKey) {
+            (
+                GroupKey::from(Uuid::from_u128(0x2222_3333_4444_5555_6666_7777_8888_9999)),
+                GroupKey::from(Uuid::from_u128(0x9999_8888_7777_6666_5555_4444_3333_2222)),
+            )
+        }
+
+        /// An app with the floater manager and the **open path** — this module's
+        /// own `open_group_profile`, not the whole plugin.
+        ///
+        /// The window-facing systems beside it each need a slice of a live
+        /// session (the avatar names, the texture pipeline, the translator, the
+        /// virtual-list layout pass), and standing all of that up would test the
+        /// harness rather than the conversion. The bug class this fixes is in
+        /// the open: one state for every group.
+        fn group_app() -> App {
+            let mut app = App::new();
+            app.add_message::<SlCommand>()
+                .add_message::<OpenGroupProfile>()
+                .init_resource::<GroupsModel>()
+                // `bevy_ui`'s scale and the keyboard map, which the manager's
+                // on-screen clamp and its `Ctrl+W` read; no `UiPlugin` here.
+                .init_resource::<UiScale>()
+                .init_resource::<ButtonInput<KeyCode>>()
+                .add_plugins(FloaterPlugin)
+                .add_systems(Update, open_group_profile);
+            let root = app.world_mut().spawn(Node::default()).id();
+            app.insert_resource(UiRoot(root));
+            app.update();
+            app
+        }
+
+        /// Open `group`'s profile the way every caller does — by writing the
+        /// message — and settle a frame.
+        fn open(app: &mut App, group: GroupKey) {
+            app.world_mut().write_message(OpenGroupProfile { group });
+            app.update();
+        }
+
+        /// Every live group-profile window, as (entity, subject) pairs.
+        fn windows(app: &mut App) -> Vec<(Entity, Option<GroupKey>)> {
+            app.world_mut()
+                .query::<(Entity, &GroupProfileState)>()
+                .iter(app.world())
+                .map(|(entity, state)| (entity, state.target))
+                .collect()
+        }
+
+        /// Two groups are two windows, each with its own subject and its own
+        /// tables — and re-opening one raises that window instead of adding a
+        /// third.
+        #[test]
+        fn two_groups_open_two_windows() -> Result<(), TestError> {
+            let (first, second) = groups();
+            let mut app = group_app();
+            open(&mut app, first);
+            open(&mut app, second);
+
+            let open_windows = windows(&mut app);
+            assert_eq!(
+                open_windows.len(),
+                2,
+                "the second group reused the first window"
+            );
+            let subjects: Vec<Option<GroupKey>> =
+                open_windows.iter().map(|(_entity, group)| *group).collect();
+            assert!(subjects.contains(&Some(first)) && subjects.contains(&Some(second)));
+
+            let world = app.world();
+            for (window, _group) in &open_windows {
+                let ui = world
+                    .get::<GroupProfileUi>(*window)
+                    .ok_or("a window has no UI handles of its own")?;
+                // Each window's lists are its own entities, not a shared pair.
+                assert!(ui.members_viewport != ui.notices_viewport);
+                let floater = world.get::<Floater>(*window).ok_or("not a floater")?;
+                assert_eq!(floater.id, GROUP_PROFILE_FLOATER_ID);
+            }
+            let members: Vec<Entity> = open_windows
+                .iter()
+                .filter_map(|(window, _group)| world.get::<GroupProfileUi>(*window))
+                .map(|ui| ui.members_viewport)
+                .collect();
+            assert!(
+                members.first() != members.get(1),
+                "both windows share one members list"
+            );
+            let keys: Vec<Option<&crate::floater::FloaterKey>> = open_windows
+                .iter()
+                .map(|(window, _group)| world.get::<Floater>(*window).and_then(Floater::key))
+                .collect();
+            assert!(keys.contains(&Some(&group_profile_key(first))));
+            assert!(keys.contains(&Some(&group_profile_key(second))));
+
+            open(&mut app, first);
+            assert_eq!(
+                windows(&mut app).len(),
+                2,
+                "a reopen spawned a third window"
+            );
+            let raised = windows(&mut app)
+                .into_iter()
+                .find_map(|(window, group)| (group == Some(first)).then_some(window))
+                .ok_or("the first group's window is gone")?;
+            assert_eq!(
+                app.world().resource::<ActiveFloater>().front(),
+                Some(raised)
+            );
+            Ok(())
+        }
+
+        /// Closing one group profile ends **that** window — its state, its
+        /// tables and its unsaved drafts go with it — and leaves the other
+        /// group's window open.
+        #[test]
+        fn closing_one_group_leaves_the_other() -> Result<(), TestError> {
+            let (first, second) = groups();
+            let mut app = group_app();
+            open(&mut app, first);
+            open(&mut app, second);
+            let target = windows(&mut app)
+                .into_iter()
+                .find_map(|(window, group)| (group == Some(first)).then_some(window))
+                .ok_or("the first group has no window")?;
+
+            app.world_mut()
+                .resource_mut::<Messages<FloaterCommand>>()
+                .write(FloaterCommand {
+                    floater: target,
+                    op: FloaterOp::Close,
+                });
+            app.update();
+
+            let left = windows(&mut app);
+            assert_eq!(left.len(), 1, "closing one profile left the wrong count");
+            assert_eq!(
+                left.first().and_then(|(_window, group)| *group),
+                Some(second)
+            );
+
+            open(&mut app, first);
+            assert_eq!(
+                windows(&mut app).len(),
+                2,
+                "the closed group did not reopen"
+            );
+            Ok(())
+        }
+
+        /// The windows above are the manager's real ones — the fixture adds
+        /// [`FloaterPlugin`], so a keyed open, a raise and a close are the
+        /// shipped code paths rather than a stand-in.
+        #[test]
+        fn the_manager_is_wired() {
+            let app = group_app();
+            assert!(app.world().contains_resource::<FloaterZTop>());
+        }
     }
 }

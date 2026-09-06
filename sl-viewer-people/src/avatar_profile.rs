@@ -62,8 +62,8 @@ use sl_client_bevy::{
 };
 
 use crate::floater::{
-    Floater, FloaterCaps, FloaterHandle, FloaterKey, FloaterSpec, KeyedFloaterOpen, KeyedFloaters,
-    host_floater,
+    Floater, FloaterCaps, FloaterHandle, FloaterKey, FloaterSpec, FloaterSystems, KeyedFloaterOpen,
+    KeyedFloaters, host_floater,
 };
 use crate::i18n::Translated;
 use crate::inventory_drag::AgentDropTarget;
@@ -528,7 +528,10 @@ impl Plugin for AvatarProfilePlugin {
             .add_systems(
                 Update,
                 (
-                    open_profile,
+                    // After the manager's command pass: the click that opens a
+                    // profile often raises the window it landed in as well, and
+                    // the later raise wins (`FloaterSystems`).
+                    open_profile.after(FloaterSystems::Commands),
                     // The per-window systems cost nothing while no profile is
                     // open — which, unlike a singleton window that merely
                     // hides, is most of a session. `ingest_profile_events` in

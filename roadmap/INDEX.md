@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 307 |
+| ready | 306 |
 | blocked | 55 |
-| in-progress | 18 |
-| bugs | 57 |
+| in-progress | 19 |
+| bugs | 59 |
 | done | 1001 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1575** |
+| **total** | **1577** |
 
 ## ideas (98)
 
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (307)
+## ready (306)
 
 ### protocol
 
@@ -575,8 +575,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-inventory-thumbnails`](ready/viewer-inventory-thumbnails.md) —
   Inventory thumbnails — view & edit (blocked by `viewer-ui-texture-picker`
   (done))
-- [`viewer-keyed-floater-audit`](ready/viewer-keyed-floater-audit.md) — Audit
-  the other per-subject singletons onto the keyed-floater scaffold
 - [`viewer-land-holdings`](ready/viewer-land-holdings.md) — My land holdings
   floater (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-land-transactions`](ready/viewer-land-transactions.md) — Land sale &
@@ -1118,7 +1116,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (18)
+## in-progress (19)
 
 ### viewer
 
@@ -1132,6 +1130,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Avatar ground probe from the simulator's collision plane (drop the raycast)
 - [`viewer-conference-start-ui`](in-progress/viewer-conference-start-ui.md) —
   Start an ad-hoc conference from a multi-selection
+- [`viewer-keyed-floater-audit`](in-progress/viewer-keyed-floater-audit.md) —
+  Audit the other per-subject singletons onto the keyed-floater scaffold
 - [`viewer-media-prim-browser`](in-progress/viewer-media-prim-browser.md) —
   Media-on-a-prim & embedded web browser
 - [`viewer-notecard-editor`](in-progress/viewer-notecard-editor.md) — Notecard
@@ -1168,7 +1168,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (57)
+## bugs (59)
 
 ### viewer
 
@@ -1248,6 +1248,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   terrain)
 - [`viewer-edit-outline-skinned-mesh`](bugs/viewer-edit-outline-skinned-mesh.md)
   — Edit-selection outline can't shell a skinned / animesh object
+- [`viewer-groups-pane-empty-on-opensim`](bugs/viewer-groups-pane-empty-on-opensim.md)
+  — The Groups pane lists nothing while the profile's group list has the same
+  groups
 - [`viewer-hover-tooltip-202ms-frame-spike`](bugs/viewer-hover-tooltip-202ms-frame-spike.md)
   — update_hover_tooltip spikes to 202 ms on a single frame
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
@@ -1276,6 +1279,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rigged-attachments-wearer-not-resolved`](bugs/viewer-rigged-attachments-wearer-not-resolved.md)
   — Worn rigged attachments (e.g. own shoes) don't render — wearer never
   resolved / too many rigged-pending objects
+- [`viewer-skinned-bind-group-quits-on-rez`](bugs/viewer-skinned-bind-group-quits-on-rez.md)
+  — A skinned draw takes the non-skinned bind group and the render handler quits
+  the viewer
 - [`viewer-sunlit-face-clips-two-channels`](bugs/viewer-sunlit-face-clips-two-channels.md)
   — A sunlit opaque face pins red and green rather than showing its texture
 - [`viewer-takeoff-hold-jumps-instead-of-flying`](bugs/viewer-takeoff-hold-jumps-instead-of-flying.md)
