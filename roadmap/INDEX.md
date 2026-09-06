@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 55 |
 | in-progress | 18 |
 | bugs | 58 |
-| done | 999 |
+| done | 1000 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1573** |
+| **total** | **1574** |
 
 ## ideas (98)
 
@@ -1246,8 +1246,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   terrain)
 - [`viewer-edit-outline-skinned-mesh`](bugs/viewer-edit-outline-skinned-mesh.md)
   — Edit-selection outline can't shell a skinned / animesh object
-- [`viewer-floaters-never-reread-after-a-push`](bugs/viewer-floaters-never-reread-after-a-push.md)
-  — A floater seeds its draft once and reverts what it never saw
 - [`viewer-hover-tooltip-202ms-frame-spike`](bugs/viewer-hover-tooltip-202ms-frame-spike.md)
   — update_hover_tooltip spikes to 202 ms on a single frame
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
@@ -1273,6 +1271,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A plain prim attachment reads "(worn)" in inventory but never appears on
 - [`viewer-profile-floater-single-instance`](bugs/viewer-profile-floater-single-instance.md)
   — A second resident profile replaces the first instead of opening its own
+- [`viewer-region-push-discards-pending-edits`](bugs/viewer-region-push-discards-pending-edits.md)
+  — A region push throws away the estate manager's unapplied edits
 - [`viewer-rigged-attachments-wearer-not-resolved`](bugs/viewer-rigged-attachments-wearer-not-resolved.md)
   — Worn rigged attachments (e.g. own shoes) don't render — wearer never
   resolved / too many rigged-pending objects
@@ -1307,7 +1307,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (999)
+## done (1000)
 
 ### protocol
 
@@ -1830,6 +1830,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-interaction-harness` (done), `viewer-floater-registry` (done))
 - [`viewer-floater-registry`](done/viewer-floater-registry.md) — A FLOATERS
   registry, so floaters can be swept at all
+- [`viewer-floaters-never-reread-after-a-push`](done/viewer-floaters-never-reread-after-a-push.md)
+  — A floater seeds its draft once and reverts what it never saw
 - [`viewer-flycam-stop-button-overlaps-chat`](done/viewer-flycam-stop-button-overlaps-chat.md)
   — "Stop flycam" button overlaps the "Chat" button in the bottom bar
 - [`viewer-fps-label-intermittent`](done/viewer-fps-label-intermittent.md) — FPS

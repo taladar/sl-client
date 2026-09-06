@@ -273,8 +273,24 @@ struct AboutLandState {
     access_ban: Vec<ParcelAccessEntry>,
     /// The pending edit draft, seeded at open; **Apply** commits it.
     draft: ParcelUpdate,
-    /// Whether [`draft`](Self::draft) is seeded for the current subject.
-    draft_ready: bool,
+    /// The record [`draft`](Self::draft) was last seeded or merged from — the
+    /// **base** of the three-way merge, and `None` until the subject resolves
+    /// (which is also what "the draft is not seeded yet" means).
+    ///
+    /// A draft field that still equals its base is one this resident has not
+    /// edited, so an arriving record owns it; a field that has moved away is a
+    /// pending edit and is kept. See [`ParcelUpdate::merge_unedited`].
+    seeded: Option<ParcelUpdate>,
+    /// What the six text fields were last written with, or `None` before the
+    /// first write.
+    ///
+    /// The text fields are not mirrored into [`draft`](Self::draft) until
+    /// **Apply** reads them, so the draft's merge cannot see typing in flight
+    /// and this is what does. A widget still reading exactly what it was last
+    /// given is one nobody has typed in; anything else is the resident's.
+    /// Compared against the *widget*, so it must be what the widget was given
+    /// and not the merge's base, which has already advanced by then.
+    shown_fields: Option<FieldText>,
     /// Bumped when the object-owner tally changes, to rebuild its table view.
     owners_revision: u64,
     /// Bumped when the allow list changes.
@@ -304,7 +320,8 @@ impl AboutLandState {
         self.owners = Vec::new();
         self.clear_access_lists();
         self.draft = ParcelUpdate::default();
-        self.draft_ready = false;
+        self.seeded = None;
+        self.shown_fields = None;
         self.pending_sequence = None;
         self.owners_revision = self.owners_revision.wrapping_add(1);
     }
@@ -343,20 +360,107 @@ impl AboutLandState {
 
     /// Seed the edit [`draft`](Self::draft) from the parcel, once per open.
     fn seed_draft(&mut self) {
-        if self.draft_ready {
+        if self.seeded.is_some() {
             return;
         }
         if let Some(parcel) = &self.parcel {
-            self.draft =
-                parcel_update_from(parcel, parcel.name.clone(), parcel.description.clone());
-            self.draft_ready = true;
+            self.draft = parcel.to_update();
+            self.seeded = Some(self.draft.clone());
         }
+    }
+
+    /// Fold a freshly arrived record into the draft, keeping this resident's
+    /// pending edits and taking the grid's word for everything else.
+    ///
+    /// Returns whether any draft field moved, so the caller can re-seed the
+    /// text fields that follow it.
+    ///
+    /// Every `ParcelProperties` for the bound parcel comes through here, not
+    /// only the sequence-zero pushes another resident's save produces. Three
+    /// things arrive on this path and the merge is the right answer to all of
+    /// them, which is why none of them is special-cased: a foreign push (carry
+    /// their change), the read-back this floater requests after its own
+    /// **Apply** (agrees with the draft, so nothing moves), and an ordinary
+    /// refresh. Telling them apart is not possible anyway — `apply_draft`
+    /// requests its read-back with `sequence_id: 0`, the very value that marks
+    /// an unsolicited push.
+    fn merge_parcel(&mut self, parcel: &ParcelInfo) -> bool {
+        self.merge_update(parcel.to_update())
+    }
+
+    /// The half of [`merge_parcel`](Self::merge_parcel) that does not need a
+    /// whole [`ParcelInfo`] to exercise.
+    fn merge_update(&mut self, fresh: ParcelUpdate) -> bool {
+        let Some(base) = self.seeded.as_ref() else {
+            // Not seeded yet: there is no base to merge against, and
+            // `seed_draft` is what establishes one.
+            return false;
+        };
+        let moved = self.draft.merge_unedited(base, &fresh);
+        self.seeded = Some(fresh);
+        moved
     }
 
     /// The scoped id for the bound parcel, given the current circuit.
     fn scoped(&self, identity: &SlIdentity) -> Option<ScopedParcelId> {
         Some(ScopedParcelId::new(identity.circuit_id?, self.target?))
     }
+}
+
+/// The six About Land text fields, rendered.
+///
+/// Both what a pass is about to write and what the previous pass wrote, so the
+/// two can be compared field by field — see
+/// [`AboutLandState::shown_fields`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct FieldText {
+    /// The parcel name.
+    name: String,
+    /// The parcel description.
+    description: String,
+    /// The streaming media URL, empty for none.
+    media_url: String,
+    /// The streaming music URL, empty for none.
+    music_url: String,
+    /// The parcel pass price in L$.
+    pass_price: String,
+    /// The parcel pass duration in hours.
+    pass_hours: String,
+}
+
+impl FieldText {
+    /// Render a draft's six editable text values.
+    fn from_draft(draft: &ParcelUpdate) -> Self {
+        Self {
+            name: draft.name.clone(),
+            description: draft.description.clone(),
+            media_url: url_text(draft.media_url.as_ref()),
+            music_url: url_text(draft.music_url.as_ref()),
+            pass_price: draft.pass_price.0.to_string(),
+            pass_hours: format!("{:.0}", draft.pass_hours),
+        }
+    }
+}
+
+/// How much of the edit fields' text the next [`seed_edit_fields`] pass may
+/// rewrite.
+///
+/// The six text fields are the one part of the form that is **not** mirrored
+/// into [`AboutLandState::draft`] until **Apply** reads them, so the resident's
+/// pending typing lives in the widget rather than in the draft. That makes the
+/// draft's three-way merge blind to it, and this is how the widgets get the
+/// same protection.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum FieldSeed {
+    /// Leave the fields alone.
+    #[default]
+    None,
+    /// Rewrite every field — a fresh subject, whose text has nothing to do with
+    /// what the widgets are showing.
+    All,
+    /// Rewrite only a field whose text still equals what was last seeded into
+    /// it, leaving anything the resident has typed since.
+    Unedited,
 }
 
 /// Which sub-panels need an in-place value refresh this frame.
@@ -366,8 +470,8 @@ impl AboutLandState {
     reason = "one independent dirty flag per in-place refresh pass"
 )]
 struct AboutLandDirty {
-    /// Seed the edit fields' text from the draft (on a fresh subject).
-    seed_fields: bool,
+    /// How much of the edit fields' text to seed from the draft.
+    seed_fields: FieldSeed,
     /// The write controls' enable state / visibility (a rights change).
     controls: bool,
     /// The General tab's read-only values.
@@ -378,8 +482,6 @@ struct AboutLandDirty {
     covenant_values: bool,
     /// The Objects tab's counts.
     objects_values: bool,
-    /// The Access tab's checkboxes / pass fields.
-    access_values: bool,
     /// The Environment tab's read-only summary.
     environment_values: bool,
 }
@@ -387,13 +489,12 @@ struct AboutLandDirty {
 impl AboutLandDirty {
     /// Mark every sub-panel dirty (on a fresh open).
     const fn mark_all(&mut self) {
-        self.seed_fields = true;
+        self.seed_fields = FieldSeed::All;
         self.controls = true;
         self.general_values = true;
         self.editable_values = true;
         self.covenant_values = true;
         self.objects_values = true;
-        self.access_values = true;
         self.environment_values = true;
     }
 }
@@ -1548,7 +1649,15 @@ fn ingest_about_land_events(
             }
             SlSessionEvent::ParcelProperties(parcel) if Some(parcel.local_id) == state.target => {
                 state.parcel = Some((**parcel).clone());
+                // Seeds on the first record for this subject, merges on every
+                // one after it. Without the merge the draft stayed as it was at
+                // open and **Apply** re-asserted all eighteen fields, reverting
+                // whatever another resident changed in between
+                // ([[viewer-floaters-never-reread-after-a-push]]).
                 state.seed_draft();
+                if state.merge_parcel(parcel) {
+                    dirty.seed_fields = FieldSeed::Unedited;
+                }
                 dirty.general_values = true;
                 dirty.objects_values = true;
                 dirty.editable_values = true;
@@ -1694,47 +1803,107 @@ fn request_name(agent: AgentKey, commands: &mut MessageWriter<SlCommand>) {
 // In-place value updates.
 // ---------------------------------------------------------------------------
 
-/// Seed the edit fields' text from the draft on a fresh subject.
+/// Seed the edit fields' text from the draft.
+///
+/// [`FieldSeed::All`] on a fresh subject, [`FieldSeed::Unedited`] after a record
+/// arrived and moved the draft under the resident. In the second mode a field is
+/// only rewritten if its text still equals what was last seeded into it, so
+/// typing that has not been applied yet is never overwritten by somebody else's
+/// save landing mid-sentence.
 fn seed_edit_fields(
     mut dirty: ResMut<AboutLandDirty>,
     ui: Option<Res<AboutLandUi>>,
-    state: Res<AboutLandState>,
+    mut state: ResMut<AboutLandState>,
     mut fields: Query<&mut EditableText>,
 ) {
     let Some(ui) = ui else {
         return;
     };
-    if !dirty.seed_fields {
+    let mode = dirty.seed_fields;
+    if mode == FieldSeed::None {
         return;
     }
-    dirty.seed_fields = false;
-    let draft = &state.draft;
-    set_field_text(&mut fields, ui.general_handles.name_field, &draft.name);
-    set_field_text(
-        &mut fields,
-        ui.general_handles.desc_field,
-        &draft.description,
-    );
-    set_field_text(
-        &mut fields,
-        ui.media_handles.url_field,
-        &url_text(draft.media_url.as_ref()),
-    );
-    set_field_text(
-        &mut fields,
-        ui.sound_handles.music_field,
-        &url_text(draft.music_url.as_ref()),
-    );
-    set_field_text(
-        &mut fields,
-        ui.access_handles.pass_price_field,
-        &draft.pass_price.0.to_string(),
-    );
-    set_field_text(
-        &mut fields,
-        ui.access_handles.pass_hours_field,
-        &format!("{:.0}", draft.pass_hours),
-    );
+    dirty.seed_fields = FieldSeed::None;
+    let wanted = FieldText::from_draft(&state.draft);
+    // What the previous pass wrote. In `Unedited` mode a field that no longer
+    // reads as it was written has been typed in, and is left alone; in `All`
+    // mode the subject itself changed, so the old text means nothing.
+    let shown = match mode {
+        FieldSeed::None | FieldSeed::All => None,
+        FieldSeed::Unedited => state.shown_fields.clone(),
+    };
+    // What this pass leaves on screen: the value it wrote, or the resident's
+    // own text where it declined to write. Recording the latter is what stops
+    // the *next* push from reading the typing as "changed back".
+    let mut left = wanted.clone();
+    // Each row carries its own slot in `left`, so there is no index to keep in
+    // step with the field order.
+    let rows: [(Option<Entity>, &str, Option<&str>, &mut String); 6] = [
+        (
+            ui.general_handles.name_field,
+            &wanted.name,
+            shown.as_ref().map(|shown| shown.name.as_str()),
+            &mut left.name,
+        ),
+        (
+            ui.general_handles.desc_field,
+            &wanted.description,
+            shown.as_ref().map(|shown| shown.description.as_str()),
+            &mut left.description,
+        ),
+        (
+            ui.media_handles.url_field,
+            &wanted.media_url,
+            shown.as_ref().map(|shown| shown.media_url.as_str()),
+            &mut left.media_url,
+        ),
+        (
+            ui.sound_handles.music_field,
+            &wanted.music_url,
+            shown.as_ref().map(|shown| shown.music_url.as_str()),
+            &mut left.music_url,
+        ),
+        (
+            ui.access_handles.pass_price_field,
+            &wanted.pass_price,
+            shown.as_ref().map(|shown| shown.pass_price.as_str()),
+            &mut left.pass_price,
+        ),
+        (
+            ui.access_handles.pass_hours_field,
+            &wanted.pass_hours,
+            shown.as_ref().map(|shown| shown.pass_hours.as_str()),
+            &mut left.pass_hours,
+        ),
+    ];
+    for (field, want, previous, slot) in rows {
+        if let Some(previous) = previous
+            && !field_reads(&fields, field, previous)
+        {
+            if let Some(text) = field_text(&fields, field) {
+                *slot = text;
+            }
+            continue;
+        }
+        set_field_text(&mut fields, field, want);
+    }
+    state.shown_fields = Some(left);
+}
+
+/// A field's current text, if it exists.
+fn field_text(fields: &Query<&mut EditableText>, field: Option<Entity>) -> Option<String> {
+    fields
+        .get(field?)
+        .ok()
+        .map(|editable| editable.value().to_string())
+}
+
+/// Whether `field`'s current text is exactly `value`.
+///
+/// A missing field reads as matching, so a form built without it is seeded
+/// rather than skipped.
+fn field_reads(fields: &Query<&mut EditableText>, field: Option<Entity>, value: &str) -> bool {
+    field_text(fields, field).is_none_or(|text| text == value)
 }
 
 /// Toggle write buttons' visibility and every editable control's
@@ -2731,31 +2900,6 @@ fn send_access_list(
     }));
 }
 
-/// Build a [`ParcelUpdate`] preserving every field of `parcel` except `name` /
-/// `description`.
-fn parcel_update_from(parcel: &ParcelInfo, name: String, description: String) -> ParcelUpdate {
-    ParcelUpdate {
-        local_id: parcel.local_id,
-        parcel_flags: ParcelFlags::from_bits(parcel.raw_parcel_flags),
-        sale_price: parcel.sale_price.clone(),
-        name,
-        description,
-        music_url: parcel.music_url.clone(),
-        media_url: parcel.media_url.clone(),
-        media_id: parcel.media_id,
-        media_auto_scale: parcel.media_auto_scale,
-        group_id: parcel.group,
-        pass_price: parcel.pass_price.clone(),
-        pass_hours: parcel.pass_hours,
-        category: parcel.category,
-        auth_buyer_id: parcel.auth_buyer_id,
-        snapshot_id: parcel.snapshot_id,
-        user_location: parcel.user_location,
-        user_look_at: parcel.user_look_at,
-        landing_type: parcel.landing_type.to_u8(),
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Value formatting.
 // ---------------------------------------------------------------------------
@@ -3379,7 +3523,7 @@ fn set_combo(combos: &mut Query<&mut ComboSelection>, combo: Option<Entity>, act
 
 #[cfg(test)]
 mod tests {
-    use super::{AboutLandState, merge_access_reply};
+    use super::{AboutLandState, ParcelUpdate, merge_access_reply};
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_bevy::{ParcelAccessEntry, ParcelAccessFlags, Uuid};
 
@@ -3436,6 +3580,80 @@ mod tests {
         let mut list = vec![entry(1)];
         assert!(!merge_access_reply(&mut list, &[]));
         assert_eq!(ids(&list), vec![entry(1).id]);
+    }
+
+    /// A record arriving before the draft is seeded has no base to merge
+    /// against, so it changes nothing and waits for `seed_draft`.
+    #[test]
+    fn a_record_before_the_draft_is_seeded_changes_nothing() {
+        let mut state = AboutLandState::default();
+        let fresh = ParcelUpdate {
+            name: "Theirs".to_owned(),
+            ..ParcelUpdate::default()
+        };
+        assert!(!state.merge_update(fresh));
+        assert_eq!(state.draft, ParcelUpdate::default());
+        assert!(
+            state.seeded.is_none(),
+            "an unseeded form must not adopt a base it never seeded from"
+        );
+    }
+
+    /// The bug this floater was filed for: a record pushed because *somebody
+    /// else* saved must reach the fields this resident has not edited, and must
+    /// not touch the one they have.
+    ///
+    /// Without it **Apply** re-asserted all eighteen fields as they stood at
+    /// open, reverting the other resident's change — and no grid can stop that,
+    /// because a `ParcelPropertiesUpdate` carries the whole record and a
+    /// simulator cannot tell a re-asserted field from an unchanged one.
+    #[test]
+    fn a_push_reaches_the_fields_this_resident_did_not_edit() {
+        let opened = ParcelUpdate {
+            name: "Before".to_owned(),
+            description: "As opened".to_owned(),
+            ..ParcelUpdate::default()
+        };
+        let mut state = AboutLandState {
+            draft: opened.clone(),
+            seeded: Some(opened),
+            ..AboutLandState::default()
+        };
+        // This resident retitled the parcel but has not applied it yet.
+        state.draft.name = "Mine".to_owned();
+
+        assert!(state.merge_update(ParcelUpdate {
+            name: "Before".to_owned(),
+            description: "Theirs".to_owned(),
+            ..ParcelUpdate::default()
+        }));
+        assert_eq!(state.draft.name, "Mine");
+        assert_eq!(
+            state.draft.description, "Theirs",
+            "an Apply now carries their change forward instead of reverting it"
+        );
+    }
+
+    /// Merging advances the base, so the floater settles instead of re-applying
+    /// the same record forever — and the read-back the floater requests after
+    /// its own **Apply** comes through this path too.
+    #[test]
+    fn merging_advances_the_base_so_a_repeat_is_not_a_change() {
+        let opened = ParcelUpdate::default();
+        let mut state = AboutLandState {
+            draft: opened.clone(),
+            seeded: Some(opened),
+            ..AboutLandState::default()
+        };
+        let fresh = ParcelUpdate {
+            description: "Theirs".to_owned(),
+            ..ParcelUpdate::default()
+        };
+        assert!(state.merge_update(fresh.clone()));
+        assert!(
+            !state.merge_update(fresh),
+            "the same record twice is one change"
+        );
     }
 
     /// Because packets accumulate, the emptying happens at request time — so a

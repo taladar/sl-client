@@ -191,6 +191,25 @@ impl TaskInventoryCache {
             entry.fetching = true;
         }
     }
+
+    /// Whether a cached listing is out of date against a serial the simulator
+    /// has just reported.
+    ///
+    /// A prim's contents serial is its **whole** freshness marker, and it
+    /// travels only in the properties record — no message announces that a
+    /// prim's inventory changed. So a listing cached against a serial the
+    /// viewer never saw advance is stale with no way to notice, which is what
+    /// this answers ([[viewer-floaters-never-reread-after-a-push]]).
+    ///
+    /// Compared for inequality, not order: the serial is an `i16` that wraps,
+    /// and any disagreement means the listing is not the one the region holds.
+    /// A listing that was never loaded is not stale but absent, and one already
+    /// being fetched is about to be replaced anyway.
+    fn is_stale_against(&self, task: &ObjectKey, serial: i16) -> bool {
+        self.entries.get(task).is_some_and(|entry| {
+            entry.loaded && !entry.fetching && entry.serial.is_some_and(|cached| cached != serial)
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -854,9 +873,32 @@ fn ingest_task_inventory(
     mut events: MessageReader<SlEvent>,
     mut cache: ResMut<TaskInventoryCache>,
     mut pending: ResMut<PendingMutations>,
+    objects: Res<ObjectState>,
+    mut commands: MessageWriter<SlCommand>,
 ) {
     for event in events.read() {
         match &event.0 {
+            // A properties record is the only thing that carries a prim's
+            // contents serial, and one arrives unasked whenever somebody else
+            // changes a prim this viewer holds selected. A serial that has
+            // moved under a cached listing is the only sign that the listing is
+            // stale, so it is re-fetched — the old items stay on screen until
+            // the reply lands, exactly as after this viewer's own mutation.
+            SlSessionEvent::ObjectProperties(properties)
+                if cache.is_stale_against(&properties.object_id, properties.inventory_serial) =>
+            {
+                if let Some(scoped) = objects
+                    .scoped_by_full_id(properties.object_id.uuid())
+                    .first()
+                {
+                    reconcile_after_mutation(
+                        &mut cache,
+                        &mut commands,
+                        *scoped,
+                        properties.object_id,
+                    );
+                }
+            }
             SlSessionEvent::TaskInventoryContents {
                 task,
                 serial,
@@ -2114,5 +2156,38 @@ mod tests {
         assert_eq!(plain.len(), 3);
         assert!(plain.iter().all(|row| row.state == RowState::Normal));
         Ok(())
+    }
+
+    /// A contents serial that moved under a cached listing is the only sign the
+    /// listing is stale, and it is now read.
+    ///
+    /// `inventory_serial` rides only in `ObjectProperties`; nothing announces
+    /// that another resident changed a prim's contents. Before this, the serial
+    /// was stored and never compared, so a viewer holding a prim's contents open
+    /// showed a listing the region no longer had and could not tell.
+    #[test]
+    fn a_moved_contents_serial_makes_a_cached_listing_stale() {
+        use super::{ObjectKey, TaskInventoryCache};
+
+        let task = ObjectKey::from(sl_client_bevy::Uuid::from_bytes([7; 16]));
+        let mut cache = TaskInventoryCache::default();
+
+        // Nothing cached: absent, not stale — the fetch driver's job, not this.
+        assert!(!cache.is_stale_against(&task, 3));
+
+        cache.store_empty(task, 3);
+        assert!(
+            !cache.is_stale_against(&task, 3),
+            "the serial the listing was fetched at is not a change"
+        );
+        assert!(cache.is_stale_against(&task, 4));
+
+        // The serial is an i16 and wraps, so any disagreement counts — a
+        // wrapped-around serial is still a listing this viewer never saw.
+        assert!(cache.is_stale_against(&task, i16::MIN));
+
+        // Already being re-fetched: the reply is about to replace it anyway.
+        cache.mark_stale(&task);
+        assert!(!cache.is_stale_against(&task, 4));
     }
 }

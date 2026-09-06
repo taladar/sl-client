@@ -1497,7 +1497,7 @@ fn refresh_on_region(
     }
     state.can_manage = identity.0.is_estate_manager;
     state.draft = seed_draft(&identity, limits.as_deref());
-    state.debug_draft = seed_debug_draft(&identity);
+    state.debug_draft = seed_debug_draft(&identity, limits.as_deref());
     state.terrain_draft = seed_terrain_draft(&identity, limits.as_deref());
     state.draft_seeded = true;
     if !identity.0.sim_owner.is_nil() {
@@ -1506,9 +1506,39 @@ fn refresh_on_region(
     dirty.mark_all();
 }
 
+/// The region flags to seed a draft from, newest source first.
+///
+/// `SlRegionIdentity` is written **only** by a `RegionHandshake`, which arrives
+/// once on entry. `SlRegionLimits` is written by every `RegionInfo` — including
+/// the one a simulator pushes to the whole region when another estate manager
+/// saves — and it carries the same `RegionFlags` bitfield. Seeding the flag
+/// checkboxes from the identity therefore re-read a record frozen at entry, and
+/// since `SetRegionInfo` sends the **whole** form, Apply re-asserted those stale
+/// flags and reverted the other manager's change
+/// ([[viewer-floaters-never-reread-after-a-push]]).
+fn region_flags_for_draft(
+    identity: &SlRegionIdentity,
+    limits: Option<&SlRegionLimits>,
+) -> RegionFlags {
+    RegionFlags::from_bits(freshest_region_flags(
+        identity.0.region_flags,
+        limits.map(|limits| limits.0.region_flags),
+    ))
+}
+
+/// The precedence [`region_flags_for_draft`] applies, without the components
+/// wrapped around it: the `RegionInfo`'s bits when there are any, else the
+/// handshake's.
+const fn freshest_region_flags(handshake: u32, region_info: Option<u32>) -> u32 {
+    match region_info {
+        Some(bits) => bits,
+        None => handshake,
+    }
+}
+
 /// Build the region-settings draft from the live region identity and limits.
 fn seed_draft(identity: &SlRegionIdentity, limits: Option<&SlRegionLimits>) -> RegionInfoUpdate {
-    let flags = RegionFlags::from_bits(identity.0.region_flags);
+    let flags = region_flags_for_draft(identity, limits);
     RegionInfoUpdate {
         block_terraform: flags.contains(RegionFlags::BLOCK_TERRAFORM),
         block_fly: flags.contains(RegionFlags::BLOCK_FLY),
@@ -1520,13 +1550,18 @@ fn seed_draft(identity: &SlRegionIdentity, limits: Option<&SlRegionLimits>) -> R
             i32::try_from(limits.0.max_agents).unwrap_or(40)
         }),
         object_bonus: limits.map_or(1.0, |limits| limits.0.object_bonus_factor),
-        maturity: identity.0.maturity,
+        // Same reason as the flags: the handshake's maturity is the one it had
+        // at entry, and a `RegionInfo` carries the current one.
+        maturity: limits.map_or(identity.0.maturity, |limits| limits.0.maturity),
     }
 }
 
 /// Build the region-debug draft from the live region flags.
-const fn seed_debug_draft(identity: &SlRegionIdentity) -> RegionDebugUpdate {
-    let flags = RegionFlags::from_bits(identity.0.region_flags);
+fn seed_debug_draft(
+    identity: &SlRegionIdentity,
+    limits: Option<&SlRegionLimits>,
+) -> RegionDebugUpdate {
+    let flags = region_flags_for_draft(identity, limits);
     RegionDebugUpdate {
         disable_scripts: flags.contains(RegionFlags::SKIP_SCRIPTS),
         disable_collisions: flags.contains(RegionFlags::SKIP_COLLISIONS),
@@ -3027,7 +3062,10 @@ fn spawn_remove_button(commands: &mut Commands, cell: Entity, list: AccessList, 
 
 #[cfg(test)]
 mod tests {
-    use super::{AboutRegionState, AccessList, CheckKind, maturity_from_index, maturity_index};
+    use super::{
+        AboutRegionState, AccessList, CheckKind, freshest_region_flags, maturity_from_index,
+        maturity_index,
+    };
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{
         EstateAccessDelta, EstateFlags, Maturity, OwnerKey, RegionInfoUpdate, Uuid,
@@ -3133,5 +3171,30 @@ mod tests {
             OwnerKey::Group(_)
         ));
         assert!(matches!(AccessList::Banned.target(id), OwnerKey::Agent(_)));
+    }
+
+    /// The region form seeds its flag checkboxes from the **`RegionInfo`**, not
+    /// from the handshake.
+    ///
+    /// `SlRegionIdentity` is written only by the `RegionHandshake` that arrives
+    /// on entry, so its flags never move again for the life of the visit.
+    /// `SlRegionLimits` is written by every `RegionInfo`, including the one a
+    /// simulator pushes to the whole region when another estate manager saves.
+    /// Reading the frozen copy meant **Apply** — which sends the whole form —
+    /// re-asserted flags as they were on arrival and reverted that manager
+    /// ([[viewer-floaters-never-reread-after-a-push]]).
+    #[test]
+    fn the_region_draft_prefers_the_region_info_flags() {
+        let handshake = 0b0001;
+        let pushed = 0b1010;
+        assert_eq!(
+            freshest_region_flags(handshake, Some(pushed)),
+            pushed,
+            "a RegionInfo's flags are newer than the handshake's and must win"
+        );
+        // A push that clears every flag is still a push, not an absent one.
+        assert_eq!(freshest_region_flags(handshake, Some(0)), 0);
+        // Before any RegionInfo the handshake is all there is.
+        assert_eq!(freshest_region_flags(handshake, None), handshake);
     }
 }

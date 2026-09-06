@@ -1084,6 +1084,95 @@ impl Default for ParcelUpdate {
     }
 }
 
+impl ParcelUpdate {
+    /// Carry a freshly read record into every field of this form the resident
+    /// has **not** edited, and report whether anything moved.
+    ///
+    /// The three-way merge an About Land form needs to converge. `base` is the
+    /// record this form was seeded from, `self` is the form as it stands, and
+    /// `fresh` is the record the simulator most recently reported. A field of
+    /// `self` that still equals `base` is one nobody here has touched, so it is
+    /// the grid's to state and takes the pushed value; a field that has moved
+    /// away from `base` is the resident's pending edit and is kept.
+    ///
+    /// This is what stops a save from reverting somebody else. A
+    /// `ParcelPropertiesUpdate` carries the **whole** record (see
+    /// [`ParcelInfo::to_update`]), so a form populated once at open re-asserts
+    /// every field as it stood then — silently undoing whatever another
+    /// resident changed in between. Nothing on the grid side can stop that: a
+    /// simulator cannot tell a re-asserted field from an unchanged one, and
+    /// Second Life has no edit lock to have prevented the overlap. Convergence
+    /// is therefore the viewer's job, and this is where it happens.
+    ///
+    /// The caller advances `base` to `fresh` afterwards, so a field the
+    /// resident edited to the value the grid already holds stops counting as an
+    /// edit — the two agree, and there is nothing left to protect.
+    #[expect(
+        clippy::float_cmp,
+        reason = "the question is whether a value moved at all, not whether two \
+                  computations agree to a tolerance: both sides come from the same \
+                  decode of the same wire field, so a difference of any size is a \
+                  real edit and must be kept"
+    )]
+    pub fn merge_unedited(&mut self, base: &Self, fresh: &Self) -> bool {
+        // Destructured without a `..` rest pattern on purpose: a field added to
+        // `ParcelUpdate` and forgotten here is then a compile error, and one
+        // added to the destructure but forgotten in `carry!` is an unused
+        // binding. The hazard this whole conversion family has is a forgotten
+        // field, so neither list is allowed to drift in silence.
+        let Self {
+            local_id,
+            parcel_flags,
+            sale_price,
+            name,
+            description,
+            music_url,
+            media_url,
+            media_id,
+            media_auto_scale,
+            group_id,
+            pass_price,
+            pass_hours,
+            category,
+            auth_buyer_id,
+            snapshot_id,
+            user_location,
+            user_look_at,
+            landing_type,
+        } = fresh;
+        let mut moved = false;
+        macro_rules! carry {
+            ($($field:ident),+ $(,)?) => {$(
+                if self.$field == base.$field && self.$field != *$field {
+                    self.$field = $field.clone();
+                    moved = true;
+                }
+            )+};
+        }
+        carry!(
+            local_id,
+            parcel_flags,
+            sale_price,
+            name,
+            description,
+            music_url,
+            media_url,
+            media_id,
+            media_auto_scale,
+            group_id,
+            pass_price,
+            pass_hours,
+            category,
+            auth_buyer_id,
+            snapshot_id,
+            user_location,
+            user_look_at,
+            landing_type,
+        );
+        moved
+    }
+}
+
 /// One owner's object tally on a parcel, from a `ParcelObjectOwnersReply` block
 /// (the per-owner rows the "Returnable objects" land panel shows). Requested via
 /// [`Command::RequestParcelObjectOwners`](crate::Command::RequestParcelObjectOwners)
@@ -1226,7 +1315,7 @@ mod tests {
 
     use pretty_assertions::assert_eq;
 
-    use super::bitmap_contains_point;
+    use super::{ParcelUpdate, bitmap_contains_point};
 
     /// A 64×64-block (standard 256 m region) membership bitmap with a single block
     /// set at `(block_x, block_y)`; the 4096-bit map is 512 bytes.
@@ -1428,5 +1517,102 @@ mod tests {
         assert!(ParcelOverlayGrid::for_region_width_metres(250.0).is_none());
         assert!(ParcelOverlayGrid::for_region_width_metres(0.0).is_none());
         assert!(ParcelOverlayGrid::for_region_width_metres(f32::NAN).is_none());
+    }
+
+    /// A form carries a pushed record into the fields nobody edited, and keeps
+    /// the ones somebody did.
+    ///
+    /// The whole point of the merge: an About Land form seeded at open, one
+    /// field changed by this resident, and a record arriving that another
+    /// resident changed a *different* field of. Without this the save would
+    /// re-assert the open-time value of their field and revert them.
+    #[test]
+    fn a_form_takes_a_push_only_where_it_was_not_edited() {
+        let base = ParcelUpdate {
+            name: "Before".to_owned(),
+            description: "As opened".to_owned(),
+            pass_hours: 1.0,
+            ..ParcelUpdate::default()
+        };
+
+        // This resident retitled the parcel and has not pressed Apply yet.
+        let mut form = base.clone();
+        form.name = "Mine".to_owned();
+
+        // Meanwhile somebody else rewrote the description and the pass length.
+        let fresh = ParcelUpdate {
+            name: "Before".to_owned(),
+            description: "Theirs".to_owned(),
+            pass_hours: 4.0,
+            ..ParcelUpdate::default()
+        };
+
+        assert!(form.merge_unedited(&base, &fresh));
+        assert_eq!(form.name, "Mine", "an edited field is the resident's");
+        assert_eq!(
+            form.description, "Theirs",
+            "an untouched field takes what the grid now holds"
+        );
+        // By bits, because the claim is that the pushed value arrived exactly,
+        // not that it landed within a tolerance.
+        assert_eq!(form.pass_hours.to_bits(), 4.0_f32.to_bits());
+    }
+
+    /// Merging is idempotent and reports honestly: a second merge against the
+    /// same record moves nothing, and a record that agrees with the form moves
+    /// nothing either.
+    #[test]
+    fn a_merge_that_changes_nothing_says_so() {
+        let base = ParcelUpdate {
+            name: "Same".to_owned(),
+            ..ParcelUpdate::default()
+        };
+        let mut form = base.clone();
+        assert!(
+            !form.merge_unedited(&base, &base),
+            "a record identical to the form is not a change"
+        );
+
+        let fresh = ParcelUpdate {
+            description: "New".to_owned(),
+            ..base.clone()
+        };
+        assert!(form.merge_unedited(&base, &fresh));
+        // The caller advances the base, which is what makes the merge settle.
+        let base = fresh.clone();
+        assert!(
+            !form.merge_unedited(&base, &fresh),
+            "the same record twice is a change once"
+        );
+    }
+
+    /// A resident who edits a field to the value the grid already holds stops
+    /// counting as having edited it, once the base advances — there is no
+    /// disagreement left to protect.
+    #[test]
+    fn an_edit_that_matches_the_grid_stops_being_an_edit() {
+        let base = ParcelUpdate {
+            name: "Old".to_owned(),
+            ..ParcelUpdate::default()
+        };
+        let fresh = ParcelUpdate {
+            name: "Agreed".to_owned(),
+            ..ParcelUpdate::default()
+        };
+        let mut form = base.clone();
+        form.name = "Agreed".to_owned();
+
+        // Their change and this resident's are the same change.
+        assert!(!form.merge_unedited(&base, &fresh));
+        assert_eq!(form.name, "Agreed");
+
+        // With the base advanced, a later push does own the field again.
+        let base = fresh;
+        let later = ParcelUpdate {
+            name: "Later".to_owned(),
+            ..ParcelUpdate::default()
+        };
+        assert!(form.merge_unedited(&base, &later));
+        assert_eq!(form.name, "Later");
     }
 }
