@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 305 |
-| blocked | 55 |
-| in-progress | 19 |
+| ready | 314 |
+| blocked | 45 |
+| in-progress | 18 |
 | bugs | 59 |
-| done | 998 |
+| done | 1000 |
 | deferred | 25 |
 | wont-do | 14 |
 | **total** | **1573** |
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (305)
+## ready (314)
 
 ### protocol
 
@@ -807,6 +807,32 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-resync-animations`](ready/viewer-resync-animations.md) — Resync
   animations action
+- [`viewer-rlv-debug-settings-commands`](ready/viewer-rlv-debug-settings-commands.md)
+  — RLV — @setdebug_*/@getdebug_* allowlist and @setrot (blocked by
+  `viewer-rlv-restriction-state` (done))
+- [`viewer-rlv-enforce-camera`](ready/viewer-rlv-enforce-camera.md) — RLV —
+  camera restrictions and vision overlay (blocked by
+  `viewer-rlv-restriction-state` (done), `viewer-camera-third-person-orbit`
+  (done))
+- [`viewer-rlv-enforce-receive-side`](ready/viewer-rlv-enforce-receive-side.md)
+  — RLV — receive-side chat/IM filters and redirect (blocked by
+  `viewer-rlv-restriction-state` (done))
+- [`viewer-rlv-enforce-send-side`](ready/viewer-rlv-enforce-send-side.md) — RLV
+  — enforce send-side blocks at the Session boundary (blocked by
+  `viewer-rlv-restriction-state` (done))
+- [`viewer-rlv-environment-commands`](ready/viewer-rlv-environment-commands.md)
+  — RLV — @setenv_*/@getenv_* environment control (blocked by
+  `viewer-rlv-restriction-state` (done))
+- [`viewer-rlv-locks`](ready/viewer-rlv-locks.md) — RLV — attachment, wearable
+  and folder locks (blocked by `viewer-rlv-restriction-state` (done))
+- [`viewer-rlv-queries`](ready/viewer-rlv-queries.md) — RLV — answer @get*
+  queries via chat reply (blocked by `viewer-rlv-restriction-state` (done))
+- [`viewer-rlv-vision-render`](ready/viewer-rlv-vision-render.md) — RLV
+  vision-restriction rendering (blocked by `viewer-rlv-restriction-state`
+  (done))
+- [`viewer-rlva-floaters-toggles`](ready/viewer-rlva-floaters-toggles.md) —
+  "RLVa UI: console, restrictions/strings/locks floaters + toggles" (blocked by
+  `viewer-rlv-restriction-state` (done))
 - [`viewer-screen-space-reflections`](ready/viewer-screen-space-reflections.md)
   — Screen-space reflections (SSR)
 - [`viewer-script-error-window`](ready/viewer-script-error-window.md) — Script
@@ -951,7 +977,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-binary-duplication`](ready/repl-audit-binary-duplication.md) —
   The two REPL binaries share ~400 near-verbatim lines and have already drifted
 
-## blocked (55)
+## blocked (45)
 
 ### viewer
 
@@ -1028,40 +1054,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   toggle axis — every effect must differ where it should and nowhere else
   (blocked by `viewer-render-context-matrix`, `viewer-render-overrides-resource`
   (done))
-- [`viewer-rlv-debug-settings-commands`](blocked/viewer-rlv-debug-settings-commands.md)
-  — RLV — @setdebug_*/@getdebug_* allowlist and @setrot (blocked by
-  `viewer-rlv-restriction-state`)
-- [`viewer-rlv-enforce-camera`](blocked/viewer-rlv-enforce-camera.md) — RLV —
-  camera restrictions and vision overlay (blocked by
-  `viewer-rlv-restriction-state`, `viewer-camera-third-person-orbit` (done))
 - [`viewer-rlv-enforce-forced-actions`](blocked/viewer-rlv-enforce-forced-actions.md)
   — RLV — forced actions and the #RLV inventory sub-protocol (blocked by
-  `viewer-rlv-restriction-state`, `viewer-sit-stand-actions`,
+  `viewer-rlv-restriction-state` (done), `viewer-sit-stand-actions`,
   `viewer-inventory-folder-tree` (done))
 - [`viewer-rlv-enforce-info-hiding`](blocked/viewer-rlv-enforce-info-hiding.md)
   — RLV — information hiding / anonymisation layer (blocked by
-  `viewer-rlv-restriction-state`, `viewer-name-tags-decorations`,
+  `viewer-rlv-restriction-state` (done), `viewer-name-tags-decorations`,
   `viewer-minimap` (done))
-- [`viewer-rlv-enforce-receive-side`](blocked/viewer-rlv-enforce-receive-side.md)
-  — RLV — receive-side chat/IM filters and redirect (blocked by
-  `viewer-rlv-restriction-state`)
-- [`viewer-rlv-enforce-send-side`](blocked/viewer-rlv-enforce-send-side.md) —
-  RLV — enforce send-side blocks at the Session boundary (blocked by
-  `viewer-rlv-restriction-state`)
-- [`viewer-rlv-environment-commands`](blocked/viewer-rlv-environment-commands.md)
-  — RLV — @setenv_*/@getenv_* environment control (blocked by
-  `viewer-rlv-restriction-state`)
-- [`viewer-rlv-locks`](blocked/viewer-rlv-locks.md) — RLV — attachment, wearable
-  and folder locks (blocked by `viewer-rlv-restriction-state`)
-- [`viewer-rlv-notify`](blocked/viewer-rlv-notify.md) — RLV — @notify broadcast
-  on restriction changes (blocked by `viewer-rlv-restriction-state`)
-- [`viewer-rlv-queries`](blocked/viewer-rlv-queries.md) — RLV — answer @get*
-  queries via chat reply (blocked by `viewer-rlv-restriction-state`)
-- [`viewer-rlv-vision-render`](blocked/viewer-rlv-vision-render.md) — RLV
-  vision-restriction rendering (blocked by `viewer-rlv-restriction-state`)
-- [`viewer-rlva-floaters-toggles`](blocked/viewer-rlva-floaters-toggles.md) —
-  "RLVa UI: console, restrictions/strings/locks floaters + toggles" (blocked by
-  `viewer-rlv-restriction-state`)
 - [`viewer-script-mirror-upload-watch`](blocked/viewer-script-mirror-upload-watch.md)
   — Scripts on disk — file watch, headless upload, three-way sync (blocked by
   `viewer-script-mirror-download`)
@@ -1113,7 +1113,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (19)
+## in-progress (18)
 
 ### viewer
 
@@ -1145,9 +1145,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Render context matrix — subjects × eye, time of day, mirror, layering
   (blocked by `viewer-render-pixel-oracle` (done), `viewer-plugin-groups`
   (done), `viewer-render-gpu-serialisation` (done))
-- [`viewer-rlv-restriction-state`](in-progress/viewer-rlv-restriction-state.md)
-  — RLV — the restriction state machine (blocked by `viewer-rlv-command-parser`
-  (done))
 - [`viewer-streaming-audio`](in-progress/viewer-streaming-audio.md) — Parcel
   streaming-audio / media-audio player
 - [`viewer-ui-text-caret-grapheme-motion`](in-progress/viewer-ui-text-caret-grapheme-motion.md)
@@ -1309,7 +1306,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (998)
+## done (1000)
 
 ### protocol
 
@@ -2576,6 +2573,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   regressions
 - [`viewer-rlv-command-parser`](done/viewer-rlv-command-parser.md) — RLV — parse
   the @-command chat protocol
+- [`viewer-rlv-notify`](done/viewer-rlv-notify.md) — RLV — @notify broadcast on
+  restriction changes (blocked by `viewer-rlv-restriction-state` (done))
+- [`viewer-rlv-restriction-state`](done/viewer-rlv-restriction-state.md) — RLV —
+  the restriction state machine (blocked by `viewer-rlv-command-parser` (done))
 - [`viewer-scene-dump`](done/viewer-scene-dump.md) — Emit the shared scene-dump
   JSON beside the frames
 - [`viewer-scene-dump-animations`](done/viewer-scene-dump-animations.md) — A

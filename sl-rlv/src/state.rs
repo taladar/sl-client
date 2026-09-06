@@ -34,6 +34,7 @@ use uuid::Uuid;
 use crate::behaviour::{RlvBehaviour, RlvEntry, RlvLocalModifier};
 use crate::command::{RlvCommand, RlvParam, RlvParamKind};
 use crate::modifier::{DEFAULT_FIELD_OF_VIEW, RlvModifier, RlvModifierState, RlvModifierValue};
+use crate::notify::{RlvNotification, RlvNotifyRegistry};
 use crate::restriction::{RlvOptionArity, RlvOptionMeaning, RlvRestrictionRule};
 
 /// The camera modifier slots that `@setcam` takes exclusive control of.
@@ -266,6 +267,10 @@ pub struct RlvState {
     modifiers: RlvModifierState,
     /// Whether the RLVa experimental command set is enabled.
     experimental: bool,
+    /// Who asked to be told about every change (`@notify`).
+    notify: RlvNotifyRegistry,
+    /// The notifications produced but not yet taken by the consumer.
+    pending: Vec<RlvNotification>,
 }
 
 impl Default for RlvState {
@@ -277,6 +282,8 @@ impl Default for RlvState {
             modifiers: RlvModifierState::new(),
             // The reference ships `RLVaExperimentalCommands` on.
             experimental: true,
+            notify: RlvNotifyRegistry::default(),
+            pending: Vec::new(),
         }
     }
 }
@@ -322,7 +329,23 @@ impl RlvState {
     /// commands change state here. Every other `=force` action and every
     /// `=<channel>` query is [`RlvOutcome::NotAStateChange`] — real work for
     /// the consumer, which this crate deliberately does not do.
+    ///
+    /// An `=n` / `=y` also feeds `@notify`
+    /// ([`RlvState::take_notifications`]) — whatever it answers, because the
+    /// reference reports a command that failed just as it reports one that
+    /// took (`rlvhandler.cpp:585`).
     pub fn apply(&mut self, object: Uuid, command: &RlvCommand) -> RlvOutcome {
+        let outcome = self.apply_silently(object, command);
+        // `@clear` announces itself from inside `clear`, which is also where a
+        // detach reaches, so only the add/remove pair is announced from here.
+        if matches!(command.param, RlvParam::Add | RlvParam::Remove) {
+            self.announce_command(command);
+        }
+        outcome
+    }
+
+    /// [`RlvState::apply`] without the `@notify` broadcast.
+    fn apply_silently(&mut self, object: Uuid, command: &RlvCommand) -> RlvOutcome {
         if !self.experimental
             && command
                 .entry
@@ -442,28 +465,38 @@ impl RlvState {
     /// A bare `@clear` lifts all of them. Clearing an object that holds nothing
     /// is not an error; the reference is explicit that failing it only confuses
     /// people.
+    ///
+    /// `@notify` hears the `@clear` itself and not the restrictions it lifted:
+    /// the reference lifts them by feeding itself internal commands, which its
+    /// notify hook skips (`rlvhandler.cpp:640`).
     pub fn clear(&mut self, object: Uuid, filter: Option<&str>) {
-        let Some(entry) = self.objects.get(&object) else {
-            return;
-        };
-        let doomed: Vec<RlvHeldCommand> = entry
-            .commands
-            .iter()
-            .filter(|held| filter.is_none_or(|filter| held.as_string().contains(filter)))
-            .cloned()
-            .collect();
-        for held in doomed {
-            let resolved = RlvBehaviour::resolve(&held.keyword, RlvParamKind::AddRem);
-            let command = RlvCommand {
-                keyword: held.keyword.clone(),
-                behaviour: held.behaviour,
-                strict: held.strict,
-                modifier: None,
-                option: held.option.clone(),
-                param: RlvParam::Remove,
-                entry: resolved.entry,
-            };
-            self.remove(object, &command);
+        if let Some(entry) = self.objects.get(&object) {
+            let doomed: Vec<RlvHeldCommand> = entry
+                .commands
+                .iter()
+                .filter(|held| filter.is_none_or(|filter| held.as_string().contains(filter)))
+                .cloned()
+                .collect();
+            for held in doomed {
+                let resolved = RlvBehaviour::resolve(&held.keyword, RlvParamKind::AddRem);
+                let command = RlvCommand {
+                    keyword: held.keyword.clone(),
+                    behaviour: held.behaviour,
+                    strict: held.strict,
+                    modifier: None,
+                    option: held.option.clone(),
+                    param: RlvParam::Remove,
+                    param_text: "y".to_owned(),
+                    entry: resolved.entry,
+                };
+                self.remove(object, &command);
+            }
+        }
+        // Announced even when the object held nothing, and after the lifting so
+        // that a `@notify` this very `@clear` just dropped no longer hears it.
+        match filter {
+            Some(filter) => self.announce(&format!("clear:{filter}"), ""),
+            None => self.announce("clear", ""),
         }
     }
 
@@ -480,6 +513,46 @@ impl RlvState {
         self.objects.remove(&object);
         self.modifiers.clear_object(object);
         self.exceptions.retain(|entry| entry.object != object);
+    }
+
+    // ---------------------------------------------------------------- notify
+
+    /// Take the notifications produced since the last call, in the order they
+    /// were produced.
+    ///
+    /// Every [`RlvState::apply`], [`RlvState::clear`] and
+    /// [`RlvState::clear_object`] can leave lines here for the objects that
+    /// asked for them with `@notify`, and a consumer that speaks `@notify` at
+    /// all has to drain them after each: an untaken queue only grows, and the
+    /// lines in it describe a state that has since moved on. A consumer that
+    /// does not speak `@notify` pays nothing for it — with no subscription in
+    /// force nothing is ever queued.
+    #[must_use]
+    pub fn take_notifications(&mut self) -> Vec<RlvNotification> {
+        core::mem::take(&mut self.pending)
+    }
+
+    /// Report an added or lifted restriction to the `@notify` subscribers.
+    ///
+    /// Nobody listening is the common case and this sits on the path of every
+    /// command, so the line is not built until there is somewhere to send it.
+    fn announce_command(&mut self, command: &RlvCommand) {
+        if self.notify.is_empty() {
+            return;
+        }
+        self.announce(&command_text(command), &format!("={}", command.param_text));
+    }
+
+    /// Queue what one change says to the objects listening for it
+    /// (`RlvBehaviourNotifyHandler::sendNotification`, `rlvhelper.cpp:1904`).
+    ///
+    /// `text` is the `behaviour[:option]` half the filters are matched
+    /// against; `suffix` is the `=<param>` glued to it, which they are not.
+    fn announce(&mut self, text: &str, suffix: &str) {
+        if self.notify.is_empty() {
+            return;
+        }
+        self.pending.extend(self.notify.notifications(text, suffix));
     }
 
     /// Run a rule's option handling for one add or remove, and reference-count
@@ -573,7 +646,13 @@ impl RlvState {
         match rule.meaning {
             RlvOptionMeaning::Opaque => Some(rule.refcount_with_option),
             RlvOptionMeaning::NotifyChannel => {
-                valid_notify_option(option).then_some(rule.refcount_with_option)
+                let (channel, filter) = parse_notify_option(option)?;
+                if adding {
+                    self.notify.add(object, channel, filter);
+                } else {
+                    self.notify.remove(object, channel, filter);
+                }
+                Some(rule.refcount_with_option)
             }
             RlvOptionMeaning::Exception => {
                 let avatar = parse_uuid(option)?;
@@ -1120,23 +1199,35 @@ fn parse_channel(option: &str, behaviour: RlvBehaviour) -> Option<i32> {
     ok.then_some(channel)
 }
 
-/// Check a `@notify` option: `<channel>[;<filter>]`, where the channel has to
+/// Parse a `@notify` option: `<channel>[;<filter>]`, where the channel has to
 /// be one a reply could be chatted on (`rlvParseNotifyOption`,
 /// `rlvhandler.cpp:97`).
 ///
-/// The filter is left to the consumer — which channel the reports go to is this
-/// layer's business, what they say is not.
-fn valid_notify_option(option: &str) -> bool {
-    let (channel, rest) = match option.split_once(';') {
-        Some((channel, rest)) => (channel, Some(rest)),
-        None => (option, None),
+/// An absent filter is an empty one, which is how the reference stores it and
+/// what makes a bare `@notify:<channel>` hear everything.
+fn parse_notify_option(option: &str) -> Option<(i32, &str)> {
+    let (channel, filter) = match option.split_once(';') {
+        Some((channel, filter)) => (channel, filter),
+        None => (option, ""),
     };
     // At most one `;`: a second separator is a malformed option, not a filter
     // that happens to contain one.
-    if rest.is_some_and(|rest| rest.contains(';')) {
-        return false;
+    if filter.contains(';') {
+        return None;
     }
-    parse_channel(channel, RlvBehaviour::Notify).is_some()
+    Some((parse_channel(channel, RlvBehaviour::Notify)?, filter))
+}
+
+/// The `behaviour[:option]` text a command reports itself as to `@notify` and
+/// `@getstatus` (`RlvCommand::asString`, `rlvhelper.h:728`).
+///
+/// The keyword is what arrived, `_sec` and all, because that is the spelling
+/// the object will use again when it lifts the restriction.
+fn command_text(command: &RlvCommand) -> String {
+    match command.option {
+        Some(ref option) => format!("{}:{option}", command.keyword),
+        None => command.keyword.clone(),
+    }
 }
 
 /// Parse one metre distance from a `@recvim` / `@sendim` / `@startim` range.
@@ -1200,6 +1291,20 @@ mod tests {
     fn apply(state: &mut RlvState, object: Uuid, field: &str) -> Result<RlvOutcome, TestError> {
         let command = RlvCommand::parse_field(field)?;
         Ok(state.apply(object, &command))
+    }
+
+    /// Everything `@notify` has queued, drained, as `<channel> <line>` text.
+    fn notifications(state: &mut RlvState) -> Vec<String> {
+        state
+            .take_notifications()
+            .into_iter()
+            .map(|note| format!("{} {}", note.channel, note.message))
+            .collect()
+    }
+
+    /// Throw away what is queued, for a test that only cares what comes after.
+    fn forget_notifications(state: &mut RlvState) {
+        drop(state.take_notifications());
     }
 
     /// Apply a command field and assert it succeeded.
@@ -2137,6 +2242,7 @@ mod tests {
             "sendchannel:-5=n",
             "editobj=n",
             "notify:0=n",
+            "notify:2222=n",
             "notify:2222;a;b=n",
             "redirchat:2147483647=n",
             "clear",
@@ -2164,6 +2270,219 @@ mod tests {
         assert_eq!(state.restricting_objects().count(), 0);
         assert_eq!(state.exceptions().count(), 0);
         assert_eq!(state.modifiers().active().count(), 0);
+
+        // Nobody is listening any more either: a subscription outliving the
+        // object that made it would chat at a prim that is gone.
+        forget_notifications(&mut state);
+        ok(&mut state, ANKLETS, "fly=n")?;
+        assert_eq!(notifications(&mut state), Vec::<String>::new());
+        Ok(())
+    }
+
+    // ---------------------------------------------------------------- notify
+
+    #[test]
+    fn notify_reports_every_change_on_the_channel_it_named() -> Result<(), TestError> {
+        let mut state = RlvState::new();
+        ok(&mut state, COLLAR, "notify:2222=n")?;
+        // The subscription is in force by the time its own command is
+        // reported, so the collar hears itself arrive.
+        assert_eq!(notifications(&mut state), ["2222 /notify:2222=n"]);
+
+        ok(&mut state, CUFFS, "detach=n")?;
+        assert_eq!(notifications(&mut state), ["2222 /detach=n"]);
+        ok(&mut state, CUFFS, "detach=y")?;
+        assert_eq!(notifications(&mut state), ["2222 /detach=y"]);
+
+        // Lifting the subscription is the one change it does not hear: the
+        // reference removes it before reporting.
+        ok(&mut state, COLLAR, "notify:2222=y")?;
+        assert_eq!(notifications(&mut state), Vec::<String>::new());
+        ok(&mut state, CUFFS, "detach=n")?;
+        assert_eq!(notifications(&mut state), Vec::<String>::new());
+        Ok(())
+    }
+
+    #[test]
+    fn a_notify_filter_matches_the_behaviour_half_only() -> Result<(), TestError> {
+        let mut state = RlvState::new();
+        ok(&mut state, COLLAR, "notify:2222;detach=n")?;
+        forget_notifications(&mut state);
+
+        ok(&mut state, CUFFS, "detach=n")?;
+        ok(&mut state, CUFFS, "fly=n")?;
+        ok(&mut state, CUFFS, "detach=y")?;
+        assert_eq!(
+            notifications(&mut state),
+            ["2222 /detach=n", "2222 /detach=y"],
+            "one filter hears a restriction go on and off, and hears nothing else"
+        );
+
+        // The param is glued on after the filter has had its say, so a filter
+        // that only the param would satisfy matches nothing.
+        ok(&mut state, COLLAR, "notify:2223;rem=n")?;
+        forget_notifications(&mut state);
+        ok(&mut state, CUFFS, "fly=rem")?;
+        assert_eq!(notifications(&mut state), Vec::<String>::new());
+        Ok(())
+    }
+
+    #[test]
+    fn notify_reports_the_spelling_the_object_used() -> Result<(), TestError> {
+        let mut state = RlvState::new();
+        ok(&mut state, COLLAR, "notify:2222=n")?;
+        forget_notifications(&mut state);
+
+        // `add` and `n` are the same command and not the same three
+        // characters; a script watching for one must see the one that arrived.
+        ok(&mut state, CUFFS, "detach=add")?;
+        ok(&mut state, CUFFS, "detach=rem")?;
+        ok(&mut state, CUFFS, "recvim_sec=n")?;
+        ok(&mut state, CUFFS, &format!("sendim:{ALICE}=n"))?;
+        assert_eq!(
+            notifications(&mut state),
+            [
+                "2222 /detach=add",
+                "2222 /detach=rem",
+                "2222 /recvim_sec=n",
+                &format!("2222 /sendim:{ALICE}=n"),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn notify_reports_a_command_that_failed() -> Result<(), TestError> {
+        let mut state = RlvState::new();
+        ok(&mut state, COLLAR, "notify:2222=n")?;
+        forget_notifications(&mut state);
+
+        // RLV tells scripts about the commands it refused, so a script that
+        // stopped hearing them would read that as a viewer gone deaf.
+        assert_eq!(
+            apply(&mut state, CUFFS, "bogus=n")?,
+            RlvOutcome::FailedParam
+        );
+        assert_eq!(
+            apply(&mut state, CUFFS, "notify:0=n")?,
+            RlvOutcome::FailedOption
+        );
+        ok(&mut state, CUFFS, "fly=n")?;
+        assert_eq!(
+            apply(&mut state, CUFFS, "fly=n")?,
+            RlvOutcome::SuccessDuplicate
+        );
+        assert_eq!(
+            notifications(&mut state),
+            [
+                "2222 /bogus=n",
+                "2222 /notify:0=n",
+                "2222 /fly=n",
+                "2222 /fly=n",
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn clear_reports_itself_and_not_what_it_lifted() -> Result<(), TestError> {
+        let mut state = RlvState::new();
+        ok(&mut state, COLLAR, "notify:2222=n")?;
+        ok(&mut state, CUFFS, "tplm=n")?;
+        ok(&mut state, CUFFS, "tploc=n")?;
+        ok(&mut state, CUFFS, "fly=n")?;
+        forget_notifications(&mut state);
+
+        ok(&mut state, CUFFS, "clear=tp")?;
+        assert_eq!(
+            notifications(&mut state),
+            ["2222 /clear:tp"],
+            "the two restrictions it lifted are internal removes, which the \
+             reference's notify hook skips"
+        );
+        assert!(state.has_behaviour(RlvBehaviour::Fly));
+
+        // An object that held nothing still says it cleared.
+        ok(&mut state, ANKLETS, "clear")?;
+        assert_eq!(notifications(&mut state), ["2222 /clear"]);
+        Ok(())
+    }
+
+    #[test]
+    fn a_detaching_object_announces_a_clear_it_no_longer_hears() -> Result<(), TestError> {
+        let mut state = RlvState::new();
+        ok(&mut state, COLLAR, "notify:2222=n")?;
+        ok(&mut state, CUFFS, "notify:2223=n")?;
+        ok(&mut state, CUFFS, "fly=n")?;
+        forget_notifications(&mut state);
+
+        state.clear_object(CUFFS);
+        assert_eq!(
+            notifications(&mut state),
+            ["2222 /clear"],
+            "the detached object's own subscription went with it"
+        );
+        assert!(!state.has_behaviour(RlvBehaviour::Fly));
+
+        // And it stays gone: nothing chats at a prim that is no longer there.
+        ok(&mut state, ANKLETS, "fly=n")?;
+        assert_eq!(notifications(&mut state), ["2222 /fly=n"]);
+        Ok(())
+    }
+
+    #[test]
+    fn every_subscription_hears_it_once() -> Result<(), TestError> {
+        let mut state = RlvState::new();
+        // Two objects, three subscriptions, two of them on one channel: the
+        // reference merges none of them, and reports in object order.
+        ok(&mut state, CUFFS, "notify:2223=n")?;
+        ok(&mut state, CUFFS, "notify:2223;fly=n")?;
+        ok(&mut state, COLLAR, "notify:2222=n")?;
+        forget_notifications(&mut state);
+
+        ok(&mut state, ANKLETS, "fly=n")?;
+        assert_eq!(
+            notifications(&mut state),
+            ["2222 /fly=n", "2223 /fly=n", "2223 /fly=n"]
+        );
+
+        // The unfiltered one alone hears a change its sibling filtered out.
+        ok(&mut state, ANKLETS, "showloc=n")?;
+        assert_eq!(
+            notifications(&mut state),
+            ["2222 /showloc=n", "2223 /showloc=n"]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn nothing_is_queued_for_nobody() -> Result<(), TestError> {
+        let mut state = RlvState::new();
+        ok(&mut state, COLLAR, "fly=n")?;
+        ok(&mut state, COLLAR, "clear")?;
+        state.clear_object(COLLAR);
+        assert_eq!(
+            notifications(&mut state),
+            Vec::<String>::new(),
+            "a consumer that never sees a `@notify` never pays for one"
+        );
+
+        // A query or an action is not a state change and is not reported.
+        ok(&mut state, COLLAR, "notify:2222=n")?;
+        forget_notifications(&mut state);
+        assert_eq!(
+            apply(&mut state, CUFFS, "version=2222")?,
+            RlvOutcome::NotAStateChange
+        );
+        assert_eq!(
+            apply(
+                &mut state,
+                CUFFS,
+                "sit:00000000-0000-4000-8000-000000000001=force"
+            )?,
+            RlvOutcome::NotAStateChange
+        );
+        assert_eq!(notifications(&mut state), Vec::<String>::new());
         Ok(())
     }
 }

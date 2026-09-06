@@ -105,6 +105,13 @@ pub struct RlvCommand {
     pub option: Option<String>,
     /// The classified param (the text after `=`).
     pub param: RlvParam,
+    /// The param exactly as it arrived, lower-cased, before classification —
+    /// `n` and `add` both classify as [`RlvParam::Add`] but they are not the
+    /// same six characters, and `@notify` echoes the spelling the object used
+    /// back to it verbatim (`RlvCommand::getParam`, `rlvhelper.h:284`). Empty
+    /// for a bare `@clear`, which is the one command that may arrive without a
+    /// param.
+    pub param_text: String,
     /// The dictionary row the keyword resolved through, or `None` when it
     /// resolved to nothing.
     ///
@@ -204,6 +211,7 @@ impl RlvCommand {
             modifier: resolved.modifier,
             option,
             param,
+            param_text: param_str.to_owned(),
             entry: resolved.entry,
         })
     }

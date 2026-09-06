@@ -19,6 +19,10 @@
 //!   which exceptions poke holes in them. Every enforcement family asks it
 //!   rather than re-deriving the answer at its own choke point.
 //!
+//! The state machine also reports itself: `@notify` subscribers are told about
+//! every change it sees, and the lines they are owed wait in
+//! [`RlvState::take_notifications`] for a consumer that can chat.
+//!
 //! What the state machine deliberately does *not* do is obey anything. It never
 //! detaches an attachment, never hides a name tag, never answers a query; those
 //! are the consumer's, and a `=force` action or a `=<channel>` query comes back
@@ -59,6 +63,15 @@
 //! // Taking the other one off is what finally lifts it.
 //! state.clear_object(cuffs);
 //! assert!(!state.has_behaviour(RlvBehaviour::Fly));
+//!
+//! // An object can ask to hear about all of that as it happens (`@notify`),
+//! // and the lines it is owed wait until the consumer takes them to chat.
+//! let watcher = Uuid::from_u128(3);
+//! state.apply(watcher, parse_chat_line("@notify:2222=n").unwrap()[0].as_ref().unwrap());
+//! state.apply(collar, parse_chat_line("@sendchat=n").unwrap()[0].as_ref().unwrap());
+//! let owed = state.take_notifications();
+//! assert_eq!(owed.last().unwrap().channel, 2222);
+//! assert_eq!(owed.last().unwrap().message, "/sendchat=n");
 //! ```
 //!
 //! The grammar, the classification and the state machine follow Firestorm's
@@ -70,6 +83,7 @@
 mod behaviour;
 mod command;
 mod modifier;
+mod notify;
 mod restriction;
 mod state;
 mod version;
@@ -82,6 +96,7 @@ pub use modifier::{
     DEFAULT_FIELD_OF_VIEW, FARTOUCH_DEFAULT, IMG_DEFAULT, RlvComparator, RlvModifier,
     RlvModifierState, RlvModifierValue, SITTP_DEFAULT, TPLOCAL_DEFAULT,
 };
+pub use notify::RlvNotification;
 pub use restriction::{RlvOptionArity, RlvOptionMeaning, RlvRestrictionRule};
 pub use state::{
     RlvException, RlvExceptionCheck, RlvExceptionOption, RlvHeldCommand, RlvOutcome, RlvState,
