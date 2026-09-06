@@ -3527,4 +3527,261 @@ mod test {
         }
         Ok(())
     }
+
+    /// A **linkset** survives a take and comes back whole.
+    ///
+    /// Two things are being asserted, and neither holds by accident. A take
+    /// names only the root — that is what a viewer selects — so the child has
+    /// to be gathered on the grid side or it stays behind in the region with a
+    /// parent nothing holds any more. And what comes back is rebuilt out of the
+    /// asset text: the region mints four fresh ids (two local, two keys), reads
+    /// the root's placement from `pos` and the child's from `childpos`, and
+    /// re-parents the child to the root's *new* local id. A child rezzed at its
+    /// stored offset but parented to nothing would stand a metre from the root
+    /// instead of on it, and the region would still look right in the log.
+    #[tokio::test]
+    async fn a_taken_linkset_rezzes_back_whole() -> Result<(), TestError> {
+        let grid = two_avatar_grid().await?;
+        let mut avatar = join(&grid, "First").await?;
+
+        let base = Vector {
+            x: 140.0,
+            y: 130.0,
+            z: 26.0,
+        };
+        let above = Vector {
+            z: base.z + 1.0,
+            ..base.clone()
+        };
+        let root = rez_cube(&mut avatar, &base).await?;
+        let child = rez_cube(&mut avatar, &above).await?;
+        avatar
+            .commands
+            .send(Command::LinkObjects {
+                local_ids: vec![
+                    sl_client_tokio::ScopedObjectId::new(avatar.circuit, root.local_id),
+                    sl_client_tokio::ScopedObjectId::new(avatar.circuit, child.local_id),
+                ],
+            })
+            .await?;
+        // The child re-sent with the root's local id as its `ParentID`: the
+        // link took, and its position is now the offset a take will serialise.
+        let child_key = child.full_id;
+        let root_local_id = root.local_id;
+        let linked = wait_on(&mut avatar.events, |event| match event {
+            Event::ObjectUpdated(object)
+                if object.full_id == child_key && object.parent_id == root_local_id =>
+            {
+                Some((**object).clone())
+            }
+            _ => None,
+        })
+        .await?;
+
+        let objects_folder = avatar
+            .agent
+            .with_sim(|sim| {
+                sim.agent_inventory()
+                    .folders()
+                    .find(|folder| {
+                        folder.folder_type == sl_client_tokio::FolderType::Object.to_code()
+                    })
+                    .map(|folder| folder.folder_id)
+            })
+            .await
+            .ok_or("the seeded account has no Objects folder")?;
+        // The take names the root alone, exactly as a viewer's selection does.
+        avatar
+            .commands
+            .send(Command::DerezObjects {
+                local_ids: vec![sl_client_tokio::ScopedObjectId::new(
+                    avatar.circuit,
+                    root.local_id,
+                )],
+                destination: sl_client_tokio::DeRezDestination::TakeIntoAgentInventory(
+                    objects_folder,
+                ),
+                transaction_id: sl_client_tokio::TransactionId::from(uuid::Uuid::from_u128(0x11E5)),
+                group_id: None,
+            })
+            .await?;
+        let item = wait_on(&mut avatar.events, |event| match event {
+            Event::InventoryItemCreated { item, .. } => Some(item.clone()),
+            _ => None,
+        })
+        .await?;
+        // Both kills in one pass: they arrive in the order the region removed
+        // them, which is not this loop's to choose.
+        let mut standing: Vec<_> = [root.local_id, child.local_id]
+            .into_iter()
+            .map(|local_id| sl_client_tokio::ScopedObjectId::new(avatar.circuit, local_id))
+            .collect();
+        while !standing.is_empty() {
+            let gone = wait_on(&mut avatar.events, |event| match event {
+                Event::ObjectRemoved { local_id, .. } if standing.contains(local_id) => {
+                    Some(*local_id)
+                }
+                _ => None,
+            })
+            .await?;
+            standing.retain(|waiting| *waiting != gone);
+        }
+
+        let landing = Vector {
+            x: 150.0,
+            y: 150.0,
+            z: 30.0,
+        };
+        avatar
+            .commands
+            .send(Command::RezObjectFromInventory {
+                params: Box::new(rez_params(&item, &landing)),
+            })
+            .await?;
+        let mut rezzed = Vec::new();
+        while rezzed.len() < 2 {
+            let object = wait_on(&mut avatar.events, |event| match event {
+                Event::ObjectAdded(object) => Some((**object).clone()),
+                _ => None,
+            })
+            .await?;
+            rezzed.push(object);
+        }
+        let (rezzed_root, rezzed_child) = match rezzed.as_slice() {
+            [first, second] if first.parent_id == sl_client_tokio::RegionLocalObjectId(0) => {
+                (first, second)
+            }
+            [first, second] => (second, first),
+            _unreachable => return Err("the rez streamed something other than two objects".into()),
+        };
+        assert_eq!(
+            rezzed_child.parent_id, rezzed_root.local_id,
+            "the rezzed child was not parented to the rezzed root"
+        );
+        assert_ne!(
+            rezzed_root.full_id, root.full_id,
+            "the rez reused the taken object's key instead of minting one"
+        );
+        assert_eq!(
+            rezzed_root.motion.position, landing,
+            "the root did not land where the ray ended"
+        );
+        assert_eq!(
+            rezzed_child.motion.position, linked.motion.position,
+            "the child came back at something other than its offset from the root"
+        );
+        assert_eq!(rezzed_root.scale, root.scale);
+        assert_eq!(rezzed_child.scale, child.scale);
+        Ok(())
+    }
+
+    /// A **no-copy** item is consumed by the rez: the object goes into the
+    /// world and the item is gone, and the client is told so.
+    ///
+    /// This is OpenSim's rule (`DoPostRezWhenFromItem`) and it is decided by the
+    /// item's own owner mask, not by the `remove_item` flag the client sent —
+    /// the flag is what the viewer *expected*, and a viewer that dragged out a
+    /// no-copy object and kept the item would be showing a copy the grid does
+    /// not have. Everything the fake grid mints is full-permission, so the copy
+    /// bit is cleared on the grid side here to reach the arm at all.
+    #[tokio::test]
+    async fn rezzing_a_no_copy_item_consumes_it() -> Result<(), TestError> {
+        let grid = two_avatar_grid().await?;
+        let mut avatar = join(&grid, "First").await?;
+
+        let item = take_a_donor_item(
+            &mut avatar,
+            &Vector {
+                x: 145.0,
+                y: 135.0,
+                z: 26.0,
+            },
+        )
+        .await?;
+        let item_id = item.item_id;
+        let stripped = avatar
+            .agent
+            .with_sim(|sim| {
+                let mut held = sim.agent_inventory().item(item_id).cloned()?;
+                held.permissions.owner =
+                    held.permissions.owner & !sl_client_tokio::Permissions::COPY;
+                sim.agent_inventory_mut().insert_item(held.clone());
+                Some(held)
+            })
+            .await
+            .ok_or("the take's item was not in the agent's inventory")?;
+
+        avatar
+            .commands
+            .send(Command::RezObjectFromInventory {
+                params: Box::new(rez_params(
+                    &stripped,
+                    &Vector {
+                        x: 146.0,
+                        y: 136.0,
+                        z: 27.0,
+                    },
+                )),
+            })
+            .await?;
+        // The object still rezzes -- consuming the item is what happens
+        // *after* the rez, not instead of it.
+        let rezzed = wait_on(&mut avatar.events, |event| match event {
+            Event::ObjectAdded(object) => Some((**object).clone()),
+            _ => None,
+        })
+        .await?;
+        assert_eq!(
+            rezzed.motion.position,
+            Vector {
+                x: 146.0,
+                y: 136.0,
+                z: 27.0
+            }
+        );
+        let removed = wait_on(&mut avatar.events, |event| match event {
+            Event::InventoryItemsRemoved { items } if items.contains(&item_id) => Some(()),
+            _ => None,
+        })
+        .await;
+        assert!(
+            removed.is_ok(),
+            "a no-copy item survived the rez that consumed it"
+        );
+        let still_held = avatar
+            .agent
+            .with_sim(|sim| sim.agent_inventory().item(item_id).is_some())
+            .await;
+        assert!(
+            !still_held,
+            "the grid kept a no-copy item it told the client it had removed"
+        );
+        Ok(())
+    }
+
+    /// The [`RezObjectParams`](sl_client_tokio::RezObjectParams) that rez `item`
+    /// at `position`, as a viewer's drag-out builds them: the ray is bypassed so
+    /// the object lands exactly there, and the masks and CRC are what the client
+    /// believes about the item rather than anything the grid checks.
+    fn rez_params(
+        item: &sl_client_tokio::InventoryItem,
+        position: &Vector,
+    ) -> sl_client_tokio::RezObjectParams {
+        sl_client_tokio::RezObjectParams {
+            group_id: None,
+            from_task_id: None,
+            bypass_raycast: true,
+            ray_start: position.clone(),
+            ray_end: position.clone(),
+            ray_target_id: None,
+            ray_end_is_intersection: false,
+            rez_selected: false,
+            remove_item: false,
+            item_flags: item.flags,
+            group_mask: item.permissions.group.bits(),
+            everyone_mask: item.permissions.everyone.bits(),
+            next_owner_mask: item.permissions.next_owner.bits(),
+            item: task_item(item),
+        }
+    }
 }

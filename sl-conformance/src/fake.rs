@@ -133,6 +133,7 @@ pub const OFFLINE_CASES: &[&str] = &[
     "object-edit",
     "object-link-delink",
     "object-properties",
+    "object-rez-derez",
     "parcel-edit",
     "region-info",
     "estate-info",

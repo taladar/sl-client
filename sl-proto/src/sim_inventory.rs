@@ -519,15 +519,34 @@ impl SimInventoryTree {
     ///
     /// [`SimInventoryError::UnknownTarget`] when the item does not exist.
     pub(crate) fn remove_item(&mut self, id: InventoryKey) -> Result<AisUpdate, SimInventoryError> {
-        let item = self
-            .items
-            .remove(&id)
-            .ok_or(SimInventoryError::UnknownTarget)?;
         let mut update = AisUpdate {
             removed_items: vec![id],
             ..AisUpdate::default()
         };
-        self.bump_version(item.folder_id, &mut update);
+        self.detach_item(id, &mut update)
+            .ok_or(SimInventoryError::UnknownTarget)?;
         Ok(update)
+    }
+
+    /// Removes the item named by `id` and returns it, bumping the version of
+    /// the folder it came out of — the counterpart to
+    /// [`insert_item`](Self::insert_item) for a simulator that **consumed** an
+    /// item rather than answering a client's delete.
+    ///
+    /// A no-copy rez is what needs this: the object goes into the world and the
+    /// item is gone, and the client is told with a `RemoveInventoryItem`
+    /// ([`SimSession::send_remove_inventory_item`](crate::SimSession::send_remove_inventory_item))
+    /// rather than through the AIS3 update this returns nothing of.
+    pub fn take_item(&mut self, id: InventoryKey) -> Option<InventoryItem> {
+        let mut discarded = AisUpdate::default();
+        self.detach_item(id, &mut discarded)
+    }
+
+    /// Removes the item and bumps its folder's version into `update`, the one
+    /// place either removal path does it.
+    fn detach_item(&mut self, id: InventoryKey, update: &mut AisUpdate) -> Option<InventoryItem> {
+        let item = self.items.remove(&id)?;
+        self.bump_version(item.folder_id, update);
+        Some(item)
     }
 }

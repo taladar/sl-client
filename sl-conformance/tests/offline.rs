@@ -78,6 +78,7 @@ mod test {
         object_edit => "object-edit",
         object_link_delink => "object-link-delink",
         object_properties => "object-properties",
+        object_rez_derez => "object-rez-derez",
         parcel_edit => "parcel-edit",
         region_info => "region-info",
         estate_info => "estate-info",

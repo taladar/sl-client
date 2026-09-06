@@ -32,6 +32,27 @@ impl ObjectAsset {
         Self { prims: vec![prim] }
     }
 
+    /// An asset holding a whole linkset: `children` first and `root` last —
+    /// the order the reference writes them — each marked with the
+    /// [`link`](PrimBlock::link) state that says which it is.
+    ///
+    /// With no children this is [`single`](Self::single): a solitary prim
+    /// carries no `linked` line at all, and one that claimed to be a root would
+    /// be a linkset of one, which the reference never writes.
+    #[must_use]
+    pub fn linkset(mut root: PrimBlock, mut children: Vec<PrimBlock>) -> Self {
+        if children.is_empty() {
+            root.link = None;
+            return Self::single(root);
+        }
+        root.link = Some(LinkState::Root);
+        for child in &mut children {
+            child.link = Some(LinkState::Child);
+        }
+        children.push(root);
+        Self { prims: children }
+    }
+
     /// The linkset's root prim: the one marked [`LinkState::Root`], or — for an
     /// asset holding one unlinked prim — that prim. `None` for an empty asset,
     /// or for one whose prims are all marked as children (which a simulator
@@ -318,6 +339,32 @@ impl LegacySaleType {
             Self::Original => "orig",
             Self::Copy => "copy",
             Self::Contents => "cntn",
+        }
+    }
+
+    /// The wire `SALE_TYPE_*` code for this sale type — what an
+    /// `ObjectProperties` record and an inventory item carry where the asset
+    /// text carries [`as_str`](Self::as_str).
+    #[must_use]
+    pub const fn to_code(self) -> u8 {
+        match self {
+            Self::NotForSale => 0,
+            Self::Original => 1,
+            Self::Copy => 2,
+            Self::Contents => 3,
+        }
+    }
+
+    /// The sale type a wire `SALE_TYPE_*` code names. A code this crate does
+    /// not know is read as not for sale, which is what the reference's own
+    /// viewer shows for one.
+    #[must_use]
+    pub const fn from_code(code: u8) -> Self {
+        match code {
+            1 => Self::Original,
+            2 => Self::Copy,
+            3 => Self::Contents,
+            _not_for_sale => Self::NotForSale,
         }
     }
 
@@ -628,3 +675,65 @@ pub const DEFAULT_DISPLAY_TYPE: &str = "v";
 /// viewer's default" for the free-entry button and the reference's own four
 /// preset amounts.
 pub const DEFAULT_PAY_PRICE: [i32; 5] = [-2, 1, 5, 10, 20];
+
+#[cfg(test)]
+mod test {
+    use pretty_assertions::assert_eq;
+
+    use super::{LinkState, ObjectAsset, PrimBlock};
+
+    /// A prim keyed by `index`, so an asset's order is readable in an assert.
+    fn prim(index: u128) -> PrimBlock {
+        PrimBlock {
+            task_id: uuid::Uuid::from_u128(index),
+            ..PrimBlock::default()
+        }
+    }
+
+    /// [`ObjectAsset::linkset`] writes the children first and the root last,
+    /// and marks each — which is what [`ObjectAsset::root`] and
+    /// [`ObjectAsset::children`] read back. The two ends of one convention, so
+    /// they are asserted against each other rather than against the order.
+    #[test]
+    fn a_linkset_writes_children_first_and_marks_its_root() {
+        let asset = ObjectAsset::linkset(prim(1), vec![prim(2), prim(3)]);
+        assert_eq!(
+            asset
+                .prims
+                .iter()
+                .map(|prim| (prim.task_id.as_u128(), prim.link))
+                .collect::<Vec<_>>(),
+            vec![
+                (2, Some(LinkState::Child)),
+                (3, Some(LinkState::Child)),
+                (1, Some(LinkState::Root)),
+            ]
+        );
+        assert_eq!(asset.root().map(|root| root.task_id.as_u128()), Some(1));
+        assert_eq!(
+            asset
+                .children()
+                .map(|child| child.task_id.as_u128())
+                .collect::<Vec<_>>(),
+            vec![2, 3]
+        );
+    }
+
+    /// A linkset of one is a solitary prim, not a root: the reference writes no
+    /// `linked` line for an unlinked prim, and an asset that claimed a linkset
+    /// of one would be one no simulator ever wrote.
+    #[test]
+    fn a_linkset_with_no_children_is_a_solitary_prim() {
+        let asset = ObjectAsset::linkset(
+            PrimBlock {
+                link: Some(LinkState::Root),
+                ..prim(1)
+            },
+            Vec::new(),
+        );
+        assert_eq!(asset.prims.len(), 1);
+        assert_eq!(asset.prims.first().and_then(|prim| prim.link), None);
+        assert_eq!(asset.root().map(|root| root.task_id.as_u128()), Some(1));
+        assert_eq!(asset.children().count(), 0);
+    }
+}

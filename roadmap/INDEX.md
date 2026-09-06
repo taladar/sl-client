@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 310 |
+| ready | 309 |
 | blocked | 55 |
 | in-progress | 18 |
 | bugs | 59 |
-| done | 999 |
+| done | 1000 |
 | deferred | 25 |
 | wont-do | 14 |
 | **total** | **1580** |
@@ -237,7 +237,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (310)
+## ready (309)
 
 ### protocol
 
@@ -953,8 +953,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The fake grid names an object's asset where Second Life never does
 - [`test-fake-grid-object-sounds`](ready/test-fake-grid-object-sounds.md) — The
   fake grid can serve a sound but cannot play one
-- [`test-fake-grid-rez-from-inventory`](ready/test-fake-grid-rez-from-inventory.md)
-  — The fake grid takes an object but cannot rez one back
 - [`test-fake-grid-timeline`](ready/test-fake-grid-timeline.md) — Scripted
   scenario timelines with markers (blocked by `test-fake-grid-determinism`
   (done), `viewer-fake-grid-render-harness` (done))
@@ -1324,7 +1322,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (999)
+## done (1000)
 
 ### protocol
 
@@ -3225,6 +3223,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Typed prim fixtures — textured, mesh, sculpt, PBR, light, particles, linksets
   (blocked by `test-fake-grid-terrain-layerdata` (done),
   `test-shared-test-assets` (done))
+- [`test-fake-grid-rez-from-inventory`](done/test-fake-grid-rez-from-inventory.md)
+  — The fake grid takes an object but cannot rez one back
 - [`test-fake-grid-seated-crossing`](done/test-fake-grid-seated-crossing.md) —
   Crossing a border seated on a vehicle, alone and with other riders
 - [`test-fake-grid-self-avatar-baked-textures-rejected`](done/test-fake-grid-self-avatar-baked-textures-rejected.md)

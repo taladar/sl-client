@@ -19,14 +19,16 @@
 
 use sl_prim::PrimShape;
 use sl_proto::{
-    Object, ObjectExtraParams, ObjectMotion, PrimShapeParams, RegionHandle, RegionLocalObjectId,
-    TextureEntry, TextureFace, TextureKey, decode_texture_entry, encode_texture_entry,
+    AgentKey, GroupKey, InventoryKey, LindenAmount, Object, ObjectExtraParams, ObjectKey,
+    ObjectMotion, ObjectProperties, OwnerKey, Permissions, Permissions5, PrimShapeParams,
+    RegionHandle, RegionLocalObjectId, TextureEntry, TextureFace, TextureKey, decode_texture_entry,
+    encode_texture_entry,
 };
 use uuid::Uuid;
 
 use crate::model::{
-    LegacyFace, LegacyPathParams, LegacyPermissions, LegacyProfileParams, LegacyShape, PrimBlock,
-    PrimPlacement, PrimSound, ZERO_VECTOR,
+    LegacyFace, LegacyPathParams, LegacyPermissions, LegacyProfileParams, LegacySaleType,
+    LegacyShape, PrimBlock, PrimPlacement, PrimSound, ZERO_VECTOR,
 };
 
 /// Where a prim decoded from an asset is being rezzed: the ids only the region
@@ -81,10 +83,7 @@ impl PrimBlock {
             position: object.motion.position.clone(),
             old_position: object.motion.position.clone(),
             rotation: object.motion.rotation.clone(),
-            placement: PrimPlacement::Free {
-                velocity: object.motion.velocity.clone(),
-                angular_velocity: object.motion.angular_velocity.clone(),
-            },
+            placement: placement_of(object),
             scale: object.scale.clone(),
             state: object.state,
             material: object.material,
@@ -185,6 +184,76 @@ impl PrimBlock {
             joint_axis_or_anchor: ZERO_VECTOR,
         }
     }
+
+    /// The properties record this asset prim describes, under the object key
+    /// `object_id` the rez minted — the reply a select of the rezzed object is
+    /// answered with, and the half [`to_object`](Self::to_object) deliberately
+    /// leaves empty.
+    ///
+    /// The inverse of what [`from_object`](Self::from_object) wrote: the name,
+    /// the description, the permission block and the sale terms. Everything
+    /// else in the record is something the asset does not carry and the
+    /// *simulator* owns — the item and folder the object was rezzed from, the
+    /// task inventory's serial, the linkset's aggregate permission rollups, the
+    /// texture id list a viewer's inventory panel shows — and is left at the
+    /// value that says "not applicable" rather than invented here. A rezzing
+    /// simulator fills those in; it is the one that knows them.
+    ///
+    /// The owner is the asset's, which for a rez is the owner the object had
+    /// when it was **taken**. A simulator rezzing it for somebody else
+    /// overwrites that with the rezzing agent, which is a decision about
+    /// ownership rather than about the format.
+    #[must_use]
+    pub fn to_properties(&self, object_id: ObjectKey) -> ObjectProperties {
+        let owner = AgentKey::from(self.permissions.owner_id);
+        ObjectProperties {
+            object_id,
+            creator_id: AgentKey::from(self.permissions.creator_id),
+            owner: if self.permissions.group_owned {
+                OwnerKey::Group(GroupKey::from(self.permissions.group_id))
+            } else {
+                OwnerKey::Agent(owner)
+            },
+            group: (!self.permissions.group_id.is_nil())
+                .then(|| GroupKey::from(self.permissions.group_id)),
+            last_owner_id: self.permissions.last_owner_id,
+            // Not in the asset: `birthtime` is the simulator's own bookkeeping
+            // stamp in microseconds, not the item's creation date in seconds,
+            // and reading one as the other would be a date a century out.
+            creation_date: 0,
+            permissions: Permissions5 {
+                base: Permissions::from_bits(self.permissions.base_mask),
+                owner: Permissions::from_bits(self.permissions.owner_mask),
+                group: Permissions::from_bits(self.permissions.group_mask),
+                everyone: Permissions::from_bits(self.permissions.everyone_mask),
+                next_owner: Permissions::from_bits(self.permissions.next_owner_mask),
+            },
+            ownership_cost: LindenAmount(0),
+            sale_type: self.sale_info.sale_type.to_code(),
+            sale_price: match self.sale_info.sale_type {
+                LegacySaleType::NotForSale => None,
+                // The wire's asking price is unsigned and the text's is not, so
+                // a negative one is read as free rather than wrapped into a
+                // fortune.
+                _for_sale => Some(LindenAmount(
+                    u64::try_from(self.sale_info.sale_price).unwrap_or(0),
+                )),
+            },
+            category: 0,
+            inventory_serial: 0,
+            item_id: InventoryKey::from(Uuid::nil()),
+            folder_id: None,
+            from_task_id: self.from_task_id.map(ObjectKey::from),
+            aggregate_perms: 0,
+            aggregate_perm_textures: 0,
+            aggregate_perm_textures_owner: 0,
+            name: self.name.clone(),
+            description: self.description.clone().unwrap_or_default(),
+            touch_name: String::new(),
+            sit_name: String::new(),
+            texture_ids: Vec::new(),
+        }
+    }
 }
 
 /// How many faces a volume prim of this shape renders — the `face_count` a
@@ -203,6 +272,35 @@ impl PrimBlock {
 #[must_use]
 pub fn rendered_face_count(shape: &PrimShapeParams) -> usize {
     sl_prim::tessellate(&PrimShape::from_params(shape), sl_prim::PrimLod::Low).face_count()
+}
+
+/// What a prim states about its motion: a root's (or a solitary prim's)
+/// velocities, or a child's offset from its root.
+///
+/// The wire tells the two apart by [`parent_id`](Object::parent_id), which is
+/// zero for everything that is not in a linkset. A child's `childpos` /
+/// `childrot` is exactly what an object update already carries in its motion
+/// block — a child's position on the wire *is* the offset from its root — so
+/// the two are the same numbers under different names.
+///
+/// The block's own [`position`](PrimBlock::position) is left at that offset for
+/// a child as well, where the reference writes the world position it had. The
+/// world position is not on the wire and cannot be recovered from the child
+/// alone; a rez reads the offset ([`PrimBlock::to_object`] takes a child's
+/// placement, not its `pos`), so the round trip is exact either way and the
+/// number written is one this crate was actually given.
+fn placement_of(object: &Object) -> PrimPlacement {
+    if object.parent_id.0 == 0 {
+        PrimPlacement::Free {
+            velocity: object.motion.velocity.clone(),
+            angular_velocity: object.motion.angular_velocity.clone(),
+        }
+    } else {
+        PrimPlacement::Child {
+            position: object.motion.position.clone(),
+            rotation: object.motion.rotation.clone(),
+        }
+    }
 }
 
 /// The permission block an object's properties state, or an all-zero block for
@@ -233,17 +331,12 @@ fn permissions_of(object: &Object) -> LegacyPermissions {
 /// as a `SALE_TYPE_*` code and the text as a keyword, so the codes are mapped
 /// here rather than guessed at either end.
 fn sale_info_of(object: &Object) -> crate::model::LegacySaleInfo {
-    use crate::model::{LegacySaleInfo, LegacySaleType};
+    use crate::model::LegacySaleInfo;
     object
         .properties
         .as_ref()
         .map_or_else(LegacySaleInfo::default, |properties| LegacySaleInfo {
-            sale_type: match properties.sale_type {
-                1 => LegacySaleType::Original,
-                2 => LegacySaleType::Copy,
-                3 => LegacySaleType::Contents,
-                _not_for_sale => LegacySaleType::NotForSale,
-            },
+            sale_type: LegacySaleType::from_code(properties.sale_type),
             sale_price: properties
                 .sale_price
                 .as_ref()
@@ -401,9 +494,11 @@ const FULLBRIGHT_BIT: u8 = 0x20;
 mod test {
     use pretty_assertions::assert_eq;
     use sl_proto::{
-        PrimShapeParams, TextureEntry, TextureFace, TextureKey, decode_texture_entry,
-        encode_texture_entry,
+        AgentKey, InventoryKey, LindenAmount, ObjectKey, ObjectProperties, OwnerKey, Permissions,
+        Permissions5, PrimShapeParams, RegionLocalObjectId, TextureEntry, TextureFace, TextureKey,
+        decode_texture_entry, encode_texture_entry,
     };
+    use sl_types::lsl::Vector;
     use uuid::Uuid;
 
     use super::{LegacyFace, LegacyShape, RezTarget};
@@ -486,5 +581,133 @@ mod test {
             encode_texture_entry(&entry),
             encode_texture_entry(&decode_texture_entry(&taken.texture_entry, 6))
         );
+    }
+
+    /// A **child** prim is serialised as one: its wire motion block holds its
+    /// offset from the root rather than a velocity, so the take writes
+    /// `childpos` / `childrot` and the rez reads them back.
+    ///
+    /// The two directions have to agree about which pair carries the offset or
+    /// a taken linkset comes back with its children piled at the root — the
+    /// same failure a link that forgot to reframe the child produces, and just
+    /// as invisible in a log of ids.
+    #[test]
+    fn a_child_prim_is_taken_and_rezzed_by_its_offset() {
+        let entry = TextureEntry {
+            faces: vec![TextureFace::new(TextureKey::from(Uuid::from_u128(1))); 6],
+        };
+        let mut taken = crate::test_support::box_object(Uuid::from_u128(0x5678), &entry);
+        // Linked: the parent's id is what tells the two apart, and the position
+        // is then the offset from the root rather than a region position.
+        taken.parent_id = RegionLocalObjectId(9);
+        taken.motion.position = Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 0.5,
+        };
+        let prim = PrimBlock::from_object(&taken, 6);
+        assert_eq!(
+            prim.placement,
+            PrimPlacement::Child {
+                position: taken.motion.position.clone(),
+                rotation: taken.motion.rotation.clone(),
+            }
+        );
+        let rezzed = prim.to_object(RezTarget {
+            region_handle: taken.region_handle,
+            local_id: RegionLocalObjectId(101),
+            full_id: Uuid::from_u128(0x9999),
+            parent_id: RegionLocalObjectId(100),
+        });
+        assert_eq!(rezzed.motion.position, taken.motion.position);
+        assert_eq!(rezzed.parent_id, RegionLocalObjectId(100));
+    }
+
+    /// The properties record survives the same trip: the name, description,
+    /// permission masks and sale terms a take wrote come back out of the text.
+    ///
+    /// The ids the record carries that the *asset* cannot know — the item and
+    /// folder it was rezzed from, the contents serial — come back empty, which
+    /// is the point: they are the rezzing simulator's to fill in, and a decoder
+    /// that invented them would hand a viewer a "find in inventory" that leads
+    /// nowhere.
+    #[test]
+    fn a_properties_record_round_trips_through_the_asset_form() {
+        let entry = TextureEntry {
+            faces: vec![TextureFace::new(TextureKey::from(Uuid::from_u128(2))); 6],
+        };
+        let mut taken = crate::test_support::box_object(Uuid::from_u128(0xABCD), &entry);
+        let creator = AgentKey::from(Uuid::from_u128(0x0C_2EA704));
+        let owner = AgentKey::from(Uuid::from_u128(0x0_0E4E));
+        let properties = ObjectProperties {
+            creator_id: creator,
+            owner: OwnerKey::Agent(owner),
+            last_owner_id: Uuid::from_u128(0x1A57),
+            permissions: Permissions5 {
+                base: Permissions::from_bits(0x7F_FF_FF_FF),
+                owner: Permissions::from_bits(0x0008_2000),
+                group: Permissions::empty(),
+                everyone: Permissions::from_bits(0x0002_0000),
+                next_owner: Permissions::from_bits(0x0008_2000),
+            },
+            sale_type: 2,
+            sale_price: Some(LindenAmount(250)),
+            name: "Taken Thing".to_owned(),
+            description: "with a description".to_owned(),
+            ..default_properties(taken.full_id)
+        };
+        taken.properties = Some(properties.clone());
+
+        let prim = PrimBlock::from_object(&taken, 6);
+        let rezzed = prim.to_properties(ObjectKey::from(Uuid::from_u128(0xFEED)));
+        assert_eq!(rezzed.object_id, ObjectKey::from(Uuid::from_u128(0xFEED)));
+        assert_eq!(rezzed.creator_id, creator);
+        assert_eq!(rezzed.owner, OwnerKey::Agent(owner));
+        assert_eq!(rezzed.last_owner_id, properties.last_owner_id);
+        assert_eq!(rezzed.permissions, properties.permissions);
+        assert_eq!(rezzed.sale_type, properties.sale_type);
+        assert_eq!(rezzed.sale_price, properties.sale_price);
+        assert_eq!(rezzed.name, properties.name);
+        assert_eq!(rezzed.description, properties.description);
+        assert_eq!(rezzed.item_id, InventoryKey::from(Uuid::nil()));
+        assert_eq!(rezzed.folder_id, None);
+        assert_eq!(rezzed.inventory_serial, 0);
+    }
+
+    /// A record whose every asset-carried field is at its zero value — the base
+    /// the round-trip test above overrides, kept here so that test states only
+    /// what it is asserting.
+    fn default_properties(object_id: sl_proto::ObjectKey) -> ObjectProperties {
+        ObjectProperties {
+            object_id,
+            creator_id: AgentKey::from(Uuid::nil()),
+            owner: OwnerKey::Agent(AgentKey::from(Uuid::nil())),
+            group: None,
+            last_owner_id: Uuid::nil(),
+            creation_date: 0,
+            permissions: Permissions5 {
+                base: Permissions::empty(),
+                owner: Permissions::empty(),
+                group: Permissions::empty(),
+                everyone: Permissions::empty(),
+                next_owner: Permissions::empty(),
+            },
+            ownership_cost: LindenAmount(0),
+            sale_type: 0,
+            sale_price: None,
+            category: 0,
+            inventory_serial: 0,
+            item_id: InventoryKey::from(Uuid::nil()),
+            folder_id: None,
+            from_task_id: None,
+            aggregate_perms: 0,
+            aggregate_perm_textures: 0,
+            aggregate_perm_textures_owner: 0,
+            name: String::new(),
+            description: String::new(),
+            touch_name: String::new(),
+            sit_name: String::new(),
+            texture_ids: Vec::new(),
+        }
     }
 }
