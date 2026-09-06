@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 311 |
+| ready | 310 |
 | blocked | 45 |
 | in-progress | 18 |
 | bugs | 59 |
-| done | 1003 |
+| done | 1004 |
 | deferred | 25 |
 | wont-do | 14 |
 | **total** | **1573** |
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (311)
+## ready (310)
 
 ### protocol
 
@@ -814,9 +814,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   camera restrictions and vision overlay (blocked by
   `viewer-rlv-restriction-state` (done), `viewer-camera-third-person-orbit`
   (done))
-- [`viewer-rlv-enforce-receive-side`](ready/viewer-rlv-enforce-receive-side.md)
-  — RLV — receive-side chat/IM filters and redirect (blocked by
-  `viewer-rlv-restriction-state` (done))
 - [`viewer-rlv-environment-commands`](ready/viewer-rlv-environment-commands.md)
   — RLV — @setenv_*/@getenv_* environment control (blocked by
   `viewer-rlv-restriction-state` (done))
@@ -1299,7 +1296,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1003)
+## done (1004)
 
 ### protocol
 
@@ -2566,6 +2563,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   regressions
 - [`viewer-rlv-command-parser`](done/viewer-rlv-command-parser.md) — RLV — parse
   the @-command chat protocol
+- [`viewer-rlv-enforce-receive-side`](done/viewer-rlv-enforce-receive-side.md) —
+  RLV — receive-side chat/IM filters and redirect (blocked by
+  `viewer-rlv-restriction-state` (done))
 - [`viewer-rlv-enforce-send-side`](done/viewer-rlv-enforce-send-side.md) — RLV —
   enforce send-side blocks at the Session boundary (blocked by
   `viewer-rlv-restriction-state` (done))

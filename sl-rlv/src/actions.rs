@@ -10,12 +10,17 @@
 //! or a build tool has to consult, and it never re-derives an answer the state
 //! machine already holds.
 //!
-//! What it covers is the **outgoing** half of enforcement — refusing to issue
-//! what is forbidden. The receiving half (dropping incoming chat, hiding names)
-//! is a different family with a different filter. The split matters because
-//! this half is exactly the part a *headless* bot has to honour too, which is
-//! why it lives in this pure crate rather than in a viewer system: no Bevy, no
-//! session, no I/O.
+//! What *this* file covers is the **outgoing** half of enforcement — refusing
+//! to issue what is forbidden. Its mirror, the incoming half, is the
+//! `receive` submodule ([`RlvActions::incoming_chat`] and its neighbours): the
+//! same façade, extended with what a restriction lets *in*, because a consumer
+//! that already holds one of these to ask whether it may say something should
+//! not need a second thing to ask whether it may hear the answer. Both halves
+//! are exactly the part a *headless* bot has to honour
+//! too, which is why they live in this pure crate rather than in a viewer
+//! system: no Bevy, no session, no I/O. The one enforcement family that is
+//! neither is the anonymisation layer, which rewrites what a name reads as
+//! rather than whether anything happens at all.
 //!
 //! Three things are needed to answer a question here:
 //!
@@ -57,6 +62,8 @@
 //! `redirectChatOrEmote`), `llfloaterimnearbychat.cpp:890-928` (the outgoing
 //! chat choke point), `llagent.cpp:3993-4002` (`@alwaysrun` / `@temprun`),
 //! `llagent.cpp:5131-5140` (`@tplm`).
+
+pub(crate) mod receive;
 
 use uuid::Uuid;
 
@@ -153,10 +160,19 @@ pub struct RlvObject {
     pub position: [f64; 3],
     /// Whether it is a prim (`LL_PCODE_VOLUME`). Only a prim can be sat on.
     pub is_volume: bool,
+    /// Whether the agent owns it (`LLViewerObject::permYouOwner`).
+    ///
+    /// [`RlvObjectKind`] already collapses ownership *for an attachment* —
+    /// what is worn on this avatar is this avatar's — so this only says
+    /// anything new about a rezzed [`RlvObjectKind::World`] object. The script
+    /// permission a `@acceptpermission` answers is the question that needs to
+    /// tell those apart.
+    pub owned_by_agent: bool,
 }
 
 impl RlvObject {
-    /// A rezzed single-prim in-world object at `position`.
+    /// A rezzed single-prim in-world object at `position`, owned by somebody
+    /// else.
     #[must_use]
     pub const fn world(id: Uuid, position: [f64; 3]) -> Self {
         Self {
@@ -165,7 +181,15 @@ impl RlvObject {
             kind: RlvObjectKind::World,
             position,
             is_volume: true,
+            owned_by_agent: false,
         }
+    }
+
+    /// The same object, but the agent's own.
+    #[must_use]
+    pub const fn owned_by_agent(mut self) -> Self {
+        self.owned_by_agent = true;
+        self
     }
 
     /// The same object, but part of the link tree rooted at `root`.
@@ -188,6 +212,20 @@ impl RlvObject {
     pub const fn non_volume(mut self) -> Self {
         self.is_volume = false;
         self
+    }
+
+    /// Whether the agent owns it (`LLViewerObject::permYouOwner`).
+    ///
+    /// Anything worn on this avatar is owned by it whatever
+    /// [`RlvObject::owned_by_agent`] was set to, and anything worn on somebody
+    /// else is not; only a rezzed object has to be told apart by the field.
+    #[must_use]
+    pub const fn is_owned_by_agent(&self) -> bool {
+        match self.kind {
+            RlvObjectKind::AttachmentSelf | RlvObjectKind::Hud => true,
+            RlvObjectKind::AttachmentOther { .. } => false,
+            RlvObjectKind::World => self.owned_by_agent,
+        }
     }
 }
 

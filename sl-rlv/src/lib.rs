@@ -23,9 +23,10 @@
 //! - the **lock model** ([`RlvLocks`]) answers the one question a yes/no
 //!   restriction cannot: not "is detaching blocked" but "may *this* come off";
 //! - the **enforcement façade** ([`RlvActions`]) is the choke point every
-//!   outgoing action asks before it happens — may I say this, teleport there,
-//!   touch that. One predicate per question, called from everywhere, so no
-//!   call site can spell a restriction its own way and get it wrong.
+//!   action asks before it happens — may I say this, teleport there, touch
+//!   that, and on the way back in: may I hear this, read that. One predicate
+//!   per question, called from everywhere, so no call site can spell a
+//!   restriction its own way and get it wrong.
 //!
 //! The state machine also reports itself: `@notify` subscribers are told about
 //! every change it sees, and the lines they are owed wait in
@@ -53,6 +54,10 @@
 //! The façade also decides the things a yes/no answer cannot express — which
 //! volume chat comes out at, what `@sendchat` leaves of a line, and where
 //! `@redirchat` sends it — because those belong at the same choke point.
+//! Arriving chat and IMs pass the other way through the same door:
+//! [`RlvActions::incoming_chat`] hands back an ellipsis or nothing at all
+//! where `@recvchat` swallowed a line, running it through the very filter the
+//! send side uses.
 //!
 //! What the state machine deliberately does *not* do is obey anything. It never
 //! detaches an attachment and never hides a name tag; those are the consumer's,
@@ -123,6 +128,10 @@ mod state;
 mod version;
 mod watchdog;
 
+pub use actions::receive::{
+    ALLOWIDLE_AWAY_TIMEOUT_SECONDS, RlvChatKind, RlvChatSource, RlvImDecision, RlvIncomingChat,
+    RlvPermissionVerdict, RlvScriptPermission, RlvSessionKind,
+};
 pub use actions::{
     RlvActionSource, RlvActions, RlvChatDecision, RlvChatVolume, RlvCheckType, RlvCurrentCommand,
     RlvFilteredChat, RlvObject, RlvObjectKind, is_emote,
