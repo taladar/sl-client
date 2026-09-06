@@ -72,8 +72,12 @@ block and an `sl_proto::Object`.
 has three commits in all — the 2007 initial import, where it sat inside a
 comment block in `indra/test/io.cpp`, and two 2009 commits (DEV-41175,
 DEV-41352) splitting the legacy TUT tests into `commonmisc_test.cpp` and
-`lluri_test.cpp`. It has only ever been captured payload data for the I/O-pump
-and URI-escaping cases. OpenSim does not use the format at
+`lluri_test.cpp`. Only one of those three sites is compiled, and it does not
+parse the asset — `lluri_test` round-trips it through `LLURI::escape` as a long
+string, the other two are `#if 0` and a comment block — so nothing in the
+reference has ever read the format. The `lluri_test` copy's `b(12100)` LLSD
+length prefix matches the extracted bytes exactly, which is what says the
+capture is whole. OpenSim does not use the format at
 all — it stores `SceneObjectSerializer.ToOriginalXmlFormat` (or
 `CoalescedSceneObjectsSerializer.ToXml` for a multi-object take) as its
 `AssetType.Object` body (`InventoryAccessModule.cs:527-587`).

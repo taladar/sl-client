@@ -18,5 +18,19 @@ string among 12 kB of structure — and the repository does not carry
 resident names. Every other byte, including the creator and owner keys the
 reference itself publishes, is untouched.
 
-The C++ sources hold them as escaped one-line string literals; the files
-here are the unescaped bytes, which is what a grid would serve.
+The C++ sources hold them as escaped one-line string literals; the files here
+are the unescaped bytes, which is what a grid would serve.
+
+**Neither is parsed by the test carrying it.** `lluri_test` round-trips its
+copy through `LLURI::escape` / `unescape` as a long punctuation-dense string —
+the test is "do some round-trip tests with very long strings", and the only
+other string in it is a paragraph of the Community Standards;
+the `commonmisc_test` copy is inside `#if 0` and is not compiled at all. So
+nothing ever validated these bytes — but the `lluri_test` literal is prefixed
+`'asset_data':b(12100)`, an LLSD binary field stating its own length, and the
+bytes unescaped out of it are exactly 12100. The capture is whole, and it came
+out of a real LLSD asset payload rather than being typed by hand.
+
+(The file here is 12095 bytes: the name redaction above is five characters
+shorter than what it replaced. The 12100 is the length of the *extraction*,
+before that edit.)

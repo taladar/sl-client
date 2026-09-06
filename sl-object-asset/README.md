@@ -68,9 +68,22 @@ from the 2007 open-source drop; no commit in it ever touched an
 keyword unique to this format — has three commits in total: the 2007 initial
 import, where it sat inside a comment block in `indra/test/io.cpp`, and two 2009
 commits that split the legacy TUT tests into
-`llcommon/tests/commonmisc_test.cpp` and `lluri_test.cpp`. Across the whole
-public history it is captured payload data in tests — a real asset pasted in as
-bulk text for the I/O-pump and URI-escaping cases — and never live code.
+`llcommon/tests/commonmisc_test.cpp` and `lluri_test.cpp`.
+
+Only one of those three sites is compiled, and it does not parse the asset:
+`lluri_test`'s "do some round-trip tests with very long strings" pushes it
+through `LLURI::escape` / `unescape` as a long punctuation-dense stress
+payload; the only other string in that test is a paragraph of the Community
+Standards. The `commonmisc_test` copy
+is inside `#if 0`; the `io.cpp` one is inside a comment block. Nothing in the
+reference has ever *read* this format — not even the tests carrying it.
+
+Nothing validated the captures either, so a truncated paste would have gone
+unnoticed. But the `lluri_test` copy is prefixed `'asset_data':b(12100)` — an
+LLSD binary field declaring its own length — and the bytes unescaped out of it
+are exactly 12100, so that capture is complete and came from a real LLSD asset
+payload. (The file in `tests/data` is five bytes shorter for the one redaction
+its README records.)
 
 OpenSim does not use the format at all: it stores
 `SceneObjectSerializer.ToOriginalXmlFormat` — or
