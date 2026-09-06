@@ -74,6 +74,7 @@ mod test {
         server_error => "server-error",
         task_inventory => "task-inventory",
         asset_round_trip => "asset-round-trip",
+        object_asset_format => "object-asset-format",
         object_edit => "object-edit",
         object_link_delink => "object-link-delink",
         object_properties => "object-properties",

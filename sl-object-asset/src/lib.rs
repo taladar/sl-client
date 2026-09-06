@@ -57,11 +57,21 @@
 //! # Where the format came from
 //!
 //! Second Life's simulator is closed, and **neither reference implementation
-//! this workspace has carries a reader for this format**: in Firestorm every
-//! keyword below appears only in test fixture data
-//! (`llcommon/tests/commonmisc_test.cpp`, `llcommon/tests/lluri_test.cpp`,
-//! `test/io.cpp`) and in no production file, and OpenSim does not use the
-//! format at all — it stores `SceneObjectSerializer.ToOriginalXmlFormat` (or
+//! this workspace has ever carried a reader for this format**.
+//!
+//! In the reference viewer that is not "it was removed": the repository's
+//! history runs unbroken from the 2007 open-source drop, no commit in it ever
+//! touched an `importFileLegacy` / `exportFileLegacy`, and the one prim-level
+//! keyword unique to this format (`sandboxhome`) has exactly three commits —
+//! the 2007 initial import, where it lived only inside a comment block in
+//! `indra/test/io.cpp`, and two 2009 commits (DEV-41175, DEV-41352) that split
+//! the legacy TUT tests into `llcommon/tests/commonmisc_test.cpp` and
+//! `lluri_test.cpp`. Across the whole public history the format is **captured
+//! payload data in tests** — a real asset pasted in as bulk text for the
+//! I/O-pump and URI-escaping cases — and never live code.
+//!
+//! OpenSim does not use the format at all: it stores
+//! `SceneObjectSerializer.ToOriginalXmlFormat` (or
 //! `CoalescedSceneObjectsSerializer.ToXml` for a multi-object take) as its
 //! `AssetType.Object` body (`InventoryAccessModule.cs`), which is XML and
 //! shares nothing with this. So `AssetType::Object` is **two different formats
@@ -91,14 +101,41 @@
 //! empty, and a keyword this crate does not know is preserved rather than
 //! dropped ([`PrimBlock::unknown`]).
 //!
+//! # What a viewer can actually see (measured)
+//!
+//! Neither grid makes this format a viewer's business, and the two do not agree
+//! with each other — measured 2026-09-06 by `sl-conformance`'s
+//! `object-asset-format` case:
+//!
+//! | grid | asset id exposed to a viewer? | body |
+//! | --- | --- | --- |
+//! | OpenSim | yes — every object item names one | `<SceneObjectGroup>` XML |
+//! | Second Life | **no** | unobservable |
+//!
+//! Second Life answers an object inventory item with a **nil** `asset_id`, in
+//! the AIS3 folder listing and in the per-item fetch alike, and it does so even
+//! for items that are full-perm to their owner — so a viewer cannot fetch an
+//! object asset there at all, whatever the bytes would have been. That is
+//! consistent with neither reference viewer ever having carried a reader.
+//!
+//! So this crate is **not** on any viewer's critical path, and its fidelity to
+//! the 2005 text buys nothing a viewer can observe. What it is for is below.
+//!
 //! # What it is for
 //!
 //! `AssetType::Object` was the one inventory class the workspace could neither
-//! read nor write, which left every path that goes *through* the asset
-//! untestable: rezzing an object from inventory, taking one back, a coalesced
-//! object, an object offered in an IM, and the object embedded in a notecard.
-//! A fake grid can now author the asset a take mints an id for, and a test can
-//! assert that what came back is the object that was taken.
+//! read nor write. Two uses survive the measurement above:
+//!
+//! - **the fake grid needs a serialisation.** Its take mints an asset id, and
+//!   an id that resolves to nothing is the failure the `asset-round-trip`
+//!   family exists to catch. Only the grid reads these bytes back, so the
+//!   choice of format is free — this one is chosen because the grid imitates
+//!   Second Life. (Whether it should imitate SL's *withholding* instead is
+//!   [[test-fake-grid-object-asset-id-divergence]].)
+//! - **the two reference captures are readable.** They are the only public
+//!   examples of the format, and a decoder that reads them field by field is
+//!   how the workspace can say what it is at all, rather than repeating
+//!   folklore about it.
 
 pub mod bridge;
 pub mod decode;

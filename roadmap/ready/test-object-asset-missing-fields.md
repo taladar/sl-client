@@ -31,6 +31,19 @@ Two possibilities, and the work is deciding which:
   modern take from Second Life would settle it — one object with a light, a
   flexi path and a glowing face, taken and its asset fetched. That is a live
   task, and it is the same fetch [[test-asset-save-mutation-survey]] does.
+**Half of this is now measured** (`object-asset-format`, 2026-09-06): a viewer
+cannot fetch an object asset on Second Life *at all*. Every object item the
+test account holds answers with a nil `asset_id`, in the AIS3 listing and the
+per-item fetch alike, including items that are full-perm to their owner. So the
+first possibility below cannot be settled from a viewer, and the missing-field
+question only ever had an answer on OpenSim — where the body is
+`SceneObjectSerializer` XML and these keywords do not exist either.
+
+What is left of this task is therefore narrower than it was written: decide
+whether the fake grid should keep serving an object asset at all
+([[test-fake-grid-object-asset-id-divergence]]), and if it does, whether its
+prims should carry the fields the 2005 captures lack.
+
 - **The format really is that old**, and a modern grid stores something else
   entirely (an LLSD or XML serialisation) for anything the text cannot say.
   OpenSim is the settled half of that already: verified while doing

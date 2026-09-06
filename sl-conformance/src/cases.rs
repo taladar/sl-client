@@ -68,6 +68,7 @@ pub mod money_transfer;
 pub mod mute_list;
 pub mod neighbour_child_circuits;
 pub mod notecard_create_update;
+pub mod object_asset_format;
 pub mod object_edit;
 pub mod object_link_delink;
 pub mod object_properties;

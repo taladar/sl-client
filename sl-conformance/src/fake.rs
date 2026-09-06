@@ -129,6 +129,7 @@ pub const OFFLINE_CASES: &[&str] = &[
     "server-error",
     "task-inventory",
     "asset-round-trip",
+    "object-asset-format",
     "object-edit",
     "object-link-delink",
     "object-properties",

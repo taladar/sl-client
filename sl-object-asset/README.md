@@ -60,9 +60,18 @@ LLSD-notation line naming the prim:
 ## Where the format came from
 
 Second Life's simulator is closed, and neither reference implementation this
-workspace has carries a reader for the format. In Firestorm every keyword below
-appears **only** in test fixture data (`llcommon/tests/commonmisc_test.cpp`,
-`llcommon/tests/lluri_test.cpp`, `test/io.cpp`) and in no production file.
+workspace has ever carried a reader for the format.
+
+For the reference viewer that is not "it was removed". Its history runs unbroken
+from the 2007 open-source drop; no commit in it ever touched an
+`importFileLegacy` / `exportFileLegacy`, and `sandboxhome` — the prim-level
+keyword unique to this format — has three commits in total: the 2007 initial
+import, where it sat inside a comment block in `indra/test/io.cpp`, and two 2009
+commits that split the legacy TUT tests into
+`llcommon/tests/commonmisc_test.cpp` and `lluri_test.cpp`. Across the whole
+public history it is captured payload data in tests — a real asset pasted in as
+bulk text for the I/O-pump and URI-escaping cases — and never live code.
+
 OpenSim does not use the format at all: it stores
 `SceneObjectSerializer.ToOriginalXmlFormat` — or
 `CoalescedSceneObjectsSerializer.ToXml` for a multi-object take — as its
@@ -90,6 +99,27 @@ Fields no source explains — `task_valid`, `travel_access`, `displayopts`,
 verbatim with no claim about their meaning, and a keyword this crate has never
 seen is preserved rather than dropped, so a re-save is not lossy against a grid
 that grew a field.
+
+## What a viewer can actually see
+
+Measured 2026-09-06 (`sl-conformance`'s `object-asset-format`), because the
+question "is this format still real" cannot be answered offline:
+
+| grid | asset id exposed to a viewer? | body |
+| --- | --- | --- |
+| OpenSim | yes — every object item names one | `<SceneObjectGroup>` XML |
+| Second Life | **no** | unobservable |
+
+Second Life answers an object inventory item with a nil `asset_id` — in the
+AIS3 folder listing and in the per-item fetch, and even for items that are
+full-perm to their owner. A viewer cannot fetch an object asset there at all,
+which is consistent with neither reference viewer ever having carried a reader
+for one.
+
+So this crate is not on a viewer's critical path. It is here because the fake
+grid's take has to serialise *something* (an inventory item whose asset id
+resolves to nothing is the bug its round-trip cases hunt), and because the two
+reference captures deserve a reader that can say what they contain.
 
 ## Two departures from the reference
 

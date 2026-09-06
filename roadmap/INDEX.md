@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 307 |
+| ready | 310 |
 | blocked | 55 |
 | in-progress | 18 |
 | bugs | 59 |
 | done | 999 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1577** |
+| **total** | **1580** |
 
 ## ideas (100)
 
@@ -237,10 +237,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (307)
+## ready (310)
 
 ### protocol
 
+- [`protocol-ais3-library-cap`](ready/protocol-ais3-library-cap.md) — An AIS3
+  request for a library folder goes to the wrong capability
+- [`protocol-ais3-nested-embedded`](ready/protocol-ais3-nested-embedded.md) — An
+  AIS3 depth fetch reads only its first level
 - [`protocol-audit-asset-store-duplication`](ready/protocol-audit-asset-store-duplication.md)
   — Three hand-rolled copies of the same asset store
 - [`protocol-audit-conversions-test-coverage`](ready/protocol-audit-conversions-test-coverage.md)
@@ -945,6 +949,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   The built-in UI sounds the viewer plays on arrival 404
 - [`test-fake-grid-login-matrix-and-timeouts`](ready/test-fake-grid-login-matrix-and-timeouts.md)
   — The login refusals and handover timeouts nothing tests
+- [`test-fake-grid-object-asset-id-divergence`](ready/test-fake-grid-object-asset-id-divergence.md)
+  — The fake grid names an object's asset where Second Life never does
 - [`test-fake-grid-object-sounds`](ready/test-fake-grid-object-sounds.md) — The
   fake grid can serve a sound but cannot play one
 - [`test-fake-grid-rez-from-inventory`](ready/test-fake-grid-rez-from-inventory.md)

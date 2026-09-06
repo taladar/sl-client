@@ -65,10 +65,15 @@ model (`PrimBlock` and its `LegacyPermissions` / `LegacySaleInfo` /
 `LegacyShape` / `LegacyFace` blocks), plus a `bridge` both ways between a prim
 block and an `sl_proto::Object`.
 
-**Where the grammar comes from.** Neither reference implementation here carries
-a reader for it: in Firestorm every one of its keywords appears only in test
-fixture data (`llcommon/tests/commonmisc_test.cpp`, `lluri_test.cpp`,
-`test/io.cpp`) and in no production file, and OpenSim does not use the format at
+**Where the grammar comes from.** Neither reference implementation here has
+*ever* carried a reader for it. The viewer's git history runs unbroken from the
+2007 open-source drop and no commit in it touches an `importFileLegacy` /
+`exportFileLegacy`; `sandboxhome`, the prim-level keyword unique to this format,
+has three commits in all — the 2007 initial import, where it sat inside a
+comment block in `indra/test/io.cpp`, and two 2009 commits (DEV-41175,
+DEV-41352) splitting the legacy TUT tests into `commonmisc_test.cpp` and
+`lluri_test.cpp`. It has only ever been captured payload data for the I/O-pump
+and URI-escaping cases. OpenSim does not use the format at
 all — it stores `SceneObjectSerializer.ToOriginalXmlFormat` (or
 `CoalescedSceneObjectsSerializer.ToXml` for a multi-object take) as its
 `AssetType.Object` body (`InventoryAccessModule.cs:527-587`).
@@ -133,3 +138,33 @@ light, sculpt, mesh, reflection probe), none for floating text (only its
 particle system. A prim carrying any of those does not survive the trip. That
 is the format, not the crate — inventing keywords would produce an asset no
 grid could read — and it is filed as [[test-object-asset-missing-fields]].
+
+## What the live grids said afterwards
+
+The premise this task rested on — that the text form is what a grid stores for
+`AssetType::Object` — was never verified when the work was done, and the
+`object-asset-format` conformance case was written to settle it (2026-09-06):
+
+| grid | asset id exposed to a viewer? | body |
+| --- | --- | --- |
+| OpenSim | yes — every object item names one | `<SceneObjectGroup>` XML |
+| Second Life | **no** | unobservable |
+| fake | yes (its own) | this crate's Linden text |
+
+Second Life answers an object inventory item with a **nil** `asset_id`, in the
+AIS3 folder listing and in the per-item `GET /item/<id>`, and does so for items
+that are full-perm to their owner — so it is not the usual "no asset id unless
+you own it outright" rule. The class is simply not fetchable by a viewer, which
+is why neither reference viewer has ever carried a reader for it.
+
+Three consequences, all filed rather than left implicit:
+
+- this crate is **not** on a viewer's critical path, and its fidelity to the
+  2005 text buys nothing a viewer can observe. Its two live uses are the fake
+  grid's own serialisation and reading the reference captures;
+- the fake grid is now **more permissive than the grid it imitates** —
+  [[test-fake-grid-object-asset-id-divergence]];
+- two client gaps surfaced on the way: an AIS3 request for a library folder
+  goes to the wrong capability ([[protocol-ais3-library-cap]]), and a
+  `depth > 1` fetch reads only its first level
+  ([[protocol-ais3-nested-embedded]]).
