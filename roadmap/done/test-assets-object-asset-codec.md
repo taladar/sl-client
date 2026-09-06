@@ -65,8 +65,17 @@ model (`PrimBlock` and its `LegacyPermissions` / `LegacySaleInfo` /
 `LegacyShape` / `LegacyFace` blocks), plus a `bridge` both ways between a prim
 block and an `sl_proto::Object`.
 
-**Where the grammar comes from, since the viewer's own reader is gone.** Three
-sources, and the crate docs say which part rests on which: the sub-block
+**Where the grammar comes from.** Neither reference implementation here carries
+a reader for it: in Firestorm every one of its keywords appears only in test
+fixture data (`llcommon/tests/commonmisc_test.cpp`, `lluri_test.cpp`,
+`test/io.cpp`) and in no production file, and OpenSim does not use the format at
+all — it stores `SceneObjectSerializer.ToOriginalXmlFormat` (or
+`CoalescedSceneObjectsSerializer.ToXml` for a multi-object take) as its
+`AssetType.Object` body (`InventoryAccessModule.cs:527-587`).
+`AssetType::Object` is two different formats on the two grids and this crate is
+the Second Life one, which is a finding in its own right — see
+[[test-object-asset-missing-fields]]. So the grammar rests on three sources, and
+the crate docs say which part rests on which: the sub-block
 writers that *do* survive (`LLPermissions` / `LLSaleInfo` / `LLPathParams` /
 `LLProfileParams::exportLegacyStream`, and their `importLegacyStream` twins for
 the reading rules); the two complete assets the reference carries in its own

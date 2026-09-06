@@ -56,9 +56,19 @@
 //!
 //! # Where the format came from
 //!
-//! Second Life's simulator is closed and the viewer's own reader for this
-//! format was removed years ago, so the grammar here is reconstructed from
-//! three sources, and the crate says which parts rest on which:
+//! Second Life's simulator is closed, and **neither reference implementation
+//! this workspace has carries a reader for this format**: in Firestorm every
+//! keyword below appears only in test fixture data
+//! (`llcommon/tests/commonmisc_test.cpp`, `llcommon/tests/lluri_test.cpp`,
+//! `test/io.cpp`) and in no production file, and OpenSim does not use the
+//! format at all — it stores `SceneObjectSerializer.ToOriginalXmlFormat` (or
+//! `CoalescedSceneObjectsSerializer.ToXml` for a multi-object take) as its
+//! `AssetType.Object` body (`InventoryAccessModule.cs`), which is XML and
+//! shares nothing with this. So `AssetType::Object` is **two different formats
+//! on the two grids**, and this crate is the Second Life one.
+//!
+//! The grammar is therefore reconstructed from three sources, and the crate
+//! says which parts rest on which:
 //!
 //! - the **sub-block writers that survive** in the reference viewer —
 //!   `LLPermissions::exportLegacyStream`, `LLSaleInfo::exportLegacyStream` and

@@ -33,9 +33,14 @@ Two possibilities, and the work is deciding which:
   task, and it is the same fetch [[test-asset-save-mutation-survey]] does.
 - **The format really is that old**, and a modern grid stores something else
   entirely (an LLSD or XML serialisation) for anything the text cannot say.
-  OpenSim already does: it writes `SceneObjectSerializer`'s XML, not this text
-  at all, which is worth recording either way since the two grids then disagree
-  about what `AssetType::Object` even *is*.
+  OpenSim is the settled half of that already: verified while doing
+  [[test-assets-object-asset-codec]], it writes
+  `SceneObjectSerializer.ToOriginalXmlFormat` — or
+  `CoalescedSceneObjectsSerializer.ToXml` for a multi-object take — as the
+  `AssetType.Object` body (`InventoryAccessModule.cs:527-587`), and carries not
+  one keyword of this text format anywhere. So the two grids already disagree
+  about what `AssetType::Object` *is*; what is unmeasured is only the Second
+  Life side.
 
 Until then `sl-object-asset` says what it cannot carry and the fake grid takes
 only the prims it rezzes (a box), so nothing silently loses a field it was

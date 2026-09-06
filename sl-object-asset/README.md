@@ -59,9 +59,19 @@ LLSD-notation line naming the prim:
 
 ## Where the format came from
 
-Second Life's simulator is closed and the reference viewer's own reader for
-this format was removed years ago, so the grammar is reconstructed — and the
-crate is explicit about which part rests on what:
+Second Life's simulator is closed, and neither reference implementation this
+workspace has carries a reader for the format. In Firestorm every keyword below
+appears **only** in test fixture data (`llcommon/tests/commonmisc_test.cpp`,
+`llcommon/tests/lluri_test.cpp`, `test/io.cpp`) and in no production file.
+OpenSim does not use the format at all: it stores
+`SceneObjectSerializer.ToOriginalXmlFormat` — or
+`CoalescedSceneObjectsSerializer.ToXml` for a multi-object take — as its
+`AssetType.Object` body (`InventoryAccessModule.cs`), which is XML and shares
+nothing with this. `AssetType::Object` is two different formats on the two
+grids, and this crate is the Second Life one.
+
+The grammar is therefore reconstructed — and the crate is explicit about which
+part rests on what:
 
 - the sub-block writers that **do** survive in the viewer
   (`LLPermissions::exportLegacyStream`, `LLSaleInfo::exportLegacyStream`,
