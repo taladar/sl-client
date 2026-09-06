@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 306 |
+| ready | 307 |
 | blocked | 55 |
 | in-progress | 18 |
 | bugs | 59 |
 | done | 999 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1576** |
+| **total** | **1577** |
 
 ## ideas (100)
 
@@ -237,7 +237,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (306)
+## ready (307)
 
 ### protocol
 
@@ -947,6 +947,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The login refusals and handover timeouts nothing tests
 - [`test-fake-grid-object-sounds`](ready/test-fake-grid-object-sounds.md) — The
   fake grid can serve a sound but cannot play one
+- [`test-fake-grid-rez-from-inventory`](ready/test-fake-grid-rez-from-inventory.md)
+  — The fake grid takes an object but cannot rez one back
 - [`test-fake-grid-timeline`](ready/test-fake-grid-timeline.md) — Scripted
   scenario timelines with markers (blocked by `test-fake-grid-determinism`
   (done), `viewer-fake-grid-render-harness` (done))
