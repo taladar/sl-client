@@ -2,7 +2,7 @@
 id: viewer-rlv-vision-render
 title: RLV vision-restriction rendering
 topic: viewer
-status: blocked
+status: ready
 origin: Vintage-parity coverage audit (2026-07-22)
 blocked_by: [viewer-rlv-restriction-state]
 ---

@@ -2,7 +2,7 @@
 id: viewer-rlv-enforce-send-side
 title: RLV — enforce send-side blocks at the Session boundary
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07); split from viewer-rlva-enforcement
 blocked_by: [viewer-rlv-restriction-state]
 ---

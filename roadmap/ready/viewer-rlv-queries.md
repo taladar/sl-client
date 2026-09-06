@@ -2,7 +2,7 @@
 id: viewer-rlv-queries
 title: RLV — answer @get* queries via chat reply
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07); split from viewer-rlva-enforcement
 blocked_by: [viewer-rlv-restriction-state]
 ---

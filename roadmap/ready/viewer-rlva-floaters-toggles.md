@@ -2,7 +2,7 @@
 id: viewer-rlva-floaters-toggles
 title: "RLVa UI: console, restrictions/strings/locks floaters + toggles"
 topic: viewer
-status: blocked
+status: ready
 origin: main-menu survey (2026-07-23)
 blocked_by: [viewer-rlv-restriction-state]
 refs: [viewer-rlv-command-parser, viewer-rlv-notify, viewer-rlv-queries]

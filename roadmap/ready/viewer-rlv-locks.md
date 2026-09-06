@@ -2,7 +2,7 @@
 id: viewer-rlv-locks
 title: RLV — attachment, wearable and folder locks
 topic: viewer
-status: blocked
+status: ready
 origin: Firestorm full-parity audit (2026-08-19)
 refs: [viewer-rlv-enforce-send-side, viewer-rlv-enforce-forced-actions,
 viewer-rlva-floaters-toggles]

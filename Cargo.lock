@@ -8960,6 +8960,7 @@ version = "0.1.0"
 dependencies = [
  "pretty_assertions",
  "thiserror 2.0.19",
+ "uuid",
 ]
 
 [[package]]

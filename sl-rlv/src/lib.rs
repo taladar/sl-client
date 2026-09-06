@@ -1,5 +1,6 @@
-//! Pure decoder for the Second Life / OpenSim **RLV / RLVa** `@`-command chat
-//! protocol — the language a worn attachment speaks to control the viewer.
+//! Pure decoder and restriction state machine for the Second Life / OpenSim
+//! **RLV / RLVa** `@`-command chat protocol — the language a worn attachment
+//! speaks to control the viewer.
 //!
 //! RLV is not a wire protocol: the carrier is ordinary **owner-say chat**
 //! (`CHAT_TYPE_OWNER` on channel `0`) from an object the agent owns, which is
@@ -8,17 +9,28 @@
 //! never reaches the chat log. The payload is a **comma-separated list** of
 //! commands, each `behaviour[:option]=param`, lower-cased.
 //!
-//! This crate is the **language decoder** only: it turns a chat line into a
-//! typed [`RlvCommand`] stream — behaviour, optional option, and the classified
-//! [`RlvParam`] (add / remove / force / reply-channel / clear). *Obeying* the
-//! commands (the restriction state and the enforcement families) is a separate
-//! concern that builds on this. Like `sl-prim` and `sl-anim` it is a pure
-//! crate — no Bevy, no I/O, no session — so a headless RLV-compliant client can
-//! use exactly this, and it is unit-testable to the letter (the reference's own
-//! debug console feeds hand-typed commands through the very same path).
+//! The crate is two layers:
+//!
+//! - the **language decoder** turns a chat line into a typed [`RlvCommand`]
+//!   stream — behaviour, optional option, and the classified [`RlvParam`] (add
+//!   / remove / force / reply-channel / clear);
+//! - the **restriction state machine** ([`RlvState`]) holds what those commands
+//!   mean: which behaviours are in force, which object put each one there, and
+//!   which exceptions poke holes in them. Every enforcement family asks it
+//!   rather than re-deriving the answer at its own choke point.
+//!
+//! What the state machine deliberately does *not* do is obey anything. It never
+//! detaches an attachment, never hides a name tag, never answers a query; those
+//! are the consumer's, and a `=force` action or a `=<channel>` query comes back
+//! from [`RlvState::apply`] as [`RlvOutcome::NotAStateChange`] for the consumer
+//! to dispatch. Like `sl-prim` and `sl-anim` this is a pure crate — no Bevy, no
+//! I/O, no session — so a headless RLV-compliant bot can use exactly this, and
+//! it is unit-testable to the letter (the reference's own debug console feeds
+//! hand-typed commands through the very same path).
 //!
 //! ```
-//! use sl_rlv::{parse_chat_line, RlvBehaviour, RlvParam};
+//! use sl_rlv::{parse_chat_line, RlvBehaviour, RlvParam, RlvState};
+//! use uuid::Uuid;
 //!
 //! let cmds = parse_chat_line("@detach=n,fly=n").unwrap();
 //! assert_eq!(cmds.len(), 2);
@@ -34,19 +46,51 @@
 //! // there is no `tpto` restriction to add.
 //! let nonsense = &parse_chat_line("@tpto=n").unwrap()[0];
 //! assert_eq!(nonsense.as_ref().unwrap().behaviour, RlvBehaviour::Unknown);
+//!
+//! // Two collars, one restriction: it stays in force until both let go.
+//! let (collar, cuffs) = (Uuid::from_u128(1), Uuid::from_u128(2));
+//! let mut state = RlvState::new();
+//! for object in [collar, cuffs] {
+//!     state.apply(object, parse_chat_line("@fly=n").unwrap()[0].as_ref().unwrap());
+//! }
+//! state.apply(collar, parse_chat_line("@fly=y").unwrap()[0].as_ref().unwrap());
+//! assert!(state.has_behaviour(RlvBehaviour::Fly));
+//!
+//! // Taking the other one off is what finally lifts it.
+//! state.clear_object(cuffs);
+//! assert!(!state.has_behaviour(RlvBehaviour::Fly));
 //! ```
 //!
-//! The grammar and classification follow Firestorm's `rlvhandler.cpp` /
-//! `rlvhelper.cpp` / `rlvdefines.h` (`ERlvBehaviour`, `ERlvParamType`,
-//! `RLV_CMD_PREFIX`), reimplemented idiomatically rather than copied. The
-//! channel-0 owner-say gating is the caller's job — this crate decodes a line
-//! it is handed.
+//! The grammar, the classification and the state machine follow Firestorm's
+//! `rlvhandler.cpp` / `rlvhelper.cpp` / `rlvdefines.h` (`ERlvBehaviour`,
+//! `ERlvParamType`, `RLV_CMD_PREFIX`), reimplemented idiomatically rather than
+//! copied. The channel-0 owner-say gating is the caller's job — this crate
+//! decodes a line it is handed.
 
 mod behaviour;
 mod command;
+mod modifier;
+mod restriction;
+mod state;
+mod version;
 
-pub use behaviour::{RlvBehaviour, RlvLocalModifier, RlvResolvedBehaviour};
+pub use behaviour::{
+    RlvBehaviour, RlvBehaviourFlags, RlvEntry, RlvLocalModifier, RlvResolvedBehaviour, RlvValueType,
+};
 pub use command::{RLV_PREFIX, RlvCommand, RlvParam, RlvParamKind, RlvParseError};
+pub use modifier::{
+    DEFAULT_FIELD_OF_VIEW, FARTOUCH_DEFAULT, IMG_DEFAULT, RlvComparator, RlvModifier,
+    RlvModifierState, RlvModifierValue, SITTP_DEFAULT, TPLOCAL_DEFAULT,
+};
+pub use restriction::{RlvOptionArity, RlvOptionMeaning, RlvRestrictionRule};
+pub use state::{
+    RlvException, RlvExceptionCheck, RlvExceptionOption, RlvHeldCommand, RlvOutcome, RlvState,
+    is_state_change,
+};
+pub use version::{
+    RLV_VERSION, RLV_VERSION_COMPAT, RLVA_IMPL_ID, RLVA_VERSION, version_impl_num_reply,
+    version_num_reply, version_reply,
+};
 
 /// Whether `line` is an RLV command line — i.e. begins with the `@`
 /// ([`RLV_PREFIX`]).
@@ -418,15 +462,110 @@ mod tests {
 
     #[test]
     fn behaviour_keyword_roundtrip() {
-        assert_eq!(RlvBehaviour::Detach.keyword(), Some("detach"));
-        assert_eq!(RlvBehaviour::Unknown.keyword(), None);
         assert_eq!(
-            RlvBehaviour::from_keyword("detach"),
+            RlvBehaviour::Detach.canonical_keyword(RlvParamKind::AddRem),
+            Some("detach")
+        );
+        assert_eq!(
+            RlvBehaviour::Unknown.canonical_keyword(RlvParamKind::AddRem),
+            None
+        );
+        assert_eq!(
+            RlvBehaviour::from_keyword("detach", RlvParamKind::AddRem),
             Some(RlvBehaviour::Detach)
         );
-        assert_eq!(RlvBehaviour::from_keyword("nope"), None);
+        assert_eq!(
+            RlvBehaviour::from_keyword("nope", RlvParamKind::AddRem),
+            None
+        );
         assert!(RlvBehaviour::Recvim.has_strict());
         assert!(!RlvBehaviour::Fly.has_strict());
+    }
+
+    #[test]
+    fn a_synonym_names_the_behaviour_it_is_a_synonym_of() -> Result<(), TestError> {
+        // The whole point of the keyword/behaviour split: two spellings, one
+        // reference-counting slot.
+        assert_eq!(
+            RlvCommand::parse_field("touchfar=n")?.behaviour,
+            RlvBehaviour::Fartouch
+        );
+        assert_eq!(
+            RlvCommand::parse_field("fartouch=n")?.behaviour,
+            RlvBehaviour::Fartouch
+        );
+        // ... but the spelling that arrived is still there.
+        assert_eq!(RlvCommand::parse_field("touchfar=n")?.keyword, "touchfar");
+        // A synonym never answers as the canonical spelling.
+        assert_eq!(
+            RlvBehaviour::Fartouch.canonical_keyword(RlvParamKind::AddRem),
+            Some("fartouch")
+        );
+
+        // The deprecated camera shims fold onto the modern behaviours.
+        assert_eq!(
+            RlvCommand::parse_field("camdistmin:2=n")?.behaviour,
+            RlvBehaviour::SetcamAvdistmin
+        );
+        assert_eq!(
+            RlvCommand::parse_field("camunlock=n")?.behaviour,
+            RlvBehaviour::SetcamUnlock
+        );
+        // `@camzoommin` is *not* one of them: the reference gives it a
+        // behaviour of its own that merely counts as `@setcam_fovmin`.
+        assert_eq!(
+            RlvCommand::parse_field("camzoommin=n")?.behaviour,
+            RlvBehaviour::Camzoommin
+        );
+
+        // Every force-wear spelling is one behaviour, as the reference's
+        // `RLV_CMD_FORCEWEAR` is.
+        for keyword in [
+            "attach",
+            "attachall",
+            "addoutfit",
+            "attachthisoverorreplace",
+        ] {
+            assert_eq!(
+                RlvCommand::parse_field(&format!("{keyword}:x=force"))?.behaviour,
+                RlvBehaviour::ForceWear,
+                "`{keyword}=force` is not a force-wear command"
+            );
+        }
+        // `@addoutfit` is a force-wear synonym but a restriction of its own.
+        assert_eq!(
+            RlvCommand::parse_field("addoutfit=n")?.behaviour,
+            RlvBehaviour::Addoutfit
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn behaviour_flags_are_carried_for_getcommand() -> Result<(), TestError> {
+        let deprecated =
+            RlvEntry::lookup("camzoommin", RlvParamKind::AddRem).ok_or("no `camzoommin` row")?;
+        assert!(deprecated.flags.is_deprecated());
+        assert!(!deprecated.flags.is_synonym());
+
+        let shim =
+            RlvEntry::lookup("camtextures", RlvParamKind::AddRem).ok_or("no `camtextures` row")?;
+        assert!(shim.flags.is_deprecated() && shim.flags.is_synonym());
+
+        let experimental =
+            RlvEntry::lookup("shownearby", RlvParamKind::AddRem).ok_or("no `shownearby` row")?;
+        assert!(experimental.flags.is_experimental());
+
+        let extended =
+            RlvEntry::lookup("interact", RlvParamKind::AddRem).ok_or("no `interact` row")?;
+        assert!(extended.flags.is_extended());
+
+        assert_eq!(format!("{:?}", RlvBehaviourFlags::NONE), "NONE");
+        assert_eq!(
+            format!("{:?}", shim.flags),
+            "SYNONYM|DEPRECATED",
+            "the debug form is what a `@getcommand` audit reads"
+        );
+        Ok(())
     }
 
     /// Every param kind, so a table row can be probed for the kinds it does
@@ -455,52 +594,58 @@ mod tests {
     }
 
     #[test]
-    fn every_table_row_roundtrips() -> Result<(), TestError> {
-        let mut seen: std::collections::HashMap<&str, RlvBehaviour> =
-            std::collections::HashMap::new();
+    fn every_dictionary_row_is_unique_and_looks_itself_up() {
+        let mut seen: std::collections::HashSet<(&str, RlvParamKind)> =
+            std::collections::HashSet::new();
 
-        for &behaviour in RlvBehaviour::ALL {
-            let keyword = behaviour.keyword().ok_or("a declared row has no keyword")?;
-
-            assert_eq!(
-                RlvBehaviour::from_keyword(keyword),
-                Some(behaviour),
-                "`{keyword}` does not look up to {behaviour:?}"
+        for entry in RlvEntry::ALL {
+            assert_ne!(
+                entry.behaviour,
+                RlvBehaviour::Unknown,
+                "`{}` names no behaviour",
+                entry.keyword
             );
             assert_eq!(
-                seen.insert(keyword, behaviour),
-                None,
-                "`{keyword}` is declared twice"
+                RlvEntry::lookup(entry.keyword, entry.kind),
+                Some(entry),
+                "`{}` for {:?} does not look itself up",
+                entry.keyword,
+                entry.kind
             );
-
-            let kinds = behaviour.param_kinds();
             assert!(
-                !kinds.is_empty(),
-                "{behaviour:?} is declared for no param kind, so it can never resolve"
+                seen.insert((entry.keyword, entry.kind)),
+                "`{}` is declared twice for {:?}",
+                entry.keyword,
+                entry.kind
             );
-            for (index, kind) in kinds.iter().enumerate() {
-                assert!(
-                    !kinds
-                        .iter()
-                        .skip(index.saturating_add(1))
-                        .any(|it| it == kind),
-                    "{behaviour:?} lists {kind:?} twice"
+        }
+    }
+
+    #[test]
+    fn every_behaviour_is_reachable_and_answers_its_own_kinds() -> Result<(), TestError> {
+        for &behaviour in RlvBehaviour::ALL {
+            let reached = RlvEntry::ALL
+                .iter()
+                .any(|entry| entry.behaviour == behaviour);
+            assert!(
+                reached,
+                "{behaviour:?} has no dictionary row, so no command can ever name it"
+            );
+            for kind in ALL_PARAM_KINDS {
+                assert_eq!(
+                    behaviour.accepts(kind),
+                    RlvEntry::canonical(behaviour, kind).is_some(),
+                    "{behaviour:?} disagrees with the dictionary about {kind:?}"
                 );
             }
         }
-
-        assert_eq!(
-            seen.len(),
-            RlvBehaviour::ALL.len(),
-            "the keyword set is smaller than the table"
-        );
         Ok(())
     }
 
     #[test]
-    fn every_table_row_answers_only_its_own_param_kinds() -> Result<(), TestError> {
-        for &behaviour in RlvBehaviour::ALL {
-            let keyword = behaviour.keyword().ok_or("a declared row has no keyword")?;
+    fn every_dictionary_row_answers_only_its_own_param_kind() -> Result<(), TestError> {
+        for entry in RlvEntry::ALL {
+            let keyword = entry.keyword;
 
             // A bare keyword is a syntax error for everything but `@clear`.
             if keyword != "clear" {
@@ -523,11 +668,8 @@ mod tests {
                     "`{field}` classified as another kind"
                 );
 
-                let expected = if behaviour.accepts(kind) {
-                    behaviour
-                } else {
-                    RlvBehaviour::Unknown
-                };
+                let expected = RlvEntry::lookup(keyword, kind)
+                    .map_or(RlvBehaviour::Unknown, |row| row.behaviour);
                 assert_eq!(
                     cmd.behaviour, expected,
                     "`{field}` resolved to {:?}, expected {expected:?}",
@@ -540,15 +682,16 @@ mod tests {
     }
 
     #[test]
-    fn every_table_row_answers_the_strict_suffix_it_declares() -> Result<(), TestError> {
-        for &behaviour in RlvBehaviour::ALL {
-            let keyword = behaviour.keyword().ok_or("a declared row has no keyword")?;
+    fn every_dictionary_row_answers_the_strict_suffix_it_declares() -> Result<(), TestError> {
+        for entry in RlvEntry::ALL {
+            if entry.kind != RlvParamKind::AddRem {
+                continue;
+            }
+            let keyword = entry.keyword;
             let field = format!("{keyword}_sec=n");
             let cmd = RlvCommand::parse_field(&field)?;
 
-            // A strict keyword is only a keyword at all when the behaviour
-            // declares strict mode *and* is a restriction to begin with.
-            let strict_ok = behaviour.has_strict() && behaviour.accepts(RlvParamKind::AddRem);
+            let strict_ok = entry.flags.is_strict();
             assert_eq!(
                 cmd.strict, strict_ok,
                 "`{field}` reported strict={}, expected {strict_ok}",
@@ -557,7 +700,7 @@ mod tests {
             assert_eq!(
                 cmd.behaviour,
                 if strict_ok {
-                    behaviour
+                    entry.behaviour
                 } else {
                     RlvBehaviour::Unknown
                 },
@@ -567,6 +710,52 @@ mod tests {
             assert_eq!(cmd.keyword, format!("{keyword}_sec"));
         }
         Ok(())
+    }
+
+    #[test]
+    fn every_restriction_row_has_a_rule_and_only_restrictions_do() {
+        for &behaviour in RlvBehaviour::ALL {
+            assert_eq!(
+                behaviour.restriction_rule().is_some(),
+                behaviour.is_restriction(),
+                "{behaviour:?} disagrees with itself about being a restriction"
+            );
+        }
+        assert_eq!(RlvBehaviour::Unknown.restriction_rule(), None);
+    }
+
+    #[test]
+    fn every_modifier_hangs_off_a_restriction_that_can_reach_it() {
+        for &modifier in RlvModifier::ALL {
+            assert!(
+                modifier.behaviour().is_restriction(),
+                "{modifier:?} hangs off a behaviour that cannot be held"
+            );
+            let resolved = RlvModifier::of_behaviour(modifier.behaviour());
+            assert_eq!(
+                resolved.map(RlvModifier::behaviour),
+                Some(modifier.behaviour()),
+                "{modifier:?}'s behaviour resolves to a slot that is not its own"
+            );
+            assert_eq!(
+                modifier.default_value().value_type(),
+                modifier.value_type(),
+                "{modifier:?} has a default of the wrong type"
+            );
+        }
+        assert_eq!(
+            RlvModifier::ALL.len(),
+            21,
+            "the reference declares 21 slots"
+        );
+
+        // A behaviour may own two slots — the IM families own a minimum *and*
+        // a maximum distance — and the reference's single-valued
+        // behaviour-to-modifier map answers with whichever was declared first.
+        assert_eq!(
+            RlvModifier::of_behaviour(RlvBehaviour::Recvim),
+            Some(RlvModifier::RecvImDistMin)
+        );
     }
 
     #[test]

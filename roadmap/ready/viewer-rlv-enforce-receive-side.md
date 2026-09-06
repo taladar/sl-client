@@ -2,7 +2,7 @@
 id: viewer-rlv-enforce-receive-side
 title: RLV — receive-side chat/IM filters and redirect
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07); split from viewer-rlva-enforcement
 blocked_by: [viewer-rlv-restriction-state]
 ---

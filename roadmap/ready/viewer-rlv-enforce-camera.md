@@ -2,7 +2,7 @@
 id: viewer-rlv-enforce-camera
 title: RLV — camera restrictions and vision overlay
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07); split from viewer-rlva-enforcement
 blocked_by: [viewer-rlv-restriction-state, viewer-camera-third-person-orbit]
 ---

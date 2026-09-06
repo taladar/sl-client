@@ -12,9 +12,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 306 |
+| ready | 305 |
 | blocked | 55 |
-| in-progress | 18 |
+| in-progress | 19 |
 | bugs | 59 |
 | done | 998 |
 | deferred | 25 |
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (306)
+## ready (305)
 
 ### protocol
 
@@ -807,9 +807,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-resync-animations`](ready/viewer-resync-animations.md) — Resync
   animations action
-- [`viewer-rlv-restriction-state`](ready/viewer-rlv-restriction-state.md) — RLV
-  — the restriction state machine (blocked by `viewer-rlv-command-parser`
-  (done))
 - [`viewer-screen-space-reflections`](ready/viewer-screen-space-reflections.md)
   — Screen-space reflections (SSR)
 - [`viewer-script-error-window`](ready/viewer-script-error-window.md) — Script
@@ -1116,7 +1113,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (18)
+## in-progress (19)
 
 ### viewer
 
@@ -1148,6 +1145,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Render context matrix — subjects × eye, time of day, mirror, layering
   (blocked by `viewer-render-pixel-oracle` (done), `viewer-plugin-groups`
   (done), `viewer-render-gpu-serialisation` (done))
+- [`viewer-rlv-restriction-state`](in-progress/viewer-rlv-restriction-state.md)
+  — RLV — the restriction state machine (blocked by `viewer-rlv-command-parser`
+  (done))
 - [`viewer-streaming-audio`](in-progress/viewer-streaming-audio.md) — Parcel
   streaming-audio / media-audio player
 - [`viewer-ui-text-caret-grapheme-motion`](in-progress/viewer-ui-text-caret-grapheme-motion.md)

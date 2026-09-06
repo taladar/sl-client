@@ -4,7 +4,7 @@ version = { workspace = true }
 authors = { workspace = true }
 edition = { workspace = true }
 rust-version = { workspace = true }
-description = "Pure decoder for the Second Life / OpenSim RLV / RLVa @-command chat protocol: turn an owner-say chat line into a typed stream of restriction / force / reply / clear commands, grid-agnostic and I/O-free like sl-prim / sl-anim"
+description = "Pure decoder and restriction state machine for the Second Life / OpenSim RLV / RLVa @-command chat protocol: turn an owner-say chat line into a typed command stream, and hold the reference-counted per-object restriction state it means, grid-agnostic and I/O-free like sl-prim / sl-anim"
 readme = { workspace = true }
 license = { workspace = true }
 
@@ -17,6 +17,7 @@ exclude = { workspace = true }
 
 [dependencies]
 thiserror = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

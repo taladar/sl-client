@@ -2,7 +2,7 @@
 id: viewer-rlv-notify
 title: RLV — @notify broadcast on restriction changes
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07); split from viewer-rlva-enforcement
 blocked_by: [viewer-rlv-restriction-state]
 ---

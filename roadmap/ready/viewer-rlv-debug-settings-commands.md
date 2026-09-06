@@ -2,7 +2,7 @@
 id: viewer-rlv-debug-settings-commands
 title: RLV — @setdebug_*/@getdebug_* allowlist and @setrot
 topic: viewer
-status: blocked
+status: ready
 origin: Firestorm full-parity audit (2026-08-19)
 refs: [viewer-preferences-debug-settings-editor]
 blocked_by: [viewer-rlv-restriction-state]

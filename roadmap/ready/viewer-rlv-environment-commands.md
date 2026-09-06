@@ -2,7 +2,7 @@
 id: viewer-rlv-environment-commands
 title: RLV — @setenv_*/@getenv_* environment control
 topic: viewer
-status: blocked
+status: ready
 origin: Firestorm full-parity audit (2026-08-19)
 refs: [viewer-environment-fixed-editor, viewer-environment-personal-lighting]
 blocked_by: [viewer-rlv-restriction-state]
