@@ -25,7 +25,7 @@ use tokio::sync::{Mutex, broadcast, watch};
 
 use crate::accounts::{Account, AccountConfig};
 use crate::agent_requests::LegacyUdpInventory;
-use crate::assets::GridAssets;
+use crate::assets::{GridAssets, ObjectAssetPolicy};
 use crate::driver::{SharedSim, SimState, new_shared_sim, run_timer, run_udp_pump};
 use crate::economy_policy::{EconomyConfig, EconomyEvent};
 use crate::error::Error;
@@ -358,6 +358,10 @@ pub(crate) struct GridCore {
     /// folded into one, because an asset id names a blob the whole grid knows
     /// (see [`crate::assets`]).
     pub(crate) assets: GridAssets,
+    /// Which live grid this one imitates for a taken object's asset — the one
+    /// class where Second Life and OpenSim disagree about whether a viewer may
+    /// see an asset at all ([`ObjectAssetPolicy`]).
+    pub(crate) object_assets: ObjectAssetPolicy,
     /// The clock every session machine is stamped from.
     pub(crate) clock: Now,
     /// How long an empty `EventQueueGet` poll is held before the 502.
@@ -659,6 +663,7 @@ impl GridCore {
             sim,
             caps,
             assets: self.assets.clone(),
+            object_assets: self.object_assets,
             identity: {
                 let mut identity = region.identity(self.estate_owner);
                 identity.is_estate_manager = account.config.estate_manager;
@@ -983,6 +988,8 @@ pub struct FakeGridBuilder {
     economy: EconomyConfig,
     /// How every session answers the deprecated UDP inventory fetch.
     legacy_udp_inventory: LegacyUdpInventory,
+    /// Which live grid this one imitates for a taken object's asset.
+    object_assets: ObjectAssetPolicy,
     /// Builder-registered map tiles.
     map_tiles: MapTileStore,
     /// The identifier source (random unless seeded).
@@ -1059,6 +1066,7 @@ impl FakeGridBuilder {
             identity: GridIdentity::default(),
             economy: EconomyConfig::default(),
             legacy_udp_inventory: LegacyUdpInventory::default(),
+            object_assets: ObjectAssetPolicy::default(),
             map_tiles: MapTileStore::default(),
         }
     }
@@ -1149,6 +1157,20 @@ impl FakeGridBuilder {
     #[must_use]
     pub const fn legacy_udp_inventory(mut self, policy: LegacyUdpInventory) -> Self {
         self.legacy_udp_inventory = policy;
+        self
+    }
+
+    /// Sets which live grid this one imitates for a taken object's asset
+    /// (default: [`ObjectAssetPolicy::Withheld`], which is Second Life).
+    ///
+    /// The default is the strict one: an object a resident takes is filed under
+    /// a **nil** asset id and its body is unfetchable, exactly as Second Life
+    /// leaves a viewer. Ask for [`ObjectAssetPolicy::Served`] to get OpenSim's
+    /// side of the divergence, where the item names the body and the grid serves
+    /// it. Rezzing the item back into the world works either way.
+    #[must_use]
+    pub const fn object_assets(mut self, policy: ObjectAssetPolicy) -> Self {
+        self.object_assets = policy;
         self
     }
 
@@ -1250,6 +1272,7 @@ impl FakeGridBuilder {
             honor_options: self.honor_options,
             minter: minter.clone(),
             assets,
+            object_assets: self.object_assets,
             clock: self.clock,
             eq_hold: self.eq_hold,
             handover_timeout: self.handover_timeout,

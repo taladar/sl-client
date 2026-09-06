@@ -130,9 +130,15 @@ which is consistent with neither reference viewer ever having carried a reader
 for one.
 
 So this crate is not on a viewer's critical path. It is here because the fake
-grid's take has to serialise *something* (an inventory item whose asset id
-resolves to nothing is the bug its round-trip cases hunt), and because the two
-reference captures deserve a reader that can say what they contain.
+grid's take has to serialise *something* — or nothing can drag the object back
+out of inventory — and because the two reference captures deserve a reader that
+can say what they contain.
+
+The fake grid now imitates Second Life here by default
+(`sl_fake_grid::ObjectAssetPolicy::Withheld`): a take is filed under a nil asset
+id and the body is kept where no capability reaches it, so these bytes never
+cross the wire unless a test asks for OpenSim's side (`Served`), where the item
+names the asset and the grid serves it.
 
 ## Two departures from the reference
 

@@ -129,7 +129,12 @@ no live account has. That last one is fake-only for a second reason worth
 keeping straight: it asserts a save comes back **byte for byte**, which is what
 the fake grid implements and very probably *not* what a real grid returns for
 several classes — measuring that is `test-asset-save-mutation-survey`'s job,
-and the assertion tightens when it has. The first of those also needs
+and the assertion tightens when it has. It is also the one case so far that
+asks the fake grid to be a *particular* live grid:
+`GridTest::fake_object_assets` picks OpenSim's side of the
+[object-asset divergence](../tools/fake-grid.md#a-taken-objects-asset), because
+its fourth leg reads a taken object's asset back and Second Life — the fake
+grid's default — never lets a viewer do that. The first of those also needs
 the harness to speak *as* the simulator — a crossing is a decision a region
 makes, and a grid that simulates no movement has to be told to make it — which
 is what `TestContext::fake()` hands a case. It is `None` on every live grid, and

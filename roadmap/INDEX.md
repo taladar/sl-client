@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 309 |
+| ready | 308 |
 | blocked | 55 |
 | in-progress | 18 |
 | bugs | 59 |
-| done | 1000 |
+| done | 1001 |
 | deferred | 25 |
 | wont-do | 14 |
 | **total** | **1580** |
@@ -237,7 +237,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (309)
+## ready (308)
 
 ### protocol
 
@@ -949,8 +949,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   The built-in UI sounds the viewer plays on arrival 404
 - [`test-fake-grid-login-matrix-and-timeouts`](ready/test-fake-grid-login-matrix-and-timeouts.md)
   — The login refusals and handover timeouts nothing tests
-- [`test-fake-grid-object-asset-id-divergence`](ready/test-fake-grid-object-asset-id-divergence.md)
-  — The fake grid names an object's asset where Second Life never does
 - [`test-fake-grid-object-sounds`](ready/test-fake-grid-object-sounds.md) — The
   fake grid can serve a sound but cannot play one
 - [`test-fake-grid-timeline`](ready/test-fake-grid-timeline.md) — Scripted
@@ -1322,7 +1320,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1000)
+## done (1001)
 
 ### protocol
 
@@ -3215,6 +3213,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-npc-avatars`](done/test-fake-grid-npc-avatars.md) — NPC
   avatars with appearance, animations and attachments (blocked by
   `test-fake-grid-render-fixtures` (done))
+- [`test-fake-grid-object-asset-id-divergence`](done/test-fake-grid-object-asset-id-divergence.md)
+  — The fake grid names an object's asset where Second Life never does
 - [`test-fake-grid-object-write-path`](done/test-fake-grid-object-write-path.md)
   — The fake grid has no way to rez, take or fill an object
 - [`test-fake-grid-own-avatar-appearance`](done/test-fake-grid-own-avatar-appearance.md)

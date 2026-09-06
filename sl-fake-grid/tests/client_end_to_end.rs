@@ -3675,6 +3675,156 @@ mod test {
         Ok(())
     }
 
+    /// **A take tells a viewer nothing about where the object lives**, and the
+    /// rez works anyway.
+    ///
+    /// This is the fake grid imitating Second Life, which is what it does unless
+    /// asked otherwise ([`sl_fake_grid::ObjectAssetPolicy`]). Measured on aditi
+    /// 2026-09-06: eleven of eleven object inventory items answered with a nil
+    /// `asset_id`, in the AIS3 listing and in the per-item fetch, every one of
+    /// them full-perm to its owner — so the withholding is about the class, not
+    /// about permissions, and no viewer can open an object asset there at all.
+    ///
+    /// The second half is the half that is easy to get wrong. Withholding the id
+    /// must not cost the resident the object: on Second Life a taken object
+    /// drags back out of inventory like any other, because the *simulator*
+    /// resolves the body and the viewer never needed it. A fake grid that
+    /// withheld the id by simply not writing the body would pass the first
+    /// assertion here and fail a resident.
+    #[tokio::test]
+    async fn a_take_withholds_the_object_asset_and_the_rez_still_works() -> Result<(), TestError> {
+        let grid = two_avatar_grid().await?;
+        let mut avatar = join(&grid, "First").await?;
+
+        let item = take_a_donor_item(
+            &mut avatar,
+            &Vector {
+                x: 143.0,
+                y: 137.0,
+                z: 26.0,
+            },
+        )
+        .await?;
+        assert!(
+            item.asset_id.is_nil(),
+            "the take named an asset ({}); Second Life names none",
+            item.asset_id
+        );
+
+        let landing = Vector {
+            x: 144.0,
+            y: 138.0,
+            z: 28.0,
+        };
+        avatar
+            .commands
+            .send(Command::RezObjectFromInventory {
+                params: Box::new(rez_params(&item, &landing)),
+            })
+            .await?;
+        let rezzed = wait_on(&mut avatar.events, |event| match event {
+            Event::ObjectAdded(object) if object.motion.position == landing => {
+                Some((**object).clone())
+            }
+            _ => None,
+        })
+        .await?;
+        assert_eq!(
+            rezzed.motion.position, landing,
+            "an item with no asset id did not come back into the world"
+        );
+        Ok(())
+    }
+
+    /// The other grid: a take **names** the object's asset, and it is fetchable
+    /// and describes the object that was taken.
+    ///
+    /// OpenSim's side of the same divergence, asked for explicitly
+    /// ([`sl_fake_grid::ObjectAssetPolicy::Served`]). Two things are asserted
+    /// together because either alone would pass a grid that is broken in the
+    /// other way: an id nothing serves is the failure the whole asset-id family
+    /// exists to catch, and bytes that describe some *other* prim would be a
+    /// take that filed the wrong object.
+    #[tokio::test]
+    async fn an_opensim_flavoured_take_names_a_fetchable_object_asset() -> Result<(), TestError> {
+        let grid = FakeGridBuilder::new()
+            .account(AccountConfig::new("First", "User", "password"))
+            .event_queue_hold(Duration::from_secs(2))
+            .object_assets(sl_fake_grid::ObjectAssetPolicy::Served)
+            .region(RegionConfig::default())
+            .start()
+            .await?;
+        let mut avatar = join(&grid, "First").await?;
+
+        let position = Vector {
+            x: 147.0,
+            y: 139.0,
+            z: 26.0,
+        };
+        // The object's own key, kept from the rez: what the asset has to name
+        // back if the take serialised the prim it was pointed at.
+        let taken = rez_cube(&mut avatar, &position).await?;
+        let objects_folder = avatar
+            .agent
+            .with_sim(|sim| {
+                sim.agent_inventory()
+                    .folders()
+                    .find(|folder| {
+                        folder.folder_type == sl_client_tokio::FolderType::Object.to_code()
+                    })
+                    .map(|folder| folder.folder_id)
+            })
+            .await
+            .ok_or("the seeded account has no Objects folder")?;
+        avatar
+            .commands
+            .send(Command::DerezObjects {
+                local_ids: vec![sl_client_tokio::ScopedObjectId::new(
+                    avatar.circuit,
+                    taken.local_id,
+                )],
+                destination: sl_client_tokio::DeRezDestination::TakeIntoAgentInventory(
+                    objects_folder,
+                ),
+                transaction_id: sl_client_tokio::TransactionId::from(uuid::Uuid::from_u128(0x0B1E)),
+                group_id: None,
+            })
+            .await?;
+        let item = wait_on(&mut avatar.events, |event| match event {
+            Event::InventoryItemCreated { item, .. } => Some(item.clone()),
+            _ => None,
+        })
+        .await?;
+        assert!(
+            !item.asset_id.is_nil(),
+            "an OpenSim-flavoured take filed an item with no asset id"
+        );
+
+        avatar
+            .commands
+            .send(Command::FetchAsset {
+                asset_id: sl_client_tokio::AssetKey::from(item.asset_id),
+                asset_type: sl_proto::AssetType::Object,
+                byte_range: None,
+            })
+            .await?;
+        let fetched_id = item.asset_id;
+        let bytes = wait_on(&mut avatar.events, |event| match event {
+            Event::AssetReceived(fetched) if fetched.id == fetched_id => Some(fetched.data.clone()),
+            _ => None,
+        })
+        .await?;
+        let asset = sl_object_asset::ObjectAsset::decode(&bytes)?;
+        let prim = asset.root().ok_or("the taken object's asset has no prim")?;
+        assert_eq!(
+            prim.task_id,
+            taken.full_id.uuid(),
+            "the asset names a different prim than the one taken"
+        );
+        assert_eq!(prim.name, item.name);
+        Ok(())
+    }
+
     /// A **no-copy** item is consumed by the rez: the object goes into the
     /// world and the item is gone, and the client is told so.
     ///

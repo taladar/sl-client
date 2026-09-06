@@ -40,6 +40,20 @@ pub trait GridTest: Send + Sync {
         false
     }
 
+    /// Which live grid the **fake** grid should imitate for a taken object's
+    /// asset, where Second Life and OpenSim disagree about whether a viewer may
+    /// see one at all (`sl_fake_grid::ObjectAssetPolicy`).
+    ///
+    /// Defaults to the fake grid's own default, which is Second Life: a take
+    /// files an item with a nil asset id and nothing serves the body. A case
+    /// overrides it when what it came to assert is the *other* grid's
+    /// behaviour — `asset-round-trip` reads a taken object's asset back, which
+    /// only OpenSim ever lets a viewer do. Ignored on every live grid, which
+    /// behaves however it behaves.
+    fn fake_object_assets(&self) -> sl_fake_grid::ObjectAssetPolicy {
+        sl_fake_grid::ObjectAssetPolicy::default()
+    }
+
     /// The `start` location every avatar of this test logs in at, as the wire
     /// string a grid expects (`"last"`, `"home"`, or `"uri:Region&x&y&z"`).
     ///

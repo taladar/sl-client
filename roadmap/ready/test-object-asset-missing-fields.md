@@ -39,10 +39,23 @@ first possibility below cannot be settled from a viewer, and the missing-field
 question only ever had an answer on OpenSim — where the body is
 `SceneObjectSerializer` XML and these keywords do not exist either.
 
-What is left of this task is therefore narrower than it was written: decide
-whether the fake grid should keep serving an object asset at all
-([[test-fake-grid-object-asset-id-divergence]]), and if it does, whether its
-prims should carry the fields the 2005 captures lack.
+What is left of this task is therefore narrower than it was written. Half of
+what was left has since been settled by
+[[test-fake-grid-object-asset-id-divergence]] (2026-09-06): the fake grid
+**stopped** serving a taken object's asset by default — `ObjectAssetPolicy`'s
+default is `Withheld`, Second Life's side, where the item carries a nil asset
+id and no capability reaches the body. So on the default configuration the
+missing keywords are unobservable to a viewer, and the question narrows again:
+whether the prims written under `ObjectAssetPolicy::Served` — OpenSim's side,
+which `asset-round-trip` asks for — should carry the fields the 2005 captures
+lack.
+
+That is now a smaller and stranger question than it looks, because the grid
+`Served` imitates does not write this format at all: OpenSim writes
+`SceneObjectSerializer` XML, and the fake grid writes the Linden text form
+under the same policy name. Whether that pairing is worth keeping — or whether
+`Served` should grow an XML body to match the grid it names — is the decision
+this task now carries, alongside the original missing-keyword list.
 
 - **The format really is that old**, and a modern grid stores something else
   entirely (an LLSD or XML serialisation) for anything the text cannot say.

@@ -36,6 +36,13 @@
 //! name the item carries, the scale, the face count, and the shape block
 //! re-quantizing to the object's own `PrimShapeParams`.
 //!
+//! That fourth leg only exists on one of the two live grids, so this case says
+//! which one it is asking the fake grid to be: `fake_object_assets` picks
+//! `Served`, OpenSim's side, where a taken object's item names its body and the
+//! grid serves it. Second Life — the fake grid's own default — hands a viewer a
+//! nil asset id and nothing to fetch, and `object-asset-format` is where that
+//! half is recorded.
+//!
 //! Fake-grid only, and deliberately so. The fixtures are the fake grid's seeded
 //! inventory, which no live grid has; the live-grid question this case's shape
 //! comes from — *what a real grid returns for the same save*, which for several
@@ -94,6 +101,16 @@ impl GridTest for AssetRoundTrip {
         // grid returns for the same save is a measurement nobody has taken yet
         // (test-asset-save-mutation-survey).
         &[Grid::Fake]
+    }
+
+    fn fake_object_assets(&self) -> sl_fake_grid::ObjectAssetPolicy {
+        // The fourth leg reads back the asset a **take** authored, and only one
+        // of the two live grids ever lets a viewer do that. The fake grid's
+        // default is the other one — Second Life, which hands a taken object's
+        // item a nil asset id and serves no body — so this case asks for
+        // OpenSim's side explicitly rather than quietly depending on whichever
+        // the default happens to be.
+        sl_fake_grid::ObjectAssetPolicy::Served
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {

@@ -208,13 +208,20 @@ impl FakeGridHarness {
     /// Start a grid serving the catalogue region and its eastern neighbour,
     /// with the three accounts registered.
     ///
+    /// `test` is the case about to run, because a couple of the grid's policies
+    /// are a case's to choose: which live grid it imitates for a taken object's
+    /// asset ([`GridTest::fake_object_assets`]) is the one so far. The grid is
+    /// started per case, so this costs nothing beyond reading the answer.
+    ///
     /// # Errors
     ///
     /// Returns [`TestFailure::State`] if the grid cannot bind its sockets, and
     /// [`TestFailure::Auth`] if the synthesised credentials do not parse (which
     /// would be a bug in this module, not in the caller's input).
-    pub async fn start() -> Result<Self, TestFailure> {
-        let mut builder = sl_fake_grid::FakeGridBuilder::new().deterministic(SEED);
+    pub async fn start(test: &dyn GridTest) -> Result<Self, TestFailure> {
+        let mut builder = sl_fake_grid::FakeGridBuilder::new()
+            .deterministic(SEED)
+            .object_assets(test.fake_object_assets());
         for (label, first_name, agent_id) in ACCOUNTS {
             let account = sl_fake_grid::AccountConfig::new(first_name, LAST_NAME, PASSWORD)
                 .with_agent_id(AgentKey::from(Uuid::from_u128(agent_id)));
@@ -415,7 +422,7 @@ fn credentials_for(login_uri: &url::Url) -> Result<Credentials, TestFailure> {
 /// starting (the grid, the login, the account resolution), or
 /// [`TestFailure::Assertion`] naming the reason it recorded partial.
 pub async fn run_offline_case(test: &dyn GridTest) -> Result<(), TestFailure> {
-    let harness = FakeGridHarness::start().await?;
+    let harness = FakeGridHarness::start(test).await?;
     let mut context = harness.context(test).await?;
     let outcome =
         crate::isolate::run_isolated(test.run(&mut context), crate::isolate::DEFAULT_CASE_TIMEOUT)

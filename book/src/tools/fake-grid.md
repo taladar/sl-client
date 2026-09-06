@@ -516,7 +516,19 @@ change what it holds, and all three are answered against the region world:
   split follows OpenSim's own `Scene.DeRezObjects`, whose
   `takeCopyGroups` / `takeDeleteGroups` lists are exactly these two
   predicates. An id the region does not have is killed on the client
-  anyway, so the two agree again.
+  anyway, so the two agree again. A take also *writes* the object down —
+  see "A taken object's asset" below for where those bytes go, which is
+  the one place the fake grid has to pick a live grid to be.
+- **`RezObject` from an item → `ServerEvent::RezObjectFromInventory`.** The
+  other half of a take. The item is resolved by id out of the agent's own
+  inventory (the masks and CRC the client sends are what the *viewer*
+  believes, and OpenSim does not check them either), its object body is
+  decoded, and the region mints an id per prim — so a linkset comes back
+  whole, children re-parented to the root's new region-local id. The root
+  lands at the ray's end point; a child keeps its stored offset. The item
+  survives unless it is no-copy, which is OpenSim's rule
+  (`DoPostRezWhenFromItem`) and is decided by the item's own owner mask
+  rather than by the client's `remove_item` flag.
 - **`UpdateTaskInventory` → `ServerEvent::UpdateTaskInventory`.** The item
   is resolved **by id from the agent's own inventory**, not trusted from
   the copy the client sent, minted a fresh task item id (a task copy is a
@@ -538,6 +550,54 @@ is a ghost object standing in that viewer until its next refetch.
 `sl-conformance`'s `task-inventory` case runs the whole of this offline —
 rez a container, rez and take a donor, drop it in, watch the serial
 advance, read the listing back over Xfer, trash the container.
+
+### A taken object's asset
+
+The two live grids disagree about `AssetType::Object`, and the disagreement
+is total, so the fake grid says which of them it is being rather than
+picking whichever was easier to build.
+
+Measured on aditi 2026-09-06 by the `object-asset-format` conformance case:
+**Second Life gives a viewer no asset id for an object inventory item.**
+Eleven of eleven object items answered with a nil `asset_id`, in the AIS3
+folder listing and again in the per-item `GET /item/<id>`, and all eleven
+were full-perm to their owner — so it is not the familiar "no asset id
+unless you fully own it" rule, it is the class. OpenSim is the opposite:
+every object item names an asset, and `ViewerAsset` serves it as
+`SceneObjectSerializer` XML.
+
+`assets::ObjectAssetPolicy` picks a side and
+`FakeGridBuilder::object_assets` sets it. The **default is Second Life**
+(`Withheld`), because that is the grid this workspace targets and because
+it is the configuration that *fails* a viewer which has come to rely on
+opening a taken object's asset. A take then files its item under a nil
+asset id and the object's body goes into a second store inside
+`GridAssets`, keyed by the **item** id, that no capability reads. The two
+stores share no keyspace, so the body is unfetchable by construction rather
+than by an id nobody can guess. Ask for `ObjectAssetPolicy::Served` to get
+OpenSim's side, where the item names a minted asset id and the grid serves
+the body under it.
+
+The take reads the policy once, in `world::taken_item`; `store_taken_asset`
+then reads the rule back off the *item* — a nil id means the withheld store
+— so the two halves cannot disagree about where a body went. And
+`rez_from_inventory` asks the item first and the store second, which is why
+**a rez works under both**: on Second Life too a taken object drags back out
+of inventory, because the simulator resolves the body itself and the viewer
+never needed it. The divergence is about what a viewer may *fetch*, not what
+a resident may *do*.
+
+One thing the switch does not govern: the seeded `Fixture Object` keeps its
+asset id and stays fetchable either way. It is the fake grid's own fixture,
+seeded so `asset-round-trip` has an authored object body to read back, and
+no live grid has an item like it at all.
+
+A conformance case names the flavour it needs with
+`GridTest::fake_object_assets`. `asset-round-trip` asks for `Served`,
+because its fourth leg reads a taken object's asset back and only OpenSim
+ever lets a viewer do that; `object-asset-format` runs on the default, so
+its fake-grid leg records `take_step = item-created-nil-asset` — the same
+string it records on aditi.
 
 ### The edit surfaces
 
@@ -1090,14 +1150,14 @@ their item ids plus a constant, pointing at nothing, both declaring class
 will eventually fetch, so those items looked fine in an inventory window
 and failed at every attempt to *use* them.
 
-Two classes have no fixture, and the absence is the finding.
-`AssetType::Object` has no codec in this workspace at all — an object asset
-is `LLViewerObject`'s nested-block text, unrelated to the `ObjectUpdate`
-wire form a fixture builds (`test-assets-object-asset-codec`). `Gesture`
-has a body but no *decoder*, so it is the one entry whose round trip is
-byte-level only. `inventory::unsupported_classes()` carries the reason for
-every class with neither, and a crate test fails if a class has both a body
-and a recorded reason, or neither.
+`AssetType::Object` was the last class with no codec at all — an object
+asset is `LLViewerObject`'s nested-block text, unrelated to the
+`ObjectUpdate` wire form a fixture builds — and `sl-object-asset` closed
+that, so a `Fixture Object` is seeded like every other class.
+`Gesture` has a body but no *decoder*, so it is the one entry whose round
+trip is byte-level only. `inventory::unsupported_classes()` carries the
+reason for every class with no fixture, and a crate test fails if a class
+has both a body and a recorded reason, or neither.
 
 ## Walking over a border
 

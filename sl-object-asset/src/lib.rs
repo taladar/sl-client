@@ -141,12 +141,17 @@
 //! `AssetType::Object` was the one inventory class the workspace could neither
 //! read nor write. Two uses survive the measurement above:
 //!
-//! - **the fake grid needs a serialisation.** Its take mints an asset id, and
-//!   an id that resolves to nothing is the failure the `asset-round-trip`
-//!   family exists to catch. Only the grid reads these bytes back, so the
-//!   choice of format is free — this one is chosen because the grid imitates
-//!   Second Life. (Whether it should imitate SL's *withholding* instead is
-//!   [[test-fake-grid-object-asset-id-divergence]].)
+//! - **the fake grid needs a serialisation.** Its take has to write the object
+//!   down somewhere, or nothing can drag it back out of inventory. **Only the
+//!   grid reads these bytes back** — which is now true by construction rather
+//!   than by convention: since [[test-fake-grid-object-asset-id-divergence]]
+//!   the fake grid imitates Second Life by default
+//!   (`sl_fake_grid::ObjectAssetPolicy::Withheld`), files a take under a nil
+//!   asset id and keeps the body where no capability reaches it. A grid asked
+//!   for OpenSim's side (`Served`) names the asset and serves it, and that is
+//!   the one configuration where these bytes cross the wire. The choice of
+//!   format is therefore free; this one is chosen because it is the format
+//!   Second Life is known to have written.
 //! - **the two reference captures are readable.** They are the only public
 //!   examples of the format, and a decoder that reads them field by field is
 //!   how the workspace can say what it is at all, rather than repeating

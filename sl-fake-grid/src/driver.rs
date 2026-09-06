@@ -35,6 +35,10 @@ pub(crate) struct SimState {
     /// caps ([`crate::assets`]). Every session shares one; an asset id names
     /// a blob the whole grid knows, not one region's.
     pub(crate) assets: GridAssets,
+    /// Which live grid this one imitates for a taken object's asset
+    /// ([`crate::assets::ObjectAssetPolicy`]). Grid-wide, like the store it
+    /// decides between.
+    pub(crate) object_assets: crate::assets::ObjectAssetPolicy,
     /// The region identity sent in the automatic `RegionHandshake` greeting
     /// (on `UseCircuitCode`, before the agent's movement completes).
     pub(crate) identity: RegionIdentity,
@@ -271,6 +275,7 @@ impl SharedSim {
                     &state.avatar,
                     &state.identity,
                     &state.assets,
+                    state.object_assets,
                     &move || minter.uuid(),
                     &mut state.selection,
                     &mut state.sim,

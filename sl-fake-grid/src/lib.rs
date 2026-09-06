@@ -2,7 +2,7 @@
 
 pub mod accounts;
 pub mod agent_requests;
-mod assets;
+pub mod assets;
 mod caps_endpoint;
 pub mod crossing;
 mod driver;
@@ -31,6 +31,7 @@ mod world_map;
 
 pub use accounts::AccountConfig;
 pub use agent_requests::{AgentPolicy, LegacyUdpInventory};
+pub use assets::ObjectAssetPolicy;
 pub use crossing::CROSSING_ARRIVAL_TIMEOUT;
 pub use economy_policy::{EconomyConfig, EconomyEvent, stock_prices};
 pub use error::Error;

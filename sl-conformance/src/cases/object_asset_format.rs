@@ -10,7 +10,16 @@
 //! | --- | --- | --- |
 //! | OpenSim | yes — every object item names one | `<SceneObjectGroup>` XML |
 //! | Second Life | **no** | unobservable |
-//! | fake | yes (its own) | the Linden text form |
+//! | fake, a take | **no** by default, Second Life's side | withheld |
+//! | fake, its seeded `Fixture Object` | yes | the Linden text form |
+//!
+//! The fake grid's row was one row until this case measured the other two.
+//! It now imitates Second Life for what a **take** files away
+//! (`sl_fake_grid::ObjectAssetPolicy`, whose default is `Withheld`), so the
+//! `take_step` metric below reads `item-created-nil-asset` there exactly as it
+//! does on aditi; a case that wants OpenSim's side asks for it
+//! (`asset-round-trip` does). What stays fetchable either way is the grid's own
+//! seeded `Fixture Object`, which is what this case samples offline.
 //!
 //! **Second Life does not tell a viewer where an object item's asset lives.**
 //! Eleven of eleven object items in the test account came back with a nil
@@ -115,10 +124,10 @@ impl GridTest for ObjectAssetFormat {
                 // owns it outright, and every object in a real account's tree
                 // is somebody else's content. An object *this* avatar rezzes
                 // and takes is its own creation, full-perm to it, so it is the
-                // one object whose asset id the grid has no reason to hide —
-                // and it is the exact shape the fake grid's take mints. If that
-                // one comes back nil too, the class is simply not fetchable by
-                // a viewer.
+                // one object whose asset id the grid has no reason to hide. On
+                // Second Life that one came back nil too, so the class is
+                // simply not fetchable by a viewer — and the fake grid now says
+                // the same by default, which is what `take_step` records here.
                 let objects_folder = survey.objects_without_asset.first().map_or_else(
                     || InventoryFolderKey::from(Uuid::nil()),
                     |item| item.folder_id,

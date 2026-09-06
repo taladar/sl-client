@@ -128,4 +128,35 @@ at).
 scenario and prints, once the grid answers `get_grid_info`, the login URI
 as an IPv4 literal plus the `--grid` argument Firestorm wants.
 
+## A taken object's asset
+
+The two live grids disagree about `AssetType::Object`, so the fake grid says
+which of them it is being. Measured on aditi 2026-09-06 by the
+`object-asset-format` conformance case: **Second Life gives a viewer no asset
+id for an object inventory item.** Eleven of eleven object items answered with
+a nil `asset_id`, in the AIS3 folder listing and again in the per-item
+`GET /item/<id>`, and all eleven were full-perm to their owner — so it is not
+the "no asset id unless you fully own it" rule, it is the class. OpenSim is the
+opposite: every object item names an asset and `ViewerAsset` serves it as
+`SceneObjectSerializer` XML.
+
+`assets::ObjectAssetPolicy` picks a side, and the **default is Second Life**
+(`Withheld`): an object a resident takes is filed under a nil asset id and its
+body goes into a store no capability reads. That is deliberately the strict
+configuration — a viewer that has come to rely on opening a taken object's
+asset fails against it, which is what the fake grid is for.
+`FakeGridBuilder::object_assets(ObjectAssetPolicy::Served)` asks for OpenSim's
+side instead, where the item names the body and the grid serves it.
+
+Rezzing the item back into the world works under **both**: on Second Life too
+the simulator resolves the body itself, and the viewer never needs to see it.
+The divergence is about what a viewer may *fetch*, not what a resident may
+*do*.
+
+One thing the switch does not govern: the seeded `Fixture Object`
+(`sl_test_assets::inventory`) keeps its asset id and stays fetchable either
+way. It is the fake grid's own fixture, seeded so the `asset-round-trip` case
+has an authored object body to read back, and no live grid has an item like it
+at all.
+
 See the book chapter "The fake grid" for architecture and usage.

@@ -1507,21 +1507,28 @@ fn push_terrain(terrain: &TerrainFixture, sim: &mut SimSession, now: Instant) {
 /// `mint` supplies the ids the simulator chooses (object keys, inventory item
 /// ids): the grid's own [`IdMinter`](crate::runtime::IdMinter) reaches through
 /// here, so a seeded grid rezzes the same object twice.
+///
+/// `object_assets` is which live grid this one imitates where they disagree
+/// about a taken object's asset
+/// ([`ObjectAssetPolicy`](crate::assets::ObjectAssetPolicy)). Only the derez arm
+/// reads it; the rez arm deliberately does not, because an item says for itself
+/// where its body went.
 #[expect(
     clippy::too_many_arguments,
     reason = "the parameters are the stores an answer reads and writes -- the \
               region's world, the grid's assets, and this session's machine \
-              and selection -- over the three identities that decide what the \
-              answer says (the agent, the region, and the minter the \
-              simulator's own ids come from); bundling them would hide which \
-              of them a given arm touches, which is the one thing this switch \
-              is read for"
+              and selection -- over the identities and policies that decide what \
+              the answer says (the agent, the region, the minter the simulator's \
+              own ids come from, and which live grid this one imitates for an \
+              object asset); bundling them would hide which of them a given arm \
+              touches, which is the one thing this switch is read for"
 )]
 pub(crate) fn answer_world_request(
     world: &mut SceneFixtures,
     identity: &AvatarIdentity,
     region: &RegionIdentity,
     assets: &crate::assets::GridAssets,
+    object_assets: crate::assets::ObjectAssetPolicy,
     mint: &dyn Fn() -> uuid::Uuid,
     selection: &mut crate::object_edits::Selection,
     sim: &mut SimSession,
@@ -1576,6 +1583,11 @@ pub(crate) fn answer_world_request(
         // selection, and a selected linkset is named by its root alone, so the
         // children have to be gathered here or a take would leave them standing
         // in the region with a parent that no longer exists.
+        //
+        // Whether the filed item *names* the body it was written from is the
+        // one place this grid has to pick a live grid to be
+        // (`ObjectAssetPolicy`): Second Life tells a viewer nothing, OpenSim
+        // tells it everything, and the rez works either way.
         ServerEvent::DerezObjects {
             local_ids,
             destination,
@@ -1613,7 +1625,7 @@ pub(crate) fn answer_world_request(
                 );
                 handled.extend(linkset.iter().map(|member| member.local_id));
                 if let Some(folder) = destination.agent_folder() {
-                    let item = taken_item(&linkset, folder, identity.agent_id, mint);
+                    let item = taken_item(&linkset, folder, identity.agent_id, mint, object_assets);
                     store_taken_asset(assets, &item, &linkset);
                     created.push(item);
                 }
@@ -2013,20 +2025,19 @@ fn rez_from_inventory(
         tracing::debug!("a rez named item {item_id}, which this agent does not hold");
         return Vec::new();
     };
-    let asset_id = AssetKey::from(item.asset_id);
-    let Some(bytes) = assets.read().get(asset_id).map(<[u8]>::to_vec) else {
-        tracing::debug!("a rez named item {item_id}, whose asset {asset_id} nothing serves");
+    let Some(bytes) = taken_object_body(assets, &item) else {
+        tracing::debug!("a rez named item {item_id}, whose object body nothing holds");
         return Vec::new();
     };
     let asset = match sl_object_asset::ObjectAsset::decode(&bytes) {
         Ok(asset) => asset,
         Err(error) => {
-            tracing::warn!("the object asset {asset_id} a rez named does not decode: {error}");
+            tracing::warn!("the object body item {item_id} names does not decode: {error}");
             return Vec::new();
         }
     };
     let Some(root_prim) = asset.root() else {
-        tracing::warn!("the object asset {asset_id} a rez named has no root prim");
+        tracing::warn!("the object body item {item_id} names has no root prim");
         return Vec::new();
     };
     let region_handle = sim.region_handle();
@@ -2066,6 +2077,26 @@ fn rez_from_inventory(
         .collect()
 }
 
+/// The object body `item` stands for, from whichever of the grid's two stores
+/// holds it.
+///
+/// An item that **names** an asset is resolved through it, as every other class
+/// is; an item with a nil asset id is resolved by its own id out of the withheld
+/// store ([`crate::assets::ObjectAssetPolicy::Withheld`]). The item is asked
+/// first and the store second, rather than the other way round, because the
+/// nil id is the *observable* — a viewer that was told nothing about where this
+/// object lives is exactly the case the withheld store exists for, and the
+/// simulator resolving it anyway is what makes a Second Life rez work.
+fn taken_object_body(assets: &crate::assets::GridAssets, item: &InventoryItem) -> Option<Vec<u8>> {
+    if item.asset_id.is_nil() {
+        return assets.withheld_object(item.item_id);
+    }
+    assets
+        .read()
+        .get(AssetKey::from(item.asset_id))
+        .map(<[u8]>::to_vec)
+}
+
 /// The properties record of one just-rezzed prim: what the asset says about it,
 /// with the three things the *region* knows and the asset cannot.
 ///
@@ -2084,7 +2115,7 @@ fn rezzed_properties(
     properties
 }
 
-/// The object asset a **take** authors, stored under the id the item names.
+/// The object asset a **take** authors, filed where the item says it lives.
 ///
 /// A take is not a round trip: nothing uploaded these bytes, the grid *writes*
 /// them from the live object, which is why the asset carries the item's name
@@ -2093,6 +2124,15 @@ fn rezzed_properties(
 /// shows). Until this existed the take minted an id and left it unbacked, so
 /// every path that opens what a take filed away — rezzing it again, reading it
 /// back to check the take — had nothing to fetch.
+///
+/// **Which store is the item's own business.** An item that names an asset gets
+/// its body in the served store under that id, as OpenSim does; an item with a
+/// nil asset id gets it in the withheld store under the item's id, as Second
+/// Life leaves a viewer with — see
+/// [`ObjectAssetPolicy`](crate::assets::ObjectAssetPolicy), which is what
+/// [`taken_item`] read to decide. Reading the rule off the item rather than off
+/// the policy a second time is what keeps the two halves from ever disagreeing
+/// about where a body went.
 ///
 /// `linkset` is the object being taken and, after it, its children — the whole
 /// set in one asset, root **first** here and written children-first by
@@ -2110,10 +2150,12 @@ fn store_taken_asset(assets: &crate::assets::GridAssets, item: &InventoryItem, l
     };
     item.name.clone_into(&mut root.name);
     root.description = Some(item.description.clone());
-    let asset = sl_object_asset::ObjectAsset::linkset(root, prims.collect());
-    let _previous = assets
-        .write()
-        .insert(AssetKey::from(item.asset_id), asset.encode());
+    let body = sl_object_asset::ObjectAsset::linkset(root, prims.collect()).encode();
+    if item.asset_id.is_nil() {
+        assets.insert_withheld_object(item.item_id, body);
+        return;
+    }
+    let _previous = assets.write().insert(AssetKey::from(item.asset_id), body);
 }
 
 /// One object as the asset prim a take serialises it into.
@@ -2145,14 +2187,22 @@ fn taken_prim(object: &Object) -> sl_object_asset::PrimBlock {
 /// is the object a resident selected and the name a viewer shows for the whole
 /// set.
 ///
-/// The minted asset id is backed by [`store_taken_asset`], which writes the
-/// object's serialisation under it — an item with an id nothing serves is as
-/// broken to a viewer as one with a nil id, it just fails later.
+/// Whether the item **names** its asset is the grid's flavour talking
+/// ([`ObjectAssetPolicy`](crate::assets::ObjectAssetPolicy)): OpenSim mints an
+/// id and a viewer may fetch the body under it, Second Life hands a viewer a nil
+/// id and no way to reach the body at all.
+///
+/// Either way the body itself is written — [`store_taken_asset`] follows this
+/// choice and files it in the store the item points at. What must not happen is
+/// a *minted* id nothing serves: that is the failure the round-trip cases hunt,
+/// and it is worse than a nil one, because it fails later and looks fine in an
+/// inventory window until it does.
 fn taken_item(
     linkset: &[Object],
     folder: InventoryFolderKey,
     owner: AgentKey,
     mint: &dyn Fn() -> uuid::Uuid,
+    object_assets: crate::assets::ObjectAssetPolicy,
 ) -> InventoryItem {
     let properties = linkset.first().and_then(|root| root.properties.as_ref());
     let named = properties.map_or(DEFAULT_OBJECT_NAME, |properties| properties.name.as_str());
@@ -2162,7 +2212,10 @@ fn taken_item(
         name: named.to_owned(),
         description: properties
             .map_or_else(String::new, |properties| properties.description.clone()),
-        asset_id: mint(),
+        asset_id: match object_assets {
+            crate::assets::ObjectAssetPolicy::Withheld => uuid::Uuid::nil(),
+            crate::assets::ObjectAssetPolicy::Served => mint(),
+        },
         item_type: narrow_code(AssetType::Object.to_code()),
         inv_type: narrow_code(InventoryType::Object.to_code()),
         flags: 0,

@@ -195,7 +195,7 @@ async fn run(args: RunArgs) -> Result<(), Error> {
     // for the whole run — dropping it shuts every session and socket down.
     let fake = match args.grid {
         Grid::Fake => Some(
-            FakeGridHarness::start()
+            FakeGridHarness::start(test.as_ref())
                 .await
                 .map_err(|error| Error::Test(error.to_string()))?,
         ),
