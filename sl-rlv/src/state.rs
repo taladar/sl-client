@@ -31,6 +31,7 @@ use std::collections::BTreeMap;
 
 use uuid::Uuid;
 
+use crate::actions::{RlvActionSource, RlvActions};
 use crate::behaviour::{RlvBehaviour, RlvEntry, RlvLocalModifier};
 use crate::command::{RlvCommand, RlvParam, RlvParamKind};
 use crate::locks::{RlvLocks, RlvObjectAttachment};
@@ -1217,6 +1218,19 @@ impl RlvState {
             .get(&object)
             .and_then(|entry| entry.modifiers.get(&modifier))
             .copied()
+    }
+
+    /// The enforcement façade over these restrictions — [`RlvActions::new`],
+    /// spelled the other way round.
+    ///
+    /// Build one where the question is asked: it borrows rather than copies,
+    /// so it costs nothing and must not outlive a change to either side.
+    #[must_use]
+    pub const fn actions<'state, S: RlvActionSource + ?Sized>(
+        &'state self,
+        source: &'state S,
+    ) -> RlvActions<'state, S> {
+        RlvActions::new(self, source)
     }
 
     /// The locks these restrictions imply — [`RlvLocks::of`], spelled the

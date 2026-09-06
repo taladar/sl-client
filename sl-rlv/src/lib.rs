@@ -9,7 +9,7 @@
 //! never reaches the chat log. The payload is a **comma-separated list** of
 //! commands, each `behaviour[:option]=param`, lower-cased.
 //!
-//! The crate is four layers:
+//! The crate is five layers:
 //!
 //! - the **language decoder** turns a chat line into a typed [`RlvCommand`]
 //!   stream — behaviour, optional option, and the classified [`RlvParam`] (add
@@ -21,7 +21,11 @@
 //! - the **query layer** ([`RlvState::answer`]) builds the line a `@get*`
 //!   question is answered with;
 //! - the **lock model** ([`RlvLocks`]) answers the one question a yes/no
-//!   restriction cannot: not "is detaching blocked" but "may *this* come off".
+//!   restriction cannot: not "is detaching blocked" but "may *this* come off";
+//! - the **enforcement façade** ([`RlvActions`]) is the choke point every
+//!   outgoing action asks before it happens — may I say this, teleport there,
+//!   touch that. One predicate per question, called from everywhere, so no
+//!   call site can spell a restriction its own way and get it wrong.
 //!
 //! The state machine also reports itself: `@notify` subscribers are told about
 //! every change it sees, and the lines they are owed wait in
@@ -42,6 +46,13 @@
 //! thing in front of it. [`RlvLocks`] derives all four registries from the
 //! held commands, with no second copy of the truth to drift, and
 //! [`RlvAttachmentWatchdog`] puts back what came off anyway.
+//!
+//! The enforcement façade is what a call site actually holds. `@sendim=n` with
+//! an exception, a distance range and a `_sec` suffix is four questions the
+//! chat bar must not be asking; it asks [`RlvActions::can_send_im`] instead.
+//! The façade also decides the things a yes/no answer cannot express — which
+//! volume chat comes out at, what `@sendchat` leaves of a line, and where
+//! `@redirchat` sends it — because those belong at the same choke point.
 //!
 //! What the state machine deliberately does *not* do is obey anything. It never
 //! detaches an attachment and never hides a name tag; those are the consumer's,
@@ -100,6 +111,7 @@
 //! copied. The channel-0 owner-say gating is the caller's job — this crate
 //! decodes a line it is handed.
 
+mod actions;
 mod behaviour;
 mod command;
 mod locks;
@@ -111,6 +123,10 @@ mod state;
 mod version;
 mod watchdog;
 
+pub use actions::{
+    RlvActionSource, RlvActions, RlvChatDecision, RlvChatVolume, RlvCheckType, RlvCurrentCommand,
+    RlvFilteredChat, RlvObject, RlvObjectKind, is_emote,
+};
 pub use behaviour::{
     RlvBehaviour, RlvBehaviourFlags, RlvEntry, RlvLocalModifier, RlvResolvedBehaviour, RlvValueType,
 };
