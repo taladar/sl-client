@@ -14,11 +14,12 @@ is an RLV command line when it starts with `@`; the viewer swallows it so it
 never reaches the chat log. The payload is a **comma-separated list** of
 commands, each `behaviour[:option]=param`, lower-cased.
 
-The crate is two layers. The **language decoder** turns a chat line into a typed
-command stream; the **restriction state machine** (`RlvState`) holds what those
-commands mean. What it deliberately does not do is *obey* anything: it never
-detaches an attachment, hides a name tag or answers a query. A `=force` action
-or a `=<channel>` query comes back from `RlvState::apply` as
+The crate is three layers. The **language decoder** turns a chat line into a
+typed command stream; the **restriction state machine** (`RlvState`) holds what
+those commands mean; and the **query layer** (`RlvState::answer`) builds the
+line a `@get*` question is answered with. What it deliberately does not do is
+*obey* anything: it never detaches an attachment and never hides a name tag. A
+`=force` action comes back from `RlvState::apply` as
 `RlvOutcome::NotAStateChange` for the consumer to dispatch.
 
 ## Decoding
@@ -130,6 +131,42 @@ implemented by RLVa 2.4.2. `RlvState::known_commands(filter, kind)` answers
 `@getcommand`, honouring `set_experimental_commands` — with the RLVa
 experimental set switched off, those keywords are not commands at all and
 `apply` refuses them.
+
+## Answering queries
+
+A command whose param is a **number** is a question: `@getoutfit=2222` means
+"chat what I am wearing on channel 2222". `RlvState::answer(issuer, &command,
+&source)` produces the `RlvReply` to shout, and `RlvQuery::classify` on its own
+decodes the question and its options if a consumer wants to dispatch them
+itself.
+
+The split is drawn at *facts*, not at formatting. Everything a script sees is
+built in this crate and is unit-tested: the `@getattach` bit string with its
+leading zero, the frozen `@getoutfit` slot order, the comma-joined name lists,
+the `|32` wear digits of `@getinvworn`, the `@getstatus` leading separator, the
+reply-channel rules and the 1023-byte chat cap. Four families need nothing
+outside — `@version*`, `@getstatus` / `@getstatusall`, `@getcommand` and the
+`@getcam_*` limits, which read back a modifier slot. Everything the crate cannot
+know it asks an `RlvQuerySource` for: what is attached and worn, what may still
+be attached or taken off, what the agent is sitting on, the active group, the
+hover height, the camera, and the `#RLV` shared-inventory tree.
+
+Two reference details are load-bearing. A query that **fails** is still
+answered, with an empty string, because a script that asked a question and heard
+nothing would wait forever; the one case with no reply at all is a channel a
+reply may not go on. And the answer is *shouted*, so it is truncated at 1023
+bytes rather than split — `split_chat` exists for `@redirchat`, not for queries.
+
+`RlvImQuery` covers the other, much smaller surface: `@stopim`, `@version`,
+`@list` and `@except` sent by **instant message** from a person rather than by
+chat from an object.
+
+One deliberate divergence lives here. `RlvAttachmentPoint::group` answers what
+the point anatomically is; Firestorm derives it from a hard-coded index table
+that reads joint group `8` as the HUD group, but since the extended attachment
+points (tail, wings, jaw, …) were added that group is *them* and the HUD points
+are group `9`, which the table does not know — so upstream's
+`@getattachnames:hud` names the extended points and never a HUD surface.
 
 The grammar, the classification and the state machine follow Firestorm's
 `rlvhandler.cpp`, `rlvhelper.cpp`, `rlvmodifiers.h` and `rlvdefines.h`

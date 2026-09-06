@@ -9,7 +9,7 @@
 //! never reaches the chat log. The payload is a **comma-separated list** of
 //! commands, each `behaviour[:option]=param`, lower-cased.
 //!
-//! The crate is two layers:
+//! The crate is three layers:
 //!
 //! - the **language decoder** turns a chat line into a typed [`RlvCommand`]
 //!   stream — behaviour, optional option, and the classified [`RlvParam`] (add
@@ -17,20 +17,30 @@
 //! - the **restriction state machine** ([`RlvState`]) holds what those commands
 //!   mean: which behaviours are in force, which object put each one there, and
 //!   which exceptions poke holes in them. Every enforcement family asks it
-//!   rather than re-deriving the answer at its own choke point.
+//!   rather than re-deriving the answer at its own choke point;
+//! - the **query layer** ([`RlvState::answer`]) builds the line a `@get*`
+//!   question is answered with.
 //!
 //! The state machine also reports itself: `@notify` subscribers are told about
 //! every change it sees, and the lines they are owed wait in
 //! [`RlvState::take_notifications`] for a consumer that can chat.
 //!
+//! The query layer **answers questions**. `@getoutfit=2222` asks what the agent
+//! is wearing and wants it shouted on channel 2222; [`RlvState::answer`] builds
+//! that line, reading the state machine for the parts it knows (`@version*`,
+//! `@getstatus`, `@getcommand`, the `@getcam_*` limits) and an
+//! [`RlvQuerySource`] the consumer implements for the parts it cannot (what is
+//! worn, what is shared, where the camera is). Every byte a script sees is
+//! built here; only the facts come from outside.
+//!
 //! What the state machine deliberately does *not* do is obey anything. It never
-//! detaches an attachment, never hides a name tag, never answers a query; those
-//! are the consumer's, and a `=force` action or a `=<channel>` query comes back
-//! from [`RlvState::apply`] as [`RlvOutcome::NotAStateChange`] for the consumer
-//! to dispatch. Like `sl-prim` and `sl-anim` this is a pure crate — no Bevy, no
-//! I/O, no session — so a headless RLV-compliant bot can use exactly this, and
-//! it is unit-testable to the letter (the reference's own debug console feeds
-//! hand-typed commands through the very same path).
+//! detaches an attachment and never hides a name tag; those are the consumer's,
+//! and a `=force` action comes back from [`RlvState::apply`] as
+//! [`RlvOutcome::NotAStateChange`] for the consumer to dispatch. Like `sl-prim`
+//! and `sl-anim` this is a pure crate — no Bevy, no I/O, no session — so a
+//! headless RLV-compliant bot can use exactly this, and it is unit-testable to
+//! the letter (the reference's own debug console feeds hand-typed commands
+//! through the very same path).
 //!
 //! ```
 //! use sl_rlv::{parse_chat_line, RlvBehaviour, RlvParam, RlvState};
@@ -84,6 +94,7 @@ mod behaviour;
 mod command;
 mod modifier;
 mod notify;
+mod query;
 mod restriction;
 mod state;
 mod version;
@@ -97,6 +108,13 @@ pub use modifier::{
     RlvModifierState, RlvModifierValue, SITTP_DEFAULT, TPLOCAL_DEFAULT,
 };
 pub use notify::RlvNotification;
+pub use query::{
+    CHAT_CHANNEL_DEBUG, FOLDER_INVALID_CHAR, FOLDER_PREFIX_HIDDEN, MAX_CHAT_BYTES,
+    OPTION_SEPARATOR, RlvAnswer, RlvAttachGroup, RlvAttachmentPoint, RlvFolderWear,
+    RlvFolderWearChild, RlvFolderWearCounts, RlvImQuery, RlvNamesQuery, RlvPathTarget, RlvQuery,
+    RlvQuerySource, RlvReply, RlvVersionNum, RlvWearableSlot, SHARED_ROOT_FOLDER, STATUS_SEPARATOR,
+    is_valid_reply_channel, split_chat, truncate_chat,
+};
 pub use restriction::{RlvOptionArity, RlvOptionMeaning, RlvRestrictionRule};
 pub use state::{
     RlvException, RlvExceptionCheck, RlvExceptionOption, RlvHeldCommand, RlvOutcome, RlvState,

@@ -35,6 +35,7 @@ use crate::behaviour::{RlvBehaviour, RlvEntry, RlvLocalModifier};
 use crate::command::{RlvCommand, RlvParam, RlvParamKind};
 use crate::modifier::{DEFAULT_FIELD_OF_VIEW, RlvModifier, RlvModifierState, RlvModifierValue};
 use crate::notify::{RlvNotification, RlvNotifyRegistry};
+use crate::query::{CHAT_CHANNEL_DEBUG, RlvAnswer, RlvQuery, RlvQuerySource};
 use crate::restriction::{RlvOptionArity, RlvOptionMeaning, RlvRestrictionRule};
 
 /// The camera modifier slots that `@setcam` takes exclusive control of.
@@ -95,6 +96,15 @@ pub enum RlvOutcome {
     /// A local modifier was addressed on an object that does not hold the
     /// restriction it belongs to (`RLV_RET_FAILED_UNHELDBEHAVIOUR`).
     FailedUnheldBehaviour,
+    /// The command was understood but could not be carried out with what the
+    /// viewer has right now (`RLV_RET_FAILED`) — a query asked about an avatar
+    /// that is not there yet.
+    Failed,
+    /// An inventory query named a folder under `#RLV` when there is no `#RLV`
+    /// folder at all (`RLV_RET_FAILED_NOSHAREDROOT`). Distinct from
+    /// [`FailedOption`](Self::FailedOption) on purpose: the object is told the
+    /// viewer shares nothing, not that its path was wrong.
+    FailedNoSharedRoot,
     /// A command this state machine does not own: an action to perform
     /// (`=force`) or a query to answer (`=<channel>`). The consumer dispatches
     /// it.
@@ -1169,6 +1179,85 @@ impl RlvState {
             .and_then(|entry| entry.modifiers.get(&modifier))
             .copied()
     }
+
+    // ----------------------------------------------------------------- queries
+
+    /// Answer one `=<channel>` query, as `RlvUtil::sendChatReply` would.
+    ///
+    /// `issuer` is the object that sent the command; it decides whose
+    /// `@getstatus` is reported, whose locks the `hide locked` settings ignore,
+    /// and — when it is the agent itself — whether channel `0` (the RLV debug
+    /// console) is allowed.
+    ///
+    /// A query that *fails* is still answered, with an empty string, because a
+    /// script that asked a question and heard nothing would wait forever. The
+    /// one case with no reply at all is a channel a reply may not go on, and a
+    /// command that is not a query, both [`RlvOutcome::FailedParam`].
+    ///
+    /// ```
+    /// # use sl_rlv::{parse_chat_line, RlvOutcome, RlvState};
+    /// # use sl_rlv::{RlvAttachmentPoint, RlvFolderWear, RlvPathTarget, RlvQuerySource, RlvWearableSlot};
+    /// # use uuid::Uuid;
+    /// # struct Bare;
+    /// # impl RlvQuerySource for Bare {
+    /// #     fn agent(&self) -> Uuid { Uuid::nil() }
+    /// #     fn attachment_count(&self, _: RlvAttachmentPoint) -> u32 { 0 }
+    /// #     fn can_attach(&self, _: RlvAttachmentPoint) -> bool { true }
+    /// #     fn can_detach(&self, _: RlvAttachmentPoint, _: Option<Uuid>) -> bool { false }
+    /// #     fn wearable_count(&self, _: RlvWearableSlot) -> u32 { 0 }
+    /// #     fn can_wear(&self, _: RlvWearableSlot) -> bool { true }
+    /// #     fn can_remove(&self, _: RlvWearableSlot, _: Option<Uuid>) -> bool { false }
+    /// #     fn hide_locked_attachments(&self) -> bool { false }
+    /// #     fn hide_locked_layers(&self) -> bool { false }
+    /// #     fn sit_target(&self) -> Option<Uuid> { None }
+    /// #     fn active_group(&self) -> Option<String> { None }
+    /// #     fn hover_height(&self) -> Option<f32> { Some(0.0) }
+    /// #     fn camera_avatar_distance(&self) -> Option<f32> { Some(0.0) }
+    /// #     fn camera_field_of_view(&self) -> Option<f32> { Some(1.0) }
+    /// #     fn has_shared_root(&self) -> bool { false }
+    /// #     fn shared_folder_children(&self, _: &str) -> Option<Vec<String>> { None }
+    /// #     fn shared_folder_wear(&self, _: &str) -> Option<RlvFolderWear> { None }
+    /// #     fn find_shared_folders(&self, _: &str) -> Vec<String> { Vec::new() }
+    /// #     fn shared_paths_of(&self, _: RlvPathTarget, _: Uuid) -> Vec<String> { Vec::new() }
+    /// # }
+    /// # fn main() -> Result<(), Box<dyn core::error::Error>> {
+    /// # let source = Bare;
+    /// let collar = Uuid::from_u128(1);
+    /// let mut state = RlvState::new();
+    /// let fly = parse_chat_line("@fly=n").ok_or("not rlv")?;
+    /// state.apply(collar, fly.first().ok_or("no command")?.as_ref().map_err(ToString::to_string)?);
+    ///
+    /// let query = parse_chat_line("@getstatus=2222").ok_or("not rlv")?;
+    /// let query = query.first().ok_or("no command")?.as_ref().map_err(ToString::to_string)?;
+    /// let answer = state.answer(collar, query, &source);
+    /// assert_eq!(answer.outcome, RlvOutcome::Success);
+    /// assert_eq!(answer.reply.ok_or("no reply")?.message, "/fly");
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn answer(
+        &self,
+        issuer: Uuid,
+        command: &RlvCommand,
+        source: &impl RlvQuerySource,
+    ) -> RlvAnswer {
+        crate::query::answer(self, issuer, command, source)
+    }
+
+    /// The text one already-decoded query answers with, and how it went.
+    ///
+    /// Separate from [`RlvState::answer`] so a consumer that decoded the query
+    /// itself — the RLV debug console does, to show the answer in a floater
+    /// rather than chat it — can ask for the text without going back through
+    /// the reply-channel rules.
+    pub fn answer_query(
+        &self,
+        issuer: Uuid,
+        query: &RlvQuery,
+        source: &impl RlvQuerySource,
+    ) -> (String, RlvOutcome) {
+        crate::query::answer_query(self, issuer, query, source)
+    }
 }
 
 /// Parse an option as the 36-character hyphenated UUID the reference insists
@@ -1178,10 +1267,6 @@ fn parse_uuid(option: &str) -> Option<Uuid> {
         .then(|| Uuid::parse_str(option).ok())
         .flatten()
 }
-
-/// The channel the viewer reserves for its own debug output, and so will not
-/// chat a reply on (`CHAT_CHANNEL_DEBUG`, `indra_constants.h:286`).
-const CHAT_CHANNEL_DEBUG: i32 = i32::MAX;
 
 /// Parse a chat channel, rejecting the ones the behaviour will not accept.
 ///
