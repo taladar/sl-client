@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 306 |
+| ready | 307 |
 | blocked | 55 |
 | in-progress | 18 |
-| bugs | 58 |
-| done | 1000 |
+| bugs | 57 |
+| done | 1001 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1574** |
+| **total** | **1575** |
 
 ## ideas (98)
 
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (306)
+## ready (307)
 
 ### protocol
 
@@ -575,6 +575,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-inventory-thumbnails`](ready/viewer-inventory-thumbnails.md) —
   Inventory thumbnails — view & edit (blocked by `viewer-ui-texture-picker`
   (done))
+- [`viewer-keyed-floater-audit`](ready/viewer-keyed-floater-audit.md) — Audit
+  the other per-subject singletons onto the keyed-floater scaffold
 - [`viewer-land-holdings`](ready/viewer-land-holdings.md) — My land holdings
   floater (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-land-transactions`](ready/viewer-land-transactions.md) — Land sale &
@@ -1166,7 +1168,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (58)
+## bugs (57)
 
 ### viewer
 
@@ -1269,8 +1271,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 - [`viewer-prim-attachment-worn-but-not-rendered`](bugs/viewer-prim-attachment-worn-but-not-rendered.md)
   — A plain prim attachment reads "(worn)" in inventory but never appears on
-- [`viewer-profile-floater-single-instance`](bugs/viewer-profile-floater-single-instance.md)
-  — A second resident profile replaces the first instead of opening its own
 - [`viewer-region-push-discards-pending-edits`](bugs/viewer-region-push-discards-pending-edits.md)
   — A region push throws away the estate manager's unapplied edits
 - [`viewer-rigged-attachments-wearer-not-resolved`](bugs/viewer-rigged-attachments-wearer-not-resolved.md)
@@ -1307,7 +1307,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1000)
+## done (1001)
 
 ### protocol
 
@@ -2478,6 +2478,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-prim-texture-editing`](done/viewer-prim-texture-editing.md) — Prim
   texture / material editing (blocked by `viewer-object-edit-floater-shell`
   (done), `viewer-edit-face-selection` (done))
+- [`viewer-profile-floater-single-instance`](done/viewer-profile-floater-single-instance.md)
+  — A second resident profile replaces the first instead of opening its own
 - [`viewer-profile-web-tab-browser`](done/viewer-profile-web-tab-browser.md) —
   Profile Web tab — render the feed in the embedded browser
 - [`viewer-profiling-logplugin-tracing`](done/viewer-profiling-logplugin-tracing.md)

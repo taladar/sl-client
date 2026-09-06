@@ -112,7 +112,7 @@ pub(crate) const FLOATERS: &[FloaterElement] = &[
     FloaterElement {
         id: "avatar-profile",
         summary: "Profile: a resident's Second Life / Web / Interests / Picks / Classifieds / \
-                  Notes tabs. Subject-bound, so its geometry is not persisted.",
+                  Notes tabs. One window per resident, so its geometry is not persisted.",
         spec: crate::avatar_profile::avatar_profile_floater_spec,
         content: FloaterContent::Stub(
             "The six profile tabs, rebuilt per open from the subject's profile replies.",

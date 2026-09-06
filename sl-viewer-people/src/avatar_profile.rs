@@ -15,6 +15,22 @@
 //! no Interests tab — the reference dropped it (`AvatarInterestsReply` is a
 //! null handler there), and we follow.
 //!
+//! # One window per resident
+//!
+//! A profile is a **keyed floater** ([`FloaterKey`]): opening a second
+//! resident's profile opens a second window beside the first rather than
+//! re-pointing it, so two people can be compared side by side — the reference's
+//! `LLFloaterReg::showInstance("profile", agent)`. Everything one window knows
+//! — its subject, the replies received for them, which tabs need repainting,
+//! where its fields are — lives in components on that window's floater root
+//! (`ProfileState`, `ProfileDirty`, `ProfileUi`), and every system here
+//! iterates the open windows rather than reading one resource.
+//!
+//! Two consequences: closing a profile **despawns** it, so re-opening that
+//! resident starts from fresh requests rather than from a stale shell; and
+//! nothing spawns at startup, since a window exists only while its subject's
+//! profile is open.
+//!
 //! # Rebuilt per change
 //!
 //! Each tab's content is torn down and rebuilt when the floater opens on an
@@ -46,13 +62,13 @@ use sl_client_bevy::{
 };
 
 use crate::floater::{
-    DeferredFloaterContent, Floater, FloaterCaps, FloaterHandle, FloaterSpec, floater_panel,
-    spawn_floater,
+    Floater, FloaterCaps, FloaterHandle, FloaterKey, FloaterSpec, KeyedFloaterOpen, KeyedFloaters,
+    host_floater,
 };
 use crate::i18n::Translated;
 use crate::inventory_drag::AgentDropTarget;
 use crate::inventory_properties::format_unix_date;
-use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use crate::ui::{column, row};
 use crate::ui_font::UiFont;
 use crate::ui_tab::{
     DEFAULT_ELLIPSIS, TabContainerHandle, TabPlacement, TabSpec, TabStrip, fill_tab_container,
@@ -191,12 +207,19 @@ impl ClassifiedDraft {
     }
 }
 
-/// The profile floater's live state: the shown avatar and everything received
-/// about them so far.
-#[derive(Resource, Debug, Default)]
+/// One open profile window's live state: the avatar it shows and everything
+/// received about them so far.
+///
+/// A **component on the floater root**, not a resource: profiles are keyed
+/// windows (one per resident, [`FloaterKey`]), so there are as many of these as
+/// there are open profiles, and closing one despawns its window and this with
+/// it.
+#[derive(Component, Debug)]
 pub(crate) struct ProfileState {
-    /// The avatar shown, or `None` before the first open.
-    target: Option<AgentKey>,
+    /// The avatar this window shows. Fixed for the window's life: a profile is
+    /// opened *on* a resident and closing it ends the window, so there is no
+    /// re-pointing and nothing here is ever `None`.
+    target: AgentKey,
     /// The avatar's properties, once received.
     properties: Option<AvatarProperties>,
     /// The avatar's profile group list, once received.
@@ -232,12 +255,27 @@ pub(crate) struct ProfileState {
 }
 
 impl ProfileState {
-    /// Reset everything to a fresh open on `target`.
-    fn reset(&mut self, target: AgentKey) {
-        *self = Self {
-            target: Some(target),
-            ..Self::default()
-        };
+    /// A fresh state for a window just opened on `target` — nothing received
+    /// yet, every request still in flight.
+    fn new(target: AgentKey) -> Self {
+        Self {
+            target,
+            properties: None,
+            groups: None,
+            picks: None,
+            classifieds: None,
+            notes: None,
+            pick_info: HashMap::new(),
+            classified_info: HashMap::new(),
+            selected_pick: 0,
+            selected_classified: 0,
+            show_in_search: false,
+            pick_use_current: HashSet::new(),
+            classified_use_current: HashSet::new(),
+            classified_drafts: HashMap::new(),
+            new_classified: None,
+            pending_textures: Vec::new(),
+        }
     }
 
     /// The selected pick's list entry, if any.
@@ -292,8 +330,9 @@ impl ProfileTab {
     }
 }
 
-/// Which tabs need their content rebuilt from [`ProfileState`].
-#[derive(Resource, Debug, Default)]
+/// Which of **one window's** tabs need their content rebuilt from its
+/// [`ProfileState`]. A component beside that state, on the same floater root.
+#[derive(Component, Debug, Default)]
 struct ProfileDirty(HashSet<ProfileTab>);
 
 impl ProfileDirty {
@@ -319,12 +358,14 @@ impl ProfileDirty {
     }
 }
 
-/// Entity handles for the profile floater: the shell spawned once at startup,
-/// and the per-rebuild field entities the Save handlers read.
-#[derive(Resource)]
+/// Entity handles for **one** profile window: its tab panels, and the
+/// per-rebuild field entities that window's Save handlers read.
+///
+/// A component on the floater root beside [`ProfileState`], so two open
+/// profiles keep their own fields — the window itself is the entity these hang
+/// off, which is why there is no `panel` field here.
+#[derive(Component)]
 pub(crate) struct ProfileUi {
-    /// The floater root (carries [`UiPanelShown`]).
-    panel: Entity,
     /// The title text node (set to the avatar's name once resolved).
     title_text: Entity,
     /// The six tab panels, in tab order (2nd Life, Web, Picks, Classifieds,
@@ -475,35 +516,51 @@ enum ProfileAction {
 pub struct AvatarProfilePlugin;
 
 impl Plugin for AvatarProfilePlugin {
-    /// Register the state, the open message, and the spawn / open / ingest /
-    /// rebuild / poll systems.
+    /// Register the open message, the shared double-click tracker, and the
+    /// open / ingest / rebuild / poll systems.
+    ///
+    /// Nothing spawns at `Startup`: a profile window exists only while a
+    /// resident's profile is open, so `open_profile` both spawns the instance
+    /// and builds its content.
     fn build(&self, app: &mut App) {
-        app.init_resource::<ProfileState>()
-            .init_resource::<ProfileDirty>()
-            .init_resource::<ProfileGroupClick>()
+        app.init_resource::<ProfileGroupClick>()
             .add_message::<OpenAvatarProfile>()
-            .add_systems(
-                Startup,
-                spawn_profile_floater.after(UiScaffoldSystems::SpawnRoot),
-            )
             .add_systems(
                 Update,
                 (
                     open_profile,
-                    ingest_profile_events,
-                    track_list_selection,
-                    rebuild_profile_tabs,
-                    poll_profile_textures,
-                    update_profile_web_status,
+                    // The per-window systems cost nothing while no profile is
+                    // open — which, unlike a singleton window that merely
+                    // hides, is most of a session. `ingest_profile_events` in
+                    // particular walks the frame's whole session-event stream,
+                    // and there is no point doing that for nobody.
+                    (
+                        ingest_profile_events,
+                        track_list_selection,
+                        rebuild_profile_tabs,
+                        poll_profile_textures,
+                        update_profile_web_status,
+                    )
+                        .chain()
+                        .run_if(any_with_component::<ProfileState>),
                 )
                     .chain(),
             );
     }
 }
 
-/// The profile floater's stable [`crate::floater::Floater::id`], the key
-/// [`open_profile`] looks the panel up by.
+/// The profile floater's stable [`crate::floater::Floater::id`] — the **kind**;
+/// which resident an instance shows is its [`FloaterKey`].
 const PROFILE_FLOATER_ID: &str = "avatar-profile";
+
+/// The [`FloaterKey`] of the window showing `agent`'s profile.
+///
+/// A [subject](FloaterKey::Subject) key: instances are told apart by the agent
+/// id, and none of them persists geometry — a settings entry per resident whose
+/// profile was ever opened is exactly what that variant exists to avoid.
+fn profile_key(agent: AgentKey) -> FloaterKey {
+    FloaterKey::subject(&agent)
+}
 
 /// The avatar profile floater's [`FloaterSpec`] — shared with the `FLOATERS`
 /// registry, so the swept window is the one the viewer spawns.
@@ -530,30 +587,16 @@ pub fn avatar_profile_floater_spec() -> FloaterSpec {
     }
 }
 
-/// Spawn the (hidden) profile floater shell's chrome; the six-tab container
-/// is built on the first open ([`DeferredFloaterContent`]), and tab contents
-/// are rebuilt per open.
-fn spawn_profile_floater(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = spawn_floater(&mut commands, root.0, avatar_profile_floater_spec());
-    // Subject-bound: the target avatar is not persisted, so neither is the
-    // floater — no restored rectangle, no restored "open" (an empty shell).
-    commands
-        .entity(handle.root)
-        .insert(crate::floater_persist::FloaterPersistExempt);
-    commands
-        .entity(handle.title_text)
-        .insert(Translated::new("profile-title"));
-    let builder = commands.register_system(build_profile_content);
-    commands
-        .entity(handle.root)
-        .insert(DeferredFloaterContent { builder, handle });
-}
-
-/// First-open content build (see [`spawn_profile_floater`]): the tab container,
-/// ending with the [`ProfileUi`] insert whose appearance wakes the
-/// `Option<Res<ProfileUi>>` consumers (their [`ProfileDirty`] flags persist
-/// until then).
-fn build_profile_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
+/// Build one profile window's content into the chrome `handle`, and hang this
+/// window's state off its root: the six-tab container, a [`ProfileState`] on
+/// `target`, its [`ProfileDirty`] flags and its [`ProfileUi`] handles.
+///
+/// Called by [`open_profile`] the moment an instance is spawned — a keyed
+/// window is only ever created because someone opened *this* subject, so there
+/// is nothing to defer (the singleton windows' `DeferredFloaterContent` exists
+/// to keep three dozen never-opened windows out of the per-frame UI walk; a
+/// window that exists only while it is open costs nothing when it does not).
+fn build_profile_content(commands: &mut Commands, handle: FloaterHandle, target: AgentKey) {
     let labels: Vec<String> = [
         "profile-tab-second-life",
         "profile-tab-web",
@@ -566,7 +609,7 @@ fn build_profile_content(In(handle): In<FloaterHandle>, mut commands: Commands) 
     .map(str::to_owned)
     .collect();
     let tabs: TabContainerHandle = spawn_tab_container(
-        &mut commands,
+        commands,
         handle.content,
         &TabSpec {
             element: "profile-tabs",
@@ -582,60 +625,74 @@ fn build_profile_content(In(handle): In<FloaterHandle>, mut commands: Commands) 
     );
     // The floater is resizable (a definite content area), so the widget must
     // track it rather than content-size — panels grow and scroll.
-    fill_tab_container(&mut commands, TabPlacement::BlockStart, &tabs);
-    commands.insert_resource(ProfileUi {
-        panel: handle.root,
-        title_text: handle.title_text,
-        tabs: tabs.panels,
-        about_field: None,
-        url_field: None,
-        web_view: None,
-        web_status: None,
-        fl_about_field: None,
-        notes_field: None,
-        pay_amount_field: None,
-        pick_name_field: None,
-        pick_desc_field: None,
-        classified_name_field: None,
-        classified_desc_field: None,
-        classified_price_field: None,
-        sl_built: None,
-        sl_handles: SecondLifeHandles::default(),
-        sl_group_rows: Vec::new(),
-        tab_sig: [None; 6],
-    });
+    fill_tab_container(commands, TabPlacement::BlockStart, &tabs);
+    // This window's whole model, on the window: the subject, what has yet to be
+    // repainted, and where the fields are. Every tab starts dirty — nothing has
+    // been drawn yet.
+    let mut initial = ProfileDirty::default();
+    initial.mark_all();
+    commands.entity(handle.root).insert((
+        ProfileState::new(target),
+        initial,
+        ProfileUi {
+            title_text: handle.title_text,
+            tabs: tabs.panels,
+            about_field: None,
+            url_field: None,
+            web_view: None,
+            web_status: None,
+            fl_about_field: None,
+            notes_field: None,
+            pay_amount_field: None,
+            pick_name_field: None,
+            pick_desc_field: None,
+            classified_name_field: None,
+            classified_desc_field: None,
+            classified_price_field: None,
+            sl_built: None,
+            sl_handles: SecondLifeHandles::default(),
+            sl_group_rows: Vec::new(),
+            tab_sig: [None; 6],
+        },
+    ));
 }
 
 // ---------------------------------------------------------------------------
 // Open / ingest / selection.
 // ---------------------------------------------------------------------------
 
-/// Open the floater on an avatar: reset the state, fire the profile requests,
-/// and mark every tab for rebuild.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the open \
-              messages, the state and dirty flags, the name cache, the (lazily-built) UI \
-              handles, the by-id floater lookup, the panel-shown query, and the command sink"
-)]
+/// Open a profile **per resident** (`viewer-profile-floater-single-instance`):
+/// raise this avatar's window when it is already up, and otherwise spawn one,
+/// build its content and fire the profile requests behind it.
+///
+/// Every open in the frame is honoured, not just the last: two name links
+/// clicked in the same frame are two residents, and each gets a window. Only a
+/// *new* window sends requests — re-opening a resident already on screen brings
+/// their window forward with everything it has already received intact.
 fn open_profile(
     mut opens: MessageReader<OpenAvatarProfile>,
-    mut state: ResMut<ProfileState>,
-    mut dirty: ResMut<ProfileDirty>,
     avatars: Res<AvatarState>,
-    ui: Option<ResMut<ProfileUi>>,
-    floaters: Query<(Entity, &Floater)>,
-    mut panels: Query<&mut UiPanelShown>,
+    mut floaters: KeyedFloaters,
+    mut dirty: Query<&mut ProfileDirty>,
+    mut commands: Commands,
     mut sl_commands: MessageWriter<SlCommand>,
 ) {
-    let Some(open) = opens.read().last().copied() else {
-        return;
-    };
-    let agent = open.agent;
-    // Re-opening the same avatar keeps the received state (a repaint after an
-    // edit); a different avatar starts fresh.
-    if state.target != Some(agent) {
-        state.reset(agent);
+    for open in opens.read().copied() {
+        let agent = open.agent;
+        let opened = floaters.open(avatar_profile_floater_spec(), profile_key(agent));
+        let KeyedFloaterOpen::Spawned(handle) = opened else {
+            // Already up: repaint it from what it has, so an open after an edit
+            // shows the edit. Each tab still skips itself when its content
+            // signature has not moved, so this costs nothing when nothing has.
+            if let Ok(mut dirty) = dirty.get_mut(opened.root()) {
+                dirty.mark_all();
+            }
+            continue;
+        };
+        commands
+            .entity(handle.title_text)
+            .insert(Translated::new("profile-title"));
+        build_profile_content(&mut commands, handle, agent);
         sl_commands.write(SlCommand(Command::RequestAvatarProperties(agent)));
         sl_commands.write(SlCommand(Command::RequestAvatarPicks(agent)));
         sl_commands.write(SlCommand(Command::RequestAvatarClassifieds(agent)));
@@ -643,38 +700,41 @@ fn open_profile(
         if avatars.name_of(agent).is_none() {
             sl_commands.write(SlCommand(Command::RequestAvatarNames(vec![agent])));
         }
-        // Invalidate the retained 2nd Life structure and the signature-skip tabs so
-        // each rebuilds for the new subject (a single user-paced teardown, done by
-        // `rebuild_profile_tabs`, never a per-reply respawn). On the very first
-        // open the content (and so `ProfileUi`) does not exist yet — nothing to
-        // invalidate, the deferred build starts fresh.
-        if let Some(mut ui) = ui {
-            ui.sl_built = None;
-            ui.tab_sig = [None; 6];
-        }
-    }
-    dirty.mark_all();
-    // By stable id — this very open may be the first, which triggers the
-    // deferred content build.
-    if let Some(panel) = floater_panel(&floaters, PROFILE_FLOATER_ID)
-        && let Ok(mut shown) = panels.get_mut(panel)
-    {
-        shown.0 = true;
     }
 }
 
-/// Fold profile-related session events for the shown avatar into the state,
-/// marking the affected tabs dirty.
+/// Fold profile-related session events into **every** open window whose avatar
+/// they are about, marking that window's affected tabs dirty.
+///
+/// The frame's events are collected once and replayed per window: a reader is
+/// consumed by the first pass over it, and with two profiles open the second
+/// would otherwise see nothing. Each window keeps its own filter on its own
+/// subject, so a reply for one resident never touches the other's tabs.
 fn ingest_profile_events(
     mut events: MessageReader<SlEvent>,
-    mut state: ResMut<ProfileState>,
-    mut dirty: ResMut<ProfileDirty>,
+    mut instances: Query<(&mut ProfileState, &mut ProfileDirty)>,
     mut sl_commands: MessageWriter<SlCommand>,
 ) {
-    let Some(target) = state.target else {
+    let frame: Vec<&SlEvent> = events.read().collect();
+    if frame.is_empty() {
         return;
-    };
-    for event in events.read() {
+    }
+    for (mut state, mut dirty) in &mut instances {
+        let target = state.target;
+        ingest_for_window(&frame, target, &mut state, &mut dirty, &mut sl_commands);
+    }
+}
+
+/// Fold this frame's events into one window's state (see
+/// [`ingest_profile_events`]).
+fn ingest_for_window(
+    frame: &[&SlEvent],
+    target: AgentKey,
+    state: &mut ProfileState,
+    dirty: &mut ProfileDirty,
+    sl_commands: &mut MessageWriter<SlCommand>,
+) {
+    for event in frame {
         match &event.0 {
             SlSessionEvent::AvatarProperties(properties) => {
                 if properties.avatar_id != target {
@@ -770,15 +830,23 @@ fn ingest_profile_events(
 /// tab. The strips are respawned on rebuild with `active` taken from the
 /// state, so an unchanged selection is a no-op.
 fn track_list_selection(
-    strips: Query<&TabStrip, Changed<TabStrip>>,
-    mut state: ResMut<ProfileState>,
-    mut dirty: ResMut<ProfileDirty>,
+    strips: Query<(Entity, &TabStrip), Changed<TabStrip>>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
+    mut instances: Query<(&mut ProfileState, &mut ProfileDirty)>,
     mut sl_commands: MessageWriter<SlCommand>,
 ) {
-    let Some(target) = state.target else {
-        return;
-    };
-    for strip in &strips {
+    for (entity, strip) in &strips {
+        // Which window's list this is: with two profiles open, both carry a
+        // strip under the same element id, so the answer has to come from the
+        // tree rather than from the id.
+        let Some(instance) = host_floater(entity, &parents, &floaters) else {
+            continue;
+        };
+        let Ok((mut state, mut dirty)) = instances.get_mut(instance) else {
+            continue;
+        };
+        let target = state.target;
         if strip.element == PICKS_STRIP_ELEMENT {
             if strip.active == state.selected_pick {
                 continue;
@@ -813,17 +881,15 @@ fn track_list_selection(
 // Rebuild.
 // ---------------------------------------------------------------------------
 
-/// Rebuild every dirty tab's content from the state.
+/// Rebuild every open window's dirty tabs from that window's own state.
 #[expect(
     clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the dirty flags, the \
-              state, the UI handles, the identity / name / friendship sources, the texture \
+    reason = "a Bevy system's parameters are its injected resources: the per-window state / \
+              dirty flags / UI handles, the identity / name / friendship sources, the texture \
               pipeline, and the spawn outputs"
 )]
 fn rebuild_profile_tabs(
-    mut dirty: ResMut<ProfileDirty>,
-    mut state: ResMut<ProfileState>,
-    ui: Option<ResMut<ProfileUi>>,
+    mut instances: Query<(Entity, &mut ProfileState, &mut ProfileDirty, &mut ProfileUi)>,
     identity: Res<SlIdentity>,
     avatars: Res<AvatarState>,
     friends: Res<FriendsModel>,
@@ -833,18 +899,49 @@ fn rebuild_profile_tabs(
     mut texts: Query<&mut Text>,
     mut commands: Commands,
 ) {
-    // Before the dirty consume: while the lazily-built content (and so the
-    // resource) does not exist yet, the flags must survive for the build.
-    let Some(mut ui) = ui else {
-        return;
-    };
-    if !dirty.any() {
-        return;
+    for (panel, mut state, mut dirty, mut ui) in &mut instances {
+        if !dirty.any() {
+            continue;
+        }
+        rebuild_one_profile(
+            panel,
+            &mut state,
+            &mut dirty,
+            &mut ui,
+            &identity,
+            &avatars,
+            &friends,
+            &groups_model,
+            &mut boost,
+            &children,
+            &mut texts,
+            &mut commands,
+        );
     }
-    let Some(target) = state.target else {
-        *dirty = ProfileDirty::default();
-        return;
-    };
+}
+
+/// Rebuild one window's dirty tabs (see [`rebuild_profile_tabs`]).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "this is `rebuild_profile_tabs`'s body with the window's own three pieces of \
+              state taken by reference instead of by query — splitting it further would only \
+              scatter one repaint across several functions"
+)]
+fn rebuild_one_profile(
+    window: Entity,
+    state: &mut ProfileState,
+    dirty: &mut ProfileDirty,
+    ui: &mut ProfileUi,
+    identity: &SlIdentity,
+    avatars: &AvatarState,
+    friends: &FriendsModel,
+    groups_model: &GroupsModel,
+    boost: &mut MessageWriter<BoostTexture>,
+    children: &Query<&Children>,
+    texts: &mut Query<&mut Text>,
+    commands: &mut Commands,
+) {
+    let target = state.target;
     let own = identity.agent_id == Some(target);
     // Title: the avatar's name once known (a plain string, not a Fluent key).
     if let Some(name) = avatars.name_of(target)
@@ -858,15 +955,15 @@ fn rebuild_profile_tabs(
     // floater gives them the item (`viewer-inventory-give-via-profile`) — the
     // root carries the target and the drop resolution walks up to it.
     if own {
-        commands.entity(ui.panel).remove::<AgentDropTarget>();
+        commands.entity(window).remove::<AgentDropTarget>();
     } else {
-        commands.entity(ui.panel).insert(AgentDropTarget(target));
+        commands.entity(window).insert(AgentDropTarget(target));
     }
     let build = BuildContext {
         target,
         own,
-        avatars: &avatars,
-        friends: &friends,
+        avatars,
+        friends,
     };
     for tab in ProfileTab::ALL {
         if !dirty_tabs.contains(&tab) {
@@ -881,61 +978,36 @@ fn rebuild_profile_tabs(
         // exactly the same-frame build+teardown that races bevy_flair.
         if tab == ProfileTab::SecondLife {
             if ui.sl_built != Some(own) {
-                despawn_children(&children, &mut commands, panel);
+                despawn_children(children, commands, panel);
                 ui.sl_handles = SecondLifeHandles::default();
                 ui.sl_group_rows.clear();
-                build_second_life_structure(&mut commands, panel, &build, &mut ui);
+                build_second_life_structure(commands, panel, &build, ui);
                 ui.sl_built = Some(own);
             }
-            update_second_life(
-                &mut commands,
-                &build,
-                &mut state,
-                &mut ui,
-                &mut boost,
-                &mut texts,
-                &groups_model,
-            );
+            update_second_life(commands, &build, state, ui, boost, texts, groups_model);
             continue;
         }
         // The other five tabs are single-source (properties / notes) or user-paced
         // (a pick / classified selection): rebuild only when the tab's content
         // signature actually changes, so the reply burst never respawns them.
-        let sig = tab_signature(tab, &state, own);
+        let sig = tab_signature(tab, state, own);
         if ui.tab_sig.get(tab.index()).copied().flatten() == Some(sig) {
             continue;
         }
         if let Some(slot) = ui.tab_sig.get_mut(tab.index()) {
             *slot = Some(sig);
         }
-        despawn_children(&children, &mut commands, panel);
+        despawn_children(children, commands, panel);
         match tab {
-            ProfileTab::Web => build_web_tab(&mut commands, panel, &build, &state, &mut ui),
-            ProfileTab::Picks => build_picks_tab(
-                &mut commands,
-                panel,
-                &build,
-                &mut state,
-                &mut ui,
-                &mut boost,
-            ),
-            ProfileTab::Classifieds => build_classifieds_tab(
-                &mut commands,
-                panel,
-                &build,
-                &mut state,
-                &mut ui,
-                &mut boost,
-            ),
-            ProfileTab::FirstLife => build_first_life_tab(
-                &mut commands,
-                panel,
-                &build,
-                &mut state,
-                &mut ui,
-                &mut boost,
-            ),
-            ProfileTab::Notes => build_notes_tab(&mut commands, panel, &state, &mut ui),
+            ProfileTab::Web => build_web_tab(commands, panel, &build, state, ui),
+            ProfileTab::Picks => build_picks_tab(commands, panel, &build, state, ui, boost),
+            ProfileTab::Classifieds => {
+                build_classifieds_tab(commands, panel, &build, state, ui, boost);
+            }
+            ProfileTab::FirstLife => {
+                build_first_life_tab(commands, panel, &build, state, ui, boost);
+            }
+            ProfileTab::Notes => build_notes_tab(commands, panel, state, ui),
             ProfileTab::SecondLife => {}
         }
     }
@@ -2486,19 +2558,24 @@ fn spawn_category_label_on(commands: &mut Commands, button: Entity, category: Cl
 // Actions.
 // ---------------------------------------------------------------------------
 
-/// Dispatch a clicked profile button to the behaviour behind it.
+/// Dispatch a clicked profile button to the behaviour behind it, **in the
+/// window it was clicked in**.
+///
+/// Which window that is comes from the tree ([`host_floater`]) rather than from
+/// a resource: with two profiles open, "Pay" means pay *this* window's
+/// resident, and the amount is *this* window's field.
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy observer's parameters are its injected resources: the action marker, \
-              the state, the UI field handles, the identity / name sources, and the command \
-              and repaint outputs"
+              the window lookup, its per-window state / UI handles, the field values, the \
+              identity / name sources, and the command and repaint outputs"
 )]
 fn on_profile_action(
     press: On<Pointer<Press>>,
     actions: Query<&ProfileAction>,
-    mut state: ResMut<ProfileState>,
-    mut dirty: ResMut<ProfileDirty>,
-    ui: Res<ProfileUi>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
+    mut instances: Query<(&mut ProfileState, &mut ProfileDirty, &ProfileUi)>,
     fields: Query<&EditableText>,
     avatars: Res<AvatarState>,
     clipboard: Res<crate::clipboard::ViewerClipboard>,
@@ -2513,9 +2590,13 @@ fn on_profile_action(
     let Ok(action) = actions.get(press.entity) else {
         return;
     };
-    let Some(target) = state.target else {
+    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
         return;
     };
+    let Ok((mut state, mut dirty, ui)) = instances.get_mut(window) else {
+        return;
+    };
+    let target = state.target;
     let read = |entity: Option<Entity>| {
         entity
             .and_then(|field| fields.get(field).ok())
@@ -2857,88 +2938,89 @@ fn teleport_to(pos_global: &GlobalCoordinates, sl_commands: &mut MessageWriter<S
 /// pending node may be gone by the time its texture decodes — those entries
 /// are dropped, not applied.
 fn poll_profile_textures(
-    mut state: ResMut<ProfileState>,
+    mut instances: Query<&mut ProfileState>,
     store: Res<DecodedTextures>,
     mut images: ResMut<Assets<Image>>,
     children: Query<&Children>,
     mut commands: Commands,
 ) {
-    if state.pending_textures.is_empty() {
-        return;
-    }
-    let pending = std::mem::take(&mut state.pending_textures);
-    for (key, node) in pending {
-        let Ok(mut entity) = commands.get_entity(node) else {
+    for mut state in &mut instances {
+        if state.pending_textures.is_empty() {
             continue;
-        };
-        if let Some(decoded) = store.get(key) {
-            let handle = images.add(to_bevy_image(decoded));
-            entity.insert(ImageNode::new(handle));
-            // Drop the "(loading)" label under the image.
-            despawn_children(&children, &mut commands, node);
-        } else {
-            state.pending_textures.push((key, node));
+        }
+        let pending = std::mem::take(&mut state.pending_textures);
+        for (key, node) in pending {
+            let Ok(mut entity) = commands.get_entity(node) else {
+                continue;
+            };
+            if let Some(decoded) = store.get(key) {
+                let handle = images.add(to_bevy_image(decoded));
+                entity.insert(ImageNode::new(handle));
+                // Drop the "(loading)" label under the image.
+                despawn_children(&children, &mut commands, node);
+            } else {
+                state.pending_textures.push((key, node));
+            }
         }
     }
 }
 
-/// Keep the Web tab's load-status line current: "loading" while the embedded
-/// page loads, then the reference's load-time string ("Page loaded in N s")
-/// once it finishes. Tracks the view entity so a tab rebuild restarts the
-/// clock.
+/// Keep every open Web tab's load-status line current: "loading" while the
+/// embedded page loads, then the reference's load-time string ("Page loaded in
+/// N s") once it finishes.
+///
+/// The clock is kept **per browser view** rather than per system: a tab rebuild
+/// spawns a new view and so restarts its own clock, and two open profiles are
+/// two views timed independently. Views that have gone (a rebuild, a closed
+/// window) are dropped each pass, so the map is as small as the open tabs.
 #[expect(
     clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the profile \
-              floater's entities, the browser view / surface lookups, the clock, the \
-              translator and the status label"
+    reason = "a Bevy system's parameters are its injected resources / queries: the open \
+              windows' handles, the browser view / surface lookups, the clock, the \
+              translator, the per-view timers and the status label"
 )]
 fn update_profile_web_status(
-    ui: Option<Res<ProfileUi>>,
+    instances: Query<&ProfileUi>,
     views: Query<&crate::browser_widget::BrowserView>,
     surfaces: bevy::ecs::system::NonSend<crate::media_engine::MediaSurfaces>,
     time: Res<Time>,
     translator: crate::i18n::Translator,
-    mut tracked: Local<Option<(Entity, f64, bool)>>,
+    mut tracked: Local<HashMap<Entity, (f64, bool)>>,
     mut texts: Query<&mut Text>,
     mut commands: Commands,
 ) {
-    let (Some(view_entity), Some(status_entity)) = ui
-        .as_deref()
-        .map_or((None, None), |ui| (ui.web_view, ui.web_status))
-    else {
-        *tracked = None;
-        return;
-    };
     let now = time.elapsed_secs_f64();
-    let restart = !matches!(*tracked, Some((entity, _, _)) if entity == view_entity);
-    if restart {
-        *tracked = Some((view_entity, now, false));
+    let mut live: HashSet<Entity> = HashSet::new();
+    for ui in &instances {
+        let (Some(view_entity), Some(status_entity)) = (ui.web_view, ui.web_status) else {
+            continue;
+        };
+        live.insert(view_entity);
+        let (started, done) = tracked.entry(view_entity).or_insert((now, false));
+        if *done {
+            continue;
+        }
+        let Ok(view) = views.get(view_entity) else {
+            continue;
+        };
+        let Some(slot) = view.surface.and_then(|id| surfaces.get(id)) else {
+            continue;
+        };
+        if slot.status.loading || slot.status.progress < 1.0 {
+            continue;
+        }
+        let seconds = format!("{:.2}", now - *started);
+        let line = translator.format(
+            "profile-web-loaded",
+            &crate::i18n::TransArgs::new().text("seconds", &seconds),
+        );
+        if let Ok(mut text) = texts.get_mut(status_entity) {
+            text.0 = line;
+        }
+        commands.entity(status_entity).remove::<Translated>();
+        *done = true;
     }
-    let Some((_, started, done)) = tracked.as_mut() else {
-        return;
-    };
-    if *done {
-        return;
-    }
-    let Ok(view) = views.get(view_entity) else {
-        return;
-    };
-    let Some(slot) = view.surface.and_then(|id| surfaces.get(id)) else {
-        return;
-    };
-    if slot.status.loading || slot.status.progress < 1.0 {
-        return;
-    }
-    let seconds = format!("{:.2}", now - *started);
-    let line = translator.format(
-        "profile-web-loaded",
-        &crate::i18n::TransArgs::new().text("seconds", &seconds),
-    );
-    if let Ok(mut text) = texts.get_mut(status_entity) {
-        text.0 = line;
-    }
-    commands.entity(status_entity).remove::<Translated>();
-    *done = true;
+    tracked.retain(|view, _timer| live.contains(view));
 }
 
 // ---------------------------------------------------------------------------
@@ -3216,5 +3298,175 @@ mod tests {
         assert!((local.x() - 128.5).abs() < 0.001);
         assert!((local.y() - 32.25).abs() < 0.001);
         assert!((local.z() - 22.0).abs() < 0.001);
+    }
+
+    /// **One window per resident** (`viewer-profile-floater-single-instance`):
+    /// the open path itself, driven by the very messages a radar row and a chat
+    /// name link write.
+    ///
+    /// The pure helpers above cannot see this one: the bug was not in any of
+    /// them, it was in there being a single `ProfileState` for every subject.
+    mod instances {
+        use super::super::{
+            PROFILE_FLOATER_ID, ProfileState, ProfileUi, open_profile, profile_key,
+        };
+        use crate::floater::{
+            ActiveFloater, Floater, FloaterCommand, FloaterOp, FloaterPlugin, FloaterZTop,
+        };
+        use crate::ui::UiRoot;
+        use crate::world_api::{AvatarState, OpenAvatarProfile};
+        use bevy::prelude::*;
+        use pretty_assertions::assert_eq;
+        use sl_client_bevy::{AgentKey, SlCommand, Uuid};
+
+        /// A boxed error so tests can use `?` rather than the disallowed
+        /// `unwrap` / `expect`.
+        type TestError = Box<dyn core::error::Error>;
+
+        /// Two distinct residents to open profiles on.
+        fn residents() -> (AgentKey, AgentKey) {
+            (
+                AgentKey::from(Uuid::from_u128(0x1111_2222_3333_4444_5555_6666_7777_8888)),
+                AgentKey::from(Uuid::from_u128(0x8888_7777_6666_5555_4444_3333_2222_1111)),
+            )
+        }
+
+        /// An app with the floater manager and the **open path** — the module's
+        /// own `open_profile`, not the whole plugin.
+        ///
+        /// The window-facing systems beside it (the repaint, the event fold,
+        /// the Web tab's clock) each need a slice of a live session — an
+        /// identity, a friend roster, the texture pipeline, the media engine's
+        /// non-send surfaces — and standing all of that up would test the
+        /// harness rather than the fix. The bug was in the open: one state for
+        /// every subject. This is that path, with the real manager under it, so
+        /// spawning, keying, raising and closing are the shipped ones.
+        fn profile_app() -> App {
+            let mut app = App::new();
+            app.add_message::<SlCommand>()
+                .add_message::<OpenAvatarProfile>()
+                .init_resource::<AvatarState>()
+                // `bevy_ui`'s scale and the keyboard map, which the manager's
+                // on-screen clamp and its `Ctrl+W` read; no `UiPlugin` here.
+                .init_resource::<UiScale>()
+                .init_resource::<ButtonInput<KeyCode>>()
+                .add_plugins(FloaterPlugin)
+                .add_systems(Update, open_profile);
+            let root = app.world_mut().spawn(Node::default()).id();
+            app.insert_resource(UiRoot(root));
+            app.update();
+            app
+        }
+
+        /// Open `agent`'s profile the way every caller does — by writing the
+        /// message — and settle a frame.
+        fn open(app: &mut App, agent: AgentKey) {
+            app.world_mut().write_message(OpenAvatarProfile { agent });
+            app.update();
+        }
+
+        /// Every live profile window, as (entity, subject) pairs.
+        fn windows(app: &mut App) -> Vec<(Entity, AgentKey)> {
+            app.world_mut()
+                .query::<(Entity, &ProfileState)>()
+                .iter(app.world())
+                .map(|(entity, state)| (entity, state.target))
+                .collect()
+        }
+
+        /// Two residents are two windows, each with its own subject, its own
+        /// tab handles and its own requests — and re-opening one of them raises
+        /// that window instead of adding a third.
+        #[test]
+        fn two_residents_open_two_windows() -> Result<(), TestError> {
+            let (first, second) = residents();
+            let mut app = profile_app();
+            open(&mut app, first);
+            open(&mut app, second);
+
+            let mut open_windows = windows(&mut app);
+            open_windows.sort_by_key(|(entity, _agent)| *entity);
+            assert_eq!(
+                open_windows.len(),
+                2,
+                "the second resident reused the first window"
+            );
+            let subjects: Vec<AgentKey> =
+                open_windows.iter().map(|(_entity, agent)| *agent).collect();
+            assert!(subjects.contains(&first) && subjects.contains(&second));
+
+            // Each window carries its own handles — the fields a Save reads.
+            let world = app.world();
+            for (window, _agent) in &open_windows {
+                assert!(
+                    world.get::<ProfileUi>(*window).is_some(),
+                    "a profile window has no UI handles of its own"
+                );
+                let floater = world.get::<Floater>(*window).ok_or("not a floater")?;
+                assert_eq!(floater.id, PROFILE_FLOATER_ID);
+            }
+            // Keyed by subject, so each window is findable by its resident.
+            let by_key: Vec<Option<&crate::floater::FloaterKey>> = open_windows
+                .iter()
+                .map(|(window, _agent)| world.get::<Floater>(*window).and_then(Floater::key))
+                .collect();
+            assert!(by_key.contains(&Some(&profile_key(first))));
+            assert!(by_key.contains(&Some(&profile_key(second))));
+
+            // Re-opening the first resident raises that window rather than
+            // spawning another copy of the same person.
+            open(&mut app, first);
+            assert_eq!(windows(&mut app).len(), 2);
+            let raised = windows(&mut app)
+                .into_iter()
+                .find_map(|(window, agent)| (agent == first).then_some(window))
+                .ok_or("the first resident's window is gone")?;
+            assert_eq!(
+                app.world().resource::<ActiveFloater>().front(),
+                Some(raised)
+            );
+            Ok(())
+        }
+
+        /// Closing one profile ends **that** window — the state goes with it —
+        /// and leaves the other resident's window open.
+        #[test]
+        fn closing_one_profile_leaves_the_other() -> Result<(), TestError> {
+            let (first, second) = residents();
+            let mut app = profile_app();
+            open(&mut app, first);
+            open(&mut app, second);
+            let target = windows(&mut app)
+                .into_iter()
+                .find_map(|(window, agent)| (agent == first).then_some(window))
+                .ok_or("the first resident has no window")?;
+
+            app.world_mut()
+                .resource_mut::<Messages<FloaterCommand>>()
+                .write(FloaterCommand {
+                    floater: target,
+                    op: FloaterOp::Close,
+                });
+            app.update();
+
+            let left = windows(&mut app);
+            assert_eq!(left.len(), 1, "closing one profile left the wrong count");
+            assert_eq!(left.first().map(|(_window, agent)| *agent), Some(second));
+
+            // Re-opening the closed resident builds a fresh window rather than
+            // reviving a hidden one.
+            open(&mut app, first);
+            assert_eq!(windows(&mut app).len(), 2);
+            Ok(())
+        }
+
+        /// The windows above are the manager's real ones — the fixture adds
+        /// [`FloaterPlugin`], so a keyed open, a raise and a close are the
+        /// shipped code paths rather than a stand-in.
+        #[test]
+        fn the_manager_is_wired() {
+            let app = profile_app();
+            assert!(app.world().contains_resource::<FloaterZTop>());
+        }
     }
 }

@@ -45,6 +45,29 @@
 //! window grows *and* shrinks with the grip, down to a real minimum, rather than
 //! being pinned to one measured rect.
 //!
+//! # One window, or one per subject
+//!
+//! Most windows are singletons — one Preferences, one inventory, one map — and
+//! those spawn their chrome once at startup and open by flipping
+//! [`UiPanelShown`]. Some open **per subject**: a profile per resident, an
+//! editor per script, a picker per field. The reference expresses that with a
+//! registry keyed by name *and* key (`LLFloaterReg::showInstance("profile",
+//! LLSD().with("id", agent))`), and [`FloaterKey`] + [`KeyedFloaters`] are that
+//! here: `open` reuses the subject's window when it is already up and spawns
+//! one — cascaded 16 px off the kind's other windows, the reference's
+//! `stackWith` — when it is not.
+//!
+//! Two consequences worth knowing before writing a keyed window:
+//!
+//! - **Its state lives on the window**, as components on the floater root, not
+//!   in a resource beside it. A resource can hold one subject's worth; the
+//!   whole point is that there are several.
+//! - **Closing it despawns it.** A keyed instance exists because a subject was
+//!   opened; ending it there means the next open starts from the grid's replies
+//!   rather than from whatever a hidden shell had accumulated, and it is what
+//!   keeps a session of browsing residents from leaving forty hidden windows
+//!   behind. A singleton still merely hides.
+//!
 //! # Constructible without its wiring
 //!
 //! Like every element (`ui_element`), a floater's chrome is spawnable with
@@ -170,6 +193,20 @@ const GLYPH_TEAROFF: &str = "\u{25a5}";
 /// reference's `Resize_Corner` image.
 const GLYPH_RESIZE: &str = "\u{25e2}";
 
+/// How far each further **instance** of a keyed floater is offset from the one
+/// before it, in logical pixels — the reference's `UIFloaterOffset` (16,
+/// `LLFloater::stackWith`), applied on both axes so a second window's title bar
+/// is reachable beside the first's.
+const CASCADE_STEP: f32 = 16.0;
+
+/// How many cascade steps are taken before the offset starts over at the spec
+/// position. Without a wrap the twentieth profile would open off the bottom of
+/// the screen and be dragged back by `clamp_floaters_on_screen` into a pile at
+/// the edge; starting over instead keeps every instance somewhere a person can
+/// actually reach. The reference has no wrap because its own cascade is
+/// relative to the *last* window rather than to a count.
+const CASCADE_WRAP: u32 = 8;
+
 /// The plugin that drives every live [`Floater`]: the chrome commands, the
 /// layout that follows a floater's state, the active-floater highlight, and the
 /// on-screen clamp.
@@ -258,6 +295,81 @@ fn open_floaters_from_env(
 // State
 // ---------------------------------------------------------------------------
 
+/// **Which subject** an instance of a keyed floater kind is showing — the
+/// second half of a floater's identity, beside its [`Floater::id`].
+///
+/// Most windows are singletons: one Preferences, one inventory, one map. Some
+/// open *per subject* — a profile per resident, an editor per script, a picker
+/// per field being edited — and the reference viewer expresses that as
+/// `LLFloaterReg::showInstance("profile", LLSD().with("id", agent))`: a
+/// registry keyed by **name and key**, so a second subject gets a second
+/// window instead of re-pointing the first. This is that key.
+///
+/// # Why the two forms differ, and why persistence follows them
+///
+/// The reference's `LLFloater::getControlName(name, key)` appends the key to
+/// the saved-rect control name **only when the key is a string**; a `UUID` key
+/// falls back to the bare name. That is not an oversight — a rect control per
+/// agent id would grow the settings file by one entry per resident whose
+/// profile was ever opened, forever. The two variants here carry that
+/// distinction in the type rather than in a comment:
+///
+/// - [`Subject`](Self::Subject) — an opaque id (an agent, a group, an
+///   inventory item). Instances are told apart by it, and **nothing about
+///   them is persisted**: they cascade off the windows already open (the
+///   reference's `POSITIONING_CASCADE_GROUP`) and start from the kind's
+///   [`FloaterSpec`] defaults each session.
+/// - [`Named`](Self::Named) — a small, closed set of well-known instance
+///   names (a picker per named field). Each gets its **own** geometry under
+///   `{id}_{name}` in the settings store, exactly as the reference's string
+///   key does.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum FloaterKey {
+    /// An opaque subject id — an agent, a group, an inventory item. Not
+    /// persisted (see the type's documentation).
+    Subject(Box<str>),
+    /// A well-known instance name, from a closed set. Persisted under its own
+    /// settings key.
+    Named(Box<str>),
+}
+
+impl FloaterKey {
+    /// A key for an opaque subject id — pass whatever names the subject (an
+    /// [`Uuid`](https://docs.rs/uuid), an `AgentKey`, an item id); its
+    /// `Display` form is what instances are compared by.
+    #[must_use]
+    pub fn subject(subject: &impl core::fmt::Display) -> Self {
+        Self::Subject(subject.to_string().into_boxed_str())
+    }
+
+    /// A key for a well-known named instance (see the type's documentation for
+    /// why only these are persisted).
+    #[must_use]
+    pub fn named(name: impl Into<Box<str>>) -> Self {
+        Self::Named(name.into())
+    }
+
+    /// The key's text — what two instances are told apart by, and what a
+    /// window's `Name` carries after its id.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Subject(key) | Self::Named(key) => key,
+        }
+    }
+
+    /// The suffix this key adds to its kind's settings id, or `None` when
+    /// instances of this kind persist nothing at all — the reference's
+    /// `getControlName` split (see the type's documentation).
+    #[must_use]
+    pub const fn settings_suffix(&self) -> Option<&str> {
+        match self {
+            Self::Subject(_) => None,
+            Self::Named(name) => Some(name),
+        }
+    }
+}
+
 /// A live floating window, on its root node. Holds everything a floater
 /// remembers that is not derivable from the tree.
 #[derive(Component, Debug, Clone)]
@@ -265,7 +377,19 @@ pub struct Floater {
     /// A stable id — lets a consumer (the inventory window) tell its own floater
     /// apart from any other, and keys its remembered geometry in the settings
     /// store ([`crate::floater_persist`]).
+    ///
+    /// For a keyed floater this names the **kind** (`"avatar-profile"`); which
+    /// of its instances this is comes from [`key`](Self::key).
     pub id: &'static str,
+    /// Which subject this **instance** shows, or `None` for a singleton window.
+    /// See [`FloaterKey`].
+    key: Option<FloaterKey>,
+    /// Where this instance sits in its kind's cascade: 0 for the first one open,
+    /// one more than the highest live instance's for each one after. The
+    /// reference's "last floater in group" ordering
+    /// (`LLFloaterReg::getLastFloaterInGroup`) expressed as a number, so a new
+    /// window stacks off the newest rather than the nearest.
+    stack_seq: u32,
     /// The remembered on-screen position while free-floating, in **logical**
     /// pixels: `x` is the inline-start offset, `y` the block-start (top) offset.
     /// Written into [`LogicalInset`], so it mirrors under RTL.
@@ -350,6 +474,35 @@ impl Floater {
     pub const fn set_position(&mut self, position: Vec2) {
         self.position = position;
     }
+
+    /// Which subject this instance shows, or `None` for a singleton window.
+    #[must_use]
+    pub const fn key(&self) -> Option<&FloaterKey> {
+        self.key.as_ref()
+    }
+
+    /// Whether this floater is the instance of `id` showing `key`.
+    #[must_use]
+    pub fn is_instance(&self, id: &str, key: &FloaterKey) -> bool {
+        self.id == id && self.key.as_ref() == Some(key)
+    }
+
+    /// The id this floater's geometry is stored under
+    /// ([`crate::floater_persist`]), or `None` when it persists nothing.
+    ///
+    /// A singleton stores under its bare id; a [`FloaterKey::Named`] instance
+    /// under `{id}_{name}`; a [`FloaterKey::Subject`] instance under nothing at
+    /// all — see [`FloaterKey`] for why, and `clamp_floaters_on_screen` /
+    /// the cascade for what places it instead.
+    #[must_use]
+    pub fn persist_id(&self) -> Option<String> {
+        match self.key.as_ref() {
+            None => Some(self.id.to_owned()),
+            Some(key) => key
+                .settings_suffix()
+                .map(|suffix| format!("{}_{suffix}", self.id)),
+        }
+    }
 }
 
 /// The chrome entities of a floater, held on its root so the systems find each
@@ -408,6 +561,16 @@ impl FloaterZTop {
 /// the reference's front-child concept.
 #[derive(Resource, Debug, Clone, Copy, Default)]
 pub struct ActiveFloater(Option<Entity>);
+
+impl ActiveFloater {
+    /// Which floater is front-most, if any — read-only, because becoming the
+    /// active window is the manager's answer to a press or an open, never
+    /// something a consumer asserts about itself.
+    #[must_use]
+    pub const fn front(&self) -> Option<Entity> {
+        self.0
+    }
+}
 
 /// The container a dock button docks its floater into, when one is set. The
 /// plugin spawns one on the trailing edge and publishes it here; without one the
@@ -649,24 +812,200 @@ pub fn build_deferred_floater_content(
     }
 }
 
+/// Where the `stack_seq`-th instance of a kind opens, given the kind's spec
+/// position — each further instance steps down and along from the one before it
+/// (the reference's `stackWith`), starting over after [`CASCADE_WRAP`].
+fn cascade_position(base: Vec2, stack_seq: u32) -> Vec2 {
+    // The modulo is what bounds the offset: `CASCADE_WRAP` is a non-zero
+    // constant, so this can neither divide by zero nor leave `u16`.
+    let steps = stack_seq % CASCADE_WRAP;
+    let step = f32::from(u16::try_from(steps).unwrap_or(0)) * CASCADE_STEP;
+    // Component-wise, because the whole-vector `+` is one of glam's overloaded
+    // operators the workspace's `arithmetic_side_effects` lint fires on.
+    Vec2::new(base.x + step, base.y + step)
+}
+
 /// Look up a live floater's root entity by its stable [`Floater::id`].
 ///
-/// The by-id lookup is how the openers (bottom toolbar, top menu bar) reach a
-/// floater whose module `XUi` resource does not exist yet: a deferred floater
-/// has chrome (and so a [`Floater`]) from startup, but its resource only
-/// appears on first open — an opener that waited for the resource could never
-/// perform that first open.
+/// Finds the kind's **singleton** — a floater with no [`FloaterKey`]. The by-id
+/// lookup is how the openers (bottom toolbar, top menu bar) reach a floater
+/// whose module `XUi` resource does not exist yet: a deferred floater has
+/// chrome (and so a [`Floater`]) from startup, but its resource only appears on
+/// first open — an opener that waited for the resource could never perform that
+/// first open.
+///
+/// A **keyed** kind has no singleton to find (its instances exist only while
+/// their subject's window is open), so this returns `None` for one; reach those
+/// with [`KeyedFloaters::instance`], and open them with the module's own
+/// message (`OpenAvatarProfile`) rather than by id.
 #[must_use]
 pub fn floater_panel(floaters: &Query<(Entity, &Floater)>, id: &str) -> Option<Entity> {
     floaters
         .iter()
-        .find_map(|(entity, floater)| (floater.id == id).then_some(entity))
+        .find_map(|(entity, floater)| (floater.id == id && floater.key.is_none()).then_some(entity))
+}
+
+/// The floater `entity` lives in — itself, or the nearest ancestor carrying a
+/// [`Floater`].
+///
+/// The instance-aware answer to "which window did this click land in": a keyed
+/// window's own observers and systems reach *their* instance's state by walking
+/// up from the node they were given, rather than from a resource that could
+/// only ever hold one window's worth.
+#[must_use]
+pub fn host_floater(
+    entity: Entity,
+    parents: &Query<&ChildOf>,
+    floaters: &Query<(Entity, &Floater)>,
+) -> Option<Entity> {
+    core::iter::successors(Some(entity), |entity| {
+        parents.get(*entity).ok().map(ChildOf::parent)
+    })
+    .find(|entity| floaters.get(*entity).is_ok())
+}
+
+/// What [`KeyedFloaters::open`] did.
+#[derive(Debug, Clone, Copy)]
+pub enum KeyedFloaterOpen {
+    /// This subject's window was already open (or closed but alive): it was
+    /// shown and raised, and its content is already built. The instance root.
+    Existing(Entity),
+    /// A new instance was spawned for this subject — **build its content into
+    /// this handle**, and insert whatever per-instance state the window keeps
+    /// on [`FloaterHandle::root`].
+    Spawned(FloaterHandle),
+}
+
+impl KeyedFloaterOpen {
+    /// The instance's root entity, however it was reached.
+    #[must_use]
+    pub const fn root(&self) -> Entity {
+        match *self {
+            Self::Existing(root) => root,
+            Self::Spawned(handle) => handle.root,
+        }
+    }
+}
+
+/// **Open a floater per subject** — the keyed half of the manager, and the
+/// scaffold behind "a second resident's profile opens its own window".
+///
+/// The reference's `LLFloaterReg::showInstance(name, key)`: a window is looked
+/// up by its kind *and* its [`FloaterKey`], reused when that subject already
+/// has one open, and spawned when it does not. Injected as one system
+/// parameter because opening needs four things at once — the spawn, the UI
+/// root, the lookup over live instances, and the raise — and a consumer that
+/// held them separately would be re-deriving the same lookup in every window
+/// that opens per subject.
+///
+/// A keyed instance is **transient**: closing it despawns it (see
+/// `apply_floater_commands`), so its per-instance state goes with it and the
+/// next open of that subject starts fresh. That is what makes per-instance
+/// state a component on the window rather than a resource beside it.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct KeyedFloaters<'w, 's> {
+    /// The spawn / insert sink for a new instance.
+    commands: Commands<'w, 's>,
+    /// The UI root every free-floating window hangs off.
+    root: Res<'w, UiRoot>,
+    /// Every live floater: the instance lookup, the cascade, the open flag and
+    /// the raise.
+    floaters: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static Floater,
+            &'static mut UiPanelShown,
+            &'static mut GlobalZIndex,
+        ),
+    >,
+    /// The z-order high-water mark the raise takes its next value from.
+    z_top: ResMut<'w, FloaterZTop>,
+    /// The front-most window, so a just-opened one is the active one.
+    active: ResMut<'w, ActiveFloater>,
+}
+
+impl core::fmt::Debug for KeyedFloaters<'_, '_> {
+    /// Hand-written because a system parameter's fields are the world's own
+    /// access handles — `Commands` and a `MessageWriter` have no useful `Debug`
+    /// — so the derive could print nothing better than this line anyway.
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("KeyedFloaters")
+            .field("live", &self.floaters.iter().len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl KeyedFloaters<'_, '_> {
+    /// The live instance of `id` showing `key`, if there is one.
+    #[must_use]
+    pub fn instance(&self, id: &str, key: &FloaterKey) -> Option<Entity> {
+        self.floaters
+            .iter()
+            .find_map(|(entity, floater, _shown, _z)| {
+                floater.is_instance(id, key).then_some(entity)
+            })
+    }
+
+    /// Open `spec`'s window **for `key`**: reuse this subject's instance when
+    /// it exists, spawn one cascaded off the kind's other windows when it does
+    /// not. Either way the window ends up shown and front-most.
+    ///
+    /// The raise is done here rather than by writing a [`FloaterCommand`]: a
+    /// just-spawned window is not in the world yet this frame, so the manager's
+    /// command pass would find nothing to raise and the new window would open
+    /// *behind* the one already up — which is exactly the "did it even open?"
+    /// this scaffold exists to stop.
+    pub fn open(&mut self, spec: FloaterSpec, key: FloaterKey) -> KeyedFloaterOpen {
+        if let Some((entity, mut shown, mut z)) =
+            self.floaters
+                .iter_mut()
+                .find_map(|(entity, floater, shown, z)| {
+                    floater
+                        .is_instance(spec.id, &key)
+                        .then_some((entity, shown, z))
+                })
+        {
+            if !shown.0 {
+                shown.0 = true;
+            }
+            let raised = self.z_top.next();
+            if z.0 != raised {
+                z.0 = raised;
+            }
+            self.active.0 = Some(entity);
+            return KeyedFloaterOpen::Existing(entity);
+        }
+        // One past the newest live instance of this kind — the reference's
+        // "last floater in group", so a window opened after two others stacks
+        // below both even if the first has since been closed.
+        let stack_seq = self
+            .floaters
+            .iter()
+            .filter(|(_entity, floater, _shown, _z)| floater.id == spec.id && floater.key.is_some())
+            .map(|(_entity, floater, _shown, _z)| floater.stack_seq.saturating_add(1))
+            .max()
+            .unwrap_or(0);
+        let handle =
+            spawn_keyed_floater(&mut self.commands, self.root.0, spec, Some(key), stack_seq);
+        self.commands
+            .entity(handle.root)
+            .insert((UiPanelShown(true), GlobalZIndex(self.z_top.next())));
+        self.active.0 = Some(handle.root);
+        KeyedFloaterOpen::Spawned(handle)
+    }
 }
 
 /// Run-condition builder: `true` while the floater with the stable id `id`
 /// exists and is shown (`UiPanelShown(true)`), `false` before its first spawn
 /// and while it is closed — the shared gate for a floater's per-frame
 /// view-refresh systems, so a closed panel costs no dispatch at all.
+///
+/// The gate is per **kind**, not per instance: for a keyed window it passes
+/// while *any* instance is open, which is what its consumers want — a system
+/// that refreshes every open profile has to run while at least one is up, and
+/// then iterates the instances itself.
 ///
 /// A `run_if`-skipped system keeps its change-detection ticks, so model
 /// changes accumulating while the floater is hidden fold into one catch-up
@@ -725,8 +1064,35 @@ pub fn show_floater(
 /// `GlobalZIndex` for the z-order, `Pickable` so it takes clicks off the world
 /// behind it, and the drag / press / button observers. Starts closed
 /// (`UiPanelShown(false)`) — the opener (e.g. the inventory toggle) shows it.
+///
+/// This spawns the kind's **singleton**. A window that opens once per subject
+/// spawns its instances through [`KeyedFloaters::open`], which is the caller
+/// [`spawn_keyed_floater`] exists for.
 pub fn spawn_floater(commands: &mut Commands, root: Entity, spec: FloaterSpec) -> FloaterHandle {
+    spawn_keyed_floater(commands, root, spec, None, 0)
+}
+
+/// **Spawn one instance of a keyed floater** — [`spawn_floater`] with a
+/// [`FloaterKey`] and a place in its kind's cascade.
+///
+/// Prefer [`KeyedFloaters::open`], which finds an existing instance first,
+/// works out the cascade and raises the window; this is the raw spawn behind
+/// it, exposed for tests and for a consumer that has already done that lookup.
+pub fn spawn_keyed_floater(
+    commands: &mut Commands,
+    root: Entity,
+    spec: FloaterSpec,
+    key: Option<FloaterKey>,
+    stack_seq: u32,
+) -> FloaterHandle {
     let font = UiFont::Sans.at(CHROME_FONT_SIZE);
+    let position = cascade_position(spec.position, stack_seq);
+    // An instance carries its key in its `Name`, so the harness (and a person
+    // reading an entity dump) can tell two profiles apart.
+    let name = match key.as_ref() {
+        Some(key) => format!("floater:{}#{}", spec.id, key.as_str()),
+        None => format!("floater:{}", spec.id),
+    };
     let floater = commands
         .spawn((
             Node {
@@ -736,8 +1102,8 @@ pub fn spawn_floater(commands: &mut Commands, root: Entity, spec: FloaterSpec) -
                 ..column(Val::ZERO)
             },
             LogicalInset(LogicalRect {
-                inline_start: Val::Px(spec.position.x),
-                block_start: Val::Px(spec.position.y),
+                inline_start: Val::Px(position.x),
+                block_start: Val::Px(position.y),
                 ..LogicalRect::AUTO
             }),
             LogicalBorder(LogicalRect::all(Val::Px(1.0))),
@@ -753,7 +1119,9 @@ pub fn spawn_floater(commands: &mut Commands, root: Entity, spec: FloaterSpec) -
             UiPanelShown(false),
             Floater {
                 id: spec.id,
-                position: spec.position,
+                key,
+                stack_seq,
+                position,
                 content_size: spec.default_size,
                 minimized: false,
                 docked_in: None,
@@ -762,7 +1130,7 @@ pub fn spawn_floater(commands: &mut Commands, root: Entity, spec: FloaterSpec) -
                 min_size: spec.min_size.unwrap_or(RESIZE_FLOOR),
                 caps: spec.caps,
             },
-            Name::new(format!("floater:{}", spec.id)),
+            Name::new(name),
             ChildOf(root),
         ))
         .id();
@@ -1212,11 +1580,24 @@ fn apply_floater_commands(
                 if !floater.caps.closable {
                     continue;
                 }
-                if let Ok(mut shown) = panels.get_mut(command.floater) {
-                    shown.0 = false;
-                }
                 if active.0 == Some(command.floater) {
                     active.0 = None;
+                }
+                // A **keyed** instance is transient: it exists because a subject
+                // was opened, so closing it ends it, exactly as the reference
+                // destroys a non-single-instance floater on close. Everything it
+                // held — its per-instance state components, its content, its
+                // observers — goes with the entity, and re-opening that subject
+                // starts from the grid's replies again rather than from whatever
+                // a hidden shell had accumulated. A singleton merely hides: its
+                // content is built once and kept (floaters are build-once,
+                // update-in-place).
+                if floater.key.is_some() {
+                    commands.entity(command.floater).despawn();
+                    continue;
+                }
+                if let Ok(mut shown) = panels.get_mut(command.floater) {
+                    shown.0 = false;
                 }
                 // A consumer that tracks its own open state observes the
                 // `UiPanelShown` change above (the inventory window does), so no
@@ -1782,12 +2163,12 @@ pub fn register_floater_layout(app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::{
-        ActiveFloater, DefaultDockHost, DeferredFloaterContent, Floater, FloaterCaps,
-        FloaterCommand, FloaterHandle, FloaterOp, FloaterParts, FloaterSpec, FloaterZTop,
-        MIN_VISIBLE, RESIZE_FLOOR, apply_floater_commands, apply_floater_content,
-        apply_floater_glyphs, apply_floater_inset, build_deferred_floater_content,
-        clamp_floaters_on_screen, clamp_position, drag_position, floater_panel,
-        highlight_active_floater, resize_size, spawn_floater, toggle_floater,
+        ActiveFloater, CASCADE_STEP, DefaultDockHost, DeferredFloaterContent, Floater, FloaterCaps,
+        FloaterCommand, FloaterHandle, FloaterKey, FloaterOp, FloaterParts, FloaterSpec,
+        FloaterZTop, KeyedFloaterOpen, KeyedFloaters, MIN_VISIBLE, RESIZE_FLOOR,
+        apply_floater_commands, apply_floater_content, apply_floater_glyphs, apply_floater_inset,
+        build_deferred_floater_content, clamp_floaters_on_screen, clamp_position, drag_position,
+        floater_panel, highlight_active_floater, resize_size, spawn_floater, toggle_floater,
     };
     use bevy::picking::backend::HitData;
     use bevy::picking::pointer::PointerId;
@@ -1861,6 +2242,62 @@ mod tests {
         queue.apply(app.world_mut());
         app.update();
         floater
+    }
+
+    /// The keyed fixture kind's id — a window that opens once per subject.
+    const KEYED_ID: &str = "keyed-test";
+
+    /// Where the keyed fixture's first instance opens, in logical pixels.
+    const KEYED_POSITION: Vec2 = Vec2::new(60.0, 90.0);
+
+    /// The keyed fixture's spec — the same for every instance, which is the
+    /// point: what differs between two windows is their [`FloaterKey`], not
+    /// their spec.
+    fn keyed_spec() -> FloaterSpec {
+        FloaterSpec {
+            id: KEYED_ID,
+            title: "Keyed".to_owned(),
+            position: KEYED_POSITION,
+            default_size: None,
+            min_size: None,
+            dock_host: None,
+            caps: FloaterCaps {
+                resizable: true,
+                minimizable: false,
+                closable: true,
+                dockable: false,
+            },
+        }
+    }
+
+    /// Open the keyed fixture on `subject` through [`KeyedFloaters`] — the very
+    /// path a consumer's open system takes — and settle a frame.
+    ///
+    /// Returns the instance root and whether this open *spawned* it, so a test
+    /// can tell "opened a second window" from "raised the first".
+    fn open_keyed(app: &mut App, subject: &str) -> Result<(Entity, bool), TestError> {
+        let world = app.world_mut();
+        let mut state = bevy::ecs::system::SystemState::<KeyedFloaters>::new(world);
+        let opened = {
+            let mut floaters = state.get_mut(world)?;
+            let opened = floaters.open(keyed_spec(), FloaterKey::subject(&subject));
+            (
+                opened.root(),
+                matches!(opened, KeyedFloaterOpen::Spawned(_)),
+            )
+        };
+        state.apply(world);
+        app.update();
+        Ok(opened)
+    }
+
+    /// How many live floaters of the keyed fixture's kind there are.
+    fn keyed_count(app: &mut App) -> usize {
+        app.world_mut()
+            .query::<&Floater>()
+            .iter(app.world())
+            .filter(|floater| floater.id == KEYED_ID)
+            .count()
     }
 
     /// Write a command and run a frame so the systems act on it.
@@ -1983,6 +2420,8 @@ mod tests {
             .spawn((
                 Floater {
                     id: "clamped",
+                    key: None,
+                    stack_seq: 0,
                     position: Vec2::new(OFF_SCREEN_X, 20.0),
                     content_size: None,
                     minimized: false,
@@ -2251,6 +2690,181 @@ mod tests {
         }
         let mut content = app.world_mut().query_filtered::<(), With<TestContent>>();
         assert_eq!(content.iter(app.world()).count(), 1);
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Keyed instances: one window per subject.
+    // -----------------------------------------------------------------------
+
+    /// **The bug this scaffold exists for** (`viewer-profile-floater-single-\
+    /// instance`): two subjects are two windows, side by side, each showing its
+    /// own subject — not one window re-pointed at whoever was opened last.
+    #[test]
+    fn a_second_subject_opens_its_own_window() -> Result<(), TestError> {
+        let (mut app, _root, _host) = floater_app();
+        let (first, spawned_first) = open_keyed(&mut app, "resident-a")?;
+        let (second, spawned_second) = open_keyed(&mut app, "resident-b")?;
+
+        assert!(spawned_first && spawned_second, "both opens spawned");
+        assert!(
+            first != second,
+            "the second subject reused the first window"
+        );
+        assert_eq!(keyed_count(&mut app), 2, "two windows of the kind are live");
+        let world = app.world();
+        let (Some(one), Some(two)) = (world.get::<Floater>(first), world.get::<Floater>(second))
+        else {
+            return Err("a window lost its state".into());
+        };
+        assert_eq!(
+            one.key().map(FloaterKey::as_str),
+            Some("resident-a"),
+            "the first window shows the first subject"
+        );
+        assert_eq!(two.key().map(FloaterKey::as_str), Some("resident-b"));
+        // Cascaded, so the second window is reachable rather than exactly
+        // behind the first — the reference's `stackWith` offset.
+        assert_eq!(one.geometry().position, KEYED_POSITION);
+        assert_eq!(
+            two.geometry().position,
+            Vec2::new(
+                KEYED_POSITION.x + CASCADE_STEP,
+                KEYED_POSITION.y + CASCADE_STEP
+            ),
+            "the second window did not cascade off the first"
+        );
+        // Both open: a second profile must not close the first.
+        for window in [first, second] {
+            assert_eq!(
+                world.get::<UiPanelShown>(window).map(|shown| shown.0),
+                Some(true)
+            );
+        }
+        // And the new one is in front of — not behind — the window already up,
+        // which is what a raise routed through the manager's command pass would
+        // have missed on the frame the window was spawned.
+        let z_of = |entity: Entity| world.get::<GlobalZIndex>(entity).map(|index| index.0);
+        let (Some(front), Some(back)) = (z_of(second), z_of(first)) else {
+            return Err("a window lost its z-index".into());
+        };
+        assert!(
+            front > back,
+            "the newly opened window ({front}) is behind the first ({back})"
+        );
+        assert_eq!(
+            world.resource::<ActiveFloater>().0,
+            Some(second),
+            "the newly opened window is not the active one"
+        );
+        Ok(())
+    }
+
+    /// Re-opening a subject already on screen raises **its** window rather than
+    /// spawning a second copy of the same person.
+    #[test]
+    fn the_same_subject_reuses_its_window() -> Result<(), TestError> {
+        let (mut app, _root, _host) = floater_app();
+        let (first, _) = open_keyed(&mut app, "resident-a")?;
+        let (again, spawned) = open_keyed(&mut app, "resident-a")?;
+        assert_eq!(again, first, "the same subject opened a second window");
+        assert!(!spawned, "the reopen spawned instead of reusing");
+        assert_eq!(keyed_count(&mut app), 1);
+        assert_eq!(
+            app.world().resource::<ActiveFloater>().0,
+            Some(first),
+            "a reopen must bring that subject's window to the front"
+        );
+        Ok(())
+    }
+
+    /// Closing a keyed window **ends** it — the entity and everything on it,
+    /// including the per-instance state a consumer hangs there — while the
+    /// other subject's window is untouched. A singleton, for contrast, only
+    /// hides.
+    #[test]
+    fn closing_a_keyed_window_ends_it() -> Result<(), TestError> {
+        let (mut app, root, _host) = floater_app();
+        let singleton = spawn_one(&mut app, root);
+        let (first, _) = open_keyed(&mut app, "resident-a")?;
+        let (second, _) = open_keyed(&mut app, "resident-b")?;
+
+        command(&mut app, first, FloaterOp::Close);
+        assert!(
+            app.world().get_entity(first).is_err(),
+            "a closed keyed window must be gone, not hidden"
+        );
+        assert_eq!(
+            keyed_count(&mut app),
+            1,
+            "the other subject's window went too"
+        );
+        assert_eq!(
+            app.world().get::<UiPanelShown>(second).map(|shown| shown.0),
+            Some(true),
+            "closing one window closed the other"
+        );
+
+        command(&mut app, singleton, FloaterOp::Close);
+        assert!(
+            app.world().get_entity(singleton).is_ok(),
+            "a singleton must survive its close — its content is built once and kept"
+        );
+        assert_eq!(
+            app.world()
+                .get::<UiPanelShown>(singleton)
+                .map(|shown| shown.0),
+            Some(false)
+        );
+        Ok(())
+    }
+
+    /// A keyed kind has no singleton for the by-id openers to find, however
+    /// many of its instances are open — so a menu entry or `SL_VIEWER_OPEN_\
+    /// FLOATER` cannot half-open one without a subject.
+    #[test]
+    fn a_keyed_kind_has_no_singleton_to_find() -> Result<(), TestError> {
+        let (mut app, _root, _host) = floater_app();
+        let _open = open_keyed(&mut app, "resident-a")?;
+        let world = app.world_mut();
+        let mut state = bevy::ecs::system::SystemState::<Query<(Entity, &Floater)>>::new(world);
+        let floaters = state.get(world)?;
+        assert_eq!(floater_panel(&floaters, KEYED_ID), None);
+        Ok(())
+    }
+
+    /// What each kind of window stores its geometry under: a singleton its bare
+    /// id, a named instance its own key, and a subject-keyed instance nothing
+    /// at all — the reference's `getControlName`, and the reason a session of
+    /// browsing residents does not grow the settings file.
+    #[test]
+    fn only_a_named_instance_gets_its_own_settings_key() -> Result<(), TestError> {
+        let (mut app, root, _host) = floater_app();
+        let singleton = spawn_one(&mut app, root);
+        let (subject, _) = open_keyed(&mut app, "resident-a")?;
+        let named = {
+            let mut queue = bevy::ecs::world::CommandQueue::default();
+            let entity = {
+                let mut commands = Commands::new(&mut queue, app.world());
+                super::spawn_keyed_floater(
+                    &mut commands,
+                    root,
+                    keyed_spec(),
+                    Some(FloaterKey::named("diffuse")),
+                    0,
+                )
+                .root
+            };
+            queue.apply(app.world_mut());
+            app.update();
+            entity
+        };
+        let world = app.world();
+        let persist_id =
+            |entity: Entity| world.get::<Floater>(entity).and_then(Floater::persist_id);
+        assert_eq!(persist_id(singleton), Some("test".to_owned()));
+        assert_eq!(persist_id(named), Some(format!("{KEYED_ID}_diffuse")));
+        assert_eq!(persist_id(subject), None);
         Ok(())
     }
 

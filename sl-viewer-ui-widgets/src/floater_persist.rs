@@ -52,6 +52,18 @@
 //!   at most that window of adjustments rather than the whole session (the clean
 //!   logout save in `session` flushes the rest).
 //!
+//! # What a keyed instance stores
+//!
+//! A floater that opens **per subject** ([`FloaterKey`](crate::floater::FloaterKey))
+//! stores under `{id}_{name}` for a named instance and under **nothing at all**
+//! for a subject-keyed one — `Floater::persist_id` is the single place that
+//! decides, and every stage here asks it rather than reading `Floater::id`.
+//! That mirrors the reference's `getControlName(name, key)`, which appends the
+//! key only when it is a string: a rect control per agent id would add one
+//! settings entry per resident whose profile was ever opened and never remove
+//! it. A subject-keyed window is placed by the manager's cascade instead, and
+//! its "open" is its subject's, not the file's.
+//!
 //! # Tab-widget splits ride the same lifecycle
 //!
 //! A resizable vertical tab widget ([`crate::ui_tab`]) inside a floater carries a
@@ -135,10 +147,13 @@ struct FloaterSeeded;
 
 /// Opts a floater **out of persistence entirely** — no settings registered, no
 /// geometry / open-state seed, no write-back, and no tab-split persistence for
-/// strips it hosts. For windows whose state is meaningless across sessions:
-/// the avatar profile carries no persisted target avatar, so restoring its
-/// rectangle — let alone "open" — would only ever restore an empty shell.
-/// Insert it on the floater root right after `spawn_floater`.
+/// strips it hosts. For a **singleton** whose state is meaningless across
+/// sessions: a window bound to something the session does not outlive, where
+/// restoring a rectangle — let alone "open" — would only ever restore an empty
+/// shell. Insert it on the floater root right after `spawn_floater`.
+///
+/// A subject-keyed instance needs no marker: it persists nothing by
+/// construction (`Floater::persist_id`).
 #[derive(Component, Debug, Clone, Copy, Default)]
 pub struct FloaterPersistExempt;
 
@@ -251,7 +266,10 @@ fn register_floater_settings(
         return;
     };
     for (floater, shown) in &floaters {
-        let id = floater.id;
+        let Some(id) = floater.persist_id() else {
+            continue;
+        };
+        let id = id.as_str();
         let geometry = floater.geometry();
         settings.register_hidden_in(
             FLOATER_SECTION,
@@ -302,7 +320,15 @@ fn seed_floaters_from_settings(
     }
     let store = settings.store();
     for (entity, mut floater, mut shown) in &mut floaters {
-        let id = floater.id;
+        // A subject-keyed instance stores nothing (see `Floater::persist_id`),
+        // so there is nothing to apply — it keeps the cascade position the
+        // manager opened it at. Marking it seeded anyway keeps this pass from
+        // re-visiting every open profile every frame.
+        let Some(id) = floater.persist_id() else {
+            commands.entity(entity).insert(FloaterSeeded);
+            continue;
+        };
+        let id = id.as_str();
         let mut geometry = floater.geometry();
         if store.is_overridden(&rect_key(id))
             && let Ok(rect) = store.get_rect(&rect_key(id))
@@ -357,7 +383,10 @@ fn persist_floater_changes(
     };
     let mut any = false;
     for (floater, shown) in &floaters {
-        let id = floater.id;
+        let Some(id) = floater.persist_id() else {
+            continue;
+        };
+        let id = id.as_str();
         let geometry = floater.geometry();
         settings.set_account(&rect_key(id), SettingValue::Rect(encode_rect(geometry)));
         settings.set_account(&visible_key(id), SettingValue::Bool(shown.0));
@@ -407,9 +436,9 @@ fn tab_split_key(floater_id: &str, element: &str) -> String {
     format!("{floater_id}_{element}_split")
 }
 
-/// The id of the floater that hosts `strip`, or `None` if it lives outside any
-/// floater (a gallery strip) or inside a [`FloaterPersistExempt`] one — those
-/// are not persisted.
+/// The settings id of the floater that hosts `strip`, or `None` if it lives
+/// outside any floater (a gallery strip), inside a [`FloaterPersistExempt`] one,
+/// or inside a subject-keyed instance — none of those are persisted.
 ///
 /// Walks `strip` and its ancestors so a tab widget nested any depth inside a
 /// floater's content is found.
@@ -417,12 +446,12 @@ fn host_floater_id(
     strip: Entity,
     parents: &Query<&ChildOf>,
     floaters: &Query<(&Floater, Has<FloaterPersistExempt>)>,
-) -> Option<&'static str> {
+) -> Option<String> {
     core::iter::successors(Some(strip), |entity| {
         parents.get(*entity).ok().map(ChildOf::parent)
     })
     .find_map(|entity| floaters.get(entity).ok())
-    .and_then(|(floater, exempt)| (!exempt).then_some(floater.id))
+    .and_then(|(floater, exempt)| (!exempt).then(|| floater.persist_id()).flatten())
 }
 
 /// Marks a tab strip whose split setting has been registered, so
@@ -456,7 +485,7 @@ fn register_tab_split_settings(
         };
         settings.register_hidden_in(
             FLOATER_SECTION,
-            &tab_split_key(floater_id, strip.element),
+            &tab_split_key(&floater_id, strip.element),
             SettingValue::F32(width.0),
             "Tab widget's strip / content split width (logical px)",
         );
@@ -482,7 +511,7 @@ fn seed_tab_splits_from_settings(
     let store = settings.store();
     for (entity, strip, mut width) in &mut strips {
         if let Some(floater_id) = host_floater_id(entity, &parents, &floaters) {
-            let key = tab_split_key(floater_id, strip.element);
+            let key = tab_split_key(&floater_id, strip.element);
             if store.is_overridden(&key)
                 && let Ok(stored) = store.get_f32(&key)
             {
@@ -524,7 +553,7 @@ fn persist_tab_split_changes(
             continue;
         };
         settings.set_account(
-            &tab_split_key(floater_id, strip.element),
+            &tab_split_key(&floater_id, strip.element),
             SettingValue::F32(width.0),
         );
         any = true;
