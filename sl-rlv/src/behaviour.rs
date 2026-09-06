@@ -234,6 +234,15 @@ impl RlvBehaviourFlags {
     pub const EXPERIMENTAL: Self = Self(0x08);
     /// `BHVR_DEPRECATED`: still accepted, but scripts should stop using it.
     pub const DEPRECATED: Self = Self(0x20);
+    /// `FORCEWEAR_SUBTREE`: this spelling addresses a folder *and everything
+    /// under it*, where the plain spelling addresses the folder alone
+    /// (`FORCEWEAR_NODE`).
+    ///
+    /// It is the only difference between the `all` spellings and their plain
+    /// siblings — `@attachallthis=n` beside `@attachthis=n`, `@attachall=force`
+    /// beside `@attach=force` — which is why it has to be a property of the
+    /// *keyword* rather than of the behaviour they share.
+    pub const SUBTREE: Self = Self(0x40);
 
     /// Every flag, paired with its name, for [`core::fmt::Debug`] and tests.
     const NAMED: &'static [(Self, &'static str)] = &[
@@ -242,6 +251,7 @@ impl RlvBehaviourFlags {
         (Self::EXTENDED, "EXTENDED"),
         (Self::EXPERIMENTAL, "EXPERIMENTAL"),
         (Self::DEPRECATED, "DEPRECATED"),
+        (Self::SUBTREE, "SUBTREE"),
     ];
 
     /// Both flag sets together.
@@ -284,6 +294,13 @@ impl RlvBehaviourFlags {
     #[must_use]
     pub const fn is_deprecated(self) -> bool {
         self.contains(Self::DEPRECATED)
+    }
+
+    /// Whether this spelling addresses a folder's whole subtree rather than the
+    /// folder alone.
+    #[must_use]
+    pub const fn is_subtree(self) -> bool {
+        self.contains(Self::SUBTREE)
     }
 }
 
@@ -437,18 +454,18 @@ rlv_dictionary! {
     "allowidle" AddRem => Allowidle [EXPERIMENTAL];
     "alwaysrun" AddRem => Alwaysrun [];
     "attachthis" AddRem => Attachthis [];
-    "attachallthis" AddRem => Attachthis [];
+    "attachallthis" AddRem => Attachthis [SUBTREE];
     "attachthis_except" AddRem => AttachthisExcept [];
-    "attachallthis_except" AddRem => AttachthisExcept [];
+    "attachallthis_except" AddRem => AttachthisExcept [SUBTREE];
     "buy" AddRem => Buy [];
     "chatwhisper" AddRem => Chatwhisper [];
     "chatnormal" AddRem => Chatnormal [];
     "chatshout" AddRem => Chatshout [];
     "detach" AddRem => Detach [];
     "detachthis" AddRem => Detachthis [];
-    "detachallthis" AddRem => Detachthis [];
+    "detachallthis" AddRem => Detachthis [SUBTREE];
     "detachthis_except" AddRem => DetachthisExcept [];
-    "detachallthis_except" AddRem => DetachthisExcept [];
+    "detachallthis_except" AddRem => DetachthisExcept [SUBTREE];
     "edit" AddRem => Edit [];
     "editattach" AddRem => Editattach [];
     "editobj" AddRem => Editobj [];
@@ -557,33 +574,33 @@ rlv_dictionary! {
 
     // Force-wear.
     "attach" Force => ForceWear [];
-    "attachall" Force => ForceWear [];
+    "attachall" Force => ForceWear [SUBTREE];
     "attachover" Force => ForceWear [];
-    "attachallover" Force => ForceWear [];
+    "attachallover" Force => ForceWear [SUBTREE];
     "attachthis" Force => ForceWear [];
-    "attachallthis" Force => ForceWear [];
+    "attachallthis" Force => ForceWear [SUBTREE];
     "attachthisover" Force => ForceWear [];
-    "attachallthisover" Force => ForceWear [];
+    "attachallthisover" Force => ForceWear [SUBTREE];
     "detach" Force => Detach [];
-    "detachall" Force => ForceWear [];
+    "detachall" Force => ForceWear [SUBTREE];
     "detachthis" Force => ForceWear [];
-    "detachallthis" Force => ForceWear [];
+    "detachallthis" Force => ForceWear [SUBTREE];
     "remattach" Force => Remattach [];
     "remoutfit" Force => Remoutfit [];
     // Force-wear synonyms (`addoutfit*` -> `attach*`).
     "addoutfit" Force => ForceWear [SYNONYM];
-    "addoutfitall" Force => ForceWear [SYNONYM];
+    "addoutfitall" Force => ForceWear [SYNONYM SUBTREE];
     "addoutfitover" Force => ForceWear [SYNONYM];
-    "addoutfitallover" Force => ForceWear [SYNONYM];
+    "addoutfitallover" Force => ForceWear [SYNONYM SUBTREE];
     "addoutfitthis" Force => ForceWear [SYNONYM];
-    "addoutfitallthis" Force => ForceWear [SYNONYM];
+    "addoutfitallthis" Force => ForceWear [SYNONYM SUBTREE];
     "addoutfitthisover" Force => ForceWear [SYNONYM];
-    "addoutfitallthisover" Force => ForceWear [SYNONYM];
+    "addoutfitallthisover" Force => ForceWear [SYNONYM SUBTREE];
     // Force-wear synonyms (`attach*overorreplace` -> `attach*`).
     "attachoverorreplace" Force => ForceWear [SYNONYM];
-    "attachalloverorreplace" Force => ForceWear [SYNONYM];
+    "attachalloverorreplace" Force => ForceWear [SYNONYM SUBTREE];
     "attachthisoverorreplace" Force => ForceWear [SYNONYM];
-    "attachallthisoverorreplace" Force => ForceWear [SYNONYM];
+    "attachallthisoverorreplace" Force => ForceWear [SYNONYM SUBTREE];
 
     // Force-only.
     "adjustheight" Force => Adjustheight [];

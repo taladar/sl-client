@@ -14,13 +14,15 @@ is an RLV command line when it starts with `@`; the viewer swallows it so it
 never reaches the chat log. The payload is a **comma-separated list** of
 commands, each `behaviour[:option]=param`, lower-cased.
 
-The crate is three layers. The **language decoder** turns a chat line into a
+The crate is four layers. The **language decoder** turns a chat line into a
 typed command stream; the **restriction state machine** (`RlvState`) holds what
-those commands mean; and the **query layer** (`RlvState::answer`) builds the
-line a `@get*` question is answered with. What it deliberately does not do is
-*obey* anything: it never detaches an attachment and never hides a name tag. A
-`=force` action comes back from `RlvState::apply` as
-`RlvOutcome::NotAStateChange` for the consumer to dispatch.
+those commands mean; the **query layer** (`RlvState::answer`) builds the line a
+`@get*` question is answered with; and the **lock model** (`RlvLocks`) answers
+the one question a yes/no restriction cannot — not "is detaching blocked" but
+"may *this* come off". What it deliberately does not do is *obey* anything: it
+never detaches an attachment and never hides a name tag. A `=force` action comes
+back from `RlvState::apply` as `RlvOutcome::NotAStateChange` for the consumer to
+dispatch.
 
 ## Decoding
 
@@ -160,6 +162,53 @@ bytes rather than split — `split_chat` exists for `@redirchat`, not for querie
 `RlvImQuery` covers the other, much smaller surface: `@stopim`, `@version`,
 `@list` and `@except` sent by **instant message** from a person rather than by
 chat from an object.
+
+## Locks
+
+`@fly=n` is a yes/no the whole viewer asks about. The wear restrictions are not:
+`@detach=n` locks *this object* on, `@remattach:chest=n` locks *one attachment
+point*, `@addoutfit:gloves=n` locks *one clothing layer*, and `@detachallthis=n`
+locks *a folder and everything under it*. Every wear and detach path therefore
+has to ask about the thing in front of it, and `RlvLocks::of(&state)` is what it
+asks.
+
+The four registries are **derived**, not maintained. Everything in them is
+already in the held-command list, so there is no second copy of the truth to
+drift: an object detaching drops its locks because `RlvState::clear_object`
+dropped its commands, with nothing else to remember. What cannot be derived
+comes from an `RlvLockSource` the consumer implements — which attachments hang
+off a point, which folder an item came from — plus one fact cached on the state
+machine by `RlvState::set_object_attachment`: where the *issuing* object is
+worn, because a bare `@detach=n` means "this object" and `@detach=y` routinely
+arrives after the object is already gone.
+
+`can_attach`, `can_detach`, `can_wear` and `can_remove` are the predicates every
+wear path must consult, and are the honest implementation of the four `can_*`
+methods on `RlvQuerySource`. Folder locks resolve by walking up the inventory
+tree: a `PERM_DENY` lock locks a folder outright, a `PERM_ALLOW` lock from some
+object makes every later lock *from that same object* stop counting (which is
+how `@detachthis_except` works, and why a second collar's lock is not exempted
+by the first one's exception), a node-scoped lock counts only on the folder
+asked about, and `@unsharedunwear` locks the whole inventory and then punches
+`#RLV` back out of it. Folded folders (`.(chest)`, `.(nostrip)`) are their
+parent for locking, and the `nostrip` naming convention exempts an item from
+being taken off by a command at all — no object issued it and nothing lifts it.
+
+## The re-attach watchdog
+
+A lock is only a rule; the simulator does not know about it, so a user can
+detach a locked attachment anyway. `RlvAttachmentWatchdog` is what makes the
+lock real: it notices and puts it back. Three things get undone — a locked
+attachment that came off (after waiting for the simulator to save its asset back
+into inventory, and forcing it after 15 seconds if that never arrives), a wear
+that landed on an add-locked point (restored to exactly what was there when the
+wear was *asked for*, which is why `on_wear_requested` exists), and a replace
+onto a point holding something locked (refused outright, or — with
+`RLVaWearReplaceUnlocked` — allowed to displace only what was free to go).
+
+It decides and does not act: `RlvWatchdogAction` says what to send. Time comes
+in as a plain seconds count on every call, so the whole machine is testable
+without a clock.
 
 One deliberate divergence lives here. `RlvAttachmentPoint::group` answers what
 the point anatomically is; Firestorm derives it from a hard-coded index table

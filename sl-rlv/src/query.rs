@@ -847,11 +847,15 @@ pub struct RlvFolderWear {
 /// headless session, a test fixture. Every method answers about *this agent*
 /// right now; nothing here mutates, and a query is expected to be cheap.
 ///
-/// The `can_*` questions are really about the RLV **lock** registries
-/// (`rlvlocks.cpp`): a viewer that has none answers them as "nothing is locked",
-/// which is honest, and one that has them consults them. They are asked
-/// separately from "is it worn" because `@getaddattachnames` wants the points
-/// that are free and `@getremattachnames` the ones that would let go.
+/// The four `can_*` questions are the lock model's, and a consumer that has
+/// built an [`RlvLocks`](crate::RlvLocks) should answer them by asking it —
+/// [`RlvLocks::can_attach`](crate::RlvLocks::can_attach),
+/// [`can_detach`](crate::RlvLocks::can_detach),
+/// [`can_wear`](crate::RlvLocks::can_wear) and
+/// [`can_remove`](crate::RlvLocks::can_remove) — rather than by guessing. They
+/// are asked separately from "is it worn" because `@getaddattachnames` wants
+/// the points that are free and `@getremattachnames` the ones that would let
+/// go.
 pub trait RlvQuerySource {
     /// The agent's own id — an object issuing a query *as* the agent (the RLV
     /// debug console does) is allowed to reply on channel `0`.

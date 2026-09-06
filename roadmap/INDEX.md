@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 313 |
+| ready | 312 |
 | blocked | 45 |
 | in-progress | 18 |
 | bugs | 59 |
-| done | 1001 |
+| done | 1002 |
 | deferred | 25 |
 | wont-do | 14 |
 | **total** | **1573** |
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (313)
+## ready (312)
 
 ### protocol
 
@@ -823,8 +823,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rlv-environment-commands`](ready/viewer-rlv-environment-commands.md)
   — RLV — @setenv_*/@getenv_* environment control (blocked by
   `viewer-rlv-restriction-state` (done))
-- [`viewer-rlv-locks`](ready/viewer-rlv-locks.md) — RLV — attachment, wearable
-  and folder locks (blocked by `viewer-rlv-restriction-state` (done))
 - [`viewer-rlv-vision-render`](ready/viewer-rlv-vision-render.md) — RLV
   vision-restriction rendering (blocked by `viewer-rlv-restriction-state`
   (done))
@@ -1304,7 +1302,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1001)
+## done (1002)
 
 ### protocol
 
@@ -2571,6 +2569,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   regressions
 - [`viewer-rlv-command-parser`](done/viewer-rlv-command-parser.md) — RLV — parse
   the @-command chat protocol
+- [`viewer-rlv-locks`](done/viewer-rlv-locks.md) — RLV — attachment, wearable
+  and folder locks (blocked by `viewer-rlv-restriction-state` (done))
 - [`viewer-rlv-notify`](done/viewer-rlv-notify.md) — RLV — @notify broadcast on
   restriction changes (blocked by `viewer-rlv-restriction-state` (done))
 - [`viewer-rlv-queries`](done/viewer-rlv-queries.md) — RLV — answer @get*

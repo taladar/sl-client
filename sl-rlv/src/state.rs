@@ -33,6 +33,7 @@ use uuid::Uuid;
 
 use crate::behaviour::{RlvBehaviour, RlvEntry, RlvLocalModifier};
 use crate::command::{RlvCommand, RlvParam, RlvParamKind};
+use crate::locks::{RlvLocks, RlvObjectAttachment};
 use crate::modifier::{DEFAULT_FIELD_OF_VIEW, RlvModifier, RlvModifierState, RlvModifierValue};
 use crate::notify::{RlvNotification, RlvNotifyRegistry};
 use crate::query::{CHAT_CHANNEL_DEBUG, RlvAnswer, RlvQuery, RlvQuerySource};
@@ -281,6 +282,9 @@ pub struct RlvState {
     notify: RlvNotifyRegistry,
     /// The notifications produced but not yet taken by the consumer.
     pending: Vec<RlvNotification>,
+    /// Where each restricting object sits on the avatar, when the consumer has
+    /// told us — the reference's cached `RlvObject` lookup.
+    attachments: BTreeMap<Uuid, RlvObjectAttachment>,
 }
 
 impl Default for RlvState {
@@ -294,6 +298,7 @@ impl Default for RlvState {
             experimental: true,
             notify: RlvNotifyRegistry::default(),
             pending: Vec::new(),
+            attachments: BTreeMap::new(),
         }
     }
 }
@@ -523,6 +528,40 @@ impl RlvState {
         self.objects.remove(&object);
         self.modifiers.clear_object(object);
         self.exceptions.retain(|entry| entry.object != object);
+        self.attachments.remove(&object);
+    }
+
+    // ------------------------------------------------------------ where it is
+
+    /// Record where a restricting object sits on the avatar, or that it is not
+    /// worn at all.
+    ///
+    /// The reference looks this up once, when it first hears from the object,
+    /// and caches it on the object (`RlvObject::RlvObject`,
+    /// `rlvhelper.cpp:1135`) — then fixes it up when the object finally rezzes
+    /// (`RlvHandler::onAttach`, `rlvhandler.cpp:975`). It has to be cached
+    /// rather than looked up, because `@detach=y` may well arrive *after* the
+    /// object has gone and there would be nothing left to ask.
+    ///
+    /// A bare `@detach=n` is the one restriction that means "this object", so
+    /// without this the locks layer cannot tell which attachment it locks on:
+    /// see [`RlvLocks`](crate::RlvLocks).
+    pub fn set_object_attachment(&mut self, object: Uuid, attachment: Option<RlvObjectAttachment>) {
+        match attachment {
+            Some(attachment) => {
+                self.attachments.insert(object, attachment);
+            }
+            None => {
+                self.attachments.remove(&object);
+            }
+        }
+    }
+
+    /// Where `object` sits on the avatar, if it is worn and the consumer has
+    /// said so.
+    #[must_use]
+    pub fn object_attachment(&self, object: Uuid) -> Option<RlvObjectAttachment> {
+        self.attachments.get(&object).copied()
     }
 
     // ---------------------------------------------------------------- notify
@@ -1178,6 +1217,16 @@ impl RlvState {
             .get(&object)
             .and_then(|entry| entry.modifiers.get(&modifier))
             .copied()
+    }
+
+    /// The locks these restrictions imply — [`RlvLocks::of`], spelled the
+    /// other way round.
+    ///
+    /// It is a snapshot: build one after the state changes rather than holding
+    /// one across a command.
+    #[must_use]
+    pub fn locks(&self) -> RlvLocks {
+        RlvLocks::of(self)
     }
 
     // ----------------------------------------------------------------- queries

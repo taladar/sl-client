@@ -9,7 +9,7 @@
 //! never reaches the chat log. The payload is a **comma-separated list** of
 //! commands, each `behaviour[:option]=param`, lower-cased.
 //!
-//! The crate is three layers:
+//! The crate is four layers:
 //!
 //! - the **language decoder** turns a chat line into a typed [`RlvCommand`]
 //!   stream — behaviour, optional option, and the classified [`RlvParam`] (add
@@ -19,7 +19,9 @@
 //!   which exceptions poke holes in them. Every enforcement family asks it
 //!   rather than re-deriving the answer at its own choke point;
 //! - the **query layer** ([`RlvState::answer`]) builds the line a `@get*`
-//!   question is answered with.
+//!   question is answered with;
+//! - the **lock model** ([`RlvLocks`]) answers the one question a yes/no
+//!   restriction cannot: not "is detaching blocked" but "may *this* come off".
 //!
 //! The state machine also reports itself: `@notify` subscribers are told about
 //! every change it sees, and the lines they are owed wait in
@@ -32,6 +34,14 @@
 //! [`RlvQuerySource`] the consumer implements for the parts it cannot (what is
 //! worn, what is shared, where the camera is). Every byte a script sees is
 //! built here; only the facts come from outside.
+//!
+//! The lock model is what makes the wear restrictions mean anything.
+//! `@detach=n` locks one object on, `@remattach:chest=n` one attachment point,
+//! `@addoutfit:gloves=n` one clothing layer and `@detachallthis=n` a folder and
+//! everything under it — so every wear and detach path has to ask about the
+//! thing in front of it. [`RlvLocks`] derives all four registries from the
+//! held commands, with no second copy of the truth to drift, and
+//! [`RlvAttachmentWatchdog`] puts back what came off anyway.
 //!
 //! What the state machine deliberately does *not* do is obey anything. It never
 //! detaches an attachment and never hides a name tag; those are the consumer's,
@@ -92,17 +102,25 @@
 
 mod behaviour;
 mod command;
+mod locks;
 mod modifier;
 mod notify;
 mod query;
 mod restriction;
 mod state;
 mod version;
+mod watchdog;
 
 pub use behaviour::{
     RlvBehaviour, RlvBehaviourFlags, RlvEntry, RlvLocalModifier, RlvResolvedBehaviour, RlvValueType,
 };
 pub use command::{RLV_PREFIX, RlvCommand, RlvParam, RlvParamKind, RlvParseError};
+pub use locks::{
+    NOSTRIP_FLAG, RlvAttachmentLock, RlvAttachmentPointLock, RlvFolderLock,
+    RlvFolderLockPermission, RlvFolderLockScope, RlvFolderLockSource, RlvLockKind, RlvLockSource,
+    RlvLocks, RlvObjectAttachment, RlvWearMask, RlvWearableTypeLock, RlvWornAttachment,
+    is_folded_folder_name, is_strippable,
+};
 pub use modifier::{
     DEFAULT_FIELD_OF_VIEW, FARTOUCH_DEFAULT, IMG_DEFAULT, RlvComparator, RlvModifier,
     RlvModifierState, RlvModifierValue, SITTP_DEFAULT, TPLOCAL_DEFAULT,
@@ -123,6 +141,10 @@ pub use state::{
 pub use version::{
     RLV_VERSION, RLV_VERSION_COMPAT, RLVA_IMPL_ID, RLVA_VERSION, version_impl_num_reply,
     version_num_reply, version_reply,
+};
+pub use watchdog::{
+    ASSET_SAVE_TIMEOUT_SECONDS, REATTACH_RETRY_SECONDS, RlvAttachmentWatchdog, RlvWatchdogAction,
+    RlvWatchdogOutcome, RlvWearAction, TICK_INTERVAL_SECONDS, WEAR_TIMEOUT_SECONDS,
 };
 
 /// Whether `line` is an RLV command line — i.e. begins with the `@`
