@@ -27,6 +27,7 @@ pub mod terrain;
 pub mod time;
 pub mod udp_assets;
 mod uploads;
+pub mod voice;
 pub mod world;
 mod world_map;
 
@@ -57,6 +58,7 @@ pub use teleport::TELEPORT_ARRIVAL_TIMEOUT;
 pub use terrain::{Heightfield, TerrainFixture};
 pub use time::{Now, system_clock, tokio_clock};
 pub use udp_assets::{UdpAssetFixtures, flat_terrain_raw};
+pub use voice::VoiceBackend;
 pub use world::{
     AvatarIdentity, ParcelAccessLists, ParcelListing, RegionChange, RegionUpdate, RegionWorld,
     SceneFixtures, TaskInventory, avatar_prim, box_prim, default_object_properties,

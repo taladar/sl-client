@@ -10,7 +10,9 @@ mod test {
         ChatChannel, ChatType, Client, Command, Event, LoginParams, LoginRequest, StartLocation,
         VoiceProvisionRequest,
     };
-    use sl_fake_grid::{AccountConfig, FakeAgent, FakeGrid, FakeGridBuilder, RegionConfig};
+    use sl_fake_grid::{
+        AccountConfig, FakeAgent, FakeGrid, FakeGridBuilder, ImitatedGrid, RegionConfig,
+    };
     use sl_proto::{ServerEvent, VoiceChannelUri};
     use sl_types::lsl::Vector;
     use sl_types::map::RegionCoordinates;
@@ -33,19 +35,22 @@ mod test {
     async fn connect_to(
         regions: Vec<RegionConfig>,
     ) -> Result<(FakeGrid, Client, FakeAgent), TestError> {
-        connect_configured(regions, None).await
+        connect_configured(regions, None, ImitatedGrid::default()).await
     }
 
     /// [`connect_to`], optionally shortening how long the grid waits for a
     /// client to complete its movement into a handover destination — what a
     /// test of the **failure** path needs, since the real budget is tens of
-    /// seconds.
+    /// seconds — and naming the live grid this one imitates, for the tests
+    /// that are about the divergence itself.
     async fn connect_configured(
         regions: Vec<RegionConfig>,
         handover_timeout: Option<Duration>,
+        imitates: ImitatedGrid,
     ) -> Result<(FakeGrid, Client, FakeAgent), TestError> {
         let mut builder = FakeGridBuilder::new()
             .account(AccountConfig::new("Test", "User", "password"))
+            .imitates(imitates)
             .event_queue_hold(Duration::from_secs(2));
         if let Some(timeout) = handover_timeout {
             builder = builder.handover_timeout(timeout);
@@ -103,16 +108,15 @@ mod test {
                 {
                     greeted = true;
                 }
-                // The stock SimulatorFeatures carry the grid's OpenSimExtras
-                // URLs (tile server, currency helper) — fetched over real CAPS.
+                // The stock grid imitates Second Life, whose SimulatorFeatures
+                // has no `OpenSimExtras` key at all — and does name its voice
+                // backend. Fetched over real CAPS. The tile server the extras
+                // would have carried arrived in the login response instead
+                // (asserted above); the OpenSim-flavoured shape is
+                // `an_opensim_flavoured_grid_introduces_itself_as_opensim`.
                 Event::SimulatorFeatures(features) => {
-                    let extras = features
-                        .open_sim_extras
-                        .as_ref()
-                        .ok_or("SimulatorFeatures without OpenSimExtras")?;
-                    assert_eq!(extras.map_server_url.as_ref(), Some(&grid.login_uri()));
-                    assert_eq!(extras.currency_base_uri.as_ref(), Some(&grid.login_uri()));
-                    assert_eq!(extras.currency.as_deref(), Some("L$"));
+                    assert_eq!(features.open_sim_extras, None);
+                    assert_eq!(features.voice_server_type.as_deref(), Some("webrtc"));
                     features_seen = true;
                 }
                 _other => {}
@@ -201,16 +205,17 @@ mod test {
 
     /// [`start`] against a grid serving `regions`.
     async fn start_in(regions: Vec<RegionConfig>) -> Result<Running, TestError> {
-        start_configured(regions, None).await
+        start_configured(regions, None, ImitatedGrid::default()).await
     }
 
-    /// [`start_in`] with the handover arrival budget of
+    /// [`start_in`] with the handover arrival budget and imitated grid of
     /// [`connect_configured`].
     async fn start_configured(
         regions: Vec<RegionConfig>,
         handover_timeout: Option<Duration>,
+        imitates: ImitatedGrid,
     ) -> Result<Running, TestError> {
-        let (grid, client, agent) = connect_configured(regions, handover_timeout).await?;
+        let (grid, client, agent) = connect_configured(regions, handover_timeout, imitates).await?;
         let circuit = client.root_circuit_id().ok_or("no root circuit")?;
         let (event_tx, event_rx) = mpsc::channel::<Event>(256);
         let (command_tx, command_rx) = mpsc::channel::<Command>(8);
@@ -879,6 +884,87 @@ mod test {
             .with_sim(|sim| sim.voice().connection(&viewer_session).is_none())
             .await;
         assert!(closed);
+        Ok(())
+    }
+
+    /// The other flavour introduces itself the other way, through the real
+    /// client: `SimulatorFeatures` carries the `OpenSimExtras` block with the
+    /// grid's own URLs, and the region speaks no voice at all — no
+    /// `VoiceServerType`, no `RequiredVoiceVersion` push on arrival, and a
+    /// provision request refused for want of a backend. Both strings appear
+    /// nowhere in OpenSim's sources, and both of its voice modules are off in
+    /// a stock region.
+    ///
+    /// Runs the loop itself rather than going through [`start_imitating`]
+    /// because the claim is about an event that must **not** arrive, and a
+    /// wait that stepped over the arrival burst on its way to the handshake
+    /// would have consumed the push this is looking for. Here nothing reads
+    /// the stream before the loop below does.
+    #[tokio::test]
+    async fn an_opensim_flavoured_grid_introduces_itself_as_opensim() -> Result<(), TestError> {
+        let (grid, client, agent) =
+            connect_configured(vec![RegionConfig::default()], None, ImitatedGrid::OpenSim).await?;
+        let login_uri = grid.login_uri();
+        let mut server_events = agent.events();
+        let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
+        let (command_tx, command_rx) = mpsc::channel::<Command>(8);
+        let (diag_tx, _diag_rx) = mpsc::channel(16);
+        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+
+        // A viewer arriving anywhere asks for voice the only way this
+        // workspace knows how to ask -- WebRTC, since Vivox is implemented
+        // nowhere here. A silent region refuses it.
+        let offer = "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n\
+            m=audio 9 UDP/TLS/RTP/SAVPF 111\r\nc=IN IP4 0.0.0.0\r\n\
+            a=setup:actpass\r\na=mid:0\r\na=sendrecv\r\na=rtpmap:111 opus/48000/2\r\n";
+        command_tx
+            .send(Command::RequestVoiceAccount {
+                request: VoiceProvisionRequest::webrtc(offer, "local", None),
+            })
+            .await?;
+
+        // The features fetch is the terminating condition; the arrival push,
+        // had there been one, would have been enqueued before it.
+        let mut features = None;
+        let mut named_a_backend = false;
+        while features.is_none() {
+            let event = tokio::time::timeout(WAIT, event_rx.recv())
+                .await?
+                .ok_or("client event stream ended early")?;
+            match event {
+                Event::SimulatorFeatures(reply) => features = Some(reply.as_ref().clone()),
+                Event::RequiredVoiceVersion(_version) => named_a_backend = true,
+                _other => {}
+            }
+        }
+        let features = features.ok_or("no SimulatorFeatures")?;
+        let extras = features
+            .open_sim_extras
+            .as_ref()
+            .ok_or("an OpenSim-flavoured grid sent no OpenSimExtras")?;
+        assert_eq!(extras.map_server_url.as_ref(), Some(&login_uri));
+        assert_eq!(extras.currency_base_uri.as_ref(), Some(&login_uri));
+        assert_eq!(extras.currency.as_deref(), Some("L$"));
+        assert_eq!(features.voice_server_type, None);
+        assert!(!named_a_backend, "OpenSim sends no RequiredVoiceVersion");
+
+        // Grid-side, because a refusal is what the *grid* decided; the client
+        // only learns that its POST failed.
+        loop {
+            let event = tokio::time::timeout(WAIT, server_events.recv()).await??;
+            if let ServerEvent::VoiceProvisionRequested { outcome, .. } = &event {
+                assert_eq!(
+                    *outcome,
+                    sl_proto::VoiceProvisionOutcome::Refused(
+                        sl_proto::VoiceProvisionRefusal::BackendUnavailable
+                    )
+                );
+                break;
+            }
+        }
+
+        drop(command_tx);
+        run.abort();
         Ok(())
     }
 
@@ -1778,6 +1864,7 @@ mod test {
         let running = start_configured(
             vec![RegionConfig::default(), east_region()],
             Some(SHORT_HANDOVER),
+            ImitatedGrid::default(),
         )
         .await?;
         assert!(
@@ -1834,6 +1921,7 @@ mod test {
         let mut running = start_configured(
             vec![RegionConfig::default(), adjacent_east_region()],
             Some(SHORT_HANDOVER),
+            ImitatedGrid::default(),
         )
         .await?;
         running

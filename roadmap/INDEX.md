@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 313 |
+| ready | 312 |
 | blocked | 55 |
 | in-progress | 18 |
 | bugs | 59 |
-| done | 1002 |
+| done | 1003 |
 | deferred | 25 |
 | wont-do | 14 |
 | **total** | **1586** |
@@ -237,7 +237,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (313)
+## ready (312)
 
 ### protocol
 
@@ -955,8 +955,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The fake grid is OpenSim about inventory whichever grid it says it is
 - [`test-fake-grid-imitates-server-bakes`](ready/test-fake-grid-imitates-server-bakes.md)
   — The fake grid runs a bake service on a grid that says it is OpenSim
-- [`test-fake-grid-imitates-simulator-features`](ready/test-fake-grid-imitates-simulator-features.md)
-  — A grid claiming to be Second Life still introduces itself as OpenSim
 - [`test-fake-grid-login-matrix-and-timeouts`](ready/test-fake-grid-login-matrix-and-timeouts.md)
   — The login refusals and handover timeouts nothing tests
 - [`test-fake-grid-object-sounds`](ready/test-fake-grid-object-sounds.md) — The
@@ -1330,7 +1328,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1002)
+## done (1003)
 
 ### protocol
 
@@ -3219,6 +3217,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Named scenarios and a fixed-port launcher for the fake grid
 - [`test-fake-grid-imitates-audit`](done/test-fake-grid-imitates-audit.md) — The
   fake grid was nobody in particular
+- [`test-fake-grid-imitates-simulator-features`](done/test-fake-grid-imitates-simulator-features.md)
+  — A grid claiming to be Second Life still introduces itself as OpenSim
 - [`test-fake-grid-neighbours-crossing`](done/test-fake-grid-neighbours-crossing.md)
   — Neighbour child agents and a scripted region crossing (blocked by
   `test-fake-grid-npc-avatars` (done))

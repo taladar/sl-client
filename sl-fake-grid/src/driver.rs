@@ -220,7 +220,9 @@ impl SharedSim {
             if matches!(event, ServerEvent::AgentArrived) {
                 // A voice-enabled region tells the arriving viewer which
                 // backend to load (`RequiredVoiceVersion` over the event
-                // queue, as the simulator does on region entry).
+                // queue, as a Second Life simulator does on region entry).
+                // A silent region -- a stock OpenSim one -- sends no such
+                // push; the string appears nowhere in OpenSim's sources.
                 if let Some(voice_server_type) = state.sim.voice().advertised_server_type() {
                     state
                         .sim

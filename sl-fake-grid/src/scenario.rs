@@ -23,7 +23,7 @@ use sl_proto::{
     AssetKey, AssetType, ChatSource, ChatType, InventoryFolder, InventoryItem, InventoryType,
     LindenAmount, ParcelVoiceInfo, Permissions, Permissions5, RegionLocalObjectId,
     RegionLocalParcelId, SaleType, ServerEvent, SimSession, TaskInventoryItem, VoiceChannelUri,
-    Wearable, WebRtcStub,
+    Wearable,
 };
 use sl_types::key::{AgentKey, InventoryFolderKey, InventoryKey, ObjectKey, OwnerKey, ParcelKey};
 
@@ -472,13 +472,16 @@ pub fn stock_parcel_id() -> ParcelKey {
 
 /// Seeds the stock fixtures on a fresh session: agent inventory (root →
 /// Clothing, and one item per writable asset class), a library, one
-/// region-wide parcel, and WebRTC
-/// voice — the stub answerer ([`WebRtcStub::default`]) plus the parcel's
-/// estate-wide voice channel (its `channel_uri` is the region id, as
-/// Second Life sends it), with the agent standing on that parcel. The
-/// runtime advertises the backend from this (`SimulatorFeatures
-/// .VoiceServerType`, the login `voice-config`, the arrival
-/// `RequiredVoiceVersion` push).
+/// region-wide parcel, and the parcel's estate-wide **voice channel** (its
+/// `channel_uri` is the region id, as Second Life sends it), with the agent
+/// standing on that parcel.
+///
+/// The channel is here; the *backend* that serves it is not. Which one a
+/// region runs is the grid's ([`VoiceBackend`](crate::VoiceBackend), derived
+/// from [`ImitatedGrid`](crate::ImitatedGrid)), so the runtime installs it
+/// after this hook has had its say — and a scenario that enables one itself
+/// keeps it. A parcel's channel is scene fixture either way: it says where
+/// voice happens, not what speaks it.
 pub(crate) fn default_setup(sim: &mut SimSession, _now: Instant) {
     sim.agent_inventory_mut().insert_folder(InventoryFolder {
         folder_id: folder_key(AGENT_ROOT),
@@ -608,7 +611,6 @@ pub(crate) fn default_setup(sim: &mut SimSession, _now: Instant) {
         sim.library_inventory_mut().insert_item(item);
     }
     let region_id = sim.region_id();
-    sim.voice_mut().enable_webrtc(WebRtcStub::default());
     sim.voice_mut().set_parcel_voice_info(ParcelVoiceInfo {
         parcel_local_id: STOCK_PARCEL_LOCAL_ID,
         region_name: None,

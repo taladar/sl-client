@@ -348,8 +348,9 @@ over a small generic `xmlrpc` module):
   entry is the login URI itself.
 - **`GET /map-<zoom>-<x>-<y>-objects.jpg`** — world-map tiles, in the
   file-name shape `sl-map-apis` and the viewer's world map request. The
-  login response's `map-server-url` and the stock `SimulatorFeatures`
-  `OpenSimExtras` both point at the login URI, so a viewer's world map
+  login response's `map-server-url` points at the login URI on either
+  flavour (and an OpenSim-flavoured grid's `SimulatorFeatures`
+  `OpenSimExtras` says it a second time), so a viewer's world map
   loads tiles from the fake grid. Every configured region gets a stock
   zoom-1 tile (an embedded JPEG); `FakeGridBuilder::map_tile` registers
   others. Absent tiles are 404; tiles carry `Cache-Control`/`ETag` so the
@@ -616,9 +617,12 @@ per-behaviour setters still win where they are called; the flavour is what
 an unset knob falls back to, not a lock, which is what a test wanting one
 deliberate deviation needs. Each resolves once, in `start`.
 
-Two behaviours follow it today: a taken object's asset, and whether the
+Four behaviours follow it today: a taken object's asset, whether the
 login response is trimmed to the request's `options` list (Second Life
-honours it, OpenSim sends every field regardless).
+honours it, OpenSim sends every field regardless), whether
+`SimulatorFeatures` carries the `OpenSimExtras` block, and which
+spatial-voice backend the regions run. The last two are covered under "How
+a region introduces itself" below.
 
 That second one is small and it immediately earned its keep. Turning it on
 by default broke a fake-grid end-to-end test that expected
@@ -632,12 +636,68 @@ The divergences the flavour does **not** yet decide are audited in
 `imitates.rs` rather than left to be rediscovered, each with a roadmap item:
 the inventory API (UDP versus AIS3, and how a new item is announced —
 `SimSession` has a sender for neither), server-side bakes (dropping the
-appearance service alone leaves every avatar a silent cloud), the
-`OpenSimExtras` block and the voice backend, and the economy price list.
+appearance service alone leaves every avatar a silent cloud), and the
+economy price list.
 One thing is deliberately not flavour-decided and is not a to-do:
 `GridIdentity::platform` stays `OpenSim` either way, because it is what
 Firestorm's grid manager reads to decide whether it will add the grid at
 all, and a grid Firestorm refuses to add tests nothing.
+
+### How a region introduces itself
+
+`SimulatorFeatures` is where the two grids describe themselves, and they
+describe themselves differently in two ways that the flavour now decides.
+
+**`OpenSimExtras`.** OpenSim always sends the block —
+`SimulatorFeaturesModule` fills it in unconditionally and `GridService`
+injects the grid-wide URLs into it — and Second Life has no such key. It is
+the one structural difference that reliably tells the two replies apart, so
+a Second-Life-flavoured fake grid omits it
+(`FakeGridBuilder::open_sim_extras` overrides).
+
+The part that had to be checked rather than assumed is that **nothing goes
+missing with the block**. What rides in it that a viewer actually reads is
+the map-tile server, the currency symbol and the currency helper base, and
+each has a second route that both grids serve and the reference viewer
+reads first when no extras block overrode it: the login response's
+`map-server-url` (`LLStartUp::process_login_success_response`), the login
+response's `currency`, and `get_grid_info`'s `economy` key
+(`LLGridManager::getHelperURI`). `LFSimFeatureHandler` treats the extras
+copies as *overrides* of those, not as the only source. So dropping the
+block removes a duplicate, not a surface — which is what the assertions in
+`http_misc.rs`'s `grid_info_is_served_as_xml_and_xml_rpc` are there to keep
+true.
+
+**Voice** (`FakeGridBuilder::voice_backend`).
+
+| | Second Life | OpenSim |
+| --- | --- | --- |
+| backend | WebRTC (`WebRtcStub`) | none (`VoiceBackend::Silent`) |
+| `SimulatorFeatures.VoiceServerType` | `"webrtc"` | absent |
+| login `voice-config` | present | absent |
+| `RequiredVoiceVersion` push on arrival | sent | absent |
+| `ProvisionVoiceAccountRequest` | answered | refused (`BackendUnavailable`) |
+
+The OpenSim column is one decision, not four: with no backend installed
+every advertisement falls away on its own, and the provision refuses
+itself. That is what a *stock* OpenSim region is — both its voice modules
+(`VivoxVoiceModule`, `FreeSwitchVoiceModule`) are optional and off by
+default — and modelling the stock region is the same choice `stock_prices`
+makes for money.
+
+It is also the only honest option here. Both OpenSim modules answer with
+the Vivox SIP account shape, and this workspace implements Vivox-shaped
+voice nowhere: Second Life removed Vivox for WebRTC, and OpenSim support
+for a leaf feature like voice is not a priority. A Vivox flavour would mean
+a fixture serving a path nothing in the workspace will ever speak, so there
+is no third variant to pick.
+
+Worth knowing anyway, because it is why OpenSim never needed
+`VoiceServerType`: a viewer told nothing falls back to Vivox by itself
+(`LLVoiceClient::handleSimulatorFeaturesReceived` turns an empty
+`VoiceServerType` into `VIVOX_VOICE_SERVER_TYPE`). Against a silent region
+it then finds no capability and gives up, which is exactly what a viewer
+meets on a stock OpenSim grid today.
 
 ### The edit surfaces
 
@@ -1377,16 +1437,23 @@ them like any other asset.
 
 ## Voice signalling
 
-The stock scenario speaks **WebRTC voice**: `default_setup` enables the
-`WebRtcStub` answerer on `SimSession::voice_mut()` and files the stock
-parcel's estate-wide channel (its `channel_uri` is the region id, the
-form Second Life sends) with the agent standing on it. The runtime
-derives every backend advertisement from that — the login response's
-`voice-config`, `SimulatorFeatures.VoiceServerType`, and a
-`RequiredVoiceVersion` push over the event queue when the avatar
-arrives — so a scenario that leaves voice disabled advertises none of
-them, and one that sets a Vivox fixture instead (`set_vivox_account`)
-advertises `vivox`. A client's `RequestVoiceAccount` (WebRTC offer) is
+A stock Second-Life-flavoured grid speaks **WebRTC voice**. The two halves
+come from different places, deliberately: `default_setup` files the stock
+parcel's estate-wide channel (its `channel_uri` is the region id, the form
+Second Life sends) with the agent standing on it — a parcel's channel is
+scene fixture, it says *where* voice happens — while the **backend** that
+serves it is the grid's, installed by the runtime from
+`ImitatedGrid::voice_backend` after the scenario's setup has had first
+refusal. A scenario that enables one itself keeps it.
+
+Every backend advertisement then derives from the backend that ended up
+installed: the login response's `voice-config`,
+`SimulatorFeatures.VoiceServerType`, and a `RequiredVoiceVersion` push over
+the event queue when the avatar arrives. A `VoiceBackend::Silent` region —
+the OpenSim flavour — advertises none of them and refuses a provision
+request with `BackendUnavailable`.
+
+A client's `RequestVoiceAccount` (WebRTC offer) is
 answered with a JSEP answer, its `SendVoiceSignaling` trickle is recorded
 on the connection, `RequestParcelVoiceInfo` returns the region-id
 channel, and a logout closes the session; the grid side sees

@@ -20,6 +20,20 @@
 //! | --- | --- | --- |
 //! | a taken object's asset ([`ObjectAssetPolicy`]) | withheld: nil id, unfetchable body | served: minted id, body under it |
 //! | the login response's `options` list ([`honor_options`](crate::FakeGridBuilder::honor_options)) | honoured: the response is trimmed to what was asked for | ignored: every field is sent |
+//! | the `OpenSimExtras` block in `SimulatorFeatures` ([`advertises_open_sim_extras`](ImitatedGrid::advertises_open_sim_extras)) | absent | sent, carrying the grid's map-tile and currency-helper URLs |
+//! | the spatial-voice backend ([`VoiceBackend`]) | WebRTC, named three ways: `SimulatorFeatures.VoiceServerType`, the login `voice-config`, the `RequiredVoiceVersion` push | none: a stock region loads no voice module, and nothing is advertised |
+//!
+//! **The map and currency URLs survive losing the extras block**, which is the
+//! part that had to be checked rather than assumed. Both are reachable by a
+//! route that is not `OpenSimExtras` and that both grids serve: the map-tile
+//! server through the login response's `map-server-url`
+//! (`LLStartUp::process_login_success_response` reads it there and
+//! `LFSimFeatureHandler` only *overrides* it from the extras), the currency
+//! symbol through the login response's `currency`, and the currency helper
+//! base through `get_grid_info`'s `economy` key, which is where
+//! `LLGridManager::getHelperURI` reads it when no extras block overrode it.
+//! Dropping the block on the Second Life side therefore hides no URL — it
+//! removes a *second* copy of two of them.
 //!
 //! # What it does not decide yet, and why
 //!
@@ -32,7 +46,6 @@
 //! | --- | --- | --- |
 //! | how inventory is fetched, and how a new item is announced | OpenSim's: the deprecated UDP fetch is refused rather than served, and a take is announced with the legacy `UpdateCreateInventoryItem` | `SimSession` has neither an `InventoryDescendents` nor a `BulkUpdateInventory` sender ([[test-fake-grid-imitates-inventory-api]]) |
 //! | server-side avatar bakes | Second Life's: `agent_appearance_service` is always named | dropping the service alone leaves every avatar a silent cloud; the "this avatar is server-baked" decision has to flip with it ([[test-fake-grid-imitates-server-bakes]]) |
-//! | `OpenSimExtras`, the map and currency URLs, the voice backend | OpenSim's: the extras block is always sent, and voice is always the WebRTC stub | Second Life sends no extras block at all, and a viewer discovers those URLs elsewhere ([[test-fake-grid-imitates-simulator-features]]) |
 //! | the economy helper and the price list | OpenSim's: a stock region's zeroes | what Second Life's helper and `EconomyData` actually answer is unmeasured ([[test-fake-grid-imitates-economy]]) |
 //!
 //! One thing is deliberately **not** flavour-decided and is not a to-do:
@@ -42,6 +55,7 @@
 //! grid nothing can log into tests nothing.
 
 use crate::assets::ObjectAssetPolicy;
+use crate::voice::VoiceBackend;
 
 /// The live grid a [`FakeGrid`](crate::FakeGrid) imitates where the two real
 /// ones disagree.
@@ -83,11 +97,42 @@ impl ImitatedGrid {
     pub const fn honors_login_options(self) -> bool {
         matches!(self, Self::SecondLife)
     }
+
+    /// Whether this grid's `SimulatorFeatures` carries the `OpenSimExtras`
+    /// block.
+    ///
+    /// OpenSim always sends it (`SimulatorFeaturesModule.cs` fills it in
+    /// unconditionally, and `GridService` injects the grid-wide URLs into it);
+    /// Second Life sends no such key, which is the one structural difference
+    /// that reliably tells the two replies apart. What rides in it — the
+    /// map-tile server and the currency helper — reaches a viewer on Second
+    /// Life by another route, so this is a block to drop rather than a set of
+    /// URLs to hide: see the module docs.
+    #[must_use]
+    pub const fn advertises_open_sim_extras(self) -> bool {
+        matches!(self, Self::OpenSim)
+    }
+
+    /// The spatial-voice backend this grid's regions serve.
+    ///
+    /// Second Life is WebRTC. A stock OpenSim region is
+    /// [`VoiceBackend::Silent`]: both its voice modules are optional and off by
+    /// default, and both answer with the Vivox SIP shape this workspace does
+    /// not implement anywhere — so the honest model of the grid nobody
+    /// configured is a grid that offers no voice, and every advertisement of it
+    /// falls away with the backend. See the [`voice`](crate::voice) module docs.
+    #[must_use]
+    pub const fn voice_backend(self) -> VoiceBackend {
+        match self {
+            Self::SecondLife => VoiceBackend::WebRtc,
+            Self::OpenSim => VoiceBackend::Silent,
+        }
+    }
 }
 
 #[cfg(test)]
 mod test {
-    use pretty_assertions::assert_eq;
+    use pretty_assertions::{assert_eq, assert_ne};
 
     use super::*;
 
@@ -97,5 +142,36 @@ mod test {
     #[test]
     fn a_grid_nobody_configured_is_second_life() {
         assert_eq!(ImitatedGrid::default(), ImitatedGrid::SecondLife);
+    }
+
+    /// The two grids take opposite sides of every knob derived here. That is
+    /// not a coincidence worth asserting for its own sake — it is the check
+    /// that a knob added later actually *decides* something, rather than
+    /// answering both flavours the same way and only looking derived.
+    #[test]
+    fn every_derived_knob_separates_the_two_grids() {
+        let sl = ImitatedGrid::SecondLife;
+        let opensim = ImitatedGrid::OpenSim;
+        assert_ne!(sl.object_assets(), opensim.object_assets());
+        assert_ne!(sl.honors_login_options(), opensim.honors_login_options());
+        assert_ne!(
+            sl.advertises_open_sim_extras(),
+            opensim.advertises_open_sim_extras()
+        );
+        assert_ne!(sl.voice_backend(), opensim.voice_backend());
+    }
+
+    /// The fake grid's own default has to be the one Second Life actually is,
+    /// and the other side has to be silence rather than a Vivox fixture: this
+    /// workspace implements no Vivox-shaped voice, so a grid defaulting to it
+    /// would serve a path nothing here speaks.
+    #[test]
+    fn the_stock_grid_speaks_webrtc_and_the_other_one_speaks_nothing() {
+        assert_eq!(
+            ImitatedGrid::SecondLife.voice_backend(),
+            VoiceBackend::WebRtc
+        );
+        assert_eq!(ImitatedGrid::OpenSim.voice_backend(), VoiceBackend::Silent);
+        assert_eq!(VoiceBackend::default(), VoiceBackend::WebRtc);
     }
 }

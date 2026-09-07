@@ -76,6 +76,23 @@ impl Grid {
         }
     }
 
+    /// Which of the two live grids this one **behaves like** where they
+    /// disagree: itself, for a live grid, and the grid it imitates for a fake
+    /// one.
+    ///
+    /// This is the question a case asks when it is surveying a divergence
+    /// rather than the harness — "does this grid send `OpenSimExtras`", not "is
+    /// this grid offline". [`imitates`](Self::imitates) answers the other one,
+    /// and answers `None` for the live grids, which is exactly wrong for this:
+    /// aditi is not a grid with no flavour, it is the flavour.
+    #[must_use]
+    pub const fn behaves_like(self) -> sl_fake_grid::ImitatedGrid {
+        match self {
+            Self::Opensim | Self::FakeOpensim => sl_fake_grid::ImitatedGrid::OpenSim,
+            Self::Aditi | Self::FakeSl => sl_fake_grid::ImitatedGrid::SecondLife,
+        }
+    }
+
     /// Whether this is the offline fake grid, whichever grid it is imitating.
     ///
     /// The question almost every case asks — "is this a grid whose content and

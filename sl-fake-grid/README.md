@@ -35,10 +35,12 @@ manager and the world map expect: `GET /get_grid_info` (and the XML-RPC
 points back at the grid), and the economy helper scripts
 `/currency.php` + `/landtool.php` for the buy-L$ / buy-land flows.
 
-The stock scenario also speaks WebRTC **voice signalling** (offer →
-answer, ICE trickle, parcel channel, logout — no media plane) and
-advertises it the way a Second Life region does (`voice-config`,
-`SimulatorFeatures.VoiceServerType`, `RequiredVoiceVersion`).
+A stock grid also speaks WebRTC **voice signalling** (offer → answer, ICE
+trickle, parcel channel, logout — no media plane) and advertises it the way
+a Second Life region does (`voice-config`,
+`SimulatorFeatures.VoiceServerType`, `RequiredVoiceVersion`). Whether a
+region speaks voice at all follows the grid this one is imitating — see
+below.
 
 ## Policy, not content
 
@@ -142,12 +144,41 @@ the grid this workspace targets — and every divergent behaviour takes its
 default from that. A per-behaviour setter still wins where it is called: the
 flavour is what an unset knob falls back to, not a lock.
 
-Two behaviours follow it today: a taken object's asset (below) and whether the
+Four behaviours follow it today: a taken object's asset (below), whether the
 login response is trimmed to the request's `options` list (Second Life honours
-it, OpenSim sends every field regardless). The divergences it does **not** yet
-decide — the inventory API, server bakes, `OpenSimExtras`, voice, the economy —
-are audited in `imitates.rs` with a roadmap item each, rather than left to be
-rediscovered.
+it, OpenSim sends every field regardless), and the two that make up how a
+region introduces itself (below). The divergences it does **not** yet decide —
+the inventory API, server bakes, the economy — are audited in `imitates.rs`
+with a roadmap item each, rather than left to be rediscovered.
+
+## How a region introduces itself
+
+`SimulatorFeatures` is where the two grids describe themselves, and the
+flavour decides two things about it.
+
+**`OpenSimExtras`** is sent by OpenSim unconditionally and by Second Life
+never — the one structural difference that reliably tells the two replies
+apart — so a Second-Life-flavoured grid omits the block
+(`FakeGridBuilder::open_sim_extras` overrides). Nothing goes missing with it:
+what a viewer actually reads out of the block reaches it by a second route
+both grids serve, and the reference viewer reads that route first when no
+extras block overrode it — the login response's `map-server-url` and
+`currency`, and `get_grid_info`'s `economy` key. Dropping the block removes a
+duplicate, not a surface.
+
+**Voice** (`FakeGridBuilder::voice_backend`) is WebRTC on the Second Life
+side, named three ways — `SimulatorFeatures.VoiceServerType`, the login
+`voice-config`, the `RequiredVoiceVersion` push on arrival — and
+`VoiceBackend::Silent` on the OpenSim one: nothing advertised, and a
+`ProvisionVoiceAccountRequest` refused for want of a backend.
+
+Silence is what a *stock* OpenSim region is. Both its voice modules
+(`VivoxVoiceModule`, `FreeSwitchVoiceModule`) are optional and off by
+default, and both answer with the Vivox SIP account shape — which this
+workspace implements nowhere, Second Life having moved to WebRTC. So there
+is no Vivox flavour to pick: a grid defaulting to one would be serving a
+path nothing here speaks. Modelling the stock region is the same choice
+`stock_prices` makes for money.
 
 ## A taken object's asset
 

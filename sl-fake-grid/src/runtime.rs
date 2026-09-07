@@ -35,6 +35,7 @@ use crate::neighbours::NeighbourPolicy;
 use crate::scenario::Scenario;
 use crate::terrain::TerrainFixture;
 use crate::time::{Now, system_clock};
+use crate::voice::VoiceBackend;
 use crate::world::AVATAR_CENTRE_ABOVE_GROUND_M;
 
 /// How the grid describes itself in `get_grid_info` and the login message.
@@ -363,6 +364,10 @@ pub(crate) struct GridCore {
     /// class where Second Life and OpenSim disagree about whether a viewer may
     /// see an asset at all ([`ObjectAssetPolicy`]).
     pub(crate) object_assets: ObjectAssetPolicy,
+    /// Whether `SimulatorFeatures` carries the `OpenSimExtras` block.
+    pub(crate) open_sim_extras: bool,
+    /// The spatial-voice backend every region serves ([`VoiceBackend`]).
+    pub(crate) voice_backend: VoiceBackend,
     /// The clock every session machine is stamped from.
     pub(crate) clock: Now,
     /// How long an empty `EventQueueGet` poll is held before the 502.
@@ -635,11 +640,25 @@ impl GridCore {
             sim.add_parcel(cover);
         }
         region.scenario.udp_assets.register_xfer_files(&mut sim);
+        // The scenario's setup gets first refusal on the voice backend: it may
+        // have enabled one itself, and a region that speaks a backend of its
+        // own choosing outranks the flavour. Otherwise the grid installs the
+        // one the imitated grid runs.
+        if sim.voice().advertised_server_type().is_none() {
+            match self.voice_backend {
+                VoiceBackend::WebRtc => sim
+                    .voice_mut()
+                    .enable_webrtc(sl_proto::WebRtcStub::default()),
+                VoiceBackend::Silent => {}
+            }
+        }
         if *sim.simulator_features() == SimulatorFeatures::default() {
-            // The scenario left the feature document untouched: advertise
-            // the grid-wide URLs (map tiles, currency helper) the way an
-            // OpenSim region does through `OpenSimExtras`, and the voice
-            // backend the scenario enabled (`VoiceServerType`).
+            // The scenario left the feature document untouched: advertise the
+            // grid-wide URLs the way an OpenSim region does through
+            // `OpenSimExtras`, and the voice backend that ended up enabled
+            // (`VoiceServerType`). A silent region advertises neither — which
+            // is exactly the pair of things a stock OpenSim region does not
+            // send.
             let mut features = self.simulator_features();
             features.voice_server_type = sim.voice().advertised_server_type().map(str::to_owned);
             sim.set_simulator_features(features);
@@ -815,13 +834,20 @@ impl GridCore {
         None
     }
 
-    /// The stock `SimulatorFeatures` document: mesh enabled plus the
-    /// `OpenSimExtras` URLs pointing back at this grid.
+    /// The stock `SimulatorFeatures` document: mesh enabled, plus — on a grid
+    /// that sends the block at all — the `OpenSimExtras` URLs pointing back at
+    /// this grid.
+    ///
+    /// A Second-Life-flavoured grid omits the block entirely, as Second Life
+    /// does. Nothing goes missing with it: the map-tile server is in the login
+    /// response's `map-server-url`, the currency symbol in its `currency`, and
+    /// the currency helper base in `get_grid_info`'s `economy` key — the routes
+    /// the reference viewer reads when no extras block overrode them.
     fn simulator_features(&self) -> SimulatorFeatures {
         SimulatorFeatures {
             mesh_rez_enabled: Some(true),
             mesh_upload_enabled: Some(true),
-            open_sim_extras: Some(OpenSimExtras {
+            open_sim_extras: self.open_sim_extras.then(|| OpenSimExtras {
                 map_server_url: Some(self.login_uri.clone()),
                 currency: Some(self.economy.currency_symbol.clone()),
                 currency_base_uri: Some(self.login_uri.clone()),
@@ -916,7 +942,8 @@ fn enrich_success(
     success.region_size_y = Some(256);
     success.agent_access = Some("M".to_owned());
     success.agent_access_max = Some("A".to_owned());
-    // The `voice-config` section mirrors the backend the scenario enabled.
+    // The `voice-config` section mirrors the backend the region ended up
+    // running; a silent region sends no section at all.
     success.voice_config = sim
         .voice()
         .advertised_server_type()
@@ -996,6 +1023,12 @@ pub struct FakeGridBuilder {
     /// Whether the login response is trimmed to the request's `options`, or
     /// `None` to follow [`imitates`](Self::imitates).
     honor_options: Option<bool>,
+    /// Whether `SimulatorFeatures` carries the `OpenSimExtras` block, or
+    /// `None` to follow [`imitates`](Self::imitates).
+    open_sim_extras: Option<bool>,
+    /// The spatial-voice backend every region serves, or `None` to follow
+    /// [`imitates`](Self::imitates).
+    voice_backend: Option<VoiceBackend>,
     /// Builder-registered map tiles.
     map_tiles: MapTileStore,
     /// The identifier source (random unless seeded).
@@ -1018,6 +1051,8 @@ impl std::fmt::Debug for FakeGridBuilder {
             // one: an override outranks the flavour above.
             .field("honor_options", &self.honor_options)
             .field("object_assets", &self.object_assets)
+            .field("open_sim_extras", &self.open_sim_extras)
+            .field("voice_backend", &self.voice_backend)
             .field("eq_hold", &self.eq_hold)
             .field("handover_timeout", &self.handover_timeout)
             .field("http_port", &self.http_port)
@@ -1080,6 +1115,8 @@ impl FakeGridBuilder {
             imitates: ImitatedGrid::default(),
             object_assets: None,
             honor_options: None,
+            open_sim_extras: None,
+            voice_backend: None,
             map_tiles: MapTileStore::default(),
         }
     }
@@ -1133,6 +1170,32 @@ impl FakeGridBuilder {
     #[must_use]
     pub const fn honor_options(mut self, honor: bool) -> Self {
         self.honor_options = Some(honor);
+        self
+    }
+
+    /// Overrides whether `SimulatorFeatures` carries the `OpenSimExtras`
+    /// block, which otherwise follows [`imitates`](Self::imitates): OpenSim
+    /// always sends it, Second Life has no such key.
+    ///
+    /// Turning it off hides no URL. The map-tile server, the currency symbol
+    /// and the currency helper base each reach a viewer by a route both grids
+    /// serve — the login response's `map-server-url` and `currency`, and
+    /// `get_grid_info`'s `economy` key.
+    #[must_use]
+    pub const fn open_sim_extras(mut self, advertise: bool) -> Self {
+        self.open_sim_extras = Some(advertise);
+        self
+    }
+
+    /// Overrides the spatial-voice backend every region serves, which
+    /// otherwise follows [`imitates`](Self::imitates): Second Life is WebRTC,
+    /// a stock OpenSim region is [`VoiceBackend::Silent`].
+    ///
+    /// A scenario whose `setup` enables a backend itself outranks this — the
+    /// grid only installs one into a session whose voice store is still empty.
+    #[must_use]
+    pub const fn voice_backend(mut self, backend: VoiceBackend) -> Self {
+        self.voice_backend = Some(backend);
         self
     }
 
@@ -1304,6 +1367,12 @@ impl FakeGridBuilder {
             object_assets: self
                 .object_assets
                 .unwrap_or_else(|| self.imitates.object_assets()),
+            open_sim_extras: self
+                .open_sim_extras
+                .unwrap_or_else(|| self.imitates.advertises_open_sim_extras()),
+            voice_backend: self
+                .voice_backend
+                .unwrap_or_else(|| self.imitates.voice_backend()),
             clock: self.clock,
             eq_hold: self.eq_hold,
             handover_timeout: self.handover_timeout,

@@ -7,7 +7,7 @@ mod test {
     use std::time::Duration;
 
     use pretty_assertions::assert_eq;
-    use sl_fake_grid::{AccountConfig, FakeGrid, FakeGridBuilder, RegionConfig};
+    use sl_fake_grid::{AccountConfig, FakeGrid, FakeGridBuilder, ImitatedGrid, RegionConfig};
     use sl_wire::{
         LoginRequest, LoginResponse, StartLocation, build_event_queue_request, build_login_request,
         build_login_request_llsd, build_seed_request, parse_event_queue_response,
@@ -101,6 +101,32 @@ mod test {
             return Err("expected a failed login".into());
         };
         assert_eq!(failure.reason, "key");
+        Ok(())
+    }
+
+    /// The other flavour's login says nothing about voice, because a stock
+    /// OpenSim region runs none — and would not name one even if it did.
+    ///
+    /// Asserted here rather than through the real client because it is the
+    /// *absence* of a section, and this grid does not honour the request's
+    /// `options` list: asking for `voice-config` and getting nothing back is
+    /// therefore the grid's answer, not the option filter's.
+    #[tokio::test]
+    async fn an_opensim_flavoured_login_names_no_voice_backend() -> Result<(), TestError> {
+        let grid = FakeGridBuilder::new()
+            .account(AccountConfig::new("Test", "User", "password"))
+            .region(RegionConfig::default())
+            .imitates(ImitatedGrid::OpenSim)
+            .event_queue_hold(Duration::from_millis(200))
+            .start()
+            .await?;
+        let mut request = login_request("password");
+        request.options.push("voice-config".to_owned());
+        let text = post_login(&grid, "text/xml", build_login_request(&request)).await?;
+        let LoginResponse::Success(success) = parse_login_response(&text)? else {
+            return Err("expected a successful login".into());
+        };
+        assert_eq!(success.voice_config, None);
         Ok(())
     }
 

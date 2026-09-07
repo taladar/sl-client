@@ -70,7 +70,12 @@ mod test {
         assert_eq!(via_rpc.grid_name(), Some("Loopback & Co"));
         assert_eq!(via_rpc.login_uri(), Some(grid.login_uri()));
 
-        // The login still works on the same URL, and advertises the tile base.
+        // The login still works on the same URL, and advertises the tile base
+        // and the currency symbol. Together with `helper_uri` above, this is
+        // the whole set of URLs the `OpenSimExtras` block would have carried —
+        // reached here by the routes a Second-Life-flavoured grid, which sends
+        // no such block, leaves them on. Losing any of these would hide a
+        // surface rather than drop a duplicate of it.
         let text = post_xml(
             &grid,
             "",

@@ -347,19 +347,21 @@ mod test {
             (patches.len() >= 256).then_some(patches)
         })?;
 
-        let login_uri = harness.grid.login_uri();
+        // The harness grid imitates Second Life, whose SimulatorFeatures has no
+        // `OpenSimExtras` key: the tile server the block would have carried
+        // arrives in the login response instead, and the reply is recognisable
+        // by the voice backend it does name.
         harness
             .wait_for_event("SimulatorFeatures over CAPS", |event| match event {
-                SlSessionEvent::SimulatorFeatures(features) => Some(
-                    features
-                        .open_sim_extras
-                        .as_ref()
-                        .and_then(|extras| extras.map_server_url.clone()),
-                ),
+                SlSessionEvent::SimulatorFeatures(features) => Some((
+                    features.open_sim_extras.is_some(),
+                    features.voice_server_type.clone(),
+                )),
                 _ => None,
             })
-            .map(|map_server| {
-                assert_eq!(map_server.as_ref(), Some(&login_uri));
+            .map(|(has_extras, voice_server_type)| {
+                assert!(!has_extras);
+                assert_eq!(voice_server_type.as_deref(), Some("webrtc"));
             })?;
         harness.step_until("the capability map", |app| {
             app.world()

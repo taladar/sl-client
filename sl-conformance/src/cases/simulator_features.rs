@@ -15,21 +15,31 @@
 //! [`Option`]: [`None`] means "not advertised" (distinct from an advertised
 //! `Some(false)`). The one cross-grid invariant the case asserts is that the
 //! reply carries **at least one** advertised feature — an empty map would mean
-//! the capability answered but decoded to nothing. On OpenSim — and on the fake
-//! grid, which presents itself as an OpenSim one and fills the subtree with URLs
-//! pointing back at itself — it additionally asserts the `OpenSimExtras` subtree
-//! is present, the one structural difference that reliably distinguishes an
-//! OpenSim reply from a Second Life one, which omits it.
+//! the capability answered but decoded to nothing.
+//!
+//! Everything else it asserts is **per grid**, because the two live grids
+//! introduce themselves differently and this reply is where they do it:
+//!
+//! - `OpenSimExtras` is the one structural difference that reliably tells the
+//!   two replies apart. OpenSim always sends it; Second Life has no such key.
+//! - `VoiceServerType` is the reverse: Second Life names its spatial-voice
+//!   backend here, OpenSim names it nowhere at all (the string appears in none
+//!   of its sources) and leaves the viewer to fall back to Vivox on its own.
+//!
+//! So the case runs on **both** fake flavours and holds each to the grid it
+//! says it is — a survey of exactly what the two disagree about, which is the
+//! shape that is worth running twice.
 //! `1av`, `[both, fake]`.
 
 use std::time::{Duration, Instant};
 
 use sl_client_tokio::{Command, Event, SimulatorFeatures};
+use sl_fake_grid::ImitatedGrid;
 
 use crate::context::TestContext;
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
-use crate::support::{REGION_TIMEOUT, check, content_is_ours, count_metric, secs_metric};
+use crate::support::{REGION_TIMEOUT, check, count_metric, secs_metric};
 
 /// How long to wait for the `SimulatorFeatures` reply.
 const REPLY_TIMEOUT: Duration = Duration::from_secs(30);
@@ -83,7 +93,7 @@ impl GridTest for SimulatorFeaturesCase {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl, Grid::FakeOpensim]
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
@@ -111,16 +121,37 @@ impl GridTest for SimulatorFeaturesCase {
                 advertised >= 1,
                 "expected the SimulatorFeatures reply to advertise at least one feature",
             )?;
-            if content_is_ours(grid) {
-                // OpenSim fills in the `OpenSimExtras` subtree (currency, chat
-                // ranges, prim-scale limits, grid URLs); Second Life omits it.
-                // The fake grid presents itself as an OpenSim grid and fills the
-                // subtree in with URLs pointing back at itself, so it is held to
-                // the same claim.
-                check(
-                    features.open_sim_extras.is_some(),
-                    "expected an OpenSim-flavoured grid to advertise the OpenSimExtras subtree",
-                )?;
+            // How a region introduces itself is where the two live grids
+            // disagree, so each is held to the grid it says it is — including
+            // the fake one, which is whichever flavour was asked for.
+            match grid.behaves_like() {
+                ImitatedGrid::OpenSim => {
+                    // OpenSim fills in the `OpenSimExtras` subtree (currency,
+                    // chat ranges, prim-scale limits, grid URLs) and names no
+                    // voice backend anywhere.
+                    check(
+                        features.open_sim_extras.is_some(),
+                        "expected an OpenSim-flavoured grid to advertise the OpenSimExtras subtree",
+                    )?;
+                    check(
+                        features.voice_server_type.is_none(),
+                        "expected an OpenSim-flavoured grid to advertise no VoiceServerType",
+                    )?;
+                }
+                ImitatedGrid::SecondLife => {
+                    // Second Life has no such key, and names its spatial-voice
+                    // backend here instead. Which backend is not asserted: it
+                    // was Vivox until 2024 and is a thing the grid may change
+                    // again, so the case records it rather than pinning it.
+                    check(
+                        features.open_sim_extras.is_none(),
+                        "expected a Second-Life-flavoured grid to omit the OpenSimExtras subtree",
+                    )?;
+                    check(
+                        features.voice_server_type.is_some(),
+                        "expected a Second-Life-flavoured grid to name its VoiceServerType",
+                    )?;
+                }
             }
 
             let metrics = ctx.metrics();
@@ -130,6 +161,10 @@ impl GridTest for SimulatorFeaturesCase {
                 i64::try_from(advertised).unwrap_or(-1),
             );
             metrics.set("has_open_sim_extras", features.open_sim_extras.is_some());
+            metrics.set(
+                "voice_server_type",
+                features.voice_server_type.as_deref().unwrap_or("(none)"),
+            );
             if let Some(mesh_upload_enabled) = features.mesh_upload_enabled {
                 metrics.set("mesh_upload_enabled", mesh_upload_enabled);
             }
