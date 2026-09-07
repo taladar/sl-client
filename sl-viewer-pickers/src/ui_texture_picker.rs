@@ -29,6 +29,21 @@
 //!   can live-preview it on the object; **OK** emits the final choice and
 //!   **Cancel** emits the original (revert), mirroring the colour picker.
 //!
+//! # One window per field
+//!
+//! The picker is a **keyed floater** ([`FloaterKey::Named`]), keyed by the
+//! field being picked for — a swatch's element id, or a name the opener
+//! chooses ([`OpenTexturePicker::field`]). Picking a normal map therefore does
+//! not close the diffuse picker you were comparing it against, which is the
+//! reference's shape too (every `LLTextureCtrl` owns its picker). Two swatches
+//! declared with the same element id share one window: they are the same field
+//! as far as the UI is concerned.
+//!
+//! A *named* key is the persisted kind, so each field's window remembers its
+//! own position and size across sessions (`texture-picker_<field>_rect`), and
+//! closing a window ends it — the next pick of that field builds a fresh one,
+//! which is why the state below is per window rather than a resource.
+//!
 //! Reference (Firestorm, read-only): `llfloatertexturepicker.cpp`,
 //! `lltexturectrl.cpp`, `llinventorypanel.cpp`.
 
@@ -45,11 +60,14 @@ use sl_client_bevy::{
 };
 use std::hash::{Hash, Hasher as _};
 
-use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
+use crate::floater::{
+    Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterKey, FloaterOp, FloaterSpec,
+    FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater,
+};
 use crate::i18n::Translated;
 use crate::inventory::{InventoryModel, item_icon, query_folder_page};
 use crate::material_preview::MaterialPreview;
-use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use crate::ui::{column, row};
 use crate::ui_font::UiFont;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::world_api::AVATAR_BOOST_PRIORITY;
@@ -121,6 +139,13 @@ const VALUE_CLASS: &str = "sk-build-value";
 #[derive(Component, Debug, Clone, Copy)]
 pub struct TextureSwatchValue(pub TextureKey);
 
+/// Which **field** a swatch stands for — its element id, carried as a component
+/// so the press that opens the picker can name the window it wants
+/// ([`OpenTexturePicker::field`]). Previously the element id only reached the
+/// swatch's `Name`, which is not something a system should be parsing.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct TextureSwatchField(pub &'static str);
+
 /// Marks a swatch as a **material** picker and carries its current material
 /// asset id. A swatch with this component opens the picker in
 /// [`PickerKind::Material`] seeded with the id (rather than in texture mode from
@@ -152,6 +177,7 @@ pub fn spawn_texture_swatch(
             BorderColor::all(CONTROL_BORDER),
             BackgroundColor(EMPTY_FILL),
             TextureSwatchValue(initial),
+            TextureSwatchField(element),
             Pickable::default(),
             Name::new(format!("{element}:texture-swatch")),
             ChildOf(parent),
@@ -186,7 +212,11 @@ pub fn spawn_material_swatch(
 /// in texture mode from its [`TextureSwatchValue`].
 fn open_picker_from_swatch(
     press: On<Pointer<Press>>,
-    swatches: Query<(&TextureSwatchValue, Option<&MaterialSwatchValue>)>,
+    swatches: Query<(
+        &TextureSwatchValue,
+        &TextureSwatchField,
+        Option<&MaterialSwatchValue>,
+    )>,
     disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
     mut opens: MessageWriter<OpenTexturePicker>,
 ) {
@@ -197,23 +227,27 @@ fn open_picker_from_swatch(
     if disabled.contains(press.entity) {
         return;
     }
-    if let Ok((texture, material)) = swatches.get(press.entity) {
+    if let Ok((texture, field, material)) = swatches.get(press.entity) {
         let (kind, current) = match material {
             Some(material) => (PickerKind::Material, TextureKey::from(material.0)),
             None => (PickerKind::Texture, texture.0),
         };
         opens.write(OpenTexturePicker {
             requester: press.entity,
+            field: field.0,
             current,
             kind,
         });
     }
 }
 
-/// The picker's live state while open.
-#[derive(Resource, Debug)]
+/// One open picker window's live state — a **component on the window**, since
+/// the picker opens per field ([`OpenTexturePicker::field`]).
+#[derive(Component, Debug)]
 struct TexturePickerState {
-    /// The widget that opened it.
+    /// The widget that opened it, and that its replies are tagged back to.
+    /// `None` once OK / Cancel has answered, which is what tells a close it has
+    /// nothing left to revert.
     requester: Option<Entity>,
     /// What this open browses (textures or materials).
     kind: PickerKind,
@@ -257,11 +291,10 @@ impl Default for TexturePickerState {
     }
 }
 
-/// The picker floater's entities.
-#[derive(Resource, Debug)]
+/// One picker window's entities — a component beside its [`TexturePickerState`],
+/// so two open pickers keep their own tree, preview and quick choices.
+#[derive(Component, Debug)]
 struct TexturePickerUi {
-    /// The floater root.
-    panel: Entity,
     /// The floater title text (retitled per [`PickerKind`] on open).
     title_text: Entity,
     /// The search text field.
@@ -340,30 +373,40 @@ enum TreeRow {
 pub struct TexturePickerPlugin;
 
 impl Plugin for TexturePickerPlugin {
-    /// Register the messages, state, floater, and systems.
+    /// Register the messages, the shared thumbnail queue, and the systems.
+    ///
+    /// Nothing spawns at `Startup`: a picker window exists only while a field
+    /// is being picked for, so `handle_open_texture_picker` spawns the instance
+    /// and builds its content.
     fn build(&self, app: &mut App) {
         app.add_message::<OpenTexturePicker>()
             .add_message::<TexturePicked>()
-            .init_resource::<TexturePickerState>()
             .init_resource::<PendingTexturePreviews>()
-            .add_systems(
-                Startup,
-                spawn_texture_picker_floater.after(UiScaffoldSystems::SpawnRoot),
-            )
             .add_systems(
                 Update,
                 (
-                    handle_open_texture_picker,
-                    revert_on_close,
-                    refresh_tree_on_inventory,
-                    watch_search_filter,
-                    rebuild_tree,
-                    paint_tree_selection,
+                    // Before the manager's command pass, so a window still
+                    // exists to read when its close is being carried out.
+                    revert_on_close.before(FloaterSystems::Commands),
+                    // After it, so the raise this open performs is the frame's
+                    // last (see `FloaterSystems`): the swatch press that opens a
+                    // picker also raises the panel the swatch sits in.
+                    handle_open_texture_picker.after(FloaterSystems::Commands),
+                    (
+                        refresh_tree_on_inventory,
+                        watch_search_filter,
+                        rebuild_tree,
+                        paint_tree_selection,
+                        request_preview_texture,
+                        sync_material_preview_pane,
+                        scroll_tree,
+                    )
+                        .chain()
+                        .run_if(any_with_component::<TexturePickerState>),
+                    // Swatch thumbnails are the consumers' business, not a
+                    // window's: they paint whether or not a picker is open.
                     apply_texture_swatch_thumbnail,
-                    request_preview_texture,
-                    sync_material_preview_pane,
                     resolve_texture_previews,
-                    scroll_tree,
                 )
                     .chain(),
             )
@@ -412,17 +455,13 @@ pub fn texture_picker_floater_spec() -> FloaterSpec {
     }
 }
 
-/// Build the shared texture-picker floater (hidden until opened).
-fn spawn_texture_picker_floater(mut commands: Commands, root: Option<Res<UiRoot>>) {
-    let Some(root) = root.map(|root| root.0) else {
-        return;
-    };
-    let handle = spawn_floater(&mut commands, root, texture_picker_floater_spec());
-    // Subject-bound: it opens on whatever swatch requested it, disconnected from
-    // saved app state, so it is exempt from floater persistence.
-    commands
-        .entity(handle.root)
-        .insert(crate::floater_persist::FloaterPersistExempt);
+/// Build one picker window's content into the chrome `handle`, and hang its
+/// state off the window: the search row, the lazy tree, the preview pane, the
+/// quick choices and the reply row.
+///
+/// Called by [`handle_open_texture_picker`] the moment an instance is spawned —
+/// a keyed window exists only because a field is being picked for.
+fn build_picker_content(commands: &mut Commands, handle: FloaterHandle, open: &OpenTexturePicker) {
     commands
         .entity(handle.title_text)
         .insert(Translated::new("texture-picker-title"));
@@ -454,7 +493,7 @@ fn spawn_texture_picker_floater(mut commands: Commands, root: Option<Res<UiRoot>
         ChildOf(search_row),
     ));
     let search = spawn_text_input(
-        &mut commands,
+        commands,
         search_row,
         &TextInputSpec {
             font_size: PICKER_FONT,
@@ -525,20 +564,11 @@ fn spawn_texture_picker_floater(mut commands: Commands, root: Option<Res<UiRoot>
             ChildOf(content),
         ))
         .id();
-    spawn_picker_button(
-        &mut commands,
-        quick,
-        PickerButton::None,
-        "texture-picker-none",
-    );
-    let blank_button = spawn_picker_button(
-        &mut commands,
-        quick,
-        PickerButton::Blank,
-        "texture-picker-blank",
-    );
+    spawn_picker_button(commands, quick, PickerButton::None, "texture-picker-none");
+    let blank_button =
+        spawn_picker_button(commands, quick, PickerButton::Blank, "texture-picker-blank");
     let default_button = spawn_picker_button(
-        &mut commands,
+        commands,
         quick,
         PickerButton::Default,
         "texture-picker-default",
@@ -555,29 +585,36 @@ fn spawn_texture_picker_floater(mut commands: Commands, root: Option<Res<UiRoot>
             ChildOf(content),
         ))
         .id();
+    spawn_picker_button(commands, buttons, PickerButton::Ok, "texture-picker-ok");
     spawn_picker_button(
-        &mut commands,
-        buttons,
-        PickerButton::Ok,
-        "texture-picker-ok",
-    );
-    spawn_picker_button(
-        &mut commands,
+        commands,
         buttons,
         PickerButton::Cancel,
         "texture-picker-cancel",
     );
 
-    commands.insert_resource(TexturePickerUi {
-        panel: handle.root,
-        title_text: handle.title_text,
-        search,
-        tree,
-        preview,
-        count,
-        blank_button,
-        default_button,
-    });
+    commands.entity(handle.root).insert((
+        TexturePickerState {
+            requester: Some(open.requester),
+            kind: open.kind,
+            original: open.current,
+            selected: open.current,
+            filter: String::new(),
+            expanded: HashSet::new(),
+            requested: HashSet::new(),
+            dirty: true,
+            last_rows_sig: 0,
+        },
+        TexturePickerUi {
+            title_text: handle.title_text,
+            search,
+            tree,
+            preview,
+            count,
+            blank_button,
+            default_button,
+        },
+    ));
 }
 
 /// Spawn a picker button, returning its entity.
@@ -627,83 +664,96 @@ fn spawn_picker_button(
 /// contents only when it is opened ([`toggle_folder`]).
 fn handle_open_texture_picker(
     mut opens: MessageReader<OpenTexturePicker>,
-    ui: Option<Res<TexturePickerUi>>,
-    mut state: ResMut<TexturePickerState>,
-    mut panels: Query<&mut UiPanelShown>,
+    mut floaters: KeyedFloaters,
+    mut windows: Query<(&mut TexturePickerState, &TexturePickerUi)>,
     mut nodes: Query<&mut Node>,
     mut commands: Commands,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    let Some(open) = opens.read().last() else {
-        return;
-    };
-    state.requester = Some(open.requester);
-    state.kind = open.kind;
-    state.original = open.current;
-    state.selected = open.current;
-    state.dirty = true;
-    // Retitle for the active kind.
-    let title_key = match open.kind {
-        PickerKind::Texture => "texture-picker-title",
-        PickerKind::Material => "texture-picker-title-material",
-    };
-    if let Ok(mut title) = commands.get_entity(ui.title_text) {
-        title.insert(Translated::new(title_key));
-    }
-    // Blank / Default are texture UUIDs — meaningless as a material, so hidden in
-    // material mode (None still clears).
-    let quick_display = match open.kind {
-        PickerKind::Texture => Display::Flex,
-        PickerKind::Material => Display::None,
-    };
-    for button in [ui.blank_button, ui.default_button] {
-        if let Ok(mut node) = nodes.get_mut(button) {
-            node.display = quick_display;
+    for open in opens.read().copied() {
+        let mut spec = texture_picker_floater_spec();
+        // Retitle for the active kind. Blank / Default are texture UUIDs —
+        // meaningless as a material — so they are hidden in material mode
+        // (None still clears).
+        let title_key = match open.kind {
+            PickerKind::Texture => "texture-picker-title",
+            PickerKind::Material => "texture-picker-title-material",
+        };
+        let quick_display = match open.kind {
+            PickerKind::Texture => Display::Flex,
+            PickerKind::Material => Display::None,
+        };
+        spec.title = String::from(match open.kind {
+            PickerKind::Texture => "Pick: Texture",
+            PickerKind::Material => "Pick: Material",
+        });
+        let opened = floaters.open(spec, FloaterKey::named(open.field));
+        let window = opened.root();
+        if let KeyedFloaterOpen::Spawned(handle) = opened {
+            build_picker_content(&mut commands, handle, &open);
         }
-    }
-    // Clear whatever the pane last showed — a texture thumbnail *or* a material
-    // sphere left from a previous open of the other kind — so it never flashes a
-    // stale preview. The correct preview then repaints for this open: in material
-    // mode [`sync_material_preview_pane`] binds the pane's [`MaterialPreview`]
-    // sphere; in texture mode [`request_preview_texture`] loads the opened-on
-    // texture's thumbnail (a nil / None swatch just stays empty). Without this a
-    // texture-mode open reopened after a material-mode open showed the leftover
-    // sphere until (or unless) a thumbnail decoded over it.
-    if let Ok(mut preview) = commands.get_entity(ui.preview) {
-        preview.remove::<ImageNode>();
-        preview.insert(BackgroundColor(EMPTY_FILL));
-    }
-    if let Ok(mut shown) = panels.get_mut(ui.panel) {
-        shown.0 = true;
+        // Re-point an existing window at this open: the same field can be
+        // picked for again with a different current value, or in the other
+        // kind (a material swatch and a texture swatch never share a field id,
+        // but About Land's snapshot button and a swatch could).
+        let Ok((mut state, ui)) = windows.get_mut(window) else {
+            continue;
+        };
+        state.requester = Some(open.requester);
+        state.kind = open.kind;
+        state.original = open.current;
+        state.selected = open.current;
+        state.dirty = true;
+        if let Ok(mut title) = commands.get_entity(ui.title_text) {
+            title.insert(Translated::new(title_key));
+        }
+        for button in [ui.blank_button, ui.default_button] {
+            if let Ok(mut node) = nodes.get_mut(button) {
+                node.display = quick_display;
+            }
+        }
+        // Clear whatever the pane last showed — a texture thumbnail *or* a
+        // material sphere left from a previous open of the other kind — so it
+        // never flashes a stale preview. The correct preview then repaints for
+        // this open: in material mode [`sync_material_preview_pane`] binds the
+        // pane's [`MaterialPreview`] sphere; in texture mode
+        // [`request_preview_texture`] loads the opened-on texture's thumbnail
+        // (a nil / None swatch just stays empty).
+        if let Ok(mut preview) = commands.get_entity(ui.preview) {
+            preview.remove::<ImageNode>();
+            preview.insert(BackgroundColor(EMPTY_FILL));
+        }
     }
 }
 
-/// If the floater was closed by its **X** (title-bar close) rather than OK /
-/// Cancel — which leaves the requester set and the live preview showing an
-/// uncommitted texture — revert the preview to the opened-on texture and clear
-/// the requester, so closing never leaves the object wrongly textured.
+/// If a picker window is closed by its **X** (title-bar close or `Ctrl+W`)
+/// rather than OK / Cancel — which leaves the requester set and the live
+/// preview showing an uncommitted texture — revert the preview to the
+/// opened-on texture, so closing never leaves the object wrongly textured.
+///
+/// Reads the manager's close **command**, before the pass that carries it out
+/// ([`FloaterSystems::Commands`]) despawns the window: a keyed window ends on
+/// close, so afterwards there is no state left to revert from. OK and Cancel
+/// clear the requester before asking for the close, which is what keeps this
+/// from undoing the choice they just made.
 fn revert_on_close(
-    ui: Option<Res<TexturePickerUi>>,
-    panels: Query<&UiPanelShown>,
-    mut state: ResMut<TexturePickerState>,
+    mut closes: MessageReader<FloaterCommand>,
+    windows: Query<&TexturePickerState>,
     mut picked: MessageWriter<TexturePicked>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    let Some(requester) = state.requester else {
-        return;
-    };
-    let hidden = panels.get(ui.panel).is_ok_and(|shown| !shown.0);
-    if hidden {
-        picked.write(TexturePicked {
-            requester,
-            texture: state.original,
-            final_pick: false,
-        });
-        state.requester = None;
+    for command in closes.read() {
+        if command.op != FloaterOp::Close {
+            continue;
+        }
+        let Ok(state) = windows.get(command.floater) else {
+            continue;
+        };
+        if let Some(requester) = state.requester {
+            picked.write(TexturePicked {
+                requester,
+                texture: state.original,
+                final_pick: false,
+            });
+        }
     }
 }
 
@@ -711,29 +761,32 @@ fn revert_on_close(
 /// lazy fetch lands over several frames).
 fn refresh_tree_on_inventory(
     inventory: Res<InventoryModel>,
-    mut state: ResMut<TexturePickerState>,
+    mut windows: Query<&mut TexturePickerState>,
 ) {
-    if state.requester.is_some() && inventory.is_changed() {
-        state.dirty = true;
+    if !inventory.is_changed() {
+        return;
+    }
+    for mut state in &mut windows {
+        if state.requester.is_some() {
+            state.dirty = true;
+        }
     }
 }
 
 /// Refilter the tree when the search field's text changes.
 fn watch_search_filter(
-    ui: Option<Res<TexturePickerUi>>,
     editors: Query<&EditableText>,
-    mut state: ResMut<TexturePickerState>,
+    mut windows: Query<(&mut TexturePickerState, &TexturePickerUi)>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    let Ok(editor) = editors.get(ui.search) else {
-        return;
-    };
-    let want = editor.value().to_string().to_lowercase();
-    if want != state.filter {
-        state.filter = want;
-        state.dirty = true;
+    for (mut state, ui) in &mut windows {
+        let Ok(editor) = editors.get(ui.search) else {
+            continue;
+        };
+        let want = editor.value().to_string().to_lowercase();
+        if want != state.filter {
+            state.filter = want;
+            state.dirty = true;
+        }
     }
 }
 
@@ -841,48 +894,46 @@ const fn item_matches(inv_type: InventoryType, kind: PickerKind) -> bool {
 /// through to the world and deselect the object). The selection highlight is
 /// painted separately by [`paint_tree_selection`].
 fn rebuild_tree(
-    mut state: ResMut<TexturePickerState>,
-    ui: Option<Res<TexturePickerUi>>,
+    mut windows: Query<(&mut TexturePickerState, &TexturePickerUi)>,
     inventory: Res<InventoryModel>,
     trees: Query<&Children>,
     mut counts: Query<&mut Text>,
     mut commands: Commands,
 ) {
-    if !state.dirty {
-        return;
-    }
-    state.dirty = false;
-    let Some(ui) = ui else {
-        return;
-    };
-    let rows = build_tree_rows(&inventory, &state);
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    rows.hash(&mut hasher);
-    let sig = hasher.finish();
-    if sig == state.last_rows_sig {
-        // Structure unchanged: keep the existing rows (and their valid hover-map
-        // entries); the highlight follows via [`paint_tree_selection`].
-        return;
-    }
-    state.last_rows_sig = sig;
-    if let Ok(children) = trees.get(ui.tree) {
-        for child in children.iter() {
-            commands.entity(child).despawn();
+    for (mut state, ui) in &mut windows {
+        if !state.dirty {
+            continue;
         }
-    }
-    let total = rows.len();
-    let shown = total.min(MAX_ROWS);
-    if let Some(slice) = rows.get(..shown) {
-        for row_data in slice {
-            spawn_tree_row(&mut commands, ui.tree, row_data, state.kind);
+        state.dirty = false;
+        let rows = build_tree_rows(&inventory, &state);
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        rows.hash(&mut hasher);
+        let sig = hasher.finish();
+        if sig == state.last_rows_sig {
+            // Structure unchanged: keep the existing rows (and their valid hover-map
+            // entries); the highlight follows via [`paint_tree_selection`].
+            continue;
         }
-    }
-    if let Ok(mut text) = counts.get_mut(ui.count) {
-        text.0 = if total > shown {
-            format!("{shown} / {total} — refine search")
-        } else {
-            format!("{total}")
-        };
+        state.last_rows_sig = sig;
+        if let Ok(children) = trees.get(ui.tree) {
+            for child in children.iter() {
+                commands.entity(child).despawn();
+            }
+        }
+        let total = rows.len();
+        let shown = total.min(MAX_ROWS);
+        if let Some(slice) = rows.get(..shown) {
+            for row_data in slice {
+                spawn_tree_row(&mut commands, ui.tree, row_data, state.kind);
+            }
+        }
+        if let Ok(mut text) = counts.get_mut(ui.count) {
+            text.0 = if total > shown {
+                format!("{shown} / {total} — refine search")
+            } else {
+                format!("{total}")
+            };
+        }
     }
 }
 
@@ -890,15 +941,21 @@ fn rebuild_tree(
 /// selection change never respawns rows). Only touches a row whose highlight
 /// state actually flips, leaving the hover tint alone.
 fn paint_tree_selection(
-    state: Res<TexturePickerState>,
-    mut rows: Query<(&TreeItemRow, &mut BackgroundColor)>,
+    windows: Query<(&TexturePickerState, &TexturePickerUi)>,
+    parents: Query<&ChildOf>,
+    mut rows: Query<(Entity, &TreeItemRow, &mut BackgroundColor)>,
 ) {
-    for (row, mut background) in &mut rows {
-        let selected = row.0 == state.selected;
-        if selected && background.0 != SELECTED_FILL {
-            background.0 = SELECTED_FILL;
-        } else if !selected && background.0 == SELECTED_FILL {
-            background.0 = Color::NONE;
+    for (state, ui) in &windows {
+        for (row_entity, row, mut background) in &mut rows {
+            if parents.get(row_entity).map(ChildOf::parent) != Ok(ui.tree) {
+                continue;
+            }
+            let selected = row.0 == state.selected;
+            if selected && background.0 != SELECTED_FILL {
+                background.0 = SELECTED_FILL;
+            } else if !selected && background.0 == SELECTED_FILL {
+                background.0 = Color::NONE;
+            }
         }
     }
 }
@@ -1019,7 +1076,9 @@ fn on_row_unhover(out: On<Pointer<Out>>, mut rows: Query<&mut BackgroundColor, W
 fn on_folder_row_press(
     press: On<Pointer<Press>>,
     rows: Query<&TreeFolderRow>,
-    mut state: ResMut<TexturePickerState>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
+    mut windows: Query<&mut TexturePickerState>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     if press.button != PointerButton::Primary {
@@ -1028,6 +1087,15 @@ fn on_folder_row_press(
     let Ok(&TreeFolderRow(folder)) = rows.get(press.entity) else {
         return;
     };
+    // The row belongs to the window it sits in — two open pickers each have
+    // their own tree.
+    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+        return;
+    };
+    let Ok(mut state) = windows.get_mut(window) else {
+        return;
+    };
+
     if state.expanded.contains(&folder) {
         state.expanded.remove(&folder);
     } else {
@@ -1044,13 +1112,23 @@ fn on_folder_row_press(
 fn on_item_row_press(
     press: On<Pointer<Press>>,
     rows: Query<&TreeItemRow>,
-    mut state: ResMut<TexturePickerState>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
+    mut windows: Query<&mut TexturePickerState>,
     mut picked: MessageWriter<TexturePicked>,
 ) {
     if press.button != PointerButton::Primary {
         return;
     }
     let Ok(&TreeItemRow(texture)) = rows.get(press.entity) else {
+        return;
+    };
+    // The row belongs to the window it sits in — two open pickers each have
+    // their own tree.
+    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+        return;
+    };
+    let Ok(mut state) = windows.get_mut(window) else {
         return;
     };
     select_texture(&mut state, texture, &mut picked);
@@ -1078,26 +1156,24 @@ fn select_texture(
 /// Skipped in material mode: a material id is not a texture, so decoding it would
 /// issue a bogus fetch (the preview was cleared on open, pending the sphere task).
 fn request_preview_texture(
-    ui: Option<Res<TexturePickerUi>>,
-    state: Res<TexturePickerState>,
+    windows: Query<(Ref<TexturePickerState>, &TexturePickerUi)>,
     mut boost: MessageWriter<BoostTexture>,
     mut pending: ResMut<PendingTexturePreviews>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    if !state.is_changed() || state.kind == PickerKind::Material {
-        return;
+    for (state, ui) in &windows {
+        if !state.is_changed() || state.kind == PickerKind::Material {
+            continue;
+        }
+        boost.write(BoostTexture {
+            key: state.selected,
+            priority: AVATAR_BOOST_PRIORITY,
+        });
+        pending
+            .waiting
+            .entry(state.selected)
+            .or_default()
+            .push(ui.preview);
     }
-    boost.write(BoostTexture {
-        key: state.selected,
-        priority: AVATAR_BOOST_PRIORITY,
-    });
-    pending
-        .waiting
-        .entry(state.selected)
-        .or_default()
-        .push(ui.preview);
 }
 
 /// Keep the preview pane's [`MaterialPreview`] in step with the picker's selection
@@ -1106,35 +1182,33 @@ fn request_preview_texture(
 /// `LLTextureCtrl` material preview. In texture mode or once the picker is closed
 /// the component is removed, handing the pane back to the texture-preview path.
 fn sync_material_preview_pane(
-    ui: Option<Res<TexturePickerUi>>,
-    state: Res<TexturePickerState>,
+    windows: Query<(Ref<TexturePickerState>, &TexturePickerUi)>,
     mut previews: Query<&mut MaterialPreview>,
     mut commands: Commands,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    if !state.is_changed() {
-        return;
-    }
-    if state.requester.is_none() || state.kind != PickerKind::Material {
-        // Closed, or a texture-mode pick: the pane is not a material preview.
-        if let Ok(mut pane) = commands.get_entity(ui.preview) {
-            pane.remove::<MaterialPreview>();
+    for (state, ui) in &windows {
+        if !state.is_changed() {
+            continue;
         }
-        return;
-    }
-    let want = if state.selected.uuid().is_nil() {
-        MaterialPreview::Empty
-    } else {
-        MaterialPreview::Asset(AssetKey::from(state.selected.uuid()))
-    };
-    if let Ok(mut preview) = previews.get_mut(ui.preview) {
-        if *preview != want {
-            *preview = want;
+        if state.requester.is_none() || state.kind != PickerKind::Material {
+            // Closed, or a texture-mode pick: the pane is not a material preview.
+            if let Ok(mut pane) = commands.get_entity(ui.preview) {
+                pane.remove::<MaterialPreview>();
+            }
+            continue;
         }
-    } else if let Ok(mut pane) = commands.get_entity(ui.preview) {
-        pane.insert(want);
+        let want = if state.selected.uuid().is_nil() {
+            MaterialPreview::Empty
+        } else {
+            MaterialPreview::Asset(AssetKey::from(state.selected.uuid()))
+        };
+        if let Ok(mut preview) = previews.get_mut(ui.preview) {
+            if *preview != want {
+                *preview = want;
+            }
+        } else if let Ok(mut pane) = commands.get_entity(ui.preview) {
+            pane.insert(want);
+        }
     }
 }
 
@@ -1198,38 +1272,37 @@ fn apply_texture_swatch_thumbnail(
 /// Scroll the tree with the wheel while the pointer is over it.
 fn scroll_tree(
     wheel: Res<AccumulatedMouseScroll>,
-    ui: Option<Res<TexturePickerUi>>,
+    windows: Query<&TexturePickerUi>,
     hover: Res<HoverMap>,
     parents: Query<&ChildOf>,
     mut positions: Query<&mut ScrollPosition>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
     if wheel.delta.y.abs() < f32::EPSILON {
         return;
     }
-    let over = hover.values().flat_map(|hits| hits.keys()).any(|hovered| {
-        let mut node = *hovered;
-        loop {
-            if node == ui.tree {
-                return true;
+    for ui in &windows {
+        let over = hover.values().flat_map(|hits| hits.keys()).any(|hovered| {
+            let mut node = *hovered;
+            loop {
+                if node == ui.tree {
+                    return true;
+                }
+                match parents.get(node) {
+                    Ok(parent) => node = parent.parent(),
+                    Err(_root) => return false,
+                }
             }
-            match parents.get(node) {
-                Ok(parent) => node = parent.parent(),
-                Err(_root) => return false,
-            }
+        });
+        if !over {
+            continue;
         }
-    });
-    if !over {
-        return;
-    }
-    let delta = match wheel.unit {
-        MouseScrollUnit::Line => wheel.delta.y * LINE_SCROLL_PIXELS,
-        MouseScrollUnit::Pixel => wheel.delta.y,
-    };
-    if let Ok(mut position) = positions.get_mut(ui.tree) {
-        position.0.y = (position.0.y - delta).max(0.0);
+        let delta = match wheel.unit {
+            MouseScrollUnit::Line => wheel.delta.y * LINE_SCROLL_PIXELS,
+            MouseScrollUnit::Pixel => wheel.delta.y,
+        };
+        if let Ok(mut position) = positions.get_mut(ui.tree) {
+            position.0.y = (position.0.y - delta).max(0.0);
+        }
     }
 }
 
@@ -1237,15 +1310,23 @@ fn scroll_tree(
 fn on_picker_button(
     press: On<Pointer<Press>>,
     buttons: Query<&PickerButton>,
-    ui: Option<Res<TexturePickerUi>>,
-    mut state: ResMut<TexturePickerState>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
+    mut windows: Query<&mut TexturePickerState>,
     mut picked: MessageWriter<TexturePicked>,
-    mut panels: Query<&mut UiPanelShown>,
+    mut closes: MessageWriter<FloaterCommand>,
 ) {
     if press.button != PointerButton::Primary {
         return;
     }
     let Ok(which) = buttons.get(press.entity) else {
+        return;
+    };
+    // OK / Cancel answer for the window the button sits in.
+    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+        return;
+    };
+    let Ok(mut state) = windows.get_mut(window) else {
         return;
     };
     match which {
@@ -1270,7 +1351,7 @@ fn on_picker_button(
                     final_pick: true,
                 });
             }
-            close_picker(&mut state, ui.as_deref(), &mut panels);
+            close_picker(window, &mut state, &mut closes);
         }
         PickerButton::Cancel => {
             // Revert the live preview to the texture the picker opened on.
@@ -1281,23 +1362,27 @@ fn on_picker_button(
                     final_pick: false,
                 });
             }
-            close_picker(&mut state, ui.as_deref(), &mut panels);
+            close_picker(window, &mut state, &mut closes);
         }
     }
 }
 
-/// Close the picker and clear its requester.
+/// Answer done: clear the requester and ask the manager to close the window.
+///
+/// Clearing the requester **first** is what tells [`revert_on_close`] this close
+/// has already been answered, so an OK is not undone by a revert a moment later.
+/// The close itself ends the window (a keyed instance is despawned), so the next
+/// pick of this field builds a fresh one.
 fn close_picker(
+    window: Entity,
     state: &mut TexturePickerState,
-    ui: Option<&TexturePickerUi>,
-    panels: &mut Query<&mut UiPanelShown>,
+    closes: &mut MessageWriter<FloaterCommand>,
 ) {
     state.requester = None;
-    if let Some(ui) = ui
-        && let Ok(mut shown) = panels.get_mut(ui.panel)
-    {
-        shown.0 = false;
-    }
+    closes.write(FloaterCommand {
+        floater: window,
+        op: FloaterOp::Close,
+    });
 }
 
 #[cfg(test)]
@@ -1342,11 +1427,11 @@ mod tests {
         use pretty_assertions::assert_eq;
 
         use super::super::{
-            IMG_BLANK, TexturePickerPlugin, TexturePickerState, TexturePickerUi,
-            spawn_texture_swatch,
+            IMG_BLANK, TexturePickerPlugin, TexturePickerState, spawn_texture_swatch,
         };
+        use crate::floater::Floater;
         use crate::inventory::InventoryModel;
-        use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems};
+        use crate::ui::{UiRoot, UiScaffoldSystems};
         use crate::world_api::{BoostTexture, DecodedTextures, TexturePicked};
         use sl_client_bevy::{SlCommand, TextureKey, Uuid};
         use sl_viewer_testkit::interact::{self, InteractionTest};
@@ -1359,9 +1444,19 @@ mod tests {
         /// The swatch's node name.
         const SWATCH: &str = "test:texture-swatch";
 
+        /// A second swatch, for a **different** field — the case the keying
+        /// exists for.
+        const OTHER_SWATCH: &str = "other:texture-swatch";
+
         /// The texture the swatch (and so the picker) opens on.
         fn opened_on() -> TextureKey {
             TextureKey::from(Uuid::from_u128(0x1234_5678))
+        }
+
+        /// The second swatch's texture, distinct so a window can be told apart
+        /// by what it opened on.
+        fn other_texture() -> TextureKey {
+            TextureKey::from(Uuid::from_u128(0x8765_4321))
         }
 
         /// A swatch and the picker floater under the real pointer stack.
@@ -1379,12 +1474,17 @@ mod tests {
                 .init_resource::<DecodedTextures>()
                 .add_message::<BoostTexture>()
                 .add_message::<SlCommand>()
-                .add_plugins(TexturePickerPlugin);
+                // The manager itself, not a stand-in: a picker window is
+                // spawned, raised and — on OK / Cancel — despawned by it, so
+                // without it the fixture would be testing a window nobody
+                // opens or closes.
+                .add_plugins((crate::floater::FloaterPlugin, TexturePickerPlugin));
             record::<TexturePicked>(&mut app);
             app.add_systems(
                 Startup,
                 (|mut commands: Commands, root: Res<UiRoot>| {
                     spawn_texture_swatch(&mut commands, root.0, "test", 1, opened_on());
+                    spawn_texture_swatch(&mut commands, root.0, "other", 2, other_texture());
                 })
                 .after(UiScaffoldSystems::SpawnRoot),
             );
@@ -1393,10 +1493,21 @@ mod tests {
             app
         }
 
-        /// Whether the picker floater is on screen.
-        fn picker_shown(app: &App) -> Option<bool> {
-            let panel = app.world().get_resource::<TexturePickerUi>()?.panel;
-            app.world().get::<UiPanelShown>(panel).map(|shown| shown.0)
+        /// The open picker window, if there is one.
+        ///
+        /// A picker is a keyed floater now: it exists **because** a field is
+        /// being picked for, and closing it ends the window — so "is it open"
+        /// is "is there a window", not a flag on a permanent one.
+        fn picker_window(app: &mut App) -> Option<Entity> {
+            app.world_mut()
+                .query_filtered::<Entity, With<TexturePickerState>>()
+                .iter(app.world())
+                .next()
+        }
+
+        /// Whether a picker window is open.
+        fn picker_open(app: &mut App) -> bool {
+            picker_window(app).is_some()
         }
 
         /// Clicking the swatch opens the picker on that swatch's texture; a
@@ -1404,20 +1515,19 @@ mod tests {
         #[test]
         fn a_swatch_click_a_quick_choice_and_ok() -> Result<(), TestError> {
             let mut app = picker_app();
-            assert_eq!(picker_shown(&app), Some(false), "it starts closed");
+            assert!(!picker_open(&mut app), "no field is being picked for yet");
 
             interact::click_node(&mut app, SWATCH)?;
             settle(&mut app);
+            let window = picker_window(&mut app).ok_or("the swatch opened no picker")?;
+            let original = app
+                .world()
+                .get::<TexturePickerState>(window)
+                .map(|state| state.original);
             assert_eq!(
-                picker_shown(&app),
-                Some(true),
-                "a click on the swatch opens the picker"
-            );
-            let state = app.world().resource::<TexturePickerState>();
-            assert_eq!(
-                state.original,
-                opened_on(),
-                "and it opens on the swatch's own texture"
+                original,
+                Some(opened_on()),
+                "it opens on the swatch's own texture"
             );
             let _opening = drain::<TexturePicked>(&mut app);
 
@@ -1430,10 +1540,9 @@ mod tests {
                 !preview.final_pick,
                 "choosing previews on the object; it does not commit: {preview:?}"
             );
-            assert_eq!(
-                picker_shown(&app),
-                Some(true),
-                "and leaves the picker open to choose again"
+            assert!(
+                picker_open(&mut app),
+                "choosing leaves the picker open to choose again"
             );
 
             interact::click_node(&mut app, "texture-picker-button:texture-picker-ok")?;
@@ -1444,7 +1553,7 @@ mod tests {
                 .find(|reply| reply.final_pick)
                 .ok_or("OK committed nothing")?;
             assert_eq!(commit.texture, TextureKey::from(IMG_BLANK));
-            assert_eq!(picker_shown(&app), Some(false), "OK closes the picker");
+            assert!(!picker_open(&mut app), "OK closes the picker");
             Ok(())
         }
 
@@ -1471,7 +1580,53 @@ mod tests {
                 "Cancel reverts to the opened-on texture, not to the last choice"
             );
             assert!(!revert.final_pick, "and a revert is not a commit");
-            assert_eq!(picker_shown(&app), Some(false), "Cancel closes it too");
+            assert!(!picker_open(&mut app), "Cancel closes it too");
+            Ok(())
+        }
+
+        /// **Two fields are two windows** (`viewer-keyed-floater-audit`), each
+        /// opened on its own field's texture — picking a normal map must not
+        /// close the diffuse picker you were comparing it against.
+        ///
+        /// And because a field is a *named* instance, each window keeps its own
+        /// remembered geometry (`Floater::persist_id`), which is what the
+        /// scaffold's named half exists for.
+        #[test]
+        fn two_fields_open_two_windows() -> Result<(), TestError> {
+            let mut app = picker_app();
+            interact::click_node(&mut app, SWATCH)?;
+            settle(&mut app);
+            interact::click_node(&mut app, OTHER_SWATCH)?;
+            settle(&mut app);
+
+            let windows: Vec<(Entity, TextureKey)> = app
+                .world_mut()
+                .query::<(Entity, &TexturePickerState)>()
+                .iter(app.world())
+                .map(|(entity, state)| (entity, state.original))
+                .collect();
+            assert_eq!(windows.len(), 2, "the second field reused the first window");
+            let opened: Vec<TextureKey> = windows.iter().map(|(_window, on)| *on).collect();
+            assert!(
+                opened.contains(&opened_on()) && opened.contains(&other_texture()),
+                "each window opens on its own field's texture: {opened:?}"
+            );
+
+            let world = app.world();
+            let mut settings: Vec<String> = windows
+                .iter()
+                .filter_map(|(window, _on)| world.get::<Floater>(*window))
+                .filter_map(Floater::persist_id)
+                .collect();
+            settings.sort();
+            assert_eq!(
+                settings,
+                vec![
+                    "texture-picker_other".to_owned(),
+                    "texture-picker_test".to_owned()
+                ],
+                "each field's window remembers its own geometry"
+            );
             Ok(())
         }
     }

@@ -270,6 +270,16 @@ fn register_floater_settings(
             continue;
         };
         let id = id.as_str();
+        // A **named** keyed instance meets these declarations again every time
+        // its window is re-opened (a keyed window is despawned on close and
+        // spawned afresh), and the same settings id is the whole point — the
+        // field's geometry is remembered across those opens. Asking first keeps
+        // that from logging four "already registered" warnings per open, while
+        // leaving a genuine duplicate (two different windows claiming one id)
+        // to report as before.
+        if settings.store().is_registered(&rect_key(id)) {
+            continue;
+        }
         let geometry = floater.geometry();
         settings.register_hidden_in(
             FLOATER_SECTION,

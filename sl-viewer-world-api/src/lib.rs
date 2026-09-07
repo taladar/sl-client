@@ -1608,6 +1608,15 @@ pub enum PickerKind {
 pub struct OpenTexturePicker {
     /// The swatch (or other widget) the reply is tagged back to.
     pub requester: Entity,
+    /// **Which field** is being picked for — the swatch's element id, or a
+    /// name the opener chooses. The picker opens one window per field (the
+    /// reference gives every `LLTextureCtrl` its own picker), so this is the
+    /// window's identity: two fields are two windows, and each remembers its
+    /// own position and size.
+    ///
+    /// Two swatches declared with the same element id share one window, since
+    /// they are the same field as far as the UI is concerned.
+    pub field: &'static str,
     /// The texture (or, in material mode, material id) to open on.
     pub current: TextureKey,
     /// Whether to browse textures or materials.

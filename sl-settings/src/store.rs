@@ -271,6 +271,20 @@ impl SettingsStore {
             .or_else(|| self.decls.get(name).map(SettingDecl::default))
     }
 
+    /// Whether `name` has already been **declared** (by any of the `register*`
+    /// methods).
+    ///
+    /// Registration is once per setting, and a second attempt is an error — but
+    /// a caller can legitimately meet the same setting twice: a floater that
+    /// opens per subject is spawned afresh each time its window is opened, and
+    /// its geometry keys are the same every time. Such a caller asks first
+    /// rather than registering and swallowing the error, so a real duplicate —
+    /// two different settings claiming one name — still reports.
+    #[must_use]
+    pub fn is_registered(&self, name: &str) -> bool {
+        self.decls.contains_key(name)
+    }
+
     /// Whether any scope currently overrides `name` — an account or global
     /// value is set — as opposed to the setting resolving to its declared
     /// default.

@@ -2590,6 +2590,7 @@ fn on_about_land_action(
         AboutLandAction::PickSnapshot => {
             texture_pickers.write(OpenTexturePicker {
                 requester: press.entity,
+                field: "about-land-snapshot",
                 current: state
                     .draft
                     .snapshot_id
@@ -2600,6 +2601,7 @@ fn on_about_land_action(
         AboutLandAction::PickMediaTexture => {
             texture_pickers.write(OpenTexturePicker {
                 requester: press.entity,
+                field: "about-land-media-texture",
                 current: state
                     .draft
                     .media_id

@@ -58,10 +58,17 @@ spawn instead of `DeferredFloaterContent`.
   [[viewer-new-notecard-unreadable-on-opensim]],
   [[viewer-saved-asset-reopens-stale]] and
   [[viewer-notecard-preview-ignores-unsaved-text]].
-- **Texture picker** (`ui_texture_picker.rs`, `"texture-picker"`) — per field
-  being edited; two open pickers is a real workflow. This is the first likely
-  customer for `FloaterKey::Named`, whose instances *do* keep their own
-  geometry.
+- ~~**Texture picker** (`ui_texture_picker.rs`, `"texture-picker"`)~~ —
+  **done** (2026-09-07), and the scaffold's **named** half's first customer:
+  the window is keyed by the *field* being picked for (a swatch's element id,
+  carried as the new `TextureSwatchField` component and named in
+  `OpenTexturePicker::field`), so each field's window remembers its own
+  position and size under `texture-picker_<field>_rect`. Two swatches sharing
+  an element id share a window, deliberately — they are the same field. Closing
+  ends the window, so `revert_on_close` now reads the manager's close
+  **command** before the pass that carries it out, rather than noticing a
+  hidden panel afterwards; OK / Cancel clear the requester first, which is what
+  keeps that revert from undoing the choice they just made.
 - **About Land** (`about_land.rs`, `"about-land"`) — per parcel.
 - **About Region** (`about_region.rs`) and the **web browser**
   (`web_floater.rs`) — check what the reference does before converting; region

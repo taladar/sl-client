@@ -344,7 +344,8 @@ pub(crate) const FLOATERS: &[FloaterElement] = &[
     FloaterElement {
         id: "texture-picker",
         summary: "Pick: Texture — the inventory swatch grid, the quick-choice row and the \
-                  OK / Cancel reply protocol every texture swatch is written against.",
+                  OK / Cancel reply protocol every texture swatch is written against. One \
+                  window per field, each remembering its own geometry.",
         spec: crate::ui_texture_picker::texture_picker_floater_spec,
         content: FloaterContent::Stub(
             "The inventory swatch grid, the quick-choice row and the OK / Cancel reply row.",
