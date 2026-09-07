@@ -145,11 +145,25 @@ spawn instead of `DeferredFloaterContent`.
     state (`LandSequence`): per-window counters would hand two windows the same
     id, and that id is the only thing saying whose `ParcelProperties` a reply
     is.
-- **About Region** (`about_region.rs`) — per region. The reference keeps both
-  About Land and region info as singletons (`LLFloaterLand` /
-  `LLFloaterRegionInfo` open on *the parcel you are standing on* and *the
-  region you are in*, so there is only ever one
-  subject). We key them anyway, by user decision: this viewer can show a parcel
+- ~~**About Region** (`about_region.rs`)~~ — **done** (2026-09-07), keyed by
+  the region's id (its handle where the grid sent no id). Unlike every other
+  conversion this one had to answer "what happens when the subject moves":
+  every reply this floater reads — `RegionInfo`, the estate `getinfo`, the
+  covenant, the four access lists — is about the region the agent is **in** and
+  names no region of its own, and every write goes out on the current circuit.
+  So a window is **current** while its region is the agent's, and a window the
+  agent has walked out of freezes: it keeps the identity snapshot it had (the
+  update passes read its own snapshot, not the live region), takes no further
+  replies, and loses `can_manage` so it offers nothing to press. Walking back
+  wakes it. `leaving_a_region_freezes_its_window` pins all three.
+- Both **About Land** and **About Region** now put their subject in the **title
+  bar** — the parcel's name, the region's name — the way the avatar profile
+  does. Two windows of a kind were identical strips otherwise; without it the
+  keying is invisible to the person using it.
+- The reference keeps both About Land and region info as singletons
+  (`LLFloaterLand` / `LLFloaterRegionInfo` open on *the parcel you are standing
+  on* and *the region you are in*, so there is only ever one subject). We key
+  them anyway, by user decision: this viewer can show a parcel
   or region it is not standing in — from a landmark, a search hit, a place
   profile — and comparing two parcels' covenants or two regions' settings is a
   real thing to want. That is a deliberate divergence from the reference, and

@@ -6,16 +6,32 @@
 //! **Experiences** tabs (their write paths — `ExtEnvironment` PUT and the
 //! experience service — are their own roadmap items).
 //!
-//! # Bound to the current region
+//! # One window per region
 //!
-//! The floater always describes the region the agent is standing in. Like the
-//! avatar / group profiles and About Land it is exempt from floater persistence
-//! ([`crate::floater_persist::FloaterPersistExempt`]): its "subject" is wherever
-//! the agent is, so a restored rectangle / open state would be meaningless.
+//! The floater opens on the region the agent is standing in, and that region is
+//! its **subject** from then on: the window is keyed by the region's id, so
+//! crossing into a new region and opening Region / Estate again gives a second
+//! window rather than repointing the first. Everything a window knows lives on
+//! its root entity as components, and closing it ends that instance.
+//!
+//! The reference keeps `LLFloaterRegionInfo` a singleton, because it only ever
+//! describes where you are. Keying it is a deliberate divergence, recorded in
+//! `viewer-keyed-floater-audit`: comparing two regions' settings, or reading a
+//! covenant after stepping across the border, is a real thing to want.
+//!
+//! **A window for a region the agent has left is frozen and read-only.** Every
+//! reply this floater reads — `RegionInfo`, the estate `getinfo`, the covenant,
+//! the access lists — is about the *current* region and names no region of its
+//! own, and every write goes out on the current circuit. So a window whose
+//! region is no longer current keeps the last snapshot it had, takes no further
+//! replies, and hides its write controls: showing one region's settings while a
+//! save would land on another is the one outcome worth ruling out. Walking back
+//! into the region wakes it again.
 //!
 //! # Build once, update in place (no despawn)
 //!
-//! Every tab's structure is spawned **once** at start-up and never torn down.
+//! Every tab's structure is spawned **once**, when the window opens, and never
+//! torn down while it lives.
 //! Replies update values *in place*: value labels via `set_value_node`,
 //! checkbox glyphs via `set_check_visual`, the maturity combo by writing its
 //! [`ComboSelection`](crate::ui_combo), edit fields by seeding
@@ -50,17 +66,18 @@ use bevy::ui::InteractionDisabled;
 use sl_client_bevy::{
     AgentKey, Asset, AssetKey, AssetType, Command, EstateAccessDelta, EstateAccessKind,
     EstateCovenant, EstateFlags, EstateInfo, EstateInfoUpdate, GroupKey, Maturity, OwnerKey,
-    ProductType, RegionDebugUpdate, RegionFlags, RegionInfoUpdate, RegionTerrainUpdate, SlCommand,
-    SlCurrentRegion, SlEvent, SlRegionIdentity, SlRegionLimits, SlSessionEvent, TextureKey, Uuid,
+    ProductType, RegionDebugUpdate, RegionFlags, RegionIdentity, RegionInfoUpdate, RegionName,
+    RegionTerrainUpdate, SlCommand, SlCurrentRegion, SlEvent, SlRegionIdentity, SlRegionLimits,
+    SlSessionEvent, TextureKey, Uuid,
 };
 
 use crate::floater::{
-    DeferredFloaterContent, Floater, FloaterCaps, FloaterHandle, FloaterSpec, floater_panel,
-    spawn_floater,
+    Floater, FloaterCaps, FloaterHandle, FloaterKey, FloaterSpec, FloaterSystems, KeyedFloaterOpen,
+    KeyedFloaters, host_floater,
 };
 use crate::i18n::{Translated, Translator};
 use crate::inventory_properties::format_unix_date;
-use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use crate::ui::{column, row};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
 use crate::ui_name_link::{NameLink, NameLinkSpec, NameTarget, set_name_link, spawn_name_link};
@@ -200,18 +217,34 @@ pub struct OpenAboutRegion;
 // State.
 // ---------------------------------------------------------------------------
 
-/// The floater's data model.
-#[derive(Resource, Debug, Default)]
+/// One window's data model — **one per region** (see the module header), on the
+/// window's root entity.
+#[derive(Component, Debug, Default)]
 #[expect(
     clippy::struct_excessive_bools,
     reason = "each bool is a distinct floater flag (requested / seeded / manage rights)"
 )]
 struct AboutRegionState {
-    /// Whether the floater has been opened at least once (gates event ingest so
-    /// stray estate replies are not folded before the first open).
-    requested: bool,
-    /// Whether the agent may manage the estate (owner or manager); gates editing.
+    /// The region this window is about — its subject, fixed at open.
+    region: Uuid,
+    /// The region record this window last saw, kept as a **snapshot**: a window
+    /// whose region the agent has left goes on showing what it had rather than
+    /// the region the agent walked into.
+    identity: Option<RegionIdentity>,
+    /// Whether [`region`](Self::region) is still the region the agent is in.
+    /// A window that is not takes no replies and offers no writes — see the
+    /// module header.
+    is_current: bool,
+    /// Whether the agent may manage the estate (owner or manager) **and** this
+    /// window is current; gates editing.
     can_manage: bool,
+    /// Which picker tag this window has a resident pick outstanding for.
+    ///
+    /// The avatar picker echoes a `&'static str` rather than an entity, so a
+    /// pick cannot name its window. It does not have to: the picker is one
+    /// window per tag, so at most one Region / Estate window can be waiting on
+    /// a tag, and this is that window's claim on it.
+    pending_pick: Option<&'static str>,
     /// The editable region-settings draft, seeded from the live region.
     draft: RegionInfoUpdate,
     /// The editable region-debug draft (disable scripts / collisions / physics).
@@ -278,8 +311,9 @@ impl AboutRegionState {
     }
 }
 
-/// The per-tab dirty flags: a value refresh runs only when its data changed.
-#[derive(Resource, Debug, Default)]
+/// One window's per-tab dirty flags: a value refresh runs only when its data
+/// changed.
+#[derive(Component, Debug, Default)]
 #[expect(
     clippy::struct_excessive_bools,
     reason = "one independent dirty flag per tab / refresh pass"
@@ -324,7 +358,7 @@ struct AccessRowData {
 }
 
 /// The estate-managers list view model.
-#[derive(Resource, Debug, Default)]
+#[derive(Component, Debug, Default)]
 struct ManagersView {
     /// The resolved rows.
     rows: Vec<AccessRowData>,
@@ -333,7 +367,7 @@ struct ManagersView {
 }
 
 /// The allowed-residents list view model.
-#[derive(Resource, Debug, Default)]
+#[derive(Component, Debug, Default)]
 struct AllowedView {
     /// The resolved rows.
     rows: Vec<AccessRowData>,
@@ -342,7 +376,7 @@ struct AllowedView {
 }
 
 /// The allowed-groups list view model.
-#[derive(Resource, Debug, Default)]
+#[derive(Component, Debug, Default)]
 struct AllowedGroupsView {
     /// The resolved rows.
     rows: Vec<AccessRowData>,
@@ -351,7 +385,7 @@ struct AllowedGroupsView {
 }
 
 /// The banned-residents list view model.
-#[derive(Resource, Debug, Default)]
+#[derive(Component, Debug, Default)]
 struct BannedView {
     /// The resolved rows.
     rows: Vec<AccessRowData>,
@@ -467,9 +501,12 @@ struct AccessHandles {
     banned_table: Option<Entity>,
 }
 
-/// The floater's live entity handles.
-#[derive(Resource, Debug)]
+/// One window's live entity handles.
+#[derive(Component, Debug)]
 struct AboutRegionUi {
+    /// The floater's title text node — rewritten with the region's name, so two
+    /// windows are tellable apart in the title bar and the window list.
+    title_text: Entity,
     /// The Region tab's handles.
     region: RegionHandles,
     /// The Debug tab's handles.
@@ -723,21 +760,19 @@ pub struct AboutRegionPlugin;
 
 impl Plugin for AboutRegionPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<AboutRegionState>()
-            .init_resource::<AboutRegionDirty>()
-            .init_resource::<ManagersView>()
-            .init_resource::<AllowedView>()
-            .init_resource::<AllowedGroupsView>()
-            .init_resource::<BannedView>()
-            .add_message::<OpenAboutRegion>()
+        app.add_message::<OpenAboutRegion>()
             .add_systems(
-                Startup,
-                spawn_about_region_floater.after(UiScaffoldSystems::SpawnRoot),
+                Update,
+                // After the manager's command pass — see `FloaterSystems`: the
+                // menu click that opens this window also raises the window it
+                // was clicked in, and the later raise wins.
+                open_about_region
+                    .after(FloaterSystems::Commands)
+                    .before(layout_virtual_lists),
             )
             .add_systems(
                 Update,
                 (
-                    open_about_region,
                     ingest_about_region_events,
                     refresh_on_region,
                     refresh_on_names,
@@ -757,13 +792,16 @@ impl Plugin for AboutRegionPlugin {
                     apply_texture_edits,
                 )
                     .chain()
-                    .before(layout_virtual_lists),
+                    .after(open_about_region)
+                    .before(layout_virtual_lists)
+                    .run_if(any_with_component::<AboutRegionState>),
             )
             .add_systems(
                 Update,
                 (populate_access_rows, bind_access_rows)
                     .chain()
-                    .after(layout_virtual_lists),
+                    .after(layout_virtual_lists)
+                    .run_if(any_with_component::<AboutRegionState>),
             );
     }
 }
@@ -796,27 +834,13 @@ pub fn about_region_floater_spec() -> FloaterSpec {
     }
 }
 
-/// Spawn the (hidden) Region / Estate floater's chrome; every tab is built
-/// once, on the first open ([`DeferredFloaterContent`]).
-fn spawn_about_region_floater(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = spawn_floater(&mut commands, root.0, about_region_floater_spec());
-    commands
-        .entity(handle.root)
-        .insert(crate::floater_persist::FloaterPersistExempt);
-    commands
-        .entity(handle.title_text)
-        .insert(Translated::new("about-region-title"));
-    let builder = commands.register_system(build_about_region_content);
-    commands
-        .entity(handle.root)
-        .insert(DeferredFloaterContent { builder, handle });
-}
-
-/// First-open content build (see [`spawn_about_region_floater`]): the tab
-/// container and every tab, ending with the [`AboutRegionUi`] insert whose
-/// appearance wakes the `Option<Res<AboutRegionUi>>` populate systems (their
-/// [`AboutRegionDirty`] flags persist until then).
-fn build_about_region_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
+/// Build one window's content: the tab container and every tab, returning the
+/// handles the update passes write through.
+///
+/// Called once per window, as it is spawned — a keyed instance's content is
+/// built into the window it belongs to, not deferred to a first open that no
+/// longer exists ([`KeyedFloaters`]).
+fn build_region_content(commands: &mut Commands, handle: FloaterHandle) -> AboutRegionUi {
     let labels: Vec<String> = [
         "about-region-tab-region",
         "about-region-tab-debug",
@@ -831,7 +855,7 @@ fn build_about_region_content(In(handle): In<FloaterHandle>, mut commands: Comma
     .map(str::to_owned)
     .collect();
     let tabs: TabContainerHandle = spawn_tab_container(
-        &mut commands,
+        commands,
         handle.content,
         &TabSpec {
             element: "about-region-tabs",
@@ -845,30 +869,27 @@ fn build_about_region_content(In(handle): In<FloaterHandle>, mut commands: Comma
             translate_labels: true,
         },
     );
-    fill_tab_container(&mut commands, TabPlacement::BlockStart, &tabs);
+    fill_tab_container(commands, TabPlacement::BlockStart, &tabs);
     let panel = |index: usize| tabs.panels.get(index).copied().unwrap_or(handle.content);
 
-    let region = build_region_tab(&mut commands, panel(0));
-    let debug = build_debug_tab(&mut commands, panel(1));
-    let terrain = build_terrain_tab(&mut commands, panel(2));
-    let estate = build_estate_tab(&mut commands, panel(3));
-    let covenant = build_covenant_tab(&mut commands, panel(4));
-    let access = build_access_tab(&mut commands, panel(5));
-    build_placeholder_tab(&mut commands, panel(6), "about-region-env-unimplemented");
-    build_placeholder_tab(
-        &mut commands,
-        panel(7),
-        "about-region-experiences-unimplemented",
-    );
+    let region = build_region_tab(commands, panel(0));
+    let debug = build_debug_tab(commands, panel(1));
+    let terrain = build_terrain_tab(commands, panel(2));
+    let estate = build_estate_tab(commands, panel(3));
+    let covenant = build_covenant_tab(commands, panel(4));
+    let access = build_access_tab(commands, panel(5));
+    build_placeholder_tab(commands, panel(6), "about-region-env-unimplemented");
+    build_placeholder_tab(commands, panel(7), "about-region-experiences-unimplemented");
 
-    commands.insert_resource(AboutRegionUi {
+    AboutRegionUi {
+        title_text: handle.title_text,
         region,
         debug,
         terrain,
         estate,
         covenant,
         access,
-    });
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1325,34 +1346,86 @@ fn spawn_bounded_table(
 // Open.
 // ---------------------------------------------------------------------------
 
-/// Open the floater and request fresh region / estate data.
+/// The [`FloaterKey`] of the window describing the region `identity`.
+///
+/// The region's own id where the grid sent one, and its handle otherwise (an
+/// OpenSim region can answer a handshake before its `RegionInfo2` block is
+/// known) — either way, two regions are two subjects.
+fn region_key(identity: &RegionIdentity) -> FloaterKey {
+    if identity.region_id.is_nil() {
+        FloaterKey::subject(&format!("handle/{}", identity.region_handle.get()))
+    } else {
+        FloaterKey::subject(&identity.region_id)
+    }
+}
+
+/// Open a window on the region the agent is in — that region's window if it is
+/// already up — and request fresh region / estate data.
 fn open_about_region(
     mut requests: MessageReader<OpenAboutRegion>,
-    mut state: ResMut<AboutRegionState>,
-    mut dirty: ResMut<AboutRegionDirty>,
-    floaters: Query<(Entity, &Floater)>,
-    mut panels: Query<&mut UiPanelShown>,
+    mut windows: KeyedFloaters,
+    mut regions_state: Query<(&mut AboutRegionState, &mut AboutRegionDirty)>,
+    regions: Query<&SlRegionIdentity, With<SlCurrentRegion>>,
+    mut spawner: Commands,
     mut commands: MessageWriter<SlCommand>,
 ) {
     if requests.read().last().is_none() {
         return;
     }
-    state.requested = true;
-    // Force a reseed of the drafts from the (refreshed) region / estate data.
-    state.draft_seeded = false;
-    state.estate_seeded = false;
-    state.clear_access();
+    let Some(identity) = regions.iter().next().map(|region| region.0.clone()) else {
+        // Nothing to open *on*: this floater's every reply is about the region
+        // the agent is in, and there is no such region yet.
+        warn!("About Region asked for with no current region");
+        return;
+    };
+    let opened = windows.open(about_region_floater_spec(), region_key(&identity));
+    // A fresh open re-asks the grid, whether the window is new or was already
+    // up: the estate data is a snapshot, and re-opening is how a resident asks
+    // for a newer one.
     commands.write(SlCommand(Command::RequestRegionInfo));
     commands.write(SlCommand(Command::RequestEstateInfo));
     commands.write(SlCommand(Command::RequestEstateCovenant));
-    dirty.mark_all();
-    // By stable id, not `AboutRegionUi` — this very open may be the first,
-    // which is what triggers the deferred content build.
-    if let Some(panel) = floater_panel(&floaters, ABOUT_REGION_FLOATER_ID)
-        && let Ok(mut shown) = panels.get_mut(panel)
-    {
-        shown.0 = true;
+    match opened {
+        KeyedFloaterOpen::Spawned(handle) => {
+            let ui = build_region_content(&mut spawner, handle);
+            spawner
+                .entity(handle.title_text)
+                .insert(Translated::new("about-region-title"));
+            // Seeded here rather than after the insert: the components only
+            // reach the world when this frame's commands flush, so a window
+            // spawned now is not queryable yet.
+            let mut state = AboutRegionState {
+                region: identity.region_id,
+                is_current: true,
+                ..AboutRegionState::default()
+            };
+            let mut dirty = AboutRegionDirty::default();
+            restart_region_open(&mut state, &mut dirty);
+            spawner.entity(handle.root).insert((
+                state,
+                dirty,
+                ManagersView::default(),
+                AllowedView::default(),
+                AllowedGroupsView::default(),
+                BannedView::default(),
+                ui,
+            ));
+        }
+        KeyedFloaterOpen::Existing(window) => {
+            if let Ok((mut state, mut dirty)) = regions_state.get_mut(window) {
+                restart_region_open(&mut state, &mut dirty);
+            }
+        }
     }
+}
+
+/// Reset a window's drafts and access lists for a fresh open, so the replies
+/// the open asks for reseed everything.
+fn restart_region_open(state: &mut AboutRegionState, dirty: &mut AboutRegionDirty) {
+    state.draft_seeded = false;
+    state.estate_seeded = false;
+    state.clear_access();
+    dirty.mark_all();
 }
 
 // ---------------------------------------------------------------------------
@@ -1360,59 +1433,71 @@ fn open_about_region(
 // ---------------------------------------------------------------------------
 
 /// Fold estate info / covenant / access-list / covenant-asset replies into state.
+/// Fold estate info / covenant / access-list / covenant-asset replies into the
+/// window whose region the agent is in.
+///
+/// Only that window: every reply here is about the current region and names no
+/// region of its own, so a window the agent has walked out of keeps the
+/// snapshot it had (see the module header).
 fn ingest_about_region_events(
     mut events: MessageReader<SlEvent>,
-    mut state: ResMut<AboutRegionState>,
-    mut dirty: ResMut<AboutRegionDirty>,
+    mut windows: Query<(&mut AboutRegionState, &mut AboutRegionDirty)>,
     mut commands: MessageWriter<SlCommand>,
 ) {
-    if !state.requested {
-        events.clear();
+    let frame: Vec<&SlEvent> = events.read().collect();
+    if frame.is_empty() {
         return;
     }
-    for event in events.read() {
-        match &event.0 {
-            SlSessionEvent::EstateInfo(info) => {
-                if !info.estate_owner.is_nil() {
-                    request_name(AgentKey::from(info.estate_owner), &mut commands);
+    for (mut state, mut dirty) in &mut windows {
+        if !state.is_current {
+            continue;
+        }
+        for event in &frame {
+            match &event.0 {
+                SlSessionEvent::EstateInfo(info) => {
+                    if !info.estate_owner.is_nil() {
+                        request_name(AgentKey::from(info.estate_owner), &mut commands);
+                    }
+                    // Seed the estate-flags draft from the estate's current flags on
+                    // the first reply after an open, preserving bits the UI omits.
+                    if !state.estate_seeded {
+                        state.estate_draft = EstateFlags::from_bits(info.estate_flags);
+                        state.estate_seeded = true;
+                        dirty.controls = true;
+                    }
+                    state.estate = Some((**info).clone());
+                    dirty.estate_values = true;
                 }
-                // Seed the estate-flags draft from the estate's current flags on
-                // the first reply after an open, preserving bits the UI omits.
-                if !state.estate_seeded {
-                    state.estate_draft = EstateFlags::from_bits(info.estate_flags);
-                    state.estate_seeded = true;
-                    dirty.controls = true;
+                SlSessionEvent::EstateCovenant(covenant) => {
+                    if let Some(id) = covenant.covenant_id {
+                        state.covenant_pending = Some(id);
+                        commands.write(SlCommand(Command::FetchAsset {
+                            asset_id: AssetKey::from(id),
+                            asset_type: AssetType::Notecard,
+                            byte_range: None,
+                        }));
+                    } else {
+                        state.covenant_text = None;
+                        state.covenant_pending = None;
+                    }
+                    if !covenant.estate_owner_id.is_nil() {
+                        request_name(AgentKey::from(covenant.estate_owner_id), &mut commands);
+                    }
+                    state.covenant = Some(covenant.clone());
+                    dirty.covenant_values = true;
                 }
-                state.estate = Some((**info).clone());
-                dirty.estate_values = true;
-            }
-            SlSessionEvent::EstateCovenant(covenant) => {
-                if let Some(id) = covenant.covenant_id {
-                    state.covenant_pending = Some(id);
-                    commands.write(SlCommand(Command::FetchAsset {
-                        asset_id: AssetKey::from(id),
-                        asset_type: AssetType::Notecard,
-                        byte_range: None,
-                    }));
-                } else {
-                    state.covenant_text = None;
+                SlSessionEvent::EstateAccessList { kind, members, .. } => {
+                    ingest_access_list(&mut state, *kind, members, &mut commands);
+                }
+                SlSessionEvent::AssetReceived(asset)
+                    if state.covenant_pending == Some(asset.id) =>
+                {
                     state.covenant_pending = None;
+                    state.covenant_text = Some(decode_covenant(asset));
+                    dirty.covenant_values = true;
                 }
-                if !covenant.estate_owner_id.is_nil() {
-                    request_name(AgentKey::from(covenant.estate_owner_id), &mut commands);
-                }
-                state.covenant = Some(covenant.clone());
-                dirty.covenant_values = true;
+                _other => {}
             }
-            SlSessionEvent::EstateAccessList { kind, members, .. } => {
-                ingest_access_list(&mut state, *kind, members, &mut commands);
-            }
-            SlSessionEvent::AssetReceived(asset) if state.covenant_pending == Some(asset.id) => {
-                state.covenant_pending = None;
-                state.covenant_text = Some(decode_covenant(asset));
-                dirty.covenant_values = true;
-            }
-            _other => {}
         }
     }
 }
@@ -1474,36 +1559,58 @@ fn request_name(agent: AgentKey, commands: &mut MessageWriter<SlCommand>) {
 // Region-change refresh + draft seeding.
 // ---------------------------------------------------------------------------
 
-/// Reseed the draft and mark the display tabs dirty when the live region data
-/// changes (a `RegionHandshake`, a `RegionInfo` reply, or a teleport), or when a
-/// fresh open cleared [`AboutRegionState::draft_seeded`].
+/// Keep each window's snapshot, rights and drafts in step with the region it is
+/// about — and freeze the ones the agent has left.
+///
+/// A window is **current** while its region is the one the agent is in. That
+/// window takes the live record (a `RegionHandshake`, a `RegionInfo` reply, a
+/// teleport) and reseeds its drafts from it; every other window keeps the last
+/// snapshot it had and loses its write rights, because every write this floater
+/// makes goes out on the current circuit and would land on the wrong region.
 #[expect(
     clippy::type_complexity,
     reason = "the region query needs the identity plus the optional limits with change detection"
 )]
 fn refresh_on_region(
-    mut state: ResMut<AboutRegionState>,
-    mut dirty: ResMut<AboutRegionDirty>,
+    mut windows: Query<(&mut AboutRegionState, &mut AboutRegionDirty)>,
     regions: Query<(Ref<SlRegionIdentity>, Option<Ref<SlRegionLimits>>), With<SlCurrentRegion>>,
     mut commands: MessageWriter<SlCommand>,
 ) {
-    let Some((identity, limits)) = regions.iter().next() else {
-        return;
-    };
-    let changed =
-        identity.is_changed() || limits.as_ref().is_some_and(|limits| limits.is_changed());
-    if !changed && state.draft_seeded {
-        return;
+    let current = regions.iter().next();
+    let current_region = current
+        .as_ref()
+        .map(|(identity, _limits)| identity.0.region_id);
+    for (mut state, mut dirty) in &mut windows {
+        let is_current = current_region == Some(state.region);
+        if state.is_current != is_current {
+            state.is_current = is_current;
+            if !is_current {
+                state.can_manage = false;
+            }
+            dirty.mark_all();
+        }
+        if !is_current {
+            continue;
+        }
+        let Some((identity, limits)) = current.as_ref() else {
+            continue;
+        };
+        let changed =
+            identity.is_changed() || limits.as_ref().is_some_and(|limits| limits.is_changed());
+        if !changed && state.draft_seeded {
+            continue;
+        }
+        state.identity = Some(identity.0.clone());
+        state.can_manage = identity.0.is_estate_manager;
+        state.draft = seed_draft(identity, limits.as_deref());
+        state.debug_draft = seed_debug_draft(identity, limits.as_deref());
+        state.terrain_draft = seed_terrain_draft(identity, limits.as_deref());
+        state.draft_seeded = true;
+        if !identity.0.sim_owner.is_nil() {
+            request_name(AgentKey::from(identity.0.sim_owner), &mut commands);
+        }
+        dirty.mark_all();
     }
-    state.can_manage = identity.0.is_estate_manager;
-    state.draft = seed_draft(&identity, limits.as_deref());
-    state.debug_draft = seed_debug_draft(&identity, limits.as_deref());
-    state.terrain_draft = seed_terrain_draft(&identity, limits.as_deref());
-    state.draft_seeded = true;
-    if !identity.0.sim_owner.is_nil() {
-        request_name(AgentKey::from(identity.0.sim_owner), &mut commands);
-    }
-    dirty.mark_all();
 }
 
 /// The region flags to seed a draft from, newest source first.
@@ -1594,12 +1701,17 @@ fn seed_terrain_draft(
 
 /// Mark the estate / covenant values dirty when a name cache changes (so a newly
 /// resolved owner / manager name lands in place).
+/// Mark each window's estate / covenant values dirty when a name cache changes
+/// (so a newly resolved owner / manager name lands in place).
 fn refresh_on_names(
     avatars: Res<AvatarState>,
     groups: Res<GroupsModel>,
-    mut dirty: ResMut<AboutRegionDirty>,
+    mut windows: Query<&mut AboutRegionDirty>,
 ) {
-    if avatars.is_changed() || groups.is_changed() {
+    if !avatars.is_changed() && !groups.is_changed() {
+        return;
+    }
+    for mut dirty in &mut windows {
         dirty.region_values = true;
         dirty.estate_values = true;
         dirty.covenant_values = true;
@@ -1612,76 +1724,75 @@ fn refresh_on_names(
 
 /// Seed the region and terrain edit fields, the maturity combo, and the terrain
 /// texture-swatch labels from the drafts on a fresh region.
+/// Seed each window's region and terrain edit fields, maturity combo and
+/// terrain texture-swatch labels from its drafts.
 fn seed_edit_fields(
-    mut dirty: ResMut<AboutRegionDirty>,
-    ui: Option<Res<AboutRegionUi>>,
-    state: Res<AboutRegionState>,
+    mut windows: Query<(&mut AboutRegionDirty, &AboutRegionUi, &AboutRegionState)>,
     mut fields: Query<&mut EditableText>,
     mut combos: Query<&mut ComboSelection>,
     mut swatches: Query<&mut TextureSwatchValue>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    if !dirty.seed_fields {
-        return;
-    }
-    dirty.seed_fields = false;
-    set_field_text(
-        &mut fields,
-        ui.region.agent_limit_field,
-        &state.draft.agent_limit.to_string(),
-    );
-    set_field_text(
-        &mut fields,
-        ui.region.object_bonus_field,
-        &format!("{:.2}", state.draft.object_bonus),
-    );
-    set_combo(
-        &mut combos,
-        ui.region.maturity_combo,
-        maturity_index(state.draft.maturity),
-    );
-    // Terrain fields + swatch labels.
-    let terrain = &state.terrain_draft;
-    set_field_text(
-        &mut fields,
-        ui.terrain.water_field,
-        &format!("{:.2}", terrain.water_height),
-    );
-    set_field_text(
-        &mut fields,
-        ui.terrain.raise_field,
-        &format!("{:.2}", terrain.terrain_raise_limit),
-    );
-    set_field_text(
-        &mut fields,
-        ui.terrain.lower_field,
-        &format!("{:.2}", terrain.terrain_lower_limit),
-    );
-    for (slot, start) in ui
-        .terrain
-        .start_fields
-        .iter()
-        .zip(terrain.start_heights.iter())
-    {
-        set_field_text(&mut fields, *slot, &format!("{start:.2}"));
-    }
-    for (slot, range) in ui
-        .terrain
-        .range_fields
-        .iter()
-        .zip(terrain.height_ranges.iter())
-    {
-        set_field_text(&mut fields, *slot, &format!("{range:.2}"));
-    }
-    for (node, texture) in ui
-        .terrain
-        .textures
-        .iter()
-        .zip(terrain.detail_textures.iter())
-    {
-        set_swatch(&mut swatches, *node, *texture);
+    for (mut dirty, ui, state) in &mut windows {
+        if !dirty.seed_fields {
+            continue;
+        }
+        dirty.seed_fields = false;
+        set_field_text(
+            &mut fields,
+            ui.region.agent_limit_field,
+            &state.draft.agent_limit.to_string(),
+        );
+        set_field_text(
+            &mut fields,
+            ui.region.object_bonus_field,
+            &format!("{:.2}", state.draft.object_bonus),
+        );
+        set_combo(
+            &mut combos,
+            ui.region.maturity_combo,
+            maturity_index(state.draft.maturity),
+        );
+        // Terrain fields + swatch labels.
+        let terrain = &state.terrain_draft;
+        set_field_text(
+            &mut fields,
+            ui.terrain.water_field,
+            &format!("{:.2}", terrain.water_height),
+        );
+        set_field_text(
+            &mut fields,
+            ui.terrain.raise_field,
+            &format!("{:.2}", terrain.terrain_raise_limit),
+        );
+        set_field_text(
+            &mut fields,
+            ui.terrain.lower_field,
+            &format!("{:.2}", terrain.terrain_lower_limit),
+        );
+        for (slot, start) in ui
+            .terrain
+            .start_fields
+            .iter()
+            .zip(terrain.start_heights.iter())
+        {
+            set_field_text(&mut fields, *slot, &format!("{start:.2}"));
+        }
+        for (slot, range) in ui
+            .terrain
+            .range_fields
+            .iter()
+            .zip(terrain.height_ranges.iter())
+        {
+            set_field_text(&mut fields, *slot, &format!("{range:.2}"));
+        }
+        for (node, texture) in ui
+            .terrain
+            .textures
+            .iter()
+            .zip(terrain.detail_textures.iter())
+        {
+            set_swatch(&mut swatches, *node, *texture);
+        }
     }
 }
 
@@ -1701,40 +1812,65 @@ fn set_swatch(swatches: &mut Query<&mut TextureSwatchValue>, node: Option<Entity
 // Control enable.
 // ---------------------------------------------------------------------------
 
-/// Toggle write buttons' visibility and every editable control's
-/// [`InteractionDisabled`] to follow the agent's estate rights, and repaint the
-/// checkbox glyphs.
+/// Toggle each window's write buttons' visibility and every editable control's
+/// [`InteractionDisabled`] to follow the agent's estate rights **in that
+/// window's region**, and repaint its checkbox glyphs.
+///
+/// The controls are found by walking up from each one to the window it lives in
+/// ([`host_floater`]): two windows can disagree — one on the region the agent
+/// manages and is standing in, one frozen on the region behind them — and a
+/// sweep would give both the last window's answer.
 #[expect(
     clippy::too_many_arguments,
-    reason = "reconciling control enable needs the write buttons, gated controls, disabled set, \
-              checks, and text query together"
+    reason = "reconciling control enable needs every window, the write buttons, gated controls, \
+              disabled set, checks, the ancestry walk, and the text query together"
 )]
 fn update_control_enable(
-    mut dirty: ResMut<AboutRegionDirty>,
-    state: Res<AboutRegionState>,
-    mut write_buttons: Query<&mut Visibility, With<WriteButton>>,
+    mut windows: Query<(Entity, &mut AboutRegionDirty, &AboutRegionState)>,
+    mut write_buttons: Query<(Entity, &mut Visibility), With<WriteButton>>,
     gated: Query<Entity, With<EditGate>>,
     disabled: Query<(), With<InteractionDisabled>>,
-    checks: Query<&AboutRegionCheck>,
+    checks: Query<(Entity, &AboutRegionCheck)>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
     mut commands: Commands,
 ) {
-    if !dirty.controls {
+    // The windows repainting this frame, and what each one allows.
+    let mut repainting: Vec<(Entity, bool)> = Vec::new();
+    for (window, mut dirty, state) in &mut windows {
+        if !dirty.controls {
+            continue;
+        }
+        dirty.controls = false;
+        repainting.push((window, state.can_manage));
+    }
+    if repainting.is_empty() {
         return;
     }
-    dirty.controls = false;
-    let can_manage = state.can_manage;
-    let button_vis = if can_manage {
-        Visibility::Inherited
-    } else {
-        Visibility::Hidden
+    let can_manage = |entity: Entity| {
+        let host = host_floater(entity, &parents, &floaters)?;
+        repainting
+            .iter()
+            .find_map(|(window, can_manage)| (*window == host).then_some(*can_manage))
     };
-    for mut visibility in &mut write_buttons {
-        if *visibility != button_vis {
-            *visibility = button_vis;
+    for (entity, mut visibility) in &mut write_buttons {
+        let Some(can_manage) = can_manage(entity) else {
+            continue;
+        };
+        let want = if can_manage {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        if *visibility != want {
+            *visibility = want;
         }
     }
     for entity in &gated {
+        let Some(can_manage) = can_manage(entity) else {
+            continue;
+        };
         let is_disabled = disabled.contains(entity);
         if can_manage && is_disabled {
             commands.entity(entity).remove::<InteractionDisabled>();
@@ -1742,8 +1878,20 @@ fn update_control_enable(
             commands.entity(entity).insert(InteractionDisabled);
         }
     }
-    for check in &checks {
-        let on = check.kind.checked(&state);
+    for (entity, check) in &checks {
+        let Some(host) = host_floater(entity, &parents, &floaters) else {
+            continue;
+        };
+        let Some(can_manage) = repainting
+            .iter()
+            .find_map(|(window, can_manage)| (*window == host).then_some(*can_manage))
+        else {
+            continue;
+        };
+        let Ok((_window, _dirty, state)) = windows.get(host) else {
+            continue;
+        };
+        let on = check.kind.checked(state);
         set_check_visual(&mut texts, check, on, can_manage);
     }
 }
@@ -1753,230 +1901,232 @@ fn update_control_enable(
 // ---------------------------------------------------------------------------
 
 /// Refresh the Region tab's read-only identity values in place.
+/// Refresh each window's Region tab read-only identity values in place, from
+/// **its** region snapshot rather than the live one.
 fn update_region_tab(
-    mut dirty: ResMut<AboutRegionDirty>,
-    ui: Option<Res<AboutRegionUi>>,
-    regions: Query<&SlRegionIdentity, With<SlCurrentRegion>>,
+    mut windows: Query<(&mut AboutRegionDirty, &AboutRegionUi, &AboutRegionState)>,
     translator: Translator,
     mut texts: Query<(&mut Text, &mut TextColor)>,
     mut links: Query<&mut NameLink>,
+    mut commands: Commands,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    if !dirty.region_values {
-        return;
+    for (mut dirty, ui, state) in &mut windows {
+        if !dirty.region_values {
+            continue;
+        }
+        dirty.region_values = false;
+        let region = state.identity.as_ref();
+        // The title carries the region's name (a plain string, not a Fluent
+        // key): two windows on two regions are otherwise identical strips.
+        if let Some(name) = region
+            .and_then(|region| region.sim_name.as_ref())
+            .map(RegionName::to_string)
+            && let Ok((mut title, _color)) = texts.get_mut(ui.title_text)
+        {
+            name.clone_into(&mut title.0);
+            commands.entity(ui.title_text).remove::<Translated>();
+        }
+        let handles = &ui.region;
+        set_value_node(&mut texts, handles.name, &region_name(region, &translator));
+        set_value_node(
+            &mut texts,
+            handles.region_type,
+            &product_text(region.map(|region| region.product), &translator),
+        );
+        let owner = region.and_then(|region| region.owner()).map(AgentKey::from);
+        set_name_link(
+            &mut links,
+            handles.owner,
+            NameTarget::from_option(region.is_some(), owner),
+        );
+        set_value_node(
+            &mut texts,
+            handles.grid_position,
+            &region.map_or_else(
+                || translator.get("about-region-loading"),
+                |region| {
+                    format!(
+                        "{}, {}",
+                        region.grid_coordinates.x(),
+                        region.grid_coordinates.y()
+                    )
+                },
+            ),
+        );
     }
-    dirty.region_values = false;
-    let region = regions.iter().next().map(|region| &region.0);
-    let handles = &ui.region;
-    set_value_node(&mut texts, handles.name, &region_name(region, &translator));
-    set_value_node(
-        &mut texts,
-        handles.region_type,
-        &product_text(region.map(|region| region.product), &translator),
-    );
-    let owner = region.and_then(|region| region.owner()).map(AgentKey::from);
-    set_name_link(
-        &mut links,
-        handles.owner,
-        NameTarget::from_option(region.is_some(), owner),
-    );
-    set_value_node(
-        &mut texts,
-        handles.grid_position,
-        &region.map_or_else(
-            || translator.get("about-region-loading"),
-            |region| {
-                format!(
-                    "{}, {}",
-                    region.grid_coordinates.x(),
-                    region.grid_coordinates.y()
-                )
-            },
-        ),
-    );
 }
 
 /// Refresh the Debug tab's read-only region name in place.
+/// Refresh each window's Debug tab read-only region name in place.
 fn update_debug_tab(
-    mut dirty: ResMut<AboutRegionDirty>,
-    ui: Option<Res<AboutRegionUi>>,
-    regions: Query<&SlRegionIdentity, With<SlCurrentRegion>>,
+    mut windows: Query<(&mut AboutRegionDirty, &AboutRegionUi, &AboutRegionState)>,
     translator: Translator,
     mut texts: Query<(&mut Text, &mut TextColor)>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    if !dirty.debug_values {
-        return;
+    for (mut dirty, ui, state) in &mut windows {
+        if !dirty.debug_values {
+            continue;
+        }
+        dirty.debug_values = false;
+        let region = state.identity.as_ref();
+        set_value_node(&mut texts, ui.debug.name, &region_name(region, &translator));
     }
-    dirty.debug_values = false;
-    let region = regions.iter().next().map(|region| &region.0);
-    set_value_node(&mut texts, ui.debug.name, &region_name(region, &translator));
 }
 
 /// Refresh the Terrain tab's region name in place (its fields and swatches are
 /// seeded from the terrain draft by [`seed_edit_fields`]).
+/// Refresh each window's Terrain tab region name in place (its fields and
+/// swatches are seeded from the terrain draft by [`seed_edit_fields`]).
 fn update_terrain_tab(
-    mut dirty: ResMut<AboutRegionDirty>,
-    ui: Option<Res<AboutRegionUi>>,
-    identities: Query<&SlRegionIdentity, With<SlCurrentRegion>>,
+    mut windows: Query<(&mut AboutRegionDirty, &AboutRegionUi, &AboutRegionState)>,
     translator: Translator,
     mut texts: Query<(&mut Text, &mut TextColor)>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    if !dirty.terrain_values {
-        return;
+    for (mut dirty, ui, state) in &mut windows {
+        if !dirty.terrain_values {
+            continue;
+        }
+        dirty.terrain_values = false;
+        let identity = state.identity.as_ref();
+        set_value_node(
+            &mut texts,
+            ui.terrain.name,
+            &region_name(identity, &translator),
+        );
     }
-    dirty.terrain_values = false;
-    let identity = identities.iter().next().map(|region| &region.0);
-    set_value_node(
-        &mut texts,
-        ui.terrain.name,
-        &region_name(identity, &translator),
-    );
 }
 
 /// Refresh the Estate tab's read-only values in place.
+/// Refresh each window's Estate tab read-only values in place.
 fn update_estate_tab(
-    mut dirty: ResMut<AboutRegionDirty>,
-    ui: Option<Res<AboutRegionUi>>,
-    state: Res<AboutRegionState>,
+    mut windows: Query<(&mut AboutRegionDirty, &AboutRegionUi, &AboutRegionState)>,
     translator: Translator,
     mut texts: Query<(&mut Text, &mut TextColor)>,
     mut links: Query<&mut NameLink>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    if !dirty.estate_values {
-        return;
+    for (mut dirty, ui, state) in &mut windows {
+        if !dirty.estate_values {
+            continue;
+        }
+        dirty.estate_values = false;
+        let handles = &ui.estate;
+        let loading = translator.get("about-region-loading");
+        // The `getinfo` reply ([`EstateInfo`]) needs estate-manager rights, so a
+        // plain resident never receives it; fall back to the covenant reply
+        // (`EstateCovenantReply`), which carries the estate name and owner too.
+        let estate_name = state
+            .estate
+            .as_ref()
+            .map(|estate| estate.estate_name.clone())
+            .or_else(|| {
+                state
+                    .covenant
+                    .as_ref()
+                    .map(|covenant| covenant.estate_name.clone())
+            });
+        // A nil owner id (Aditi's covenant reply for some estates) maps to no link.
+        let estate_owner = state
+            .estate
+            .as_ref()
+            .map(|estate| estate.estate_owner)
+            .or_else(|| {
+                state
+                    .covenant
+                    .as_ref()
+                    .map(|covenant| covenant.estate_owner_id)
+            })
+            .filter(|id| !id.is_nil())
+            .map(AgentKey::from);
+        set_value_node(
+            &mut texts,
+            handles.name,
+            &estate_name.unwrap_or_else(|| loading.clone()),
+        );
+        // A known estate (either reply arrived) resolves to the owner or `(none)`;
+        // before any reply it is `(loading)`.
+        let estate_known = state.estate.is_some() || state.covenant.is_some();
+        set_name_link(
+            &mut links,
+            handles.owner,
+            NameTarget::from_option(estate_known, estate_owner),
+        );
+        // The abuse email only comes from `getinfo`; show `(none)` once we know the
+        // estate but got no email, and only `(loading)` before any estate reply.
+        let none = translator.get("about-region-none");
+        let abuse_email = match &state.estate {
+            Some(estate) if !estate.abuse_email.is_empty() => estate.abuse_email.clone(),
+            Some(_estate) => none.clone(),
+            None if state.covenant.is_some() => none,
+            None => loading.clone(),
+        };
+        set_value_node(&mut texts, handles.abuse_email, &abuse_email);
     }
-    dirty.estate_values = false;
-    let handles = &ui.estate;
-    let loading = translator.get("about-region-loading");
-    // The `getinfo` reply ([`EstateInfo`]) needs estate-manager rights, so a
-    // plain resident never receives it; fall back to the covenant reply
-    // (`EstateCovenantReply`), which carries the estate name and owner too.
-    let estate_name = state
-        .estate
-        .as_ref()
-        .map(|estate| estate.estate_name.clone())
-        .or_else(|| {
-            state
-                .covenant
-                .as_ref()
-                .map(|covenant| covenant.estate_name.clone())
-        });
-    // A nil owner id (Aditi's covenant reply for some estates) maps to no link.
-    let estate_owner = state
-        .estate
-        .as_ref()
-        .map(|estate| estate.estate_owner)
-        .or_else(|| {
-            state
-                .covenant
-                .as_ref()
-                .map(|covenant| covenant.estate_owner_id)
-        })
-        .filter(|id| !id.is_nil())
-        .map(AgentKey::from);
-    set_value_node(
-        &mut texts,
-        handles.name,
-        &estate_name.unwrap_or_else(|| loading.clone()),
-    );
-    // A known estate (either reply arrived) resolves to the owner or `(none)`;
-    // before any reply it is `(loading)`.
-    let estate_known = state.estate.is_some() || state.covenant.is_some();
-    set_name_link(
-        &mut links,
-        handles.owner,
-        NameTarget::from_option(estate_known, estate_owner),
-    );
-    // The abuse email only comes from `getinfo`; show `(none)` once we know the
-    // estate but got no email, and only `(loading)` before any estate reply.
-    let none = translator.get("about-region-none");
-    let abuse_email = match &state.estate {
-        Some(estate) if !estate.abuse_email.is_empty() => estate.abuse_email.clone(),
-        Some(_estate) => none.clone(),
-        None if state.covenant.is_some() => none,
-        None => loading.clone(),
-    };
-    set_value_node(&mut texts, handles.abuse_email, &abuse_email);
 }
 
 /// Refresh the Covenant tab's read-only values in place.
+/// Refresh each window's Covenant tab read-only values in place.
 fn update_covenant_tab(
-    mut dirty: ResMut<AboutRegionDirty>,
-    ui: Option<Res<AboutRegionUi>>,
-    state: Res<AboutRegionState>,
-    regions: Query<&SlRegionIdentity, With<SlCurrentRegion>>,
+    mut windows: Query<(&mut AboutRegionDirty, &AboutRegionUi, &AboutRegionState)>,
     translator: Translator,
     mut texts: Query<(&mut Text, &mut TextColor)>,
     mut links: Query<&mut NameLink>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    if !dirty.covenant_values {
-        return;
-    }
-    dirty.covenant_values = false;
-    let handles = &ui.covenant;
-    let region = regions.iter().next().map(|region| &region.0);
-    if let Some(covenant) = &state.covenant {
-        set_value_node(&mut texts, handles.estate, &covenant.estate_name);
-        let owner =
-            (!covenant.estate_owner_id.is_nil()).then(|| AgentKey::from(covenant.estate_owner_id));
+    for (mut dirty, ui, state) in &mut windows {
+        if !dirty.covenant_values {
+            continue;
+        }
+        dirty.covenant_values = false;
+        let handles = &ui.covenant;
+        let region = state.identity.as_ref();
+        if let Some(covenant) = &state.covenant {
+            set_value_node(&mut texts, handles.estate, &covenant.estate_name);
+            let owner = (!covenant.estate_owner_id.is_nil())
+                .then(|| AgentKey::from(covenant.estate_owner_id));
+            set_value_node(
+                &mut texts,
+                handles.timestamp,
+                &format_unix_date(i64::from(covenant.covenant_timestamp)),
+            );
+            set_name_link(
+                &mut links,
+                handles.estate_owner,
+                NameTarget::from_option(true, owner),
+            );
+        } else {
+            set_name_link::<AgentKey>(&mut links, handles.estate_owner, NameTarget::Loading);
+        }
         set_value_node(
             &mut texts,
-            handles.timestamp,
-            &format_unix_date(i64::from(covenant.covenant_timestamp)),
+            handles.text,
+            &covenant_body(
+                state.covenant.as_ref(),
+                state.covenant_text.as_deref(),
+                &translator,
+            ),
         );
-        set_name_link(
-            &mut links,
-            handles.estate_owner,
-            NameTarget::from_option(true, owner),
+        set_value_node(
+            &mut texts,
+            handles.region,
+            &region_name(region, &translator),
         );
-    } else {
-        set_name_link::<AgentKey>(&mut links, handles.estate_owner, NameTarget::Loading);
+        set_value_node(
+            &mut texts,
+            handles.region_type,
+            &product_text(region.map(|region| region.product), &translator),
+        );
+        set_value_node(
+            &mut texts,
+            handles.region_rating,
+            &maturity_text(region.map(|region| region.maturity), &translator),
+        );
+        let flags = region.map(|region| RegionFlags::from_bits(region.region_flags));
+        set_value_node(&mut texts, handles.resale, &resale_text(flags, &translator));
+        set_value_node(
+            &mut texts,
+            handles.subdivide,
+            &subdivide_text(flags, &translator),
+        );
     }
-    set_value_node(
-        &mut texts,
-        handles.text,
-        &covenant_body(
-            state.covenant.as_ref(),
-            state.covenant_text.as_deref(),
-            &translator,
-        ),
-    );
-    set_value_node(
-        &mut texts,
-        handles.region,
-        &region_name(region, &translator),
-    );
-    set_value_node(
-        &mut texts,
-        handles.region_type,
-        &product_text(region.map(|region| region.product), &translator),
-    );
-    set_value_node(
-        &mut texts,
-        handles.region_rating,
-        &maturity_text(region.map(|region| region.maturity), &translator),
-    );
-    let flags = region.map(|region| RegionFlags::from_bits(region.region_flags));
-    set_value_node(&mut texts, handles.resale, &resale_text(flags, &translator));
-    set_value_node(
-        &mut texts,
-        handles.subdivide,
-        &subdivide_text(flags, &translator),
-    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1984,99 +2134,103 @@ fn update_covenant_tab(
 // ---------------------------------------------------------------------------
 
 /// Rebuild the estate-managers view when the list or the name cache changes.
+/// Rebuild each window's estate-managers view when its list or the name cache changes.
 fn sync_managers_view(
-    state: Res<AboutRegionState>,
-    view: ResMut<ManagersView>,
-    ui: Option<Res<AboutRegionUi>>,
+    mut windows: Query<(&AboutRegionState, &mut ManagersView, &AboutRegionUi)>,
     avatars: Res<AvatarState>,
     groups: Res<GroupsModel>,
-    lists: Query<&mut VirtualList>,
+    mut lists: Query<&mut VirtualList>,
 ) {
-    let view = view.into_inner();
-    sync_access_view(
-        AccessList::Managers,
-        state.managers_revision,
-        &state.managers,
-        &mut view.rows,
-        &mut view.built,
-        ui.and_then(|ui| ui.access.managers_viewport),
-        &avatars,
-        &groups,
-        avatars.is_changed() || groups.is_changed(),
-        lists,
-    );
+    for (state, view, ui) in &mut windows {
+        let view = view.into_inner();
+        sync_access_view(
+            AccessList::Managers,
+            state.managers_revision,
+            &state.managers,
+            &mut view.rows,
+            &mut view.built,
+            ui.access.managers_viewport,
+            &avatars,
+            &groups,
+            avatars.is_changed() || groups.is_changed(),
+            &mut lists,
+        );
+    }
 }
 
 /// Rebuild the allowed-residents view.
+/// Rebuild each window's allowed-residents view.
 fn sync_allowed_view(
-    state: Res<AboutRegionState>,
-    view: ResMut<AllowedView>,
-    ui: Option<Res<AboutRegionUi>>,
+    mut windows: Query<(&AboutRegionState, &mut AllowedView, &AboutRegionUi)>,
     avatars: Res<AvatarState>,
     groups: Res<GroupsModel>,
-    lists: Query<&mut VirtualList>,
+    mut lists: Query<&mut VirtualList>,
 ) {
-    let view = view.into_inner();
-    sync_access_view(
-        AccessList::Allowed,
-        state.allowed_revision,
-        &state.allowed,
-        &mut view.rows,
-        &mut view.built,
-        ui.and_then(|ui| ui.access.allowed_viewport),
-        &avatars,
-        &groups,
-        avatars.is_changed() || groups.is_changed(),
-        lists,
-    );
+    for (state, view, ui) in &mut windows {
+        let view = view.into_inner();
+        sync_access_view(
+            AccessList::Allowed,
+            state.allowed_revision,
+            &state.allowed,
+            &mut view.rows,
+            &mut view.built,
+            ui.access.allowed_viewport,
+            &avatars,
+            &groups,
+            avatars.is_changed() || groups.is_changed(),
+            &mut lists,
+        );
+    }
 }
 
 /// Rebuild the allowed-groups view.
+/// Rebuild each window's allowed-groups view.
 fn sync_allowed_groups_view(
-    state: Res<AboutRegionState>,
-    view: ResMut<AllowedGroupsView>,
-    ui: Option<Res<AboutRegionUi>>,
+    mut windows: Query<(&AboutRegionState, &mut AllowedGroupsView, &AboutRegionUi)>,
     avatars: Res<AvatarState>,
     groups: Res<GroupsModel>,
-    lists: Query<&mut VirtualList>,
+    mut lists: Query<&mut VirtualList>,
 ) {
-    let view = view.into_inner();
-    sync_access_view(
-        AccessList::AllowedGroups,
-        state.allowed_groups_revision,
-        &state.allowed_groups,
-        &mut view.rows,
-        &mut view.built,
-        ui.and_then(|ui| ui.access.allowed_groups_viewport),
-        &avatars,
-        &groups,
-        avatars.is_changed() || groups.is_changed(),
-        lists,
-    );
+    for (state, view, ui) in &mut windows {
+        let view = view.into_inner();
+        sync_access_view(
+            AccessList::AllowedGroups,
+            state.allowed_groups_revision,
+            &state.allowed_groups,
+            &mut view.rows,
+            &mut view.built,
+            ui.access.allowed_groups_viewport,
+            &avatars,
+            &groups,
+            avatars.is_changed() || groups.is_changed(),
+            &mut lists,
+        );
+    }
 }
 
 /// Rebuild the banned-residents view.
+/// Rebuild each window's banned-residents view.
 fn sync_banned_view(
-    state: Res<AboutRegionState>,
-    view: ResMut<BannedView>,
-    ui: Option<Res<AboutRegionUi>>,
+    mut windows: Query<(&AboutRegionState, &mut BannedView, &AboutRegionUi)>,
     avatars: Res<AvatarState>,
     groups: Res<GroupsModel>,
-    lists: Query<&mut VirtualList>,
+    mut lists: Query<&mut VirtualList>,
 ) {
-    let view = view.into_inner();
-    sync_access_view(
-        AccessList::Banned,
-        state.banned_revision,
-        &state.banned,
-        &mut view.rows,
-        &mut view.built,
-        ui.and_then(|ui| ui.access.banned_viewport),
-        &avatars,
-        &groups,
-        avatars.is_changed() || groups.is_changed(),
-        lists,
-    );
+    for (state, view, ui) in &mut windows {
+        let view = view.into_inner();
+        sync_access_view(
+            AccessList::Banned,
+            state.banned_revision,
+            &state.banned,
+            &mut view.rows,
+            &mut view.built,
+            ui.access.banned_viewport,
+            &avatars,
+            &groups,
+            avatars.is_changed() || groups.is_changed(),
+            &mut lists,
+        );
+    }
 }
 
 /// The shared rebuild of an access-list view (resolving names) + item count.
@@ -2095,7 +2249,7 @@ fn sync_access_view(
     avatars: &AvatarState,
     groups: &GroupsModel,
     names_changed: bool,
-    mut lists: Query<&mut VirtualList>,
+    lists: &mut Query<&mut VirtualList>,
 ) {
     if *built == revision && !names_changed {
         return;
@@ -2120,114 +2274,127 @@ fn sync_access_view(
 }
 
 /// Build each newly-pooled access row's cells + Remove button once.
+/// Build each newly-pooled access row's cells + Remove button once, in
+/// whichever window's list it was pooled into.
 fn populate_access_rows(
     mut commands: Commands,
-    ui: Option<Res<AboutRegionUi>>,
+    windows: Query<&AboutRegionUi>,
     new_rows: Query<(Entity, &ChildOf), Added<VirtualRow>>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
     for (row_entity, child_of) in &new_rows {
         let parent = child_of.parent();
-        let access = &ui.access;
-        let matched = [
-            (
-                access.managers_viewport,
-                access.managers_table,
-                &MANAGERS_TABLE,
-                AccessList::Managers,
-            ),
-            (
-                access.allowed_viewport,
-                access.allowed_table,
-                &ALLOWED_TABLE,
-                AccessList::Allowed,
-            ),
-            (
-                access.allowed_groups_viewport,
-                access.allowed_groups_table,
-                &ALLOWED_GROUPS_TABLE,
-                AccessList::AllowedGroups,
-            ),
-            (
-                access.banned_viewport,
-                access.banned_table,
-                &BANNED_TABLE,
-                AccessList::Banned,
-            ),
-        ]
-        .into_iter()
-        .find(|(viewport, _table, _spec, _list)| *viewport == Some(parent));
-        let Some((_viewport, Some(table), spec, list)) = matched else {
-            continue;
-        };
-        let cells = spawn_table_row(&mut commands, row_entity, table, spec);
-        if let Some(custom) = cells.cell(1) {
-            spawn_remove_button(&mut commands, custom, list, row_entity);
+        for ui in &windows {
+            let access = &ui.access;
+            let matched = [
+                (
+                    access.managers_viewport,
+                    access.managers_table,
+                    &MANAGERS_TABLE,
+                    AccessList::Managers,
+                ),
+                (
+                    access.allowed_viewport,
+                    access.allowed_table,
+                    &ALLOWED_TABLE,
+                    AccessList::Allowed,
+                ),
+                (
+                    access.allowed_groups_viewport,
+                    access.allowed_groups_table,
+                    &ALLOWED_GROUPS_TABLE,
+                    AccessList::AllowedGroups,
+                ),
+                (
+                    access.banned_viewport,
+                    access.banned_table,
+                    &BANNED_TABLE,
+                    AccessList::Banned,
+                ),
+            ]
+            .into_iter()
+            .find(|(viewport, _table, _spec, _list)| *viewport == Some(parent));
+            let Some((_viewport, Some(table), spec, list)) = matched else {
+                continue;
+            };
+            let cells = spawn_table_row(&mut commands, row_entity, table, spec);
+            if let Some(custom) = cells.cell(1) {
+                spawn_remove_button(&mut commands, custom, list, row_entity);
+            }
+            break;
         }
     }
 }
 
-/// Bind each pooled access row to its resolved name, and reveal the Remove
-/// buttons only when the agent may manage the estate.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "binding the four pools needs every view, the state, the UI handles, and the row / \
-              remove / visibility / text queries together"
-)]
+/// Every window's four access-list views, state and handles — the row binder's
+/// read of the windows, named because the tuple is past the point of reading
+/// well inline.
+type RegionBindWindows<'world, 'state> = Query<
+    'world,
+    'state,
+    (
+        Entity,
+        Ref<'static, ManagersView>,
+        Ref<'static, AllowedView>,
+        Ref<'static, AllowedGroupsView>,
+        Ref<'static, BannedView>,
+        Ref<'static, AboutRegionState>,
+        &'static AboutRegionUi,
+    ),
+>;
+
+/// Bind each pooled access row to its window's resolved name, and reveal that
+/// window's Remove buttons only when the agent may manage its estate.
 fn bind_access_rows(
-    managers: Res<ManagersView>,
-    allowed: Res<AllowedView>,
-    allowed_groups: Res<AllowedGroupsView>,
-    banned: Res<BannedView>,
-    state: Res<AboutRegionState>,
-    ui: Option<Res<AboutRegionUi>>,
+    windows: RegionBindWindows,
     rows: Query<(Ref<VirtualRow>, &ChildOf, &crate::ui_table::TableRowCells)>,
     removes: Query<Entity, With<RemoveAccessButton>>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
     mut visibility: Query<&mut Visibility>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    let refresh = managers.is_changed()
-        || allowed.is_changed()
-        || allowed_groups.is_changed()
-        || banned.is_changed()
-        || state.is_changed();
-    let access = &ui.access;
-    for (row, child_of, cells) in &rows {
-        let parent = child_of.parent();
-        let view = if Some(parent) == access.managers_viewport {
-            &managers.rows
-        } else if Some(parent) == access.allowed_viewport {
-            &allowed.rows
-        } else if Some(parent) == access.allowed_groups_viewport {
-            &allowed_groups.rows
-        } else if Some(parent) == access.banned_viewport {
-            &banned.rows
-        } else {
-            continue;
-        };
-        if !refresh && !row.is_changed() {
-            continue;
+    for (window, managers, allowed, allowed_groups, banned, state, ui) in &windows {
+        let refresh = managers.is_changed()
+            || allowed.is_changed()
+            || allowed_groups.is_changed()
+            || banned.is_changed()
+            || state.is_changed();
+        let access = &ui.access;
+        for (row, child_of, cells) in &rows {
+            let parent = child_of.parent();
+            let view = if Some(parent) == access.managers_viewport {
+                &managers.rows
+            } else if Some(parent) == access.allowed_viewport {
+                &allowed.rows
+            } else if Some(parent) == access.allowed_groups_viewport {
+                &allowed_groups.rows
+            } else if Some(parent) == access.banned_viewport {
+                &banned.rows
+            } else {
+                continue;
+            };
+            if !refresh && !row.is_changed() {
+                continue;
+            }
+            let Some(data) = row.index.and_then(|index| view.get(index)) else {
+                continue;
+            };
+            set_cell(&mut texts, cells, 0, &data.name);
         }
-        let Some(data) = row.index.and_then(|index| view.get(index)) else {
-            continue;
+        let want = if state.can_manage {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
         };
-        set_cell(&mut texts, cells, 0, &data.name);
-    }
-    let want = if state.can_manage {
-        Visibility::Inherited
-    } else {
-        Visibility::Hidden
-    };
-    for entity in &removes {
-        if let Ok(mut vis) = visibility.get_mut(entity)
-            && *vis != want
-        {
-            *vis = want;
+        for entity in &removes {
+            if host_floater(entity, &parents, &floaters) != Some(window) {
+                continue;
+            }
+            if let Ok(mut vis) = visibility.get_mut(entity)
+                && *vis != want
+            {
+                *vis = want;
+            }
         }
     }
 }
@@ -2237,16 +2404,25 @@ fn bind_access_rows(
 // ---------------------------------------------------------------------------
 
 /// Toggle a checkbox, flipping its backing draft field.
+/// Toggle a checkbox, flipping the draft field of the window it was pressed in.
 fn on_about_region_check(
     press: On<Pointer<Press>>,
     checks: Query<&AboutRegionCheck>,
-    mut state: ResMut<AboutRegionState>,
+    mut windows: Query<&mut AboutRegionState>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
 ) {
     if press.button != PointerButton::Primary {
         return;
     }
     let Ok(check) = checks.get(press.entity) else {
+        return;
+    };
+    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+        return;
+    };
+    let Ok(mut state) = windows.get_mut(window) else {
         return;
     };
     if !state.can_manage {
@@ -2258,11 +2434,18 @@ fn on_about_region_check(
 }
 
 /// Dispatch a floater action-button press.
+/// Dispatch a floater action-button press, in the window it was pressed in.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the dispatcher fans out to every button kind, reading the pressed window, its \
+              fields and the picker / command outputs"
+)]
 fn on_about_region_action(
     press: On<Pointer<Press>>,
     actions: Query<&AboutRegionAction>,
-    mut state: ResMut<AboutRegionState>,
-    ui: Res<AboutRegionUi>,
+    mut windows: Query<(&mut AboutRegionState, &AboutRegionUi)>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
     fields: Query<&EditableText>,
     mut sl_commands: MessageWriter<SlCommand>,
     mut pickers: MessageWriter<OpenAvatarPicker>,
@@ -2273,6 +2456,14 @@ fn on_about_region_action(
     let Ok(action) = actions.get(press.entity) else {
         return;
     };
+    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+        return;
+    };
+    let Ok((mut state, ui)) = windows.get_mut(window) else {
+        return;
+    };
+    // A window whose region the agent has left has no rights: every write here
+    // goes out on the current circuit (see the module header).
     if !state.can_manage {
         return;
     }
@@ -2301,7 +2492,7 @@ fn on_about_region_action(
             sl_commands.write(SlCommand(Command::RequestRegionInfo));
         }
         AboutRegionAction::ApplyTerrain => {
-            read_terrain_fields(&mut state, &ui, &read);
+            read_terrain_fields(&mut state, ui, &read);
             sl_commands.write(SlCommand(Command::SetRegionTerrain(
                 state.terrain_draft.clone(),
             )));
@@ -2324,6 +2515,7 @@ fn on_about_region_action(
             sl_commands.write(SlCommand(Command::SetEstateInfo(update)));
         }
         AboutRegionAction::TeleportHomeOne => {
+            state.pending_pick = Some(PICK_TELEPORT);
             pickers.write(OpenAvatarPicker::one(PICK_TELEPORT));
         }
         AboutRegionAction::TeleportHomeAll => {
@@ -2346,46 +2538,68 @@ fn on_about_region_action(
             }
         }
         AboutRegionAction::KickEstate => {
+            state.pending_pick = Some(PICK_KICK);
             pickers.write(OpenAvatarPicker::one(PICK_KICK));
         }
         // The three estate access lists take a multi-pick, as the reference's do
         // ("avatar picker yes multi-select"); a kick or a send-home is about one
         // resident, so those stay single.
         AboutRegionAction::AddManager => {
+            state.pending_pick = Some(PICK_MANAGER);
             pickers.write(OpenAvatarPicker::many(PICK_MANAGER));
         }
         AboutRegionAction::AddAllowed => {
+            state.pending_pick = Some(PICK_ALLOWED);
             pickers.write(OpenAvatarPicker::many(PICK_ALLOWED));
         }
         AboutRegionAction::AddBanned => {
+            state.pending_pick = Some(PICK_BANNED);
             pickers.write(OpenAvatarPicker::many(PICK_BANNED));
         }
     }
 }
 
-/// Resolve and act on a per-row access Remove press.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "resolving a remove needs the pressed button, its row, all four list views, the \
-              state, and the command writer"
-)]
+/// One window's four access-list views and its state — the remove observer's
+/// read of a window, named because the tuple is past the point of reading well
+/// inline.
+type RegionRemoveWindows<'world, 'state> = Query<
+    'world,
+    'state,
+    (
+        &'static ManagersView,
+        &'static AllowedView,
+        &'static AllowedGroupsView,
+        &'static BannedView,
+        &'static mut AboutRegionState,
+    ),
+>;
+
+/// Resolve and act on a per-row access Remove press, in the window it was
+/// pressed in.
 fn on_remove_access(
     press: On<Pointer<Press>>,
     buttons: Query<&RemoveAccessButton>,
     rows: Query<&VirtualRow>,
-    managers: Res<ManagersView>,
-    allowed: Res<AllowedView>,
-    allowed_groups: Res<AllowedGroupsView>,
-    banned: Res<BannedView>,
-    mut state: ResMut<AboutRegionState>,
+    mut windows: RegionRemoveWindows,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
     mut commands: MessageWriter<SlCommand>,
 ) {
-    if press.button != PointerButton::Primary || !state.can_manage {
+    if press.button != PointerButton::Primary {
         return;
     }
     let Ok(button) = buttons.get(press.entity) else {
         return;
     };
+    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+        return;
+    };
+    let Ok((managers, allowed, allowed_groups, banned, mut state)) = windows.get_mut(window) else {
+        return;
+    };
+    if !state.can_manage {
+        return;
+    }
     let Ok(row) = rows.get(button.row) else {
         return;
     };
@@ -2409,51 +2623,66 @@ fn on_remove_access(
 }
 
 /// Fold a maturity combo pick into the draft.
+/// Fold a maturity combo pick into the draft of the window whose combo it was.
 fn apply_combo_edits(
     mut changed: MessageReader<ComboChanged>,
-    ui: Option<Res<AboutRegionUi>>,
-    mut state: ResMut<AboutRegionState>,
+    mut windows: Query<(&AboutRegionUi, &mut AboutRegionState)>,
 ) {
-    let Some(ui) = ui else {
+    let frame: Vec<ComboChanged> = changed.read().copied().collect();
+    if frame.is_empty() {
         return;
-    };
-    for event in changed.read() {
-        if Some(event.combo) == ui.region.maturity_combo {
-            state.draft.maturity = maturity_from_index(event.active);
+    }
+    for (ui, mut state) in &mut windows {
+        for event in &frame {
+            if Some(event.combo) == ui.region.maturity_combo {
+                state.draft.maturity = maturity_from_index(event.active);
+            }
         }
     }
 }
 
 /// Fold the avatar picks into the estate action that opened the picker — each
 /// chosen resident in turn, since the access lists open a multi-picker.
+/// Fold the avatar picks into the estate action of the window that asked — each
+/// chosen resident in turn, since the access lists open a multi-picker.
+///
+/// The picker echoes a tag rather than an entity, so the window is the one
+/// holding a matching claim ([`AboutRegionState::pending_pick`]).
 fn apply_avatar_picks(
     mut picked: MessageReader<AvatarPicked>,
-    mut state: ResMut<AboutRegionState>,
+    mut windows: Query<&mut AboutRegionState>,
     mut commands: MessageWriter<SlCommand>,
 ) {
-    for event in picked.read() {
-        if !state.can_manage {
-            continue;
-        }
-        for chosen in &event.picks {
-            let agent = chosen.agent;
-            match event.requester {
-                PICK_TELEPORT => {
-                    commands.write(SlCommand(Command::TeleportHomeUser { target: agent }));
+    let frame: Vec<AvatarPicked> = picked.read().cloned().collect();
+    if frame.is_empty() {
+        return;
+    }
+    for event in &frame {
+        for mut state in &mut windows {
+            if state.pending_pick != Some(event.requester) || !state.can_manage {
+                continue;
+            }
+            state.pending_pick = None;
+            for chosen in &event.picks {
+                let agent = chosen.agent;
+                match event.requester {
+                    PICK_TELEPORT => {
+                        commands.write(SlCommand(Command::TeleportHomeUser { target: agent }));
+                    }
+                    PICK_KICK => {
+                        commands.write(SlCommand(Command::KickEstateUser { target: agent }));
+                    }
+                    PICK_MANAGER => {
+                        add_access_entry(&mut state, AccessList::Managers, agent, &mut commands);
+                    }
+                    PICK_ALLOWED => {
+                        add_access_entry(&mut state, AccessList::Allowed, agent, &mut commands);
+                    }
+                    PICK_BANNED => {
+                        add_access_entry(&mut state, AccessList::Banned, agent, &mut commands);
+                    }
+                    _other => {}
                 }
-                PICK_KICK => {
-                    commands.write(SlCommand(Command::KickEstateUser { target: agent }));
-                }
-                PICK_MANAGER => {
-                    add_access_entry(&mut state, AccessList::Managers, agent, &mut commands);
-                }
-                PICK_ALLOWED => {
-                    add_access_entry(&mut state, AccessList::Allowed, agent, &mut commands);
-                }
-                PICK_BANNED => {
-                    add_access_entry(&mut state, AccessList::Banned, agent, &mut commands);
-                }
-                _other => {}
             }
         }
     }
@@ -2461,13 +2690,29 @@ fn apply_avatar_picks(
 
 /// Fold a terrain texture pick into the terrain draft slot and repaint its
 /// swatch thumbnail (via [`TextureSwatchValue`]).
+/// Fold a terrain texture pick into the terrain draft slot of the window whose
+/// swatch asked for it, and repaint that swatch's thumbnail (via
+/// [`TextureSwatchValue`]).
 fn apply_texture_edits(
     mut picked: MessageReader<TexturePicked>,
     mut swatches: Query<(&TerrainSwatch, &mut TextureSwatchValue)>,
-    mut state: ResMut<AboutRegionState>,
+    mut windows: Query<&mut AboutRegionState>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
 ) {
     for event in picked.read() {
-        if !event.final_pick || !state.can_manage {
+        if !event.final_pick {
+            continue;
+        }
+        // The pick belongs to the window the pressed swatch lives in — the
+        // picker echoes the swatch, and the swatch names its window.
+        let Some(window) = host_floater(event.requester, &parents, &floaters) else {
+            continue;
+        };
+        let Ok(mut state) = windows.get_mut(window) else {
+            continue;
+        };
+        if !state.can_manage {
             continue;
         }
         let Ok((swatch, mut value)) = swatches.get_mut(event.requester) else {
@@ -3196,5 +3441,223 @@ mod tests {
         assert_eq!(freshest_region_flags(handshake, Some(0)), 0);
         // Before any RegionInfo the handshake is all there is.
         assert_eq!(freshest_region_flags(handshake, None), handshake);
+    }
+
+    /// **One window per region** (`viewer-keyed-floater-audit`), and the freeze
+    /// a window keeps once the agent has left its region.
+    mod instances {
+        use super::super::{AboutRegionPlugin, AboutRegionState, OpenAboutRegion, region_key};
+        use crate::floater::{Floater, FloaterCommand, FloaterOp, FloaterPlugin};
+        use crate::ui::UiRoot;
+        use crate::world_api::{AvatarState, GroupsModel};
+        use bevy::prelude::*;
+        use pretty_assertions::assert_eq;
+        use sl_client_bevy::{
+            GridCoordinates, Maturity, ProductType, RegionHandle, RegionIdentity, RegionName,
+            RegionTerrainComposition, SlCommand, SlCurrentRegion, SlEvent, SlRegionIdentity, Uuid,
+        };
+
+        /// A boxed error so tests use `?` rather than the disallowed
+        /// `unwrap` / `expect`.
+        type TestError = Box<dyn core::error::Error>;
+
+        /// A region record the agent may manage, named and identified by `id`.
+        fn region(id: u128, name: &str) -> RegionIdentity {
+            RegionIdentity {
+                sim_name: RegionName::try_new(name).ok(),
+                region_id: Uuid::from_u128(id),
+                region_handle: RegionHandle::new(0),
+                grid_coordinates: GridCoordinates::new(1000, 1000),
+                region_flags: 0,
+                region_flags_extended: 0,
+                region_protocols: 0,
+                maturity: Maturity::Pg,
+                product: ProductType::Unknown,
+                product_sku: String::new(),
+                product_name: String::new(),
+                cpu_class_id: 0,
+                cpu_ratio: 0,
+                sim_owner: Uuid::nil(),
+                is_estate_manager: true,
+                water_height: 20.0,
+                billable_factor: 1.0,
+                terrain: RegionTerrainComposition {
+                    detail_textures: [Uuid::nil(); 4],
+                    start_heights: [0.0; 4],
+                    height_ranges: [0.0; 4],
+                },
+            }
+        }
+
+        /// An app with the floater manager, this module's plugin, and the world
+        /// facts its systems read — no grid, no window.
+        fn region_app() -> App {
+            let mut app = App::new();
+            app.add_message::<SlCommand>()
+                .add_message::<SlEvent>()
+                .add_message::<crate::ui_combo::ComboChanged>()
+                .add_message::<crate::world_api::OpenTexturePicker>()
+                .add_message::<crate::world_api::TexturePicked>()
+                .add_message::<crate::world_api::OpenAvatarPicker>()
+                .add_message::<crate::world_api::AvatarPicked>()
+                .init_resource::<AvatarState>()
+                .init_resource::<GroupsModel>()
+                .init_resource::<UiScale>()
+                .init_resource::<ButtonInput<KeyCode>>()
+                .init_resource::<bevy::input_focus::InputFocus>()
+                .add_plugins((FloaterPlugin, AboutRegionPlugin));
+            crate::i18n::install_untranslated(&mut app);
+            let root = app.world_mut().spawn(Node::default()).id();
+            app.insert_resource(UiRoot(root));
+            app.update();
+            app
+        }
+
+        /// Make `identity` the region the agent is in, replacing whichever was.
+        fn stand_in(app: &mut App, identity: &RegionIdentity) {
+            let live: Vec<Entity> = app
+                .world_mut()
+                .query_filtered::<Entity, With<SlCurrentRegion>>()
+                .iter(app.world())
+                .collect();
+            for entity in live {
+                app.world_mut().entity_mut(entity).despawn();
+            }
+            app.world_mut()
+                .spawn((SlCurrentRegion, SlRegionIdentity(identity.clone())));
+            app.update();
+        }
+
+        /// Ask for Region / Estate, the way the World menu does.
+        fn open(app: &mut App) {
+            app.world_mut().write_message(OpenAboutRegion);
+            app.update();
+        }
+
+        /// Every live Region / Estate window, with the region it is about.
+        fn windows(app: &mut App) -> Vec<(Entity, Uuid, bool)> {
+            app.world_mut()
+                .query::<(Entity, &AboutRegionState)>()
+                .iter(app.world())
+                .map(|(entity, state)| (entity, state.region, state.is_current))
+                .collect()
+        }
+
+        /// Two regions are two windows, each keyed by its own region.
+        #[test]
+        fn two_regions_open_two_windows() -> Result<(), TestError> {
+            let (first, second) = (region(0xA1, "Alpha"), region(0xB2, "Beta"));
+            let mut app = region_app();
+            stand_in(&mut app, &first);
+            open(&mut app);
+            stand_in(&mut app, &second);
+            open(&mut app);
+
+            let open_windows = windows(&mut app);
+            assert_eq!(
+                open_windows.len(),
+                2,
+                "the second region reused the first window"
+            );
+            let world = app.world();
+            let keys: Vec<Option<&crate::floater::FloaterKey>> = open_windows
+                .iter()
+                .map(|(window, _region, _current)| {
+                    world.get::<Floater>(*window).and_then(Floater::key)
+                })
+                .collect();
+            assert!(keys.contains(&Some(&region_key(&first))));
+            assert!(keys.contains(&Some(&region_key(&second))));
+            Ok(())
+        }
+
+        /// Re-opening in the same region raises its window instead of making a
+        /// second.
+        #[test]
+        fn reopening_in_one_region_reuses_its_window() -> Result<(), TestError> {
+            let here = region(0xA1, "Alpha");
+            let mut app = region_app();
+            stand_in(&mut app, &here);
+            open(&mut app);
+            open(&mut app);
+            assert_eq!(windows(&mut app).len(), 1);
+            Ok(())
+        }
+
+        /// **A window the agent has walked out of is frozen and read-only.**
+        /// Every reply it reads is about the current region and every write goes
+        /// out on the current circuit, so it keeps its snapshot and offers
+        /// nothing to press. Walking back wakes it.
+        #[test]
+        fn leaving_a_region_freezes_its_window() -> Result<(), TestError> {
+            let (first, second) = (region(0xA1, "Alpha"), region(0xB2, "Beta"));
+            let mut app = region_app();
+            stand_in(&mut app, &first);
+            open(&mut app);
+            let window = windows(&mut app)
+                .into_iter()
+                .find_map(|(window, id, _current)| (id == first.region_id).then_some(window))
+                .ok_or("the first region has no window")?;
+            assert!(
+                app.world()
+                    .get::<AboutRegionState>(window)
+                    .is_some_and(|state| state.can_manage),
+                "an estate manager standing in the region cannot manage it"
+            );
+
+            stand_in(&mut app, &second);
+            let left = app
+                .world()
+                .get::<AboutRegionState>(window)
+                .ok_or("the window vanished")?;
+            assert!(!left.is_current, "the window followed the agent out");
+            assert!(!left.can_manage, "a left-behind window still offers writes");
+            assert!(
+                left.identity
+                    .as_ref()
+                    .is_some_and(|identity| identity.region_id == first.region_id),
+                "the window lost the region it was about"
+            );
+
+            stand_in(&mut app, &first);
+            assert!(
+                app.world()
+                    .get::<AboutRegionState>(window)
+                    .is_some_and(|state| state.is_current && state.can_manage),
+                "coming back did not wake the window"
+            );
+            Ok(())
+        }
+
+        /// Closing one region's window leaves the other open.
+        #[test]
+        fn closing_one_region_leaves_the_other() -> Result<(), TestError> {
+            let (first, second) = (region(0xA1, "Alpha"), region(0xB2, "Beta"));
+            let mut app = region_app();
+            stand_in(&mut app, &first);
+            open(&mut app);
+            stand_in(&mut app, &second);
+            open(&mut app);
+            let target = windows(&mut app)
+                .into_iter()
+                .find_map(|(window, id, _current)| (id == first.region_id).then_some(window))
+                .ok_or("the first region has no window")?;
+
+            app.world_mut()
+                .resource_mut::<Messages<FloaterCommand>>()
+                .write(FloaterCommand {
+                    floater: target,
+                    op: FloaterOp::Close,
+                });
+            app.update();
+
+            let live = windows(&mut app);
+            assert_eq!(live.len(), 1);
+            assert_eq!(
+                live.first().map(|(_window, id, _current)| *id),
+                Some(second.region_id)
+            );
+            Ok(())
+        }
     }
 }

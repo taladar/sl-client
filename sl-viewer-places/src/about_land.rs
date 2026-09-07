@@ -897,11 +897,10 @@ impl AccessScope {
 
 /// One window's live entity handles.
 #[derive(Component, Debug)]
-#[expect(
-    clippy::struct_field_names,
-    reason = "one per-tab handle group per field; the shared postfix is the point"
-)]
 struct AboutLandUi {
+    /// The floater's title text node — rewritten with the parcel's name, so two
+    /// windows are tellable apart in the title bar and the window list.
+    title_text: Entity,
     /// The General tab's handles.
     general_handles: GeneralHandles,
     /// The Covenant tab's handles.
@@ -1088,6 +1087,7 @@ fn build_land_content(commands: &mut Commands, handle: FloaterHandle) -> AboutLa
     let environment_handles = build_environment_tab(commands, panel(8));
 
     AboutLandUi {
+        title_text: handle.title_text,
         general_handles,
         covenant_handles,
         object_handles,
@@ -2311,6 +2311,7 @@ fn update_general_tab(
     translator: Translator,
     mut texts: Query<(&mut Text, &mut TextColor)>,
     mut links: Query<&mut NameLink>,
+    mut commands: Commands,
 ) {
     for (mut dirty, ui, state) in &mut windows {
         if !dirty.general_values {
@@ -2323,6 +2324,14 @@ fn update_general_tab(
         let Some(parcel) = &state.parcel else {
             continue;
         };
+        // The title carries the parcel's name (a plain string, not a Fluent
+        // key): two windows on two parcels are otherwise identical strips.
+        if !parcel.name.is_empty()
+            && let Ok((mut title, _color)) = texts.get_mut(ui.title_text)
+        {
+            parcel.name.clone_into(&mut title.0);
+            commands.entity(ui.title_text).remove::<Translated>();
+        }
         set_value_node(texts, handles.parcel_id, &parcel.local_id.0.to_string());
         set_value_node(
             texts,
