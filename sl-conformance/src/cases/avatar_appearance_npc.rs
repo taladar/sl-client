@@ -21,6 +21,17 @@
 //! encodes, so "the appearance names the fixture's textures" only has a meaning
 //! against the fixture; on a live grid the nearby avatars are whoever happened
 //! to be standing there.
+//!
+//! **Both flavours**, because the message is one of the places the two live
+//! grids disagree and both answers are worth having. Second Life central-bakes
+//! and wraps the appearance in an `AppearanceData` block; a stock OpenSim region
+//! writes no such block at all (`LLClientView.SendAppearance`, `// no
+//! AppearanceData`), which is what `LLVOAvatar::processAvatarAppearance` turns
+//! into `setIsUsingServerBakes(appearance_version > 0)` — the per-avatar
+//! decision that picks the road every baked slot is fetched by. The ids
+//! themselves are the same either way, and the `GetTexture` leg below proves
+//! they are fetchable by id on both, which is the *only* road on the
+//! client-baked one.
 
 use std::time::Duration;
 
@@ -53,7 +64,7 @@ impl GridTest for AvatarAppearanceNpc {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::FakeSl]
+        &[Grid::FakeSl, Grid::FakeOpensim]
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
@@ -62,6 +73,10 @@ impl GridTest for AvatarAppearanceNpc {
             let agent = npc.identity.agent_id;
             let started = std::time::Instant::now();
 
+            // Read the flavour before borrowing the session: the whole of what
+            // the two grids disagree about here is the block below.
+            let bakes_server_side =
+                ctx.grid().behaves_like() == sl_fake_grid::ImitatedGrid::SecondLife;
             let session = ctx.primary();
             session.wait_for_region(REGION_TIMEOUT).await?;
             let appearance = session
@@ -83,6 +98,24 @@ impl GridTest for AvatarAppearanceNpc {
                 "visual parameters",
                 &appearance.visual_params,
                 &npc.appearance.visual_params,
+            )?;
+
+            // The `AppearanceData` block: present on the central-baking grid,
+            // *absent* — not zeroed — on the other.
+            check_eq(
+                "an AppearanceData block",
+                &appearance.appearance_version.is_some(),
+                &bakes_server_side,
+            )?;
+            check_eq(
+                "a COF version",
+                &appearance.cof_version.is_some(),
+                &bakes_server_side,
+            )?;
+            check_eq(
+                "appearance flags",
+                &appearance.appearance_flags.is_some(),
+                &bakes_server_side,
             )?;
 
             // Every slot the fixture bakes, named in the appearance's texture
@@ -131,6 +164,10 @@ impl GridTest for AvatarAppearanceNpc {
             )?;
 
             let metrics = ctx.metrics();
+            metrics.set(
+                &count_metric("appearance_version"),
+                appearance.appearance_version.map_or(-1, i64::from),
+            );
             metrics.set_timing(&secs_metric("appearance"), elapsed);
             metrics.set_timing(&secs_metric("bake_fetch"), fetch_secs);
             metrics.set(

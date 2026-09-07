@@ -3,6 +3,7 @@
 pub mod accounts;
 pub mod agent_requests;
 pub mod assets;
+pub mod bakes;
 mod caps_endpoint;
 pub mod crossing;
 mod driver;
@@ -35,6 +36,7 @@ mod world_map;
 pub use accounts::AccountConfig;
 pub use agent_requests::AgentPolicy;
 pub use assets::ObjectAssetPolicy;
+pub use bakes::{BakePolicy, REGION_PROTOCOL_BAKES_ON_MESH, REGION_PROTOCOL_SERVER_BAKES};
 pub use crossing::CROSSING_ARRIVAL_TIMEOUT;
 pub use economy_policy::{EconomyConfig, EconomyEvent, stock_prices};
 pub use error::Error;

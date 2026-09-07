@@ -113,8 +113,8 @@ long-poll — so on that flavour the item arrives **after** the kills.
 `a_taken_linkset_rezzes_back_whole` waited for the item and *then* for the two
 kills, so it silently ate both on the way past and then waited forever for
 them; `wait_on`'s timeout is per event, and a grid still sending pings never
-trips it ([[sl-client-fake-grid-follow-ups]] records that trap). It drains for
-all three in one pass now, and the ordering is written down in
+trips it, so a "hang" there is a wrong expectation. It drains for all three in
+one pass now, and the ordering is written down in
 `sl-fake-grid/src/inventory.rs` rather than left for the next consumer to
 rediscover the same way.
 

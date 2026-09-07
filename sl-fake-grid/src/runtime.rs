@@ -25,6 +25,7 @@ use tokio::sync::{Mutex, broadcast, watch};
 
 use crate::accounts::{Account, AccountConfig};
 use crate::assets::{GridAssets, ObjectAssetPolicy};
+use crate::bakes::BakePolicy;
 use crate::driver::{SharedSim, SimState, new_shared_sim, run_timer, run_udp_pump};
 use crate::economy_policy::{EconomyConfig, EconomyEvent};
 use crate::error::Error;
@@ -174,7 +175,10 @@ impl RegionEntry {
     /// `estate_owner` is the grid's own ([`GridCore::estate_owner`]): a region
     /// is owned by whoever holds its estate, and a region owned by nobody is
     /// one whose About Land and Region/Estate floaters both name "(nobody)".
-    fn identity(&self, estate_owner: AgentKey) -> RegionIdentity {
+    /// `region_protocols` is the grid's own too
+    /// ([`GridCore::region_protocols`]): what a region claims to speak is a
+    /// property of the grid running it, not of the patch of land.
+    fn identity(&self, estate_owner: AgentKey, region_protocols: u64) -> RegionIdentity {
         let handle = self.handle();
         RegionIdentity {
             sim_name: region_name_from_wire("fake-grid", &self.config.name)
@@ -188,7 +192,7 @@ impl RegionEntry {
             ),
             region_flags: 0,
             region_flags_extended: 0,
-            region_protocols: 0,
+            region_protocols,
             maturity: self.config.maturity,
             product: ProductType::FullRegion,
             product_sku: String::new(),
@@ -393,6 +397,13 @@ pub(crate) struct GridCore {
     /// How a session announces an inventory item it just created
     /// ([`InventoryAnnouncement`]).
     pub(crate) inventory_announcement: InventoryAnnouncement,
+    /// Who composites this grid's avatars ([`BakePolicy`]): the appearance
+    /// service, the central-bake protocol bit, the `AppearanceData` block and
+    /// the `UpdateAvatarAppearance` capability all follow it.
+    pub(crate) bakes: BakePolicy,
+    /// The `RegionProtocols` field every region handshake carries: the bake
+    /// policy's bit 0 and whatever else the imitated grid claims.
+    pub(crate) region_protocols: u64,
     /// The world-map tiles served under the login URI.
     pub(crate) map_tiles: MapTileStore,
     /// The world-map region catalogue every session answers map requests
@@ -536,16 +547,20 @@ impl GridCore {
         }
         success.message = Some(self.identity.message.clone());
         success.map_server_url = Some(self.login_uri.clone());
-        // The grid's avatar-baking service. Without it the viewer decides the
-        // avatar is server-baked, finds no URL to fetch a bake from, and
-        // leaves every avatar a cloud -- silently, because `getImageURL`
-        // returns an empty string rather than a failing request. See
+        // The grid's avatar-baking service, on a grid that bakes. Naming it is
+        // half of a pair: a viewer that has decided an avatar is server-baked
+        // and finds no URL here leaves every avatar a cloud -- silently,
+        // because `getImageURL` returns an empty string rather than a failing
+        // request -- so the rest of `BakePolicy` moves with this field, and a
+        // client-baking grid tells the viewer to bake instead. See
         // `crate::http_service::appearance_texture_id` for why it is mounted
         // per session.
-        success.agent_appearance_service = self
-            .login_uri
-            .join(&format!("sim/{}/appearance/", prepared.seq))
-            .ok();
+        if self.bakes.advertises_appearance_service() {
+            success.agent_appearance_service = self
+                .login_uri
+                .join(&format!("sim/{}/appearance/", prepared.seq))
+                .ok();
+        }
         success.currency = Some(self.economy.currency_symbol.clone());
         Ok((prepared, success))
     }
@@ -672,7 +687,16 @@ impl GridCore {
             format!("http://127.0.0.1:{}/sim/{seq}", self.http_port).parse()?;
         let caps = {
             let minter = self.minter.clone();
-            sl_proto::SimCaps::new(base_url, self.minter.uuid(), move || minter.uuid())
+            let mut caps =
+                sl_proto::SimCaps::new(base_url, self.minter.uuid(), move || minter.uuid());
+            if !self.bakes.grants_bake_capability() {
+                // A grid that does not central-bake offers no trigger to bake
+                // with, and a viewer that finds none composites the avatar
+                // itself and uploads the result -- which is the whole of what a
+                // stock OpenSim region does about appearance.
+                let _withheld = caps.withhold(sl_proto::CAP_UPDATE_AVATAR_APPEARANCE);
+            }
+            caps
         };
         let seed_url = caps.seed_url();
 
@@ -689,8 +713,9 @@ impl GridCore {
             assets: self.assets.clone(),
             object_assets: self.object_assets,
             inventory_announcement: self.inventory_announcement,
+            bakes: self.bakes,
             identity: {
-                let mut identity = region.identity(self.estate_owner);
+                let mut identity = region.identity(self.estate_owner, self.region_protocols);
                 identity.is_estate_manager = account.config.estate_manager;
                 identity
             },
@@ -1038,6 +1063,9 @@ pub struct FakeGridBuilder {
     /// How a created inventory item is announced, or `None` to follow
     /// [`imitates`](Self::imitates).
     inventory_announcement: Option<InventoryAnnouncement>,
+    /// Who composites this grid's avatars, or `None` to follow
+    /// [`imitates`](Self::imitates).
+    bakes: Option<BakePolicy>,
     /// Builder-registered map tiles.
     map_tiles: MapTileStore,
     /// The identifier source (random unless seeded).
@@ -1064,6 +1092,7 @@ impl std::fmt::Debug for FakeGridBuilder {
             .field("voice_backend", &self.voice_backend)
             .field("legacy_udp_inventory", &self.legacy_udp_inventory)
             .field("inventory_announcement", &self.inventory_announcement)
+            .field("bakes", &self.bakes)
             .field("eq_hold", &self.eq_hold)
             .field("handover_timeout", &self.handover_timeout)
             .field("http_port", &self.http_port)
@@ -1129,6 +1158,7 @@ impl FakeGridBuilder {
             voice_backend: None,
             legacy_udp_inventory: None,
             inventory_announcement: None,
+            bakes: None,
             map_tiles: MapTileStore::default(),
         }
     }
@@ -1286,6 +1316,20 @@ impl FakeGridBuilder {
         self
     }
 
+    /// Overrides who composites this grid's avatars, which otherwise follows
+    /// [`imitates`](Self::imitates): Second Life central-bakes, a stock OpenSim
+    /// region leaves it to each viewer.
+    ///
+    /// All four advertisements move together ([`BakePolicy`]) — the appearance
+    /// service, the central-bake protocol bit, the `AppearanceData` block and
+    /// the `UpdateAvatarAppearance` capability — because a grid that moves
+    /// fewer than all four leaves avatars cloud-shaped without saying so.
+    #[must_use]
+    pub const fn bakes(mut self, policy: BakePolicy) -> Self {
+        self.bakes = Some(policy);
+        self
+    }
+
     /// Registers a world-map tile served at `map-<zoom>-<x>-<y>-objects.jpg`
     /// under the login URI. Every configured region gets a stock zoom-1 tile
     /// unless one is registered here.
@@ -1376,6 +1420,7 @@ impl FakeGridBuilder {
             .iter()
             .find(|account| account.config.estate_manager)
             .map_or_else(|| AgentKey::from(Uuid::nil()), |account| account.agent_id);
+        let bakes = self.bakes.unwrap_or_else(|| self.imitates.bakes());
         let core = Arc::new(GridCore {
             accounts,
             estate_owner,
@@ -1411,6 +1456,12 @@ impl FakeGridBuilder {
             inventory_announcement: self
                 .inventory_announcement
                 .unwrap_or_else(|| self.imitates.inventory_announcement()),
+            bakes,
+            // The two halves of `RegionProtocols` compose: the bake policy
+            // claims the central-bake bit (and an explicit `bakes` override
+            // moves it), the flavour claims everything else it sets — today
+            // OpenSim's "more than 6 baked textures".
+            region_protocols: self.imitates.region_protocol_bits() | bakes.region_protocol_bits(),
             map_tiles,
             map,
             sessions: Mutex::new(HashMap::new()),

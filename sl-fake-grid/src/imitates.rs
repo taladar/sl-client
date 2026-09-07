@@ -24,6 +24,8 @@
 //! | the spatial-voice backend ([`VoiceBackend`]) | WebRTC, named three ways: `SimulatorFeatures.VoiceServerType`, the login `voice-config`, the `RequiredVoiceVersion` push | none: a stock region loads no voice module, and nothing is advertised |
 //! | the deprecated UDP inventory fetch ([`LegacyUdpInventory`]) | refused with a `FeatureDisabled` | served out of the session's inventory tree |
 //! | how a created inventory item is announced ([`InventoryAnnouncement`]) | a `BulkUpdateInventory` over the event queue | the legacy UDP `UpdateCreateInventoryItem` |
+//! | who composites an avatar ([`BakePolicy`]) | the grid: an `agent_appearance_service`, the central-bake protocol bit, an `AppearanceData` block on every appearance, and the `UpdateAvatarAppearance` trigger | every viewer for itself: none of those four |
+//! | the rest of `RegionProtocols` ([`region_protocol_bits`](ImitatedGrid::region_protocol_bits)) | nothing else claimed | bit 63, "more than 6 baked textures" |
 //!
 //! **The inventory pair is the divergence a viewer is most likely to trip
 //! over**, which is why it is two rows rather than one setting. An inventory
@@ -48,6 +50,14 @@
 //! Dropping the block on the Second Life side therefore hides no URL — it
 //! removes a *second* copy of two of them.
 //!
+//! **The bake pair is the divergence that cost the most to derive**, and the
+//! reason it is a policy type rather than a boolean: withdrawing the appearance
+//! service on its own is *worse* than leaving it, because a viewer that has
+//! already decided an avatar is server-baked then asks for no bake at all and
+//! leaves it a cloud with nothing in the log. Four things move together or none
+//! of them may — see the [`bakes`](crate::bakes) module docs for the four and
+//! for where each side of each was measured.
+//!
 //! # What it does not decide yet, and why
 //!
 //! Each of these is a measured or documented divergence the fake grid takes one
@@ -57,7 +67,6 @@
 //!
 //! | behaviour | the side the fake grid takes | what the other side needs |
 //! | --- | --- | --- |
-//! | server-side avatar bakes | Second Life's: `agent_appearance_service` is always named | dropping the service alone leaves every avatar a silent cloud; the "this avatar is server-baked" decision has to flip with it ([[test-fake-grid-imitates-server-bakes]]) |
 //! | the economy helper and the price list | OpenSim's: a stock region's zeroes | what Second Life's helper and `EconomyData` actually answer is unmeasured ([[test-fake-grid-imitates-economy]]) |
 //! | how an **upload-created** item is announced (as opposed to a taken one) | the legacy UDP message on both flavours | what Second Life sends besides the capability's own HTTP response is unmeasured ([[test-fake-grid-imitates-upload-announcements]]) |
 //!
@@ -68,6 +77,7 @@
 //! grid nothing can log into tests nothing.
 
 use crate::assets::ObjectAssetPolicy;
+use crate::bakes::{BakePolicy, REGION_PROTOCOL_BAKES_ON_MESH};
 use crate::inventory::{InventoryAnnouncement, LegacyUdpInventory};
 use crate::voice::VoiceBackend;
 
@@ -171,6 +181,42 @@ impl ImitatedGrid {
             Self::OpenSim => InventoryAnnouncement::Legacy,
         }
     }
+
+    /// Who composites this grid's avatars ([`BakePolicy`]).
+    ///
+    /// Second Life central-bakes; a stock OpenSim region leaves it to each
+    /// viewer. Four separate things move with this answer, and moving fewer
+    /// than all four leaves avatars silently cloud-shaped — see the
+    /// [`bakes`](crate::bakes) module docs.
+    #[must_use]
+    pub const fn bakes(self) -> BakePolicy {
+        match self {
+            Self::SecondLife => BakePolicy::ServerSide,
+            Self::OpenSim => BakePolicy::ClientSide,
+        }
+    }
+
+    /// The `RegionProtocols` bits this grid claims that are **not** the bake
+    /// policy's to claim.
+    ///
+    /// Only one so far: OpenSim sets bit 63,
+    /// [`REGION_PROTOCOL_BAKES_ON_MESH`], on every region handshake. It shares
+    /// a field with the central-bake bit and nothing else, which is why the two
+    /// halves are contributed separately and OR'd together — a grid told to
+    /// bake client-side is still whichever grid it is imitating about Bakes on
+    /// Mesh.
+    ///
+    /// Second Life claims nothing here rather than claiming bit 63 too: the
+    /// reference viewer reads that bit as an OpenSim extension and decides the
+    /// same question from the grid's identity on Second Life, so whether the
+    /// Second Life simulator sets it is unmeasured.
+    #[must_use]
+    pub const fn region_protocol_bits(self) -> u64 {
+        match self {
+            Self::SecondLife => 0,
+            Self::OpenSim => REGION_PROTOCOL_BAKES_ON_MESH,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -206,6 +252,56 @@ mod test {
         assert_ne!(
             sl.inventory_announcement(),
             opensim.inventory_announcement()
+        );
+        assert_ne!(sl.bakes(), opensim.bakes());
+        assert_ne!(sl.region_protocol_bits(), opensim.region_protocol_bits());
+    }
+
+    /// The bake policy is four coupled advertisements, and the flavour has to
+    /// carry all four: a grid that says it is OpenSim while still naming an
+    /// appearance service is the shape of divergence this whole module exists
+    /// to make impossible, and one that drops the service while still stamping
+    /// an `AppearanceData` block is the *worse* shape — every avatar a cloud,
+    /// silently.
+    #[test]
+    fn an_open_sim_flavoured_grid_bakes_nothing_of_its_own() {
+        let opensim = ImitatedGrid::OpenSim.bakes();
+        assert_eq!(opensim, BakePolicy::ClientSide);
+        assert!(!opensim.advertises_appearance_service());
+        assert!(!opensim.grants_bake_capability());
+        assert_eq!(opensim.region_protocol_bits(), 0);
+
+        let sl = ImitatedGrid::SecondLife.bakes();
+        assert_eq!(sl, BakePolicy::ServerSide);
+        assert!(sl.advertises_appearance_service());
+        assert!(sl.grants_bake_capability());
+        assert_eq!(
+            sl.region_protocol_bits(),
+            crate::bakes::REGION_PROTOCOL_SERVER_BAKES
+        );
+    }
+
+    /// The two halves of `RegionProtocols` are independent, and the whole field
+    /// is what a region handshake carries: OpenSim's bit 63 is measured from
+    /// `LLClientView.SendRegionHandshake`, and it survives a grid that has been
+    /// told to bake server-side anyway.
+    #[test]
+    fn the_region_protocol_halves_compose() {
+        assert_eq!(
+            ImitatedGrid::OpenSim.region_protocol_bits()
+                | ImitatedGrid::OpenSim.bakes().region_protocol_bits(),
+            REGION_PROTOCOL_BAKES_ON_MESH
+        );
+        assert_eq!(
+            ImitatedGrid::SecondLife.region_protocol_bits()
+                | ImitatedGrid::SecondLife.bakes().region_protocol_bits(),
+            crate::bakes::REGION_PROTOCOL_SERVER_BAKES
+        );
+        // An explicit override moves only its own half.
+        assert_eq!(
+            ImitatedGrid::OpenSim.region_protocol_bits()
+                | BakePolicy::ServerSide.region_protocol_bits(),
+            REGION_PROTOCOL_BAKES_ON_MESH | crate::bakes::REGION_PROTOCOL_SERVER_BAKES
         );
     }
 

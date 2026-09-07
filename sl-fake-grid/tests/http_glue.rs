@@ -130,6 +130,63 @@ mod test {
         Ok(())
     }
 
+    /// **The appearance service is named only by the grid that bakes.**
+    ///
+    /// The login field is the *only* place a viewer learns where a baked slot
+    /// is fetched from, and the failure mode of getting this wrong is silent:
+    /// a viewer that has decided an avatar is server-baked and finds no URL
+    /// here asks for no bake at all and draws a cloud forever. So both answers
+    /// are pinned, not just the interesting one — and pinned on the raw login
+    /// response, because "the field is absent" is not something the client
+    /// re-exposes as anything but a `None` it also produces when it never
+    /// parsed the response.
+    ///
+    /// The URL points at this session's own route rather than a grid-wide one
+    /// because the fake grid's bakes are fabricated per session; that is
+    /// [`sl_fake_grid`]'s deviation and not a grid's, so only its *shape* is
+    /// asserted.
+    #[tokio::test]
+    async fn only_a_baking_grid_names_an_appearance_service() -> Result<(), TestError> {
+        for (imitates, bakes) in [
+            (ImitatedGrid::SecondLife, true),
+            (ImitatedGrid::OpenSim, false),
+        ] {
+            let grid = FakeGridBuilder::new()
+                .account(AccountConfig::new("Test", "User", "password"))
+                .region(RegionConfig::default())
+                .imitates(imitates)
+                .event_queue_hold(Duration::from_millis(200))
+                .start()
+                .await?;
+            let text = post_login(
+                &grid,
+                "text/xml",
+                build_login_request(&login_request("password")),
+            )
+            .await?;
+            let LoginResponse::Success(success) = parse_login_response(&text)? else {
+                return Err("expected a successful login".into());
+            };
+            let service = success.agent_appearance_service.clone();
+            assert_eq!(
+                service.is_some(),
+                bakes,
+                "a grid imitating {imitates:?} answered agent_appearance_service = {service:?}"
+            );
+            if let Some(service) = service {
+                assert!(
+                    service.path().ends_with("/appearance/"),
+                    "the appearance service is not the per-session route: {service}"
+                );
+                // The trailing slash is load-bearing: the reference viewer
+                // concatenates rather than joins (`service + "texture/" + ...`),
+                // so a URL without it addresses a sibling path.
+                assert!(service.as_str().ends_with('/'));
+            }
+        }
+        Ok(())
+    }
+
     #[tokio::test]
     async fn llsd_login_works_on_the_same_url() -> Result<(), TestError> {
         let grid = start_grid().await?;

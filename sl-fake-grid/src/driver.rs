@@ -44,6 +44,10 @@ pub(crate) struct SimState {
     /// ([`crate::InventoryAnnouncement`]). Grid-wide, because it is a property
     /// of which live grid this one is being.
     pub(crate) inventory_announcement: crate::inventory::InventoryAnnouncement,
+    /// Who composites this grid's avatars ([`crate::BakePolicy`]). Grid-wide,
+    /// and what decides whether an `AvatarAppearance` this session pushes
+    /// carries an `AppearanceData` block at all.
+    pub(crate) bakes: crate::bakes::BakePolicy,
     /// The region identity sent in the automatic `RegionHandshake` greeting
     /// (on `UseCircuitCode`, before the agent's movement completes).
     pub(crate) identity: RegionIdentity,
@@ -217,6 +221,7 @@ impl SharedSim {
                         &state.world.lock(),
                         &state.terrain,
                         &state.identity,
+                        state.bakes,
                         &mut state.sim,
                         now,
                     );
@@ -248,6 +253,7 @@ impl SharedSim {
                     &state.terrain,
                     &state.avatar,
                     &state.assets,
+                    state.bakes,
                     &mut state.sim,
                     now,
                 );

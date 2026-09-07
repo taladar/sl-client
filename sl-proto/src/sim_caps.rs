@@ -686,6 +686,23 @@ impl SimCaps {
         self.tokens.contains_key(name)
     }
 
+    /// Withdraws a capability this surface would otherwise serve, so the seed
+    /// grant never advertises it and its URL never resolves. Answers whether
+    /// there was one to withdraw.
+    ///
+    /// The served-capability table is what a simulator *can* serve, not what
+    /// every simulator does: capability negotiation is how a grid tells a client
+    /// which of two protocols it speaks, and a client that finds a capability
+    /// missing is expected to take the other road. `UpdateAvatarAppearance` is
+    /// the worked example — a grid that does not central-bake avatars offers no
+    /// bake trigger, and a viewer that finds none bakes the avatar itself.
+    ///
+    /// Withholding is per-agent-presence, because that is the granularity a
+    /// [`SimCaps`] has; a grid-wide policy withholds on every session it mints.
+    pub fn withhold(&mut self, name: &str) -> bool {
+        self.tokens.remove(name).is_some()
+    }
+
     /// Grants capability URLs for the requested names — the server side of
     /// the seed round-trip. Merges the sim-cap grant with the composed
     /// [`AssetCaps`]'s grant so one response advertises every capability, sim
@@ -2563,6 +2580,34 @@ mod tests {
         );
         assert_eq!(caps.resolve("/cap/not-a-uuid"), ResolvedPath::Unknown);
         assert_eq!(caps.resolve("/somewhere/else"), ResolvedPath::Unknown);
+        Ok(())
+    }
+
+    /// A withheld capability disappears from **both** halves of the contract:
+    /// the grant a client reads to learn the URL, and the URL itself. Leaving
+    /// the second behind would let a client that guessed the token keep using a
+    /// protocol the grid says it does not speak.
+    #[test]
+    fn a_withheld_capability_is_neither_granted_nor_resolvable() -> Result<(), TestError> {
+        let mut caps = caps()?;
+        let name = CAP_UPDATE_AVATAR_APPEARANCE.to_owned();
+        let url: Url = caps
+            .grant(std::slice::from_ref(&name))
+            .get(&name)
+            .ok_or("UpdateAvatarAppearance was not granted before withholding")?
+            .parse()?;
+
+        assert!(caps.withhold(CAP_UPDATE_AVATAR_APPEARANCE));
+        assert!(!caps.supports(CAP_UPDATE_AVATAR_APPEARANCE));
+        assert!(
+            caps.grant(std::slice::from_ref(&name)).is_empty(),
+            "a withheld capability is still advertised"
+        );
+        assert_eq!(caps.resolve(url.path()), ResolvedPath::Unknown);
+        // Withholding twice is not an error, it is a no-op that answers so.
+        assert!(!caps.withhold(CAP_UPDATE_AVATAR_APPEARANCE));
+        // Everything else is untouched.
+        assert!(caps.supports(EVENT_QUEUE_GET));
         Ok(())
     }
 }

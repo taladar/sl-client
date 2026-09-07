@@ -618,13 +618,14 @@ per-behaviour setters still win where they are called; the flavour is what
 an unset knob falls back to, not a lock, which is what a test wanting one
 deliberate deviation needs. Each resolves once, in `start`.
 
-Six behaviours follow it today: a taken object's asset, whether the
+Seven behaviours follow it today: a taken object's asset, whether the
 login response is trimmed to the request's `options` list (Second Life
 honours it, OpenSim sends every field regardless), whether
 `SimulatorFeatures` carries the `OpenSimExtras` block, which spatial-voice
-backend the regions run, and the two halves of how inventory works. The
-`SimulatorFeatures` pair is covered under "How a region introduces itself"
-below, and the inventory pair under "How this grid does inventory".
+backend the regions run, the two halves of how inventory works, and who
+composites an avatar. The `SimulatorFeatures` pair is covered under "How a
+region introduces itself" below, the inventory pair under "How this grid
+does inventory", and the bakes under "Who bakes an avatar".
 
 That second one is small and it immediately earned its keep. Turning it on
 by default broke a fake-grid end-to-end test that expected
@@ -636,8 +637,52 @@ grid that commits to being one real grid.
 
 The divergences the flavour does **not** yet decide are audited in
 `imitates.rs` rather than left to be rediscovered, each with a roadmap item:
-server-side bakes (dropping the appearance service alone leaves every avatar
-a silent cloud) and the economy price list.
+the economy price list, and how an *upload*-created inventory item is
+announced.
+
+### Who bakes an avatar
+
+`BakePolicy` says whether this grid composites avatars or leaves it to each
+viewer, and it is one setting rather than four because the four have to move
+together. Second Life central-bakes ("Sunshine"); a stock OpenSim region
+runs no bake service and every viewer bakes its own agent and uploads the
+result as an ordinary texture asset.
+
+What moves with it:
+
+| what | `ServerSide` | `ClientSide` |
+| --- | --- | --- |
+| the login `agent_appearance_service` | the per-session route | absent |
+| `RegionProtocols` bit 0 | set | clear |
+| the appearance's `AppearanceData` block | present, version 1 | no block |
+| the `UpdateAvatarAppearance` capability | granted | withheld |
+
+The reason they move together is the failure mode of moving fewer. A viewer
+decides per avatar whether that avatar is server-baked, from the
+`AppearanceData` block's version
+(`setIsUsingServerBakes(appearance_version > 0)`); once it has decided so,
+`LLVOAvatar::getImageURL` is the only way it will ever ask for a baked slot,
+and with no service URL to build from that function returns an **empty
+string**. No request, no failure, no warning — every avatar including the
+agent's own stays a cloud and nothing says why. Dropping the service on its
+own is therefore worse than leaving it there.
+
+Bit 0 is the half that is easy to forget, because it is about the *agent's
+own* appearance rather than about looking at anyone: the reference viewer
+reads it as `LLViewerRegion::getCentralBakeVersion()` and never sends
+`AgentSetAppearance` in a region that claims to central-bake. A grid that
+sets the bit and serves no bake service has an agent that can neither be
+baked nor bake itself.
+
+Every client-baked answer is what OpenSim's `LLClientView` actually writes:
+`SendRegionHandshake` sends `RegionProtocols = 1 << 63` (bit 0 clear, bit 63
+being the unrelated "more than 6 baked textures" extension, which
+`ImitatedGrid::region_protocol_bits` contributes separately), and
+`SendAppearance` writes a literal zero block count where `AppearanceData`
+would go. The fake grid's own bakes are fabricated per session either way
+and their bytes live in the grid asset store under the ids the appearance
+names, so on the client-baked flavour a viewer reaches them the only road
+left: `GetTexture`, by id.
 
 ### How this grid does inventory
 

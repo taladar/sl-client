@@ -996,6 +996,104 @@ mod test {
         Ok(())
     }
 
+    /// **A grid that does not central-bake says so four times over.**
+    ///
+    /// Server-side baking is not one advertisement, it is four, and the reason
+    /// they are asserted together is that moving fewer than all of them is
+    /// *worse than moving none*: a viewer that has decided an avatar is
+    /// server-baked and finds no service URL asks for no baked texture at all
+    /// (`LLVOAvatar::getImageURL` answers an empty string), so every avatar
+    /// stays a cloud with nothing logged. Three of the four are here — the
+    /// fourth, the login field itself, is pinned on the raw response in
+    /// `http_glue`, because its absence is not something the client re-exposes.
+    ///
+    /// Both flavours run, because "the OpenSim one withholds it" is only half a
+    /// claim: a knob that answered the same on both would pass a test that
+    /// checked one side and would still leave the fake grid nobody in
+    /// particular.
+    #[tokio::test]
+    async fn a_client_baking_grid_withholds_every_bake_signal() -> Result<(), TestError> {
+        for (imitates, bakes) in [
+            (ImitatedGrid::SecondLife, true),
+            (ImitatedGrid::OpenSim, false),
+        ] {
+            let (_grid, mut client, _agent) =
+                connect_configured(vec![RegionConfig::default()], None, imitates).await?;
+            let (caps_tx, mut caps_rx) = mpsc::channel(4);
+            client.set_caps_reporter(caps_tx);
+            let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
+            let (command_tx, command_rx) = mpsc::channel::<Command>(8);
+            let (diag_tx, _diag_rx) = mpsc::channel(16);
+            let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+
+            // The region handshake and the agent's own appearance both arrive
+            // in the arrival burst; neither is requested, so this reads the
+            // stream until it has both rather than asking for either.
+            let mut protocols = None;
+            let mut appearance = None;
+            while protocols.is_none() || appearance.is_none() {
+                let event = tokio::time::timeout(WAIT, event_rx.recv())
+                    .await?
+                    .ok_or("client event stream ended early")?;
+                match event {
+                    Event::RegionInfoHandshake(identity) => {
+                        protocols = Some(identity.region_protocols);
+                    }
+                    Event::AvatarAppearance(record) => appearance = Some(*record),
+                    _other => {}
+                }
+            }
+            let protocols = protocols.ok_or("no region identity")?;
+            let appearance = appearance.ok_or("no appearance")?;
+
+            // (1) `RegionProtocols` bit 0, which the reference viewer reads as
+            // `getCentralBakeVersion()` — what decides whether the agent bakes
+            // and uploads its *own* appearance.
+            assert_eq!(
+                protocols & sl_fake_grid::REGION_PROTOCOL_SERVER_BAKES != 0,
+                bakes,
+                "a grid imitating {imitates:?} claimed central baking = {}",
+                protocols & sl_fake_grid::REGION_PROTOCOL_SERVER_BAKES != 0
+            );
+            // The other bit in that field is Bakes on Mesh, an OpenSim
+            // extension that rides along and is not the bake policy's.
+            assert_eq!(
+                protocols & sl_fake_grid::REGION_PROTOCOL_BAKES_ON_MESH != 0,
+                imitates == ImitatedGrid::OpenSim
+            );
+
+            // (2) the per-avatar `AppearanceData` block, which is
+            // `setIsUsingServerBakes(appearance_version > 0)`. Absent, not
+            // zeroed: OpenSim writes no block at all.
+            assert_eq!(appearance.appearance_version.is_some(), bakes);
+            assert_eq!(appearance.cof_version.is_some(), bakes);
+            assert_eq!(appearance.appearance_flags.is_some(), bakes);
+            // What the avatar *looks* like is the same either way — both grids
+            // publish baked ids, they disagree only about how to fetch them.
+            assert!(!appearance.visual_params.is_empty());
+            assert!(
+                appearance
+                    .texture_entry
+                    .texture_id(sl_proto::avatar_texture::UPPER_BAKED)
+                    .is_some()
+            );
+
+            // (3) the `UpdateAvatarAppearance` capability — the POST that
+            // triggers a central bake. A viewer that finds none bakes locally.
+            let caps = tokio::time::timeout(WAIT, caps_rx.recv())
+                .await?
+                .ok_or("no capability map")?;
+            assert_eq!(caps.contains_key("UpdateAvatarAppearance"), bakes);
+            // A neighbouring upload cap is still there on both, so the check
+            // above is about this capability and not about the seed grant.
+            assert!(caps.contains_key("UploadBakedTexture"));
+
+            drop(command_tx);
+            run.abort();
+        }
+        Ok(())
+    }
+
     #[tokio::test]
     async fn two_grids_run_in_parallel() -> Result<(), TestError> {
         let (first_grid, first_client, _first_agent) = connect().await?;

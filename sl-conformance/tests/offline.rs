@@ -66,6 +66,7 @@ mod test {
         region_crossing => "region-crossing",
         neighbour_child_circuits => "neighbour-child-circuits",
         avatar_appearance_npc => "avatar-appearance-npc",
+        server_appearance_bake => "server-appearance-bake",
         texture_fetch_http => "texture-fetch-http",
         asset_fetch_http => "asset-fetch-http",
         economy_data => "economy-data",

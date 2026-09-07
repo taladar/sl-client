@@ -25,15 +25,24 @@
 //! `baked-texture-upload` exercises), so on OpenSim the case records `partial`
 //! ("capability not offered"). The mirror image of `baked-texture-upload`, which
 //! is `complete` on OpenSim and `partial` on aditi.
+//!
+//! On the **fake** grid that divergence is not an unknown, it is a setting this
+//! workspace made ([`sl_fake_grid::BakePolicy`]), so both flavours run and the
+//! absence is asserted rather than recorded partial: `FakeSl` must offer the
+//! capability and accept a bake, `FakeOpensim` must offer none. Asserting the
+//! *absence* is the point — withdrawing the appearance service while leaving
+//! this capability behind would tell a viewer to trigger a bake on a grid that
+//! runs no baking service at all.
 
 use std::time::Instant;
 
 use sl_client_tokio::{Command, Event, Throttle};
+use sl_fake_grid::ImitatedGrid;
 
 use crate::context::{TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
-use crate::support::{LONG_TIMEOUT, REGION_TIMEOUT, check, is_aditi};
+use crate::support::{LONG_TIMEOUT, REGION_TIMEOUT, check, check_eq, is_aditi};
 
 /// The Current Outfit Folder version to bake from first; a mismatch makes the
 /// grid answer with the version it expects, which the case then re-requests.
@@ -57,7 +66,7 @@ impl GridTest for ServerAppearanceBake {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl, Grid::FakeOpensim]
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
@@ -71,7 +80,21 @@ impl GridTest for ServerAppearanceBake {
 
             // Central baking is Second Life-only; OpenSim never offers the
             // capability (it uses the legacy client-side bake path instead).
-            if session.cap("UpdateAvatarAppearance").is_none() {
+            let offered = session.cap("UpdateAvatarAppearance").is_some();
+            if grid.is_fake() {
+                // Offline the answer is not an unknown: the flavour decided it,
+                // and either side being wrong is a real failure. A grid that
+                // offers the trigger while naming no bake service would send a
+                // viewer to composite an outfit nothing will ever bake.
+                check_eq(
+                    "the UpdateAvatarAppearance capability",
+                    &offered,
+                    &(grid.behaves_like() == ImitatedGrid::SecondLife),
+                )?;
+                if !offered {
+                    return Ok(());
+                }
+            } else if !offered {
                 ctx.mark_partial("no UpdateAvatarAppearance capability offered");
                 return Ok(());
             }

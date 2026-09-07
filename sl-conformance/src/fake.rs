@@ -133,6 +133,7 @@ pub const OFFLINE_CASES: &[&str] = &[
     "region-crossing",
     "neighbour-child-circuits",
     "avatar-appearance-npc",
+    "server-appearance-bake",
     "texture-fetch-http",
     "asset-fetch-http",
     "economy-data",

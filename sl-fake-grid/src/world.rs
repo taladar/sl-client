@@ -1240,6 +1240,7 @@ pub(crate) fn push_arrival_world(
     terrain: &TerrainFixture,
     identity: &AvatarIdentity,
     assets: &crate::assets::GridAssets,
+    bakes: crate::bakes::BakePolicy,
     sim: &mut SimSession,
     now: Instant,
 ) {
@@ -1258,7 +1259,7 @@ pub(crate) fn push_arrival_world(
     if let Err(error) = sim.send_object_update(&[avatar], REAL_TIME_DILATION, now) {
         tracing::warn!("rezzing the arriving avatar failed: {error}");
     }
-    push_own_appearance(identity, assets, sim, now);
+    push_own_appearance(identity, assets, bakes, sim, now);
     push_own_animation(identity, sim, now);
     if let Err(error) = sim.send_parcel_overlay(&world.overlay_for(identity.agent_id), now) {
         tracing::warn!("sending the parcel overlay failed: {error}");
@@ -1276,7 +1277,7 @@ pub(crate) fn push_arrival_world(
     {
         tracing::warn!("rezzing the fixture objects failed: {error}");
     }
-    push_npcs(&world.npcs, sim, now);
+    push_npcs(&world.npcs, bakes, sim, now);
     push_object_animations(&world.object_animations, sim, now);
 }
 
@@ -1299,6 +1300,7 @@ pub(crate) fn push_child_world(
     world: &SceneFixtures,
     terrain: &TerrainFixture,
     identity: &sl_proto::RegionIdentity,
+    bakes: crate::bakes::BakePolicy,
     sim: &mut SimSession,
     now: Instant,
 ) {
@@ -1307,7 +1309,7 @@ pub(crate) fn push_child_world(
     {
         tracing::warn!("rezzing a neighbour's objects failed: {error}");
     }
-    push_npcs(&world.npcs, sim, now);
+    push_npcs(&world.npcs, bakes, sim, now);
     push_object_animations(&world.object_animations, sim, now);
     push_terrain(terrain, sim, now);
     // The overlay is the whole region's parcel layout, which a neighbouring
@@ -1379,6 +1381,7 @@ pub const AVATAR_CENTRE_ABOVE_GROUND_M: f32 = 0.95;
 fn push_own_appearance(
     identity: &AvatarIdentity,
     assets: &crate::assets::GridAssets,
+    bakes: crate::bakes::BakePolicy,
     sim: &mut SimSession,
     now: Instant,
 ) {
@@ -1389,9 +1392,11 @@ fn push_own_appearance(
             let _previous = store.insert(key, bytes);
         }
     }
-    if let Err(error) =
-        sim.send_avatar_appearance(&appearance.record(identity.agent_id, Vec::new()), now)
-    {
+    // Both flavours publish the same ids for the same body; only the
+    // `AppearanceData` block around them tells the viewer whether to fetch them
+    // from the appearance service or as ordinary assets (`crate::bakes`).
+    let record = bakes.applied(appearance.record(identity.agent_id, Vec::new()));
+    if let Err(error) = sim.send_avatar_appearance(&record, now) {
         tracing::warn!("sending the arriving agent's own appearance failed: {error}");
     }
 }
@@ -1430,7 +1435,12 @@ fn push_own_animation(identity: &AvatarIdentity, sim: &mut SimSession, now: Inst
 /// name an avatar the client has to already know, and the attachments last
 /// because each names its wearer's region-local id as its parent. Send
 /// failures are logged, never fatal.
-fn push_npcs(npcs: &[NpcFixture], sim: &mut SimSession, now: Instant) {
+fn push_npcs(
+    npcs: &[NpcFixture],
+    bakes: crate::bakes::BakePolicy,
+    sim: &mut SimSession,
+    now: Instant,
+) {
     if npcs.is_empty() {
         return;
     }
@@ -1439,7 +1449,8 @@ fn push_npcs(npcs: &[NpcFixture], sim: &mut SimSession, now: Instant) {
         tracing::warn!("rezzing the NPC avatars failed: {error}");
     }
     for npc in npcs {
-        if let Err(error) = sim.send_avatar_appearance(&npc.appearance_record(), now) {
+        let record = bakes.applied(npc.appearance_record());
+        if let Err(error) = sim.send_avatar_appearance(&record, now) {
             tracing::warn!("sending an NPC's appearance failed: {error}");
         }
     }
