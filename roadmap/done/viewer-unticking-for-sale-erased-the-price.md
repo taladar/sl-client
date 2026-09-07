@@ -5,7 +5,7 @@ topic: viewer
 status: done
 origin: found live-checking the keyed properties floater on the local grid
   (2026-09-07)
-refs: [viewer-inventory-item-properties, viewer-keyed-floater-audit,
+refs: [viewer-inventory-open-and-properties, viewer-keyed-floater-audit,
   viewer-item-price-field-silently-dropped]
 ---
 

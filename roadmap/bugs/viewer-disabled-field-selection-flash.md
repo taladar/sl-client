@@ -5,7 +5,7 @@ topic: viewer
 status: bugs
 origin: seen live-checking the item-properties price field on the local grid
   (2026-09-07)
-refs: [viewer-ui-text-input, viewer-inventory-item-properties]
+refs: [viewer-ui-text-input-widget, viewer-inventory-open-and-properties]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).

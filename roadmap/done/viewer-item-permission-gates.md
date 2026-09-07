@@ -5,7 +5,7 @@ topic: viewer
 status: done
 origin: user question while live-checking the keyed properties floater
   (2026-09-07)
-refs: [viewer-inventory-item-properties, viewer-keyed-floater-audit]
+refs: [viewer-inventory-open-and-properties, viewer-keyed-floater-audit]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).

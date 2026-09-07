@@ -5,16 +5,16 @@ topic: viewer
 status: bugs
 origin: seen on the local OpenSim grid while live-checking the keyed group
   profile (2026-09-06)
-refs: [viewer-social-group-profile, viewer-keyed-floater-audit,
-  sl-client-opensim-groups-v2-setup]
+refs: [viewer-social-group-profile, viewer-keyed-floater-audit]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
 
-On the local OpenSim grid the **Groups pane** in the Conversations window is
-empty, while the **avatar profile's 2nd Life tab lists the agent's groups** in
-the same session. So the memberships are known to the grid and reach the
-viewer by one path and not the other.
+On the local OpenSim grid (Groups V2 wired up per
+`sl-client-opensim-groups-v2-setup`) the **Groups pane** in the Conversations
+window is empty, while the **avatar profile's 2nd Life tab lists the agent's
+groups** in the same session. So the memberships are known to the grid and
+reach the viewer by one path and not the other.
 
 ## The two paths
 

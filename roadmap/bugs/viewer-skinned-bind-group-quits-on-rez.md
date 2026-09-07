@@ -57,7 +57,7 @@ Candidates to check first, in order:
    model-only group. `SL_VIEWER_GPU_AVATARS=cpu` forces the legacy CPU path and
    is the cheapest A/B for this.
 3. `bevy_pbr`'s **batching / `MultiDrawIndirect`** grouping in the fork
-   ([[sl-client-bevy-pbr-fork]]) putting a skinned and a non-skinned mesh in one
+   (`sl-client-bevy-pbr-fork`) putting a skinned and a non-skinned mesh in one
    indirect batch.
 
 ## Not always — and not a code change
