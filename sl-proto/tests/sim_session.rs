@@ -4445,6 +4445,53 @@ mod test {
         Ok(())
     }
 
+    /// The seam a driver uses to order two messages the client would otherwise
+    /// be free to see in either order: read the sequence a `send_*` is about to
+    /// take, then wait for the client's acknowledgement of exactly that packet.
+    ///
+    /// The distinction the test pins is *delivery is not acknowledgement*. A
+    /// datagram handed to the client is still awaited; only the `PacketAck` the
+    /// client emits — after it has decoded the message and pushed whatever the
+    /// message means onto its own event stream — retires it. That is what makes
+    /// the ack usable as a happens-before edge (`sl-fake-grid`'s teleport waits
+    /// on it before announcing the destination over the CAPS event queue, which
+    /// would otherwise race the UDP `TeleportStart`).
+    #[test]
+    fn a_reliable_send_is_awaited_until_the_client_acknowledges_it() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+
+        // Taken *before* the send, so it names the packet that send emits.
+        let sequence = sim.next_outgoing_sequence();
+        sim.send_teleport_start(0, now)?;
+        assert!(
+            sim.is_awaiting_ack(sequence),
+            "a reliable packet is awaited from the moment it is sent"
+        );
+
+        // Handing it to the client is not enough: the client batches owed
+        // acknowledgements behind its ack-flush delay and emits the `PacketAck`
+        // only from a timeout, which `pump` never drives.
+        pump(&mut client, &mut sim, now)?;
+        assert!(
+            sim.is_awaiting_ack(sequence),
+            "delivering a datagram is not the same as the client acknowledging it"
+        );
+
+        // Past the flush delay the client owns up, and the ack retires it.
+        let later = after(now, 200)?;
+        client.handle_timeout(later);
+        pump(&mut client, &mut sim, later)?;
+        assert!(
+            !sim.is_awaiting_ack(sequence),
+            "the client's PacketAck retires the packet"
+        );
+
+        // A sequence the session never sent was never tracked.
+        assert!(!sim.is_awaiting_ack(SequenceNumber(u32::MAX)));
+        Ok(())
+    }
+
     #[test]
     fn acknowledges_reliable_inbound() -> Result<(), TestError> {
         let now = Instant::now();

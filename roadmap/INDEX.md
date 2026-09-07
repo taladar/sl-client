@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 322 |
 | blocked | 46 |
 | in-progress | 20 |
-| bugs | 63 |
-| done | 1022 |
+| bugs | 62 |
+| done | 1023 |
 | deferred | 25 |
 | wont-do | 14 |
 | **total** | **1612** |
@@ -1190,7 +1190,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (63)
+## bugs (62)
 
 ### viewer
 
@@ -1338,12 +1338,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-map-server-url-not-honoured`](bugs/test-fake-grid-map-server-url-not-honoured.md)
   — The viewer falls back to map.secondlife.com instead of the grid's
   map-server-url
-- [`test-fake-grid-teleport-phase-order-flake`](bugs/test-fake-grid-teleport-phase-order-flake.md)
-  — teleport-cross-region intermittently sees a phase before TeleportStart
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1022)
+## done (1023)
 
 ### protocol
 
@@ -3301,6 +3299,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   discarded
 - [`test-fake-grid-simulator-request-surfaces`](done/test-fake-grid-simulator-request-surfaces.md)
   — Four client requests no simulator half answers
+- [`test-fake-grid-teleport-phase-order-flake`](done/test-fake-grid-teleport-phase-order-flake.md)
+  — teleport-cross-region intermittently sees a phase before TeleportStart
 - [`test-fake-grid-teleport-shapes`](done/test-fake-grid-teleport-shapes.md) —
   The teleport matrix — same region, neighbour, distant, and each one failing
 - [`test-fake-grid-terrain-layerdata`](done/test-fake-grid-terrain-layerdata.md)

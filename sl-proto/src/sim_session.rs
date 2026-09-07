@@ -4702,6 +4702,33 @@ impl SimSession {
         matches!(self.state, SimState::Closed)
     }
 
+    /// The sequence number the next reliable packet sent on this circuit will
+    /// carry.
+    ///
+    /// Read *before* a `send_*` call, this names the packet that call is about
+    /// to send, which is the handle
+    /// [`is_awaiting_ack`](Self::is_awaiting_ack) takes — the pair is how a
+    /// driver waits for the client to have taken delivery of one particular
+    /// message before it does something the client should only see afterwards.
+    #[must_use]
+    pub const fn next_outgoing_sequence(&self) -> SequenceNumber {
+        self.next_sequence
+    }
+
+    /// Whether the reliable packet sent as `sequence` is still awaiting the
+    /// client's acknowledgement.
+    ///
+    /// `false` for a sequence this session never sent, for one already
+    /// acknowledged, and for an unreliable packet — which is never tracked, and
+    /// so is never waited for. A client only acknowledges a packet it has
+    /// decoded and handled, so the ack is a happens-before edge: once this
+    /// answers `false`, whatever that packet said has already reached the
+    /// client's own event stream.
+    #[must_use]
+    pub fn is_awaiting_ack(&self, sequence: SequenceNumber) -> bool {
+        self.unacked.contains_key(&sequence)
+    }
+
     /// Allocates the next outgoing sequence number.
     const fn next_sequence(&mut self) -> SequenceNumber {
         let sequence = self.next_sequence;

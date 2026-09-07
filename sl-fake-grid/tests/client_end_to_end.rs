@@ -1942,6 +1942,76 @@ mod test {
         Ok(())
     }
 
+    /// The teleport screen's phases must reach the client **in order**, and the
+    /// neighbour teleport is where that is hardest: the destination session is
+    /// already open, so the grid has almost no work to do between the UDP
+    /// `TeleportStart` and the CAPS `TeleportFinish` — and those two travel on
+    /// different transports, which the client's driver reads with an unbiased
+    /// select. Announce the destination too soon and the client can decode the
+    /// finish first, surfacing `TeleportFinished` ahead of `TeleportStarted`
+    /// (see `sl-proto`'s `a_caps_finish_ahead_of_the_udp_start_reorders_the_phases`
+    /// for exactly what that produces).
+    ///
+    /// The grid closes that window by waiting for the client's acknowledgement
+    /// of the start before it announces the destination, so the whole sequence
+    /// is collected here in **one** wait and asserted as an order, not a set.
+    #[tokio::test]
+    async fn a_neighbour_teleport_starts_before_it_finishes() -> Result<(), TestError> {
+        let mut running = start_in(vec![RegionConfig::default(), adjacent_east_region()]).await?;
+        let east = running
+            ._grid
+            .region_handle("Fake Region East")
+            .ok_or("no east region")?;
+        running
+            .wait_until("the east region's child circuit", |event| match event {
+                Event::GenericMessage(generic) => {
+                    sl_fake_grid::neighbour_marker_region(generic).as_deref()
+                        == Some("Fake Region East")
+                }
+                _ => false,
+            })
+            .await?;
+
+        running
+            .commands
+            .send(Command::Teleport {
+                region_handle: east,
+                position: RegionCoordinates::new(128.0, 128.0, 26.0),
+                look_at: Vector {
+                    x: 0.0,
+                    y: 1.0,
+                    z: 0.0,
+                },
+            })
+            .await?;
+
+        let mut phases: Vec<&'static str> = Vec::new();
+        running
+            .wait_until("the arrival in the east region", |event| match event {
+                Event::TeleportStarted => {
+                    phases.push("started");
+                    false
+                }
+                Event::TeleportFinished { .. } => {
+                    phases.push("finished");
+                    false
+                }
+                Event::RegionChanged { region_handle, .. } if *region_handle == east => {
+                    phases.push("region-changed");
+                    true
+                }
+                _ => false,
+            })
+            .await?;
+
+        assert_eq!(
+            phases,
+            vec!["started", "finished", "region-changed"],
+            "the teleport screen goes up before the handover is announced"
+        );
+        Ok(())
+    }
+
     /// A same-region request opens no second session at all — the shape of the
     /// matrix that has nothing to hand over, and so nothing to time out.
     #[tokio::test]

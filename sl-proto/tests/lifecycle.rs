@@ -157,10 +157,10 @@ mod test {
         SoundTriggerSoundDataBlock, TelehubInfo as TelehubInfoMessage,
         TelehubInfoSpawnPointBlockBlock, TelehubInfoTelehubBlockBlock, TeleportFailed,
         TeleportFailedAlertInfoBlock, TeleportFailedInfoBlock, TeleportFinish,
-        TeleportFinishInfoBlock, TerminateFriendship, TerminateFriendshipAgentDataBlock,
-        TerminateFriendshipExBlockBlock, TransferInfo, TransferInfoTransferInfoBlock,
-        TransferPacket, TransferPacketTransferDataBlock, UUIDNameReply,
-        UUIDNameReplyUUIDNameBlockBlock, UpdateCreateInventoryItem,
+        TeleportFinishInfoBlock, TeleportStart, TeleportStartInfoBlock, TerminateFriendship,
+        TerminateFriendshipAgentDataBlock, TerminateFriendshipExBlockBlock, TransferInfo,
+        TransferInfoTransferInfoBlock, TransferPacket, TransferPacketTransferDataBlock,
+        UUIDNameReply, UUIDNameReplyUUIDNameBlockBlock, UpdateCreateInventoryItem,
         UpdateCreateInventoryItemAgentDataBlock, UpdateCreateInventoryItemInventoryDataBlock,
         UseCachedMuteList, UseCachedMuteListAgentDataBlock, UserInfoReply,
         UserInfoReplyAgentDataBlock, UserInfoReplyUserDataBlock,
@@ -15065,6 +15065,89 @@ mod test {
             .ok_or("expected a RegionChanged event")?;
         assert_eq!(changed.0, RegionHandle(handle));
         assert_eq!(changed.1, sim_b());
+        Ok(())
+    }
+
+    /// A teleport's phases reach the client on **two transports** —
+    /// `TeleportStart` over UDP, `TeleportFinish` over the CAPS event queue —
+    /// and nothing orders one against the other. A driver reading both (as
+    /// `sl-client-tokio` does, selecting over its socket and its event-queue
+    /// channel without bias) can hand them to the session either way round.
+    ///
+    /// This pins what happens when the event queue wins that race, which is
+    /// what a *simulator* must not let happen and what this session must
+    /// survive when it does:
+    ///
+    /// - the handover is **not** lost. `begin_handover` deliberately leaves the
+    ///   state `Teleporting`, so the finish is honoured and the teleport still
+    ///   completes into a `RegionChanged`.
+    /// - the late `TeleportStart` still surfaces, because that same state gate
+    ///   is the one the UDP arm checks — so the observable phase order becomes
+    ///   finished-then-started rather than losing a phase.
+    ///
+    /// The second point is why a viewer's teleport screen can show its lines
+    /// out of order, and why `sl-fake-grid` waits for the client's ack of the
+    /// `TeleportStart` before it announces the destination: on a real grid the
+    /// two are tens of milliseconds apart, and a fake one must not be the only
+    /// grid that can deliver them microseconds apart.
+    ///
+    /// Note what is *not* reachable: `RegionChanged` can never come first. It
+    /// is reachable only through `begin_handover`, which runs in the same
+    /// handler that pushed `TeleportFinished` immediately before it.
+    #[test]
+    fn a_caps_finish_ahead_of_the_udp_start_reorders_the_phases() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let handle = 0x0003_E800_0003_E900;
+        session.teleport_to(
+            RegionHandle(handle),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // The event queue wins the race: the CAPS finish is handled while the
+        // source region's UDP `TeleportStart` is still sitting in the socket.
+        let body = sl_proto::parse_llsd_xml(caps_teleport_finish_xml())?;
+        session.handle_caps_event("TeleportFinish", &body, now)?;
+        // ... and only now is that datagram read.
+        let start = AnyMessage::TeleportStart(TeleportStart {
+            info: TeleportStartInfoBlock { teleport_flags: 12 },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&start, 900, true)?, now)?;
+
+        // The destination then greets and confirms, committing the handover.
+        while session.poll_transmit().is_some() {}
+        let handshake = server_message(&region_handshake_msg(13, 0, "RegionB", "", ""), 1, true)?;
+        session.handle_datagram(sim_b(), &handshake, now)?;
+        session.handle_datagram(
+            sim_b(),
+            &server_message(&agent_movement_complete_msg(handle), 2, true)?,
+            now,
+        )?;
+
+        let phases: Vec<&'static str> = drain_events(&mut session)
+            .iter()
+            .filter_map(|event| match event {
+                Event::TeleportStarted => Some("started"),
+                Event::TeleportProgress { .. } => Some("progress"),
+                Event::TeleportFinished { .. } => Some("finished"),
+                Event::RegionChanged { .. } => Some("region-changed"),
+                Event::TeleportFailed { .. } => Some("failed"),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            phases,
+            vec!["finished", "started", "region-changed"],
+            "a finish handled ahead of the start reorders the phases without \
+             losing either of them, and still arrives"
+        );
         Ok(())
     }
 

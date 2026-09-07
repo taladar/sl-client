@@ -24,7 +24,7 @@ use sl_proto::{
     teleport_strings,
 };
 use sl_types::map::{RegionCoordinates, TeleportFlags};
-use sl_wire::{FakeParcelId, LandmarkAsset};
+use sl_wire::{FakeParcelId, LandmarkAsset, SequenceNumber};
 use tokio::sync::{broadcast, watch};
 
 use crate::driver::SharedSim;
@@ -36,6 +36,27 @@ use crate::runtime::{GridCore, TeleportNotice};
 /// abandons the destination session (OpenSim's `WaitForAgentArrivedAtDestination`
 /// budget is in the same range).
 pub const TELEPORT_ARRIVAL_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How long the grid waits for the client to acknowledge the `TeleportStart`
+/// before it announces the destination anyway.
+///
+/// A real simulator does not wait for this ack, and does not have to: the
+/// handover it performs between the start and the finish is tens of
+/// milliseconds of real work (serialising the agent, posting it to the
+/// destination simulator, waiting for that simulator to build it). Here the
+/// destination is often a neighbour session that is already open, so the two
+/// would leave microseconds apart — and they leave on *two transports*, the
+/// start over UDP and the finish over the CAPS event queue, whose relative
+/// order no client fixes: `sl-client-tokio`'s driver selects over its socket
+/// and its event-queue channel without bias, so whichever is ready wins a coin
+/// flip. Losing it reorders the client's own teleport phases to
+/// finished-then-started. This wait is the happens-before edge that keeps them
+/// in the order every viewer expects.
+const TELEPORT_START_ACK_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// How often [`wait_for_start_ack`] re-reads the source session's outstanding
+/// packets. Over loopback the ack lands within a poll or two.
+const TELEPORT_START_ACK_POLL: Duration = Duration::from_millis(2);
 
 /// What a teleport asks for: where, how the arrival is placed, and how it is
 /// reported (flags + the progress key the viewer localises).
@@ -114,13 +135,18 @@ pub(crate) async fn teleport_session(
         return Ok(TeleportOutcome::Local);
     }
 
-    // The black screen goes up, and the viewer learns what is happening.
-    source
+    // The black screen goes up, and the viewer learns what is happening. The
+    // start's sequence number is kept so the destination can be announced
+    // behind the client's acknowledgement of it
+    // ([`TELEPORT_START_ACK_TIMEOUT`]).
+    let start_sequence = source
         .with_sim(|sim| {
             let now = source.now();
+            let sequence = sim.next_outgoing_sequence();
             sim.send_teleport_start(request.flags, now)?;
             sim.send_teleport_progress(teleport_strings::RESOLVING, request.flags, now)?;
-            sim.send_teleport_progress(request.progress, request.flags, now)
+            sim.send_teleport_progress(request.progress, request.flags, now)?;
+            Ok::<_, sl_proto::Error>(sequence)
         })
         .await?;
 
@@ -183,6 +209,17 @@ pub(crate) async fn teleport_session(
             sl_proto::STANDARD_REGION_SIZE_METRES,
         ),
     };
+    // Everything below reaches the client over the CAPS event queue, which
+    // races the UDP `TeleportStart` above unless the client has already taken
+    // delivery of it. Preparing the destination has run concurrently with the
+    // ack, so on a healthy circuit this has usually already come back.
+    if !wait_for_start_ack(source, start_sequence).await {
+        tracing::debug!(
+            "teleport of session {source_seq}: no TeleportStart ack within \
+             {TELEPORT_START_ACK_TIMEOUT:?}; announcing the destination regardless"
+        );
+    }
+
     source
         .with_sim(|sim| {
             let now = source.now();
@@ -378,6 +415,39 @@ async fn resolve_request(
         _ => None,
     }
 }
+/// Waits until the client has acknowledged the `TeleportStart` sent as
+/// `sequence`, giving up after [`TELEPORT_START_ACK_TIMEOUT`] or on the grid
+/// shutting down. Returns whether the ack arrived.
+///
+/// The caller proceeds either way: this orders two messages the client would
+/// otherwise see in either order, and an ordering nicety must never be able to
+/// strand a teleport. The session is read directly rather than through
+/// [`SharedSim::with_sim`] because nothing here mutates it, and a flush per
+/// poll would be pure churn.
+async fn wait_for_start_ack(source: &SharedSim, sequence: SequenceNumber) -> bool {
+    let Some(deadline) = tokio::time::Instant::now().checked_add(TELEPORT_START_ACK_TIMEOUT) else {
+        return false;
+    };
+    let mut shutdown_rx = source.shutdown_rx.clone();
+    loop {
+        if !source.state.lock().await.sim.is_awaiting_ack(sequence) {
+            return true;
+        }
+        if *shutdown_rx.borrow_and_update() {
+            return false;
+        }
+        tokio::select! {
+            () = tokio::time::sleep_until(deadline) => return false,
+            () = tokio::time::sleep(TELEPORT_START_ACK_POLL) => {}
+            changed = shutdown_rx.changed() => {
+                if changed.is_err() || *shutdown_rx.borrow() {
+                    return false;
+                }
+            }
+        }
+    }
+}
+
 /// Waits for the destination's `AgentArrived`, or gives up after `timeout`
 /// (also on a closed or hopelessly lagged event stream, and on the grid
 /// shutting down — teardown must not wait out the arrival budget).
