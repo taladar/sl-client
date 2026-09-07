@@ -33,19 +33,22 @@ use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use sl_client_bevy::{
-    AgentKey, AssetKey, AssetType, Command, GroupKey, ItemInfo, OwnerKey, ParcelDetails, ParcelKey,
-    RegionCoordinates, RegionHandle, RegionName, SlCommand, SlEvent, SlIdentity, SlSessionEvent,
-    TextureKey, Uuid, to_bevy_image,
+    AgentKey, AssetKey, AssetType, Command, GroupKey, InventoryKey, ItemInfo, OwnerKey,
+    ParcelDetails, ParcelKey, RegionCoordinates, RegionHandle, RegionName, SlCommand, SlEvent,
+    SlIdentity, SlSessionEvent, TextureKey, Uuid, to_bevy_image,
 };
 
 use crate::clipboard::{ViewerClipboard, copy_to_clipboard};
-use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
+use crate::floater::{
+    Floater, FloaterCaps, FloaterKey, FloaterSpec, FloaterSystems, KeyedFloaterOpen, KeyedFloaters,
+    host_floater,
+};
 use crate::i18n::{Translated, Translator};
 use crate::inventory::OpenAboutLandmark;
 use crate::inventory_properties::{
     LandmarkAsset, format_unix_date, parse_landmark, send_item_update,
 };
-use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use crate::ui::{column, row};
 use crate::ui_font::UiFont;
 use crate::world_api::AVATAR_BOOST_PRIORITY;
 use crate::world_api::AvatarState;
@@ -79,12 +82,11 @@ const RESOLVE_TIMEOUT_SECONDS: f64 = 10.0;
 // Resources.
 // ---------------------------------------------------------------------------
 
-/// The floater's entities: the startup-spawned chrome, and the per-open value
-/// nodes the async updates write into (all `None` until the first open).
-#[derive(Resource)]
+/// One About Landmark window's entities — a component on the window, since the
+/// floater opens per landmark ([`FloaterKey`]): its content column and the
+/// value nodes the async updates write into.
+#[derive(Component)]
 struct AboutLandmarkUi {
-    /// The floater root (carries [`UiPanelShown`]).
-    panel: Entity,
     /// The rebuilt-per-open content column.
     content: Entity,
     /// The title text node (set to the item's name on open).
@@ -124,13 +126,19 @@ struct AboutLandmarkUi {
 ///
 /// The `RemoteParcelRequest` reply ([`SlSessionEvent::RemoteParcelId`])
 /// carries **only** the parcel id — no echo of the requested region /
-/// position — so replies cannot be matched to requests. This floater is
-/// currently the only `RequestRemoteParcelId` sender in the viewer, and it
-/// keeps a single await slot: a reply is taken as the answer to the newest
-/// open while its [`deadline`](Self::deadline) is live. A reply landing after
-/// a rapid re-open is attributed to the new landmark (bounded by the
-/// deadline); any later consumer of the capability must add real correlation.
-#[derive(Resource, Debug, Default)]
+/// position — so a reply cannot be matched to its request by content. With one
+/// window that was merely untidy ("the newest open wins"); with a window per
+/// landmark it would be wrong, since two windows can await different parcels
+/// at once.
+///
+/// So the resolves are **serialised**: [`ParcelResolveQueue`] holds the windows
+/// that have asked, one request is in flight at a time, and each reply belongs
+/// to the window at the head of the queue. A window whose
+/// [`deadline`](Self::deadline) passes leaves the queue and the next request
+/// goes out. The real fix is a protocol-level echo (the capability is a
+/// per-request POST, so the answer *could* carry its question) — filed as
+/// `viewer-remote-parcel-id-uncorrelated`.
+#[derive(Component, Debug, Default)]
 struct AboutLandmarkState {
     /// The item shown (as last received / edited).
     item: Option<ItemInfo>,
@@ -162,25 +170,50 @@ struct AboutLandmarkState {
 #[derive(Debug)]
 pub struct AboutLandmarkPlugin;
 
+/// The windows waiting on a `RemoteParcelRequest`, oldest first.
+///
+/// The capability's reply names no request (see [`AboutLandmarkState`]), so
+/// only one is allowed in flight and the answer belongs to the window at the
+/// head. A window that times out or closes leaves the queue, and the next
+/// window's request goes out.
+#[derive(Resource, Debug, Default)]
+struct ParcelResolveQueue {
+    /// The waiting windows, oldest first; the head owns the next reply.
+    waiting: std::collections::VecDeque<Entity>,
+    /// Whether the head's request has gone out and its answer is still due.
+    in_flight: bool,
+}
+
 impl Plugin for AboutLandmarkPlugin {
-    /// Register the message, state and systems; spawn the (hidden) floater.
+    /// Register the message, the resolve queue and the systems.
+    ///
+    /// Nothing spawns at `Startup`: a window exists only while a landmark is
+    /// open, so `open_about_landmark` spawns the instance and builds it.
     fn build(&self, app: &mut App) {
-        app.init_resource::<AboutLandmarkState>()
+        app.init_resource::<ParcelResolveQueue>()
             .add_message::<OpenAboutLandmark>()
-            .add_systems(
-                Startup,
-                spawn_about_landmark_floater.after(UiScaffoldSystems::SpawnRoot),
-            )
             .add_systems(
                 Update,
                 (
-                    open_about_landmark,
-                    ingest_landmark_asset,
-                    ingest_parcel_replies,
-                    poll_snapshot,
-                    refresh_names,
-                    commit_landmark_edits,
-                    expire_resolve,
+                    // After the manager's command pass — see `FloaterSystems`:
+                    // the inventory row that opens a landmark also raises the
+                    // window it sits in, and the later raise wins.
+                    open_about_landmark.after(FloaterSystems::Commands),
+                    // The resolve queue is folded before it is driven: an
+                    // answer (or a timeout) frees the head, and the window
+                    // behind it asks its question on the same frame rather
+                    // than waiting one out.
+                    (
+                        ingest_landmark_asset,
+                        ingest_parcel_replies,
+                        expire_resolve,
+                        drive_parcel_resolves,
+                        poll_snapshot,
+                        refresh_names,
+                        commit_landmark_edits,
+                    )
+                        .chain()
+                        .run_if(any_with_component::<AboutLandmarkState>),
                 )
                     .chain(),
             );
@@ -207,35 +240,11 @@ pub fn about_landmark_floater_spec() -> FloaterSpec {
     }
 }
 
-/// Spawn the floater shell, hidden.
-fn spawn_about_landmark_floater(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = spawn_floater(&mut commands, root.0, about_landmark_floater_spec());
-    // Subject-bound: the shown landmark is not persisted, so neither is the
-    // floater (like the item-properties / preview floaters).
-    commands
-        .entity(handle.root)
-        .insert(crate::floater_persist::FloaterPersistExempt);
-    commands
-        .entity(handle.title_text)
-        .insert(Translated::new("about-landmark-title"));
-    commands.insert_resource(AboutLandmarkUi {
-        panel: handle.root,
-        content: handle.content,
-        title_text: handle.title_text,
-        snapshot_box: None,
-        snapshot_label: None,
-        region_text: None,
-        parcel_text: None,
-        description_text: None,
-        maturity_text: None,
-        owner_text: None,
-        traffic_text: None,
-        area_text: None,
-        creator_text: None,
-        slurl_text: None,
-        name_field: None,
-        notes_field: None,
-    });
+/// The [`FloaterKey`] of the window showing the landmark `item` — one window
+/// per landmark, keyed by its inventory id. A subject key, so nothing is
+/// persisted.
+fn landmark_key(item: InventoryKey) -> FloaterKey {
+    FloaterKey::subject(&item)
 }
 
 // ---------------------------------------------------------------------------
@@ -253,35 +262,88 @@ fn spawn_about_landmark_floater(mut commands: Commands, root: Res<UiRoot>) {
 )]
 fn open_about_landmark(
     mut opens: MessageReader<OpenAboutLandmark>,
-    mut state: ResMut<AboutLandmarkState>,
-    ui: Option<ResMut<AboutLandmarkUi>>,
+    mut floaters: KeyedFloaters,
+    mut windows: Query<(&mut AboutLandmarkState, &mut AboutLandmarkUi)>,
     identity: Res<SlIdentity>,
     avatars: Res<AvatarState>,
     translator: Translator,
     children: Query<&Children>,
-    mut panels: Query<&mut UiPanelShown>,
     mut texts: Query<&mut Text>,
     mut commands: Commands,
     mut sl_commands: MessageWriter<SlCommand>,
 ) {
-    let Some(mut ui) = ui else {
-        return;
-    };
-    let Some(open) = opens.read().last().cloned() else {
-        return;
-    };
-    let item = open.item;
-
-    // Tear the old content down (a discrete open, not a data update).
-    if let Ok(existing) = children.get(ui.content) {
-        for child in existing.iter().collect::<Vec<_>>() {
-            commands.entity(child).despawn();
+    for open in opens.read().cloned() {
+        let item = open.item;
+        let opened = floaters.open(about_landmark_floater_spec(), landmark_key(item.item_id));
+        match opened {
+            KeyedFloaterOpen::Spawned(handle) => {
+                commands
+                    .entity(handle.title_text)
+                    .insert(Translated::new("about-landmark-title"));
+                let filled = fill_landmark_content(
+                    &mut commands,
+                    handle.content,
+                    handle.title_text,
+                    &item,
+                    &identity,
+                    &avatars,
+                    &translator,
+                    &mut texts,
+                    &mut sl_commands,
+                );
+                commands.entity(handle.root).insert(filled);
+            }
+            KeyedFloaterOpen::Existing(window) => {
+                let Ok((mut state, mut ui)) = windows.get_mut(window) else {
+                    continue;
+                };
+                // A discrete re-open: tear the old content down and rebuild.
+                if let Ok(existing) = children.get(ui.content) {
+                    for child in existing.iter().collect::<Vec<_>>() {
+                        commands.entity(child).despawn();
+                    }
+                }
+                let (fresh_state, fresh_ui) = fill_landmark_content(
+                    &mut commands,
+                    ui.content,
+                    ui.title_text,
+                    &item,
+                    &identity,
+                    &avatars,
+                    &translator,
+                    &mut texts,
+                    &mut sl_commands,
+                );
+                *state = fresh_state;
+                *ui = fresh_ui;
+            }
         }
     }
-    if let Ok(mut text) = texts.get_mut(ui.title_text) {
+}
+
+/// Build one landmark window's content under `content` and return the state and
+/// handles it produced — the same body for a window just spawned and for one
+/// being re-opened on another landmark.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the content build takes what it draws from: the spawn target and title node, the \
+              item, the identity and name sources, the translator, and the text / command sinks"
+)]
+fn fill_landmark_content(
+    commands: &mut Commands,
+    content: Entity,
+    title_text: Entity,
+    item: &ItemInfo,
+    identity: &SlIdentity,
+    avatars: &AvatarState,
+    translator: &Translator,
+    texts: &mut Query<&mut Text>,
+    sl_commands: &mut MessageWriter<SlCommand>,
+) -> (AboutLandmarkState, AboutLandmarkUi) {
+    // The window's title is the landmark's own name.
+    if let Ok(mut text) = texts.get_mut(title_text) {
         item.name.clone_into(&mut text.0);
     }
-    let content = ui.content;
     let editable = matches!(item.owner, OwnerKey::Agent(agent) if Some(agent) == identity.agent_id);
     let loading = translator.get("about-landmark-loading");
 
@@ -310,10 +372,10 @@ fn open_about_landmark(
         .id();
 
     // Title / notes: editable for the item's owner, plain values otherwise.
-    let name_row = spawn_labeled_row(&mut commands, content, "about-landmark-name");
+    let name_row = spawn_labeled_row(commands, content, "about-landmark-name");
     let name_field = editable.then(|| {
         crate::ui_text_input::spawn_text_input(
-            &mut commands,
+            commands,
             name_row,
             &crate::ui_text_input::TextInputSpec {
                 initial: item.name.clone(),
@@ -329,12 +391,12 @@ fn open_about_landmark(
         )
     });
     if !editable {
-        spawn_value(&mut commands, name_row, item.name.clone(), LABEL_COLOR);
+        spawn_value(commands, name_row, item.name.clone(), LABEL_COLOR);
     }
-    let notes_row = spawn_labeled_row(&mut commands, content, "about-landmark-notes");
+    let notes_row = spawn_labeled_row(commands, content, "about-landmark-notes");
     let notes_field = editable.then(|| {
         crate::ui_text_input::spawn_text_input(
-            &mut commands,
+            commands,
             notes_row,
             &crate::ui_text_input::TextInputSpec {
                 initial: item.description.clone(),
@@ -350,19 +412,14 @@ fn open_about_landmark(
         )
     });
     if !editable {
-        spawn_value(
-            &mut commands,
-            notes_row,
-            item.description.clone(),
-            LABEL_COLOR,
-        );
+        spawn_value(commands, notes_row, item.description.clone(), LABEL_COLOR);
     }
 
     // The destination rows, all "(loading)" until their resolve step lands.
-    let region_row = spawn_labeled_row(&mut commands, content, "about-landmark-region");
-    let region_text = spawn_value(&mut commands, region_row, loading.clone(), LABEL_COLOR);
-    let parcel_row = spawn_labeled_row(&mut commands, content, "about-landmark-parcel");
-    let parcel_text = spawn_value(&mut commands, parcel_row, loading.clone(), LABEL_COLOR);
+    let region_row = spawn_labeled_row(commands, content, "about-landmark-region");
+    let region_text = spawn_value(commands, region_row, loading.clone(), LABEL_COLOR);
+    let parcel_row = spawn_labeled_row(commands, content, "about-landmark-parcel");
+    let parcel_text = spawn_value(commands, parcel_row, loading.clone(), LABEL_COLOR);
     let description_text = commands
         .spawn((
             Node {
@@ -377,21 +434,21 @@ fn open_about_landmark(
             TextColor(DIM_LABEL_COLOR),
         ))
         .id();
-    let maturity_row = spawn_labeled_row(&mut commands, content, "about-landmark-maturity");
-    let maturity_text = spawn_value(&mut commands, maturity_row, loading.clone(), LABEL_COLOR);
-    let owner_row = spawn_labeled_row(&mut commands, content, "about-landmark-owner");
-    let owner_text = spawn_value(&mut commands, owner_row, loading.clone(), LABEL_COLOR);
-    let traffic_row = spawn_labeled_row(&mut commands, content, "about-landmark-traffic");
-    let traffic_text = spawn_value(&mut commands, traffic_row, loading.clone(), LABEL_COLOR);
-    let area_row = spawn_labeled_row(&mut commands, content, "about-landmark-area");
-    let area_text = spawn_value(&mut commands, area_row, loading.clone(), LABEL_COLOR);
+    let maturity_row = spawn_labeled_row(commands, content, "about-landmark-maturity");
+    let maturity_text = spawn_value(commands, maturity_row, loading.clone(), LABEL_COLOR);
+    let owner_row = spawn_labeled_row(commands, content, "about-landmark-owner");
+    let owner_text = spawn_value(commands, owner_row, loading.clone(), LABEL_COLOR);
+    let traffic_row = spawn_labeled_row(commands, content, "about-landmark-traffic");
+    let traffic_text = spawn_value(commands, traffic_row, loading.clone(), LABEL_COLOR);
+    let area_row = spawn_labeled_row(commands, content, "about-landmark-area");
+    let area_text = spawn_value(commands, area_row, loading.clone(), LABEL_COLOR);
 
     // Item-side rows: creator and acquired date.
-    let creator_row = spawn_labeled_row(&mut commands, content, "about-landmark-creator");
+    let creator_row = spawn_labeled_row(commands, content, "about-landmark-creator");
     let creator_text = spawn_value(
-        &mut commands,
+        commands,
         creator_row,
-        agent_label(item.creator_id, &avatars),
+        agent_label(item.creator_id, avatars),
         DIM_LABEL_COLOR,
     );
     if avatars.name_of(item.creator_id).is_none() {
@@ -399,17 +456,17 @@ fn open_about_landmark(
             item.creator_id,
         ])));
     }
-    let acquired_row = spawn_labeled_row(&mut commands, content, "about-landmark-acquired");
+    let acquired_row = spawn_labeled_row(commands, content, "about-landmark-acquired");
     spawn_value(
-        &mut commands,
+        commands,
         acquired_row,
         format_unix_date(i64::from(item.creation_date)),
         DIM_LABEL_COLOR,
     );
 
     // SLURL row: fills once the region name resolves.
-    let slurl_row = spawn_labeled_row(&mut commands, content, "about-landmark-slurl");
-    let slurl_text = spawn_value(&mut commands, slurl_row, loading, DIM_LABEL_COLOR);
+    let slurl_row = spawn_labeled_row(commands, content, "about-landmark-slurl");
+    let slurl_text = spawn_value(commands, slurl_row, loading, DIM_LABEL_COLOR);
 
     // Buttons: Teleport (works off the asset id alone) and Copy SLURL (a
     // no-op until the SLURL resolves — the row above shows the state).
@@ -422,7 +479,7 @@ fn open_about_landmark(
         ))
         .id();
     let asset_id = item.asset_id;
-    let teleport = spawn_button(&mut commands, buttons, "landmark-teleport", 3);
+    let teleport = spawn_button(commands, buttons, "landmark-teleport", 3);
     commands.entity(teleport).observe(
         move |press: On<Pointer<Press>>, mut commands: MessageWriter<SlCommand>| {
             if press.button == PointerButton::Primary {
@@ -432,12 +489,22 @@ fn open_about_landmark(
             }
         },
     );
-    let copy = spawn_button(&mut commands, buttons, "about-landmark-copy-slurl", 4);
+    let copy = spawn_button(commands, buttons, "about-landmark-copy-slurl", 4);
     commands.entity(copy).observe(
         |press: On<Pointer<Press>>,
-         state: Res<AboutLandmarkState>,
+         parents: Query<&ChildOf>,
+         floaters: Query<(Entity, &Floater)>,
+         windows: Query<&AboutLandmarkState>,
          clipboard: Res<ViewerClipboard>| {
-            if press.button == PointerButton::Primary
+            if press.button != PointerButton::Primary {
+                return;
+            }
+            // Copy *this* window's SLURL: with two landmarks open, the button
+            // belongs to the one it sits in.
+            let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+                return;
+            };
+            if let Ok(state) = windows.get(window)
                 && let Some(slurl) = state.slurl.as_deref()
             {
                 copy_to_clipboard(&clipboard, slurl);
@@ -445,8 +512,9 @@ fn open_about_landmark(
         },
     );
 
-    // Reset the resolve state and start the chain with the asset fetch.
-    *state = AboutLandmarkState {
+    // The window's state starts fresh for this landmark, and the chain starts
+    // with the asset fetch.
+    let state = AboutLandmarkState {
         item: Some(item.clone()),
         pending_asset: Some(item.asset_id),
         ..AboutLandmarkState::default()
@@ -457,22 +525,26 @@ fn open_about_landmark(
         byte_range: None,
     }));
 
-    ui.snapshot_box = Some(snapshot_box);
-    ui.snapshot_label = Some(snapshot_label);
-    ui.region_text = Some(region_text);
-    ui.parcel_text = Some(parcel_text);
-    ui.description_text = Some(description_text);
-    ui.maturity_text = Some(maturity_text);
-    ui.owner_text = Some(owner_text);
-    ui.traffic_text = Some(traffic_text);
-    ui.area_text = Some(area_text);
-    ui.creator_text = Some(creator_text);
-    ui.slurl_text = Some(slurl_text);
-    ui.name_field = name_field;
-    ui.notes_field = notes_field;
-    if let Ok(mut shown) = panels.get_mut(ui.panel) {
-        shown.0 = true;
-    }
+    (
+        state,
+        AboutLandmarkUi {
+            content,
+            title_text,
+            snapshot_box: Some(snapshot_box),
+            snapshot_label: Some(snapshot_label),
+            region_text: Some(region_text),
+            parcel_text: Some(parcel_text),
+            description_text: Some(description_text),
+            maturity_text: Some(maturity_text),
+            owner_text: Some(owner_text),
+            traffic_text: Some(traffic_text),
+            area_text: Some(area_text),
+            creator_text: Some(creator_text),
+            slurl_text: Some(slurl_text),
+            name_field,
+            notes_field,
+        },
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -483,47 +555,84 @@ fn open_about_landmark(
 /// the region line's fallback and fire the `RemoteParcelRequest` resolve.
 fn ingest_landmark_asset(
     mut events: MessageReader<SlEvent>,
-    mut state: ResMut<AboutLandmarkState>,
-    ui: Option<Res<AboutLandmarkUi>>,
+    mut windows: Query<(Entity, &mut AboutLandmarkState, &AboutLandmarkUi)>,
+    mut queue: ResMut<ParcelResolveQueue>,
     translator: Translator,
-    time: Res<Time>,
     mut texts: Query<&mut Text>,
-    mut sl_commands: MessageWriter<SlCommand>,
 ) {
-    let Some(ui) = ui else {
+    // Collected once and replayed per window: a reader is consumed by the first
+    // pass over it, so with two landmarks open the second would see nothing.
+    let frame: Vec<&SlEvent> = events.read().collect();
+    if frame.is_empty() {
         return;
-    };
-    for event in events.read() {
-        let SlSessionEvent::AssetReceived(asset) = &event.0 else {
-            continue;
-        };
-        if state.pending_asset != Some(asset.id) {
-            continue;
-        }
-        state.pending_asset = None;
-        let text = String::from_utf8_lossy(&asset.data).into_owned();
-        let Some(landmark) = parse_landmark(&text) else {
+    }
+    for (window, mut state, ui) in &mut windows {
+        for event in &frame {
+            let SlSessionEvent::AssetReceived(asset) = &event.0 else {
+                continue;
+            };
+            if state.pending_asset != Some(asset.id) {
+                continue;
+            }
+            state.pending_asset = None;
+            let text = String::from_utf8_lossy(&asset.data).into_owned();
+            let Some(landmark) = parse_landmark(&text) else {
+                set_text(
+                    &mut texts,
+                    ui.region_text,
+                    &translator.get("about-landmark-unreadable"),
+                );
+                continue;
+            };
             set_text(
                 &mut texts,
                 ui.region_text,
-                &translator.get("about-landmark-unreadable"),
+                &region_line(None, landmark.region_id, landmark.position),
             );
+            state.landmark = Some(landmark);
+            state.awaiting_remote = true;
+            // Join the resolve queue rather than asking now: the capability's reply
+            // names no request, so exactly one may be in flight
+            // (`ParcelResolveQueue`). The deadline starts when the request actually
+            // goes out, in `drive_parcel_resolves`.
+            queue.waiting.push_back(window);
+        }
+    }
+}
+
+/// Send the head of the resolve queue's `RemoteParcelRequest`, one at a time.
+///
+/// The capability answers with a bare parcel id, so a second request in flight
+/// would make the reply ambiguous between two windows. The head owns the
+/// answer; its deadline starts here, when the question is actually asked.
+fn drive_parcel_resolves(
+    mut queue: ResMut<ParcelResolveQueue>,
+    mut windows: Query<&mut AboutLandmarkState>,
+    time: Res<Time>,
+    mut sl_commands: MessageWriter<SlCommand>,
+) {
+    if queue.in_flight {
+        return;
+    }
+    // Drop any head that has gone away (a closed window) before asking.
+    while let Some(&head) = queue.waiting.front() {
+        let Ok(mut state) = windows.get_mut(head) else {
+            let _gone = queue.waiting.pop_front();
             continue;
         };
-        set_text(
-            &mut texts,
-            ui.region_text,
-            &region_line(None, landmark.region_id, landmark.position),
-        );
-        state.landmark = Some(landmark);
-        state.awaiting_remote = true;
-        state.deadline = Some(time.elapsed_secs_f64() + RESOLVE_TIMEOUT_SECONDS);
+        let Some(landmark) = state.landmark else {
+            let _unresolvable = queue.waiting.pop_front();
+            continue;
+        };
         let (x, y, z) = landmark.position;
         sl_commands.write(SlCommand(Command::RequestRemoteParcelId {
             location: RegionCoordinates::new(x, y, z),
             region_id: landmark.region_id,
             region_handle: RegionHandle::new(0),
         }));
+        state.deadline = Some(time.elapsed_secs_f64() + RESOLVE_TIMEOUT_SECONDS);
+        queue.in_flight = true;
+        return;
     }
 }
 
@@ -538,8 +647,8 @@ fn ingest_landmark_asset(
 )]
 fn ingest_parcel_replies(
     mut events: MessageReader<SlEvent>,
-    mut state: ResMut<AboutLandmarkState>,
-    ui: Option<Res<AboutLandmarkUi>>,
+    mut windows: Query<(Entity, &mut AboutLandmarkState, &AboutLandmarkUi)>,
+    mut queue: ResMut<ParcelResolveQueue>,
     avatars: Res<AvatarState>,
     groups: Res<GroupsModel>,
     translator: Translator,
@@ -548,16 +657,30 @@ fn ingest_parcel_replies(
     mut texts: Query<&mut Text>,
     mut sl_commands: MessageWriter<SlCommand>,
 ) {
-    let Some(ui) = ui else {
+    let frame: Vec<&SlEvent> = events.read().collect();
+    if frame.is_empty() {
         return;
-    };
-    for event in events.read() {
+    }
+    for event in &frame {
         match &event.0 {
+            // One reply, one window. The capability's answer names no request,
+            // so it belongs to the window at the head of the queue — the only
+            // one that has asked (`ParcelResolveQueue`) — and is consumed
+            // there. Offering it to every window in turn would let the window
+            // behind the head, which becomes the head the moment the first is
+            // answered, take the same answer as its own.
             SlSessionEvent::RemoteParcelId(parcel_id) => {
-                // Uncorrelated single-slot await — see [`AboutLandmarkState`].
-                if !state.awaiting_remote || state.deadline.is_none() {
+                let Some(&head) = queue.waiting.front() else {
+                    continue;
+                };
+                let Ok((_window, mut state, _ui)) = windows.get_mut(head) else {
+                    continue;
+                };
+                if !state.awaiting_remote {
                     continue;
                 }
+                let _answered = queue.waiting.pop_front();
+                queue.in_flight = false;
                 state.awaiting_remote = false;
                 state.parcel_id = Some(*parcel_id);
                 state.deadline = Some(time.elapsed_secs_f64() + RESOLVE_TIMEOUT_SECONDS);
@@ -565,23 +688,28 @@ fn ingest_parcel_replies(
                     parcel_id: *parcel_id,
                 }));
             }
+            // Details, unlike the resolve, name the parcel they are about, so
+            // every window waiting on that parcel takes them — two landmarks in
+            // one parcel are answered by one reply.
             SlSessionEvent::ParcelDetails(details) => {
-                if state.parcel_id != Some(details.parcel_id) || state.details.is_some() {
-                    continue;
+                for (_window, mut state, ui) in &mut windows {
+                    if state.parcel_id != Some(details.parcel_id) || state.details.is_some() {
+                        continue;
+                    }
+                    state.deadline = None;
+                    apply_details(
+                        details,
+                        &mut state,
+                        ui,
+                        &avatars,
+                        &groups,
+                        &translator,
+                        &mut boost,
+                        &mut texts,
+                        &mut sl_commands,
+                    );
+                    state.details = Some(details.clone());
                 }
-                state.deadline = None;
-                apply_details(
-                    details,
-                    &mut state,
-                    &ui,
-                    &avatars,
-                    &groups,
-                    &translator,
-                    &mut boost,
-                    &mut texts,
-                    &mut sl_commands,
-                );
-                state.details = Some(details.clone());
             }
             _other => {}
         }
@@ -675,27 +803,29 @@ fn apply_details(
 /// texture pipeline holds it. A re-open replaces the box, so a stale pending
 /// node is dropped, not applied.
 fn poll_snapshot(
-    mut state: ResMut<AboutLandmarkState>,
+    mut windows: Query<&mut AboutLandmarkState>,
     store: Res<DecodedTextures>,
     mut images: ResMut<Assets<Image>>,
     children: Query<&Children>,
     mut commands: Commands,
 ) {
-    let Some((key, node)) = state.pending_snapshot else {
-        return;
-    };
-    let Some(decoded) = store.get(key) else {
-        return;
-    };
-    state.pending_snapshot = None;
-    let Ok(mut entity) = commands.get_entity(node) else {
-        return;
-    };
-    let handle = images.add(to_bevy_image(decoded));
-    entity.insert(ImageNode::new(handle));
-    if let Ok(existing) = children.get(node) {
-        for child in existing.iter().collect::<Vec<_>>() {
-            commands.entity(child).despawn();
+    for mut state in &mut windows {
+        let Some((key, node)) = state.pending_snapshot else {
+            continue;
+        };
+        let Some(decoded) = store.get(key) else {
+            continue;
+        };
+        state.pending_snapshot = None;
+        let Ok(mut entity) = commands.get_entity(node) else {
+            continue;
+        };
+        let handle = images.add(to_bevy_image(decoded));
+        entity.insert(ImageNode::new(handle));
+        if let Ok(existing) = children.get(node) {
+            for child in existing.iter().collect::<Vec<_>>() {
+                commands.entity(child).despawn();
+            }
         }
     }
 }
@@ -703,8 +833,7 @@ fn poll_snapshot(
 /// Rewrite the creator / parcel-owner rows when the avatar / group name
 /// caches change, so a name requested at open / details time fills in.
 fn refresh_names(
-    state: Res<AboutLandmarkState>,
-    ui: Option<Res<AboutLandmarkUi>>,
+    windows: Query<(&AboutLandmarkState, &AboutLandmarkUi)>,
     avatars: Res<AvatarState>,
     groups: Res<GroupsModel>,
     mut texts: Query<&mut Text>,
@@ -712,22 +841,21 @@ fn refresh_names(
     if !avatars.is_changed() && !groups.is_changed() {
         return;
     }
-    let Some(ui) = ui else {
-        return;
-    };
-    if let Some(item) = state.item.as_ref() {
-        set_text(
-            &mut texts,
-            ui.creator_text,
-            &agent_label(item.creator_id, &avatars),
-        );
-    }
-    if let Some(details) = state.details.as_ref() {
-        set_text(
-            &mut texts,
-            ui.owner_text,
-            &parcel_owner_label(details, &avatars, &groups),
-        );
+    for (state, ui) in &windows {
+        if let Some(item) = state.item.as_ref() {
+            set_text(
+                &mut texts,
+                ui.creator_text,
+                &agent_label(item.creator_id, &avatars),
+            );
+        }
+        if let Some(details) = state.details.as_ref() {
+            set_text(
+                &mut texts,
+                ui.owner_text,
+                &parcel_owner_label(details, &avatars, &groups),
+            );
+        }
     }
 }
 
@@ -736,26 +864,25 @@ fn refresh_names(
 fn commit_landmark_edits(
     keyboard: Res<ButtonInput<KeyCode>>,
     focus: Res<InputFocus>,
-    ui: Option<Res<AboutLandmarkUi>>,
+    mut windows: Query<(&mut AboutLandmarkState, &AboutLandmarkUi)>,
     fields: Query<&EditableText>,
-    mut state: ResMut<AboutLandmarkState>,
     mut texts: Query<&mut Text>,
     mut sl_commands: MessageWriter<SlCommand>,
 ) {
     if !keyboard.just_pressed(KeyCode::Enter) {
         return;
     }
-    let Some(ui) = ui else {
+    // The commit belongs to the window whose field holds the keyboard — with
+    // two landmarks open, Enter must save the one being typed in.
+    let focused = focus.get();
+    let Some((mut state, ui)) = windows.iter_mut().find(|(_state, ui)| {
+        [ui.name_field, ui.notes_field]
+            .into_iter()
+            .flatten()
+            .any(|field| Some(field) == focused)
+    }) else {
         return;
     };
-    let focused = focus.get();
-    let editing = [ui.name_field, ui.notes_field]
-        .into_iter()
-        .flatten()
-        .any(|field| Some(field) == focused);
-    if !editing {
-        return;
-    }
     let Some(mut item) = state.item.clone() else {
         return;
     };
@@ -784,29 +911,34 @@ fn commit_landmark_edits(
 /// past its deadline (a missing / failing capability, a lost reply). The
 /// asset-derived rows, Teleport and the title / notes editing keep working.
 fn expire_resolve(
-    mut state: ResMut<AboutLandmarkState>,
-    ui: Option<Res<AboutLandmarkUi>>,
+    mut windows: Query<(Entity, &mut AboutLandmarkState, &AboutLandmarkUi)>,
+    mut queue: ResMut<ParcelResolveQueue>,
     translator: Translator,
     time: Res<Time>,
     mut texts: Query<&mut Text>,
 ) {
-    let Some(deadline) = state.deadline else {
-        return;
-    };
-    if time.elapsed_secs_f64() < deadline {
-        return;
+    for (window, mut state, ui) in &mut windows {
+        let Some(deadline) = state.deadline else {
+            continue;
+        };
+        if time.elapsed_secs_f64() < deadline {
+            continue;
+        }
+        state.deadline = None;
+        state.awaiting_remote = false;
+        // A timed-out head frees the resolve slot, so the next window's
+        // request can go out (`ParcelResolveQueue`).
+        if queue.waiting.front() == Some(&window) {
+            let _expired = queue.waiting.pop_front();
+            queue.in_flight = false;
+        }
+        info!("about landmark: parcel resolve timed out");
+        set_text(
+            &mut texts,
+            ui.parcel_text,
+            &translator.get("about-landmark-unavailable"),
+        );
     }
-    let Some(ui) = ui else {
-        return;
-    };
-    state.deadline = None;
-    state.awaiting_remote = false;
-    info!("about landmark: parcel resolve timed out");
-    set_text(
-        &mut texts,
-        ui.parcel_text,
-        &translator.get("about-landmark-unavailable"),
-    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1054,5 +1186,218 @@ mod tests {
             "Default Region (12, 201, 30)"
         );
         Ok(())
+    }
+
+    /// **One window per landmark** (`viewer-keyed-floater-audit`), and the
+    /// serialised parcel resolve the keying forced.
+    mod instances {
+        use super::super::{
+            AboutLandmarkPlugin, AboutLandmarkState, ParcelResolveQueue, landmark_key,
+        };
+        use crate::floater::{Floater, FloaterCommand, FloaterOp, FloaterPlugin};
+        use crate::inventory::OpenAboutLandmark;
+        use crate::ui::UiRoot;
+        use crate::world_api::{AvatarState, GroupsModel};
+        use bevy::prelude::*;
+        use pretty_assertions::assert_eq;
+        use sl_client_bevy::{
+            AgentKey, Asset, AssetType, Command, InventoryFolderKey, InventoryKey, InventoryType,
+            ItemInfo, OwnerKey, ParcelKey, Permissions5, SaleInfo, SlCommand, SlEvent, SlIdentity,
+            SlSessionEvent, Uuid,
+        };
+
+        /// A boxed error so tests use `?` rather than the disallowed
+        /// `unwrap` / `expect`.
+        type TestError = Box<dyn core::error::Error>;
+
+        /// One landmark inventory item.
+        fn landmark(id: u128, name: &str) -> ItemInfo {
+            ItemInfo {
+                item_id: InventoryKey::from(Uuid::from_u128(id)),
+                folder_id: InventoryFolderKey::from(Uuid::from_u128(0x0F)),
+                name: name.to_owned(),
+                description: String::new(),
+                asset_id: Uuid::from_u128(id.wrapping_add(0x1000)),
+                asset_type: AssetType::Landmark,
+                inv_type: InventoryType::Landmark,
+                flags: 0,
+                creation_date: 0,
+                owner: OwnerKey::Agent(AgentKey::from(Uuid::from_u128(0xA9))),
+                last_owner_id: Uuid::from_u128(0),
+                creator_id: AgentKey::from(Uuid::from_u128(0)),
+                group: None,
+                permissions: Permissions5::default(),
+                sale: SaleInfo::default(),
+            }
+        }
+
+        /// An app with the floater manager, this module's plugin, and the world
+        /// facts its systems read — no grid, no window.
+        fn landmark_app() -> App {
+            let mut app = App::new();
+            app.add_message::<SlCommand>()
+                .add_message::<SlEvent>()
+                .add_message::<crate::world_api::BoostTexture>()
+                .init_resource::<AvatarState>()
+                .init_resource::<GroupsModel>()
+                .init_resource::<SlIdentity>()
+                .init_resource::<crate::world_api::DecodedTextures>()
+                .init_resource::<Assets<Image>>()
+                .init_resource::<Time>()
+                .init_resource::<UiScale>()
+                .init_resource::<ButtonInput<KeyCode>>()
+                .init_resource::<bevy::input_focus::InputFocus>()
+                .add_plugins((FloaterPlugin, AboutLandmarkPlugin));
+            crate::i18n::install_untranslated(&mut app);
+            let root = app.world_mut().spawn(Node::default()).id();
+            app.insert_resource(UiRoot(root));
+            app.update();
+            app
+        }
+
+        /// Open a landmark the way the inventory row does.
+        fn open(app: &mut App, item: &ItemInfo) {
+            app.world_mut()
+                .write_message(OpenAboutLandmark { item: item.clone() });
+            app.update();
+        }
+
+        /// Every live landmark window, as (entity, shown item) pairs.
+        fn windows(app: &mut App) -> Vec<(Entity, Option<InventoryKey>)> {
+            app.world_mut()
+                .query::<(Entity, &AboutLandmarkState)>()
+                .iter(app.world())
+                .map(|(entity, state)| (entity, state.item.as_ref().map(|item| item.item_id)))
+                .collect()
+        }
+
+        /// Two landmarks are two windows, each on its own item and keyed by it.
+        #[test]
+        fn two_landmarks_open_two_windows() -> Result<(), TestError> {
+            let (first, second) = (landmark(0xA1, "Home"), landmark(0xB2, "Shop"));
+            let mut app = landmark_app();
+            open(&mut app, &first);
+            open(&mut app, &second);
+
+            let open_windows = windows(&mut app);
+            assert_eq!(
+                open_windows.len(),
+                2,
+                "the second landmark reused the first window"
+            );
+            let world = app.world();
+            let keys: Vec<Option<&crate::floater::FloaterKey>> = open_windows
+                .iter()
+                .map(|(window, _item)| world.get::<Floater>(*window).and_then(Floater::key))
+                .collect();
+            assert!(keys.contains(&Some(&landmark_key(first.item_id))));
+            assert!(keys.contains(&Some(&landmark_key(second.item_id))));
+            Ok(())
+        }
+
+        /// A `Landmark version 2` body pointing at `region` at 128/128/25.
+        fn landmark_body(region: u128) -> Vec<u8> {
+            format!(
+                "Landmark version 2\nregion_id {}\nlocal_pos 128 128 25\n",
+                Uuid::from_u128(region)
+            )
+            .into_bytes()
+        }
+
+        /// Hand both windows their landmark assets, so both join the resolve
+        /// queue on the same frame.
+        fn deliver_assets(app: &mut App, items: &[&ItemInfo]) {
+            for item in items {
+                app.world_mut()
+                    .write_message(SlEvent(SlSessionEvent::AssetReceived(Box::new(Asset {
+                        id: item.asset_id,
+                        asset_type: AssetType::Landmark,
+                        data: landmark_body(item.asset_id.as_u128()),
+                    }))));
+            }
+            app.update();
+        }
+
+        /// How many `RemoteParcelRequest`s went out on the last frame.
+        fn resolves_sent(app: &App) -> usize {
+            app.world()
+                .resource::<Messages<SlCommand>>()
+                .iter_current_update_messages()
+                .filter(|command| matches!(command.0, Command::RequestRemoteParcelId { .. }))
+                .count()
+        }
+
+        /// **Only one parcel resolve is in flight.** The capability's reply
+        /// names no request, so a second question would make the answer
+        /// ambiguous between two windows; the queue asks in turn, and the
+        /// reply lands on the window that asked.
+        #[test]
+        fn parcel_resolves_are_serialised() -> Result<(), TestError> {
+            let (first, second) = (landmark(0xA1, "Home"), landmark(0xB2, "Shop"));
+            let mut app = landmark_app();
+            open(&mut app, &first);
+            open(&mut app, &second);
+            deliver_assets(&mut app, &[&first, &second]);
+
+            assert_eq!(
+                resolves_sent(&app),
+                1,
+                "both windows asked the capability at once"
+            );
+            let queue = app.world().resource::<ParcelResolveQueue>();
+            assert!(queue.in_flight, "the head's question is not marked asked");
+            assert_eq!(queue.waiting.len(), 2, "the second window left the queue");
+            let head = *queue.waiting.front().ok_or("the queue emptied itself")?;
+
+            // The one answer the capability gives belongs to the head — and the
+            // window behind it then gets its turn.
+            let parcel = ParcelKey::from(Uuid::from_u128(0xC3));
+            app.world_mut()
+                .write_message(SlEvent(SlSessionEvent::RemoteParcelId(parcel)));
+            app.update();
+
+            let answered = app
+                .world()
+                .get::<AboutLandmarkState>(head)
+                .ok_or("the head window vanished")?;
+            assert_eq!(answered.parcel_id, Some(parcel));
+            assert_eq!(
+                resolves_sent(&app),
+                1,
+                "the next window's question did not go out once the head was answered"
+            );
+            let queue = app.world().resource::<ParcelResolveQueue>();
+            assert_eq!(queue.waiting.len(), 1, "the answered window stayed queued");
+            Ok(())
+        }
+
+        /// Closing one landmark's window leaves the other open.
+        #[test]
+        fn closing_one_landmark_leaves_the_other() -> Result<(), TestError> {
+            let (first, second) = (landmark(0xA1, "Home"), landmark(0xB2, "Shop"));
+            let mut app = landmark_app();
+            open(&mut app, &first);
+            open(&mut app, &second);
+            let target = windows(&mut app)
+                .into_iter()
+                .find_map(|(window, item)| (item == Some(first.item_id)).then_some(window))
+                .ok_or("the first landmark has no window")?;
+
+            app.world_mut()
+                .resource_mut::<Messages<FloaterCommand>>()
+                .write(FloaterCommand {
+                    floater: target,
+                    op: FloaterOp::Close,
+                });
+            app.update();
+
+            let left = windows(&mut app);
+            assert_eq!(left.len(), 1);
+            assert_eq!(
+                left.first().and_then(|(_window, item)| *item),
+                Some(second.item_id)
+            );
+            Ok(())
+        }
     }
 }

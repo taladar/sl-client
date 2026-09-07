@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 306 |
 | blocked | 55 |
 | in-progress | 19 |
-| bugs | 61 |
+| bugs | 62 |
 | done | 1006 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1584** |
+| **total** | **1585** |
 
 ## ideas (98)
 
@@ -1168,7 +1168,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (61)
+## bugs (62)
 
 ### viewer
 
@@ -1280,6 +1280,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A plain prim attachment reads "(worn)" in inventory but never appears on
 - [`viewer-region-push-discards-pending-edits`](bugs/viewer-region-push-discards-pending-edits.md)
   — A region push throws away the estate manager's unapplied edits
+- [`viewer-remote-parcel-id-uncorrelated`](bugs/viewer-remote-parcel-id-uncorrelated.md)
+  — A resolved parcel id names no question, so two askers cannot be told apart
 - [`viewer-rigged-attachments-wearer-not-resolved`](bugs/viewer-rigged-attachments-wearer-not-resolved.md)
   — Worn rigged attachments (e.g. own shoes) don't render — wearer never
   resolved / too many rigged-pending objects

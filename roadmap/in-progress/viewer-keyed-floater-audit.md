@@ -61,8 +61,38 @@ spawn instead of `DeferredFloaterContent`.
   (comparing two textures is a real workflow). They were missing from this list
   rather than deliberately excluded; they share the properties module and would
   convert the same way.
-- **About Landmark** (`about_landmark.rs`, `"about-landmark"`) — per landmark
-  item ([[viewer-about-landmark-floater]]).
+- ~~**About Landmark** (`about_landmark.rs`, `"about-landmark"`)~~ — **done**
+  (2026-09-07). Keyed by the landmark's inventory id
+  ([[viewer-about-landmark-floater]]); the shown item, the resolve chain's
+  progress (pending asset, parcel id, details, deadline), the built row handles
+  and the SLURL are components on the window, and the copy / teleport / map
+  observers resolve theirs with `host_floater`. The one thing that did not fall
+  out of the pattern is the resolve itself: `RemoteParcelId` comes back as a
+  bare id naming no request, so two windows resolving at once could not tell
+  whose answer had arrived. `ParcelResolveQueue` serialises them — one request
+  in flight, the reply belongs to the head, a timed-out window leaves the queue
+  — and the protocol-level fix is filed as
+  [[viewer-remote-parcel-id-uncorrelated]]. Writing
+  `parcel_resolves_are_serialised` turned up a second half of the same problem:
+  the reply pass offered each event to every window in turn, so the window
+  *behind* the head — which becomes the head the moment the first is answered —
+  took the same answer as its own. A `RemoteParcelId` is now consumed once, by
+  the head; `ParcelDetails`, which does name its parcel, still reaches every
+  window waiting on it. The chain also folds before it drives (replies and
+  expiries, then the next question), so a handoff costs no frame.
+- **The remaining inventory-item editors** — every one of these opens *on* an
+  item and shares one id today, so each is a keyed conversion with the same
+  shape as the notecard editor:
+  - **Wearable editor** (`edit_wearable.rs`, `"wearable-editor"`) — bodyparts
+    and clothing layers. Editing a shape while comparing it against a skin is
+    an ordinary workflow, and the reference keys this one by item.
+  - **Material editor** (`edit_material_asset.rs`, `"material-editor"`) — per
+    material item.
+  - **Object contents** (`edit_contents.rs`, `"object-contents"`) — per object
+    (task id), not per item: the window lists one object's inventory.
+  - **Colour picker** (`ui_color_picker.rs`, `"color-picker"`) — the same
+    argument as the texture picker, and the same **named** key: the field being
+    picked for.
 - ~~**Notecard / script editors** (`edit_notecard.rs` `"notecard-editor"`,
   `edit_script.rs` `"script-editor"`)~~ — **done** (2026-09-06). Each window
   carries its own `NotecardEditorState` / `ScriptEditorState` (source, baseline,
@@ -94,10 +124,17 @@ spawn instead of `DeferredFloaterContent`.
   **command** before the pass that carries it out, rather than noticing a
   hidden panel afterwards; OK / Cancel clear the requester first, which is what
   keeps that revert from undoing the choice they just made.
-- **About Land** (`about_land.rs`, `"about-land"`) — per parcel.
-- **About Region** (`about_region.rs`) and the **web browser**
-  (`web_floater.rs`) — check what the reference does before converting; region
-  info is arguably one window, the browser arguably tabs.
+- **About Land** (`about_land.rs`, `"about-land"`) — per parcel, and **About
+  Region** (`about_region.rs`) — per region. The reference keeps both as
+  singletons (`LLFloaterLand` / `LLFloaterRegionInfo` open on *the parcel you
+  are standing on* and *the region you are in*, so there is only ever one
+  subject). We key them anyway, by user decision: this viewer can show a parcel
+  or region it is not standing in — from a landmark, a search hit, a place
+  profile — and comparing two parcels' covenants or two regions' settings is a
+  real thing to want. That is a deliberate divergence from the reference, and
+  this is where it is written down.
+- **Web browser** (`web_floater.rs`) — check what the reference does before
+  converting; the browser is arguably tabs rather than windows.
 
 Not every floater should be keyed (Preferences, Search, the minimap, the
 inventory and the Conversations floater are singletons in the reference too),
