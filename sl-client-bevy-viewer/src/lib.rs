@@ -357,6 +357,7 @@ pub(crate) use sl_viewer_audio::world_sounds;
 pub(crate) use sl_viewer_map::world_map;
 
 use std::collections::BTreeSet;
+use std::num::NonZero;
 use std::path::{Path, PathBuf};
 
 use bevy::diagnostic::{EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin};
@@ -477,6 +478,18 @@ pub enum Error {
     /// or an unreadable / unsupported manifest).
     #[error("replay bundle error: {0}")]
     Replay(String),
+    /// The Bevy app asked to exit with a failing status — a plugin that could
+    /// not build, a renderer thread that panicked, a system that requested a
+    /// failing exit. The code the app chose is carried so a log names it, but
+    /// the process exits `1` either way: this is a `main` returning `Err`, not
+    /// a `std::process::exit`, which would skip the tracing guards' flush and
+    /// lose the very log that explains the failure.
+    #[error("the viewer exited with a failing status ({0})")]
+    AppFailed(NonZero<u8>),
+    /// The `--screenshot-dir` could not be created, so the run has nowhere to
+    /// put the frames it was started to take.
+    #[error("could not create the screenshot directory")]
+    ScreenshotDir(#[source] std::io::Error),
 }
 
 /// The command-line options for the viewer.
@@ -990,6 +1003,14 @@ struct MediaRuntime {
 
 /// Run one windowed session to completion, returning any recoverable login
 /// outcome (an MFA challenge or a retryable rejection) it stopped on.
+///
+/// # Errors
+///
+/// Returns [`Error::ScreenshotDir`] if `--screenshot-dir` names a directory
+/// that cannot be created — the run was started to take frames, and one that
+/// cannot write them has already failed. Returns [`Error::AppFailed`] if the
+/// Bevy app exited with a failing status, which is **not** a recoverable
+/// outcome: the caller must not retry it the way it retries an MFA challenge.
 #[expect(
     clippy::too_many_arguments,
     reason = "the viewer's startup knobs, already bundled where they group naturally \
@@ -1006,7 +1027,7 @@ fn run_session(
     media: MediaRuntime,
     fetch_server_chat_history: bool,
     replay: Option<crate::avatar_replay::ReplayConfig>,
-) -> LoginOutcome {
+) -> Result<LoginOutcome, Error> {
     // Offline (avatar-state replay) mode: the plugin registers its event/resource
     // substrate but never logs in; the session is fed synthetic events from the
     // bundle instead (see `crate::avatar_replay`).
@@ -1827,6 +1848,10 @@ fn run_session(
         // Keep re-issuing the `--play-animation` motions (`--repeat-animation`)
         // so a one-shot animation still plays once the avatar has loaded.
         app.add_systems(Update, repeat_debug_animation);
+    } else if repeat_animation {
+        // There is nothing to repeat, and a silent no-op looks exactly like a
+        // run that worked — the same reasoning as the `--capture-*` warnings.
+        warn!("--repeat-animation has no effect without --play-animation");
     }
     // Avatar-state capture (viewer-avatar-state-dump-replay): only when
     // `SL_VIEWER_DUMP_DIR` is set — retain the raw avatar/appearance/animation
@@ -1854,9 +1879,11 @@ fn run_session(
     // then quit (the R11 offline-inspection harness) — from the window, or from
     // an off-screen target of the pinned `--capture-size` when one was asked for.
     if let Some(dir) = capture.dir {
-        if let Err(error) = fs_err::create_dir_all(dir) {
-            warn!("failed to create screenshot dir {}: {error}", dir.display());
-        }
+        // Abort here rather than warning and running on. A run given
+        // `--screenshot-dir` exists to write frames into it; carrying on gives
+        // a `ScreenshotPlugin` that fails on every single capture, which buries
+        // the one error that explains why under a run's worth of noise.
+        fs_err::create_dir_all(dir).map_err(Error::ScreenshotDir)?;
         app.add_plugins(crate::screenshot::ScreenshotPlugin {
             dir: dir.to_path_buf(),
             content: capture.content,
@@ -1893,10 +1920,20 @@ fn run_session(
     if let Some(radians) = camera_fov {
         app.insert_resource(crate::preferences_camera_move::CameraFovOverride { radians });
     }
-    let _exit = app.run();
-    app.world_mut()
+    let exit = app.run();
+    // Taken before the exit is judged, so the outcome is out of the world
+    // either way — but reported only on a clean exit. An app that failed has
+    // not "stopped on an MFA challenge"; it stopped on the failure, and
+    // handing the caller a challenge to retry would send it round the login
+    // loop again on the strength of a run that never got that far.
+    let outcome = app
+        .world_mut()
         .remove_resource::<LoginOutcome>()
-        .unwrap_or_default()
+        .unwrap_or_default();
+    match exit {
+        AppExit::Success => Ok(outcome),
+        AppExit::Error(code) => Err(Error::AppFailed(code)),
+    }
 }
 
 /// Run the viewer end-to-end, restarting the windowed app once per MFA
@@ -1905,7 +1942,9 @@ fn run_session(
 /// # Errors
 ///
 /// Returns an [`enum@Error`] if credentials cannot be loaded, the login URI
-/// cannot be resolved, or an MFA challenge cannot be answered.
+/// cannot be resolved, an MFA challenge cannot be answered, or a session fails
+/// ([`Error::AppFailed`] / [`Error::ScreenshotDir`]) — a failing session ends
+/// the retry loop rather than being retried.
 fn run_viewer(options: &Options) -> Result<(), Error> {
     // Before anything else, so a signal that arrives during login is still a
     // graceful logout: the flag is only read once the app is running, but the
@@ -2010,7 +2049,7 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
             },
             !options.no_group_chat_history,
             None,
-        );
+        )?;
         if let Some(challenge) = outcome.challenge {
             info!(
                 "multi-factor authentication required: {}",
@@ -2045,7 +2084,10 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
 ///
 /// # Errors
 ///
-/// Returns [`Error::Replay`] if the bundle is missing, empty, or unreadable.
+/// Returns [`Error::Replay`] if the bundle is missing, empty, or unreadable,
+/// or [`Error::AppFailed`] / [`Error::ScreenshotDir`] if the session itself
+/// fails — which is the whole point of a replay run, since it is normally
+/// driven unattended by a harness reading the exit status.
 fn run_replay(options: &Options, bundle_dir: &Path) -> Result<(), Error> {
     // Serve every asset request from the bundle's drop-in cache for the rest of
     // the process (must be set before the asset stores are built below).
@@ -2147,7 +2189,7 @@ fn run_replay(options: &Options, bundle_dir: &Path) -> Result<(), Error> {
         // the no-network intent explicit.
         false,
         Some(config),
-    );
+    )?;
     info!("replay ended");
     Ok(())
 }
@@ -2333,7 +2375,9 @@ pub fn init_tracing() -> TracingGuards {
 ///
 /// # Errors
 ///
-/// Returns [`Error`] if the credentials, grid or login URI cannot be resolved.
+/// Returns [`enum@Error`] if the credentials, grid or login URI cannot be
+/// resolved, or if the run itself fails — the process then exits non-zero, so
+/// a script or harness that checks the status sees the failure.
 pub fn run() -> Result<(), Error> {
     // Held for the whole process so the Chrome profiler (if enabled) flushes.
     let _tracing_guards = init_tracing();

@@ -4,7 +4,11 @@
 //! the library, which is what lets this binary render the viewer's real UI
 //! modules rather than a second, drifting copy of them.
 
-/// Entry point: hand straight over to the library.
-fn main() {
-    sl_client_bevy_viewer::gallery::run();
+/// Entry point: hand straight over to the library, and let its [`AppExit`]
+/// **be** the process's exit status — `AppExit` implements `Termination`, so a
+/// failing run reaches a harness's exit-code check with its own code intact.
+///
+/// [`AppExit`]: bevy::app::AppExit
+fn main() -> bevy::app::AppExit {
+    sl_client_bevy_viewer::gallery::run()
 }

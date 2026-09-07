@@ -341,10 +341,13 @@ type HasDeclaration = Or<(
 /// Run the gallery: a window, the viewer's real converters, and every registered
 /// scene rendered on its own.
 ///
-/// Returns `()` rather than a `Result` because there is nothing here to fail at:
-/// no credentials to reject, no grid to be unreachable, no world to fail to load.
-/// That is the whole point of the gallery, and the signature says so.
-pub fn run() {
+/// Returns Bevy's own [`AppExit`] rather than a `Result`, because there is
+/// nothing *here* to fail at: no credentials to reject, no grid to be
+/// unreachable, no world to fail to load. That is the whole point of the
+/// gallery. The app underneath can still fail — a plugin that will not build, a
+/// renderer thread that panics — and a gallery run that a harness drives
+/// unattended must say so in its exit status rather than reporting success.
+pub fn run() -> AppExit {
     // Held for the whole process so the Chrome profiler (if enabled) flushes.
     let _tracing_guards = crate::init_tracing();
     let args = GalleryArgs::parse();
@@ -361,7 +364,10 @@ pub fn run() {
                     "no scene named `{wanted}`. Known scenes: {}",
                     known.join(", ")
                 );
-                return;
+                // A failing status, not a quiet `return`: the run did not do
+                // what it was asked, and a harness that only reads the exit
+                // code would otherwise record a typo as a successful render.
+                return AppExit::error();
             }
         },
     };
@@ -450,7 +456,7 @@ pub fn run() {
                 quit_on_escape,
             ),
         )
-        .run();
+        .run()
 }
 
 /// Spawn the camera and the fixed lighting every scene is judged under.

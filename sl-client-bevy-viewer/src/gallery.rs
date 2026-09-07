@@ -193,10 +193,13 @@ struct GalleryHeader;
 /// Run the gallery: a window, the viewer's real UI scaffold, and every
 /// registered element rendered on its own.
 ///
-/// Returns `()` rather than a `Result` because there is nothing here to fail at:
-/// no credentials to reject, no grid to be unreachable, no world to fail to
-/// load. That is the whole point of the gallery, and the signature says so.
-pub fn run() {
+/// Returns Bevy's own [`AppExit`] rather than a `Result`, because there is
+/// nothing *here* to fail at: no credentials to reject, no grid to be
+/// unreachable, no world to fail to load. That is the whole point of the
+/// gallery. The app underneath can still fail — a plugin that will not build, a
+/// renderer thread that panics — and a gallery run that a harness drives
+/// unattended must say so in its exit status rather than reporting success.
+pub fn run() -> AppExit {
     // Held for the whole process so the Chrome profiler (if enabled) flushes.
     let _tracing_guards = crate::init_tracing();
     info!(
@@ -356,7 +359,7 @@ pub fn run() {
             PostUpdate,
             (order_gallery_tab_stops, scroll_focus_into_view).after(bevy::ui::UiSystems::Layout),
         )
-        .run();
+        .run()
 }
 
 /// Re-number the gallery's focus stops into reading order — top-to-bottom, then

@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 322 |
 | blocked | 46 |
 | in-progress | 20 |
-| bugs | 62 |
-| done | 1023 |
+| bugs | 61 |
+| done | 1024 |
 | deferred | 25 |
 | wont-do | 14 |
 | **total** | **1612** |
@@ -1190,7 +1190,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (62)
+## bugs (61)
 
 ### viewer
 
@@ -1211,8 +1211,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-account-dir-index-repoint`](bugs/viewer-audit-account-dir-index-repoint.md)
   — A skipped rename still repoints the UUID index, handing one avatar another's
   data
-- [`viewer-audit-app-exit-discarded`](bugs/viewer-audit-app-exit-discarded.md) —
-  The viewer exits 0 on a failing AppExit
 - [`viewer-audit-asset-editor-scaffold`](bugs/viewer-audit-asset-editor-scaffold.md)
   — The wearable editor reports a save that has not happened, and claims other
   editors' results
@@ -1341,7 +1339,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1023)
+## done (1024)
 
 ### protocol
 
@@ -1596,6 +1594,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Worn rigid attachments freeze at the T-pose instead of following the
 - [`viewer-audio-backend`](done/viewer-audio-backend.md) — Audio backend —
   device, decode, listener & mixer
+- [`viewer-audit-app-exit-discarded`](done/viewer-audit-app-exit-discarded.md) —
+  The viewer exits 0 on a failing AppExit
 - [`viewer-audit-command-result-diagnostics`](done/viewer-audit-command-result-diagnostics.md)
   — The bevy command dispatcher discards 300 protocol send results with no log
 - [`viewer-audit-diagnostic-stream-unread`](done/viewer-audit-diagnostic-stream-unread.md)
