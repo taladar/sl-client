@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 309 |
+| ready | 310 |
 | blocked | 45 |
 | in-progress | 19 |
 | bugs | 59 |
-| done | 1004 |
+| done | 1005 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1573** |
+| **total** | **1575** |
 
 ## ideas (98)
 
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (309)
+## ready (310)
 
 ### protocol
 
@@ -801,14 +801,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-render-readback-tier`](ready/viewer-render-readback-tier.md) — Render
   readback tier — assert on the pixels, headlessly (blocked by
   `viewer-render-test-harness` (done))
+- [`viewer-render-resolution-divisor`](ready/viewer-render-resolution-divisor.md)
+  — Render at a reduced resolution (RenderResolutionDivisor)
 - [`viewer-render-type-toggles`](ready/viewer-render-type-toggles.md) —
   Render-type & render-feature toggles (hide object classes, wireframe)
 - [`viewer-report-abuse`](ready/viewer-report-abuse.md) — Report Abuse floater
   (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-resync-animations`](ready/viewer-resync-animations.md) — Resync
   animations action
-- [`viewer-rlv-debug-settings-commands`](ready/viewer-rlv-debug-settings-commands.md)
-  — RLV — @setdebug_*/@getdebug_* allowlist and @setrot (blocked by
+- [`viewer-rlv-command-intake`](ready/viewer-rlv-command-intake.md) — RLV — the
+  owner-say command intake and the reply/notify chat path (blocked by
   `viewer-rlv-restriction-state` (done))
 - [`viewer-rlv-enforce-camera`](ready/viewer-rlv-enforce-camera.md) — RLV —
   camera restrictions and vision overlay (blocked by
@@ -1296,7 +1298,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1004)
+## done (1005)
 
 ### protocol
 
@@ -2563,6 +2565,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   regressions
 - [`viewer-rlv-command-parser`](done/viewer-rlv-command-parser.md) — RLV — parse
   the @-command chat protocol
+- [`viewer-rlv-debug-settings-commands`](done/viewer-rlv-debug-settings-commands.md)
+  — RLV — @setdebug_*/@getdebug_* allowlist and @setrot (blocked by
+  `viewer-rlv-restriction-state` (done))
 - [`viewer-rlv-enforce-receive-side`](done/viewer-rlv-enforce-receive-side.md) —
   RLV — receive-side chat/IM filters and redirect (blocked by
   `viewer-rlv-restriction-state` (done))

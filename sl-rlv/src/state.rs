@@ -34,6 +34,7 @@ use uuid::Uuid;
 use crate::actions::{RlvActionSource, RlvActions};
 use crate::behaviour::{RlvBehaviour, RlvEntry, RlvLocalModifier};
 use crate::command::{RlvCommand, RlvParam, RlvParamKind};
+use crate::extension::{RlvDebugSetting, RlvExtResult, RlvExtSource};
 use crate::locks::{RlvLocks, RlvObjectAttachment};
 use crate::modifier::{DEFAULT_FIELD_OF_VIEW, RlvModifier, RlvModifierState, RlvModifierValue};
 use crate::notify::{RlvNotification, RlvNotifyRegistry};
@@ -286,6 +287,11 @@ pub struct RlvState {
     /// Where each restricting object sits on the avatar, when the consumer has
     /// told us — the reference's cached `RlvObject` lookup.
     attachments: BTreeMap<Uuid, RlvObjectAttachment>,
+    /// What a script has written into a **pseudo** debug setting: text with no
+    /// stored setting behind it that only `@getdebug_*` ever reads
+    /// (`RlvExtGetSet::m_PseudoDebug`). Kept verbatim, because that is what the
+    /// reference hands back.
+    pseudo_debug: BTreeMap<RlvDebugSetting, String>,
 }
 
 impl Default for RlvState {
@@ -300,6 +306,7 @@ impl Default for RlvState {
             notify: RlvNotifyRegistry::default(),
             pending: Vec::new(),
             attachments: BTreeMap::new(),
+            pseudo_debug: BTreeMap::new(),
         }
     }
 }
@@ -1320,6 +1327,62 @@ impl RlvState {
         source: &impl RlvQuerySource,
     ) -> (String, RlvOutcome) {
         crate::query::answer_query(self, issuer, query, source)
+    }
+
+    // ------------------------------------------------------- extension commands
+
+    /// Run a command the behaviour dictionary did not claim through the
+    /// **extension** handlers: `@getdebug_*`, `@setdebug_*` and `@setrot`.
+    ///
+    /// `None` means the command is not one of those either, and the consumer
+    /// should report it unknown. This is the last stop after
+    /// [`RlvState::apply`] has handed a `=force` or `=<channel>` command back
+    /// as [`RlvOutcome::NotAStateChange`], exactly as the reference falls
+    /// through to its registered `RlvExtCommandHandler` chain for an unknown
+    /// behaviour.
+    ///
+    /// ```
+    /// # use sl_rlv::{RlvCommand, RlvDebugSetting, RlvDebugValue, RlvExtSource, RlvState};
+    /// # use uuid::Uuid;
+    /// struct Viewer;
+    /// impl RlvExtSource for Viewer {
+    ///     fn debug_value(&self, setting: RlvDebugSetting) -> Option<RlvDebugValue> {
+    ///         (setting == RlvDebugSetting::NoSetEnv).then_some(RlvDebugValue::Bool(true))
+    ///     }
+    ///     fn set_debug_value(&mut self, _: RlvDebugSetting, _: RlvDebugValue) -> bool {
+    ///         false
+    ///     }
+    /// }
+    ///
+    /// # fn main() -> Result<(), Box<dyn core::error::Error>> {
+    /// let mut state = RlvState::new();
+    /// let command = RlvCommand::parse_field("getdebug_restrainedlovenosetenv=2222")?;
+    /// let result = state
+    ///     .run_extension(Uuid::from_u128(1), &command, &mut Viewer)
+    ///     .ok_or("not an extension command")?;
+    /// assert_eq!(result.reply.ok_or("no reply")?.message, "1");
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn run_extension(
+        &mut self,
+        issuer: Uuid,
+        command: &RlvCommand,
+        source: &mut impl RlvExtSource,
+    ) -> Option<RlvExtResult> {
+        crate::extension::run(self, issuer, command, source)
+    }
+
+    /// What a script has written into the pseudo debug setting `setting`, if
+    /// anything.
+    #[must_use]
+    pub fn pseudo_debug(&self, setting: RlvDebugSetting) -> Option<&str> {
+        self.pseudo_debug.get(&setting).map(String::as_str)
+    }
+
+    /// Remember what a script wrote into a pseudo debug setting, verbatim.
+    pub fn set_pseudo_debug(&mut self, setting: RlvDebugSetting, text: &str) {
+        let _previous = self.pseudo_debug.insert(setting, text.to_owned());
     }
 }
 

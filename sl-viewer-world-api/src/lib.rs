@@ -6163,6 +6163,12 @@ pub struct AvatarControls {
     pub tap_run_forward: DoubleTapRun,
     /// The tap-tap-hold-to-run detector for the walk-backward key.
     pub tap_run_backward: DoubleTapRun,
+    /// A heading (radians about the Second Life up axis) something has *told*
+    /// the avatar to face rather than turned it towards: RLV's
+    /// `@setrot:<radians>=force`. Taken by the movement driver on the next
+    /// frame it runs, which replaces the tracked heading with it and advertises
+    /// it at once.
+    pub forced_heading: Option<f32>,
 }
 
 impl AvatarControls {
@@ -6191,6 +6197,7 @@ impl Default for AvatarControls {
             ascend_hold_secs: 0.0,
             tap_run_forward: DoubleTapRun::default(),
             tap_run_backward: DoubleTapRun::default(),
+            forced_heading: None,
         }
     }
 }

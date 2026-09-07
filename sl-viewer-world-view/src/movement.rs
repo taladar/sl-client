@@ -423,6 +423,20 @@ pub(crate) fn drive_avatar_controls(
             turning = true;
         }
     }
+    // A heading something *told* the avatar to face — RLV's `@setrot` — replaces
+    // whatever this frame's input turned it to, and is advertised at once rather
+    // than waiting out the turning throttle. Taken here, after the per-mode turn
+    // above, so it wins over the mouselook aim; a seated avatar is left alone for
+    // the same reason its keys are (the vehicle owns its orientation), and so is
+    // flycam, which returned above with the body parked.
+    if let Some(heading) = controls.forced_heading.take() {
+        controls.yaw = heading;
+        // A forced heading is authoritative even before the own avatar has
+        // reported one, so it is a seed as well as a turn.
+        controls.seeded = true;
+        controls.rotation_send_accum = ROTATION_SEND_INTERVAL_SECS;
+        turning = true;
+    }
     if turning {
         // Keep the heading bounded so a long session cannot accumulate a huge angle.
         controls.yaw = wrap_angle(controls.yaw);

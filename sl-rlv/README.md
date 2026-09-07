@@ -14,14 +14,18 @@ is an RLV command line when it starts with `@`; the viewer swallows it so it
 never reaches the chat log. The payload is a **comma-separated list** of
 commands, each `behaviour[:option]=param`, lower-cased.
 
-The crate is four layers. The **language decoder** turns a chat line into a
+The crate is six layers. The **language decoder** turns a chat line into a
 typed command stream; the **restriction state machine** (`RlvState`) holds what
 those commands mean; the **query layer** (`RlvState::answer`) builds the line a
-`@get*` question is answered with; and the **lock model** (`RlvLocks`) answers
+`@get*` question is answered with; the **lock model** (`RlvLocks`) answers
 the one question a yes/no restriction cannot — not "is detaching blocked" but
-"may *this* come off". What it deliberately does not do is *obey* anything: it
-never detaches an attachment and never hides a name tag. A `=force` action comes
-back from `RlvState::apply` as `RlvOutcome::NotAStateChange` for the consumer to
+"may *this* come off"; the **enforcement façade** (`RlvActions`) is the one
+predicate every call site asks before it acts, and the one filter arriving chat
+and IMs pass back through; and the **extension commands**
+(`RlvState::run_extension`) are the ones the behaviour dictionary never claimed.
+What it deliberately does not do is *obey* anything: it never detaches an
+attachment and never hides a name tag. A `=force` action comes back from
+`RlvState::apply` as `RlvOutcome::NotAStateChange` for the consumer to
 dispatch.
 
 ## Decoding
@@ -217,8 +221,37 @@ points (tail, wings, jaw, …) were added that group is *them* and the HUD point
 are group `9`, which the table does not know — so upstream's
 `@getattachnames:hud` names the extended points and never a HUD surface.
 
+## Extension commands
+
+Three commands are in no dictionary: `@getdebug_<setting>=<channel>`,
+`@setdebug_<setting>:<value>=force` and `@setrot:<radians>=force`. They arrive
+as unknown keywords, and the reference picks them up afterwards through a chain
+of registered handlers. `RlvState::run_extension` is that last stop — the
+consumer sends it a command `apply` handed back as `NotAStateChange`, and gets
+`None` if it is not one of the three either.
+
+The debug settings are a closed **allowlist** of six rows
+(`RLV_DEBUG_SETTINGS`), for the obvious reason: an object that could write any
+debug setting could do anything the viewer can. Each row carries what may be
+read, what may be written, and whether it is a *pseudo* setting — a computed
+fact with no stored value. The parsing (C++'s prefix-stopping `operator>>`, its
+closed list of boolean words), the formatting, and every rule about who may
+touch what are here; the values come from an `RlvExtSource` the consumer
+implements. `@setdebug=n` gives one object the writable rows, and
+`is_debug_setting_locked` is what a settings editor asks so the user cannot
+edit underneath it.
+
+Three reference quirks are kept deliberately. The pseudo `AvatarSex` write is a
+lie a script tells itself — stored verbatim, never reaching a settings store,
+read back as the spelling that went in. `@setrot` is registered for the reply
+dispatch too and checks neither, so `@setrot:1.5=2222` really does turn the
+avatar and answers nothing. And a read of a setting the viewer does not have
+still *succeeds*, with an empty answer, because a script that asked a question
+must not be left waiting.
+
 The grammar, the classification and the state machine follow Firestorm's
-`rlvhandler.cpp`, `rlvhelper.cpp`, `rlvmodifiers.h` and `rlvdefines.h`
+`rlvhandler.cpp`, `rlvhelper.cpp`, `rlvmodifiers.h`, `rlvextensions.cpp` and
+`rlvdefines.h`
 (`ERlvBehaviour`, `ERlvParamType`, `ERlvBehaviourModifier`, `RLV_CMD_PREFIX`),
 reimplemented idiomatically rather than copied. Channel-0 owner-say gating is
 the caller's job — this crate decodes a line it is handed.

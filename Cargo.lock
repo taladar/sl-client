@@ -9378,6 +9378,7 @@ dependencies = [
  "serde_json",
  "sl-audio",
  "sl-client-bevy",
+ "sl-rlv",
  "sl-settings",
  "sl-viewer-audio",
  "sl-viewer-kit",
@@ -9392,6 +9393,7 @@ dependencies = [
  "sl-viewer-world-scene",
  "sl-viewer-world-view",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

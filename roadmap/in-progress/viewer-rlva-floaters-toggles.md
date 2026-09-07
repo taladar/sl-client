@@ -104,8 +104,7 @@ could each name a setting the roster does not have.
 - **`RestrainedLoveDebug` is registered but nothing yet fills the console from
   it.** It echoes *processed* commands, and today only the console processes
   commands — and it echoes regardless. It becomes load-bearing with the
-  owner-say command intake, which no task owns yet and which is the obvious
-  next RLV step.
+  owner-say command intake, which is now [[viewer-rlv-command-intake]].
 - **The Locks window does not list the `nostrip` soft locks**, nor resolve a
   folder lock to the worn items it catches. Both need the `#RLV` folder tree.
   The four lock registries themselves are complete.

@@ -43,7 +43,7 @@
 use std::collections::VecDeque;
 
 use bevy::prelude::*;
-use sl_rlv::{RlvState, is_rlv_line};
+use sl_rlv::{RlvDebugSetting, RlvDebugValue, RlvExtSource, RlvState, is_rlv_line};
 use sl_settings::SettingValue;
 use sl_viewer_settings::ViewerSettings;
 
@@ -595,6 +595,79 @@ impl RlvSession {
         }
         self.console.clear();
         self.console_revision = self.console_revision.wrapping_add(1);
+    }
+}
+
+// --- The `@getdebug_*` / `@setdebug_*` allowlist ----------------------------
+
+/// The two facts behind the **pseudo** debug settings — the ones with no
+/// stored value for [`ViewerRlvExt`] to read.
+///
+/// Each is published by the feature that owns it (the camera publishes the
+/// view's shape, the avatar layer publishes the shape of the avatar), because
+/// neither belongs to the RLV surface that answers with them. `None` means
+/// not known yet, which a script hears as an empty answer rather than as a
+/// guess.
+#[derive(Resource, Debug, Default, Clone, Copy, PartialEq)]
+pub struct RlvExtFacts {
+    /// The 3D view's width divided by its height (`AspectRatio`).
+    pub aspect_ratio: Option<f32>,
+    /// Whether the worn Shape's `male` param says male (`AvatarSex`).
+    pub avatar_is_male: Option<bool>,
+}
+
+/// The viewer behind the debug-setting allowlist: the settings store for the
+/// rows that are real settings, [`RlvExtFacts`] for the two that are not.
+///
+/// Borrowed for the length of one command rather than kept, because both halves
+/// are Bevy resources. The store is borrowed *immutably* because nothing here
+/// is writable — see [`set_debug_value`](RlvExtSource::set_debug_value).
+#[derive(Debug)]
+pub struct ViewerRlvExt<'settings> {
+    /// The settings store the readable RLV rows live in, where there is one.
+    pub settings: Option<&'settings ViewerSettings>,
+    /// The two computed facts.
+    pub facts: RlvExtFacts,
+}
+
+impl RlvExtSource for ViewerRlvExt<'_> {
+    /// What each allowlisted row reads as here.
+    ///
+    /// Two of the six answer nothing, and say why:
+    ///
+    /// - **`RenderResolutionDivisor`** — this viewer does not render at a
+    ///   reduced resolution, so there is no setting to read and none to write.
+    ///   It is the cheap vision impairment a collar reaches for, and it belongs
+    ///   with the rest of the vision-restriction rendering rather than being
+    ///   faked with a setting nothing looks at;
+    /// - **`AvatarSex`** and **`AspectRatio`** answer nothing until the avatar
+    ///   layer and the camera have published them.
+    ///
+    /// `WindLightUseAtmosShaders` is not a setting here either, but its answer
+    /// is not in doubt: this viewer always renders the atmospheric sky, which
+    /// is exactly what a script asking the question wants to know.
+    fn debug_value(&self, setting: RlvDebugSetting) -> Option<RlvDebugValue> {
+        match setting {
+            RlvDebugSetting::AvatarSex => self.facts.avatar_is_male.map(RlvDebugValue::Bool),
+            RlvDebugSetting::AspectRatio => self.facts.aspect_ratio.map(RlvDebugValue::Float),
+            RlvDebugSetting::RenderResolutionDivisor => None,
+            RlvDebugSetting::ForbidGiveToRlv => Some(RlvDebugValue::Bool(rlv_flag(
+                self.settings,
+                SETTING_FORBID_GIVE_TO_RLV,
+            ))),
+            RlvDebugSetting::NoSetEnv => Some(RlvDebugValue::Bool(rlv_flag(
+                self.settings,
+                SETTING_NO_SET_ENV,
+            ))),
+            RlvDebugSetting::WindLightUseAtmosShaders => Some(RlvDebugValue::Bool(true)),
+        }
+    }
+
+    /// Nothing here is writable: of the two rows the allowlist lets a script
+    /// write, `AvatarSex` is a pseudo setting the state machine keeps and
+    /// `RenderResolutionDivisor` is the one this viewer does not have.
+    fn set_debug_value(&mut self, _setting: RlvDebugSetting, _value: RlvDebugValue) -> bool {
+        false
     }
 }
 

@@ -46,7 +46,7 @@ use crate::avatars::{
 };
 use crate::bake_inputs::{
     OwnBakeInputs, WearableAssetFetched, WearableAssetManager, assemble_own_bake,
-    drive_wearable_requests, poll_wearable_assets, update_asset_caps,
+    drive_wearable_requests, poll_wearable_assets, publish_rlv_avatar_sex, update_asset_caps,
 };
 use crate::bake_publish::OwnBakePublish;
 use crate::bump::{BumpManager, apply_bump_normals, register_bump_faces};
@@ -486,6 +486,7 @@ impl Plugin for ViewerWorldPlugins {
         app.init_resource::<ServerBakeState>();
         app.init_resource::<MeshManager>();
         app.init_resource::<OwnBakeInputs>();
+        app.init_resource::<crate::world_api::rlv::RlvExtFacts>();
         app.init_resource::<OwnBakePublish>();
         app.init_resource::<WearableAssetManager>();
         app.init_resource::<AnimationPlayback>();
@@ -548,6 +549,10 @@ impl Plugin for ViewerWorldPlugins {
                     drive_wearable_requests,
                     poll_wearable_assets,
                     assemble_own_bake,
+                    // The worn Shape is what says whether the avatar is male,
+                    // which is one of the two facts RLV's debug-setting
+                    // allowlist cannot read out of a settings store.
+                    publish_rlv_avatar_sex,
                 ),
                 // Scene re-base on a region change, then fold terrain + object
                 // events. (The purge half of a *distant* teleport is each store's

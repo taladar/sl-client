@@ -26,6 +26,7 @@ sl-audio = { path = "../sl-audio", version = "0.1.0" }
 sl-client-bevy = { workspace = true, features = [
   "bevy_pbr",
 ] }
+sl-rlv = { path = "../sl-rlv", version = "0.1.0" }
 sl-settings = { path = "../sl-settings", version = "0.1.0" }
 sl-viewer-audio = { workspace = true }
 sl-viewer-kit = { workspace = true }
@@ -43,6 +44,7 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
+uuid = { workspace = true }
 
 [lints]
 workspace = true

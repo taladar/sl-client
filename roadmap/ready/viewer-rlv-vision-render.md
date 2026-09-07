@@ -31,6 +31,15 @@ Firestorm RLVa's dictionary (verified — no `camdraw` anywhere in the
 rlv* sources); they are Marine's-RLV-only commands. Do not block on
 them.
 
+## Addendum: `RenderResolutionDivisor` is its own task (2026-09-07)
+
+The oldest vision impairment of the lot —
+`@setdebug_renderresolutiondivisor:<n>=force`, the cheap blur a collar reaches
+for — is **not** in this task. It is a plain graphics lever that RLV merely
+happens to be able to drive (a performance control as much as a restraint), so
+it is [[viewer-render-resolution-divisor]]. The RLVa effects here are the
+`@setsphere` / `@setoverlay` shader family instead.
+
 Missing scope found by the audit: the `@setoverlay` overlay effect
 family (`RlvOverlayEffect` in `rlveffects.cpp`) — `@setoverlay`
 (screen-space textured overlay), `@setoverlay_touch` (the overlay's

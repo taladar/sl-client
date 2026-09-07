@@ -9,7 +9,7 @@
 //! never reaches the chat log. The payload is a **comma-separated list** of
 //! commands, each `behaviour[:option]=param`, lower-cased.
 //!
-//! The crate is five layers:
+//! The crate is six layers:
 //!
 //! - the **language decoder** turns a chat line into a typed [`RlvCommand`]
 //!   stream — behaviour, optional option, and the classified [`RlvParam`] (add
@@ -26,7 +26,11 @@
 //!   action asks before it happens — may I say this, teleport there, touch
 //!   that, and on the way back in: may I hear this, read that. One predicate
 //!   per question, called from everywhere, so no call site can spell a
-//!   restriction its own way and get it wrong.
+//!   restriction its own way and get it wrong;
+//! - the **extension commands** ([`RlvState::run_extension`]) are the ones the
+//!   dictionary never claimed: the `@getdebug_*` / `@setdebug_*` allowlist and
+//!   `@setrot`. They arrive as unknown keywords and are picked up here after
+//!   the state machine has handed them back.
 //!
 //! The state machine also reports itself: `@notify` subscribers are told about
 //! every change it sees, and the lines they are owed wait in
@@ -119,6 +123,7 @@
 mod actions;
 mod behaviour;
 mod command;
+mod extension;
 mod locks;
 mod modifier;
 mod notify;
@@ -140,6 +145,11 @@ pub use behaviour::{
     RlvBehaviour, RlvBehaviourFlags, RlvEntry, RlvLocalModifier, RlvResolvedBehaviour, RlvValueType,
 };
 pub use command::{RLV_PREFIX, RlvCommand, RlvParam, RlvParamKind, RlvParseError};
+pub use extension::{
+    RLV_DEBUG_SETTINGS, RlvDebugKind, RlvDebugSetting, RlvDebugSettingDef, RlvDebugValue,
+    RlvExtCommand, RlvExtResult, RlvExtSource, SETROT_OFFSET, is_debug_setting_locked, parse_bool,
+    parse_prefix, writable_debug_setting_names,
+};
 pub use locks::{
     NOSTRIP_FLAG, RlvAttachmentLock, RlvAttachmentPointLock, RlvFolderLock,
     RlvFolderLockPermission, RlvFolderLockScope, RlvFolderLockSource, RlvLockKind, RlvLockSource,

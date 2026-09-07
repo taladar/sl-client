@@ -34,6 +34,13 @@
 //! command is reported as accepted-but-unanswered rather than being given a
 //! made-up answer, because a wrong `@getattach` reply is worse than none.
 //!
+//! The **extension** commands are the exception, and are answered here:
+//! `@getdebug_<setting>` reads one of the allowlisted debug settings and its
+//! answer is shown on the reply stream, `@setdebug_<setting>:<value>=force`
+//! writes one, and `@setrot:<radians>=force` turns the avatar. They are asked
+//! of [`RlvState::run_extension`] only *after* the state machine has handed the
+//! command back, so nothing in the dictionary can be shadowed by them.
+//!
 //! Reference (Firestorm, read-only): `rlvfloaters.cpp` (`RlvFloaterConsole`),
 //! `floater_rlv_console.xml`.
 
@@ -42,7 +49,10 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::{EditableText, FontCx, LayoutCx};
 use sl_client_bevy::SlIdentity;
-use sl_rlv::{RLV_PREFIX, RlvCommand, RlvOutcome, RlvParam, RlvState, parse_chat_line};
+use sl_rlv::{
+    RLV_PREFIX, RlvCommand, RlvExtCommand, RlvExtSource, RlvOutcome, RlvParam, RlvState,
+    parse_chat_line,
+};
 use sl_viewer_settings::ViewerSettings;
 use sl_viewer_ui_core::i18n::Translated;
 use sl_viewer_ui_core::ui::UiPanelShown;
@@ -57,8 +67,10 @@ use sl_viewer_ui_widgets::floater::{
     floater_shown, spawn_floater,
 };
 use sl_viewer_ui_widgets::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
+use sl_viewer_world_api::AvatarControls;
 use sl_viewer_world_api::rlv::{
-    RlvConsoleKind, RlvSession, SETTING_DEBUG_HIDE_UNSET_DUPLICATE, rlv_flag, rlv_is_enabled,
+    RlvConsoleKind, RlvExtFacts, RlvSession, SETTING_DEBUG_HIDE_UNSET_DUPLICATE, ViewerRlvExt,
+    rlv_flag, rlv_is_enabled,
 };
 use uuid::Uuid;
 
@@ -178,8 +190,21 @@ pub const fn is_unset_or_duplicate(outcome: RlvOutcome) -> bool {
     )
 }
 
+/// What running one console line asked of the viewer beyond the state machine.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ConsoleRun {
+    /// Whether the held set changed, so the floaters watching it rebuild.
+    pub changed: bool,
+    /// The heading `@setrot` asked the avatar to face, if the line carried one.
+    pub rotate_to: Option<f32>,
+}
+
 /// Run one command line against `state` as if `issuer` had said it, appending
-/// each command's report to `lines` and returning whether the held set changed.
+/// each command's report to `lines`.
+///
+/// A command the dictionary does not claim is offered to the extension handlers
+/// (`ext`) before it is reported unknown — that is where `@getdebug_*`,
+/// `@setdebug_*` and `@setrot` live.
 ///
 /// Split out from the system so the whole decision — parse, apply, classify,
 /// report — is testable without an app.
@@ -188,41 +213,84 @@ pub fn run_line(
     issuer: Uuid,
     line: &str,
     hide_unset_duplicate: bool,
+    ext: &mut impl RlvExtSource,
     lines: &mut Vec<(RlvConsoleKind, String)>,
-) -> bool {
+) -> ConsoleRun {
+    let mut run = ConsoleRun::default();
     let Some(parsed) = parse_chat_line(line) else {
         lines.push((RlvConsoleKind::Error, "not an RLV command line".to_owned()));
-        return false;
+        return run;
     };
-    let mut changed = false;
     for command in parsed {
         match command {
             Err(error) => lines.push((RlvConsoleKind::Error, error.to_string())),
             Ok(command) => {
                 let text = command_text(&command);
                 let is_query = matches!(command.param, RlvParam::Reply { .. });
-                let outcome = state.apply(issuer, &command);
-                if outcome.succeeded() && !matches!(outcome, RlvOutcome::NotAStateChange) {
-                    changed = true;
+                let applied = state.apply(issuer, &command);
+                // The state machine hands back every `=force` action and every
+                // query; one of those may still be an extension command, which
+                // is the last place a keyword can be recognised.
+                let extension = (applied == RlvOutcome::NotAStateChange)
+                    .then(|| state.run_extension(issuer, &command, ext))
+                    .flatten();
+                // Only what the *state machine* applied can have changed the
+                // held set. An extension command answers a question, writes a
+                // setting or turns the avatar — none of them a restriction, so
+                // none of them may wake the floaters watching the revision.
+                if applied.succeeded() {
+                    run.changed = true;
+                }
+                let mut outcome = applied;
+                if let Some(ref result) = extension {
+                    outcome = result.outcome;
+                    if let Some(heading) = result.rotate_to {
+                        run.rotate_to = Some(heading);
+                    }
                 }
                 if hide_unset_duplicate && is_unset_or_duplicate(outcome) {
                     continue;
                 }
                 lines.push((outcome_stream(outcome), report_line(&text, outcome)));
-                if is_query {
+                match extension {
+                    // An extension read: the answer, as the asking script would
+                    // have heard it. An empty one is shown as an empty one.
+                    Some(result) => match result.reply {
+                        Some(reply) => lines.push((
+                            RlvConsoleKind::Reply,
+                            format!("{}: {}", reply.channel, reply.message),
+                        )),
+                        // A *read* with no reply is one whose channel no reply
+                        // may go on. The reference drops it silently; in a
+                        // debugging console that is worth saying out loud.
+                        // `@setrot` asked as a query is not a read and answers
+                        // nothing by design, so it says nothing here either.
+                        None if matches!(
+                            RlvExtCommand::classify(&command),
+                            Some(RlvExtCommand::GetDebug { .. })
+                        ) =>
+                        {
+                            lines.push((
+                                RlvConsoleKind::Error,
+                                "no reply may be chatted on that channel".to_owned(),
+                            ));
+                        }
+                        None => {}
+                    },
                     // See the module documentation: the answer needs facts the
                     // state machine does not hold, and a wrong answer is worse
                     // than an honest silence.
-                    lines.push((
+                    None if is_query => lines.push((
                         RlvConsoleKind::Reply,
                         "(queries are not answered yet — the query source is not wired up)"
                             .to_owned(),
-                    ));
+                    )),
+                    None => {}
                 }
             }
         }
     }
-    changed
+    run
 }
 
 /// One command written back the way it arrived —
@@ -457,8 +525,9 @@ fn spawn_clear_button(commands: &mut Commands, parent: Entity) {
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources / queries: the keyboard and \
               focus that decide a submit happened, the UI handles, the identity and settings the \
-              run needs, the session it writes to, and the field plus the two text contexts \
-              clearing it requires"
+              run needs, the two facts the debug-setting allowlist reads, the movement controls a \
+              forced rotation writes, the session it writes to, and the field plus the two text \
+              contexts clearing it requires"
 )]
 fn submit_console_line(
     mut keyboard: ResMut<ButtonInput<KeyCode>>,
@@ -466,6 +535,8 @@ fn submit_console_line(
     ui: Option<Res<ConsoleUi>>,
     identity: Option<Res<SlIdentity>>,
     settings: Option<Res<ViewerSettings>>,
+    facts: Option<Res<RlvExtFacts>>,
+    mut controls: Option<ResMut<AvatarControls>>,
     mut session: ResMut<RlvSession>,
     mut fields: Query<&mut EditableText>,
     mut contexts: (ResMut<FontCx>, ResMut<LayoutCx>),
@@ -513,13 +584,29 @@ fn submit_console_line(
                     .as_deref()
                     .and_then(|identity| identity.agent_id)
                     .map_or_else(Uuid::nil, |agent| agent.uuid());
+                let mut ext = ViewerRlvExt {
+                    settings: settings.as_deref(),
+                    facts: facts.as_deref().copied().unwrap_or_default(),
+                };
                 let mut lines = Vec::new();
-                let changed = run_line(session.state_mut(), issuer, &typed, hide, &mut lines);
+                let run = run_line(
+                    session.state_mut(),
+                    issuer,
+                    &typed,
+                    hide,
+                    &mut ext,
+                    &mut lines,
+                );
                 for (kind, text) in lines {
                     session.log(kind, text);
                 }
-                if changed {
+                if run.changed {
                     session.bump();
+                }
+                // `@setrot` is the one extension command that moves something:
+                // the movement driver picks the heading up on its next frame.
+                if let (Some(heading), Some(controls)) = (run.rotate_to, controls.as_mut()) {
+                    controls.forced_heading = Some(heading);
                 }
             }
         }
@@ -662,16 +749,44 @@ fn clear_console_restrictions_on_close(
 #[cfg(test)]
 mod tests {
     use super::{
-        ConsoleVerdict, classify, is_unset_or_duplicate, outcome_stream, outcome_suffix,
-        report_line, run_line,
+        ConsoleRun, ConsoleVerdict, classify, is_unset_or_duplicate, outcome_stream,
+        outcome_suffix, report_line, run_line,
     };
     use pretty_assertions::assert_eq;
-    use sl_rlv::{RlvOutcome, RlvState};
-    use sl_viewer_world_api::rlv::RlvConsoleKind;
+    use sl_rlv::{RlvDebugSetting, RlvDebugValue, RlvExtSource as _, RlvOutcome, RlvState};
+    use sl_viewer_world_api::rlv::{RlvConsoleKind, RlvExtFacts, ViewerRlvExt};
     use uuid::Uuid;
 
     /// A `Box<dyn Error>` alias, so a test can use `?`.
     type TestError = Box<dyn core::error::Error>;
+
+    /// The extension source a test line is run against: the viewer's own, with
+    /// no settings store and whichever facts the test supplies.
+    fn ext(facts: RlvExtFacts) -> ViewerRlvExt<'static> {
+        ViewerRlvExt {
+            settings: None,
+            facts,
+        }
+    }
+
+    /// Run one line with no extension facts, which is what every test that is
+    /// not about the extension family wants.
+    fn run(
+        state: &mut RlvState,
+        issuer: Uuid,
+        line: &str,
+        hide_unset_duplicate: bool,
+        lines: &mut Vec<(RlvConsoleKind, String)>,
+    ) -> ConsoleRun {
+        run_line(
+            state,
+            issuer,
+            line,
+            hide_unset_duplicate,
+            &mut ext(RlvExtFacts::default()),
+            lines,
+        )
+    }
 
     /// The four things a submitted line can be.
     #[test]
@@ -742,9 +857,9 @@ mod tests {
         let agent = Uuid::from_u128(1);
         let mut state = RlvState::new();
         let mut lines = Vec::new();
-        let changed = run_line(&mut state, agent, "@detach=n,fly=n", false, &mut lines);
+        let run = run(&mut state, agent, "@detach=n,fly=n", false, &mut lines);
 
-        assert!(changed);
+        assert!(run.changed);
         assert_eq!(lines.len(), 2, "{lines:?}");
         assert!(lines.iter().all(|(kind, _)| *kind == RlvConsoleKind::Info));
         // Both are held by the agent. `@fly` is reference-counted, so it also
@@ -767,9 +882,9 @@ mod tests {
         let agent = Uuid::from_u128(1);
         let mut state = RlvState::new();
         let mut lines = Vec::new();
-        let changed = run_line(&mut state, agent, "@notacommand=n", false, &mut lines);
+        let run = run(&mut state, agent, "@notacommand=n", false, &mut lines);
 
-        assert!(!changed);
+        assert!(!run.changed);
         assert_eq!(lines.len(), 1, "{lines:?}");
         assert_eq!(
             lines.first().ok_or("no report line")?.0,
@@ -790,9 +905,9 @@ mod tests {
         let agent = Uuid::from_u128(1);
         let mut state = RlvState::new();
         let mut lines = Vec::new();
-        run_line(&mut state, agent, "@detach=n", true, &mut lines);
+        let _first = run(&mut state, agent, "@detach=n", true, &mut lines);
         let before = lines.len();
-        run_line(&mut state, agent, "@detach=n", true, &mut lines);
+        let _duplicate = run(&mut state, agent, "@detach=n", true, &mut lines);
         assert_eq!(
             lines.len(),
             before,
@@ -807,11 +922,126 @@ mod tests {
         let agent = Uuid::from_u128(1);
         let mut state = RlvState::new();
         let mut lines = Vec::new();
-        run_line(&mut state, agent, "@getoutfit=2222", false, &mut lines);
+        let _run = run(&mut state, agent, "@getoutfit=2222", false, &mut lines);
 
         assert!(
             lines.iter().any(|(kind, _)| *kind == RlvConsoleKind::Reply),
             "{lines:?}"
+        );
+    }
+
+    /// An extension read *is* answered, on the reply stream, with the channel
+    /// it would have been shouted on — the console is the only place today
+    /// where a `@getdebug_*` gets a real answer.
+    #[test]
+    fn an_extension_read_is_answered() -> Result<(), TestError> {
+        let agent = Uuid::from_u128(1);
+        let mut state = RlvState::new();
+        let mut lines = Vec::new();
+        let mut source = ext(RlvExtFacts {
+            aspect_ratio: Some(1.5),
+            avatar_is_male: Some(true),
+        });
+        let run = run_line(
+            &mut state,
+            agent,
+            "@getdebug_avatarsex=2222",
+            false,
+            &mut source,
+            &mut lines,
+        );
+
+        assert!(
+            !run.changed,
+            "a read changes no restriction, so it must not wake the floaters \
+             watching the revision"
+        );
+        let reply = lines
+            .iter()
+            .find(|(kind, _)| *kind == RlvConsoleKind::Reply)
+            .ok_or("no reply line")?;
+        assert_eq!(reply.1, "2222: 1");
+        // The report line itself is a plain success, not "unknown command".
+        assert_eq!(
+            lines.first().ok_or("no report line")?.0,
+            RlvConsoleKind::Info,
+            "{lines:?}"
+        );
+        Ok(())
+    }
+
+    /// This viewer has no `RenderResolutionDivisor`, so the write it is asked
+    /// for is refused rather than silently swallowed.
+    #[test]
+    fn a_write_this_viewer_cannot_do_is_refused() -> Result<(), TestError> {
+        let agent = Uuid::from_u128(1);
+        let mut state = RlvState::new();
+        let mut lines = Vec::new();
+        let mut source = ext(RlvExtFacts::default());
+        assert_eq!(
+            source.debug_value(RlvDebugSetting::RenderResolutionDivisor),
+            None
+        );
+        assert_eq!(
+            source.debug_value(RlvDebugSetting::WindLightUseAtmosShaders),
+            Some(RlvDebugValue::Bool(true)),
+            "this viewer always renders the atmospheric sky"
+        );
+        let _run = run_line(
+            &mut state,
+            agent,
+            "@setdebug_renderresolutiondivisor:4=force",
+            false,
+            &mut source,
+            &mut lines,
+        );
+        assert_eq!(
+            lines.first().ok_or("no report line")?.0,
+            RlvConsoleKind::Error,
+            "{lines:?}"
+        );
+        Ok(())
+    }
+
+    /// `@setrot` comes back as a heading for the caller to hand to the movement
+    /// driver, rather than being applied here.
+    #[test]
+    fn setrot_hands_back_a_heading() {
+        let agent = Uuid::from_u128(1);
+        let mut state = RlvState::new();
+        let mut lines = Vec::new();
+        let run = run(&mut state, agent, "@setrot:0=force", false, &mut lines);
+        assert_eq!(run.rotate_to, Some(sl_rlv::SETROT_OFFSET));
+        assert!(!run.changed, "turning the avatar is not a restriction");
+        assert_eq!(
+            lines.first().map(|(kind, _)| *kind),
+            Some(RlvConsoleKind::Info),
+            "{lines:?}"
+        );
+    }
+
+    /// A *read* on a channel no reply may go on says so; `@setrot` written as a
+    /// query still turns the avatar and stays quiet, because it is not a read
+    /// and never had an answer to lose.
+    #[test]
+    fn only_a_read_complains_about_the_channel() {
+        let agent = Uuid::from_u128(1);
+        let mut state = RlvState::new();
+
+        let mut read = Vec::new();
+        let _run = run(&mut state, agent, "@getdebug_avatarsex=0", false, &mut read);
+        assert!(
+            read.iter()
+                .any(|(kind, text)| *kind == RlvConsoleKind::Error && text.contains("channel")),
+            "{read:?}"
+        );
+
+        let mut turn = Vec::new();
+        let run = run(&mut state, agent, "@setrot:0=2222", false, &mut turn);
+        assert_eq!(run.rotate_to, Some(sl_rlv::SETROT_OFFSET));
+        assert!(
+            turn.iter().all(|(kind, _)| *kind == RlvConsoleKind::Info),
+            "{turn:?}"
         );
     }
 }
