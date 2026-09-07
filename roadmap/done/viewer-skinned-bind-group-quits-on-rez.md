@@ -105,6 +105,32 @@ fingerprint matches this spawn site and no other.
 Pinned by `a_skinned_straddling_face_gives_its_twin_the_skin` and
 `an_unskinned_straddling_face_gives_its_twin_no_skin` in `water_clip`.
 
+## Generalised, so the next one is not found the same way
+
+Finding this needed a rigged face to cross a water plane while somebody was
+looking, which is why it survived as long as it did. The same split exists for
+**morph targets** — the pipeline key comes from the mesh asset
+(`mesh.morph_targets()`), the bind group from the entity's morph index — so a
+twin of a morphed face would fail identically. It is not reachable today
+(runtime morphs are attached to avatar base parts, which carry no
+`PrimFaceEntity` and so never reach the split), and that is exactly why it is
+worth pinning rather than waiting for a mesh head to bring facial morphs to a
+worn submesh.
+
+The twin now copies **every component the mesh bind group is built from**, and
+`a_twins_bind_group_inputs_match_its_faces` enumerates the four combinations of
+skinned × morphed, asserting the twin matches its face in each. The test has
+teeth: dropping the morph copy fails it on the `morphed: true` rows.
+
+The SL asset categories deliberately do **not** form an axis of that matrix.
+Every face reaching the split is a `PrimFaceEntity` with a `FaceMaterial`; a
+prim, mesh and sculpt face are all spawned by one `spawn_face_entity` and differ
+only in geometry the twin never inspects, while a worn rigged submesh and an
+animesh submesh differ precisely by carrying a `SkinnedMesh`. Enumerating the
+categories would re-test one path four times and still miss the combinations
+that break; enumerating the bind-group inputs covers every category by
+construction.
+
 ## What else came out of it
 
 - **A runtime guard**, `crate::skin_agreement`: the attribute/`SkinnedMesh`

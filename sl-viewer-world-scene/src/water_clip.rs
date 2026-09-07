@@ -47,6 +47,7 @@
 //! shader.
 
 use bevy::camera::primitives::Aabb;
+use bevy::mesh::morph::MeshMorphWeights;
 use bevy::mesh::skinning::SkinnedMesh;
 use bevy::prelude::*;
 use bevy::render::sync_world::MainEntity;
@@ -98,8 +99,10 @@ pub struct WaterClipTwin;
 
 /// What the reconciler reads of each candidate face: its mesh and material (to
 /// copy into the twin), its world placement and bounds (to decide whether it
-/// crosses the surface), the clip it already carries, and whether its material is
-/// one the [`MaterialCache`](sl_viewer_world_objects::material_cache) shares.
+/// crosses the surface), the clip it already carries, whether its material is
+/// one the [`MaterialCache`](sl_viewer_world_objects::material_cache) shares,
+/// and the components its mesh **bind group** is built from — the skin and the
+/// morph weights — which the twin has to carry too.
 type ClipCandidates<'w, 's> = Query<
     'w,
     's,
@@ -112,6 +115,7 @@ type ClipCandidates<'w, 's> = Query<
         Option<&'static WaterClipSide>,
         Has<SharedFaceMaterial>,
         Option<&'static SkinnedMesh>,
+        Option<&'static MeshMorphWeights>,
     ),
     With<PrimFaceEntity>,
 >;
@@ -139,7 +143,7 @@ fn reconcile_water_clip_twins(
     // The faces that should have a twin this frame, and the twin each already has.
     let mut wanted: bevy::platform::collections::HashSet<Entity> =
         bevy::platform::collections::HashSet::new();
-    for (face, mesh, material, transform, aabb, side, shared, skin) in &faces {
+    for (face, mesh, material, transform, aabb, side, shared, skin, morph) in &faces {
         // A face already split stays in `wanted` however it is filtered below, or
         // the sweep at the end would despawn a twin that is still correct.
         if side.is_some() {
@@ -201,18 +205,29 @@ fn reconcile_water_clip_twins(
             ChildOf(face),
         ));
         // The twin draws the **same geometry** as the face, clipped to the other
-        // side of the surface — so if the face is skinned, the twin must be
-        // skinned identically. Bevy specializes the render pipeline from the
-        // mesh asset's vertex layout but takes the bind group from the entity's
-        // own skin, and the twin shares the face's mesh handle: leaving the skin
-        // off hands a skinned pipeline a model-only bind group, which is a wgpu
-        // validation error that quits the viewer. Worse, worn rigged submeshes
-        // share one mesh asset across wearers so that Bevy can batch them, so
-        // the malformed twin takes down every other wearer drawn in the same
-        // batch — which is why this read as a random crash near other people's
-        // avatars rather than as anything to do with water.
+        // side — so it must carry every component the mesh **bind group** is
+        // built from, because it shares the face's mesh handle and Bevy decides
+        // the two halves of the draw in two different places:
+        //
+        // | property | pipeline key from | bind group from |
+        // | --- | --- | --- |
+        // | skinning | the mesh's `JOINT_INDEX` / `JOINT_WEIGHT` | the entity's `SkinnedMesh` |
+        // | morph targets | the mesh's `morph_targets()` | the entity's morph index |
+        //
+        // Miss one and the shared mesh specializes a pipeline the twin cannot
+        // bind for: a wgpu validation error that quits the viewer, not an
+        // artifact. Worse, worn rigged submeshes share one mesh asset across
+        // wearers so Bevy can batch them, and a batch takes its bind group from
+        // one representative entity — so a malformed twin takes down every other
+        // wearer drawn with it, which is why the skinned case read as a random
+        // crash near other people's avatars rather than as anything about water.
+        //
+        // Anything added to that table later belongs here too.
         if let Some(skin) = skin {
             spawned.insert(skin.clone());
+        }
+        if let Some(morph) = morph {
+            spawned.insert(morph.clone());
         }
     }
     for (twin, child_of) in &twins {
@@ -326,6 +341,7 @@ mod tests {
     use crate::water::WaterLevel;
     use bevy::asset::AssetApp as _;
     use bevy::camera::primitives::Aabb;
+    use bevy::mesh::morph::MeshMorphWeights;
     use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
@@ -491,6 +507,129 @@ mod tests {
             app.world().get::<SkinnedMesh>(twin).is_none(),
             "an unskinned face's twin stays unskinned",
         );
+    }
+
+    /// Which of the mesh **bind group**'s inputs a face carries.
+    ///
+    /// This is the axis the twin has to get right, and the axis the SL asset
+    /// categories collapse onto. Every face that reaches the split does so as a
+    /// `PrimFaceEntity` with a `FaceMaterial` — a prim face, a mesh face and a
+    /// sculpt face are all spawned by one `spawn_face_entity` and differ only in
+    /// the geometry behind the handle, which the twin never looks at. What
+    /// actually varies between them, and what wgpu rejects a mismatch on, is
+    /// this: a worn rigged submesh (and an animesh submesh) adds a
+    /// `SkinnedMesh`, and a part with runtime morphs adds `MeshMorphWeights`.
+    ///
+    /// So enumerating the SL categories would re-test one code path four times
+    /// while leaving the combinations that actually break untested. Enumerating
+    /// *these* covers every category by construction.
+    #[derive(Clone, Copy, Debug)]
+    struct BindGroupInputs {
+        /// The face's mesh carries skin attributes, so the entity needs a
+        /// `SkinnedMesh` — a worn rigged submesh or an animesh submesh.
+        skinned: bool,
+        /// The face's mesh carries morph targets, so the entity needs
+        /// `MeshMorphWeights` — a part with runtime morphs.
+        morphed: bool,
+    }
+
+    /// Give `face` the bind-group inputs `inputs` names.
+    fn add_bind_group_inputs(app: &mut App, face: Entity, inputs: BindGroupInputs) {
+        if inputs.skinned {
+            let joints: Vec<Entity> =
+                std::iter::repeat_with(|| app.world_mut().spawn(Transform::default()).id())
+                    .take(3)
+                    .collect();
+            let inverse_bindposes = app
+                .world_mut()
+                .resource_mut::<Assets<SkinnedMeshInverseBindposes>>()
+                .add(SkinnedMeshInverseBindposes::from(vec![Mat4::IDENTITY; 3]));
+            app.world_mut().entity_mut(face).insert(SkinnedMesh {
+                inverse_bindposes,
+                joints,
+            });
+        }
+        if inputs.morphed {
+            app.world_mut()
+                .entity_mut(face)
+                .insert(MeshMorphWeights::Value {
+                    weights: vec![0.25, 0.5],
+                });
+        }
+    }
+
+    /// **The twin carries exactly the bind-group inputs its face does** — for
+    /// every combination of them, not just the one that happened to crash.
+    ///
+    /// The twin shares the face's *mesh asset*, and Bevy decides the two halves
+    /// of a draw in two different places: the pipeline is specialized from the
+    /// mesh asset (its `JOINT_INDEX` / `JOINT_WEIGHT`, its `morph_targets()`)
+    /// while the bind group comes from the entity (its `SkinnedMesh`, its morph
+    /// index). Any input the twin is missing specializes a pipeline it cannot
+    /// bind for — a wgpu validation error that quits the application, and one
+    /// that takes down every other draw batched on that shared mesh with it.
+    ///
+    /// The skinned case shipped broken and was found only by an avatar happening
+    /// to stand in the shallows on aditi
+    /// (`viewer-skinned-bind-group-quits-on-rez`). The morphed case is not
+    /// reachable today — runtime morphs are attached to avatar base parts, which
+    /// carry no `PrimFaceEntity` and so never reach this split — which is
+    /// exactly why it is pinned here rather than left to be discovered the same
+    /// way if a mesh head ever brings facial morphs to a worn submesh.
+    #[test]
+    fn a_twins_bind_group_inputs_match_its_faces() {
+        for inputs in [
+            BindGroupInputs {
+                skinned: false,
+                morphed: false,
+            },
+            BindGroupInputs {
+                skinned: true,
+                morphed: false,
+            },
+            BindGroupInputs {
+                skinned: false,
+                morphed: true,
+            },
+            BindGroupInputs {
+                skinned: true,
+                morphed: true,
+            },
+        ] {
+            let mut app = app();
+            let face = spawn_face(&mut app, LEVEL, AlphaMode::Blend);
+            add_bind_group_inputs(&mut app, face, inputs);
+            app.update();
+
+            let twin = app
+                .world_mut()
+                .query_filtered::<Entity, With<WaterClipTwin>>()
+                .iter(app.world())
+                .next()
+                .expect("the straddling face gained its twin");
+            assert_eq!(
+                app.world().get::<SkinnedMesh>(twin).is_some(),
+                inputs.skinned,
+                "{inputs:?}: the twin's skin must match its face's",
+            );
+            assert_eq!(
+                app.world().get::<MeshMorphWeights>(twin).is_some(),
+                inputs.morphed,
+                "{inputs:?}: the twin's morph weights must match its face's",
+            );
+            // The values, not merely the presence: a twin skinned to other
+            // joints, or morphed by other weights, draws different geometry from
+            // the half it is completing.
+            assert_eq!(
+                app.world()
+                    .get::<SkinnedMesh>(twin)
+                    .map(|skin| skin.joints.clone()),
+                app.world()
+                    .get::<SkinnedMesh>(face)
+                    .map(|skin| skin.joints.clone()),
+                "{inputs:?}: the twin binds the same joints",
+            );
+        }
     }
 
     /// A face clear of the surface is left alone — no clip, no twin, and (this is
