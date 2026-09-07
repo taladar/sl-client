@@ -50,3 +50,9 @@ Shipped 2026-08-13 (about_landmark module):
   acquired shown like the properties floater.
 - Unit tests: maturity / group-owned flag decode, SLURL formatting +
   clamping, region-line fallback (UUID before the name resolves).
+- **Show on Map** (added 2026-09-07, with the keyed conversion): centres the
+  world-map floater on the parcel's anchor (`ParcelDetails::global_position`),
+  which only the resolved details carry — so, like Copy SLURL, it does nothing
+  until the chain above finishes and the SLURL row says so. `sl-viewer-places`
+  gained a dependency on `sl-viewer-map` for `OpenWorldMap`; the search panel
+  reaches the map the same way.

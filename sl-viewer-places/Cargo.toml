@@ -23,6 +23,7 @@ sl-client-bevy = { workspace = true, features = [
 sl-notecard = { path = "../sl-notecard", version = "0.1.0" }
 sl-types = { workspace = true }
 sl-viewer-inventory = { workspace = true }
+sl-viewer-map = { workspace = true }
 sl-viewer-notices = { workspace = true }
 sl-viewer-pickers = { workspace = true }
 sl-viewer-platform = { workspace = true }

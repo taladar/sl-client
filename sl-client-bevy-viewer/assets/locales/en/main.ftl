@@ -804,6 +804,7 @@ about-landmark-area = Area:
 about-landmark-creator = Creator:
 about-landmark-acquired = Acquired:
 about-landmark-slurl = SLURL:
+about-landmark-show-on-map = Show on Map
 about-landmark-copy-slurl = Copy SLURL
 about-landmark-loading = (loading)
 about-landmark-no-image = (no image)

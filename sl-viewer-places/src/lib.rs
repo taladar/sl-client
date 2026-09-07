@@ -21,6 +21,7 @@
 // modules keep addressing them as `crate::ui` and `crate::inventory`.
 pub(crate) use sl_viewer_inventory::inventory;
 pub(crate) use sl_viewer_inventory::inventory_properties;
+pub(crate) use sl_viewer_map::world_map;
 pub(crate) use sl_viewer_notices::ui_name_link;
 pub(crate) use sl_viewer_pickers::ui_texture_picker;
 pub(crate) use sl_viewer_platform::clipboard;

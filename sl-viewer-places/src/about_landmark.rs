@@ -2,7 +2,8 @@
 //! detail view for a landmark inventory item — the destination region's name
 //! and coordinates, the destination parcel's name / description / snapshot /
 //! maturity / owner / traffic, a copyable SLURL, editable item title / notes,
-//! and the Teleport button. Opened by the inventory context menu's
+//! and the Teleport / Show on Map / Copy SLURL buttons. Opened by the
+//! inventory context menu's
 //! **About Landmark** entry and by **Open** on a landmark
 //! ([`crate::inventory_properties`] forwards its Landmark previews here).
 //!
@@ -54,6 +55,7 @@ use crate::world_api::AVATAR_BOOST_PRIORITY;
 use crate::world_api::AvatarState;
 use crate::world_api::GroupsModel;
 use crate::world_api::{BoostTexture, DecodedTextures};
+use crate::world_map::OpenWorldMap;
 
 /// The floater's font size, in logical pixels.
 const ABOUT_FONT_SIZE: f32 = 14.0;
@@ -489,7 +491,35 @@ fn fill_landmark_content(
             }
         },
     );
-    let copy = spawn_button(commands, buttons, "about-landmark-copy-slurl", 4);
+    // Show on Map: the parcel's anchor in global metres, which only the
+    // resolved details carry — so the button waits on the same chain the SLURL
+    // row shows the state of.
+    let show_on_map = spawn_button(commands, buttons, "about-landmark-show-on-map", 4);
+    commands.entity(show_on_map).observe(
+        |press: On<Pointer<Press>>,
+         parents: Query<&ChildOf>,
+         floaters: Query<(Entity, &Floater)>,
+         windows: Query<&AboutLandmarkState>,
+         mut world_map: MessageWriter<OpenWorldMap>| {
+            if press.button != PointerButton::Primary {
+                return;
+            }
+            // Centre the map on *this* window's parcel: with two landmarks
+            // open, the button belongs to the one it sits in.
+            let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+                return;
+            };
+            if let Ok(state) = windows.get(window)
+                && let Some(details) = state.details.as_ref()
+            {
+                world_map.write(OpenWorldMap {
+                    east: details.global_position.x(),
+                    north: details.global_position.y(),
+                });
+            }
+        },
+    );
+    let copy = spawn_button(commands, buttons, "about-landmark-copy-slurl", 5);
     commands.entity(copy).observe(
         |press: On<Pointer<Press>>,
          parents: Query<&ChildOf>,

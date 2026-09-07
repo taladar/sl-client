@@ -9337,6 +9337,7 @@ dependencies = [
  "sl-notecard",
  "sl-types",
  "sl-viewer-inventory",
+ "sl-viewer-map",
  "sl-viewer-notices",
  "sl-viewer-pickers",
  "sl-viewer-platform",
