@@ -1,7 +1,7 @@
 //! The RLV command grammar: an `@behaviour[:option]=param` field and how it
 //! decodes into a typed [`RlvCommand`].
 
-use crate::behaviour::{RlvBehaviour, RlvLocalModifier};
+use crate::behaviour::{RlvBehaviour, RlvEntry, RlvLocalModifier};
 
 /// The RLV command prefix character (`RLV_CMD_PREFIX` in the reference).
 ///
@@ -105,6 +105,20 @@ pub struct RlvCommand {
     pub option: Option<String>,
     /// The classified param (the text after `=`).
     pub param: RlvParam,
+    /// The param exactly as it arrived, lower-cased, before classification —
+    /// `n` and `add` both classify as [`RlvParam::Add`] but they are not the
+    /// same six characters, and `@notify` echoes the spelling the object used
+    /// back to it verbatim (`RlvCommand::getParam`, `rlvhelper.h:284`). Empty
+    /// for a bare `@clear`, which is the one command that may arrive without a
+    /// param.
+    pub param_text: String,
+    /// The dictionary row the keyword resolved through, or `None` when it
+    /// resolved to nothing.
+    ///
+    /// A synonym resolves through *its own* row, so the flags here describe the
+    /// spelling that arrived — which is what tells a consumer that the object
+    /// is talking to it in deprecated or experimental dialect.
+    pub entry: Option<&'static RlvEntry>,
 }
 
 /// What went wrong decoding a single command field.
@@ -197,6 +211,8 @@ impl RlvCommand {
             modifier: resolved.modifier,
             option,
             param,
+            param_text: param_str.to_owned(),
+            entry: resolved.entry,
         })
     }
 }

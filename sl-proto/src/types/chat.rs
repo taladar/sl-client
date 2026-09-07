@@ -223,6 +223,18 @@ impl ChatSource {
             Self::System | Self::Unknown { .. } => None,
         }
     }
+
+    /// The object key when an in-world object (or a worn attachment) spoke, and
+    /// `None` for every other source. What a consumer that has to look the
+    /// speaker up in the object cache needs — the RLV admission test's
+    /// temporary-attachment clause, above all.
+    #[must_use]
+    pub const fn object_key(&self) -> Option<ObjectKey> {
+        match self {
+            Self::Object(object) => Some(*object),
+            Self::System | Self::Agent(_) | Self::Unknown { .. } => None,
+        }
+    }
 }
 
 /// Whether a chat message was audible at the listener, from the `Audible` byte

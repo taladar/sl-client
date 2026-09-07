@@ -53,7 +53,7 @@ use sl_client_bevy::{SaleType, avatar_texture};
 
 use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatars::OwnLocalBake;
-use crate::bake_inputs::OwnBakeInputs;
+use crate::bake_inputs::{OwnBakeInputs, shape_is_male};
 use crate::floater::{FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater};
 use crate::inventory::OpenWearableEditor;
 use crate::inventory_actions::{PendingWearableUploads, wearable_param_group, wearable_type_of};
@@ -573,14 +573,12 @@ fn editable_params(
 /// The avatar's sex, from the worn Shape's `male` param (`> 0.5` is male, the
 /// reference viewer's `getVisualParamWeight("male")` rule); defaults to female
 /// (the SL default body) when the shape or the param table is unknown.
+///
+/// The rule itself is [`shape_is_male`], shared with the RLV surface that
+/// answers `@getdebug_avatarsex` — one avatar cannot be two sexes because two
+/// call sites read the param differently.
 fn avatar_sex(library: Option<&AvatarAssetLibrary>, shape: Option<&WearableAsset>) -> ParamSex {
-    let male_id = library
-        .and_then(|library| library.params().by_name("male"))
-        .map_or(80, |param| param.id);
-    let male = shape
-        .and_then(|shape| shape.params.get(&male_id).copied())
-        .unwrap_or(0.0);
-    if male > 0.5 {
+    if shape_is_male(library, shape).unwrap_or(false) {
         ParamSex::Male
     } else {
         ParamSex::Female

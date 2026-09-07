@@ -314,6 +314,43 @@ pub(crate) const FLOATERS: &[FloaterElement] = &[
         content: FloaterContent::Specimen(crate::radar::spawn_radar_specimen),
     },
     FloaterElement {
+        id: "rlv-behaviours",
+        summary: "RLVa Restrictions: the restrictions in force grouped by the object holding \
+                  each, the exceptions poked in them, and the modifier slots.",
+        spec: crate::rlv_behaviours::rlv_behaviours_floater_spec,
+        content: FloaterContent::Stub(
+            "The Restrictions / Exceptions / Modifiers tabs, filled from the live RLV state \
+             machine.",
+        ),
+    },
+    FloaterElement {
+        id: "rlv-console",
+        summary: "RLVa Console: type @-commands at your own viewer and watch the transcript of \
+                  what each one did.",
+        spec: crate::rlv_console::rlv_console_floater_spec,
+        content: FloaterContent::Stub(
+            "The command transcript over the input line, filled by what is typed into it.",
+        ),
+    },
+    FloaterElement {
+        id: "rlv-locks",
+        summary: "RLVa Locks: the lock model's four registries — which attachment, point, layer \
+                  or folder may not be worn on or taken off, and which object decided.",
+        spec: crate::rlv_locks::rlv_locks_floater_spec,
+        content: FloaterContent::Stub(
+            "The lock list, derived from the restrictions the live RLV state machine holds.",
+        ),
+    },
+    FloaterElement {
+        id: "rlv-strings",
+        summary: "RLVa Strings: the customisable canned texts RLVa emits, with the description \
+                  of when each is sent and the editor for rewriting it.",
+        spec: crate::rlv_strings::rlv_strings_floater_spec,
+        content: FloaterContent::Stub(
+            "The string picker, its description line, the value editor and Restore default.",
+        ),
+    },
+    FloaterElement {
         id: "script-editor",
         summary: "Script: the LSL editor's body, the Running toggle, Save & Compile, and the \
                   compile-diagnostic rows. One window per script, as the reference opens \

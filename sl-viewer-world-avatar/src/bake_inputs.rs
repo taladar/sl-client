@@ -557,6 +557,44 @@ pub fn poll_wearable_assets(
     }
 }
 
+/// The visual-param id of the Shape's `male` switch, used when the avatar asset
+/// library is not loaded and its name table cannot be consulted.
+const MALE_PARAM_ID: i32 = 80;
+
+/// Whether a worn `shape` says the avatar is male — the reference viewer's
+/// `getVisualParamWeight("male") > 0.5` rule (`LLVOAvatar::getSex`).
+///
+/// `None` when no shape is worn yet, so a caller can tell "not known" from
+/// "female" — the appearance editor defaults such an avatar to female (the SL
+/// default body), while RLV's `@getdebug_avatarsex` answers nothing at all.
+#[must_use]
+pub fn shape_is_male(
+    library: Option<&AvatarAssetLibrary>,
+    shape: Option<&WearableAsset>,
+) -> Option<bool> {
+    let male_id = library
+        .and_then(|library| library.params().by_name("male"))
+        .map_or(MALE_PARAM_ID, |param| param.id);
+    shape.map(|shape| shape.params.get(&male_id).copied().unwrap_or(0.0) > 0.5)
+}
+
+/// Publish the avatar's sex for RLV's `@getdebug_avatarsex`, which is one of
+/// the two facts the debug-setting allowlist cannot read out of a settings
+/// store (`RlvExtGetSet::onGetPseudoDebug`).
+///
+/// The avatar layer publishes it because the avatar layer is what knows it: the
+/// answer is the worn Shape's `male` param, which lives in the bake inputs.
+pub fn publish_rlv_avatar_sex(
+    inputs: Res<OwnBakeInputs>,
+    library: Option<Res<AvatarAssetLibrary>>,
+    mut facts: ResMut<crate::world_api::rlv::RlvExtFacts>,
+) {
+    let is_male = shape_is_male(library.as_deref(), inputs.worn_asset(WearableType::Shape));
+    if facts.avatar_is_male != is_male {
+        facts.avatar_is_male = is_male;
+    }
+}
+
 /// Drive the assembly half: parse each fetched wearable asset and request its
 /// layer textures; as those decode, once every asset and texture is resolved (or
 /// the grace period lapses) assemble the per-region layer lists.

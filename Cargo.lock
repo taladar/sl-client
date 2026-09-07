@@ -8556,6 +8556,7 @@ dependencies = [
  "sl-viewer-places",
  "sl-viewer-platform",
  "sl-viewer-preferences",
+ "sl-viewer-rlv",
  "sl-viewer-search",
  "sl-viewer-settings",
  "sl-viewer-spacenav",
@@ -8900,6 +8901,7 @@ dependencies = [
  "serde_json",
  "sl-lsl",
  "sl-marketplace",
+ "sl-rlv",
  "sl-types",
  "sl-wire",
  "thiserror 2.0.19",
@@ -8974,6 +8976,7 @@ version = "0.1.0"
 dependencies = [
  "pretty_assertions",
  "thiserror 2.0.19",
+ "uuid",
 ]
 
 [[package]]
@@ -9392,6 +9395,7 @@ dependencies = [
  "serde_json",
  "sl-audio",
  "sl-client-bevy",
+ "sl-rlv",
  "sl-settings",
  "sl-viewer-audio",
  "sl-viewer-kit",
@@ -9406,6 +9410,28 @@ dependencies = [
  "sl-viewer-world-scene",
  "sl-viewer-world-view",
  "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "sl-viewer-rlv"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "pretty_assertions",
+ "sl-client-bevy",
+ "sl-fake-grid",
+ "sl-proto",
+ "sl-rlv",
+ "sl-settings",
+ "sl-viewer-notifications",
+ "sl-viewer-platform",
+ "sl-viewer-settings",
+ "sl-viewer-ui-core",
+ "sl-viewer-ui-widgets",
+ "sl-viewer-world-api",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -9518,6 +9544,8 @@ dependencies = [
  "pretty_assertions",
  "serde",
  "sl-client-bevy",
+ "sl-rlv",
+ "sl-settings",
  "sl-terrain",
  "sl-viewer-kit",
  "sl-viewer-settings",

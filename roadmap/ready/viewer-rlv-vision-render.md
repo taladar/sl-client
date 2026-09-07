@@ -2,7 +2,7 @@
 id: viewer-rlv-vision-render
 title: RLV vision-restriction rendering
 topic: viewer
-status: blocked
+status: ready
 origin: Vintage-parity coverage audit (2026-07-22)
 blocked_by: [viewer-rlv-restriction-state]
 ---
@@ -30,6 +30,15 @@ CORRECTION: the body's `@camdrawmin` / `@camdrawmax` do not exist in
 Firestorm RLVa's dictionary (verified — no `camdraw` anywhere in the
 rlv* sources); they are Marine's-RLV-only commands. Do not block on
 them.
+
+## Addendum: `RenderResolutionDivisor` is its own task (2026-09-07)
+
+The oldest vision impairment of the lot —
+`@setdebug_renderresolutiondivisor:<n>=force`, the cheap blur a collar reaches
+for — is **not** in this task. It is a plain graphics lever that RLV merely
+happens to be able to drive (a performance control as much as a restraint), so
+it is [[viewer-render-resolution-divisor]]. The RLVa effects here are the
+`@setsphere` / `@setoverlay` shader family instead.
 
 Missing scope found by the audit: the `@setoverlay` overlay effect
 family (`RlvOverlayEffect` in `rlveffects.cpp`) — `@setoverlay`

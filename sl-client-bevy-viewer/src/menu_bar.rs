@@ -43,6 +43,20 @@ use crate::menu::{
 };
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems};
 use crate::ui_element::{ElementCx, UiAction};
+use crate::world_api::rlv::{
+    COND_CAN_OOC, COND_DEBUG, COND_DEBUG_HIDE_UNSET_DUPLICATE, COND_ENABLE_LEGACY_NAMING,
+    COND_ENABLE_SHARED_WEAR, COND_ENABLE_TEMP_ATTACH, COND_FORBID_GIVE_TO_RLV,
+    COND_HIDE_LOCKED_ATTACHMENTS, COND_HIDE_LOCKED_INVENTORY, COND_HIDE_LOCKED_LAYERS,
+    COND_SHARED_INV_AUTO_RENAME, COND_SHOW_ASSERTION_FAILURES, COND_SHOW_ELLIPSIS,
+    COND_SHOW_REDIRECT_CHAT_TYPING, COND_SPLIT_REDIRECT_CHAT, COND_WEAR_REPLACE_UNLOCKED,
+    RLV_BOOL_SETTINGS, RLV_ENABLED, SETTING_CAN_OOC, SETTING_DEBUG,
+    SETTING_DEBUG_HIDE_UNSET_DUPLICATE, SETTING_ENABLE_LEGACY_NAMING, SETTING_ENABLE_SHARED_WEAR,
+    SETTING_ENABLE_TEMP_ATTACH, SETTING_FORBID_GIVE_TO_RLV, SETTING_HIDE_LOCKED_ATTACHMENTS,
+    SETTING_HIDE_LOCKED_INVENTORY, SETTING_HIDE_LOCKED_LAYERS, SETTING_MAIN,
+    SETTING_SHARED_INV_AUTO_RENAME, SETTING_SHOW_ASSERTION_FAILURES, SETTING_SHOW_ELLIPSIS,
+    SETTING_SHOW_REDIRECT_CHAT_TYPING, SETTING_SPLIT_REDIRECT_CHAT, SETTING_WEAR_REPLACE_UNLOCKED,
+    rlv_flag,
+};
 
 /// The z-index the bar renders at — above the floaters (so a window never covers
 /// the menu bar), below an open menu's popup (`crate::menu`'s `MENU_Z_INDEX`).
@@ -173,6 +187,42 @@ const ENV_MODERN_SUNSET_ACTIVE: &str = "env-modern-sunset-active";
 const ENV_MODERN_MIDNIGHT_ACTIVE: &str = "env-modern-midnight-active";
 /// See [`ENV_DAYCYCLE_SUNRISE_ACTIVE`].
 const ENV_SHARED_ACTIVE: &str = "env-shared-active";
+
+/// The condition keys that hold while each RLVa floater is open — they drive
+/// the check marks on the RLVa menu's four window entries.
+const RLV_CONSOLE_OPEN: &str = "rlv-console-open";
+/// See [`RLV_CONSOLE_OPEN`].
+const RLV_BEHAVIOURS_OPEN: &str = "rlv-behaviours-open";
+/// See [`RLV_CONSOLE_OPEN`].
+const RLV_LOCKS_OPEN: &str = "rlv-locks-open";
+/// See [`RLV_CONSOLE_OPEN`].
+const RLV_STRINGS_OPEN: &str = "rlv-strings-open";
+
+/// One RLVa toggle entry, by setting name.
+///
+/// **The action string is the setting name itself.** That is deliberate: the
+/// dispatch then looks the action up in the settings roster rather than
+/// matching twenty hand-written arms, so a toggle cannot be wired to a name the
+/// roster does not have — the failure mode of twenty arms is a menu line that
+/// silently does nothing. The check mark comes from the roster's own condition
+/// key for the same reason.
+const fn rlv_toggle(
+    label: &'static str,
+    setting: &'static str,
+    condition: &'static str,
+) -> MenuItemDef {
+    MenuItemDef::Command(
+        MenuCommand::new(label, setting)
+            .checked_when(condition)
+            .enabled_when(RLV_ENABLED),
+    )
+}
+
+/// The master switch's entry: the same shape, but never disabled — it is the
+/// only line that has to work while RLV is off, because it is what turns it on.
+const fn rlv_master_toggle(label: &'static str) -> MenuItemDef {
+    MenuItemDef::Command(MenuCommand::new(label, SETTING_MAIN).checked_when(RLV_ENABLED))
+}
 
 /// The Avatar (Me) menu — the entries with a live target today.
 static AVATAR_MENU: MenuDef = MenuDef {
@@ -491,6 +541,135 @@ static ADVANCED_MENU: MenuDef = MenuDef {
     ],
 };
 
+/// The RLVa ▸ **Debug** submenu — the reference's own Debug submenu: the
+/// developer-facing flags, the three "hide what is locked" display flags, the
+/// three shared-`#RLV` flags, and the Locks inspector.
+static RLVA_DEBUG_MENU: MenuDef = MenuDef {
+    label: "Debug",
+    items: &[
+        rlv_toggle("Show Debug Messages", SETTING_DEBUG, COND_DEBUG),
+        rlv_toggle(
+            "Hide Unset or Duplicate Messages",
+            SETTING_DEBUG_HIDE_UNSET_DUPLICATE,
+            COND_DEBUG_HIDE_UNSET_DUPLICATE,
+        ),
+        rlv_toggle(
+            "Show Assertion Failures",
+            SETTING_SHOW_ASSERTION_FAILURES,
+            COND_SHOW_ASSERTION_FAILURES,
+        ),
+        MenuItemDef::Separator,
+        rlv_toggle(
+            "Hide Locked Layers",
+            SETTING_HIDE_LOCKED_LAYERS,
+            COND_HIDE_LOCKED_LAYERS,
+        ),
+        rlv_toggle(
+            "Hide Locked Attachments",
+            SETTING_HIDE_LOCKED_ATTACHMENTS,
+            COND_HIDE_LOCKED_ATTACHMENTS,
+        ),
+        rlv_toggle(
+            "Hide Locked Inventory",
+            SETTING_HIDE_LOCKED_INVENTORY,
+            COND_HIDE_LOCKED_INVENTORY,
+        ),
+        MenuItemDef::Separator,
+        rlv_toggle(
+            "Enable Legacy Naming",
+            SETTING_ENABLE_LEGACY_NAMING,
+            COND_ENABLE_LEGACY_NAMING,
+        ),
+        rlv_toggle(
+            "Enable Shared Wear",
+            SETTING_ENABLE_SHARED_WEAR,
+            COND_ENABLE_SHARED_WEAR,
+        ),
+        rlv_toggle(
+            "Rename Shared Items on Wear",
+            SETTING_SHARED_INV_AUTO_RENAME,
+            COND_SHARED_INV_AUTO_RENAME,
+        ),
+        MenuItemDef::Separator,
+        MenuItemDef::Command(
+            MenuCommand::new("Locks\u{2026}", "toggle-rlv-locks")
+                .checked_when(RLV_LOCKS_OPEN)
+                .enabled_when(RLV_ENABLED),
+        ),
+    ],
+};
+
+/// The **RLVa** menu — the reference's whole RLVa top-level menu: the master
+/// switch, the Debug submenu, the behaviour toggles, and the three windows onto
+/// the live restriction state.
+///
+/// The master switch is first and always live; everything below it is enabled
+/// only while RLV is on, because a toggle that steers a machine that is not
+/// running is a lie about what it does. The reference reaches the same place by
+/// a different route — its RLVa menu is always pickable and the *commands* stop
+/// working — but a greyed line says so before the click rather than after.
+///
+/// The reference's `RLVaTopLevelMenu` setting, which chooses between this
+/// placement and a copy embedded under Advanced, is deliberately absent: there
+/// is one placement here, so there is nothing for it to choose.
+static RLVA_MENU: MenuDef = MenuDef {
+    label: "RLVa",
+    items: &[
+        rlv_master_toggle("Enable RLVa"),
+        MenuItemDef::Separator,
+        MenuItemDef::Submenu(&RLVA_DEBUG_MENU),
+        MenuItemDef::Separator,
+        rlv_toggle("Allow OOC Chat", SETTING_CAN_OOC, COND_CAN_OOC),
+        rlv_toggle(
+            "Show Filtered Chat",
+            SETTING_SHOW_ELLIPSIS,
+            COND_SHOW_ELLIPSIS,
+        ),
+        rlv_toggle(
+            "Show Redirected Chat Typing",
+            SETTING_SHOW_REDIRECT_CHAT_TYPING,
+            COND_SHOW_REDIRECT_CHAT_TYPING,
+        ),
+        rlv_toggle(
+            "Split Long Redirected Chat",
+            SETTING_SPLIT_REDIRECT_CHAT,
+            COND_SPLIT_REDIRECT_CHAT,
+        ),
+        MenuItemDef::Separator,
+        rlv_toggle(
+            "Allow Temporary Attachments",
+            SETTING_ENABLE_TEMP_ATTACH,
+            COND_ENABLE_TEMP_ATTACH,
+        ),
+        rlv_toggle(
+            "Forbid Give to #RLV",
+            SETTING_FORBID_GIVE_TO_RLV,
+            COND_FORBID_GIVE_TO_RLV,
+        ),
+        rlv_toggle(
+            "Wear Replaces Unlocked",
+            SETTING_WEAR_REPLACE_UNLOCKED,
+            COND_WEAR_REPLACE_UNLOCKED,
+        ),
+        MenuItemDef::Separator,
+        MenuItemDef::Command(
+            MenuCommand::new("Console\u{2026}", "toggle-rlv-console")
+                .checked_when(RLV_CONSOLE_OPEN)
+                .enabled_when(RLV_ENABLED),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Restrictions\u{2026}", "toggle-rlv-behaviours")
+                .checked_when(RLV_BEHAVIOURS_OPEN)
+                .enabled_when(RLV_ENABLED),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Strings\u{2026}", "toggle-rlv-strings")
+                .checked_when(RLV_STRINGS_OPEN)
+                .enabled_when(RLV_ENABLED),
+        ),
+    ],
+};
+
 /// The top menu bar, in the reference viewer's order. Exposed so menu search
 /// ([`crate::menu_search`]) can walk the same tree it draws.
 pub(crate) static TOP_MENU_BAR: MenuBarDef = MenuBarDef {
@@ -500,6 +679,7 @@ pub(crate) static TOP_MENU_BAR: MenuBarDef = MenuBarDef {
         &WORLD_MENU,
         &BUILD_MENU,
         &CONTENT_MENU,
+        &RLVA_MENU,
         &HELP_MENU,
         &ADVANCED_MENU,
     ],
@@ -611,6 +791,10 @@ fn update_top_menu_conditions(
     let experiences_open = open(crate::experiences_floater::EXPERIENCES_FLOATER_ID);
     let blacklist_open = open(crate::asset_blacklist::BLACKLIST_FLOATER_ID);
     let render_settings_open = open(crate::avatar_render_floater::RENDER_SETTINGS_FLOATER_ID);
+    let rlv_console_open = open(crate::rlv_console::CONSOLE_FLOATER_ID);
+    let rlv_behaviours_open = open(crate::rlv_behaviours::BEHAVIOURS_FLOATER_ID);
+    let rlv_locks_open = open(crate::rlv_locks::LOCKS_FLOATER_ID);
+    let rlv_strings_open = open(crate::rlv_strings::STRINGS_FLOATER_ID);
     let mut wanted: Vec<&'static str> = Vec::new();
     if preferences_open {
         wanted.push(PREFERENCES_OPEN);
@@ -735,6 +919,25 @@ fn update_top_menu_conditions(
     }
     if crate::edit_undo::can_redo(&selection, &edit_tool) {
         wanted.push(CAN_REDO);
+    }
+    // The four RLVa window check marks.
+    for (is_open, condition) in [
+        (rlv_console_open, RLV_CONSOLE_OPEN),
+        (rlv_behaviours_open, RLV_BEHAVIOURS_OPEN),
+        (rlv_locks_open, RLV_LOCKS_OPEN),
+        (rlv_strings_open, RLV_STRINGS_OPEN),
+    ] {
+        if is_open {
+            wanted.push(condition);
+        }
+    }
+    // Every RLVa toggle's check mark, walked off the settings roster itself —
+    // so a toggle added there gets its tick with no second edit here, and none
+    // can be gated on a key nothing sets.
+    for flag in RLV_BOOL_SETTINGS {
+        if rlv_flag(Some(&settings), flag.name) {
+            wanted.push(flag.condition);
+        }
     }
     // The Environment submenu's check marks: exactly one of the four presets or
     // the shared default holds. The gallery has no environment resource, so the
@@ -1044,9 +1247,52 @@ fn handle_top_menu_actions(
                 );
             }
             "env-shared" => set_fixed(&mut environment, None),
+            "toggle-rlv-console" => {
+                toggle_floater(
+                    &floaters,
+                    &mut panels,
+                    crate::rlv_console::CONSOLE_FLOATER_ID,
+                );
+            }
+            "toggle-rlv-behaviours" => {
+                toggle_floater(
+                    &floaters,
+                    &mut panels,
+                    crate::rlv_behaviours::BEHAVIOURS_FLOATER_ID,
+                );
+            }
+            "toggle-rlv-locks" => {
+                toggle_floater(&floaters, &mut panels, crate::rlv_locks::LOCKS_FLOATER_ID);
+            }
+            "toggle-rlv-strings" => {
+                toggle_floater(
+                    &floaters,
+                    &mut panels,
+                    crate::rlv_strings::STRINGS_FLOATER_ID,
+                );
+            }
+            // Every RLVa toggle: the action *is* the setting name, so the arm
+            // is a roster lookup rather than twenty arms that could each name a
+            // setting the roster does not have. An action that is not a known
+            // RLV setting falls through to the catch-all below, exactly as any
+            // other unhandled action does.
+            action if is_rlv_setting(action) => {
+                let current = rlv_flag(Some(&settings), action);
+                settings.set(
+                    sl_settings::Scope::Global,
+                    action,
+                    sl_settings::SettingValue::Bool(!current),
+                );
+            }
             _ => {}
         }
     }
+}
+
+/// Whether `action` names a boolean RLV setting — the guard that turns the
+/// RLVa toggles into one dispatch arm. See [`rlv_toggle`].
+fn is_rlv_setting(action: &str) -> bool {
+    RLV_BOOL_SETTINGS.iter().any(|flag| flag.name == action)
 }
 
 #[cfg(test)]
@@ -1172,6 +1418,31 @@ mod tests {
             ("Build".to_owned(), "unlink-objects"),
             ("Content".to_owned(), "toggle-search"),
             ("Content".to_owned(), "toggle-web-browser"),
+            // The RLVa menu. Its toggle entries carry the *setting name* as
+            // their action, which is what lets one dispatch arm serve all of
+            // them (`is_rlv_setting`) — so the pinned names here are the
+            // `RlvSettingNames` roster, not `toggle-*` verbs.
+            ("RLVa".to_owned(), "RestrainedLove"),
+            ("RLVa > Debug".to_owned(), "RestrainedLoveDebug"),
+            ("RLVa > Debug".to_owned(), "RLVaDebugHideUnsetDuplicate"),
+            ("RLVa > Debug".to_owned(), "RLVaShowAssertionFailures"),
+            ("RLVa > Debug".to_owned(), "RLVaHideLockedLayers"),
+            ("RLVa > Debug".to_owned(), "RLVaHideLockedAttachments"),
+            ("RLVa > Debug".to_owned(), "RLVaHideLockedInventory"),
+            ("RLVa > Debug".to_owned(), "RLVaEnableLegacyNaming"),
+            ("RLVa > Debug".to_owned(), "RLVaEnableSharedWear"),
+            ("RLVa > Debug".to_owned(), "RLVaSharedInvAutoRename"),
+            ("RLVa > Debug".to_owned(), "toggle-rlv-locks"),
+            ("RLVa".to_owned(), "RestrainedLoveCanOOC"),
+            ("RLVa".to_owned(), "RestrainedLoveShowEllipsis"),
+            ("RLVa".to_owned(), "RLVaShowRedirectChatTyping"),
+            ("RLVa".to_owned(), "RLVaSplitRedirectChat"),
+            ("RLVa".to_owned(), "RLVaEnableTemporaryAttachments"),
+            ("RLVa".to_owned(), "RestrainedLoveForbidGiveToRLV"),
+            ("RLVa".to_owned(), "RLVaWearReplaceUnlocked"),
+            ("RLVa".to_owned(), "toggle-rlv-console"),
+            ("RLVa".to_owned(), "toggle-rlv-behaviours"),
+            ("RLVa".to_owned(), "toggle-rlv-strings"),
             ("Help".to_owned(), "toggle-about"),
             ("Advanced".to_owned(), "toggle-debug-settings"),
             ("Advanced".to_owned(), "toggle-collect-diagnostics"),

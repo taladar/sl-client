@@ -63,6 +63,7 @@ use crate::spacenav::{FlycamAxisSettings, SpacenavInput};
 use crate::water::WaterCell;
 use crate::world_api::AvatarState;
 use crate::world_api::InputContext;
+use crate::world_api::rlv::RlvExtFacts;
 use crate::world_api::{
     AvatarMotion, CameraMode, CameraRig, MAX_DISTANCE, MAX_PITCH, MOUSELOOK_CROSS_DISTANCE,
     ViewerCamera,
@@ -391,6 +392,24 @@ fn scroll_notches(wheel: &AccumulatedMouseScroll) -> f32 {
     }
 }
 
+/// Publish the 3D view's aspect ratio for RLV's `@getdebug_aspectratio`
+/// (`RlvExtGetSet::onGetPseudoDebug`, which divides the reference's world-view
+/// width by its height).
+///
+/// The camera owns this because the camera owns the view: the answer is the
+/// shape of what is being rendered, not of the window chrome around it. Here
+/// the 3D view *is* the window — the UI is drawn over it rather than beside it
+/// — so the window's own ratio is the world view's.
+fn publish_view_aspect_ratio(windows: Query<&Window>, mut facts: ResMut<RlvExtFacts>) {
+    let ratio = windows.iter().next().and_then(|window| {
+        let (width, height) = (window.width(), window.height());
+        (height > 0.0).then_some(width / height)
+    });
+    if facts.aspect_ratio != ratio {
+        facts.aspect_ratio = ratio;
+    }
+}
+
 /// The camera plugin: the mode machine, the per-mode drivers, and the final pose.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CameraPlugin;
@@ -432,7 +451,8 @@ impl Plugin for CameraPlugin {
                     // object update, so the anchor is fully current here.
                     .after(crate::physics::drive_avatar_motion),
             )
-            .add_systems(Update, update_camera_cursor);
+            .init_resource::<RlvExtFacts>()
+            .add_systems(Update, (update_camera_cursor, publish_view_aspect_ratio));
         if std::env::var_os("SL_VIEWER_CAMERA_DUMP").is_some() {
             // Log the camera pose as a ready-to-paste `--camera-position` /
             // `--camera-look-at` for repeatable framing. Registered here rather

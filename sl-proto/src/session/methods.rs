@@ -12024,6 +12024,20 @@ impl Session {
         self.objects.get(&id.circuit)?.get(&id.id)
     }
 
+    /// Whether the cached object with global id `key` is a **temporary**
+    /// attachment — one a script attached rather than one worn from inventory
+    /// ([`Object::is_temp_attachment`]).
+    ///
+    /// `false` for an object this session has never streamed, which is the
+    /// reference's answer too: its own test starts from a viewer-object lookup
+    /// and treats a miss as "not excluded" (`llviewermessage.cpp`'s
+    /// `(!chatter) || …` or-chain).
+    #[must_use]
+    pub fn is_temp_attachment(&self, key: ObjectKey) -> bool {
+        self.object_by_full_id(key)
+            .is_some_and(Object::is_temp_attachment)
+    }
+
     /// All cached terrain patches across the current region *and* every
     /// neighbouring region a child circuit is streaming (decoded from
     /// `LayerData`). Includes every layer (LAND/WATER/WIND/CLOUD); filter on

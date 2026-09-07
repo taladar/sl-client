@@ -43,6 +43,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui::{Checked, InteractionDisabled};
 use bevy::ui_widgets::{Activate, Checkbox, ValueChange};
+use sl_rlv::is_debug_setting_locked;
 use sl_settings::{Scope, SettingDecl, SettingKind, SettingValue};
 
 use crate::clipboard::{ViewerClipboard, copy_to_clipboard};
@@ -65,6 +66,7 @@ use crate::ui_table::{
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, TextInputValue, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
+use crate::world_api::rlv::RlvSession;
 
 /// The floater's stable id (geometry persistence, menu toggle, tests).
 pub const DEBUG_SETTINGS_FLOATER_ID: &str = "debug_settings";
@@ -253,6 +255,10 @@ struct DebugSettingsModel {
     view: Vec<usize>,
     /// The lowercased, trimmed mirror of the search field's text.
     filter: String,
+    /// The RLV restriction revision the view was last built against, so a
+    /// `@setdebug=n` arriving (or lifting) re-derives which settings the user
+    /// may still see.
+    rlv_revision: u64,
 }
 
 /// What the detail pane edits: the selected setting and the override layer
@@ -866,11 +872,19 @@ fn build_entries(store: &sl_settings::SettingsStore) -> Vec<DebugEntry> {
 /// The view over `entries` for a lowercased filter `term` and the changed-only
 /// toggle: the indices of the matching entries, in the entries' (sorted-name)
 /// order. Pure, so the filter behaviour is unit-testable.
+///
+/// `locked` drops a setting an object has taken over with RLV's `@setdebug=n`:
+/// while it holds, the writable rows of the debug-setting allowlist are the
+/// object's, and the reference hides them from this editor for exactly as long
+/// (`RlvBehaviourToggleHandler<RLV_BHVR_SETDEBUG>::onCommandToggle`). Hiding
+/// rather than greying is the reference's own choice, and it is the honest one:
+/// the value shown would be one the user cannot change and the object can.
 fn build_view(
     entries: &[DebugEntry],
     term: &str,
     hide_default: bool,
     overridden: impl Fn(&str) -> bool,
+    locked: impl Fn(&str) -> bool,
 ) -> Vec<usize> {
     entries
         .iter()
@@ -879,6 +893,7 @@ fn build_view(
             term.is_empty() || entry.name_lower.contains(term) || entry.comment_lower.contains(term)
         })
         .filter(|(_, entry)| !hide_default || overridden(&entry.name))
+        .filter(|(_, entry)| !locked(&entry.name))
         .map(|(index, _)| index)
         .collect()
 }
@@ -889,9 +904,17 @@ fn build_view(
 /// or vanishing feeds both the changed-only filter and the `*` markers).
 /// Keeps the viewport's [`VirtualList::item_count`] current and drops a
 /// selection the filter removed.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its inputs, and this view has that many: the UI \
+              handles, the settings store it enumerates, the RLV session that can take a setting \
+              away, the model and editor state it writes, the search field it reads the term \
+              from, and the list and table it resizes"
+)]
 fn refresh_debug_view(
     ui: Option<Res<DebugSettingsUi>>,
     settings: Option<Res<ViewerSettings>>,
+    rlv: Option<Res<RlvSession>>,
     mut model: ResMut<DebugSettingsModel>,
     mut state: ResMut<DebugEditorState>,
     fields: Query<&EditableText>,
@@ -907,7 +930,11 @@ fn refresh_debug_view(
         .unwrap_or_default();
     let term_changed = model.filter != term;
     let rebuild_entries = model.entries.is_empty();
-    if !term_changed && !rebuild_entries && !settings.is_changed() {
+    // A restriction arriving or lifting changes which settings may be listed,
+    // so the revision is an input to the view exactly as the search term is.
+    let rlv_revision = rlv.as_deref().map_or(0, RlvSession::revision);
+    let rlv_changed = model.rlv_revision != rlv_revision;
+    if !term_changed && !rebuild_entries && !rlv_changed && !settings.is_changed() {
         return;
     }
     if rebuild_entries {
@@ -916,14 +943,20 @@ fn refresh_debug_view(
     if term_changed {
         model.filter.clone_from(&term);
     }
+    model.rlv_revision = rlv_revision;
     let hide_default = settings
         .store()
         .get_bool(SETTING_HIDE_DEFAULT)
         .unwrap_or(false);
     let store = settings.store();
-    let view = build_view(&model.entries, &term, hide_default, |name| {
-        store.is_overridden(name)
-    });
+    let rlv_state = rlv.as_deref().map(RlvSession::state);
+    let view = build_view(
+        &model.entries,
+        &term,
+        hide_default,
+        |name| store.is_overridden(name),
+        |name| rlv_state.is_some_and(|state| is_debug_setting_locked(state, name)),
+    );
     if let Ok(mut list) = lists.get_mut(ui.viewport) {
         if list.item_count != view.len() {
             list.item_count = view.len();
@@ -1853,8 +1886,8 @@ mod tests {
     use super::{
         DebugBoolCheckbox, DebugEditField, DebugEditorState, DebugEntry, DebugFieldFocus,
         DebugSettingsUi, NO_OVERRIDE, build_entries, build_view, commit_debug_text_fields,
-        format_setting_value, guard_debug_account_scope, on_debug_bool_toggle, on_reset_setting,
-        sync_debug_detail,
+        format_setting_value, guard_debug_account_scope, is_debug_setting_locked,
+        on_debug_bool_toggle, on_reset_setting, sync_debug_detail,
     };
     use crate::settings::ViewerSettings;
     use crate::ui_combo::ComboSelection;
@@ -1996,14 +2029,47 @@ mod tests {
             entry("MiniMapRotate", "Rotate the mini-map with the camera"),
             entry("ShowPropertyLines", "Draw parcel property lines"),
         ];
-        assert_eq!(build_view(&entries, "", false, |_| false), vec![0, 1, 2]);
-        assert_eq!(build_view(&entries, "minimap", false, |_| false), vec![1]);
-        // A comment-only match: "parcel" appears in no name.
-        assert_eq!(build_view(&entries, "parcel", false, |_| false), vec![2]);
+        let unlocked = |_: &str| false;
         assert_eq!(
-            build_view(&entries, "no such term", false, |_| false),
+            build_view(&entries, "", false, |_| false, unlocked),
+            vec![0, 1, 2]
+        );
+        assert_eq!(
+            build_view(&entries, "minimap", false, |_| false, unlocked),
+            vec![1]
+        );
+        // A comment-only match: "parcel" appears in no name.
+        assert_eq!(
+            build_view(&entries, "parcel", false, |_| false, unlocked),
+            vec![2]
+        );
+        assert_eq!(
+            build_view(&entries, "no such term", false, |_| false, unlocked),
             Vec::<usize>::new()
         );
+    }
+
+    /// A setting an object has taken over with `@setdebug=n` is not listed at
+    /// all while the restriction holds, and comes back the moment it lifts.
+    #[test]
+    fn a_setting_rlv_holds_is_not_listed() -> Result<(), TestError> {
+        let entries = vec![
+            entry("AudioMasterVolume", "Master audio level"),
+            entry("RenderResolutionDivisor", "Render at 1/n resolution"),
+        ];
+        let mut state = sl_rlv::RlvState::new();
+        let collar = uuid::Uuid::from_u128(1);
+        let _held = state.apply(collar, &sl_rlv::RlvCommand::parse_field("setdebug=n")?);
+        let locked = |name: &str| is_debug_setting_locked(&state, name);
+        assert_eq!(build_view(&entries, "", false, |_| false, locked), vec![0]);
+
+        state.clear_object(collar);
+        let unlocked = |name: &str| is_debug_setting_locked(&state, name);
+        assert_eq!(
+            build_view(&entries, "", false, |_| false, unlocked),
+            vec![0, 1]
+        );
+        Ok(())
     }
 
     /// The changed-only toggle keeps exactly the overridden settings.
@@ -2015,10 +2081,14 @@ mod tests {
             entry("ShowPropertyLines", "Draw property lines"),
         ];
         let overridden = |name: &str| name == "MiniMapRotate";
-        assert_eq!(build_view(&entries, "", true, overridden), vec![1]);
+        let unlocked = |_: &str| false;
+        assert_eq!(
+            build_view(&entries, "", true, overridden, unlocked),
+            vec![1]
+        );
         // The term and the toggle compose.
         assert_eq!(
-            build_view(&entries, "audio", true, overridden),
+            build_view(&entries, "audio", true, overridden, unlocked),
             Vec::<usize>::new()
         );
     }

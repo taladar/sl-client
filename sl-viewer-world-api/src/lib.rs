@@ -16,6 +16,7 @@
 //! a single upward reference added here would put the whole feature tier back
 //! underneath the world.
 
+pub mod rlv;
 pub mod world_scoped;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -4705,6 +4706,21 @@ pub struct TrackedObject {
     /// to its avatar's skeleton joint rather than a linkset root, by
     /// `adopt_pending_attachments` (P16.1).
     pub attachment_point: Option<u8>,
+    /// The inventory item this attachment was worn from — its `AttachItemID`
+    /// name-value ([`Object::attachment_item_id`]) — or `None` when it is not an
+    /// attachment, or the simulator named none.
+    ///
+    /// It is not always an inventory item: a **temporary** attachment (one a
+    /// script attached) has none, and the simulator repeats the object's own id
+    /// instead. That equality is the only thing that tells a temp attachment
+    /// apart, and the RLV admission test is the one caller that needs to
+    /// ([`rlv::is_temp_attachment`]), so the raw id is kept here rather than a
+    /// derived flag.
+    ///
+    /// Retained across an update that carries no name-values at all, and
+    /// dropped the moment the object stops being an attachment — the reference
+    /// re-reads it on attach and nulls it on detach, and never in between.
+    pub attachment_item: Option<Uuid>,
     /// The object's owner (`owner_id` from the object update). For a worn
     /// attachment this is its wearer, so a stuck attachment can be attributed to
     /// the avatar it belongs to (the `SL_VIEWER_LOG_ATTACHMENT_BIND` diagnostic).
@@ -6171,6 +6187,12 @@ pub struct AvatarControls {
     pub tap_run_forward: DoubleTapRun,
     /// The tap-tap-hold-to-run detector for the walk-backward key.
     pub tap_run_backward: DoubleTapRun,
+    /// A heading (radians about the Second Life up axis) something has *told*
+    /// the avatar to face rather than turned it towards: RLV's
+    /// `@setrot:<radians>=force`. Taken by the movement driver on the next
+    /// frame it runs, which replaces the tracked heading with it and advertises
+    /// it at once.
+    pub forced_heading: Option<f32>,
 }
 
 impl AvatarControls {
@@ -6199,6 +6221,7 @@ impl Default for AvatarControls {
             ascend_hold_secs: 0.0,
             tap_run_forward: DoubleTapRun::default(),
             tap_run_backward: DoubleTapRun::default(),
+            forced_heading: None,
         }
     }
 }

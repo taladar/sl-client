@@ -84,6 +84,7 @@ use crate::ui::{
 };
 use crate::ui_font::UiFont;
 use crate::ui_tab::{TabDivider, TabPlacement, TabStrip, TabStripWidth, resize_strip_width};
+use crate::world_api::rlv::swallows_owner_say;
 use crate::world_api::{
     AvatarPicked, ConversationKey, OpenAvatarPicker, OpenConversation, StartConference,
 };
@@ -1761,6 +1762,13 @@ fn ingest_conversation_notices(
 /// One inbound event can be refused outright here: an **ad-hoc conference**
 /// invitation under the ignore-conferences mode ([`crate::auto_reject`]) is
 /// declined on the wire and never given a tab.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries: the event \
+              stream, the conversation model and avatar-name cache it fills, the identity, \
+              the settings and friends model the auto-reject reads, the object mirror the \
+              RLV owner-say gate reads, and the command writer a refusal answers on"
+)]
 pub(crate) fn ingest_conversation_events(
     mut events: MessageReader<SlEvent>,
     mut model: ResMut<ConversationModel>,
@@ -1768,6 +1776,7 @@ pub(crate) fn ingest_conversation_events(
     identity: Res<SlIdentity>,
     settings: Option<Res<crate::settings::ViewerSettings>>,
     friends: Option<Res<crate::world_api::FriendsModel>>,
+    objects: Option<Res<crate::world_api::ObjectState>>,
     mut sl: MessageWriter<SlCommand>,
 ) {
     for event in events.read() {
@@ -1776,7 +1785,20 @@ pub(crate) fn ingest_conversation_events(
                 // Skip the typing-animation triggers and any empty line, like the
                 // overlay does. Our own local chat is echoed here too, under our
                 // name — the same as the overlay shows it.
-                if is_displayable(&message.chat_type, &message.message) {
+                //
+                // An owner-say `@`-line is an object talking to the *viewer*,
+                // not to the person, and the RLV intake takes it: showing the
+                // commands a collar issues in the transcript is both noise and
+                // a leak of what it is doing.
+                if is_displayable(&message.chat_type, &message.message)
+                    && !swallows_owner_say(
+                        settings.as_deref(),
+                        objects.as_deref(),
+                        message.source,
+                        message.chat_type,
+                        &message.message,
+                    )
+                {
                     model.push_nearby(&message.from_name, &message.source, &message.message);
                 }
             }
