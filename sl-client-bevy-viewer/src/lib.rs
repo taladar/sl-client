@@ -294,6 +294,7 @@ pub(crate) use sl_viewer_kit::sit_offset;
 pub(crate) use sl_viewer_kit::sky_presets;
 pub(crate) use sl_viewer_kit::slt;
 pub(crate) use sl_viewer_ui_core::skin;
+mod skin_agreement;
 pub(crate) use sl_viewer_ui_core::skin_colors;
 pub(crate) use sl_viewer_world_scene::sky;
 pub(crate) use sl_viewer_world_view::sit_camera;

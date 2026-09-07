@@ -105,6 +105,16 @@ struct BasePartSpec {
     region: BodyRegion,
 }
 
+impl BasePartSpec {
+    /// Whether this part is declared to carry per-vertex skin weights — the
+    /// claim reconciled against the mesh file's own `has_weights` at load, since
+    /// a part spawned skinned over an unweighted mesh (or the reverse) is a wgpu
+    /// validation error rather than a wrong picture.
+    const fn declares_skinned(&self) -> bool {
+        matches!(self.binding, PartBinding::Skinned)
+    }
+}
+
 /// The standard base-body parts and their `lod = 0` files, as referenced by
 /// `avatar_lad.xml`'s `<mesh>` table. The two eyeballs share one file but pin to
 /// distinct eye joints; every other part is skinned to its own joint table.
@@ -303,6 +313,37 @@ impl AvatarAssetLibrary {
         let mut parts = Vec::with_capacity(BASE_PARTS.len());
         for spec in BASE_PARTS {
             let mesh = BaseMesh::from_bytes(&fs_err::read(dir.join(spec.file))?)?;
+            // The binding below is *declared* per part, while the mesh's skin
+            // vertex attributes are *derived* from the file
+            // (`build_base_mesh` emits them exactly when `has_weights`). Bevy
+            // specializes the skinned pipeline from the attributes and picks the
+            // bind group from the entity's `SkinnedMesh`, so the two disagreeing
+            // is a wgpu validation error that kills the process — not a
+            // rendering artifact. The table is right for the vendored character
+            // directory, but `SL_VIEWER_ASSETS` can point at another one, and a
+            // real Linden body whose eye parts carry no weights is exactly how
+            // that crash was found once already. Reconcile here, where both
+            // facts are in hand, rather than trusting them to stay in step.
+            if spec.declares_skinned() != mesh.has_weights() {
+                warn!(
+                    "skipping avatar part `{}` ({}): the part table declares it {}, but its mesh \
+                     {} skin weights. Rendering it would hand Bevy a pipeline and a bind group \
+                     that disagree, which is a validation error that quits the viewer.",
+                    spec.label,
+                    spec.file,
+                    if spec.declares_skinned() {
+                        "skinned"
+                    } else {
+                        "rigid"
+                    },
+                    if mesh.has_weights() {
+                        "carries"
+                    } else {
+                        "carries no"
+                    },
+                );
+                continue;
+            }
             let binding = match spec.binding {
                 PartBinding::Skinned => match skeleton.base_mesh_skin(&mesh) {
                     Some(skin) => LoadedBinding::Skinned(skin),

@@ -47,6 +47,7 @@
 //! shader.
 
 use bevy::camera::primitives::Aabb;
+use bevy::mesh::skinning::SkinnedMesh;
 use bevy::prelude::*;
 use bevy::render::sync_world::MainEntity;
 use bevy::render::{Extract, RenderApp};
@@ -110,6 +111,7 @@ type ClipCandidates<'w, 's> = Query<
         Ref<'static, Aabb>,
         Option<&'static WaterClipSide>,
         Has<SharedFaceMaterial>,
+        Option<&'static SkinnedMesh>,
     ),
     With<PrimFaceEntity>,
 >;
@@ -137,7 +139,7 @@ fn reconcile_water_clip_twins(
     // The faces that should have a twin this frame, and the twin each already has.
     let mut wanted: bevy::platform::collections::HashSet<Entity> =
         bevy::platform::collections::HashSet::new();
-    for (face, mesh, material, transform, aabb, side, shared) in &faces {
+    for (face, mesh, material, transform, aabb, side, shared, skin) in &faces {
         // A face already split stays in `wanted` however it is filtered below, or
         // the sweep at the end would despawn a twin that is still correct.
         if side.is_some() {
@@ -186,9 +188,11 @@ fn reconcile_water_clip_twins(
         }
         debug!(
             target: WATER_CLIP_LOG_TARGET,
-            "split face {face}: straddles the surface at {level} m, drawing it twice",
+            "split face {face}: straddles the surface at {level} m, drawing it twice \
+             (skinned={})",
+            skin.is_some(),
         );
-        commands.spawn((
+        let mut spawned = commands.spawn((
             Mesh3d(mesh.0.clone()),
             MeshMaterial3d(twin),
             Transform::IDENTITY,
@@ -196,6 +200,20 @@ fn reconcile_water_clip_twins(
             WaterClipSide::Below,
             ChildOf(face),
         ));
+        // The twin draws the **same geometry** as the face, clipped to the other
+        // side of the surface — so if the face is skinned, the twin must be
+        // skinned identically. Bevy specializes the render pipeline from the
+        // mesh asset's vertex layout but takes the bind group from the entity's
+        // own skin, and the twin shares the face's mesh handle: leaving the skin
+        // off hands a skinned pipeline a model-only bind group, which is a wgpu
+        // validation error that quits the viewer. Worse, worn rigged submeshes
+        // share one mesh asset across wearers so that Bevy can batch them, so
+        // the malformed twin takes down every other wearer drawn in the same
+        // batch — which is why this read as a random crash near other people's
+        // avatars rather than as anything to do with water.
+        if let Some(skin) = skin {
+            spawned.insert(skin.clone());
+        }
     }
     for (twin, child_of) in &twins {
         if !wanted.contains(&child_of.parent()) {
@@ -308,6 +326,7 @@ mod tests {
     use crate::water::WaterLevel;
     use bevy::asset::AssetApp as _;
     use bevy::camera::primitives::Aabb;
+    use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::PrimFaceId;
@@ -323,6 +342,7 @@ mod tests {
         app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
             .init_asset::<Mesh>()
             .init_asset::<FaceMaterial>()
+            .init_asset::<SkinnedMeshInverseBindposes>()
             .insert_resource(WaterLevel(LEVEL))
             .add_systems(PostUpdate, reconcile_water_clip_twins);
         app
@@ -391,6 +411,86 @@ mod tests {
             .expect("the face has a material");
         assert!((own.extension.params.water_clip - 1.0).abs() < f32::EPSILON);
         assert!((own.extension.params.water_level - LEVEL).abs() < f32::EPSILON);
+    }
+
+    /// **A skinned face's twin is skinned too**, or the split kills the viewer.
+    ///
+    /// The twin shares the face's *mesh asset*. Bevy specializes the render
+    /// pipeline from that asset's vertex layout — a rigged mesh carries
+    /// `JOINT_INDEX` / `JOINT_WEIGHT`, so the draw specializes **skinned** — but
+    /// takes the bind group from the entity's own `SkinnedMesh`. A twin spawned
+    /// without one is handed a model-only bind group for a skinned pipeline,
+    /// which is a wgpu validation error that quits the application, not a
+    /// rendering artifact.
+    ///
+    /// It is worse than one bad draw: worn rigged submeshes deliberately share
+    /// one mesh asset across wearers so Bevy can batch them, and the batch takes
+    /// its bind group from a single representative entity — so one malformed
+    /// twin takes down every wearer drawn in that batch. That is what made this
+    /// read as a random crash near other people's avatars
+    /// (`viewer-skinned-bind-group-quits-on-rez`), reproduced on aditi by
+    /// standing an avatar in the shallows: without the skin below, a run logged
+    /// 14 malformed twins; with it, 40 skinned splits and none.
+    #[test]
+    fn a_skinned_straddling_face_gives_its_twin_the_skin() {
+        let mut app = app();
+        let face = spawn_face(&mut app, LEVEL, AlphaMode::Blend);
+        // The joints an avatar's skeleton instance would supply. Their identity
+        // does not matter here — that the twin carries the *same* ones does.
+        let joints: Vec<Entity> =
+            std::iter::repeat_with(|| app.world_mut().spawn(Transform::default()).id())
+                .take(3)
+                .collect();
+        let inverse_bindposes = app
+            .world_mut()
+            .resource_mut::<Assets<SkinnedMeshInverseBindposes>>()
+            .add(SkinnedMeshInverseBindposes::from(vec![Mat4::IDENTITY; 3]));
+        app.world_mut().entity_mut(face).insert(SkinnedMesh {
+            inverse_bindposes: inverse_bindposes.clone(),
+            joints: joints.clone(),
+        });
+        app.update();
+
+        assert_eq!(twins(&mut app), 1, "the straddling face gained its twin");
+        let twin = app
+            .world_mut()
+            .query_filtered::<Entity, With<WaterClipTwin>>()
+            .iter(app.world())
+            .next()
+            .expect("the twin exists");
+        let skin = app
+            .world()
+            .get::<SkinnedMesh>(twin)
+            .expect("the twin of a skinned face must itself be skinned");
+        assert_eq!(
+            skin.joints, joints,
+            "the twin draws the same posed geometry, so it binds the same joints",
+        );
+        assert_eq!(
+            skin.inverse_bindposes, inverse_bindposes,
+            "and the same inverse bindposes",
+        );
+    }
+
+    /// An **unskinned** face's twin must not gain a skin either — the agreement
+    /// has to hold in both directions, since a `SkinnedMesh` over a mesh with no
+    /// skin attributes is the same validation error mirrored.
+    #[test]
+    fn an_unskinned_straddling_face_gives_its_twin_no_skin() {
+        let mut app = app();
+        let _face = spawn_face(&mut app, LEVEL, AlphaMode::Blend);
+        app.update();
+
+        let twin = app
+            .world_mut()
+            .query_filtered::<Entity, With<WaterClipTwin>>()
+            .iter(app.world())
+            .next()
+            .expect("the twin exists");
+        assert!(
+            app.world().get::<SkinnedMesh>(twin).is_none(),
+            "an unskinned face's twin stays unskinned",
+        );
     }
 
     /// A face clear of the surface is left alone — no clip, no twin, and (this is

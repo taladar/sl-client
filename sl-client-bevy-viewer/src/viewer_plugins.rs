@@ -724,6 +724,13 @@ impl Plugin for ViewerWorldPlugins {
                 apply_avatar_names,
             ),
         );
+        // The skin-attribute / `SkinnedMesh` agreement, checked in the main
+        // world on whatever just changed — after every system above that spawns
+        // or re-meshes a skinned entity, and so before the extract that would
+        // hand a mismatch to wgpu. See `crate::skin_agreement` for why the two
+        // halves can disagree at all and why one bad entity takes a whole
+        // batched draw down with it.
+        app.add_systems(PostUpdate, crate::skin_agreement::assert_skin_agreement);
         // The crosshair pick tool (press `P`) to identify the object under the
         // centre of the screen. Separate calls to stay clear of Bevy's per-tuple
         // system limit. (The SL_VIEWER_LOG_OBJECTS diagnostic is registered
