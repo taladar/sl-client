@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 306 |
 | blocked | 55 |
 | in-progress | 19 |
-| bugs | 62 |
+| bugs | 63 |
 | done | 1006 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1585** |
+| **total** | **1586** |
 
 ## ideas (98)
 
@@ -1168,7 +1168,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (62)
+## bugs (63)
 
 ### viewer
 
@@ -1274,6 +1274,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Own avatar looks broken after a teleport
 - [`viewer-own-avatar-facing-drifts-idle`](bugs/viewer-own-avatar-facing-drifts-idle.md)
   — Own avatar forward direction drifts every few seconds while idle
+- [`viewer-parcel-object-owners-uncorrelated`](bugs/viewer-parcel-object-owners-uncorrelated.md)
+  — An object-owner tally says nothing about which parcel it counted
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 - [`viewer-prim-attachment-worn-but-not-rendered`](bugs/viewer-prim-attachment-worn-but-not-rendered.md)

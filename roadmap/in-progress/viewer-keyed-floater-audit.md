@@ -124,10 +124,31 @@ spawn instead of `DeferredFloaterContent`.
   **command** before the pass that carries it out, rather than noticing a
   hidden panel afterwards; OK / Cancel clear the requester first, which is what
   keeps that revert from undoing the choice they just made.
-- **About Land** (`about_land.rs`, `"about-land"`) — per parcel, and **About
-  Region** (`about_region.rs`) — per region. The reference keeps both as
-  singletons (`LLFloaterLand` / `LLFloaterRegionInfo` open on *the parcel you
-  are standing on* and *the region you are in*, so there is only ever one
+- ~~**About Land** (`about_land.rs`, `"about-land"`)~~ — **done** (2026-09-07),
+  keyed by `ScopedParcelId` — the circuit and the region-local parcel id, so
+  the same local id in two regions is two subjects. The nine tabs' state, dirty
+  flags, handles and three table views are components on the window; the check /
+  action / remove observers resolve theirs with `host_floater`, and so do the
+  control-enable and checkbox passes, which used to sweep every control in the
+  viewer and would now paint one window's rights onto another's. Two things did
+  not fall out of the pattern:
+  - A land-pie open names a **point**, not a parcel. Its window opens under a
+    provisional `point/x/y` key and is re-keyed (`Floater::rekey`, new) when the
+    simulator says which parcel the click landed in — folding into that parcel's
+    window if it already has one.
+  - `ParcelObjectOwnersReply` carries owners and nothing else — no parcel, no
+    sequence id — so `OwnerTallyQueue` allows one tally request at a time, the
+    way About Landmark's parcel resolves are serialised. Filed as
+    [[viewer-parcel-object-owners-uncorrelated]]. The media push has the same
+    gap and a better answer: it is always about the parcel the agent stands in,
+    so only that window takes it. The sequence counter also had to leave the
+    state (`LandSequence`): per-window counters would hand two windows the same
+    id, and that id is the only thing saying whose `ParcelProperties` a reply
+    is.
+- **About Region** (`about_region.rs`) — per region. The reference keeps both
+  About Land and region info as singletons (`LLFloaterLand` /
+  `LLFloaterRegionInfo` open on *the parcel you are standing on* and *the
+  region you are in*, so there is only ever one
   subject). We key them anyway, by user decision: this viewer can show a parcel
   or region it is not standing in — from a landmark, a search hit, a place
   profile — and comparing two parcels' covenants or two regions' settings is a

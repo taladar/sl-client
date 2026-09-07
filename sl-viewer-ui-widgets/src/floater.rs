@@ -501,6 +501,19 @@ impl Floater {
         self.key.as_ref()
     }
 
+    /// Re-point this instance at a different subject.
+    ///
+    /// For a window opened before its subject is known — About Land on a
+    /// land-pie click knows the **point** clicked, and only the simulator's
+    /// reply says which parcel that is — so the window can be found by its
+    /// subject from then on. A caller that re-keys onto a subject another
+    /// window already holds has made two windows for one subject, and must
+    /// close one; this does not check, because only the caller knows which of
+    /// the two should live.
+    pub fn rekey(&mut self, key: FloaterKey) {
+        self.key = Some(key);
+    }
+
     /// Whether this floater is the instance of `id` showing `key`.
     #[must_use]
     pub fn is_instance(&self, id: &str, key: &FloaterKey) -> bool {

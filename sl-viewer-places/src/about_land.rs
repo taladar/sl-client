@@ -3,17 +3,36 @@
 //! nine reference tabs — **General**, **Covenant**, **Objects**, **Options**,
 //! **Media**, **Sound**, **Access**, **Experiences**, **Environment**.
 //!
-//! # Subject-bound
+//! # One window per parcel
 //!
 //! The floater opens on a **particular parcel** ([`OpenAboutLand`]) — the parcel
 //! the top-bar location read-out was clicked on (the agent's current parcel), or
-//! the parcel a land-pie right-click landed on. Like the avatar and group
-//! profiles it is exempt from floater persistence
-//! ([`crate::floater_persist::FloaterPersistExempt`]).
+//! the parcel a land-pie right-click landed on — and each parcel gets **its own
+//! window**, keyed by [`ScopedParcelId`] (the circuit and the region-local id,
+//! so the same local id in two regions is two subjects). Everything the window
+//! knows lives on its root entity as components, and closing it ends that
+//! instance.
+//!
+//! The reference keeps `LLFloaterLand` a singleton, because it only ever opens
+//! on the parcel the agent is standing in. This viewer opens About Land on a
+//! parcel it is *not* standing in — a land-pie click across the road, and in
+//! time a search hit or a place profile — so comparing two parcels is a real
+//! thing to want. That divergence is a deliberate decision, recorded in
+//! `viewer-keyed-floater-audit`.
+//!
+//! A subject-keyed window persists no geometry (the scaffold's rule: a window
+//! per subject has no stable identity to remember one under), so unlike the
+//! singleton this replaced it needs no persistence exemption.
+//!
+//! A land-pie open names a **point**, not a parcel, so its window starts under a
+//! provisional key and is re-keyed when the simulator says which parcel that
+//! point is in — and folds into the parcel's existing window if there already is
+//! one.
 //!
 //! # Build once, update in place (no despawn)
 //!
-//! Every tab's structure is spawned **once** at start-up and never torn down.
+//! Every tab's structure is spawned **once**, when the window opens, and never
+//! torn down while it lives.
 //! Replies update values *in place*: value labels via `set_value_node`,
 //! checkbox glyphs via `set_check_visual`, combos by writing their
 //! [`ComboSelection`](crate::ui_combo), edit fields by seeding
@@ -54,12 +73,12 @@ use sl_client_bevy::{
 
 use crate::environment::EnvironmentState;
 use crate::floater::{
-    DeferredFloaterContent, Floater, FloaterCaps, FloaterHandle, FloaterSpec, floater_panel,
-    spawn_floater,
+    Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterKey, FloaterOp, FloaterSpec,
+    FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater,
 };
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::inventory_properties::format_unix_date;
-use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use crate::ui::{column, row};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
 use crate::ui_name_link::{NameLink, NameLinkSpec, NameTarget, set_name_link, spawn_name_link};
@@ -243,8 +262,9 @@ pub enum AboutLandSubject {
 // State.
 // ---------------------------------------------------------------------------
 
-/// The floater's data model.
-#[derive(Resource, Debug, Default)]
+/// The floater's data model — **one per window** (see the module header), on
+/// the window's root entity.
+#[derive(Component, Debug, Default)]
 struct AboutLandState {
     /// The parcel currently bound, or `None` before the first open.
     target: Option<RegionLocalParcelId>,
@@ -301,8 +321,75 @@ struct AboutLandState {
     /// (a land-pie click): the reply with this echoed `sequence_id` binds the
     /// subject. `None` once bound, or when opened on a known parcel.
     pending_sequence: Option<i32>,
-    /// A monotonic source of request sequence ids.
-    sequence_counter: i32,
+    /// Which access list an avatar pick this window asked for will land in, or
+    /// `None` when it has no pick outstanding.
+    ///
+    /// The avatar picker echoes a `&'static str` tag rather than an entity, so
+    /// a pick cannot name its window. It does not have to: the picker is one
+    /// window per tag, so at most one About Land window can have a pick
+    /// outstanding for a tag, and this is that window's claim on it.
+    pending_pick: Option<AccessScope>,
+}
+
+/// A monotonic source of `ParcelPropertiesRequest` sequence ids, shared by every
+/// About Land window.
+///
+/// Per-window counters would hand two windows the same id, and the id is the
+/// only thing that says which window's question a `ParcelProperties` reply
+/// answers.
+#[derive(Resource, Debug, Default)]
+struct LandSequence(i32);
+
+impl LandSequence {
+    /// The next sequence id — never repeated while the session lives.
+    const fn next(&mut self) -> i32 {
+        self.0 = self.0.wrapping_add(1);
+        self.0
+    }
+}
+
+/// How long a window's object-owner tally may stay unanswered before the next
+/// window's request goes out, in seconds.
+const OWNER_TALLY_TIMEOUT_SECONDS: f64 = 8.0;
+
+/// The windows waiting for an object-owner tally, oldest first.
+///
+/// `ParcelObjectOwnersReply` carries **nothing but the owners** — not the
+/// parcel, not a sequence id (see the wire template) — so a reply cannot say
+/// whose question it answers, and two windows asking at once would each take
+/// the other's tally as their own. Only one request is outstanding at a time;
+/// every reply while it is belongs to the window that asked, which is also how
+/// a tally split over several packets stays whole. Filed as
+/// `viewer-parcel-object-owners-uncorrelated`.
+#[derive(Resource, Debug, Default)]
+struct OwnerTallyQueue {
+    /// The windows still to ask for, with the parcel each is about.
+    waiting: std::collections::VecDeque<(Entity, ScopedParcelId)>,
+    /// The window whose request is outstanding, and when it gives up.
+    asking: Option<(Entity, f64)>,
+}
+
+impl OwnerTallyQueue {
+    /// Queue `window`'s tally request for `parcel`, replacing any request of
+    /// its own it has not been answered yet.
+    fn ask(&mut self, window: Entity, parcel: ScopedParcelId) {
+        self.waiting.retain(|(waiting, _parcel)| *waiting != window);
+        self.waiting.push_back((window, parcel));
+    }
+
+    /// Whether `window` owns the tally replies arriving now.
+    fn owns_reply(&self, window: Entity) -> bool {
+        self.asking
+            .is_some_and(|(asking, _deadline)| asking == window)
+    }
+
+    /// Forget `window` — it closed, or its subject changed.
+    fn forget(&mut self, window: Entity) {
+        self.waiting.retain(|(waiting, _parcel)| *waiting != window);
+        if self.owns_reply(window) {
+            self.asking = None;
+        }
+    }
 }
 
 impl AboutLandState {
@@ -323,6 +410,7 @@ impl AboutLandState {
         self.seeded = None;
         self.shown_fields = None;
         self.pending_sequence = None;
+        self.pending_pick = None;
         self.owners_revision = self.owners_revision.wrapping_add(1);
     }
 
@@ -341,21 +429,21 @@ impl AboutLandState {
     /// Bind the resolved parcel as the subject (from a known id, or a point
     /// reply), computing the edit rights.
     fn bind(&mut self, parcel: ParcelInfo, identity: &SlIdentity) {
-        self.can_edit = !self.read_only
-            && identity.agent_id.is_some_and(|agent| match parcel.owner {
-                OwnerKey::Agent(owner) => owner == agent,
-                OwnerKey::Group(_group) => false,
-            });
+        self.rebind_rights(&parcel, identity);
         self.target = Some(parcel.local_id);
         self.pending_sequence = None;
         self.parcel = Some(parcel);
         self.seed_draft();
     }
 
-    /// The next request sequence id.
-    const fn next_sequence(&mut self) -> i32 {
-        self.sequence_counter = self.sequence_counter.wrapping_add(1);
-        self.sequence_counter
+    /// Recompute whether the agent may edit the bound parcel — at bind, and
+    /// again when a re-open changes the window's mode.
+    fn rebind_rights(&mut self, parcel: &ParcelInfo, identity: &SlIdentity) {
+        self.can_edit = !self.read_only
+            && identity.agent_id.is_some_and(|agent| match parcel.owner {
+                OwnerKey::Agent(owner) => owner == agent,
+                OwnerKey::Group(_group) => false,
+            });
     }
 
     /// Seed the edit [`draft`](Self::draft) from the parcel, once per open.
@@ -463,8 +551,8 @@ enum FieldSeed {
     Unedited,
 }
 
-/// Which sub-panels need an in-place value refresh this frame.
-#[derive(Resource, Debug, Default)]
+/// Which sub-panels need an in-place value refresh this frame, for one window.
+#[derive(Component, Debug, Default)]
 #[expect(
     clippy::struct_excessive_bools,
     reason = "one independent dirty flag per in-place refresh pass"
@@ -514,8 +602,9 @@ struct OwnerRowData {
     count: String,
 }
 
-/// The object-owners table view (rebuilt when the tally or names change).
-#[derive(Resource, Debug, Default)]
+/// The object-owners table view (rebuilt when the tally or names change), for
+/// one window.
+#[derive(Component, Debug, Default)]
 struct OwnersView {
     /// The rows in display order.
     rows: Vec<OwnerRowData>,
@@ -534,8 +623,8 @@ struct AccessRowData {
     expiry: String,
 }
 
-/// The allow-list table view.
-#[derive(Resource, Debug, Default)]
+/// The allow-list table view, for one window.
+#[derive(Component, Debug, Default)]
 struct AllowView {
     /// The rows in display order.
     rows: Vec<AccessRowData>,
@@ -543,8 +632,8 @@ struct AllowView {
     built: u64,
 }
 
-/// The ban-list table view.
-#[derive(Resource, Debug, Default)]
+/// The ban-list table view, for one window.
+#[derive(Component, Debug, Default)]
 struct BanView {
     /// The rows in display order.
     rows: Vec<AccessRowData>,
@@ -806,8 +895,8 @@ impl AccessScope {
     }
 }
 
-/// The floater's live entity handles.
-#[derive(Resource, Debug)]
+/// One window's live entity handles.
+#[derive(Component, Debug)]
 #[expect(
     clippy::struct_field_names,
     reason = "one per-tab handle group per field; the shared postfix is the point"
@@ -869,21 +958,23 @@ pub struct AboutLandPlugin;
 
 impl Plugin for AboutLandPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<AboutLandState>()
-            .init_resource::<AboutLandDirty>()
-            .init_resource::<OwnersView>()
-            .init_resource::<AllowView>()
-            .init_resource::<BanView>()
+        app.init_resource::<LandSequence>()
+            .init_resource::<OwnerTallyQueue>()
             .add_message::<OpenAboutLand>()
             .add_systems(
-                Startup,
-                spawn_about_land_floater.after(UiScaffoldSystems::SpawnRoot),
+                Update,
+                // After the manager's command pass — see `FloaterSystems`: the
+                // land pie that opens a parcel also raises whatever it was
+                // clicked through, and the later raise wins.
+                open_about_land
+                    .after(FloaterSystems::Commands)
+                    .before(layout_virtual_lists),
             )
             .add_systems(
                 Update,
                 (
-                    open_about_land,
                     ingest_about_land_events,
+                    drive_owner_tallies,
                     refresh_on_names,
                     seed_edit_fields,
                     update_control_enable,
@@ -900,7 +991,9 @@ impl Plugin for AboutLandPlugin {
                     apply_avatar_picks,
                 )
                     .chain()
-                    .before(layout_virtual_lists),
+                    .after(open_about_land)
+                    .before(layout_virtual_lists)
+                    .run_if(any_with_component::<AboutLandState>),
             )
             .add_systems(
                 Update,
@@ -911,7 +1004,8 @@ impl Plugin for AboutLandPlugin {
                     bind_access_rows,
                 )
                     .chain()
-                    .after(layout_virtual_lists),
+                    .after(layout_virtual_lists)
+                    .run_if(any_with_component::<AboutLandState>),
             );
     }
 }
@@ -944,28 +1038,13 @@ pub fn about_land_floater_spec() -> FloaterSpec {
     }
 }
 
-/// Spawn the (hidden) About Land floater's chrome; every tab is built once, on
-/// the first open ([`DeferredFloaterContent`]).
-fn spawn_about_land_floater(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = spawn_floater(&mut commands, root.0, about_land_floater_spec());
-    commands
-        .entity(handle.root)
-        .insert(crate::floater_persist::FloaterPersistExempt);
-    commands
-        .entity(handle.title_text)
-        .insert(Translated::new("about-land-title"));
-    let builder = commands.register_system(build_about_land_content);
-    commands
-        .entity(handle.root)
-        .insert(DeferredFloaterContent { builder, handle });
-}
-
-/// First-open content build (see [`spawn_about_land_floater`]): the tab
-/// container and every tab, ending with the [`AboutLandUi`] insert whose
-/// appearance wakes the `Option<Res<AboutLandUi>>` populate systems (their
-/// [`AboutLandDirty`] flags persist until then, so an open that raced the
-/// build loses nothing).
-fn build_about_land_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
+/// Build one window's content: the tab container and every tab, returning the
+/// handles the update passes write through.
+///
+/// Called once per window, as it is spawned — a keyed instance's content is
+/// built into the window it belongs to, not deferred to a first open that no
+/// longer exists ([`KeyedFloaters`]).
+fn build_land_content(commands: &mut Commands, handle: FloaterHandle) -> AboutLandUi {
     let labels: Vec<String> = [
         "about-land-tab-general",
         "about-land-tab-covenant",
@@ -981,7 +1060,7 @@ fn build_about_land_content(In(handle): In<FloaterHandle>, mut commands: Command
     .map(str::to_owned)
     .collect();
     let tabs: TabContainerHandle = spawn_tab_container(
-        &mut commands,
+        commands,
         handle.content,
         &TabSpec {
             element: "about-land-tabs",
@@ -995,20 +1074,20 @@ fn build_about_land_content(In(handle): In<FloaterHandle>, mut commands: Command
             translate_labels: true,
         },
     );
-    fill_tab_container(&mut commands, TabPlacement::BlockStart, &tabs);
+    fill_tab_container(commands, TabPlacement::BlockStart, &tabs);
     let panel = |index: usize| tabs.panels.get(index).copied().unwrap_or(handle.content);
 
-    let general_handles = build_general_tab(&mut commands, panel(0));
-    let covenant_handles = build_covenant_tab(&mut commands, panel(1));
-    let object_handles = build_objects_tab(&mut commands, panel(2));
-    let options_handles = build_options_tab(&mut commands, panel(3));
-    let media_handles = build_media_tab(&mut commands, panel(4));
-    let sound_handles = build_sound_tab(&mut commands, panel(5));
-    let access_handles = build_access_tab(&mut commands, panel(6));
-    build_experiences_tab(&mut commands, panel(7));
-    let environment_handles = build_environment_tab(&mut commands, panel(8));
+    let general_handles = build_general_tab(commands, panel(0));
+    let covenant_handles = build_covenant_tab(commands, panel(1));
+    let object_handles = build_objects_tab(commands, panel(2));
+    let options_handles = build_options_tab(commands, panel(3));
+    let media_handles = build_media_tab(commands, panel(4));
+    let sound_handles = build_sound_tab(commands, panel(5));
+    let access_handles = build_access_tab(commands, panel(6));
+    build_experiences_tab(commands, panel(7));
+    let environment_handles = build_environment_tab(commands, panel(8));
 
-    commands.insert_resource(AboutLandUi {
+    AboutLandUi {
         general_handles,
         covenant_handles,
         object_handles,
@@ -1017,7 +1096,7 @@ fn build_about_land_content(In(handle): In<FloaterHandle>, mut commands: Command
         sound_handles,
         access_handles,
         environment_handles,
-    });
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1494,32 +1573,48 @@ fn spawn_bounded_table(
 // Open.
 // ---------------------------------------------------------------------------
 
-/// Open the floater on the requested parcel and request its tab data.
+/// The [`FloaterKey`] of the window showing `parcel`: the circuit and the
+/// region-local id, so the same local id on two circuits is two windows.
+fn parcel_key(parcel: ScopedParcelId) -> FloaterKey {
+    FloaterKey::subject(&format!("{}/{}", parcel.circuit(), parcel.id().0))
+}
+
+/// The provisional [`FloaterKey`] of a window opened on a **point** — a land-pie
+/// click — before the simulator says which parcel that point is in.
+///
+/// Re-keyed to [`parcel_key`] on the binding reply (see
+/// [`bind_point_window`]); two clicks in one parcel therefore start as two
+/// windows and fold into one.
+fn point_key(x: f32, y: f32) -> FloaterKey {
+    FloaterKey::subject(&format!("point/{x:.1}/{y:.1}"))
+}
+
+/// Open a window on the requested parcel — this parcel's window if it is
+/// already up — and request its tab data.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the open reads the identity / parcel model to resolve the subject and fires every \
-              tab's fetch"
+    reason = "the open reads the identity / parcel model to resolve the subject, spawns or \
+              reuses the subject's window, and fires every tab's fetch"
 )]
 fn open_about_land(
     mut requests: MessageReader<OpenAboutLand>,
-    mut state: ResMut<AboutLandState>,
-    mut dirty: ResMut<AboutLandDirty>,
-    floaters: Query<(Entity, &Floater)>,
+    mut windows: KeyedFloaters,
+    mut lands: Query<(&mut AboutLandState, &mut AboutLandDirty)>,
+    mut sequence: ResMut<LandSequence>,
+    mut tallies: ResMut<OwnerTallyQueue>,
     identity: Res<SlIdentity>,
     parcels: Query<&SlParcel>,
     regions: Query<&Children, With<SlCurrentRegion>>,
     agent_parcel: Res<SlAgentParcel>,
-    mut panels: Query<&mut UiPanelShown>,
+    mut spawner: Commands,
     mut commands: MessageWriter<SlCommand>,
 ) {
-    let Some(request) = requests.read().last().copied() else {
-        return;
-    };
-    state.reset(request.read_only);
-    match request.subject {
-        AboutLandSubject::CurrentParcel(local_id) => {
-            // The parcel data is already local (the agent's current parcel).
-            let parcel = find_parcel(&parcels, &regions, local_id)
+    for request in requests.read().copied().collect::<Vec<_>>() {
+        // What the window will show, and what it is keyed by. A point open
+        // knows neither yet — it opens under a provisional key and is re-keyed
+        // when the reply says which parcel the click landed in.
+        let bound = match request.subject {
+            AboutLandSubject::CurrentParcel(local_id) => find_parcel(&parcels, &regions, local_id)
                 .cloned()
                 .or_else(|| {
                     agent_parcel
@@ -1527,17 +1622,120 @@ fn open_about_land(
                         .as_ref()
                         .filter(|parcel| parcel.local_id == local_id)
                         .cloned()
-                });
-            if let Some(parcel) = parcel {
-                state.bind(parcel, &identity);
-                if let Some(scoped) = state.scoped(&identity) {
-                    request_tab_data(&mut state, scoped, &mut commands);
+                }),
+            AboutLandSubject::AtPoint { .. } => None,
+        };
+        let key = match request.subject {
+            AboutLandSubject::CurrentParcel(local_id) => identity
+                .circuit_id
+                .map(|circuit| parcel_key(ScopedParcelId::new(circuit, local_id))),
+            AboutLandSubject::AtPoint { x, y } => Some(point_key(x, y)),
+        };
+        let Some(key) = key else {
+            // No circuit: nothing this window could ask about a parcel would
+            // reach a simulator.
+            continue;
+        };
+        let opened = windows.open(about_land_floater_spec(), key);
+        let window = opened.root();
+        if let KeyedFloaterOpen::Spawned(handle) = opened {
+            let ui = build_land_content(&mut spawner, handle);
+            spawner
+                .entity(handle.title_text)
+                .insert(Translated::new("about-land-title"));
+            // Seeded here rather than after the insert: the components only
+            // reach the world when this frame's commands flush, so a window
+            // spawned now is not queryable yet.
+            let mut state = AboutLandState::default();
+            let mut dirty = AboutLandDirty::default();
+            start_land_open(
+                window,
+                &mut state,
+                &mut dirty,
+                request,
+                bound,
+                &identity,
+                &mut sequence,
+                &mut tallies,
+                &mut commands,
+            );
+            spawner.entity(handle.root).insert((
+                state,
+                dirty,
+                OwnersView::default(),
+                AllowView::default(),
+                BanView::default(),
+                ui,
+            ));
+            continue;
+        }
+        let Ok((mut state, mut dirty)) = lands.get_mut(window) else {
+            continue;
+        };
+        start_land_open(
+            window,
+            &mut state,
+            &mut dirty,
+            request,
+            bound,
+            &identity,
+            &mut sequence,
+            &mut tallies,
+            &mut commands,
+        );
+    }
+}
+
+/// Bind (or re-bind) one window to an open request and fire its fetches.
+///
+/// A window already showing this parcel keeps everything it has — the only
+/// thing an open changes is the **mode**: asking for the editable view of a
+/// parcel whose read-only window is up (or the other way round) re-gates its
+/// controls rather than leaving the resident in a window that will not let them
+/// do what they asked for.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the shared open path threads the window, its state and dirty flags, the request, \
+              the resolved parcel, the identity, and the sequence / tally books"
+)]
+fn start_land_open(
+    window: Entity,
+    state: &mut AboutLandState,
+    dirty: &mut AboutLandDirty,
+    request: OpenAboutLand,
+    bound: Option<ParcelInfo>,
+    identity: &SlIdentity,
+    sequence: &mut LandSequence,
+    tallies: &mut OwnerTallyQueue,
+    commands: &mut MessageWriter<SlCommand>,
+) {
+    let already = state.target.is_some() && state.target == bound.as_ref().map(|p| p.local_id);
+    if already {
+        // The same parcel's window, re-opened: keep its data and its pending
+        // edits, and only re-gate for the requested mode.
+        if state.read_only != request.read_only {
+            state.read_only = request.read_only;
+            if let Some(parcel) = state.parcel.clone() {
+                state.rebind_rights(&parcel, identity);
+            }
+            dirty.controls = true;
+            dirty.editable_values = true;
+        }
+        return;
+    }
+    state.reset(request.read_only);
+    match request.subject {
+        AboutLandSubject::CurrentParcel(local_id) => {
+            if let Some(parcel) = bound {
+                state.bind(parcel, identity);
+                if let Some(scoped) = state.scoped(identity) {
+                    request_tab_data(state, window, scoped, tallies, commands);
                 }
             } else {
                 // No local copy — ask the sim for it by id and bind on the reply.
                 state.target = Some(local_id);
-                if let Some(scoped) = state.scoped(&identity) {
-                    let sequence_id = state.next_sequence();
+                if let Some(scoped) = state.scoped(identity) {
+                    let sequence_id = sequence.next();
                     state.pending_sequence = Some(sequence_id);
                     commands.write(SlCommand(Command::RequestParcelPropertiesById {
                         local_id: scoped,
@@ -1549,7 +1747,7 @@ fn open_about_land(
         AboutLandSubject::AtPoint { x, y } => {
             // Ask the sim which parcel contains the clicked point; bind on the
             // reply (matched by the echoed sequence id).
-            let sequence_id = state.next_sequence();
+            let sequence_id = sequence.next();
             state.pending_sequence = Some(sequence_id);
             commands.write(SlCommand(Command::RequestParcelProperties {
                 west: x,
@@ -1563,15 +1761,6 @@ fn open_about_land(
     // The estate covenant is region-scoped (needs no parcel), so request it now.
     commands.write(SlCommand(Command::RequestEstateCovenant));
     dirty.mark_all();
-
-    // By stable id, not `AboutLandUi` — this very open may be the first, which
-    // is what triggers the deferred content build; the populate systems then
-    // consume the dirty flags set above once the UI exists.
-    if let Some(panel) = floater_panel(&floaters, ABOUT_LAND_FLOATER_ID)
-        && let Ok(mut shown) = panels.get_mut(panel)
-    {
-        shown.0 = true;
-    }
 }
 
 /// Request a bound parcel's per-parcel tab data (owners, dwell, access lists).
@@ -1581,13 +1770,16 @@ fn open_about_land(
 /// entries the grid has since dropped would survive.
 fn request_tab_data(
     state: &mut AboutLandState,
+    window: Entity,
     scoped: ScopedParcelId,
+    tallies: &mut OwnerTallyQueue,
     commands: &mut MessageWriter<SlCommand>,
 ) {
     state.clear_access_lists();
-    commands.write(SlCommand(Command::RequestParcelObjectOwners {
-        local_id: scoped,
-    }));
+    // The object-owner tally is asked for through the queue: its reply names no
+    // parcel, so only one window may have one outstanding
+    // (`OwnerTallyQueue`).
+    tallies.ask(window, scoped);
     commands.write(SlCommand(Command::RequestParcelDwell { local_id: scoped }));
     commands.write(SlCommand(Command::RequestParcelAccessList {
         local_id: scoped,
@@ -1621,119 +1813,250 @@ fn find_parcel<'a>(
 // Ingest.
 // ---------------------------------------------------------------------------
 
-/// Fold parcel / covenant / dwell / owner / access / media replies into the model.
+/// Fold parcel / covenant / dwell / owner / access / media replies into every
+/// window's model.
+///
+/// A frame's events are collected once and replayed per window: a
+/// [`MessageReader`] is consumed by the first pass over it, so with two windows
+/// open the second would see nothing.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources: the event stream, every \
+              window's model, the identity, the sequence / tally books, the keying outputs and \
+              the command writer"
+)]
 fn ingest_about_land_events(
     mut events: MessageReader<SlEvent>,
-    mut state: ResMut<AboutLandState>,
-    mut dirty: ResMut<AboutLandDirty>,
+    mut windows: Query<(Entity, &mut AboutLandState, &mut AboutLandDirty)>,
+    mut floaters: Query<&mut Floater>,
+    mut tallies: ResMut<OwnerTallyQueue>,
     identity: Res<SlIdentity>,
+    agent_parcel: Res<SlAgentParcel>,
+    mut closes: MessageWriter<FloaterCommand>,
     mut commands: MessageWriter<SlCommand>,
 ) {
-    // Process while a subject is bound, or a point-open is awaiting its reply.
-    if state.target.is_none() && state.pending_sequence.is_none() {
-        events.clear();
+    let frame: Vec<&SlEvent> = events.read().collect();
+    if frame.is_empty() {
         return;
     }
-    for event in events.read() {
-        match &event.0 {
-            SlSessionEvent::ParcelProperties(parcel)
-                if state.pending_sequence == Some(parcel.sequence_id) =>
-            {
-                // The awaited point / id resolve: bind this parcel as the subject
-                // and fetch the rest of its tab data.
-                state.bind((**parcel).clone(), &identity);
-                if let Some(scoped) = state.scoped(&identity) {
-                    request_tab_data(&mut state, scoped, &mut commands);
-                }
-                dirty.mark_all();
-            }
-            SlSessionEvent::ParcelProperties(parcel) if Some(parcel.local_id) == state.target => {
-                state.parcel = Some((**parcel).clone());
-                // Seeds on the first record for this subject, merges on every
-                // one after it. Without the merge the draft stayed as it was at
-                // open and **Apply** re-asserted all eighteen fields, reverting
-                // whatever another resident changed in between
-                // ([[viewer-floaters-never-reread-after-a-push]]).
-                state.seed_draft();
-                if state.merge_parcel(parcel) {
-                    dirty.seed_fields = FieldSeed::Unedited;
-                }
-                dirty.general_values = true;
-                dirty.objects_values = true;
-                dirty.editable_values = true;
-                dirty.environment_values = true;
-            }
-            SlSessionEvent::ParcelDwell {
-                local_id, dwell, ..
-            } if Some(local_id.id()) == state.target => {
-                state.dwell = Some(*dwell);
-                dirty.general_values = true;
-            }
-            SlSessionEvent::ParcelObjectOwners { owners } => {
-                state.owners.clone_from(owners);
-                request_names_for_owners(&state, &mut commands);
-                state.owners_revision = state.owners_revision.wrapping_add(1);
-                dirty.objects_values = true;
-            }
-            SlSessionEvent::ParcelAccessList {
-                local_id,
-                scope,
-                entries,
-            } if Some(local_id.id()) == state.target => {
-                // One request is answered by **one or more** packets, each
-                // carrying a slice of the list — so a packet is folded in, not
-                // swapped for the list. The accumulator was emptied when the
-                // list was requested (`request_tab_data`).
-                let changed = {
-                    // Deref the `ResMut` once: borrowing two fields through it
-                    // separately would be two whole-resource borrows.
-                    let land = &mut *state;
-                    let (list, revision) = match scope {
-                        ParcelAccessScope::Access => {
-                            (&mut land.access_allow, &mut land.allow_revision)
-                        }
-                        ParcelAccessScope::Ban => (&mut land.access_ban, &mut land.ban_revision),
-                    };
-                    if merge_access_reply(list, entries) {
-                        *revision = revision.wrapping_add(1);
-                        true
-                    } else {
-                        false
-                    }
-                };
-                if changed {
-                    request_names_for_access(&state, &mut commands);
-                }
-            }
-            SlSessionEvent::ParcelMediaUpdate(media) => {
-                state.media = Some(media.clone());
-                dirty.editable_values = true;
-            }
-            SlSessionEvent::EstateCovenant(covenant) => {
-                if let Some(id) = covenant.covenant_id {
-                    state.covenant_pending = Some(id);
-                    commands.write(SlCommand(Command::FetchAsset {
-                        asset_id: AssetKey::from(id),
-                        asset_type: AssetType::Notecard,
-                        byte_range: None,
-                    }));
-                } else {
-                    state.covenant_text = None;
-                    state.covenant_pending = None;
-                }
-                if let Some(agent) = estate_owner_agent(covenant) {
-                    request_name(agent, &mut commands);
-                }
-                state.covenant = Some(covenant.clone());
-                dirty.covenant_values = true;
-            }
-            SlSessionEvent::AssetReceived(asset) if state.covenant_pending == Some(asset.id) => {
-                state.covenant_pending = None;
-                state.covenant_text = Some(decode_covenant(asset));
-                dirty.covenant_values = true;
-            }
-            _other => {}
+    // Which parcels already have a window, so a point open that lands on one of
+    // them folds into it instead of becoming a second window on one parcel.
+    let bound: Vec<(Entity, RegionLocalParcelId)> = windows
+        .iter()
+        .filter_map(|(window, state, _dirty)| Some((window, state.target?)))
+        .collect();
+    for (window, mut state, mut dirty) in &mut windows {
+        // Process while a subject is bound, or a point-open is awaiting its reply.
+        if state.target.is_none() && state.pending_sequence.is_none() {
+            continue;
         }
+        for event in &frame {
+            match &event.0 {
+                SlSessionEvent::ParcelProperties(parcel)
+                    if state.pending_sequence == Some(parcel.sequence_id) =>
+                {
+                    // The awaited point / id resolve: bind this parcel as the
+                    // subject and fetch the rest of its tab data.
+                    state.bind((**parcel).clone(), &identity);
+                    let folded = bind_point_window(
+                        window,
+                        parcel.local_id,
+                        &bound,
+                        &identity,
+                        &mut floaters,
+                        &mut closes,
+                    );
+                    if folded {
+                        // This click's parcel already has a window; that one
+                        // keeps the subject and this one is closing.
+                        tallies.forget(window);
+                        break;
+                    }
+                    if let Some(scoped) = state.scoped(&identity) {
+                        request_tab_data(&mut state, window, scoped, &mut tallies, &mut commands);
+                    }
+                    dirty.mark_all();
+                }
+                SlSessionEvent::ParcelProperties(parcel)
+                    if Some(parcel.local_id) == state.target =>
+                {
+                    state.parcel = Some((**parcel).clone());
+                    // Seeds on the first record for this subject, merges on every
+                    // one after it. Without the merge the draft stayed as it was at
+                    // open and **Apply** re-asserted all eighteen fields, reverting
+                    // whatever another resident changed in between
+                    // ([[viewer-floaters-never-reread-after-a-push]]).
+                    state.seed_draft();
+                    if state.merge_parcel(parcel) {
+                        dirty.seed_fields = FieldSeed::Unedited;
+                    }
+                    dirty.general_values = true;
+                    dirty.objects_values = true;
+                    dirty.editable_values = true;
+                    dirty.environment_values = true;
+                }
+                SlSessionEvent::ParcelDwell {
+                    local_id, dwell, ..
+                } if Some(local_id.id()) == state.target => {
+                    state.dwell = Some(*dwell);
+                    dirty.general_values = true;
+                }
+                // The tally names no parcel, so it belongs to the window whose
+                // request is outstanding (`OwnerTallyQueue`).
+                SlSessionEvent::ParcelObjectOwners { owners } if tallies.owns_reply(window) => {
+                    state.owners.clone_from(owners);
+                    request_names_for_owners(&state, &mut commands);
+                    state.owners_revision = state.owners_revision.wrapping_add(1);
+                    dirty.objects_values = true;
+                }
+                SlSessionEvent::ParcelAccessList {
+                    local_id,
+                    scope,
+                    entries,
+                } if Some(local_id.id()) == state.target => {
+                    // One request is answered by **one or more** packets, each
+                    // carrying a slice of the list — so a packet is folded in, not
+                    // swapped for the list. The accumulator was emptied when the
+                    // list was requested (`request_tab_data`).
+                    let changed = {
+                        // Deref the `Mut` once: borrowing two fields through it
+                        // separately would be two whole-component borrows.
+                        let land = &mut *state;
+                        let (list, revision) = match scope {
+                            ParcelAccessScope::Access => {
+                                (&mut land.access_allow, &mut land.allow_revision)
+                            }
+                            ParcelAccessScope::Ban => {
+                                (&mut land.access_ban, &mut land.ban_revision)
+                            }
+                        };
+                        if merge_access_reply(list, entries) {
+                            *revision = revision.wrapping_add(1);
+                            true
+                        } else {
+                            false
+                        }
+                    };
+                    if changed {
+                        request_names_for_access(&state, &mut commands);
+                    }
+                }
+                // A media push names no parcel either, but it is always about
+                // the parcel the agent is standing in — so only that parcel's
+                // window takes it, rather than every window showing the
+                // neighbours' media.
+                SlSessionEvent::ParcelMediaUpdate(media)
+                    if agent_parcel
+                        .current
+                        .as_ref()
+                        .is_some_and(|parcel| Some(parcel.local_id) == state.target) =>
+                {
+                    state.media = Some(media.clone());
+                    dirty.editable_values = true;
+                }
+                // The covenant is estate-scoped, so every window in the estate
+                // shows the same one.
+                SlSessionEvent::EstateCovenant(covenant) => {
+                    if let Some(id) = covenant.covenant_id {
+                        state.covenant_pending = Some(id);
+                        commands.write(SlCommand(Command::FetchAsset {
+                            asset_id: AssetKey::from(id),
+                            asset_type: AssetType::Notecard,
+                            byte_range: None,
+                        }));
+                    } else {
+                        state.covenant_text = None;
+                        state.covenant_pending = None;
+                    }
+                    if let Some(agent) = estate_owner_agent(covenant) {
+                        request_name(agent, &mut commands);
+                    }
+                    state.covenant = Some(covenant.clone());
+                    dirty.covenant_values = true;
+                }
+                SlSessionEvent::AssetReceived(asset)
+                    if state.covenant_pending == Some(asset.id) =>
+                {
+                    state.covenant_pending = None;
+                    state.covenant_text = Some(decode_covenant(asset));
+                    dirty.covenant_values = true;
+                }
+                _other => {}
+            }
+        }
+    }
+}
+
+/// Settle a point-opened window onto the parcel its click landed in: fold it
+/// into that parcel's existing window if there is one, and otherwise re-key it
+/// from its provisional [`point_key`] to the parcel's own.
+///
+/// Returns whether this window folded (and is therefore closing).
+fn bind_point_window(
+    window: Entity,
+    local_id: RegionLocalParcelId,
+    bound: &[(Entity, RegionLocalParcelId)],
+    identity: &SlIdentity,
+    floaters: &mut Query<&mut Floater>,
+    closes: &mut MessageWriter<FloaterCommand>,
+) -> bool {
+    let Some(circuit) = identity.circuit_id else {
+        return false;
+    };
+    let key = parcel_key(ScopedParcelId::new(circuit, local_id));
+    let Ok(mut floater) = floaters.get_mut(window) else {
+        return false;
+    };
+    if floater.key() == Some(&key) {
+        // Opened on a known parcel: it was keyed by it from the start.
+        return false;
+    }
+    if let Some((existing, _parcel)) = bound
+        .iter()
+        .find(|(other, parcel)| *other != window && *parcel == local_id)
+    {
+        // Two clicks in one parcel: the first window keeps it.
+        closes.write(FloaterCommand {
+            floater: *existing,
+            op: FloaterOp::BringToFront,
+        });
+        closes.write(FloaterCommand {
+            floater: window,
+            op: FloaterOp::Close,
+        });
+        return true;
+    }
+    floater.rekey(key);
+    false
+}
+
+/// Send the outstanding object-owner tally request, one window at a time.
+///
+/// The reply names no parcel (`OwnerTallyQueue`), so a second request in flight
+/// would make it ambiguous; a window that goes unanswered releases its turn
+/// after [`OWNER_TALLY_TIMEOUT_SECONDS`].
+fn drive_owner_tallies(
+    mut tallies: ResMut<OwnerTallyQueue>,
+    windows: Query<(), With<AboutLandState>>,
+    time: Res<Time>,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    let now = time.elapsed_secs_f64();
+    if let Some((asking, deadline)) = tallies.asking {
+        if windows.contains(asking) && now < deadline {
+            return;
+        }
+        tallies.asking = None;
+    }
+    while let Some((window, parcel)) = tallies.waiting.pop_front() {
+        if !windows.contains(window) {
+            continue;
+        }
+        commands.write(SlCommand(Command::RequestParcelObjectOwners {
+            local_id: parcel,
+        }));
+        tallies.asking = Some((window, now + OWNER_TALLY_TIMEOUT_SECONDS));
+        return;
     }
 }
 
@@ -1743,9 +2066,12 @@ fn ingest_about_land_events(
 fn refresh_on_names(
     avatars: Res<AvatarState>,
     groups: Res<GroupsModel>,
-    mut dirty: ResMut<AboutLandDirty>,
+    mut windows: Query<&mut AboutLandDirty>,
 ) {
-    if avatars.is_changed() || groups.is_changed() {
+    if !avatars.is_changed() && !groups.is_changed() {
+        return;
+    }
+    for mut dirty in &mut windows {
         dirty.general_values = true;
     }
 }
@@ -1810,84 +2136,88 @@ fn request_name(agent: AgentKey, commands: &mut MessageWriter<SlCommand>) {
 /// only rewritten if its text still equals what was last seeded into it, so
 /// typing that has not been applied yet is never overwritten by somebody else's
 /// save landing mid-sentence.
+/// Seed one window's edit fields' text from its draft.
+///
+/// [`FieldSeed::All`] on a fresh subject, [`FieldSeed::Unedited`] after a record
+/// arrived and moved the draft under the resident. In the second mode a field is
+/// only rewritten if its text still equals what was last seeded into it, so
+/// typing that has not been applied yet is never overwritten by somebody else's
+/// save landing mid-sentence.
 fn seed_edit_fields(
-    mut dirty: ResMut<AboutLandDirty>,
-    ui: Option<Res<AboutLandUi>>,
-    mut state: ResMut<AboutLandState>,
+    mut windows: Query<(&mut AboutLandDirty, &AboutLandUi, &mut AboutLandState)>,
     mut fields: Query<&mut EditableText>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    let mode = dirty.seed_fields;
-    if mode == FieldSeed::None {
-        return;
-    }
-    dirty.seed_fields = FieldSeed::None;
-    let wanted = FieldText::from_draft(&state.draft);
-    // What the previous pass wrote. In `Unedited` mode a field that no longer
-    // reads as it was written has been typed in, and is left alone; in `All`
-    // mode the subject itself changed, so the old text means nothing.
-    let shown = match mode {
-        FieldSeed::None | FieldSeed::All => None,
-        FieldSeed::Unedited => state.shown_fields.clone(),
-    };
-    // What this pass leaves on screen: the value it wrote, or the resident's
-    // own text where it declined to write. Recording the latter is what stops
-    // the *next* push from reading the typing as "changed back".
-    let mut left = wanted.clone();
-    // Each row carries its own slot in `left`, so there is no index to keep in
-    // step with the field order.
-    let rows: [(Option<Entity>, &str, Option<&str>, &mut String); 6] = [
-        (
-            ui.general_handles.name_field,
-            &wanted.name,
-            shown.as_ref().map(|shown| shown.name.as_str()),
-            &mut left.name,
-        ),
-        (
-            ui.general_handles.desc_field,
-            &wanted.description,
-            shown.as_ref().map(|shown| shown.description.as_str()),
-            &mut left.description,
-        ),
-        (
-            ui.media_handles.url_field,
-            &wanted.media_url,
-            shown.as_ref().map(|shown| shown.media_url.as_str()),
-            &mut left.media_url,
-        ),
-        (
-            ui.sound_handles.music_field,
-            &wanted.music_url,
-            shown.as_ref().map(|shown| shown.music_url.as_str()),
-            &mut left.music_url,
-        ),
-        (
-            ui.access_handles.pass_price_field,
-            &wanted.pass_price,
-            shown.as_ref().map(|shown| shown.pass_price.as_str()),
-            &mut left.pass_price,
-        ),
-        (
-            ui.access_handles.pass_hours_field,
-            &wanted.pass_hours,
-            shown.as_ref().map(|shown| shown.pass_hours.as_str()),
-            &mut left.pass_hours,
-        ),
-    ];
-    for (field, want, previous, slot) in rows {
-        if let Some(previous) = previous
-            && !field_reads(&fields, field, previous)
-        {
-            if let Some(text) = field_text(&fields, field) {
-                *slot = text;
-            }
+    for (mut dirty, ui, mut state) in &mut windows {
+        let mode = dirty.seed_fields;
+        if mode == FieldSeed::None {
             continue;
         }
-        set_field_text(&mut fields, field, want);
+        dirty.seed_fields = FieldSeed::None;
+        let wanted = FieldText::from_draft(&state.draft);
+        // What the previous pass wrote. In `Unedited` mode a field that no longer
+        // reads as it was written has been typed in, and is left alone; in `All`
+        // mode the subject itself changed, so the old text means nothing.
+        let shown = match mode {
+            FieldSeed::None | FieldSeed::All => None,
+            FieldSeed::Unedited => state.shown_fields.clone(),
+        };
+        // What this pass leaves on screen: the value it wrote, or the resident's
+        // own text where it declined to write. Recording the latter is what stops
+        // the *next* push from reading the typing as "changed back".
+        let mut left = wanted.clone();
+        // Each row carries its own slot in `left`, so there is no index to keep in
+        // step with the field order.
+        let rows: [(Option<Entity>, &str, Option<&str>, &mut String); 6] = [
+            (
+                ui.general_handles.name_field,
+                &wanted.name,
+                shown.as_ref().map(|shown| shown.name.as_str()),
+                &mut left.name,
+            ),
+            (
+                ui.general_handles.desc_field,
+                &wanted.description,
+                shown.as_ref().map(|shown| shown.description.as_str()),
+                &mut left.description,
+            ),
+            (
+                ui.media_handles.url_field,
+                &wanted.media_url,
+                shown.as_ref().map(|shown| shown.media_url.as_str()),
+                &mut left.media_url,
+            ),
+            (
+                ui.sound_handles.music_field,
+                &wanted.music_url,
+                shown.as_ref().map(|shown| shown.music_url.as_str()),
+                &mut left.music_url,
+            ),
+            (
+                ui.access_handles.pass_price_field,
+                &wanted.pass_price,
+                shown.as_ref().map(|shown| shown.pass_price.as_str()),
+                &mut left.pass_price,
+            ),
+            (
+                ui.access_handles.pass_hours_field,
+                &wanted.pass_hours,
+                shown.as_ref().map(|shown| shown.pass_hours.as_str()),
+                &mut left.pass_hours,
+            ),
+        ];
+        for (field, want, previous, slot) in rows {
+            if let Some(previous) = previous
+                && !field_reads(&fields, field, previous)
+            {
+                if let Some(text) = field_text(&fields, field) {
+                    *slot = text;
+                }
+                continue;
+            }
+            set_field_text(&mut fields, field, want);
+        }
+        state.shown_fields = Some(left);
     }
-    state.shown_fields = Some(left);
 }
 
 /// A field's current text, if it exists.
@@ -1908,30 +2238,58 @@ fn field_reads(fields: &Query<&mut EditableText>, field: Option<Entity>, value: 
 
 /// Toggle write buttons' visibility and every editable control's
 /// [`InteractionDisabled`] to follow the agent's rights.
+/// Toggle each window's write buttons' visibility and every editable control's
+/// [`InteractionDisabled`] to follow the agent's rights **in that window**.
+///
+/// The controls are found by walking up from each one to the window it lives in
+/// ([`host_floater`]), rather than by sweeping every control in the viewer: two
+/// About Land windows can disagree about `can_edit` — one on a parcel this
+/// resident owns, one on a neighbour's — and a sweep would give both the last
+/// window's answer.
 fn update_control_enable(
-    mut dirty: ResMut<AboutLandDirty>,
-    state: Res<AboutLandState>,
-    mut write_buttons: Query<&mut Visibility, With<WriteButton>>,
+    mut windows: Query<(Entity, &mut AboutLandDirty, &AboutLandState)>,
+    mut write_buttons: Query<(Entity, &mut Visibility), With<WriteButton>>,
     gated: Query<(Entity, &EditGate)>,
     disabled: Query<(), With<InteractionDisabled>>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
     mut commands: Commands,
 ) {
-    if !dirty.controls {
+    // The windows repainting this frame, and what each one allows.
+    let mut repainting: Vec<(Entity, bool)> = Vec::new();
+    for (window, mut dirty, state) in &mut windows {
+        if !dirty.controls {
+            continue;
+        }
+        dirty.controls = false;
+        repainting.push((window, state.can_edit));
+    }
+    if repainting.is_empty() {
         return;
     }
-    dirty.controls = false;
-    let can_edit = state.can_edit;
-    let button_vis = if can_edit {
-        Visibility::Inherited
-    } else {
-        Visibility::Hidden
+    let can_edit = |entity: Entity| {
+        let host = host_floater(entity, &parents, &floaters)?;
+        repainting
+            .iter()
+            .find_map(|(window, can_edit)| (*window == host).then_some(*can_edit))
     };
-    for mut visibility in &mut write_buttons {
-        if *visibility != button_vis {
-            *visibility = button_vis;
+    for (entity, mut visibility) in &mut write_buttons {
+        let Some(can_edit) = can_edit(entity) else {
+            continue;
+        };
+        let want = if can_edit {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        if *visibility != want {
+            *visibility = want;
         }
     }
     for (entity, gate) in &gated {
+        let Some(can_edit) = can_edit(entity) else {
+            continue;
+        };
         let enabled = match gate {
             EditGate::Owner => can_edit,
             EditGate::Never => false,
@@ -1946,305 +2304,305 @@ fn update_control_enable(
 }
 
 /// Refresh the General tab's read-only values in place.
+/// Refresh each window's General tab read-only values in place.
 fn update_general_tab(
-    mut dirty: ResMut<AboutLandDirty>,
-    ui: Option<Res<AboutLandUi>>,
-    state: Res<AboutLandState>,
+    mut windows: Query<(&mut AboutLandDirty, &AboutLandUi, &AboutLandState)>,
     regions: Query<&SlRegionIdentity, With<SlCurrentRegion>>,
     translator: Translator,
     mut texts: Query<(&mut Text, &mut TextColor)>,
     mut links: Query<&mut NameLink>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    if !dirty.general_values {
-        return;
+    for (mut dirty, ui, state) in &mut windows {
+        if !dirty.general_values {
+            continue;
+        }
+        dirty.general_values = false;
+        let texts = &mut texts;
+        let handles = &ui.general_handles;
+        let region = regions.iter().next().map(|region| &region.0);
+        let Some(parcel) = &state.parcel else {
+            continue;
+        };
+        set_value_node(texts, handles.parcel_id, &parcel.local_id.0.to_string());
+        set_value_node(
+            texts,
+            handles.land_type,
+            &product_text(region.map(|r| r.product), &translator),
+        );
+        set_value_node(
+            texts,
+            handles.rating,
+            &maturity_text(region.map(|r| r.maturity), &translator),
+        );
+        // The parcel owner is always present in the reply (an agent or a deeded
+        // group); the widget annotates a group owner with "(group owned)".
+        set_name_link(
+            &mut links,
+            handles.owner,
+            NameTarget::from_option(true, Some(parcel.owner)),
+        );
+        set_name_link(
+            &mut links,
+            handles.group,
+            NameTarget::from_option(true, parcel.group),
+        );
+        set_value_node(texts, handles.area, &parcel.area.to_string());
+        set_value_node(
+            texts,
+            handles.claimed,
+            &format_unix_date(i64::from(parcel.claim_date)),
+        );
+        set_value_node(
+            texts,
+            handles.traffic,
+            &state
+                .dwell
+                .map_or_else(|| translator.get("about-land-loading"), format_dwell),
+        );
+        set_value_node(texts, handles.for_sale, &sale_text(parcel, &translator));
     }
-    dirty.general_values = false;
-    let texts = &mut texts;
-    let handles = &ui.general_handles;
-    let region = regions.iter().next().map(|region| &region.0);
-    let Some(parcel) = &state.parcel else {
-        return;
-    };
-    set_value_node(texts, handles.parcel_id, &parcel.local_id.0.to_string());
-    set_value_node(
-        texts,
-        handles.land_type,
-        &product_text(region.map(|r| r.product), &translator),
-    );
-    set_value_node(
-        texts,
-        handles.rating,
-        &maturity_text(region.map(|r| r.maturity), &translator),
-    );
-    // The parcel owner is always present in the reply (an agent or a deeded
-    // group); the widget annotates a group owner with "(group owned)".
-    set_name_link(
-        &mut links,
-        handles.owner,
-        NameTarget::from_option(true, Some(parcel.owner)),
-    );
-    set_name_link(
-        &mut links,
-        handles.group,
-        NameTarget::from_option(true, parcel.group),
-    );
-    set_value_node(texts, handles.area, &parcel.area.to_string());
-    set_value_node(
-        texts,
-        handles.claimed,
-        &format_unix_date(i64::from(parcel.claim_date)),
-    );
-    set_value_node(
-        texts,
-        handles.traffic,
-        &state
-            .dwell
-            .map_or_else(|| translator.get("about-land-loading"), format_dwell),
-    );
-    set_value_node(texts, handles.for_sale, &sale_text(parcel, &translator));
 }
 
 /// Refresh the Options / Media / Sound controls in place: checkbox glyphs (with
 /// their enabled greying), combos, texture ids, media read-outs, landing point.
+/// Refresh each window's Options / Media / Sound controls in place: checkbox
+/// glyphs (with their enabled greying), combos, texture ids, media read-outs,
+/// landing point.
+///
+/// The checkboxes are matched to their window by walking up from each one
+/// ([`host_floater`]) — see [`update_control_enable`] for why a sweep is wrong.
 fn update_editable_tab(
-    mut dirty: ResMut<AboutLandDirty>,
-    ui: Option<Res<AboutLandUi>>,
-    state: Res<AboutLandState>,
-    checks: Query<&AboutLandCheck>,
+    mut windows: Query<(Entity, &mut AboutLandDirty, &AboutLandUi, &AboutLandState)>,
+    checks: Query<(Entity, &AboutLandCheck)>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
     mut combos: Query<&mut ComboSelection>,
     translator: Translator,
     mut texts: Query<(&mut Text, &mut TextColor)>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    if !dirty.editable_values {
-        return;
+    for (window, mut dirty, ui, state) in &mut windows {
+        if !dirty.editable_values {
+            continue;
+        }
+        dirty.editable_values = false;
+        let texts = &mut texts;
+        let can_edit = state.can_edit;
+        for (entity, check) in &checks {
+            if host_floater(entity, &parents, &floaters) != Some(window) {
+                continue;
+            }
+            let on = check.kind.checked(state);
+            let enabled = can_edit && check.kind.editable();
+            set_check_visual(texts, check, on, enabled);
+        }
+        let draft = &state.draft;
+        set_combo(
+            &mut combos,
+            ui.options_handles.category_combo,
+            usize::from(draft.category.to_u8()),
+        );
+        set_combo(
+            &mut combos,
+            ui.options_handles.landing_combo,
+            usize::from(draft.landing_type.min(2)),
+        );
+        set_value_node(
+            texts,
+            ui.options_handles.snapshot_value,
+            &texture_label(draft.snapshot_id),
+        );
+        set_value_node(
+            texts,
+            ui.media_handles.texture_value,
+            &texture_label(draft.media_id),
+        );
+        set_value_node(
+            texts,
+            ui.options_handles.landing_point,
+            &coord_text(&draft.user_location),
+        );
+        let media_type = state.media.as_ref().map_or_else(
+            || translator.get("about-land-none"),
+            |m| m.media_type.clone(),
+        );
+        set_value_node(texts, ui.media_handles.media_type, &media_type);
+        set_value_node(
+            texts,
+            ui.media_handles.media_size,
+            &media_size_text(state.media.as_ref(), &translator),
+        );
     }
-    dirty.editable_values = false;
-    let texts = &mut texts;
-    let can_edit = state.can_edit;
-    for check in &checks {
-        let on = check.kind.checked(&state);
-        let enabled = can_edit && check.kind.editable();
-        set_check_visual(texts, check, on, enabled);
-    }
-    let draft = &state.draft;
-    set_combo(
-        &mut combos,
-        ui.options_handles.category_combo,
-        usize::from(draft.category.to_u8()),
-    );
-    set_combo(
-        &mut combos,
-        ui.options_handles.landing_combo,
-        usize::from(draft.landing_type.min(2)),
-    );
-    set_value_node(
-        texts,
-        ui.options_handles.snapshot_value,
-        &texture_label(draft.snapshot_id),
-    );
-    set_value_node(
-        texts,
-        ui.media_handles.texture_value,
-        &texture_label(draft.media_id),
-    );
-    set_value_node(
-        texts,
-        ui.options_handles.landing_point,
-        &coord_text(&draft.user_location),
-    );
-    let media_type = state.media.as_ref().map_or_else(
-        || translator.get("about-land-none"),
-        |m| m.media_type.clone(),
-    );
-    set_value_node(texts, ui.media_handles.media_type, &media_type);
-    set_value_node(
-        texts,
-        ui.media_handles.media_size,
-        &media_size_text(state.media.as_ref(), &translator),
-    );
 }
 
 /// Refresh the Covenant tab's values in place.
+/// Refresh each window's Covenant tab values in place.
 fn update_covenant_tab(
-    mut dirty: ResMut<AboutLandDirty>,
-    ui: Option<Res<AboutLandUi>>,
-    state: Res<AboutLandState>,
+    mut windows: Query<(&mut AboutLandDirty, &AboutLandUi, &AboutLandState)>,
     avatars: Res<AvatarState>,
     regions: Query<&SlRegionIdentity, With<SlCurrentRegion>>,
     translator: Translator,
     mut texts: Query<(&mut Text, &mut TextColor)>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    if !dirty.covenant_values {
-        return;
-    }
-    dirty.covenant_values = false;
-    let texts = &mut texts;
-    let handles = &ui.covenant_handles;
-    let region = regions.iter().next().map(|region| &region.0);
-    if let Some(covenant) = &state.covenant {
-        set_value_node(texts, handles.estate, &covenant.estate_name);
+    for (mut dirty, ui, state) in &mut windows {
+        if !dirty.covenant_values {
+            continue;
+        }
+        dirty.covenant_values = false;
+        let texts = &mut texts;
+        let handles = &ui.covenant_handles;
+        let region = regions.iter().next().map(|region| &region.0);
+        if let Some(covenant) = &state.covenant {
+            set_value_node(texts, handles.estate, &covenant.estate_name);
+            set_value_node(
+                texts,
+                handles.estate_owner,
+                &estate_owner_agent(covenant).map_or_else(
+                    || translator.get("about-land-none"),
+                    |agent| name_of(agent, &avatars),
+                ),
+            );
+            set_value_node(
+                texts,
+                handles.timestamp,
+                &format_unix_date(i64::from(covenant.covenant_timestamp)),
+            );
+        }
         set_value_node(
             texts,
-            handles.estate_owner,
-            &estate_owner_agent(covenant).map_or_else(
-                || translator.get("about-land-none"),
-                |agent| name_of(agent, &avatars),
+            handles.text,
+            &covenant_body(
+                state.covenant.as_ref(),
+                state.covenant_text.as_deref(),
+                &translator,
             ),
         );
         set_value_node(
             texts,
-            handles.timestamp,
-            &format_unix_date(i64::from(covenant.covenant_timestamp)),
+            handles.region,
+            &region
+                .and_then(|r| r.sim_name.as_ref())
+                .map_or_else(|| translator.get("about-land-loading"), ToString::to_string),
+        );
+        set_value_node(
+            texts,
+            handles.region_type,
+            &product_text(region.map(|r| r.product), &translator),
+        );
+        set_value_node(
+            texts,
+            handles.region_rating,
+            &maturity_text(region.map(|r| r.maturity), &translator),
+        );
+        let region_flags = region.map(|r| RegionFlags::from_bits(r.region_flags));
+        set_value_node(
+            texts,
+            handles.resale,
+            &resale_text(region_flags, &translator),
+        );
+        set_value_node(
+            texts,
+            handles.subdivide,
+            &subdivide_text(region_flags, &translator),
         );
     }
-    set_value_node(
-        texts,
-        handles.text,
-        &covenant_body(
-            state.covenant.as_ref(),
-            state.covenant_text.as_deref(),
-            &translator,
-        ),
-    );
-    set_value_node(
-        texts,
-        handles.region,
-        &region
-            .and_then(|r| r.sim_name.as_ref())
-            .map_or_else(|| translator.get("about-land-loading"), ToString::to_string),
-    );
-    set_value_node(
-        texts,
-        handles.region_type,
-        &product_text(region.map(|r| r.product), &translator),
-    );
-    set_value_node(
-        texts,
-        handles.region_rating,
-        &maturity_text(region.map(|r| r.maturity), &translator),
-    );
-    let region_flags = region.map(|r| RegionFlags::from_bits(r.region_flags));
-    set_value_node(
-        texts,
-        handles.resale,
-        &resale_text(region_flags, &translator),
-    );
-    set_value_node(
-        texts,
-        handles.subdivide,
-        &subdivide_text(region_flags, &translator),
-    );
 }
 
 /// Refresh the Objects tab's counts in place.
+/// Refresh each window's Objects tab read-only values in place.
 fn update_objects_tab(
-    mut dirty: ResMut<AboutLandDirty>,
-    ui: Option<Res<AboutLandUi>>,
-    state: Res<AboutLandState>,
+    mut windows: Query<(&mut AboutLandDirty, &AboutLandUi, &AboutLandState)>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    if !dirty.objects_values {
-        return;
+    for (mut dirty, ui, state) in &mut windows {
+        if !dirty.objects_values {
+            continue;
+        }
+        dirty.objects_values = false;
+        let texts = &mut texts;
+        let handles = &ui.object_handles;
+        let Some(parcel) = &state.parcel else {
+            continue;
+        };
+        set_value_node(
+            texts,
+            handles.region_capacity,
+            &format!(
+                "{} / {}",
+                parcel.sim_wide_total_prims, parcel.sim_wide_max_prims
+            ),
+        );
+        set_value_node(
+            texts,
+            handles.parcel_capacity,
+            &parcel.max_prims.to_string(),
+        );
+        set_value_node(
+            texts,
+            handles.parcel_impact,
+            &parcel.total_prims.to_string(),
+        );
+        set_value_node(
+            texts,
+            handles.owner_objects,
+            &parcel.owner_prims.to_string(),
+        );
+        set_value_node(
+            texts,
+            handles.group_objects,
+            &parcel.group_prims.to_string(),
+        );
+        set_value_node(
+            texts,
+            handles.other_objects,
+            &parcel.other_prims.to_string(),
+        );
+        set_value_node(
+            texts,
+            handles.selected_objects,
+            &parcel.selected_prims.to_string(),
+        );
+        set_value_node(
+            texts,
+            handles.autoreturn,
+            &parcel.other_clean_time.to_string(),
+        );
     }
-    dirty.objects_values = false;
-    let texts = &mut texts;
-    let handles = &ui.object_handles;
-    let Some(parcel) = &state.parcel else {
-        return;
-    };
-    set_value_node(
-        texts,
-        handles.region_capacity,
-        &format!(
-            "{} / {}",
-            parcel.sim_wide_total_prims, parcel.sim_wide_max_prims
-        ),
-    );
-    set_value_node(
-        texts,
-        handles.parcel_capacity,
-        &parcel.max_prims.to_string(),
-    );
-    set_value_node(
-        texts,
-        handles.parcel_impact,
-        &parcel.total_prims.to_string(),
-    );
-    set_value_node(
-        texts,
-        handles.owner_objects,
-        &parcel.owner_prims.to_string(),
-    );
-    set_value_node(
-        texts,
-        handles.group_objects,
-        &parcel.group_prims.to_string(),
-    );
-    set_value_node(
-        texts,
-        handles.other_objects,
-        &parcel.other_prims.to_string(),
-    );
-    set_value_node(
-        texts,
-        handles.selected_objects,
-        &parcel.selected_prims.to_string(),
-    );
-    set_value_node(
-        texts,
-        handles.autoreturn,
-        &parcel.other_clean_time.to_string(),
-    );
 }
 
 /// Refresh the Environment tab's read-only summary in place.
+/// Refresh each window's Environment tab read-only summary in place.
 fn update_environment_tab(
-    mut dirty: ResMut<AboutLandDirty>,
-    ui: Option<Res<AboutLandUi>>,
-    state: Res<AboutLandState>,
+    mut windows: Query<(&mut AboutLandDirty, &AboutLandUi, &AboutLandState)>,
     environment: Option<Res<EnvironmentState>>,
     translator: Translator,
     mut texts: Query<(&mut Text, &mut TextColor)>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    if !dirty.environment_values {
-        return;
-    }
-    dirty.environment_values = false;
-    let texts = &mut texts;
-    let handles = &ui.environment_handles;
-    if let Some(parcel) = &state.parcel {
-        let allowed = if parcel.region_allow_environment_override {
-            translator.get("about-land-yes")
-        } else {
-            translator.get("about-land-no")
-        };
-        set_value_node(texts, handles.override_allowed, &allowed);
-        set_value_node(
-            texts,
-            handles.version,
-            &parcel.parcel_environment_version.to_string(),
+    for (mut dirty, ui, state) in &mut windows {
+        if !dirty.environment_values {
+            continue;
+        }
+        dirty.environment_values = false;
+        let texts = &mut texts;
+        let handles = &ui.environment_handles;
+        if let Some(parcel) = &state.parcel {
+            let allowed = if parcel.region_allow_environment_override {
+                translator.get("about-land-yes")
+            } else {
+                translator.get("about-land-no")
+            };
+            set_value_node(texts, handles.override_allowed, &allowed);
+            set_value_node(
+                texts,
+                handles.version,
+                &parcel.parcel_environment_version.to_string(),
+            );
+        }
+        let summary = environment.as_ref().map_or_else(
+            || translator.get("about-land-loading"),
+            |env| day_cycle_summary(&env.settings),
         );
+        set_value_node(texts, handles.day_cycle, &summary);
     }
-    let summary = environment.map_or_else(
-        || translator.get("about-land-loading"),
-        |env| day_cycle_summary(&env.settings),
-    );
-    set_value_node(texts, handles.day_cycle, &summary);
 }
 
 // ---------------------------------------------------------------------------
@@ -2253,93 +2611,94 @@ fn update_environment_tab(
 
 /// Rebuild the object-owners view (resolving names) when the tally or the name
 /// caches change, and keep the virtual list's item count in step.
+/// Rebuild each window's object-owners view (resolving names) when its tally or
+/// the name caches change, and keep its virtual list's item count in step.
 fn sync_owners_view(
-    state: Res<AboutLandState>,
-    mut view: ResMut<OwnersView>,
-    ui: Option<Res<AboutLandUi>>,
+    mut windows: Query<(&AboutLandState, &mut OwnersView, &AboutLandUi)>,
     avatars: Res<AvatarState>,
     groups: Res<GroupsModel>,
     translator: Translator,
     mut lists: Query<&mut VirtualList>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    if view.built == state.owners_revision && !avatars.is_changed() && !groups.is_changed() {
-        return;
-    }
-    view.built = state.owners_revision;
-    view.rows = state
-        .owners
-        .iter()
-        .map(|owner| {
-            let (kind_key, name) = match owner.owner {
-                OwnerKey::Agent(agent) => ("about-land-owner-agent", name_of(agent, &avatars)),
-                OwnerKey::Group(group) => (
-                    "about-land-owner-group",
-                    groups
-                        .group_name(group)
-                        .map_or_else(|| format!("({group})"), str::to_owned),
-                ),
-            };
-            OwnerRowData {
-                kind: translator.get(kind_key),
-                name,
-                count: owner.count.to_string(),
-            }
-        })
-        .collect();
-    if let Some(viewport) = ui.object_handles.owners_viewport
-        && let Ok(mut list) = lists.get_mut(viewport)
-    {
-        list.item_count = view.rows.len();
+    for (state, mut view, ui) in &mut windows {
+        if view.built == state.owners_revision && !avatars.is_changed() && !groups.is_changed() {
+            continue;
+        }
+        view.built = state.owners_revision;
+        view.rows = state
+            .owners
+            .iter()
+            .map(|owner| {
+                let (kind_key, name) = match owner.owner {
+                    OwnerKey::Agent(agent) => ("about-land-owner-agent", name_of(agent, &avatars)),
+                    OwnerKey::Group(group) => (
+                        "about-land-owner-group",
+                        groups
+                            .group_name(group)
+                            .map_or_else(|| format!("({group})"), str::to_owned),
+                    ),
+                };
+                OwnerRowData {
+                    kind: translator.get(kind_key),
+                    name,
+                    count: owner.count.to_string(),
+                }
+            })
+            .collect();
+        if let Some(viewport) = ui.object_handles.owners_viewport
+            && let Ok(mut list) = lists.get_mut(viewport)
+        {
+            list.item_count = view.rows.len();
+        }
     }
 }
 
 /// Rebuild the allow-list view.
+/// Rebuild each window's allow-list view.
 fn sync_allow_view(
-    state: Res<AboutLandState>,
-    view: ResMut<AllowView>,
-    ui: Option<Res<AboutLandUi>>,
+    mut windows: Query<(&AboutLandState, &mut AllowView, &AboutLandUi)>,
     avatars: Res<AvatarState>,
     translator: Translator,
-    lists: Query<&mut VirtualList>,
+    mut lists: Query<&mut VirtualList>,
 ) {
-    let view = view.into_inner();
-    sync_access_view(
-        state.allow_revision,
-        &state.access_allow,
-        &mut view.rows,
-        &mut view.built,
-        ui.and_then(|ui| ui.access_handles.allow_viewport),
-        &avatars,
-        avatars.is_changed(),
-        &translator,
-        lists,
-    );
+    for (state, view, ui) in &mut windows {
+        let view = view.into_inner();
+        sync_access_view(
+            state.allow_revision,
+            &state.access_allow,
+            &mut view.rows,
+            &mut view.built,
+            ui.access_handles.allow_viewport,
+            &avatars,
+            avatars.is_changed(),
+            &translator,
+            &mut lists,
+        );
+    }
 }
 
 /// Rebuild the ban-list view.
+/// Rebuild each window's ban-list view.
 fn sync_ban_view(
-    state: Res<AboutLandState>,
-    view: ResMut<BanView>,
-    ui: Option<Res<AboutLandUi>>,
+    mut windows: Query<(&AboutLandState, &mut BanView, &AboutLandUi)>,
     avatars: Res<AvatarState>,
     translator: Translator,
-    lists: Query<&mut VirtualList>,
+    mut lists: Query<&mut VirtualList>,
 ) {
-    let view = view.into_inner();
-    sync_access_view(
-        state.ban_revision,
-        &state.access_ban,
-        &mut view.rows,
-        &mut view.built,
-        ui.and_then(|ui| ui.access_handles.ban_viewport),
-        &avatars,
-        avatars.is_changed(),
-        &translator,
-        lists,
-    );
+    for (state, view, ui) in &mut windows {
+        let view = view.into_inner();
+        sync_access_view(
+            state.ban_revision,
+            &state.access_ban,
+            &mut view.rows,
+            &mut view.built,
+            ui.access_handles.ban_viewport,
+            &avatars,
+            avatars.is_changed(),
+            &translator,
+            &mut lists,
+        );
+    }
 }
 
 /// The shared rebuild of an access-list view (resolving names) + item count.
@@ -2357,7 +2716,7 @@ fn sync_access_view(
     avatars: &AvatarState,
     avatars_changed: bool,
     translator: &Translator,
-    mut lists: Query<&mut VirtualList>,
+    lists: &mut Query<&mut VirtualList>,
 ) {
     if *built == revision && !avatars_changed {
         return;
@@ -2379,146 +2738,155 @@ fn sync_access_view(
 }
 
 /// Build each newly-pooled owner row's cells once.
+/// Build each newly-pooled owner row's cells once, in whichever window's list
+/// it was pooled into.
 fn populate_owner_rows(
     mut commands: Commands,
-    ui: Option<Res<AboutLandUi>>,
+    windows: Query<&AboutLandUi>,
     new_rows: Query<(Entity, &ChildOf), Added<VirtualRow>>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    let Some(viewport) = ui.object_handles.owners_viewport else {
-        return;
-    };
-    let Some(table) = ui.object_handles.owners_table else {
-        return;
-    };
     for (row_entity, child_of) in &new_rows {
-        if child_of.parent() != viewport {
-            continue;
+        for ui in &windows {
+            let (Some(viewport), Some(table)) = (
+                ui.object_handles.owners_viewport,
+                ui.object_handles.owners_table,
+            ) else {
+                continue;
+            };
+            if child_of.parent() != viewport {
+                continue;
+            }
+            spawn_table_row(&mut commands, row_entity, table, &OWNERS_TABLE);
+            break;
         }
-        spawn_table_row(&mut commands, row_entity, table, &OWNERS_TABLE);
     }
 }
 
 /// Bind each pooled owner row to its [`OwnerRowData`].
+/// Bind each pooled owner row to its window's [`OwnerRowData`].
 fn bind_owner_rows(
-    view: Res<OwnersView>,
-    ui: Option<Res<AboutLandUi>>,
+    windows: Query<(Ref<OwnersView>, &AboutLandUi)>,
     rows: Query<(Ref<VirtualRow>, &ChildOf, &crate::ui_table::TableRowCells)>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    let Some(viewport) = ui.object_handles.owners_viewport else {
-        return;
-    };
-    let refresh = view.is_changed();
-    for (row, child_of, cells) in &rows {
-        if child_of.parent() != viewport {
-            continue;
-        }
-        if !refresh && !row.is_changed() {
-            continue;
-        }
-        let Some(data) = row.index.and_then(|index| view.rows.get(index)) else {
+    for (view, ui) in &windows {
+        let Some(viewport) = ui.object_handles.owners_viewport else {
             continue;
         };
-        set_cell(&mut texts, cells, 0, &data.kind);
-        set_cell(&mut texts, cells, 1, &data.name);
-        set_cell(&mut texts, cells, 2, &data.count);
+        let refresh = view.is_changed();
+        for (row, child_of, cells) in &rows {
+            if child_of.parent() != viewport {
+                continue;
+            }
+            if !refresh && !row.is_changed() {
+                continue;
+            }
+            let Some(data) = row.index.and_then(|index| view.rows.get(index)) else {
+                continue;
+            };
+            set_cell(&mut texts, cells, 0, &data.kind);
+            set_cell(&mut texts, cells, 1, &data.name);
+            set_cell(&mut texts, cells, 2, &data.count);
+        }
     }
 }
 
 /// Build each newly-pooled access row's cells + Remove button once.
+/// Build each newly-pooled access row's cells + Remove button once, in
+/// whichever window's list it was pooled into.
 fn populate_access_rows(
     mut commands: Commands,
-    ui: Option<Res<AboutLandUi>>,
+    windows: Query<&AboutLandUi>,
     new_rows: Query<(Entity, &ChildOf), Added<VirtualRow>>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
     for (row_entity, child_of) in &new_rows {
         let parent = child_of.parent();
-        let (viewport, table, spec, scope) = if Some(parent) == ui.access_handles.allow_viewport {
-            (
-                ui.access_handles.allow_viewport,
-                ui.access_handles.allow_table,
-                &ALLOW_TABLE,
-                AccessScope::Allow,
-            )
-        } else if Some(parent) == ui.access_handles.ban_viewport {
-            (
-                ui.access_handles.ban_viewport,
-                ui.access_handles.ban_table,
-                &BAN_TABLE,
-                AccessScope::Ban,
-            )
-        } else {
-            continue;
-        };
-        let (Some(_viewport), Some(table)) = (viewport, table) else {
-            continue;
-        };
-        let cells = spawn_table_row(&mut commands, row_entity, table, spec);
-        if let Some(custom) = cells.cell(2) {
-            spawn_remove_button(&mut commands, custom, scope, row_entity);
+        for ui in &windows {
+            let (table, spec, scope) = if Some(parent) == ui.access_handles.allow_viewport {
+                (
+                    ui.access_handles.allow_table,
+                    &ALLOW_TABLE,
+                    AccessScope::Allow,
+                )
+            } else if Some(parent) == ui.access_handles.ban_viewport {
+                (ui.access_handles.ban_table, &BAN_TABLE, AccessScope::Ban)
+            } else {
+                continue;
+            };
+            let Some(table) = table else {
+                continue;
+            };
+            let cells = spawn_table_row(&mut commands, row_entity, table, spec);
+            if let Some(custom) = cells.cell(2) {
+                spawn_remove_button(&mut commands, custom, scope, row_entity);
+            }
+            break;
         }
     }
 }
 
-/// Bind each pooled access row to its [`AccessRowData`].
-#[expect(
-    clippy::too_many_arguments,
-    reason = "binding the allow / ban pools needs both views, the state, the UI handles, and the \
-              row / remove / visibility / text queries together"
-)]
+/// Every window's access-list views, state and handles — the row binder's read
+/// of the windows, named because the tuple is past the point of reading well
+/// inline.
+type AccessBindWindows<'world, 'state> = Query<
+    'world,
+    'state,
+    (
+        Entity,
+        Ref<'static, AllowView>,
+        Ref<'static, BanView>,
+        Ref<'static, AboutLandState>,
+        &'static AboutLandUi,
+    ),
+>;
+
+/// Bind each pooled access row to its window's [`AccessRowData`].
 fn bind_access_rows(
-    allow: Res<AllowView>,
-    ban: Res<BanView>,
-    state: Res<AboutLandState>,
-    ui: Option<Res<AboutLandUi>>,
+    windows: AccessBindWindows,
     rows: Query<(Ref<VirtualRow>, &ChildOf, &crate::ui_table::TableRowCells)>,
     removes: Query<Entity, With<RemoveAccessButton>>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
     mut visibility: Query<&mut Visibility>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    let refresh = allow.is_changed() || ban.is_changed() || state.is_changed();
-    for (row, child_of, cells) in &rows {
-        let parent = child_of.parent();
-        let view = if Some(parent) == ui.access_handles.allow_viewport {
-            &allow.rows
-        } else if Some(parent) == ui.access_handles.ban_viewport {
-            &ban.rows
-        } else {
-            continue;
-        };
-        if !refresh && !row.is_changed() {
-            continue;
+    for (window, allow, ban, state, ui) in &windows {
+        let refresh = allow.is_changed() || ban.is_changed() || state.is_changed();
+        for (row, child_of, cells) in &rows {
+            let parent = child_of.parent();
+            let view = if Some(parent) == ui.access_handles.allow_viewport {
+                &allow.rows
+            } else if Some(parent) == ui.access_handles.ban_viewport {
+                &ban.rows
+            } else {
+                continue;
+            };
+            if !refresh && !row.is_changed() {
+                continue;
+            }
+            let Some(data) = row.index.and_then(|index| view.get(index)) else {
+                continue;
+            };
+            set_cell(&mut texts, cells, 0, &data.name);
+            set_cell(&mut texts, cells, 1, &data.expiry);
         }
-        let Some(data) = row.index.and_then(|index| view.get(index)) else {
-            continue;
+        // Show each Remove button only when the agent may edit **this** parcel
+        // (a parked row hides the whole row, so this only ever reveals buttons
+        // on bound rows).
+        let want = if state.can_edit {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
         };
-        set_cell(&mut texts, cells, 0, &data.name);
-        set_cell(&mut texts, cells, 1, &data.expiry);
-    }
-    // Show each Remove button only when the agent may edit (a parked row hides
-    // the whole row, so this only ever reveals buttons on bound rows).
-    let want = if state.can_edit {
-        Visibility::Inherited
-    } else {
-        Visibility::Hidden
-    };
-    for entity in &removes {
-        if let Ok(mut vis) = visibility.get_mut(entity)
-            && *vis != want
-        {
-            *vis = want;
+        for entity in &removes {
+            if host_floater(entity, &parents, &floaters) != Some(window) {
+                continue;
+            }
+            if let Ok(mut vis) = visibility.get_mut(entity)
+                && *vis != want
+            {
+                *vis = want;
+            }
         }
     }
 }
@@ -2528,16 +2896,25 @@ fn bind_access_rows(
 // ---------------------------------------------------------------------------
 
 /// Toggle an editable checkbox.
+/// Toggle an editable checkbox, in the window it was pressed in.
 fn on_about_land_check(
     press: On<Pointer<Press>>,
     checks: Query<&AboutLandCheck>,
-    mut state: ResMut<AboutLandState>,
+    mut windows: Query<&mut AboutLandState>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
 ) {
     if press.button != PointerButton::Primary {
         return;
     }
     let Ok(check) = checks.get(press.entity) else {
+        return;
+    };
+    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+        return;
+    };
+    let Ok(mut state) = windows.get_mut(window) else {
         return;
     };
     if !state.can_edit || !check.kind.editable() {
@@ -2548,19 +2925,21 @@ fn on_about_land_check(
     set_check_visual(&mut texts, check, on, true);
 }
 
-/// Dispatch a floater button press.
+/// Dispatch a floater button press, in the window it was pressed in.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the dispatcher fans out to every button kind, reading the edit fields and the agent \
-              position to route each"
+    reason = "the dispatcher fans out to every button kind, reading the pressed window, the edit \
+              fields and the agent position to route each"
 )]
 fn on_about_land_action(
     press: On<Pointer<Press>>,
     actions: Query<&AboutLandAction>,
-    mut state: ResMut<AboutLandState>,
-    ui: Res<AboutLandUi>,
+    mut windows: Query<(&mut AboutLandState, &AboutLandUi)>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
     identity: Res<SlIdentity>,
     agent_position: Res<AgentRegionPosition>,
+    mut tallies: ResMut<OwnerTallyQueue>,
     fields: Query<&EditableText>,
     mut sl_commands: MessageWriter<SlCommand>,
     mut pickers: MessageWriter<OpenAvatarPicker>,
@@ -2572,6 +2951,12 @@ fn on_about_land_action(
     let Ok(action) = actions.get(press.entity) else {
         return;
     };
+    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+        return;
+    };
+    let Ok((mut state, ui)) = windows.get_mut(window) else {
+        return;
+    };
     // The owners refresh is a read; the rest write.
     let is_read = matches!(action, AboutLandAction::RefreshOwners);
     if !is_read && !state.can_edit {
@@ -2581,12 +2966,8 @@ fn on_about_land_action(
         return;
     };
     match action {
-        AboutLandAction::Apply => apply_draft(&mut state, &ui, &fields, scoped, &mut sl_commands),
-        AboutLandAction::RefreshOwners => {
-            sl_commands.write(SlCommand(Command::RequestParcelObjectOwners {
-                local_id: scoped,
-            }));
-        }
+        AboutLandAction::Apply => apply_draft(&mut state, ui, &fields, scoped, &mut sl_commands),
+        AboutLandAction::RefreshOwners => tallies.ask(window, scoped),
         AboutLandAction::PickSnapshot => {
             texture_pickers.write(OpenTexturePicker {
                 requester: press.entity,
@@ -2622,37 +3003,52 @@ fn on_about_land_action(
         // the ban list — its allow list was never updated when the ban path
         // grew one — and two buttons side by side that answer a modified click
         // differently is worse than the small divergence.
+        //
+        // The claim is what the pick comes back to (`pending_pick`): the picker
+        // echoes a tag, not a window.
         AboutLandAction::AddAllowed => {
+            state.pending_pick = Some(AccessScope::Allow);
             pickers.write(OpenAvatarPicker::many("about-land-allow"));
         }
         AboutLandAction::AddBanned => {
+            state.pending_pick = Some(AccessScope::Ban);
             pickers.write(OpenAvatarPicker::many("about-land-ban"));
         }
     }
 }
 
-/// Resolve and act on a per-row access Remove press.
+/// Resolve and act on a per-row access Remove press, in the window it was
+/// pressed in.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the remove observer reads the pressed button, its row, both views, the state, the \
-              identity, and the command writer"
+    reason = "the remove observer reads the pressed button, its row, its window's views and \
+              state, the identity, and the command writer"
 )]
 fn on_remove_access(
     press: On<Pointer<Press>>,
     buttons: Query<&RemoveAccessButton>,
     rows: Query<&VirtualRow>,
-    allow: Res<AllowView>,
-    ban: Res<BanView>,
-    mut state: ResMut<AboutLandState>,
+    mut windows: Query<(&AllowView, &BanView, &mut AboutLandState)>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
     identity: Res<SlIdentity>,
     mut commands: MessageWriter<SlCommand>,
 ) {
-    if press.button != PointerButton::Primary || !state.can_edit {
+    if press.button != PointerButton::Primary {
         return;
     }
     let Ok(button) = buttons.get(press.entity) else {
         return;
     };
+    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+        return;
+    };
+    let Ok((allow, ban, mut state)) = windows.get_mut(window) else {
+        return;
+    };
+    if !state.can_edit {
+        return;
+    }
     let Ok(row) = rows.get(button.row) else {
         return;
     };
@@ -2670,39 +3066,51 @@ fn on_remove_access(
 }
 
 /// Fold a combo pick into the draft.
+/// Fold a combo pick into the draft of the window whose combo it was.
 fn apply_combo_edits(
     mut changed: MessageReader<ComboChanged>,
-    ui: Option<Res<AboutLandUi>>,
-    mut state: ResMut<AboutLandState>,
+    mut windows: Query<(&AboutLandUi, &mut AboutLandState)>,
 ) {
-    let Some(ui) = ui else {
+    let frame: Vec<ComboChanged> = changed.read().copied().collect();
+    if frame.is_empty() {
         return;
-    };
-    for event in changed.read() {
-        if Some(event.combo) == ui.options_handles.category_combo {
-            state.draft.category = ParcelCategory::from_u8(u8::try_from(event.active).unwrap_or(0));
-        } else if Some(event.combo) == ui.options_handles.landing_combo {
-            state.draft.landing_type = u8::try_from(event.active).unwrap_or(0);
+    }
+    for (ui, mut state) in &mut windows {
+        for event in &frame {
+            if Some(event.combo) == ui.options_handles.category_combo {
+                state.draft.category =
+                    ParcelCategory::from_u8(u8::try_from(event.active).unwrap_or(0));
+            } else if Some(event.combo) == ui.options_handles.landing_combo {
+                state.draft.landing_type = u8::try_from(event.active).unwrap_or(0);
+            }
         }
     }
 }
 
 /// Fold a texture pick into the draft and its button label.
+/// Fold a texture pick into the draft and button label of the window whose
+/// swatch asked for it.
 fn apply_texture_edits(
     mut picked: MessageReader<TexturePicked>,
-    ui: Option<Res<AboutLandUi>>,
+    mut windows: Query<(&AboutLandUi, &mut AboutLandState)>,
     swatches: Query<&SwatchTexture>,
-    mut state: ResMut<AboutLandState>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
     for event in picked.read() {
         if !event.final_pick {
             continue;
         }
         let Ok(swatch) = swatches.get(event.requester) else {
+            continue;
+        };
+        // The pick belongs to the window the pressed swatch lives in — the
+        // picker echoes the button, and the button names its window.
+        let Some(window) = host_floater(event.requester, &parents, &floaters) else {
+            continue;
+        };
+        let Ok((ui, mut state)) = windows.get_mut(window) else {
             continue;
         };
         let texture = (event.texture.uuid() != Uuid::nil()).then_some(event.texture);
@@ -2729,23 +3137,39 @@ fn apply_texture_edits(
 }
 
 /// Fold the avatar picks into the allow / ban list and commit them.
+/// Fold the avatar picks into the allow / ban list of the window that asked,
+/// and commit them.
+///
+/// The picker echoes a `&'static str` tag rather than an entity, so the window
+/// is the one holding a matching claim ([`AboutLandState::pending_pick`]) — at
+/// most one, because the picker itself is one window per tag.
 fn apply_avatar_picks(
     mut picked: MessageReader<AvatarPicked>,
-    mut state: ResMut<AboutLandState>,
+    mut windows: Query<(Entity, &mut AboutLandState)>,
     identity: Res<SlIdentity>,
     mut commands: MessageWriter<SlCommand>,
 ) {
-    let Some(scoped) = state.scoped(&identity) else {
+    let frame: Vec<AvatarPicked> = picked.read().cloned().collect();
+    if frame.is_empty() {
         return;
-    };
-    for event in picked.read() {
+    }
+    for event in &frame {
         let scope = match event.requester {
             "about-land-allow" => AccessScope::Allow,
             "about-land-ban" => AccessScope::Ban,
             _other => continue,
         };
-        for chosen in &event.picks {
-            add_access_entry(&mut state, scope, chosen.agent, scoped, &mut commands);
+        for (_window, mut state) in &mut windows {
+            if state.pending_pick != Some(scope) {
+                continue;
+            }
+            state.pending_pick = None;
+            let Some(scoped) = state.scoped(&identity) else {
+                continue;
+            };
+            for chosen in &event.picks {
+                add_access_entry(&mut state, scope, chosen.agent, scoped, &mut commands);
+            }
         }
     }
 }
@@ -3673,5 +4097,206 @@ mod tests {
         assert!(state.access_ban.is_empty());
         assert_ne!(state.allow_revision, allow);
         assert_ne!(state.ban_revision, ban);
+    }
+
+    /// **One window per parcel** (`viewer-keyed-floater-audit`), and the one
+    /// request the keying had to serialise.
+    mod instances {
+        use super::super::{
+            AboutLandPlugin, AboutLandState, AboutLandSubject, OpenAboutLand, OwnerTallyQueue,
+            parcel_key,
+        };
+        use crate::floater::{Floater, FloaterCommand, FloaterOp, FloaterPlugin};
+        use crate::ui::UiRoot;
+        use crate::world_api::{AgentRegionPosition, AvatarState, GroupsModel};
+        use bevy::prelude::*;
+        use pretty_assertions::assert_eq;
+        use sl_client_bevy::{
+            AgentKey, CircuitId, Command, RegionLocalParcelId, ScopedParcelId, SlAgentParcel,
+            SlCommand, SlEvent, SlIdentity, Uuid,
+        };
+
+        /// A boxed error so tests use `?` rather than the disallowed
+        /// `unwrap` / `expect`.
+        type TestError = Box<dyn core::error::Error>;
+
+        /// The circuit every test's identity is on.
+        const fn circuit() -> CircuitId {
+            CircuitId::new(1)
+        }
+
+        /// An app with the floater manager, this module's plugin, and the world
+        /// facts its systems read — no grid, no window.
+        fn land_app() -> App {
+            let mut app = App::new();
+            let identity = SlIdentity {
+                agent_id: Some(AgentKey::from(Uuid::from_u128(0xA9))),
+                circuit_id: Some(circuit()),
+                ..SlIdentity::default()
+            };
+            app.add_message::<SlCommand>()
+                .add_message::<SlEvent>()
+                .add_message::<crate::ui_combo::ComboChanged>()
+                .add_message::<crate::world_api::OpenTexturePicker>()
+                .add_message::<crate::world_api::TexturePicked>()
+                .add_message::<crate::world_api::OpenAvatarPicker>()
+                .add_message::<crate::world_api::AvatarPicked>()
+                .insert_resource(identity)
+                .init_resource::<AvatarState>()
+                .init_resource::<GroupsModel>()
+                .init_resource::<SlAgentParcel>()
+                .init_resource::<AgentRegionPosition>()
+                .init_resource::<Time>()
+                .init_resource::<UiScale>()
+                .init_resource::<ButtonInput<KeyCode>>()
+                .init_resource::<bevy::input_focus::InputFocus>()
+                .add_plugins((FloaterPlugin, AboutLandPlugin));
+            crate::i18n::install_untranslated(&mut app);
+            let root = app.world_mut().spawn(Node::default()).id();
+            app.insert_resource(UiRoot(root));
+            app.update();
+            app
+        }
+
+        /// Open About Land on a region-local parcel id, the way the top bar and
+        /// the World menu do.
+        fn open(app: &mut App, local_id: i32) {
+            app.world_mut().write_message(OpenAboutLand {
+                subject: AboutLandSubject::CurrentParcel(RegionLocalParcelId(local_id)),
+                read_only: false,
+            });
+            app.update();
+        }
+
+        /// Every live About Land window.
+        fn windows(app: &mut App) -> Vec<Entity> {
+            app.world_mut()
+                .query_filtered::<Entity, With<AboutLandState>>()
+                .iter(app.world())
+                .collect()
+        }
+
+        /// Two parcels are two windows, each keyed by its own scoped id.
+        #[test]
+        fn two_parcels_open_two_windows() -> Result<(), TestError> {
+            let mut app = land_app();
+            open(&mut app, 7);
+            open(&mut app, 9);
+
+            let open_windows = windows(&mut app);
+            assert_eq!(
+                open_windows.len(),
+                2,
+                "the second parcel reused the first window"
+            );
+            let world = app.world();
+            let keys: Vec<Option<&crate::floater::FloaterKey>> = open_windows
+                .iter()
+                .map(|window| world.get::<Floater>(*window).and_then(Floater::key))
+                .collect();
+            for local_id in [7_i32, 9] {
+                let key = parcel_key(ScopedParcelId::new(
+                    circuit(),
+                    RegionLocalParcelId(local_id),
+                ));
+                assert!(keys.contains(&Some(&key)), "no window keyed by {local_id}");
+            }
+            Ok(())
+        }
+
+        /// Re-opening a parcel raises its window instead of making a second.
+        #[test]
+        fn reopening_a_parcel_reuses_its_window() -> Result<(), TestError> {
+            let mut app = land_app();
+            open(&mut app, 7);
+            open(&mut app, 7);
+            assert_eq!(windows(&mut app).len(), 1);
+            Ok(())
+        }
+
+        /// Closing one parcel's window leaves the other open.
+        #[test]
+        fn closing_one_parcel_leaves_the_other() -> Result<(), TestError> {
+            let mut app = land_app();
+            open(&mut app, 7);
+            open(&mut app, 9);
+            let target = *windows(&mut app).first().ok_or("no window opened")?;
+
+            app.world_mut()
+                .resource_mut::<Messages<FloaterCommand>>()
+                .write(FloaterCommand {
+                    floater: target,
+                    op: FloaterOp::Close,
+                });
+            app.update();
+
+            let left = windows(&mut app);
+            assert_eq!(left.len(), 1);
+            assert!(!left.contains(&target));
+            Ok(())
+        }
+
+        /// **Only one object-owner tally is outstanding.** The reply carries
+        /// nothing but the owners — no parcel, no sequence id — so a second
+        /// request in flight would let one window take the other's tally.
+        #[test]
+        fn owner_tallies_are_serialised() -> Result<(), TestError> {
+            let mut app = land_app();
+            let first = app.world_mut().spawn(AboutLandState::default()).id();
+            let second = app.world_mut().spawn(AboutLandState::default()).id();
+            {
+                let mut tallies = app.world_mut().resource_mut::<OwnerTallyQueue>();
+                tallies.ask(
+                    first,
+                    ScopedParcelId::new(circuit(), RegionLocalParcelId(7)),
+                );
+                tallies.ask(
+                    second,
+                    ScopedParcelId::new(circuit(), RegionLocalParcelId(9)),
+                );
+            }
+            app.update();
+
+            let asked = app
+                .world()
+                .resource::<Messages<SlCommand>>()
+                .iter_current_update_messages()
+                .filter(|command| matches!(command.0, Command::RequestParcelObjectOwners { .. }))
+                .count();
+            assert_eq!(asked, 1, "both windows asked for a tally at once");
+            let tallies = app.world().resource::<OwnerTallyQueue>();
+            assert!(tallies.owns_reply(first), "the reply is nobody's, or wrong");
+            assert!(!tallies.owns_reply(second));
+            Ok(())
+        }
+
+        /// A window that closes releases its turn, so the next one asks.
+        #[test]
+        fn a_closed_window_releases_the_tally_turn() -> Result<(), TestError> {
+            let mut app = land_app();
+            let first = app.world_mut().spawn(AboutLandState::default()).id();
+            let second = app.world_mut().spawn(AboutLandState::default()).id();
+            {
+                let mut tallies = app.world_mut().resource_mut::<OwnerTallyQueue>();
+                tallies.ask(
+                    first,
+                    ScopedParcelId::new(circuit(), RegionLocalParcelId(7)),
+                );
+                tallies.ask(
+                    second,
+                    ScopedParcelId::new(circuit(), RegionLocalParcelId(9)),
+                );
+            }
+            app.update();
+            app.world_mut().entity_mut(first).despawn();
+            app.update();
+
+            let tallies = app.world().resource::<OwnerTallyQueue>();
+            assert!(
+                tallies.owns_reply(second),
+                "the second window never got its turn"
+            );
+            Ok(())
+        }
     }
 }
