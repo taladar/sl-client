@@ -123,11 +123,19 @@ type ClipCandidates<'w, 's> = Query<
 /// Give every translucent face that crosses the waterline a second draw, and take
 /// it away again when it no longer does.
 ///
-/// Runs the straddle test only over faces whose placement **changed** — and over
-/// every face when the water level itself moved, since that re-decides all of them
-/// at once and none of them moved. A settled scene therefore pays a single query
-/// walk and no per-face work, which matters because a busy region has tens of
-/// thousands of faces and almost none of them are anywhere near the surface.
+/// Runs the straddle test only over faces whose placement or **bounds** changed —
+/// and over every face when the water level itself moved, since that re-decides
+/// all of them at once and none of them moved. A genuinely settled scene
+/// therefore pays a single query walk and no per-face work, which matters because
+/// a busy region has tens of thousands of faces and almost none of them are
+/// anywhere near the surface.
+///
+/// "Settled" is doing real work in that sentence. A flexi prim, an animating
+/// avatar and a mesh body's physics all move their *geometry* while their entity
+/// stands still, and the posed avatar bound is rewritten every frame, so those
+/// faces are re-tested every frame — deliberately, since they are exactly the
+/// content that can cross the surface unnoticed. The per-face cost is the
+/// arithmetic in [`straddles`], which short-circuits before the material lookup.
 fn reconcile_water_clip_twins(
     water_level: Option<Res<WaterLevel>>,
     faces: ClipCandidates,
@@ -154,7 +162,31 @@ fn reconcile_water_clip_twins(
         // query at all on the one frame its `GlobalTransform` counts as changed.
         // Its bounds arriving is therefore its own trigger, or a static face would
         // never be evaluated at all.
-        if !level_moved && !transform.is_changed() && !aabb.is_added() {
+        //
+        // Its bounds **changing** is a trigger for the same reason, and a
+        // load-bearing one: geometry that moves while its entity sits still is
+        // otherwise never re-decided. Three kinds of content do exactly that, and
+        // all three carry `PrimFaceEntity`, so all three reach this split:
+        //
+        // - a **flexi** prim, whose shape is simulated client-side
+        //   (`sl_viewer_kit::flexi`) by mutating the mesh asset in place — it can
+        //   droop metres, from clear of the surface to well under it, without its
+        //   transform moving at all;
+        // - an **animating** avatar's worn rigged submeshes, whose drawn vertices
+        //   live wherever the GPU skin palette puts them;
+        // - **body physics** on a worn mesh body, which bounces the `LEFT_PEC` /
+        //   `RIGHT_PEC` / `BELLY` / `BUTT` collision volumes — bindable joints, so
+        //   the mesh follows through that same palette. Only centimetres, but this
+        //   is a test of which side of a *plane* the bounds fall on, and a jiggle
+        //   at the waterline flips it.
+        //
+        // `calculate_bounds` rewrites the `Aabb` on `AssetChanged<Mesh3d>`, and
+        // the GPU-posed bound is written back every frame
+        // (`gpu_avatars::stage::apply_gpu_avatar_bounds`), so avatar faces do pay
+        // the straddle test per frame. That is a few float operations which
+        // short-circuit before the material lookup, and it is the price of the
+        // split being correct for the content that moves.
+        if !level_moved && !transform.is_changed() && !aabb.is_changed() {
             continue;
         }
         if !straddles(&transform, &aabb, level) || !is_translucent(&materials, material) {
@@ -630,6 +662,89 @@ mod tests {
                 "{inputs:?}: the twin binds the same joints",
             );
         }
+    }
+
+    /// Deform `face` so its bounds become `min..max` in its own local space,
+    /// leaving its transform alone — what a flexi's client-side simulation, an
+    /// avatar's skin palette and a mesh body's physics all do to their geometry.
+    fn deform(app: &mut App, face: Entity, min: Vec3, max: Vec3) {
+        if let Some(mut aabb) = app.world_mut().get_mut::<Aabb>(face) {
+            *aabb = Aabb::from_min_max(min, max);
+        }
+    }
+
+    /// **Geometry that moves while its entity stands still is re-decided.**
+    ///
+    /// A flexi prim's shape is simulated client-side, an animating avatar's
+    /// rigged submeshes are posed by the GPU skin palette, and a mesh body's
+    /// breast / belly / butt physics bounces the collision volumes those
+    /// submeshes are rigged to. In all three the entity's `GlobalTransform`
+    /// never moves — only the bounds change — so a reconciler that waited on the
+    /// transform would never notice such a face crossing the surface, and the
+    /// submerged half would go on being painted over by the depth-writing sea:
+    /// the very defect the split exists to fix.
+    ///
+    /// Flexi is the extreme case (it can droop metres), body physics the
+    /// subtlest (centimetres) — but this is a test of which side of a *plane*
+    /// the bounds fall on, so a jiggle at the waterline flips it just as surely.
+    #[test]
+    fn a_face_that_deforms_into_the_water_is_split() {
+        let mut app = app();
+        // Well clear of the surface, and left there: no twin.
+        let face = spawn_face(&mut app, LEVEL + 5.0, AlphaMode::Blend);
+        app.update();
+        assert_eq!(
+            twins(&mut app),
+            0,
+            "a face clear of the surface has no twin"
+        );
+
+        // Now it droops across the waterline — bounds only, transform untouched.
+        deform(
+            &mut app,
+            face,
+            Vec3::new(-1.0, -6.0, -1.0),
+            Vec3::splat(1.0),
+        );
+        app.update();
+        assert_eq!(
+            twins(&mut app),
+            1,
+            "deforming across the surface splits the face, even though it never moved",
+        );
+        assert_eq!(
+            app.world().get::<WaterClipSide>(face).copied(),
+            Some(WaterClipSide::Above),
+            "and the face itself keeps the half above",
+        );
+    }
+
+    /// The same in reverse: geometry that deforms **clear** of the surface gives
+    /// its twin up, or a flexi that swings back out of the water keeps drawing a
+    /// second, now-redundant half of itself for as long as it stays there.
+    #[test]
+    fn a_face_that_deforms_clear_of_the_water_is_made_whole() {
+        let mut app = app();
+        let face = spawn_face(&mut app, LEVEL, AlphaMode::Blend);
+        app.update();
+        assert_eq!(twins(&mut app), 1, "the straddling face gained its twin");
+
+        deform(
+            &mut app,
+            face,
+            Vec3::new(-1.0, 1.0, -1.0),
+            Vec3::new(1.0, 3.0, 1.0),
+        );
+        app.update();
+        assert_eq!(
+            twins(&mut app),
+            0,
+            "deforming clear of the surface takes the twin away again",
+        );
+        assert!(
+            app.world().get::<WaterClipSide>(face).is_none(),
+            "and the face keeps no clip",
+        );
     }
 
     /// A face clear of the surface is left alone — no clip, no twin, and (this is

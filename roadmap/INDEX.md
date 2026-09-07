@@ -11,7 +11,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 100 |
+| ideas | 101 |
 | ready | 322 |
 | blocked | 46 |
 | in-progress | 20 |
@@ -19,9 +19,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | done | 1025 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1613** |
+| **total** | **1614** |
 
-## ideas (100)
+## ideas (101)
 
 ### protocol
 
@@ -148,6 +148,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Pause off-view texture animations, resume phase-exact
 - [`viewer-perf-texture-decode-cache`](ideas/viewer-perf-texture-decode-cache.md)
   — Persistent decoded-texture cache (raw / BCn / HTJ2K transcode)
+- [`viewer-posed-avatar-bounds-rewritten-every-frame`](ideas/viewer-posed-avatar-bounds-rewritten-every-frame.md)
+  — The GPU-posed avatar Aabb is rewritten every frame, waking every consumer of
+  it
 - [`viewer-preferences-search-synonyms`](ideas/viewer-preferences-search-synonyms.md)
   — Preferences search — synonyms / alternative search terms
 - [`viewer-probe-auto-placement`](ideas/viewer-probe-auto-placement.md) —

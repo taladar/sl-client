@@ -151,6 +151,33 @@ construction.
   directory agrees for all eight parts; an `SL_VIEWER_ASSETS` override need
   not.)
 
+## A second bug the same module was hiding
+
+The reconciler re-tested a face only when its transform moved, its `Aabb` was
+**added**, or the water level changed. Nothing there notices *geometry* moving
+while the entity stands still — and three kinds of content do exactly that, all
+of them carrying `PrimFaceEntity` and so reaching this split:
+
+| producer | mechanism | amplitude |
+| --- | --- | --- |
+| flexi prims | client-side sim mutates the mesh asset | metres |
+| animation | GPU skin palette | metres |
+| body physics on a mesh body | volume-joint deltas through that palette | centimetres |
+
+Bevy's `calculate_bounds` rewrites the `Aabb` on `AssetChanged<Mesh3d>` and the
+posed avatar bound is written back every frame, so all three mark the bounds
+**changed, never added**. A flexi drooping into the sea was therefore never
+split, and its submerged half went on being painted over by the depth-writing
+sea — the very defect the split exists to fix. The test is now
+`aabb.is_changed()`, pinned in both directions by
+`a_face_that_deforms_into_the_water_is_split` and
+`a_face_that_deforms_clear_of_the_water_is_made_whole`, which both fail against
+`is_added()`.
+
+The cost that buys is real and is written down rather than papered over: avatar
+faces now pay the straddle test every frame, because the posed bound is
+rewritten every frame ([[viewer-posed-avatar-bounds-rewritten-every-frame]]).
+
 ## Still worth deciding separately
 
 Whether a wgpu validation error should be fatal in a release build at all. The
