@@ -23,11 +23,11 @@ mod test {
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{
-        ChatChannel, ChatLogConfig, ChatSource, ChatType, ClientDirectories, InventoryCacheConfig,
-        LoginParams, LoginRequest, ObjectKey, SlClientPlugin, SlEvent, SlSessionEvent,
-        StartLocation, Vector,
+        AgentKey, ChatChannel, ChatLogConfig, ChatSource, ChatType, ClientDirectories,
+        InventoryCacheConfig, InventoryKey, LoginParams, LoginRequest, ObjectKey, PrimLod,
+        Rotation, SlClientPlugin, SlEvent, SlSessionEvent, StartLocation, Vector,
     };
-    use sl_fake_grid::{AccountConfig, FakeGrid, FakeGridBuilder, RegionConfig};
+    use sl_fake_grid::{AccountConfig, FakeGrid, FakeGridBuilder, PrimFixture, RegionConfig};
     use sl_proto::ServerEvent;
     use sl_rlv::RlvBehaviour;
     use sl_settings::{Scope, SettingValue, SettingsStore};
@@ -35,9 +35,10 @@ mod test {
     use sl_viewer_rlv::intake::{NOTIFY_TOGGLED_OFF, NOTIFY_TOGGLED_ON, RlvIntakePlugin};
     use sl_viewer_settings::ViewerSettings;
     use sl_viewer_world_api::rlv::{
-        RlvConsoleKind, RlvSession, SETTING_DEBUG, SETTING_MAIN, register_settings,
-        swallows_owner_say,
+        RlvConsoleKind, RlvSession, SETTING_DEBUG, SETTING_ENABLE_TEMP_ATTACH, SETTING_MAIN,
+        is_temp_attachment, register_settings, swallows_owner_say,
     };
+    use sl_viewer_world_api::{INITIAL_TREE_TIER, ObjectState, ShapeFingerprint, TrackedObject};
     use tokio::sync::broadcast;
     use uuid::Uuid;
 
@@ -62,6 +63,17 @@ mod test {
     /// The collar — the object that owner-says at the viewer.
     const COLLAR: Uuid = Uuid::from_u128(0xc0_11a2);
 
+    /// The temporary attachment: a prim the grid attaches to the agent naming
+    /// *itself* as the item it came from, which is what makes it temporary.
+    const TEMP_ATTACHMENT: Uuid = Uuid::from_u128(0x7e_11a2);
+
+    /// The attachment point the temporary attachment is worn on. Any non-zero
+    /// point would do; the gate reads only that there *is* one.
+    const RIGHT_HAND: u8 = 6;
+
+    /// The time dilation a simulator sends when it is keeping up.
+    const REAL_TIME_DILATION: u16 = 0xFFFF;
+
     /// Every [`SlSessionEvent`] the plugin emitted and every notification the
     /// intake raised, in order — the "did the wire message actually arrive" and
     /// "was the user told" halves of each assertion.
@@ -71,6 +83,67 @@ mod test {
         events: Vec<SlSessionEvent>,
         /// The catalogue names of the notifications raised, oldest first.
         notifications: Vec<&'static str>,
+    }
+
+    /// Mirrors the wire's objects into the viewer's [`ObjectState`], which is
+    /// what the owner-say gate asks whether a speaker is a temporary
+    /// attachment.
+    ///
+    /// The production ingest is `sl_viewer_world_objects::objects::apply_object`
+    /// and it is not here: it builds geometry, and this tier deliberately runs
+    /// no renderer. What it fills is not re-derived either — the two fields the
+    /// gate reads come off the arriving [`Object`] through the *same*
+    /// accessors production uses, so this stays a mirror rather than a second
+    /// implementation of the rule under test. (The ingest's own handling of
+    /// them — keeping the item id across a nameless update, dropping it on
+    /// detach — is pinned in `sl-viewer-world-objects`.)
+    fn mirror_objects(
+        mut commands: Commands,
+        mut events: MessageReader<SlEvent>,
+        mut objects: ResMut<ObjectState>,
+    ) {
+        for event in events.read() {
+            let (SlSessionEvent::ObjectAdded(object) | SlSessionEvent::ObjectUpdated(object)) =
+                &event.0
+            else {
+                continue;
+            };
+            let scoped = object.scoped_id();
+            // Reuse the entities of an object already mirrored, so a stream of
+            // updates does not spawn a fresh pair every frame.
+            let (entity, geometry) = objects.objects.get(&scoped).map_or_else(
+                || (commands.spawn_empty().id(), commands.spawn_empty().id()),
+                |tracked| (tracked.entity, tracked.geometry),
+            );
+            objects.objects.insert(
+                scoped,
+                TrackedObject {
+                    entity,
+                    full_key: object.full_id,
+                    geometry,
+                    shape: ShapeFingerprint::of(object),
+                    parent: scoped,
+                    is_root: object.parent_id.get() == 0,
+                    parented: false,
+                    attachment_point: object.attachment_point_id(),
+                    attachment_item: object.attachment_item_id(),
+                    owner_id: AgentKey::from(object.owner_id),
+                    update_flags: object.update_flags,
+                    material: object.material,
+                    extra: object.extra.clone(),
+                    texture_animation: object.texture_animation,
+                    text: object.text.clone(),
+                    text_color: object.text_color,
+                    face_entities: Vec::new(),
+                    prim_lod: PrimLod::FINEST,
+                    tree_tier: INITIAL_TREE_TIER,
+                    animated: false,
+                    texture_entry: object.texture_entry.clone(),
+                    media_url: None,
+                    scale: Vec3::ONE,
+                },
+            );
+        }
     }
 
     /// Appends this frame's events and notifications to [`Recorded`].
@@ -152,7 +225,12 @@ mod test {
                 .insert_resource(settings)
                 .init_resource::<RlvSession>()
                 .add_plugins(RlvIntakePlugin)
+                .init_resource::<ObjectState>()
                 .init_resource::<Recorded>()
+                // Unordered against the intake: an object's update arrives many
+                // frames before anything it says, and both systems read the
+                // same message queue with their own cursors.
+                .add_systems(Update, mirror_objects)
                 .add_systems(PostUpdate, record);
             Ok(Self {
                 runtime,
@@ -258,9 +336,15 @@ mod test {
         /// Move the `RestrainedLove` master switch, as the RLVa menu does, and
         /// let the frame that notices it run.
         fn set_rlv(&mut self, enabled: bool) {
+            self.set_rlv_flag(SETTING_MAIN, enabled);
+        }
+
+        /// Move one of the RLV boolean settings, as its RLVa menu entry does,
+        /// and let the frames that notice it run.
+        fn set_rlv_flag(&mut self, name: &str, enabled: bool) {
             self.app.world_mut().resource_mut::<ViewerSettings>().set(
                 Scope::Global,
-                SETTING_MAIN,
+                name,
                 SettingValue::Bool(enabled),
             );
             self.settle();
@@ -305,10 +389,21 @@ mod test {
         agent: &sl_fake_grid::FakeAgent,
         line: &str,
     ) -> Result<(), TestError> {
+        owner_say_from(harness, agent, COLLAR, line)
+    }
+
+    /// The same, from a named speaker — for a test where *which* object spoke
+    /// is the thing under test.
+    fn owner_say_from(
+        harness: &Harness,
+        agent: &sl_fake_grid::FakeAgent,
+        speaker: Uuid,
+        line: &str,
+    ) -> Result<(), TestError> {
         harness.runtime.block_on(agent.with_sim(|sim| {
             sim.send_chat_from_simulator(
                 "Collar",
-                ChatSource::Object(ObjectKey::from(COLLAR)),
+                ChatSource::Object(ObjectKey::from(speaker)),
                 agent.agent_id().uuid(),
                 ChatType::Owner,
                 1,
@@ -384,6 +479,8 @@ mod test {
         assert_eq!(arrived.chat_type, ChatType::Owner);
         assert!(swallows_owner_say(
             Some(settings),
+            None,
+            arrived.source,
             arrived.chat_type,
             &arrived.message
         ));
@@ -534,6 +631,8 @@ mod test {
         let settings = harness.app.world().resource::<ViewerSettings>();
         assert!(!swallows_owner_say(
             Some(settings),
+            None,
+            ChatSource::Object(ObjectKey::from(COLLAR)),
             ChatType::Owner,
             "@fly=n"
         ));
@@ -595,6 +694,137 @@ mod test {
         assert_eq!(
             harness.app.world().resource::<Recorded>().notifications,
             vec![NOTIFY_TOGGLED_ON, NOTIFY_TOGGLED_OFF]
+        );
+        Ok(())
+    }
+
+    /// The **one** speaker the reference's admission test can exclude: a
+    /// temporary attachment while `RLVaEnableTemporaryAttachments` is off.
+    ///
+    /// The grid attaches a prim to the agent's avatar with its `AttachItemID`
+    /// naming *itself* — which is exactly what a simulator sends for something
+    /// `llAttachToAvatarTemp` rezzed, and the only thing that tells a temporary
+    /// attachment from a worn one. Both directions of the flag are driven, and
+    /// a second speaker that is *not* a temp attachment is driven alongside it
+    /// in the refusing state: the or-chain's whole point is that everything
+    /// else stays admitted, and a viewer that inverted it would refuse every
+    /// ordinary collar while looking, from one assertion, entirely correct.
+    #[test]
+    fn only_a_temporary_attachment_can_be_refused_the_gate() -> Result<(), TestError> {
+        let mut harness = Harness::start(true)?;
+        let agent = harness.logged_in_agent()?;
+        harness.wait_until_in_world()?;
+
+        // The grid attaches it. `attached_to` writes the point into the state
+        // byte and the item id into the `AttachItemID` name-value the way a
+        // simulator does; naming the object's own id there is what makes it
+        // *temporary*.
+        let now = agent.now();
+        let owner = agent.agent_id();
+        harness.runtime.block_on(agent.with_world(|world, sim| {
+            let local_id = world.mint_local_id();
+            let object = PrimFixture::boxed(
+                local_id,
+                ObjectKey::from(TEMP_ATTACHMENT),
+                owner,
+                Vector {
+                    x: 128.0,
+                    y: 128.0,
+                    z: 25.0,
+                },
+                Vector {
+                    x: 0.2,
+                    y: 0.2,
+                    z: 0.2,
+                },
+            )
+            .attached_to(
+                world.avatar_local_id,
+                RIGHT_HAND,
+                InventoryKey::from(TEMP_ATTACHMENT),
+                Vector {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                Rotation {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                    s: 1.0,
+                },
+            )
+            .build();
+            world.objects.push(object.clone());
+            let _sent = sim.send_object_update(&[object], REAL_TIME_DILATION, now);
+        }));
+
+        // Wait until the viewer's object mirror knows it, and agrees it is one.
+        harness.step_until("the temp attachment to be mirrored", |app| {
+            let objects = app.world().resource::<ObjectState>();
+            is_temp_attachment(objects, ObjectKey::from(TEMP_ATTACHMENT)).then_some(())
+        })?;
+
+        // 1. The roster's default is the reference's: temp attachments are
+        //    obeyed, so it restrains like anything else.
+        owner_say_from(&harness, &agent, TEMP_ATTACHMENT, "@fly=n")?;
+        harness.step_until("the temp attachment's restriction", |app| {
+            app.world()
+                .resource::<RlvSession>()
+                .state()
+                .has_behaviour(RlvBehaviour::Fly)
+                .then_some(())
+        })?;
+        owner_say_from(&harness, &agent, TEMP_ATTACHMENT, "@clear")?;
+        harness.step_until("the temp attachment to let go", |app| {
+            (app.world()
+                .resource::<RlvSession>()
+                .state()
+                .restricting_objects()
+                .count()
+                == 0)
+                .then_some(())
+        })?;
+
+        // 2. Refused. The line is neither obeyed nor swallowed — and those are
+        //    the same test, so a refused line is one the chat surfaces show.
+        harness.set_rlv_flag(SETTING_ENABLE_TEMP_ATTACH, false);
+        owner_say_from(&harness, &agent, TEMP_ATTACHMENT, "@detach=n")?;
+        harness.settle();
+        assert_eq!(
+            harness.session().state().restricting_objects().count(),
+            0,
+            "a refused temporary attachment must not restrain the viewer"
+        );
+        {
+            let world = harness.app.world();
+            assert!(!swallows_owner_say(
+                Some(world.resource::<ViewerSettings>()),
+                Some(world.resource::<ObjectState>()),
+                ChatSource::Object(ObjectKey::from(TEMP_ATTACHMENT)),
+                ChatType::Owner,
+                "@detach=n"
+            ));
+        }
+
+        // 3. And in that same state an ordinary speaker is untouched. The
+        //    collar has never been streamed as an object, which is the
+        //    reference's `(!chatter)` clause: not evidence of anything, so
+        //    admitted.
+        owner_say(&harness, &agent, "@fly=n")?;
+        harness.step_until("the ordinary speaker to still be obeyed", |app| {
+            app.world()
+                .resource::<RlvSession>()
+                .state()
+                .has_behaviour(RlvBehaviour::Fly)
+                .then_some(())
+        })?;
+        assert!(
+            harness
+                .session()
+                .state()
+                .has_behaviour_from(COLLAR, RlvBehaviour::Fly, ""),
+            "the restriction must be the collar's, not the refused attachment's"
         );
         Ok(())
     }

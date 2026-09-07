@@ -37,7 +37,7 @@ use crate::ui_font::UiFont;
 use crate::world_api::LocalChatNotice;
 use crate::world_api::rlv::swallows_owner_say;
 use crate::world_api::{
-    SETTING_CHAT_FONT_SIZE, SETTING_CHAT_MAX_LINES, SETTING_NEARBY_TOAST_LIFETIME,
+    ObjectState, SETTING_CHAT_FONT_SIZE, SETTING_CHAT_MAX_LINES, SETTING_NEARBY_TOAST_LIFETIME,
 };
 
 /// The most chat lines the overlay ever shows at once when no
@@ -290,6 +290,12 @@ pub fn position_chat_overlay(
 
 /// Spawn a fresh, fully-opaque [`ChatOverlayLine`] under the container for each
 /// displayable local-chat message that arrives this frame.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries: the chat and \
+              notice streams, the overlay state and its container, the font / colour settings, \
+              the own-agent identity, and the object mirror the RLV owner-say gate reads"
+)]
 pub fn update_chat_overlay(
     mut commands: Commands,
     mut events: MessageReader<SlEvent>,
@@ -298,6 +304,7 @@ pub fn update_chat_overlay(
     container: Query<Entity, With<ChatOverlayContainer>>,
     settings: Option<Res<ViewerSettings>>,
     identity: Option<Res<SlIdentity>>,
+    objects: Option<Res<ObjectState>>,
 ) {
     let Ok(container) = container.single() else {
         return;
@@ -332,7 +339,13 @@ pub fn update_chat_overlay(
         // float over the world as if it were.
         if let SlSessionEvent::ChatReceived(message) = &event.0
             && is_displayable(message)
-            && !swallows_owner_say(settings.as_deref(), message.chat_type, &message.message)
+            && !swallows_owner_say(
+                settings.as_deref(),
+                objects.as_deref(),
+                message.source,
+                message.chat_type,
+                &message.message,
+            )
         {
             spawn_line(
                 format_chat_line(message),

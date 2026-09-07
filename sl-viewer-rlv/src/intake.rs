@@ -520,7 +520,13 @@ fn take_rlv_owner_say(
         let SlSessionEvent::ChatReceived(message) = &event.0 else {
             continue;
         };
-        if !swallows_owner_say(settings.as_deref(), message.chat_type, &message.message) {
+        if !swallows_owner_say(
+            settings.as_deref(),
+            objects.as_deref(),
+            message.source,
+            message.chat_type,
+            &message.message,
+        ) {
             continue;
         }
         // `CHAT_TYPE_OWNER` is what an object says; anything else wearing that

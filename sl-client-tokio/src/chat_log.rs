@@ -507,11 +507,20 @@ impl ChatLog {
             sl_proto::Event::ChatReceived(chat) => {
                 // A worn object's `@`-commands are the viewer's traffic, not
                 // the person's conversation, and a viewer that obeys them eats
-                // them rather than writing them down.
-                if !self
-                    .config
-                    .swallows_rlv_command(chat.chat_type, &chat.message)
-                {
+                // them rather than writing them down. The one speaker that may
+                // be refused — a temporary attachment, when the runtime is
+                // configured not to obey those — is not eaten, because it is
+                // not obeyed: only the object cache can tell one apart, which
+                // is why the lookup happens here rather than in the config.
+                let from_temp_attachment = chat
+                    .source
+                    .object_key()
+                    .is_some_and(|object| session.is_temp_attachment(object));
+                if !self.config.swallows_rlv_command(
+                    chat.chat_type,
+                    &chat.message,
+                    from_temp_attachment,
+                ) {
                     self.log_nearby(&chat.from_name, &chat.message);
                 }
             }

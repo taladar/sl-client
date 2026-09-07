@@ -386,6 +386,41 @@ impl Object {
             .find(|pair| pair.name == name)
             .map(|pair| pair.value)
     }
+
+    /// The inventory item this object was worn from, taken from its
+    /// `AttachItemID` name-value — the reference viewer's
+    /// `LLViewerObject::extractAttachmentItemID`.
+    ///
+    /// `None` when the object is not an attachment, or when the simulator sent
+    /// no such pair. It is **not** always an inventory item: a *temporary*
+    /// attachment is rezzed by a script rather than worn from inventory, so it
+    /// has no item to name and the simulator repeats the object's own id here
+    /// instead (OpenSim's `LLClientView`: `FromItemID`, falling back to
+    /// `part.UUID`). That is exactly what
+    /// [`is_temp_attachment`](Self::is_temp_attachment) tests, and the reason
+    /// this is a bare [`Uuid`] rather than an inventory key.
+    #[must_use]
+    pub fn attachment_item_id(&self) -> Option<Uuid> {
+        self.name_value_data("AttachItemID")
+            .and_then(|value| Uuid::parse_str(value.trim()).ok())
+    }
+
+    /// Whether this object is a **temporary** attachment: one a script attached
+    /// (`llAttachToAvatarTemp`) rather than one the agent wore from inventory.
+    ///
+    /// The reference's test (`LLViewerObject::isTempAttachment`) is that the
+    /// object's own id and its
+    /// [`attachment_item_id`](Self::attachment_item_id) are the same non-null
+    /// id, which is what a simulator sends when there is no inventory item to
+    /// name. An attachment carrying no `AttachItemID` at all is therefore *not*
+    /// temporary by this test — the reference leaves its item id null and the
+    /// comparison fails — and neither is a plain in-world prim.
+    #[must_use]
+    pub fn is_temp_attachment(&self) -> bool {
+        !self.full_id.uuid().is_nil()
+            && self.attachment_point_id().is_some()
+            && self.attachment_item_id() == Some(self.full_id.uuid())
+    }
 }
 
 /// One parsed entry of an object's packed `name_value` string (the reference
@@ -1226,6 +1261,48 @@ mod tests {
         // Grass likewise.
         let grass = test_object(super::pcode::GRASS, 1, "");
         assert_eq!(grass.attachment_point_id(), None);
+    }
+
+    /// A worn attachment names the inventory item it came from; a *temporary*
+    /// one has no item, so the simulator repeats the object's own id and that
+    /// equality is the whole test.
+    #[test]
+    fn temp_attachment_is_the_one_whose_item_is_itself() {
+        let own = super::Uuid::from_u128(0x7e_11_a2);
+        let item = super::Uuid::from_u128(0x1_7e_11);
+        let attached = |name_value: &str| {
+            let mut object = test_object(super::pcode::PRIMITIVE, 0x60, name_value);
+            object.full_id = ObjectKey::from(own);
+            object
+        };
+
+        // Worn from inventory: the item id is the inventory item's, not the
+        // object's, so this is an ordinary attachment.
+        let worn = attached(&format!("AttachItemID STRING RW SV {item}"));
+        assert_eq!(worn.attachment_item_id(), Some(item));
+        assert!(!worn.is_temp_attachment());
+
+        // Rezzed by a script: the simulator had no item to name and sent the
+        // object's own id.
+        let temp = attached(&format!("AttachItemID STRING RW SV {own}"));
+        assert_eq!(temp.attachment_item_id(), Some(own));
+        assert!(temp.is_temp_attachment());
+
+        // No pair at all: the reference leaves its item id null and the
+        // comparison fails, so this is *not* temporary.
+        let bare = attached("");
+        assert_eq!(bare.attachment_item_id(), None);
+        assert!(!bare.is_temp_attachment());
+
+        // An in-world prim that somehow names itself is still not an
+        // attachment — the point test is what keeps it out.
+        let mut prim = test_object(
+            super::pcode::PRIMITIVE,
+            0,
+            &format!("AttachItemID STRING RW SV {own}"),
+        );
+        prim.full_id = ObjectKey::from(own);
+        assert!(!prim.is_temp_attachment());
     }
 
     /// The two spellings a live reference viewer actually wrote into a scene

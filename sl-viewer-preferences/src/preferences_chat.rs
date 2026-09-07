@@ -526,6 +526,12 @@ pub(crate) fn chat_log_config_from_settings(settings: &ViewerSettings) -> ChatLo
         // this tab — the RLVa menu owns the switch, and the push system below
         // is what carries a flip of it here.
         swallow_rlv_commands: sl_viewer_world_api::rlv::rlv_is_enabled(Some(settings)),
+        // The transcript has to swallow exactly what the engine takes, and the
+        // engine refuses one speaker: a temporary attachment, when this is off.
+        obey_temp_attachments: sl_viewer_world_api::rlv::rlv_flag(
+            Some(settings),
+            sl_viewer_world_api::rlv::SETTING_ENABLE_TEMP_ATTACH,
+        ),
         legacy_im_names: flag(SETTING_LOG_LEGACY_NAMES, false),
         date_suffix: flag(SETTING_LOG_FILENAME_DATE, false),
         timestamp,
@@ -564,10 +570,11 @@ fn push_chat_log_config_at_login(
     pushed.0 = Some(config);
 }
 
-/// Push a rebuilt chat-log configuration whenever the **RLV master switch**
-/// changes, because that is the one input to it the preferences OK press does
-/// not own — the RLVa menu flips `RestrainedLove`, and the transcript has to
-/// stop (or start) recording an object's commands the moment it does.
+/// Push a rebuilt chat-log configuration whenever one of the **RLV switches**
+/// changes, because those are the inputs to it the preferences OK press does
+/// not own — the RLVa menu flips `RestrainedLove` (and
+/// `RLVaEnableTemporaryAttachments`), and the transcript has to stop (or start)
+/// recording an object's commands the moment it does.
 ///
 /// It diffs against [`PushedChatLogConfig`] like the OK path, so it can only
 /// ever send when something actually changed, and it deliberately reads the
@@ -578,7 +585,7 @@ fn push_chat_log_config_on_rlv_toggle(
     settings: Option<Res<ViewerSettings>>,
     mut pushed: ResMut<PushedChatLogConfig>,
     mut sl: MessageWriter<SlCommand>,
-    mut last: Local<Option<bool>>,
+    mut last: Local<Option<(bool, bool)>>,
 ) {
     let Some(settings) = settings else {
         return;
@@ -586,11 +593,20 @@ fn push_chat_log_config_on_rlv_toggle(
     if !settings.is_changed() {
         return;
     }
-    let enabled = sl_viewer_world_api::rlv::rlv_is_enabled(Some(&settings));
-    if *last == Some(enabled) {
+    // Both RLV switches the transcript reads, and both live on the RLVa menu:
+    // the master one, and the temporary-attachment exclusion — a flip of either
+    // changes which lines the engine takes, and so which the log must not keep.
+    let switches = (
+        sl_viewer_world_api::rlv::rlv_is_enabled(Some(&settings)),
+        sl_viewer_world_api::rlv::rlv_flag(
+            Some(&settings),
+            sl_viewer_world_api::rlv::SETTING_ENABLE_TEMP_ATTACH,
+        ),
+    );
+    if *last == Some(switches) {
         return;
     }
-    *last = Some(enabled);
+    *last = Some(switches);
     // Nothing has been pushed yet: the login push is still to come and will
     // carry the current switch with it, so there is nothing to correct.
     if pushed.0.is_none() {

@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 311 |
+| ready | 310 |
 | blocked | 46 |
 | in-progress | 19 |
 | bugs | 59 |
-| done | 1006 |
+| done | 1007 |
 | deferred | 25 |
 | wont-do | 14 |
 | **total** | **1578** |
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (311)
+## ready (310)
 
 ### protocol
 
@@ -818,8 +818,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rlv-environment-commands`](ready/viewer-rlv-environment-commands.md)
   — RLV — @setenv_*/@getenv_* environment control (blocked by
   `viewer-rlv-restriction-state` (done))
-- [`viewer-rlv-temp-attachment-gate`](ready/viewer-rlv-temp-attachment-gate.md)
-  — RLV — the temporary-attachment half of the owner-say gate
 - [`viewer-rlv-vision-render`](ready/viewer-rlv-vision-render.md) — RLV
   vision-restriction rendering (blocked by `viewer-rlv-restriction-state`
   (done))
@@ -1046,7 +1044,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-rlv-blocked-objects`](blocked/viewer-rlv-blocked-objects.md) — RLV —
   the blocked-object list for an unapproved experience's attachment (blocked by
-  `viewer-experience-event-stream`, `viewer-rlv-temp-attachment-gate`)
+  `viewer-experience-event-stream`, `viewer-rlv-temp-attachment-gate` (done))
 - [`viewer-rlv-enforce-forced-actions`](blocked/viewer-rlv-enforce-forced-actions.md)
   — RLV — forced actions and the #RLV inventory sub-protocol (blocked by
   `viewer-rlv-restriction-state` (done), `viewer-sit-stand-actions`,
@@ -1302,7 +1300,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1006)
+## done (1007)
 
 ### protocol
 
@@ -2589,6 +2587,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   queries via chat reply (blocked by `viewer-rlv-restriction-state` (done))
 - [`viewer-rlv-restriction-state`](done/viewer-rlv-restriction-state.md) — RLV —
   the restriction state machine (blocked by `viewer-rlv-command-parser` (done))
+- [`viewer-rlv-temp-attachment-gate`](done/viewer-rlv-temp-attachment-gate.md) —
+  RLV — the temporary-attachment half of the owner-say gate
 - [`viewer-scene-dump`](done/viewer-scene-dump.md) — Emit the shared scene-dump
   JSON beside the frames
 - [`viewer-scene-dump-animations`](done/viewer-scene-dump-animations.md) — A

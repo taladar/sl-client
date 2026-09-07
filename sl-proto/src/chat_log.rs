@@ -274,6 +274,14 @@ pub struct ChatLogConfig {
     /// from its `RestrainedLove` master switch, and off by default because a
     /// runtime that does not obey RLV has no reason to hide the attempt.
     pub swallow_rlv_commands: bool,
+    /// Whether a **temporary** attachment — one a script attached rather than
+    /// one worn from inventory — is obeyed at all (the reference's
+    /// `RLVaEnableTemporaryAttachments`, on by default). Set by the viewer
+    /// alongside [`swallow_rlv_commands`](Self::swallow_rlv_commands), because
+    /// the transcript must swallow exactly the lines the engine takes: with
+    /// this off, a temp attachment's `@`-line is *not* obeyed, so it is not
+    /// eaten either and belongs in the log like any other thing it said.
+    pub obey_temp_attachments: bool,
 }
 
 impl Default for ChatLogConfig {
@@ -287,6 +295,7 @@ impl Default for ChatLogConfig {
             conversation_log: false,
             conversation_log_retention_days: CONVERSATION_LOG_RETENTION_DAYS,
             swallow_rlv_commands: false,
+            obey_temp_attachments: true,
         }
     }
 }
@@ -318,9 +327,26 @@ impl ChatLogConfig {
     /// Gated on [`swallow_rlv_commands`](Self::swallow_rlv_commands), because a
     /// runtime with RLV switched off does *not* act on the line, and there
     /// seeing the attempt in the log is the point.
+    ///
+    /// `from_temp_attachment` says whether the speaker is a temporary
+    /// attachment ([`Session::is_temp_attachment`](crate::Session::is_temp_attachment)),
+    /// the one speaker the reference's admission test can exclude: with
+    /// [`obey_temp_attachments`](Self::obey_temp_attachments) off such a line is
+    /// not obeyed, so it is not swallowed either. Every other speaker — a worn
+    /// collar, a rezzed in-world prim the agent owns, a relay — is admitted
+    /// whatever that flag says, which is why this is the *only* place the
+    /// speaker enters the test.
     #[must_use]
-    pub fn swallows_rlv_command(&self, chat_type: ChatType, message: &str) -> bool {
-        self.swallow_rlv_commands && chat_type == ChatType::Owner && sl_rlv::is_rlv_line(message)
+    pub fn swallows_rlv_command(
+        &self,
+        chat_type: ChatType,
+        message: &str,
+        from_temp_attachment: bool,
+    ) -> bool {
+        self.swallow_rlv_commands
+            && chat_type == ChatType::Owner
+            && sl_rlv::is_rlv_line(message)
+            && (self.obey_temp_attachments || !from_temp_attachment)
     }
 
     /// Whether messages of `kind` (a session conversation, not nearby chat) are
@@ -1034,25 +1060,57 @@ mod tests {
         };
         // An object commanding a viewer that acts on it: taken, not recorded.
         assert_eq!(
-            obeying.swallows_rlv_command(ChatType::Owner, "@detach=n"),
+            obeying.swallows_rlv_command(ChatType::Owner, "@detach=n", false),
             true
         );
         // The same viewer still logs what the object actually says.
         assert_eq!(
-            obeying.swallows_rlv_command(ChatType::Owner, "the collar is on"),
+            obeying.swallows_rlv_command(ChatType::Owner, "the collar is on", false),
             false
         );
         // And a person typing `@detach=n` out loud is conversation, however
         // much it looks like a command.
         assert_eq!(
-            obeying.swallows_rlv_command(ChatType::Normal, "@detach=n"),
+            obeying.swallows_rlv_command(ChatType::Normal, "@detach=n", false),
             false
         );
         // A runtime that does not obey RLV records the attempt, which is the
         // whole point of seeing it there.
         assert_eq!(
-            ChatLogConfig::default().swallows_rlv_command(ChatType::Owner, "@detach=n"),
+            ChatLogConfig::default().swallows_rlv_command(ChatType::Owner, "@detach=n", false),
             false
+        );
+    }
+
+    /// The one speaker the admission test can exclude, and the only one: with
+    /// temporary attachments refused, *their* line is logged like anything else
+    /// they said, while a worn collar's is still swallowed.
+    #[test]
+    fn a_refused_temp_attachments_line_is_logged_instead_of_eaten() {
+        let obeying = ChatLogConfig {
+            swallow_rlv_commands: true,
+            ..ChatLogConfig::default()
+        };
+        // The default obeys temp attachments, so one is swallowed like any
+        // other speaker.
+        assert_eq!(
+            obeying.swallows_rlv_command(ChatType::Owner, "@detach=n", true),
+            true
+        );
+        let refusing = ChatLogConfig {
+            obey_temp_attachments: false,
+            ..obeying
+        };
+        // Refused: not obeyed, so not eaten.
+        assert_eq!(
+            refusing.swallows_rlv_command(ChatType::Owner, "@detach=n", true),
+            false
+        );
+        // A worn collar is not a temp attachment and is unaffected — the flag
+        // must not become a master switch by accident.
+        assert_eq!(
+            refusing.swallows_rlv_command(ChatType::Owner, "@detach=n", false),
+            true
         );
     }
 }

@@ -44,7 +44,7 @@
 use std::collections::VecDeque;
 
 use bevy::prelude::*;
-use sl_client_bevy::{ChatType, ObjectKey};
+use sl_client_bevy::{ChatSource, ChatType, ObjectKey};
 use sl_rlv::{
     RlvAttachmentPoint, RlvDebugSetting, RlvDebugValue, RlvExtSource, RlvObjectAttachment,
     RlvReply, RlvState, is_rlv_line,
@@ -833,24 +833,63 @@ pub fn is_rlv_command_line(line: &str) -> bool {
 ///   here and why this must not invent a check that only looks like safety;
 /// - the line starts with `@`.
 ///
-/// There is no attachment test. A rezzed in-world prim the agent owns — a bed,
-/// a cage, a cuff-post — commands the viewer directly and always has; a club's
-/// poseball cannot, which is exactly why *relays* exist, and a relay is worn,
-/// owned, and indistinguishable from any other worn object down here. The one
-/// case the reference excludes is a *temporary* attachment while
-/// `RLVaEnableTemporaryAttachments` is off, which this viewer cannot yet tell
-/// apart (it does not keep an attachment's `AttachItemID`) and which its
-/// default — the flag on — would not exclude anyway.
+/// There is no general attachment test. A rezzed in-world prim the agent owns —
+/// a bed, a cage, a cuff-post — commands the viewer directly and always has; a
+/// club's poseball cannot, which is exactly why *relays* exist, and a relay is
+/// worn, owned, and indistinguishable from any other worn object down here.
+///
+/// The **one** speaker the reference's or-chain excludes is a *temporary*
+/// attachment (one a script attached, [`is_temp_attachment`]) while
+/// `RLVaEnableTemporaryAttachments` is off. The chain's shape is what matters:
+/// every other speaker is admitted whatever that flag says, and a viewer that
+/// inverted it would refuse every ordinary collar. A speaker this viewer has
+/// not streamed is admitted too, which is the reference's `(!chatter) || …`
+/// first clause — an object whose update has not arrived is not evidence of
+/// anything.
 ///
 /// Every surface that displays or records nearby chat asks this, so the line
-/// the engine takes cannot leak out of one of them.
+/// the engine takes cannot leak out of one of them — and the refusal is the
+/// same test as the swallow, so a line the gate refuses is one they *show*.
 #[must_use]
 pub fn swallows_owner_say(
     settings: Option<&ViewerSettings>,
+    objects: Option<&ObjectState>,
+    source: ChatSource,
     chat_type: ChatType,
     message: &str,
 ) -> bool {
-    rlv_is_enabled(settings) && chat_type == ChatType::Owner && is_rlv_line(message)
+    rlv_is_enabled(settings)
+        && chat_type == ChatType::Owner
+        && is_rlv_line(message)
+        && (rlv_flag(settings, SETTING_ENABLE_TEMP_ATTACH)
+            || !source
+                .object_key()
+                .zip(objects)
+                .is_some_and(|(key, objects)| is_temp_attachment(objects, key)))
+}
+
+/// Whether the object with grid-wide key `key` is a **temporary** attachment:
+/// one a script attached (`llAttachToAvatarTemp`) rather than one the agent
+/// wore from inventory.
+///
+/// The reference's test (`LLViewerObject::isTempAttachment`) is that the
+/// object's own id and the `AttachItemID` the simulator sent for it are the
+/// same — which is what a simulator sends when there is no inventory item to
+/// name. `false` for an object this viewer has not streamed, and `false` for
+/// an attachment that named no item at all, both matching the reference.
+///
+/// Unlike [`object_attachment`] this does **not** chase the linkset up to its
+/// attachment root, because the reference does not either: it asks the
+/// *speaking* object, and a child prim of an attachment carries neither an
+/// attachment point nor an `AttachItemID` of its own, so a script talking from
+/// one is admitted there as it is here.
+#[must_use]
+pub fn is_temp_attachment(objects: &ObjectState, key: ObjectKey) -> bool {
+    objects.objects.values().any(|tracked| {
+        tracked.full_key == key
+            && tracked.attachment_point.is_some()
+            && tracked.attachment_item == Some(key.uuid())
+    })
 }
 
 /// Where the object with grid-wide key `key` sits on the avatar, or `None` when
@@ -896,7 +935,7 @@ mod tests {
         swallows_owner_say,
     };
     use pretty_assertions::assert_eq;
-    use sl_client_bevy::{ChatType, Uuid};
+    use sl_client_bevy::{ChatSource, ChatType, ObjectKey, Uuid};
     use sl_rlv::{RlvNoFacts, parse_chat_line};
     use std::collections::HashSet;
 
@@ -1026,7 +1065,13 @@ mod tests {
     /// viewer is exactly what a person wants to see in that case.
     #[test]
     fn nothing_is_swallowed_while_rlv_is_off() {
-        assert!(!swallows_owner_say(None, ChatType::Owner, "@detach=n"));
+        assert!(!swallows_owner_say(
+            None,
+            None,
+            ChatSource::Object(ObjectKey::from(Uuid::from_u128(1))),
+            ChatType::Owner,
+            "@detach=n"
+        ));
     }
 
     /// The two halves of the gate are both required, and neither is more than
@@ -1045,7 +1090,13 @@ mod tests {
             (ChatType::Direct, "@detach=n"),
         ] {
             assert!(
-                !swallows_owner_say(None, chat_type, message),
+                !swallows_owner_say(
+                    None,
+                    None,
+                    ChatSource::Object(ObjectKey::from(Uuid::from_u128(1))),
+                    chat_type,
+                    message
+                ),
                 "{chat_type:?} {message:?} is not an RLV command line"
             );
         }

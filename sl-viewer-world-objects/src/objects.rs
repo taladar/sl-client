@@ -3202,6 +3202,12 @@ fn apply_object(
     // `parent` is the avatar, and it is parented to that avatar's skeleton joint
     // (P16.1) by `adopt_pending_attachments`, not to a linkset root here.
     let attachment_point = object.attachment_point_id();
+    // The inventory item the attachment was worn from, which for a *temporary*
+    // attachment is the object's own id (the RLV admission test's one exclusion
+    // — `rlv::is_temp_attachment`). `None` on an update that carried no
+    // name-values at all, which the known-object path below keeps rather than
+    // blanks.
+    let attachment_item = object.attachment_item_id();
     let category = classify(object);
     let shape = ShapeFingerprint::of(object);
     let transform = object_transform(object, is_root, state.origin);
@@ -3447,6 +3453,15 @@ fn apply_object(
         existing.parent = parent;
         existing.is_root = is_root;
         existing.attachment_point = attachment_point;
+        // The item id follows the attachment, not the update: an object that is
+        // no longer an attachment has none (the reference nulls it on detach),
+        // and one whose update carried no name-values keeps the last it named
+        // rather than losing it to a compressed update that omitted them.
+        if attachment_point.is_none() {
+            existing.attachment_item = None;
+        } else if attachment_item.is_some() {
+            existing.attachment_item = attachment_item;
+        }
         existing.animated = is_animated_object(object);
         existing.full_key = object.full_id;
         existing.update_flags = object.update_flags;
@@ -3587,6 +3602,7 @@ fn apply_object(
             is_root,
             parented,
             attachment_point,
+            attachment_item,
             owner_id: AgentKey::from(object.owner_id),
             update_flags: object.update_flags,
             material: object.material,
@@ -4892,6 +4908,78 @@ mod tests {
         );
     }
 
+    /// The resources [`apply_object`](super::apply_object) takes, as one
+    /// `SystemState` tuple (named to satisfy `type_complexity`).
+    type ApplyParams<'w, 's> = (
+        bevy::prelude::Commands<'w, 's>,
+        super::FaceIds<'w, 's>,
+        bevy::prelude::ResMut<'w, bevy::prelude::Assets<bevy::prelude::Mesh>>,
+        bevy::prelude::ResMut<'w, bevy::prelude::Assets<crate::face_material::FaceMaterial>>,
+        bevy::prelude::ResMut<'w, crate::textures::TextureManager>,
+        bevy::prelude::Res<'w, crate::world_api::DecodedTextures>,
+        bevy::prelude::ResMut<'w, crate::textures::PrimTextures>,
+        bevy::prelude::ResMut<'w, crate::meshes::MeshManager>,
+        bevy::prelude::ResMut<'w, crate::geometry_cache::GeometryCache>,
+        bevy::prelude::ResMut<'w, crate::material_cache::MaterialCache>,
+    );
+
+    /// Initialises every resource [`apply_one`] needs, so a bare
+    /// [`World`](bevy::prelude::World) can run the real ingest path.
+    fn seed_apply_resources(world: &mut bevy::prelude::World) {
+        world.init_resource::<bevy::prelude::Assets<bevy::prelude::Mesh>>();
+        world.init_resource::<bevy::prelude::Assets<crate::face_material::FaceMaterial>>();
+        world.init_resource::<crate::textures::TextureManager>();
+        world.init_resource::<crate::world_api::DecodedTextures>();
+        world.init_resource::<crate::textures::PrimTextures>();
+        world.init_resource::<crate::meshes::MeshManager>();
+        world.init_resource::<crate::geometry_cache::GeometryCache>();
+        world.init_resource::<crate::material_cache::MaterialCache>();
+    }
+
+    /// Runs one [`apply_object`](super::apply_object) — the real object-update
+    /// ingest — and flushes its commands into `world`. Takes `world` as a
+    /// parameter rather than capturing it, so a caller stays free to inspect or
+    /// despawn between invocations.
+    fn apply_one(
+        world: &mut bevy::prelude::World,
+        state: &mut super::ObjectState,
+        object: &Object,
+    ) -> Result<(), Box<dyn core::error::Error>> {
+        use bevy::ecs::system::SystemState;
+
+        let mut params: SystemState<ApplyParams> = SystemState::new(world);
+        let (
+            mut commands,
+            faces,
+            mut meshes,
+            mut materials,
+            mut manager,
+            store,
+            mut prim_textures,
+            mut mesh_manager,
+            mut cache,
+            mut material_cache,
+        ) = params
+            .get_mut(world)
+            .map_err(|error| format!("system params: {error}"))?;
+        super::apply_object(
+            state,
+            object,
+            &faces,
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            &mut manager,
+            &store,
+            &mut prim_textures,
+            &mut mesh_manager,
+            &mut cache,
+            &mut material_cache,
+        );
+        params.apply(world);
+        Ok(())
+    }
+
     /// A [`TrackedObject`](super::TrackedObject) stub for the stale-guard tests: a
     /// plain-prim root at `entity` / `geometry`, every other field at its spawn
     /// default. Only the `entity` field is under test.
@@ -4909,6 +4997,7 @@ mod tests {
             is_root: true,
             parented: false,
             attachment_point: None,
+            attachment_item: None,
             owner_id: AgentKey::from(object.owner_id),
             update_flags: object.update_flags,
             material: object.material,
@@ -4924,6 +5013,162 @@ mod tests {
             media_url: None,
             scale: bevy::prelude::Vec3::ONE,
         }
+    }
+
+    /// The `AttachItemID` name-value reaches the tracked object through the real
+    /// ingest, and follows the attachment rather than the update: it is kept
+    /// across an update that names none (a compressed update may omit the
+    /// name-values entirely) and dropped the moment the object stops being an
+    /// attachment, which is where the reference nulls it too.
+    #[test]
+    fn the_attachment_item_id_survives_a_nameless_update_and_dies_with_the_attachment()
+    -> Result<(), Box<dyn core::error::Error>> {
+        use bevy::prelude::World;
+        use sl_client_bevy::ObjectKey;
+
+        use crate::world_api::rlv::is_temp_attachment;
+
+        let own = Uuid::from_u128(0x7e_11_a2);
+        let attached_to_right_hand = sl_proto::attachment_state_from_point(6);
+
+        let mut world = World::new();
+        seed_apply_resources(&mut world);
+        let mut state = super::ObjectState::default();
+
+        // A temporary attachment as a simulator sends one: worn on a point, and
+        // naming *itself* as the item it came from because there is no item.
+        let mut object = bare_object(pcode::PRIMITIVE);
+        object.full_id = ObjectKey::from(own);
+        object.parent_id = RegionLocalObjectId(9);
+        object.state = attached_to_right_hand;
+        object.name_value = format!("AttachItemID STRING RW SV {own}");
+        let scoped = object.scoped_id();
+        apply_one(&mut world, &mut state, &object)?;
+        assert_eq!(
+            state.objects.get(&scoped).and_then(|it| it.attachment_item),
+            Some(own),
+            "the ingest must keep the item id the wire named"
+        );
+        assert!(is_temp_attachment(&state, ObjectKey::from(own)));
+
+        // The same object again with no name-values at all: the last known item
+        // id stands, because losing it would silently un-refuse the speaker.
+        let mut nameless = object.clone();
+        nameless.name_value = String::new();
+        apply_one(&mut world, &mut state, &nameless)?;
+        assert_eq!(
+            state.objects.get(&scoped).and_then(|it| it.attachment_item),
+            Some(own),
+            "an update carrying no name-values must not blank the item id"
+        );
+
+        // Detached: no attachment point, so no attachment item either.
+        let mut detached = object.clone();
+        detached.state = 0;
+        detached.parent_id = RegionLocalObjectId(0);
+        apply_one(&mut world, &mut state, &detached)?;
+        assert_eq!(
+            state.objects.get(&scoped).and_then(|it| it.attachment_item),
+            None,
+            "an object that is no longer an attachment has no attachment item"
+        );
+        assert!(!is_temp_attachment(&state, ObjectKey::from(own)));
+        Ok(())
+    }
+
+    /// The RLV admission test's one exclusion, read off the tracked objects
+    /// this module fills: a *temporary* attachment (one whose `AttachItemID` is
+    /// its own id) speaking while `RLVaEnableTemporaryAttachments` is off.
+    ///
+    /// The or-chain's shape is what is under test, not the flag: every other
+    /// speaker — a worn collar, a rezzed prim, an object that has not been
+    /// streamed at all — must stay admitted whatever that flag says, because
+    /// inverting this would refuse every ordinary RLV device there is.
+    #[test]
+    fn only_a_refused_temp_attachment_falls_out_of_the_owner_say_gate() {
+        use bevy::prelude::World;
+        use sl_client_bevy::{ChatSource, ChatType, ObjectKey};
+        use sl_settings::{Scope, SettingValue, SettingsStore};
+        use sl_viewer_settings::ViewerSettings;
+
+        use crate::world_api::ObjectState;
+        use crate::world_api::rlv::{
+            SETTING_ENABLE_TEMP_ATTACH, SETTING_MAIN, is_temp_attachment, register_settings,
+            swallows_owner_say,
+        };
+
+        let temp = Uuid::from_u128(0x7e_11_a2);
+        let worn = Uuid::from_u128(0xc0_11a2);
+        let item = Uuid::from_u128(0x1_7e_11);
+        let unstreamed = Uuid::from_u128(0xdead);
+
+        let mut world = World::new();
+        let mut objects = ObjectState::default();
+        for (index, (full_id, attachment_item)) in [(temp, Some(temp)), (worn, Some(item))]
+            .into_iter()
+            .enumerate()
+        {
+            let mut object = bare_object(pcode::PRIMITIVE);
+            object.full_id = ObjectKey::from(full_id);
+            object.local_id = RegionLocalObjectId(u32::try_from(index).unwrap_or(0) + 1);
+            let entity = world.spawn_empty().id();
+            let geometry = world.spawn_empty().id();
+            let mut tracked = tracked_stub(&object, entity, geometry);
+            tracked.attachment_point = Some(6);
+            tracked.attachment_item = attachment_item;
+            objects.objects.insert(object.scoped_id(), tracked);
+        }
+
+        assert!(is_temp_attachment(&objects, ObjectKey::from(temp)));
+        assert!(!is_temp_attachment(&objects, ObjectKey::from(worn)));
+        assert!(!is_temp_attachment(&objects, ObjectKey::from(unstreamed)));
+
+        let mut settings = ViewerSettings::from_store_for_test(SettingsStore::new());
+        register_settings(&mut settings);
+        settings.set(Scope::Global, SETTING_MAIN, SettingValue::Bool(true));
+        let admits = |settings: &ViewerSettings, speaker: Uuid| {
+            swallows_owner_say(
+                Some(settings),
+                Some(&objects),
+                ChatSource::Object(ObjectKey::from(speaker)),
+                ChatType::Owner,
+                "@detach=n",
+            )
+        };
+
+        // The roster's default is on, which is the reference's default too: a
+        // temp attachment is obeyed like anything else.
+        for speaker in [temp, worn, unstreamed] {
+            assert!(admits(&settings, speaker), "{speaker} must be admitted");
+        }
+
+        // Turned off, and exactly one speaker drops out.
+        settings.set(
+            Scope::Global,
+            SETTING_ENABLE_TEMP_ATTACH,
+            SettingValue::Bool(false),
+        );
+        assert!(
+            !admits(&settings, temp),
+            "a refused temp attachment must not be obeyed"
+        );
+        for speaker in [worn, unstreamed] {
+            assert!(
+                admits(&settings, speaker),
+                "{speaker} is not a temp attachment and must stay admitted"
+            );
+        }
+
+        // A speaker that is not an object at all cannot be a temp attachment,
+        // so the exclusion never reaches it — the reference's `(!chatter)`
+        // first clause, which admits and leaves the refusal to the intake.
+        assert!(swallows_owner_say(
+            Some(&settings),
+            Some(&objects),
+            ChatSource::Agent(AgentKey::from(Uuid::from_u128(5))),
+            ChatType::Owner,
+            "@detach=n",
+        ));
     }
 
     /// The terse-update fast path's gate: a motion-only update (the merged
@@ -5109,39 +5354,10 @@ mod tests {
     #[test]
     fn apply_object_respawns_a_child_despawned_out_from_under_the_map()
     -> Result<(), Box<dyn core::error::Error>> {
-        use crate::face_material::FaceMaterial;
-        use crate::geometry_cache::GeometryCache;
-        use crate::material_cache::MaterialCache;
-        use crate::meshes::MeshManager;
-        use crate::textures::{PrimTextures, TextureManager};
-        use crate::world_api::DecodedTextures;
-        use bevy::ecs::system::SystemState;
-        use bevy::prelude::{Assets, ChildOf, Commands, Mesh, Res, ResMut, World};
-
-        /// The resources `apply_object`(super::apply_object) takes, as one
-        /// `SystemState` tuple (named to satisfy `type_complexity`).
-        type ApplyParams<'w, 's> = (
-            Commands<'w, 's>,
-            super::FaceIds<'w, 's>,
-            ResMut<'w, Assets<Mesh>>,
-            ResMut<'w, Assets<FaceMaterial>>,
-            ResMut<'w, TextureManager>,
-            Res<'w, DecodedTextures>,
-            ResMut<'w, PrimTextures>,
-            ResMut<'w, MeshManager>,
-            ResMut<'w, GeometryCache>,
-            ResMut<'w, MaterialCache>,
-        );
+        use bevy::prelude::{ChildOf, World};
 
         let mut world = World::new();
-        world.init_resource::<Assets<Mesh>>();
-        world.init_resource::<Assets<FaceMaterial>>();
-        world.init_resource::<TextureManager>();
-        world.init_resource::<DecodedTextures>();
-        world.init_resource::<PrimTextures>();
-        world.init_resource::<MeshManager>();
-        world.init_resource::<GeometryCache>();
-        world.init_resource::<MaterialCache>();
+        seed_apply_resources(&mut world);
 
         let mut state = super::ObjectState::default();
         let root_obj = bare_object(pcode::PRIMITIVE);
@@ -5152,49 +5368,9 @@ mod tests {
         let root_scoped = root_obj.scoped_id();
         let child_scoped = child_obj.scoped_id();
 
-        // Runs one `apply_object` and flushes its commands into `world`. Takes
-        // `world` as a parameter (rather than capturing it) so the world stays free
-        // to inspect / despawn between invocations.
-        let apply = |world: &mut World,
-                     state: &mut super::ObjectState,
-                     object: &Object|
-         -> Result<(), Box<dyn core::error::Error>> {
-            let mut params: SystemState<ApplyParams> = SystemState::new(world);
-            let (
-                mut commands,
-                faces,
-                mut meshes,
-                mut materials,
-                mut manager,
-                store,
-                mut prim_textures,
-                mut mesh_manager,
-                mut cache,
-                mut material_cache,
-            ) = params
-                .get_mut(world)
-                .map_err(|error| format!("system params: {error}"))?;
-            super::apply_object(
-                state,
-                object,
-                &faces,
-                &mut commands,
-                &mut meshes,
-                &mut materials,
-                &mut manager,
-                &store,
-                &mut prim_textures,
-                &mut mesh_manager,
-                &mut cache,
-                &mut material_cache,
-            );
-            params.apply(world);
-            Ok(())
-        };
-
         // Spawn the root then the child; the child parents to the root's entity.
-        apply(&mut world, &mut state, &root_obj)?;
-        apply(&mut world, &mut state, &child_obj)?;
+        apply_one(&mut world, &mut state, &root_obj)?;
+        apply_one(&mut world, &mut state, &child_obj)?;
         let root_entity = state
             .objects
             .get(&root_scoped)
@@ -5222,7 +5398,7 @@ mod tests {
 
         // A later ObjectUpdated for the child: the guard drops the stale entry and the
         // spawn path re-creates the object, re-parented to the still-live root.
-        apply(&mut world, &mut state, &child_obj)?;
+        apply_one(&mut world, &mut state, &child_obj)?;
         let new_child = state
             .objects
             .get(&child_scoped)

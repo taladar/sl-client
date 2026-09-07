@@ -1738,6 +1738,12 @@ fn build_chat_log_config(args: &Args, ctx: &dyn ReplContext) -> Result<ChatLogCo
             9,
             defaults.swallow_rlv_commands,
         )?,
+        obey_temp_attachments: args.bool_or(
+            ctx,
+            "obey_temp_attachments",
+            10,
+            defaults.obey_temp_attachments,
+        )?,
     })
 }
 
@@ -3263,7 +3269,7 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "[enabled=nearby,im,group,conference] [legacy_im_names=] [date_suffix=] \
                     [timestamp=none|time|datetime] [clock=24|12] [seconds=] [recall_window=] \
                     [conversation_log=] [conversation_log_retention_days=] \
-                    [swallow_rlv_commands=]",
+                    [swallow_rlv_commands=] [obey_temp_attachments=]",
             build: |args, ctx| {
                 Ok(Command::SetChatLogConfig(Box::new(build_chat_log_config(
                     args, ctx,
