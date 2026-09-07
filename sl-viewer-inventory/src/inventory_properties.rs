@@ -22,6 +22,19 @@
 //! description commit on `Enter`; the permission / sale toggles commit
 //! immediately on click.
 //!
+//! # One properties window per item
+//!
+//! The properties floater is a **keyed floater** ([`FloaterKey`]): inspecting a
+//! second item opens a second window rather than re-pointing the first, so two
+//! items' permissions can be compared side by side (the reference registers
+//! `LLFloaterProperties` per item id). Each window's item and field entities
+//! are components on it, and a permission toggle repaints **its** window by
+//! re-opening on the updated snapshot — which is why an open on an item that
+//! is already up rebuilds rather than merely raising, unlike the asset editors
+//! where a rebuild would discard unsaved text.
+//!
+//! The two per-type **previews** below are still singletons.
+//!
 //! Reference (Firestorm, read-only): `llfloaterproperties.cpp`,
 //! `skins/vintage/xui/en/floater_inventory_item_properties.xml`,
 //! `llpreview{notecard,texture,anim}.cpp`, "About Landmark".
@@ -31,11 +44,15 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use sl_client_bevy::{
-    AnimationKey, AssetKey, Command, InventoryItem, InventoryType, ItemInfo, LindenAmount,
-    Permissions, SaleType, SlCommand, SlIdentity, TextureKey, TransactionId, Uuid, to_bevy_image,
+    AnimationKey, AssetKey, Command, InventoryItem, InventoryKey, InventoryType, ItemInfo,
+    LindenAmount, Permissions, SaleInfo, SaleType, SlCommand, SlIdentity, TextureKey,
+    TransactionId, Uuid, to_bevy_image,
 };
 
-use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
+use crate::floater::{
+    Floater, FloaterCaps, FloaterKey, FloaterSpec, FloaterSystems, KeyedFloaterOpen, KeyedFloaters,
+    host_floater, spawn_floater,
+};
 use crate::i18n::Translated;
 use crate::inventory::query_folder_page;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, row};
@@ -55,6 +72,11 @@ const DIM_LABEL_COLOR: Color = Color::srgb(0.62, 0.66, 0.74);
 /// A toggle's check glyph colour.
 const CHECK_COLOR: Color = Color::srgb(0.55, 0.85, 0.60);
 
+/// A **read-only** check's glyph colour — the live check's green, muted, so the
+/// "You can" row reads as a statement of fact rather than a control that will
+/// not respond. See `spawn_static_check`.
+const STATIC_CHECK_COLOR: Color = Color::srgb(0.42, 0.60, 0.45);
+
 /// A button's background / border.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
 /// A button's border colour.
@@ -64,6 +86,11 @@ const BUTTON_BORDER: Color = Color::srgb(0.34, 0.40, 0.52);
 const CHECKED_GLYPH: &str = "\u{2611}";
 /// The unchecked glyph.
 const UNCHECKED_GLYPH: &str = "\u{2610}";
+
+/// The price a **newly offered** item starts at, in L$, when its own price is
+/// unreadable — only reached if the field holds something unparsable, since an
+/// item now always carries a price of its own (`SaleInfo`).
+const DEFAULT_SALE_PRICE: u64 = 10;
 
 /// The texture preview's largest edge, in logical pixels.
 const TEXTURE_PREVIEW_EDGE: f32 = 256.0;
@@ -104,19 +131,21 @@ pub(crate) const fn previewable(inv_type: InventoryType) -> bool {
 // Properties floater.
 // ---------------------------------------------------------------------------
 
-/// The properties floater's live state: the item shown, and the editable
-/// permission / sale bits as currently displayed.
-#[derive(Resource, Debug, Default)]
+/// One open properties window's live state — a **component on the window**,
+/// since the floater opens per item ([`FloaterKey`]): the item shown, with the
+/// editable permission / sale bits as currently displayed.
+#[derive(Component, Debug)]
 pub(crate) struct ItemPropertiesState {
-    /// The item the floater shows (as last received).
+    /// The item this window shows (as last received). Always set — the window
+    /// exists because an item was opened — but kept as an `Option` because a
+    /// toggle takes it apart and puts an updated snapshot back.
     item: Option<ItemInfo>,
 }
 
-/// Entity handles for the properties floater.
-#[derive(Resource)]
+/// One properties window's entity handles — a component beside its
+/// [`ItemPropertiesState`], so two open items keep their own fields.
+#[derive(Component)]
 pub(crate) struct ItemPropertiesUi {
-    /// The floater root.
-    panel: Entity,
     /// The rebuilt-per-open content column.
     content: Entity,
     /// The name field (rebuilt per open; nil when read-only).
@@ -152,10 +181,14 @@ enum PropsToggle {
 pub struct InventoryPropertiesPlugin;
 
 impl Plugin for InventoryPropertiesPlugin {
-    /// Register messages, state and systems; spawn the (hidden) floaters.
+    /// Register messages and systems; spawn the (hidden) preview floaters.
+    ///
+    /// The **properties** floater spawns nothing at `Startup`: it opens per
+    /// item, so `open_properties` spawns the instance and builds its content.
+    /// The two per-type previews are still singletons (a separate entry in
+    /// `viewer-keyed-floater-audit`).
     fn build(&self, app: &mut App) {
-        app.init_resource::<ItemPropertiesState>()
-            .init_resource::<PreviewState>()
+        app.init_resource::<PreviewState>()
             .add_message::<OpenItemProperties>()
             .add_message::<OpenItemPreview>()
             .add_systems(
@@ -165,8 +198,12 @@ impl Plugin for InventoryPropertiesPlugin {
             .add_systems(
                 Update,
                 (
-                    open_properties,
-                    commit_text_edits,
+                    // After the manager's command pass — see `FloaterSystems`:
+                    // the inventory row that opens a properties window also
+                    // raises the inventory floater it sits in, and the later
+                    // raise wins.
+                    open_properties.after(FloaterSystems::Commands),
+                    commit_text_edits.run_if(any_with_component::<ItemPropertiesState>),
                     open_previews,
                     poll_texture_preview,
                 )
@@ -228,26 +265,9 @@ fn preview_floater_spec(id: &'static str, title: &str) -> FloaterSpec {
     }
 }
 
-/// Spawn the properties floater and the preview floaters, all hidden.
+/// Spawn the preview floaters, hidden. (The properties floater is keyed, so it
+/// is spawned per item by [`open_properties`].)
 fn spawn_preview_floaters(mut commands: Commands, root: Res<UiRoot>) {
-    // Properties.
-    let properties = spawn_floater(&mut commands, root.0, item_properties_floater_spec());
-    // Subject-bound: the shown item is not persisted, so neither is the
-    // floater (`FloaterPersistExempt` — see the avatar profile).
-    commands
-        .entity(properties.root)
-        .insert(crate::floater_persist::FloaterPersistExempt);
-    commands
-        .entity(properties.title_text)
-        .insert(Translated::new("item-properties-title"));
-    commands.insert_resource(ItemPropertiesUi {
-        panel: properties.root,
-        content: properties.content,
-        name_field: None,
-        desc_field: None,
-        price_field: None,
-    });
-
     // Notecards open in their own editor floater (`crate::edit_notecard`),
     // landmarks in the About Landmark floater (`crate::about_landmark`) — not
     // here.
@@ -296,45 +316,192 @@ struct PreviewUi {
     animation: PreviewFloater,
 }
 
-/// Rebuild and show the properties floater when asked.
+/// The [`FloaterKey`] of the window showing `item`'s properties — one window
+/// per inventory item, keyed by its id. A [subject](FloaterKey::Subject) key,
+/// so nothing is persisted: a stored rectangle per item ever inspected would
+/// grow the settings file without bound.
+fn properties_key(item: InventoryKey) -> FloaterKey {
+    FloaterKey::subject(&item)
+}
+
+/// Open (or repaint) an item's properties window.
+///
+/// Every open of the frame is honoured, and an item already on screen is
+/// **rebuilt** rather than merely raised — unlike the asset editors, where a
+/// re-open would discard unsaved text. Here the re-open *is* the repaint: a
+/// permission toggle sends its update and re-opens the floater on the new
+/// snapshot, which is how every checkbox in the window follows the change.
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources: the open stream, the \
-              floater state and handles, the identity and name sources, and the spawn / \
-              visibility outputs"
+              keyed-window opener, the per-window state and handles, the identity and name \
+              sources, and the spawn / command outputs"
 )]
 fn open_properties(
     mut opens: MessageReader<OpenItemProperties>,
-    mut state: ResMut<ItemPropertiesState>,
-    mut ui: ResMut<ItemPropertiesUi>,
+    mut floaters: KeyedFloaters,
+    mut windows: Query<(&mut ItemPropertiesState, &mut ItemPropertiesUi)>,
     identity: Res<SlIdentity>,
     avatars: Res<crate::world_api::AvatarState>,
     children: Query<&Children>,
-    mut panels: Query<&mut UiPanelShown>,
     mut commands: Commands,
     mut sl_commands: MessageWriter<SlCommand>,
 ) {
-    let Some(open) = opens.read().last().cloned() else {
-        return;
-    };
-    let item = open.item;
-    state.item = Some(item.clone());
-    // Tear the old content down.
-    if let Ok(existing) = children.get(ui.content) {
-        for child in existing.iter().collect::<Vec<_>>() {
-            commands.entity(child).despawn();
+    for open in opens.read().cloned() {
+        let item = open.item;
+        let opened = floaters.open(item_properties_floater_spec(), properties_key(item.item_id));
+        match opened {
+            KeyedFloaterOpen::Spawned(handle) => {
+                // A fresh window: its content is built straight into the chrome
+                // handle, and the fields it hands back are its first `ItemPropertiesUi`.
+                commands
+                    .entity(handle.title_text)
+                    .insert(Translated::new("item-properties-title"));
+                let fields = build_properties_content(
+                    &mut commands,
+                    handle.content,
+                    &item,
+                    &identity,
+                    &avatars,
+                    &mut sl_commands,
+                );
+                commands.entity(handle.root).insert((
+                    ItemPropertiesState {
+                        item: Some(item.clone()),
+                    },
+                    ItemPropertiesUi {
+                        content: handle.content,
+                        name_field: fields.name,
+                        desc_field: fields.description,
+                        price_field: fields.price,
+                    },
+                ));
+            }
+            KeyedFloaterOpen::Existing(window) => {
+                let Ok((mut state, mut ui)) = windows.get_mut(window) else {
+                    continue;
+                };
+                state.item = Some(item.clone());
+                // Tear the old content down and repaint from the new snapshot.
+                if let Ok(existing) = children.get(ui.content) {
+                    for child in existing.iter().collect::<Vec<_>>() {
+                        commands.entity(child).despawn();
+                    }
+                }
+                let fields = build_properties_content(
+                    &mut commands,
+                    ui.content,
+                    &item,
+                    &identity,
+                    &avatars,
+                    &mut sl_commands,
+                );
+                ui.name_field = fields.name;
+                ui.desc_field = fields.description;
+                ui.price_field = fields.price;
+            }
         }
     }
-    let content = ui.content;
+}
+
+/// Which of a properties window's controls a given item lets the agent touch.
+///
+/// The reference computes exactly these from the item's permission masks
+/// (`LLFloaterProperties::refresh`), and each one is about a *different* bit —
+/// so a single "is it mine" flag, which is what this floater used to gate
+/// everything on, offered controls that could not do what they promised. The
+/// masks are the item's own: `owner` is what the agent may do with it now,
+/// `base` what the creator ever permitted, `next_owner` what the next owner
+/// gets.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "seven independent yes/no answers, one per control the window offers — which is \
+              the whole point: collapsing them is exactly the bug this type fixed, and a \
+              bitflags newtype would only obscure which control each answer is about"
+)]
+#[derive(Debug, Clone, Copy)]
+struct PermissionGates {
+    /// The item's name and description may be edited (the agent may modify it).
+    modifiable: bool,
+    /// The group-share toggle is live.
+    share_with_group: bool,
+    /// The anyone-copy toggle is live: you cannot let anyone copy what you may
+    /// not copy **and** pass on.
+    everyone_copy: bool,
+    /// The sale row (For Sale, its type, its price) is live: selling is passing
+    /// the item on, so it needs transfer.
+    sale: bool,
+    /// The next-owner modify toggle is live — bounded by what the creator
+    /// permitted, not by what this owner happens to hold.
+    next_modify: bool,
+    /// The next-owner copy toggle is live (likewise the creator's bound).
+    next_copy: bool,
+    /// The next-owner transfer toggle is live — the reference gates it on the
+    /// next owner's *copy* bit, since forbidding transfer only means something
+    /// for an item they can copy.
+    next_transfer: bool,
+}
+
+impl PermissionGates {
+    /// Read the gates off `item`, for an agent who does (`owned`) or does not
+    /// own it. A non-owner touches nothing.
+    const fn of(item: &ItemInfo, owned: bool) -> Self {
+        let owner = item.permissions.owner;
+        let base = item.permissions.base;
+        let next = item.permissions.next_owner;
+        let modifiable = owned && owner.contains(Permissions::MODIFY);
+        // Selling hands the item on, so the whole sale / next-owner block
+        // needs the transfer right as well as modify.
+        let sale = modifiable && owner.contains(Permissions::TRANSFER);
+        Self {
+            modifiable,
+            share_with_group: modifiable,
+            everyone_copy: modifiable
+                && owner.contains(Permissions::COPY)
+                && owner.contains(Permissions::TRANSFER),
+            sale,
+            next_modify: sale && base.contains(Permissions::MODIFY),
+            next_copy: sale && base.contains(Permissions::COPY),
+            next_transfer: sale && next.contains(Permissions::COPY),
+        }
+    }
+}
+
+/// The editable fields a properties repaint spawned, handed back so the window
+/// can read them on a commit.
+#[derive(Debug, Default, Clone, Copy)]
+struct PropertiesFields {
+    /// The name field, when the item is the agent's own (else read-only).
+    name: Option<Entity>,
+    /// The description field.
+    description: Option<Entity>,
+    /// The sale-price field.
+    price: Option<Entity>,
+}
+
+/// Build one properties window's content under `content` from `item`: the name
+/// / description rows, the creator / owner / dates block, the permission
+/// checkboxes and the sale row.
+fn build_properties_content(
+    commands: &mut Commands,
+    content: Entity,
+    item: &ItemInfo,
+    identity: &SlIdentity,
+    avatars: &crate::world_api::AvatarState,
+    sl_commands: &mut MessageWriter<SlCommand>,
+) -> PropertiesFields {
     let own = identity.agent_id;
-    let editable =
-        matches!(item.owner, sl_client_bevy::OwnerKey::Agent(agent) if Some(agent) == own);
+    let owned = matches!(item.owner, sl_client_bevy::OwnerKey::Agent(agent) if Some(agent) == own);
+    let gates = PermissionGates::of(item, owned);
+    // The item's own text follows the modify bit, as everything below follows
+    // the bit it is about.
+    let editable = gates.modifiable;
 
     // Name / description rows.
-    let name_row = spawn_labeled_row(&mut commands, content, "item-properties-name");
+    let name_row = spawn_labeled_row(commands, content, "item-properties-name");
     let name_field = editable.then(|| {
         crate::ui_text_input::spawn_text_input(
-            &mut commands,
+            commands,
             name_row,
             &crate::ui_text_input::TextInputSpec {
                 initial: item.name.clone(),
@@ -350,12 +517,12 @@ fn open_properties(
         )
     });
     if !editable {
-        spawn_value_label(&mut commands, name_row, item.name.clone(), LABEL_COLOR);
+        spawn_value_label(commands, name_row, item.name.clone(), LABEL_COLOR);
     }
-    let desc_row = spawn_labeled_row(&mut commands, content, "item-properties-description");
+    let desc_row = spawn_labeled_row(commands, content, "item-properties-description");
     let desc_field = editable.then(|| {
         crate::ui_text_input::spawn_text_input(
-            &mut commands,
+            commands,
             desc_row,
             &crate::ui_text_input::TextInputSpec {
                 initial: item.description.clone(),
@@ -371,12 +538,7 @@ fn open_properties(
         )
     });
     if !editable {
-        spawn_value_label(
-            &mut commands,
-            desc_row,
-            item.description.clone(),
-            LABEL_COLOR,
-        );
+        spawn_value_label(commands, desc_row, item.description.clone(), LABEL_COLOR);
     }
 
     // Creator / owner / acquired.
@@ -385,19 +547,19 @@ fn open_properties(
             .name_of(agent)
             .map_or_else(|| format!("({agent})"), str::to_owned)
     };
-    let creator_row = spawn_labeled_row(&mut commands, content, "item-properties-creator");
+    let creator_row = spawn_labeled_row(commands, content, "item-properties-creator");
     spawn_value_label(
-        &mut commands,
+        commands,
         creator_row,
         name_of(item.creator_id),
         DIM_LABEL_COLOR,
     );
-    let owner_row = spawn_labeled_row(&mut commands, content, "item-properties-owner");
+    let owner_row = spawn_labeled_row(commands, content, "item-properties-owner");
     let owner_label = match item.owner {
         sl_client_bevy::OwnerKey::Agent(agent) => name_of(agent),
         sl_client_bevy::OwnerKey::Group(group) => format!("(group {group})"),
     };
-    spawn_value_label(&mut commands, owner_row, owner_label, DIM_LABEL_COLOR);
+    spawn_value_label(commands, owner_row, owner_label, DIM_LABEL_COLOR);
     // Ask for any unresolved names; the next open shows them.
     let mut wanted = vec![item.creator_id];
     if let sl_client_bevy::OwnerKey::Agent(agent) = item.owner {
@@ -410,102 +572,98 @@ fn open_properties(
     if !unresolved.is_empty() {
         sl_commands.write(SlCommand(Command::RequestAvatarNames(unresolved)));
     }
-    let acquired_row = spawn_labeled_row(&mut commands, content, "item-properties-acquired");
+    let acquired_row = spawn_labeled_row(commands, content, "item-properties-acquired");
     spawn_value_label(
-        &mut commands,
+        commands,
         acquired_row,
         format_unix_date(i64::from(item.creation_date)),
         DIM_LABEL_COLOR,
     );
 
     // "You can:" — the owner mask, read-only.
-    let you_row = spawn_labeled_row(&mut commands, content, "item-properties-you-can");
+    let you_row = spawn_labeled_row(commands, content, "item-properties-you-can");
     let owner_mask = item.permissions.owner;
     for (label, bit) in [
         ("item-properties-modify", Permissions::MODIFY),
         ("item-properties-copy", Permissions::COPY),
         ("item-properties-transfer", Permissions::TRANSFER),
     ] {
-        spawn_static_check(&mut commands, you_row, label, owner_mask.contains(bit));
+        spawn_static_check(commands, you_row, label, owner_mask.contains(bit));
     }
 
     // Group share / everyone copy toggles.
-    let share_row = spawn_labeled_row(&mut commands, content, "item-properties-group");
+    let share_row = spawn_labeled_row(commands, content, "item-properties-group");
     spawn_props_toggle(
-        &mut commands,
+        commands,
         share_row,
         "item-properties-share",
         PropsToggle::ShareWithGroup,
         item.permissions.group.contains(Permissions::COPY),
-        editable,
+        gates.share_with_group,
     );
-    let anyone_row = spawn_labeled_row(&mut commands, content, "item-properties-anyone");
+    let anyone_row = spawn_labeled_row(commands, content, "item-properties-anyone");
     spawn_props_toggle(
-        &mut commands,
+        commands,
         anyone_row,
         "item-properties-copy",
         PropsToggle::EveryoneCopy,
         item.permissions.everyone.contains(Permissions::COPY),
-        editable,
+        gates.everyone_copy,
     );
 
     // Next owner toggles.
-    let next_row = spawn_labeled_row(&mut commands, content, "item-properties-next-owner");
+    let next_row = spawn_labeled_row(commands, content, "item-properties-next-owner");
     let next = item.permissions.next_owner;
-    for (label, toggle, bit) in [
+    for (label, toggle, bit, enabled) in [
         (
             "item-properties-modify",
             PropsToggle::NextModify,
             Permissions::MODIFY,
+            gates.next_modify,
         ),
         (
             "item-properties-copy",
             PropsToggle::NextCopy,
             Permissions::COPY,
+            gates.next_copy,
         ),
         (
             "item-properties-transfer",
             PropsToggle::NextTransfer,
             Permissions::TRANSFER,
+            gates.next_transfer,
         ),
     ] {
         spawn_props_toggle(
-            &mut commands,
+            commands,
             next_row,
             label,
             toggle,
             next.contains(bit),
-            editable,
+            enabled,
         );
     }
 
     // For sale + type + price.
-    let sale_row = spawn_labeled_row(&mut commands, content, "item-properties-for-sale");
-    let (sale_type, sale_price) = item
-        .sale
-        .clone()
-        .map_or((SaleType::NotForSale, LindenAmount(10)), |sale| {
-            (sale.0, sale.1)
-        });
+    let sale_row = spawn_labeled_row(commands, content, "item-properties-for-sale");
+    // The type and the price are separate facts, and the price survives an
+    // unticked sale (`SaleInfo`) — so unticking For Sale keeps the number the
+    // owner set rather than falling back to a made-up default.
+    let (sale_type, sale_price) = (item.sale.sale_type, item.sale.price.clone());
     spawn_props_toggle(
-        &mut commands,
+        commands,
         sale_row,
         "item-properties-for-sale",
         PropsToggle::ForSale,
         sale_type != SaleType::NotForSale,
-        editable,
+        gates.sale,
     );
-    let type_button = spawn_text_button(
-        &mut commands,
-        sale_row,
-        sale_type_key(sale_type),
-        3,
-        editable,
-    );
+    let type_button =
+        spawn_text_button(commands, sale_row, sale_type_key(sale_type), 3, gates.sale);
     commands.entity(type_button).insert(PropsToggle::SaleType);
-    let price_field = editable.then(|| {
-        crate::ui_text_input::spawn_text_input(
-            &mut commands,
+    let price_field = gates.sale.then(|| {
+        let field = crate::ui_text_input::spawn_text_input(
+            commands,
             sale_row,
             &crate::ui_text_input::TextInputSpec {
                 initial: sale_price.0.to_string(),
@@ -517,14 +675,25 @@ fn open_properties(
                     crate::ui_text_input::TextInputKind::NonNegativeInteger,
                 )
             },
-        )
+        );
+        // A price only means something for an item that is **for sale**, and the
+        // commit path knows it: it applies a typed price only when a sale
+        // exists. Showing a live field for a not-for-sale item therefore
+        // offered an edit that was silently dropped, so the field is disabled
+        // (greyed, and it refuses focus) until For Sale is ticked — which is
+        // what the reference does with its price spinner. Ticking the box
+        // re-opens the window, so the field comes back live with the value it
+        // was showing.
+        if !item.sale.is_for_sale() {
+            commands.entity(field).insert(bevy::ui::InteractionDisabled);
+        }
+        field
     });
 
-    ui.name_field = name_field;
-    ui.desc_field = desc_field;
-    ui.price_field = price_field;
-    if let Ok(mut shown) = panels.get_mut(ui.panel) {
-        shown.0 = true;
+    PropertiesFields {
+        name: name_field,
+        description: desc_field,
+        price: price_field,
     }
 }
 
@@ -574,17 +743,27 @@ fn spawn_value_label(commands: &mut Commands, parent: Entity, value: String, col
 
 /// A read-only check + label pair (the "You can" row).
 fn spawn_static_check(commands: &mut Commands, parent: Entity, label_key: &'static str, on: bool) {
+    // Read-only, and it must **look** it: the "You can" row states what the
+    // owner mask already says, and nothing here can change it (only the item's
+    // creator or a next-owner setting can). Drawn in the dim label colour and
+    // with a dimmed check, so it does not read as a checkbox the user is
+    // failing to click — the same distinction the reference draws between its
+    // greyed permission display and its live next-owner boxes.
     commands.spawn((
         Text::new(if on { CHECKED_GLYPH } else { UNCHECKED_GLYPH }),
         UiFont::Sans.at(PROPS_FONT_SIZE),
-        TextColor(if on { CHECK_COLOR } else { DIM_LABEL_COLOR }),
+        TextColor(if on {
+            STATIC_CHECK_COLOR
+        } else {
+            DIM_LABEL_COLOR
+        }),
         ChildOf(parent),
     ));
     commands.spawn((
         Text::default(),
         Translated::new(label_key),
         UiFont::Sans.at(PROPS_FONT_SIZE),
-        TextColor(LABEL_COLOR),
+        TextColor(DIM_LABEL_COLOR),
         ChildOf(parent),
     ));
 }
@@ -638,11 +817,18 @@ fn spawn_props_toggle(
 /// A permission / sale toggle was clicked: flip the bit on the shown item,
 /// send the update, and re-open the floater on the updated snapshot (which
 /// repaints every toggle).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy observer's parameters are its injected resources: the pressed toggle, \
+              the two queries that resolve which window it sits in, that window's state and \
+              handles, the field values, and the update / repaint outputs"
+)]
 fn on_toggle_press(
     press: On<Pointer<Press>>,
     toggles: Query<&PropsToggle>,
-    mut state: ResMut<ItemPropertiesState>,
-    ui: Res<ItemPropertiesUi>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
+    mut windows: Query<(&mut ItemPropertiesState, &ItemPropertiesUi)>,
     fields: Query<&EditableText>,
     mut commands: MessageWriter<SlCommand>,
     mut reopen: MessageWriter<OpenItemProperties>,
@@ -651,6 +837,14 @@ fn on_toggle_press(
         return;
     }
     let Ok(toggle) = toggles.get(press.entity) else {
+        return;
+    };
+    // The toggle belongs to the window it sits in: with two items' properties
+    // open, this must flip *that* item's bit and read *that* window's price.
+    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+        return;
+    };
+    let Ok((mut state, ui)) = windows.get_mut(window) else {
         return;
     };
     let Some(mut item) = state.item.clone() else {
@@ -676,18 +870,25 @@ fn on_toggle_press(
         PropsToggle::NextCopy => flip_next_owner(&mut item, Permissions::COPY),
         PropsToggle::NextTransfer => flip_next_owner(&mut item, Permissions::TRANSFER),
         PropsToggle::ForSale => {
-            item.sale = match item.sale {
-                Some(_sale) => None,
-                None => Some((SaleType::Copy, sale_price_of(&ui, &fields))),
+            // Unticking keeps the price on the item (the wire keeps it too);
+            // only the type says whether it is offered.
+            item.sale = if item.sale.is_for_sale() {
+                SaleInfo::not_for_sale(item.sale.price.clone())
+            } else {
+                SaleInfo {
+                    sale_type: SaleType::Copy,
+                    price: sale_price_of(ui, &fields),
+                }
             };
         }
         PropsToggle::SaleType => {
-            let price = sale_price_of(&ui, &fields);
-            item.sale = Some(match item.sale {
-                Some((SaleType::Original, _price)) => (SaleType::Copy, price),
-                Some((SaleType::Copy, _price)) => (SaleType::Contents, price),
-                _other => (SaleType::Original, price),
-            });
+            let price = sale_price_of(ui, &fields);
+            let sale_type = match item.sale.sale_type {
+                SaleType::Original => SaleType::Copy,
+                SaleType::Copy => SaleType::Contents,
+                _not_or_contents => SaleType::Original,
+            };
+            item.sale = SaleInfo { sale_type, price };
         }
     }
     send_item_update(&item, &mut commands);
@@ -710,7 +911,7 @@ fn sale_price_of(ui: &ItemPropertiesUi, fields: &Query<&EditableText>) -> Linden
     ui.price_field
         .and_then(|field| fields.get(field).ok())
         .and_then(|field| field.value().to_string().trim().parse::<u64>().ok())
-        .map_or(LindenAmount(10), LindenAmount)
+        .map_or(LindenAmount(DEFAULT_SALE_PRICE), LindenAmount)
 }
 
 /// `Enter` in the name / description / price fields commits the pending text
@@ -718,23 +919,24 @@ fn sale_price_of(ui: &ItemPropertiesUi, fields: &Query<&EditableText>) -> Linden
 fn commit_text_edits(
     keyboard: Res<ButtonInput<KeyCode>>,
     focus: Res<InputFocus>,
-    ui: Res<ItemPropertiesUi>,
+    mut windows: Query<(&mut ItemPropertiesState, &ItemPropertiesUi)>,
     fields: Query<&EditableText>,
-    mut state: ResMut<ItemPropertiesState>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     if !keyboard.just_pressed(KeyCode::Enter) {
         return;
     }
-    // Only while one of the floater's fields holds focus.
+    // The commit belongs to the window whose field has the keyboard — with two
+    // items open, Enter must save the one being typed in.
     let focused = focus.get();
-    let editing = [ui.name_field, ui.desc_field, ui.price_field]
-        .into_iter()
-        .flatten()
-        .any(|field| Some(field) == focused);
-    if !editing {
+    let Some((mut state, ui)) = windows.iter_mut().find(|(_state, ui)| {
+        [ui.name_field, ui.desc_field, ui.price_field]
+            .into_iter()
+            .flatten()
+            .any(|field| Some(field) == focused)
+    }) else {
         return;
-    }
+    };
     let Some(mut item) = state.item.clone() else {
         return;
     };
@@ -752,11 +954,12 @@ fn commit_text_edits(
     if let Some(description) = read(ui.desc_field) {
         description.trim().clone_into(&mut item.description);
     }
-    if item.sale.is_some()
+    // A price is only editable while the item is offered (the field is disabled
+    // otherwise), so only then can there be a typed one to commit.
+    if item.sale.is_for_sale()
         && let Some(price) = read(ui.price_field).and_then(|price| price.trim().parse::<u64>().ok())
-        && let Some((sale_type, _old)) = item.sale
     {
-        item.sale = Some((sale_type, LindenAmount(price)));
+        item.sale.price = LindenAmount(price);
     }
     send_item_update(&item, &mut commands);
     state.item = Some(item);
@@ -777,10 +980,9 @@ pub fn send_item_update(item: &ItemInfo, commands: &mut MessageWriter<SlCommand>
 /// (shared with the COF link renumbering in [`crate::inventory_actions`]).
 #[must_use]
 pub fn to_wire_item(item: &ItemInfo) -> InventoryItem {
-    let (sale_type, sale_price) = match item.sale.clone() {
-        Some((sale_type, price)) => (sale_type.to_code(), Some(price)),
-        None => (SaleType::NotForSale.to_code(), None),
-    };
+    // Both halves always travel: an unticked sale still carries its price, so a
+    // save cannot erase what the grid holds (see `SaleInfo`).
+    let (sale_type, sale_price) = (item.sale.sale_type.to_code(), Some(item.sale.price.clone()));
     InventoryItem {
         item_id: item.item_id,
         folder_id: item.folder_id,
@@ -1153,5 +1355,355 @@ mod tests {
         assert_eq!(parsed.position, (128.5, 64.25, 22.0));
         assert!(parse_landmark("Landmark version 2\n").is_none());
         assert!(parse_landmark("").is_none());
+    }
+
+    /// **One window per item** (`viewer-keyed-floater-audit`): the open path,
+    /// driven by the message an inventory row's Properties entry writes.
+    mod instances {
+        use super::super::{
+            InventoryPropertiesPlugin, ItemPropertiesState, ItemPropertiesUi, OpenItemProperties,
+            PermissionGates, properties_key,
+        };
+        use crate::floater::{Floater, FloaterCommand, FloaterOp, FloaterPlugin};
+        use crate::ui::UiRoot;
+        use bevy::prelude::*;
+        use pretty_assertions::assert_eq;
+        use sl_client_bevy::{
+            AgentKey, AssetType, InventoryFolderKey, InventoryKey, InventoryType, ItemInfo,
+            LindenAmount, OwnerKey, Permissions, Permissions5, SaleInfo, SaleType, SlCommand,
+            SlIdentity, Uuid,
+        };
+
+        /// A boxed error so tests use `?` rather than the disallowed
+        /// `unwrap` / `expect`.
+        type TestError = Box<dyn core::error::Error>;
+
+        /// One inventory item, owned by the logged-in agent so its fields are
+        /// editable (the read-only path spawns no fields to tell apart).
+        fn item(id: u128, name: &str) -> ItemInfo {
+            ItemInfo {
+                item_id: InventoryKey::from(Uuid::from_u128(id)),
+                folder_id: InventoryFolderKey::from(Uuid::from_u128(0x0F)),
+                name: name.to_owned(),
+                description: String::new(),
+                asset_id: Uuid::from_u128(id.wrapping_add(0x1000)),
+                asset_type: AssetType::Object,
+                inv_type: InventoryType::Object,
+                flags: 0,
+                creation_date: 0,
+                owner: OwnerKey::Agent(owner()),
+                last_owner_id: Uuid::from_u128(0),
+                creator_id: AgentKey::from(Uuid::from_u128(0)),
+                group: None,
+                // Fully permissive, so the controls under test are live: every
+                // one of them is gated on a specific bit now
+                // (`PermissionGates`), and a default (empty) mask would spawn a
+                // window with nothing to click.
+                permissions: Permissions5 {
+                    base: all_rights(),
+                    owner: all_rights(),
+                    group: Permissions::empty(),
+                    everyone: Permissions::empty(),
+                    next_owner: all_rights(),
+                },
+                sale: SaleInfo::default(),
+            }
+        }
+
+        /// Modify + copy + transfer, the mask a fully permissive item carries.
+        fn all_rights() -> Permissions {
+            Permissions::MODIFY | Permissions::COPY | Permissions::TRANSFER
+        }
+
+        /// The agent whose inventory these items are in.
+        fn owner() -> AgentKey {
+            AgentKey::from(Uuid::from_u128(0xA9))
+        }
+
+        /// An app with the floater manager and the properties plugin.
+        fn properties_app() -> App {
+            let mut app = App::new();
+            let identity = SlIdentity {
+                agent_id: Some(owner()),
+                ..SlIdentity::default()
+            };
+            app.add_message::<SlCommand>()
+                .insert_resource(identity)
+                .init_resource::<crate::world_api::AvatarState>()
+                .init_resource::<UiScale>()
+                .init_resource::<ButtonInput<KeyCode>>()
+                .init_resource::<bevy::input_focus::InputFocus>()
+                // The plugin's other half — the per-type previews — reads the
+                // texture pipeline and hands notecards / scripts / landmarks to
+                // their own floaters. Those seams are stood up empty: the
+                // properties window under test never uses them, but every
+                // system in the plugin must be able to run.
+                .add_message::<crate::world_api::BoostTexture>()
+                .add_message::<crate::world_api::OpenNotecard>()
+                .add_message::<crate::world_api::OpenScript>()
+                .add_message::<crate::inventory::OpenAboutLandmark>()
+                .init_resource::<crate::world_api::DecodedTextures>()
+                .init_resource::<Assets<Image>>()
+                .add_plugins((FloaterPlugin, InventoryPropertiesPlugin));
+            let root = app.world_mut().spawn(Node::default()).id();
+            app.insert_resource(UiRoot(root));
+            app.update();
+            app
+        }
+
+        /// Open an item's properties the way the inventory row does.
+        fn open(app: &mut App, item: &ItemInfo) {
+            app.world_mut()
+                .write_message(OpenItemProperties { item: item.clone() });
+            app.update();
+        }
+
+        /// Every live properties window, as (entity, shown item id) pairs.
+        fn windows(app: &mut App) -> Vec<(Entity, Option<InventoryKey>)> {
+            app.world_mut()
+                .query::<(Entity, &ItemPropertiesState)>()
+                .iter(app.world())
+                .map(|(entity, state)| (entity, state.item.as_ref().map(|item| item.item_id)))
+                .collect()
+        }
+
+        /// Two items are two windows, each showing its own item and carrying
+        /// its own field entities.
+        #[test]
+        fn two_items_open_two_windows() -> Result<(), TestError> {
+            let (first, second) = (item(0xA1, "A hat"), item(0xB2, "A chair"));
+            let mut app = properties_app();
+            open(&mut app, &first);
+            open(&mut app, &second);
+
+            let open_windows = windows(&mut app);
+            assert_eq!(
+                open_windows.len(),
+                2,
+                "the second item reused the first window"
+            );
+            let shown: Vec<Option<InventoryKey>> =
+                open_windows.iter().map(|(_window, item)| *item).collect();
+            assert!(shown.contains(&Some(first.item_id)) && shown.contains(&Some(second.item_id)));
+
+            let world = app.world();
+            let contents: Vec<Entity> = open_windows
+                .iter()
+                .filter_map(|(window, _item)| world.get::<ItemPropertiesUi>(*window))
+                .map(|ui| ui.content)
+                .collect();
+            assert!(
+                contents.first() != contents.get(1),
+                "both windows build into one content column"
+            );
+            let keys: Vec<Option<&crate::floater::FloaterKey>> = open_windows
+                .iter()
+                .map(|(window, _item)| world.get::<Floater>(*window).and_then(Floater::key))
+                .collect();
+            assert!(keys.contains(&Some(&properties_key(first.item_id))));
+            assert!(keys.contains(&Some(&properties_key(second.item_id))));
+            Ok(())
+        }
+
+        /// **Re-opening an item repaints its own window** rather than adding
+        /// one — which is how a permission toggle refreshes every checkbox.
+        #[test]
+        fn reopening_an_item_repaints_its_window() -> Result<(), TestError> {
+            let mut first = item(0xA1, "A hat");
+            let mut app = properties_app();
+            open(&mut app, &first);
+            let window = windows(&mut app)
+                .first()
+                .map(|(window, _item)| *window)
+                .ok_or("the item opened no window")?;
+
+            // The toggle path: an updated snapshot re-opened on the same item.
+            first.description = "now described".to_owned();
+            open(&mut app, &first);
+
+            let left = windows(&mut app);
+            assert_eq!(left.len(), 1, "a repaint spawned a second window");
+            assert_eq!(left.first().map(|(entity, _item)| *entity), Some(window));
+            let described = app
+                .world()
+                .get::<ItemPropertiesState>(window)
+                .and_then(|state| state.item.as_ref().map(|item| item.description.clone()));
+            assert_eq!(
+                described,
+                Some("now described".to_owned()),
+                "the window kept the stale snapshot"
+            );
+            Ok(())
+        }
+
+        /// **A price you cannot save is a price you cannot type.**
+        ///
+        /// The commit applies a typed price only to an item that is for sale
+        /// (a price without a sale has nowhere to live, on the wire or in
+        /// `ItemInfo`), so a live price field on a not-for-sale item offered an
+        /// edit that was silently dropped. It is disabled until For Sale is
+        /// ticked — the reference's own gating of its price spinner.
+        #[test]
+        fn the_price_field_is_dead_until_the_item_is_for_sale() -> Result<(), TestError> {
+            let not_for_sale = item(0xC3, "A lamp");
+            let mut for_sale = item(0xD4, "A rug");
+            for_sale.sale = SaleInfo {
+                sale_type: SaleType::Copy,
+                price: LindenAmount(250),
+            };
+
+            let mut app = properties_app();
+            open(&mut app, &not_for_sale);
+            open(&mut app, &for_sale);
+
+            let mut fields: Vec<(InventoryKey, bool)> = Vec::new();
+            for (window, shown) in windows(&mut app) {
+                let Some(item_id) = shown else { continue };
+                let price = app
+                    .world()
+                    .get::<ItemPropertiesUi>(window)
+                    .and_then(|ui| ui.price_field)
+                    .ok_or("an editable item has no price field")?;
+                let disabled = app
+                    .world()
+                    .get::<bevy::ui::InteractionDisabled>(price)
+                    .is_some();
+                fields.push((item_id, disabled));
+            }
+            fields.sort_by_key(|(item_id, _disabled)| item_id.to_string());
+            assert_eq!(
+                fields,
+                vec![(not_for_sale.item_id, true), (for_sale.item_id, false)],
+                "the not-for-sale item's price must be disabled, the for-sale one's live"
+            );
+            Ok(())
+        }
+
+        /// **Unticking For Sale keeps the price.**
+        ///
+        /// The price and the sale type are separate facts on the wire and in
+        /// `SaleInfo`, and the reference keeps both: unticking must not throw
+        /// the number away (the display would fall back to a made-up default,
+        /// and the save would write a zero over what the grid holds).
+        #[test]
+        fn unticking_for_sale_keeps_the_price() {
+            let mut offered = item(0xE5, "A bench");
+            offered.sale = SaleInfo {
+                sale_type: SaleType::Copy,
+                price: LindenAmount(250),
+            };
+
+            // What the For Sale toggle does to the item.
+            let unticked = SaleInfo::not_for_sale(offered.sale.price.clone());
+            assert!(!unticked.is_for_sale(), "it is no longer offered");
+            assert_eq!(
+                unticked.price,
+                LindenAmount(250),
+                "and it still remembers what it was offered at"
+            );
+
+            // And what the wire then carries — the price rides along, so a save
+            // cannot erase the grid's copy.
+            let wire = super::super::to_wire_item(&ItemInfo {
+                sale: unticked,
+                ..offered
+            });
+            assert_eq!(wire.sale_type, SaleType::NotForSale.to_code());
+            assert_eq!(wire.sale_price, Some(LindenAmount(250)));
+        }
+
+        /// **Every control follows the bit it is about.**
+        ///
+        /// The reference gates each of these separately
+        /// (`LLFloaterProperties::refresh`), and a single "is it mine" flag —
+        /// which is what this floater used to use — offered controls that
+        /// could not do what they promised: letting anyone copy an item you
+        /// may not copy, or granting a next owner a right the creator never
+        /// permitted.
+        #[test]
+        fn each_control_follows_its_own_permission_bit() {
+            let all = Permissions::MODIFY | Permissions::COPY | Permissions::TRANSFER;
+
+            // Someone else's item: nothing is live.
+            let mut theirs = item(0xF1, "Not yours");
+            theirs.owner = OwnerKey::Agent(AgentKey::from(Uuid::from_u128(0xDEAD)));
+            let gates = PermissionGates::of(&theirs, false);
+            assert!(!gates.modifiable && !gates.share_with_group && !gates.sale);
+
+            // Mine, fully permissive: everything is live.
+            let mut mine = item(0xF2, "Mine");
+            mine.permissions.owner = all;
+            mine.permissions.base = all;
+            mine.permissions.next_owner = all;
+            let gates = PermissionGates::of(&mine, true);
+            assert!(gates.modifiable && gates.share_with_group && gates.everyone_copy);
+            assert!(gates.sale && gates.next_modify && gates.next_copy && gates.next_transfer);
+
+            // No-copy: anyone-copy goes dead, the rest stays.
+            let mut no_copy = mine.clone();
+            no_copy.permissions.owner = Permissions::MODIFY | Permissions::TRANSFER;
+            let gates = PermissionGates::of(&no_copy, true);
+            assert!(!gates.everyone_copy, "cannot share a copy you cannot make");
+            assert!(gates.share_with_group && gates.sale);
+
+            // No-transfer: the whole sale / next-owner block goes dead, since
+            // selling is passing the item on.
+            let mut no_transfer = mine.clone();
+            no_transfer.permissions.owner = Permissions::MODIFY | Permissions::COPY;
+            let gates = PermissionGates::of(&no_transfer, true);
+            assert!(!gates.sale && !gates.next_modify && !gates.next_copy);
+            assert!(!gates.everyone_copy, "nor pass on what you cannot transfer");
+            assert!(gates.modifiable && gates.share_with_group);
+
+            // A creator who forbade copying bounds the next owner, however
+            // permissive this owner's own rights are.
+            let mut base_bound = mine.clone();
+            base_bound.permissions.base = Permissions::MODIFY | Permissions::TRANSFER;
+            let gates = PermissionGates::of(&base_bound, true);
+            assert!(!gates.next_copy, "the creator's bound wins");
+            assert!(gates.next_modify);
+
+            // Next-owner transfer is about a copy they can hold, so it follows
+            // their copy bit (the reference's own gate).
+            let mut next_no_copy = mine.clone();
+            next_no_copy.permissions.next_owner = Permissions::MODIFY | Permissions::TRANSFER;
+            let gates = PermissionGates::of(&next_no_copy, true);
+            assert!(!gates.next_transfer);
+
+            // No modify: the text and every toggle go dead together.
+            let mut no_modify = mine.clone();
+            no_modify.permissions.owner = Permissions::COPY | Permissions::TRANSFER;
+            let gates = PermissionGates::of(&no_modify, true);
+            assert!(!gates.modifiable && !gates.share_with_group && !gates.sale);
+        }
+
+        /// Closing one item's window leaves the other open.
+        #[test]
+        fn closing_one_item_leaves_the_other() -> Result<(), TestError> {
+            let (first, second) = (item(0xA1, "A hat"), item(0xB2, "A chair"));
+            let mut app = properties_app();
+            open(&mut app, &first);
+            open(&mut app, &second);
+            let target = windows(&mut app)
+                .into_iter()
+                .find_map(|(window, item)| (item == Some(first.item_id)).then_some(window))
+                .ok_or("the first item has no window")?;
+
+            app.world_mut()
+                .resource_mut::<Messages<FloaterCommand>>()
+                .write(FloaterCommand {
+                    floater: target,
+                    op: FloaterOp::Close,
+                });
+            app.update();
+
+            let left = windows(&mut app);
+            assert_eq!(left.len(), 1);
+            assert_eq!(
+                left.first().and_then(|(_window, item)| *item),
+                Some(second.item_id)
+            );
+            Ok(())
+        }
     }
 }

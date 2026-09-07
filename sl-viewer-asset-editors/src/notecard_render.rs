@@ -238,7 +238,7 @@ fn texture_item_info(item: &sl_notecard::InventoryItem) -> ItemInfo {
         asset_type: AssetType::Texture,
         inv_type: InventoryType::Texture,
         flags: 0,
-        sale: None,
+        sale: sl_client_bevy::SaleInfo::default(),
         creation_date: 0,
         owner: OwnerKey::Agent(AgentKey::from(Uuid::nil())),
         last_owner_id: Uuid::nil(),

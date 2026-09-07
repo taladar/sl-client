@@ -370,6 +370,52 @@ impl FolderInfo {
     }
 }
 
+/// An inventory item's **sale terms**: what kind of sale it offers and at what
+/// price.
+///
+/// The wire carries `SaleType` and `SalePrice` as two independent fields, and
+/// the reference viewer keeps both in one `LLSaleInfo` — including for an item
+/// that is **not** for sale, which still has a price on record. That matters in
+/// use: unticking "For Sale" in the item properties must not throw the number
+/// away, or re-ticking it would offer a price the owner never chose (and a
+/// client that wrote a zero back would erase the grid's).
+///
+/// Whether the item is actually offered is therefore [`sale_type`](Self::sale_type),
+/// not the presence of a price — [`is_for_sale`](Self::is_for_sale) asks it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SaleInfo {
+    /// What kind of sale is offered ([`SaleType::NotForSale`] when none is).
+    pub sale_type: SaleType,
+    /// The asking price in L$, kept even while not for sale. A for-sale item
+    /// may legitimately be free (`LindenAmount(0)`).
+    pub price: LindenAmount,
+}
+
+impl SaleInfo {
+    /// Sale terms for an item that is not being offered, at `price` — the
+    /// price the item last carried, which the wire keeps and so do we.
+    #[must_use]
+    pub const fn not_for_sale(price: LindenAmount) -> Self {
+        Self {
+            sale_type: SaleType::NotForSale,
+            price,
+        }
+    }
+
+    /// Whether the item is actually offered for sale.
+    #[must_use]
+    pub const fn is_for_sale(&self) -> bool {
+        !matches!(self.sale_type, SaleType::NotForSale)
+    }
+}
+
+impl Default for SaleInfo {
+    /// Not for sale, at no price — what an item with nothing on record has.
+    fn default() -> Self {
+        Self::not_for_sale(LindenAmount(0))
+    }
+}
+
 /// An owning snapshot of an inventory item for the paginated read API
 /// ([`Session::inventory_folder_page`](crate::Session::inventory_folder_page))
 /// and the [`Command`](crate::Command)/[`Event`](crate::Event) pull-bridge:
@@ -394,10 +440,10 @@ pub struct ItemInfo {
     pub inv_type: InventoryType,
     /// The item flags bitfield.
     pub flags: u32,
-    /// The sale type paired with the asking price in L$ when the item is for
-    /// sale, or `None` when it is not. A for-sale item may still be free
-    /// (`Some((_, LindenAmount(0)))`).
-    pub sale: Option<(SaleType, LindenAmount)>,
+    /// The item's sale terms — its type **and** its asking price, which the
+    /// wire carries as two independent fields and which stay meaningful
+    /// together (see [`SaleInfo`]).
+    pub sale: SaleInfo,
     /// The creation date (Unix seconds).
     pub creation_date: i32,
     /// The current owner (an agent, or a group for a group-owned item).
@@ -425,10 +471,10 @@ impl ItemInfo {
             asset_type: AssetType::from_code(i32::from(item.item_type)),
             inv_type: InventoryType::from_code(i32::from(item.inv_type)),
             flags: item.flags,
-            sale: item
-                .sale_price
-                .clone()
-                .map(|price| (SaleType::from_code(item.sale_type), price)),
+            sale: SaleInfo {
+                sale_type: SaleType::from_code(item.sale_type),
+                price: item.sale_price.clone().unwrap_or(LindenAmount(0)),
+            },
             creation_date: item.creation_date,
             owner: item.owner,
             last_owner_id: item.last_owner_id,
@@ -455,11 +501,11 @@ impl ItemInfo {
             item_type: i8::try_from(self.asset_type.to_code()).unwrap_or(-1),
             inv_type: i8::try_from(self.inv_type.to_code()).unwrap_or(-1),
             flags: self.flags,
-            sale_type: self
-                .sale
-                .as_ref()
-                .map_or(0, |(sale_type, _price)| sale_type.to_code()),
-            sale_price: self.sale.as_ref().map(|(_sale_type, price)| price.clone()),
+            sale_type: self.sale.sale_type.to_code(),
+            // The price rides along whether or not the item is offered: the
+            // wire field exists either way, and zeroing it on an unticked sale
+            // would erase what the grid holds (see `SaleInfo`).
+            sale_price: Some(self.sale.price.clone()),
             creation_date: self.creation_date,
             owner: self.owner,
             last_owner_id: self.last_owner_id,

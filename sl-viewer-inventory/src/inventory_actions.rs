@@ -2940,7 +2940,7 @@ mod tests {
             asset_type,
             inv_type,
             flags: 0,
-            sale: None,
+            sale: sl_client_bevy::SaleInfo::default(),
             creation_date: 0,
             owner: sl_client_bevy::OwnerKey::Agent(AgentKey::from(Uuid::from_u128(1))),
             last_owner_id: Uuid::nil(),

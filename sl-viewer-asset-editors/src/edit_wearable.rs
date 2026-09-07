@@ -1099,13 +1099,10 @@ const fn asset_type_of(slot: WearableType) -> AssetType {
 /// Build the `.wearable` header permissions block from the inventory item (the
 /// reference authors the export from the item's `LLPermissions`).
 fn wearable_permissions(item: &ItemInfo) -> WearablePermissions {
-    let (sale_type, sale_price) = match &item.sale {
-        Some((sale, price)) => (
-            map_sale_type(*sale),
-            i32::try_from(price.0).unwrap_or_default(),
-        ),
-        None => (WearableSaleType::Not, 0),
-    };
+    let (sale_type, sale_price) = (
+        map_sale_type(item.sale.sale_type),
+        i32::try_from(item.sale.price.0).unwrap_or_default(),
+    );
     WearablePermissions {
         base_mask: item.permissions.base.bits(),
         owner_mask: item.permissions.owner.bits(),

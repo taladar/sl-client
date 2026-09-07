@@ -105,7 +105,7 @@ pub use sl_proto::{
     RegionInfoUpdate, RegionLimits, RegionLocalObjectId, RegionLocalParcelId, RegionName,
     RegionTerrainComposition, RegionTerrainUpdate, Reliability, RenderMaterialEntry,
     RenderMaterialRef, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation,
-    SaleType, ScopedObjectId, ScopedParcelId, ScriptCompileError, ScriptControl,
+    SaleInfo, SaleType, ScopedObjectId, ScopedParcelId, ScriptCompileError, ScriptControl,
     ScriptControlAction, ScriptDialog, ScriptLanguage, ScriptPermissionRequest, ScriptPermissions,
     ScriptTarget, ScriptTeleportRequest, ScriptUploadLocation, SculptData, SculptOrMeshKey,
     SequenceNumber, ServerHistoryMessage, SetDisplayNameReply, SimulatorFeatures, SkySettings,

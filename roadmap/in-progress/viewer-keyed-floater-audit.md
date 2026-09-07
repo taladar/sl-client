@@ -34,8 +34,33 @@ spawn instead of `DeferredFloaterContent`.
   persisting their sort / widths by table name as the reference does.
   Live-checked on the local grid: two groups, two windows with their own lists
   and selections, closing one leaves the other, re-opening raises.
-- **Item Properties** (`inventory_properties.rs`, `"item-properties"`) — per
-  inventory item.
+- ~~**Item Properties** (`inventory_properties.rs`, `"item-properties"`)~~ —
+  **done** (2026-09-07). Keyed by item id; the shown item and the name /
+  description / price field entities are components on the window, and the
+  toggle observer and the Enter-commit resolve theirs (the commit by *which
+  window's field has the keyboard*, which is the honest reading of "commit
+  what is being typed"). Unlike the asset editors, an open on an item already
+  up **rebuilds** the window rather than only raising it: the re-open is how a
+  permission toggle repaints every checkbox from the updated snapshot, so the
+  content build was split out (`build_properties_content`) and both paths call
+  it. Live-checked on the local grid: two items, two windows, a checkbox
+  flipping and repainting only its own, Enter committing the window being typed
+  in, and a close leaving the other. The check also turned up three findings in
+  the window's own content: [[viewer-item-price-field-silently-dropped]] and
+  [[viewer-unticking-for-sale-erased-the-price]] (both fixed — the second was
+  data loss, and took `ItemInfo::sale` from an `Option` pair to a `SaleInfo`
+  carrying both wire fields), and
+  [[viewer-disabled-field-selection-flash]] (filed). A fourth followed from
+  reading the reference while fixing those: every control in the window was
+  gated on one "is it mine" flag, where `LLFloaterProperties::refresh` gates
+  each on the bit it is about — so the window offered an anyone-copy on an item
+  the owner cannot copy, and next-owner rights the creator never permitted
+  ([[viewer-item-permission-gates]], fixed).
+- **The two per-type previews** (`inventory_properties.rs`, `"preview-texture"`
+  / `"preview-animation"`) — still singletons, and the same argument applies
+  (comparing two textures is a real workflow). They were missing from this list
+  rather than deliberately excluded; they share the properties module and would
+  convert the same way.
 - **About Landmark** (`about_landmark.rs`, `"about-landmark"`) — per landmark
   item ([[viewer-about-landmark-floater]]).
 - ~~**Notecard / script editors** (`edit_notecard.rs` `"notecard-editor"`,

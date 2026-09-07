@@ -786,13 +786,10 @@ fn to_embedded_item(item: &ItemInfo) -> sl_notecard::InventoryItem {
         group_id: item.group.map_or(sl_types::key::NULL_KEY, |group| group.0),
         group_owned,
     };
-    let (sale_type, sale_price) = match &item.sale {
-        Some((sale_type, amount)) => (
-            notecard_sale_type(*sale_type),
-            i32::try_from(amount.0).unwrap_or(0),
-        ),
-        None => (sl_notecard::SaleType::NotForSale, 0),
-    };
+    let (sale_type, sale_price) = (
+        notecard_sale_type(item.sale.sale_type),
+        i32::try_from(item.sale.price.0).unwrap_or(0),
+    );
     sl_notecard::InventoryItem {
         item_id: item.item_id.0,
         parent_id: item.folder_id.0,
@@ -1163,7 +1160,7 @@ mod tests {
             asset_type: AssetType::Landmark,
             inv_type: InventoryType::Landmark,
             flags: 7,
-            sale: None,
+            sale: sl_client_bevy::SaleInfo::default(),
             creation_date: 1_700_000_000,
             owner: OwnerKey::Agent(AgentKey::from(Uuid::from_u128(0x40))),
             last_owner_id: Uuid::from_u128(0x50),

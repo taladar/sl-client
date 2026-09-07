@@ -37,7 +37,7 @@ mod test {
         Postcard, PrimShape, PrimShapeParams, ProductType, ProfileUpdate, QueryId,
         ReflectionProbeFlags, RegionCoordinates, RegionHandle, RegionInfoUpdate,
         RegionLocalParcelId, RegionName, Reliability, RequiredVoiceVersion, RestoreItem,
-        RezAttachment, RezObjectParams, RezScriptParams, SaleType, Scale, ScopedObjectId,
+        RezAttachment, RezObjectParams, RezScriptParams, SaleInfo, SaleType, Scale, ScopedObjectId,
         ScopedParcelId, ScriptControlAction, ScriptPermissionStatus, ScriptPermissions,
         SculptOrMeshKey, Session, SessionMessage, SetDisplayNameReply, SimStatId,
         SimWideDeleteFlags, SimulatorTime, SkySettings, SoundFlags, StartLocationSlot,
@@ -10738,16 +10738,25 @@ mod test {
         let cube: &ItemInfo = items3.first().ok_or("cube item")?;
         assert_eq!(cube.asset_type, AssetType::Object);
         assert_eq!(cube.inv_type, InventoryType::Object);
-        assert_eq!(cube.sale, Some((SaleType::Copy, LindenAmount(250))));
+        assert_eq!(
+            cube.sale,
+            SaleInfo {
+                sale_type: SaleType::Copy,
+                price: LindenAmount(250),
+            }
+        );
         assert_eq!(
             cube.asset_id,
             uuid::Uuid::from_u128(0xA000_u128.wrapping_add(0xC2))
         );
 
-        // A not-for-sale item resolves to `sale: None`.
+        // A not-for-sale item keeps the price the wire carried: the sale type
+        // is what says it is not offered, and throwing the number away would
+        // erase it on the next save (`SaleInfo`).
         let note: &ItemInfo = items2.first().ok_or("note item")?;
         assert_eq!(note.asset_type, AssetType::Notecard);
-        assert_eq!(note.sale, None);
+        assert_eq!(note.sale.sale_type, SaleType::NotForSale);
+        assert!(!note.sale.is_for_sale());
         Ok(())
     }
 

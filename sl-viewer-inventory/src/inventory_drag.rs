@@ -44,8 +44,8 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use sl_client_bevy::{
     AgentKey, Command, InventoryFolderKey, InventoryType, ItemInfo, ObjectKey, Permissions,
-    RestoreItem, RezObjectParams, SaleType, ScopedObjectId, SlCommand, SlIdentity, TransactionId,
-    Uuid, Vector,
+    RestoreItem, RezObjectParams, ScopedObjectId, SlCommand, SlIdentity, TransactionId, Uuid,
+    Vector,
 };
 
 use crate::coords::bevy_to_sl_vec;
@@ -242,10 +242,9 @@ pub(crate) fn give_command(
 /// copyable one leaves the inventory copy behind — the reference's rule.
 pub(crate) fn rez_object_command(item: &ItemInfo, ray_start: Vector, ray_end: Vector) -> Command {
     let copyable = item.permissions.owner.contains(Permissions::COPY);
-    let (sale_type, sale_price) = match item.sale.clone() {
-        Some((sale_type, price)) => (sale_type, Some(price)),
-        None => (SaleType::NotForSale, None),
-    };
+    // A rez carries the item's sale terms as they stand; an unoffered item
+    // still has a price on record (`SaleInfo`), which the wire slot holds.
+    let (sale_type, sale_price) = (item.sale.sale_type, Some(item.sale.price.clone()));
     Command::RezObjectFromInventory {
         params: Box::new(RezObjectParams {
             group_id: None,
@@ -1219,7 +1218,7 @@ mod tests {
             asset_type: AssetType::Object,
             inv_type: InventoryType::Object,
             flags: 0,
-            sale: None,
+            sale: sl_client_bevy::SaleInfo::default(),
             creation_date: 0,
             owner: sl_client_bevy::OwnerKey::Agent(AgentKey::from(Uuid::from_u128(1))),
             last_owner_id: Uuid::nil(),

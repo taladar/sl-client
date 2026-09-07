@@ -5548,7 +5548,7 @@ mod drag_drop_tests {
             asset_type: AssetType::Notecard,
             inv_type: InventoryType::Notecard,
             flags: 0,
-            sale: None,
+            sale: sl_client_bevy::SaleInfo::default(),
             creation_date: 0,
             owner: OwnerKey::Agent(own),
             last_owner_id: Uuid::nil(),

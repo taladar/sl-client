@@ -783,7 +783,7 @@ mod tests {
             asset_type: AssetType::Object,
             inv_type,
             flags: 0,
-            sale: None,
+            sale: sl_client_bevy::SaleInfo::default(),
             creation_date: created,
             owner: sl_client_bevy::OwnerKey::Agent(AgentKey::from(Uuid::from_u128(4))),
             last_owner_id: Uuid::nil(),

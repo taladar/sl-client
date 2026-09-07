@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 306 |
 | blocked | 55 |
 | in-progress | 19 |
-| bugs | 60 |
-| done | 1003 |
+| bugs | 61 |
+| done | 1006 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1580** |
+| **total** | **1584** |
 
 ## ideas (98)
 
@@ -1168,7 +1168,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (60)
+## bugs (61)
 
 ### viewer
 
@@ -1246,6 +1246,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-crossing-movement-locks-up`](bugs/viewer-crossing-movement-locks-up.md)
   — Movement locks up after a region crossing (stand-up anim, esp. onto lower
   terrain)
+- [`viewer-disabled-field-selection-flash`](bugs/viewer-disabled-field-selection-flash.md)
+  — A disabled text field flashes a selection, and cannot be copied from
 - [`viewer-edit-outline-skinned-mesh`](bugs/viewer-edit-outline-skinned-mesh.md)
   — Edit-selection outline can't shell a skinned / animesh object
 - [`viewer-groups-pane-empty-on-opensim`](bugs/viewer-groups-pane-empty-on-opensim.md)
@@ -1315,7 +1317,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1003)
+## done (1006)
 
 ### protocol
 
@@ -1950,6 +1952,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Show (worn) / bold inventory markers early, without opening Current Outfit
 - [`viewer-inventory-worn-tab-items-without-folders`](done/viewer-inventory-worn-tab-items-without-folders.md)
   — Worn tab lists Skin / Hair / Eyes / Shirt without their containing folders
+- [`viewer-item-permission-gates`](done/viewer-item-permission-gates.md) — Item
+  properties offered permission controls the item did not allow
+- [`viewer-item-price-field-silently-dropped`](done/viewer-item-price-field-silently-dropped.md)
+  — The item-properties price field took a value it never saved
 - [`viewer-land-context-menu`](done/viewer-land-context-menu.md) — Land /
   terrain context pie menu entries (blocked by `viewer-ui-radial-menu` (done))
 - [`viewer-load-url-body-links`](done/viewer-load-url-body-links.md) — Script
@@ -2803,6 +2809,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Name tags are not drawn at all while submerged
 - [`viewer-underwater-translucent-drawn-behind-surface`](done/viewer-underwater-translucent-drawn-behind-surface.md)
   — A submerged camera sees translucent objects as if beyond the water surface
+- [`viewer-unticking-for-sale-erased-the-price`](done/viewer-unticking-for-sale-erased-the-price.md)
+  — Unticking For Sale threw the item's price away — on screen and on the grid
 - [`viewer-url-linkification`](done/viewer-url-linkification.md) — URLs in chat
   & other text contexts (blocked by `viewer-ui-text-foundation` (done))
 - [`viewer-volume-panel`](done/viewer-volume-panel.md) — Volume panel (master +

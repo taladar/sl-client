@@ -233,7 +233,7 @@ pub(crate) const FLOATERS: &[FloaterElement] = &[
     FloaterElement {
         id: "item-properties",
         summary: "Item Properties: an inventory item's name, description and sale fields with its \
-                  permission checkboxes. Subject-bound, so its geometry is not persisted.",
+                  permission checkboxes. One window per item, so its geometry is not persisted.",
         spec: crate::inventory_properties::item_properties_floater_spec,
         content: FloaterContent::Stub(
             "The item's name, description and sale fields with its permission checkboxes.",
