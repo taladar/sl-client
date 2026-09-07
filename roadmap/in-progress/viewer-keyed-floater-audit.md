@@ -59,8 +59,9 @@ spawn instead of `DeferredFloaterContent`.
 - **The two per-type previews** (`inventory_properties.rs`, `"preview-texture"`
   / `"preview-animation"`) — still singletons, and the same argument applies
   (comparing two textures is a real workflow). They were missing from this list
-  rather than deliberately excluded; they share the properties module and would
-  convert the same way.
+  rather than deliberately excluded. One task each, since they are two window
+  kinds sharing one module and one `PreviewState`:
+  [[viewer-key-texture-preview]] and [[viewer-key-animation-preview]].
 - ~~**About Landmark** (`about_landmark.rs`, `"about-landmark"`)~~ — **done**
   (2026-09-07). Keyed by the landmark's inventory id
   ([[viewer-about-landmark-floater]]); the shown item, the resolve chain's
@@ -82,17 +83,18 @@ spawn instead of `DeferredFloaterContent`.
   expiries, then the next question), so a handoff costs no frame.
 - **The remaining inventory-item editors** — every one of these opens *on* an
   item and shares one id today, so each is a keyed conversion with the same
-  shape as the notecard editor:
-  - **Wearable editor** (`edit_wearable.rs`, `"wearable-editor"`) — bodyparts
-    and clothing layers. Editing a shape while comparing it against a skin is
-    an ordinary workflow, and the reference keys this one by item.
-  - **Material editor** (`edit_material_asset.rs`, `"material-editor"`) — per
-    material item.
-  - **Object contents** (`edit_contents.rs`, `"object-contents"`) — per object
-    (task id), not per item: the window lists one object's inventory.
-  - **Colour picker** (`ui_color_picker.rs`, `"color-picker"`) — the same
-    argument as the texture picker, and the same **named** key: the field being
-    picked for.
+  shape as the notecard editor. One task each:
+  - [[viewer-key-wearable-editor]] (`edit_wearable.rs`, `"wearable-editor"`) —
+    bodyparts and clothing layers, keyed by item; the bake preview is the part
+    that does not fall out of the pattern.
+  - [[viewer-key-material-editor]] (`edit_material_asset.rs`,
+    `"material-editor"`) — per material item.
+  - [[viewer-key-object-contents]] (`edit_contents.rs`, `"object-contents"`) —
+    per object, not per item: the window lists one object's inventory, and the
+    Build tab's surface stays a singleton.
+  - [[viewer-key-color-picker]] (`ui_color_picker.rs`, `"color-picker"`) — the
+    same argument as the texture picker, and the same **named** key: the field
+    being picked for.
 - ~~**Notecard / script editors** (`edit_notecard.rs` `"notecard-editor"`,
   `edit_script.rs` `"script-editor"`)~~ — **done** (2026-09-06). Each window
   carries its own `NotecardEditorState` / `ScriptEditorState` (source, baseline,
@@ -168,13 +170,18 @@ spawn instead of `DeferredFloaterContent`.
   profile — and comparing two parcels' covenants or two regions' settings is a
   real thing to want. That is a deliberate divergence from the reference, and
   this is where it is written down.
-- **Web browser** (`web_floater.rs`) — check what the reference does before
-  converting; the browser is arguably tabs rather than windows.
+- [[viewer-key-web-browser]] (`web_floater.rs`) — a decision before an
+  implementation: the browser is arguably tabs rather than windows, and the
+  reference's answer has to be read before either is built.
 
 Not every floater should be keyed (Preferences, Search, the minimap, the
 inventory and the Conversations floater are singletons in the reference too),
 so this is an audit, not a sweep. A window that stays a singleton is a finding
 worth writing down here, not a no-op.
+
+Each window still to convert now has **its own task** (linked above), so they
+can be picked up and reviewed one at a time; this file stays the record of
+what was decided and what each conversion taught the scaffold.
 
 ## What the first conversion taught the scaffold
 

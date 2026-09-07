@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 306 |
+| ready | 313 |
 | blocked | 55 |
 | in-progress | 19 |
 | bugs | 63 |
 | done | 1006 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1586** |
+| **total** | **1593** |
 
 ## ideas (98)
 
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (306)
+## ready (313)
 
 ### protocol
 
@@ -575,6 +575,20 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-inventory-thumbnails`](ready/viewer-inventory-thumbnails.md) —
   Inventory thumbnails — view & edit (blocked by `viewer-ui-texture-picker`
   (done))
+- [`viewer-key-animation-preview`](ready/viewer-key-animation-preview.md) — One
+  animation-preview window per animation
+- [`viewer-key-color-picker`](ready/viewer-key-color-picker.md) — One
+  colour-picker window per field, like the texture picker
+- [`viewer-key-material-editor`](ready/viewer-key-material-editor.md) — One
+  material-editor window per material item
+- [`viewer-key-object-contents`](ready/viewer-key-object-contents.md) — One
+  Object Contents window per object
+- [`viewer-key-texture-preview`](ready/viewer-key-texture-preview.md) — One
+  texture-preview window per texture
+- [`viewer-key-wearable-editor`](ready/viewer-key-wearable-editor.md) — One
+  wearable-editor window per bodypart / clothing item
+- [`viewer-key-web-browser`](ready/viewer-key-web-browser.md) — Decide whether
+  the web browser is many windows or one with tabs
 - [`viewer-land-holdings`](ready/viewer-land-holdings.md) — My land holdings
   floater (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-land-transactions`](ready/viewer-land-transactions.md) — Land sale &
