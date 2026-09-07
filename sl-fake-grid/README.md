@@ -51,8 +51,8 @@ and the price list its simulator answers an `EconomyDataRequest` with, so
 the two cannot disagree. `AgentPolicy` (from `AccountConfig::estate_manager`
 and `FakeGridBuilder::legacy_udp_inventory`) decides whether an agent's
 estate commands are answered or silently dropped the way OpenSim drops them,
-and whether the deprecated UDP inventory fetch is refused with a
-`FeatureDisabled` or ignored the way Second Life ignores it.
+and how the deprecated UDP inventory fetch is answered — served, refused
+with a `FeatureDisabled`, or ignored the way Second Life ignores it.
 
 ## Neighbours, teleports and crossings
 
@@ -144,12 +144,39 @@ the grid this workspace targets — and every divergent behaviour takes its
 default from that. A per-behaviour setter still wins where it is called: the
 flavour is what an unset knob falls back to, not a lock.
 
-Four behaviours follow it today: a taken object's asset (below), whether the
+Six behaviours follow it today: a taken object's asset (below), whether the
 login response is trimmed to the request's `options` list (Second Life honours
-it, OpenSim sends every field regardless), and the two that make up how a
-region introduces itself (below). The divergences it does **not** yet decide —
-the inventory API, server bakes, the economy — are audited in `imitates.rs`
-with a roadmap item each, rather than left to be rediscovered.
+it, OpenSim sends every field regardless), the two that make up how a region
+introduces itself (below), and the two that make up how it does inventory
+(below). The divergences it does **not** yet decide — server bakes and the
+economy — are audited in `imitates.rs` with a roadmap item each, rather than
+left to be rediscovered.
+
+## How inventory is fetched, and how a new item is announced
+
+The loudest divergence a viewer meets, and the one it is most likely to depend
+on without noticing, because both halves are silent when they are wrong.
+
+**The fetch.** OpenSim still serves the deprecated UDP
+`FetchInventoryDescendents`; Second Life dropped it when inventory moved behind
+AIS3. So an OpenSim-flavoured grid answers it out of the session's own
+inventory tree — the same tree `FetchInventoryDescendents2` reads, packed the
+way `LLClientView` packs it: at most six folders or five items per message,
+never both in one, and a nil-id placeholder block padding whatever half is
+empty. A Second-Life-flavoured grid does not have the path, and of the two
+answers a grid without it can give, this one takes the loud road: a
+`FeatureDisabled` naming the refused feature. Aditi was measured (2026-08-12)
+*ignoring* the fetch instead, and `LegacyUdpInventory::Ignored` reproduces
+that — but silence is indistinguishable from a lost packet, so it is not the
+default a test would have to wait out.
+
+**The announcement.** A take is answered with the legacy UDP
+`UpdateCreateInventoryItem` on OpenSim and with a `BulkUpdateInventory` over
+the event queue on Second Life. `InventoryAnnouncement` picks between them
+(`FakeGridBuilder::inventory_announcement` overrides). A client listening for
+only one of the two hears nothing at all from the other grid, which is why the
+conformance cases that take something use one shared helper that accepts
+either and records which arrived.
 
 ## How a region introduces itself
 

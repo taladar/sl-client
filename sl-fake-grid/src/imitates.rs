@@ -22,6 +22,19 @@
 //! | the login response's `options` list ([`honor_options`](crate::FakeGridBuilder::honor_options)) | honoured: the response is trimmed to what was asked for | ignored: every field is sent |
 //! | the `OpenSimExtras` block in `SimulatorFeatures` ([`advertises_open_sim_extras`](ImitatedGrid::advertises_open_sim_extras)) | absent | sent, carrying the grid's map-tile and currency-helper URLs |
 //! | the spatial-voice backend ([`VoiceBackend`]) | WebRTC, named three ways: `SimulatorFeatures.VoiceServerType`, the login `voice-config`, the `RequiredVoiceVersion` push | none: a stock region loads no voice module, and nothing is advertised |
+//! | the deprecated UDP inventory fetch ([`LegacyUdpInventory`]) | refused with a `FeatureDisabled` | served out of the session's inventory tree |
+//! | how a created inventory item is announced ([`InventoryAnnouncement`]) | a `BulkUpdateInventory` over the event queue | the legacy UDP `UpdateCreateInventoryItem` |
+//!
+//! **The inventory pair is the divergence a viewer is most likely to trip
+//! over**, which is why it is two rows rather than one setting. An inventory
+//! implementation that still reaches for the UDP fetch, or that only listens
+//! for the legacy create, works against OpenSim and fails against the grid this
+//! workspace targets — silently, in both directions. Second Life's refusal is
+//! the one deliberate deviation from the measurement in this table: aditi
+//! empirically *drops* the fetch without a word (2026-08-12), and
+//! [`LegacyUdpInventory::Ignored`] reproduces that, but of the two roads a grid
+//! without the path has only the refusal leaves something to assert — silence
+//! is indistinguishable from a lost packet.
 //!
 //! **The map and currency URLs survive losing the extras block**, which is the
 //! part that had to be checked rather than assumed. Both are reachable by a
@@ -44,9 +57,9 @@
 //!
 //! | behaviour | the side the fake grid takes | what the other side needs |
 //! | --- | --- | --- |
-//! | how inventory is fetched, and how a new item is announced | OpenSim's: the deprecated UDP fetch is refused rather than served, and a take is announced with the legacy `UpdateCreateInventoryItem` | `SimSession` has neither an `InventoryDescendents` nor a `BulkUpdateInventory` sender ([[test-fake-grid-imitates-inventory-api]]) |
 //! | server-side avatar bakes | Second Life's: `agent_appearance_service` is always named | dropping the service alone leaves every avatar a silent cloud; the "this avatar is server-baked" decision has to flip with it ([[test-fake-grid-imitates-server-bakes]]) |
 //! | the economy helper and the price list | OpenSim's: a stock region's zeroes | what Second Life's helper and `EconomyData` actually answer is unmeasured ([[test-fake-grid-imitates-economy]]) |
+//! | how an **upload-created** item is announced (as opposed to a taken one) | the legacy UDP message on both flavours | what Second Life sends besides the capability's own HTTP response is unmeasured ([[test-fake-grid-imitates-upload-announcements]]) |
 //!
 //! One thing is deliberately **not** flavour-decided and is not a to-do:
 //! [`GridIdentity::platform`](crate::GridIdentity) stays `OpenSim` whichever
@@ -55,6 +68,7 @@
 //! grid nothing can log into tests nothing.
 
 use crate::assets::ObjectAssetPolicy;
+use crate::inventory::{InventoryAnnouncement, LegacyUdpInventory};
 use crate::voice::VoiceBackend;
 
 /// The live grid a [`FakeGrid`](crate::FakeGrid) imitates where the two real
@@ -128,6 +142,35 @@ impl ImitatedGrid {
             Self::OpenSim => VoiceBackend::Silent,
         }
     }
+
+    /// How this grid answers the deprecated UDP inventory fetch.
+    ///
+    /// OpenSim still serves it (`LLClientView.HandleFetchInventoryDescendents`
+    /// is wired to the region's inventory service); Second Life dropped it when
+    /// inventory moved behind AIS3. The Second Life side is the *refusal* rather
+    /// than the silence aditi was measured giving — see the module docs for why
+    /// that deviation is deliberate.
+    #[must_use]
+    pub const fn legacy_udp_inventory(self) -> LegacyUdpInventory {
+        match self {
+            Self::SecondLife => LegacyUdpInventory::Refused,
+            Self::OpenSim => LegacyUdpInventory::Served,
+        }
+    }
+
+    /// How this grid announces an inventory item it just created — the item a
+    /// take files away.
+    ///
+    /// OpenSim sends the legacy UDP `UpdateCreateInventoryItem`; Second Life
+    /// delivers the new item as a `BulkUpdateInventory` over the event queue,
+    /// which is why `object-asset-format`'s take leg waits for either.
+    #[must_use]
+    pub const fn inventory_announcement(self) -> InventoryAnnouncement {
+        match self {
+            Self::SecondLife => InventoryAnnouncement::BulkUpdate,
+            Self::OpenSim => InventoryAnnouncement::Legacy,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -159,6 +202,35 @@ mod test {
             opensim.advertises_open_sim_extras()
         );
         assert_ne!(sl.voice_backend(), opensim.voice_backend());
+        assert_ne!(sl.legacy_udp_inventory(), opensim.legacy_udp_inventory());
+        assert_ne!(
+            sl.inventory_announcement(),
+            opensim.inventory_announcement()
+        );
+    }
+
+    /// The inventory pair is the one place the flavour decides both ends of the
+    /// same divergence, and getting either backwards would let a viewer that
+    /// depends on the legacy path pass against a grid claiming to be Second
+    /// Life — the exact failure this task existed to make impossible.
+    #[test]
+    fn only_the_open_sim_flavour_speaks_legacy_inventory() {
+        assert_eq!(
+            ImitatedGrid::OpenSim.legacy_udp_inventory(),
+            LegacyUdpInventory::Served
+        );
+        assert_eq!(
+            ImitatedGrid::OpenSim.inventory_announcement(),
+            InventoryAnnouncement::Legacy
+        );
+        assert_eq!(
+            ImitatedGrid::SecondLife.legacy_udp_inventory(),
+            LegacyUdpInventory::Refused
+        );
+        assert_eq!(
+            ImitatedGrid::SecondLife.inventory_announcement(),
+            InventoryAnnouncement::BulkUpdate
+        );
     }
 
     /// The fake grid's own default has to be the one Second Life actually is,

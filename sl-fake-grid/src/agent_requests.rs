@@ -1,6 +1,6 @@
 //! The agent-directed asks a simulator answers about the agent itself: what it
-//! is wearing, where it just set its home, and the deprecated paths it is
-//! refused.
+//! is wearing, where it just set its home, and what becomes of the deprecated
+//! paths it reaches for.
 //!
 //! These have nothing in common with the world fixtures ([`crate::world`]) —
 //! none of them is about the region's content — but they share a shape: each
@@ -16,6 +16,7 @@ use std::time::Instant;
 
 use sl_proto::{AgentKey, ServerEvent, SimSession, TransactionId};
 
+use crate::inventory::LegacyUdpInventory;
 use crate::world::SceneFixtures;
 
 /// The alert a simulator answers a stored Set-Home with. OpenSim's
@@ -31,28 +32,6 @@ const HOME_REFUSED: &str = "You are not allowed to set your home location in thi
 const LEGACY_INVENTORY_REFUSED: &str = "The UDP inventory fetch is deprecated on this grid; use the \
      FetchInventoryDescendents2 capability.";
 
-/// How the simulator answers the deprecated UDP inventory fetch
-/// (`FetchInventoryDescendents`).
-///
-/// The live grids take different roads — OpenSim still serves it, Second Life
-/// silently drops it — and the fake grid can take either of the two a grid that
-/// does *not* serve it has.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum LegacyUdpInventory {
-    /// Answer it with a `FeatureDisabled` naming the refused feature — what
-    /// Second Life does for a message it has blacklisted, and what the
-    /// reference viewer logs as its "Blacklisted Feature Response".
-    ///
-    /// The default, and the only road that produces something to assert:
-    /// silence is indistinguishable from a lost packet, and the fake grid does
-    /// not serve UDP inventory at all.
-    #[default]
-    Refused,
-    /// Drop it silently — what Second Life empirically does to this particular
-    /// deprecated fetch (aditi, 2026-08-12).
-    Ignored,
-}
-
 /// What the grid permits an agent, and how it answers the deprecated paths.
 ///
 /// Grid-wide but read per session, because the estate half is about *who* is
@@ -65,7 +44,8 @@ pub struct AgentPolicy {
     /// returns without a word from an estate command an agent has no power
     /// for, so this is the difference between an alert and nothing at all.
     pub estate_manager: bool,
-    /// How the deprecated UDP inventory fetch is answered.
+    /// How the deprecated UDP inventory fetch is answered
+    /// ([`LegacyUdpInventory`], which follows [`ImitatedGrid`](crate::ImitatedGrid)).
     pub legacy_udp_inventory: LegacyUdpInventory,
 }
 
@@ -109,26 +89,52 @@ pub(crate) fn answer_agent_request(
                 tracing::warn!("answering a set-home request failed: {error}");
             }
         }
-        // The deprecated UDP inventory fetch. It reaches the simulator half as
-        // a raw forward — nothing decodes it into a typed event, because no
-        // grid worth speaking to still serves it.
-        ServerEvent::ClientMessage(message)
-            if matches!(**message, sl_wire::AnyMessage::FetchInventoryDescendents(_)) =>
-        {
-            if policy.legacy_udp_inventory == LegacyUdpInventory::Ignored {
-                return;
+        // The deprecated UDP inventory fetch, and which of the three roads
+        // this grid takes is the flavour's answer, not this module's: a grid
+        // imitating OpenSim still serves it out of the session's own inventory
+        // tree, and one imitating Second Life does not have the path at all.
+        ServerEvent::RequestInventoryDescendents {
+            folder_id,
+            owner_id,
+            sort_order,
+            fetch_folders,
+            fetch_items,
+        } => match policy.legacy_udp_inventory {
+            LegacyUdpInventory::Ignored => {}
+            LegacyUdpInventory::Served => {
+                match sim.send_inventory_descendents(
+                    *folder_id,
+                    *owner_id,
+                    *sort_order,
+                    *fetch_folders,
+                    *fetch_items,
+                    now,
+                ) {
+                    // A folder this grid's inventory does not have. A real
+                    // simulator answers nothing either; the client is holding
+                    // an id from somewhere else.
+                    Ok(false) => tracing::debug!(
+                        "a UDP inventory fetch named {folder_id:?}, which this grid does not have"
+                    ),
+                    Ok(true) => {}
+                    Err(error) => {
+                        tracing::warn!("serving the deprecated inventory fetch failed: {error}");
+                    }
+                }
             }
-            if let Err(error) = sim.send_feature_disabled(
-                &sl_proto::FeatureDisabled {
-                    message: LEGACY_INVENTORY_REFUSED.to_owned(),
-                    agent: agent_id,
-                    transaction: TransactionId::from(uuid::Uuid::nil()),
-                },
-                now,
-            ) {
-                tracing::warn!("refusing the deprecated inventory fetch failed: {error}");
+            LegacyUdpInventory::Refused => {
+                if let Err(error) = sim.send_feature_disabled(
+                    &sl_proto::FeatureDisabled {
+                        message: LEGACY_INVENTORY_REFUSED.to_owned(),
+                        agent: agent_id,
+                        transaction: TransactionId::from(uuid::Uuid::nil()),
+                    },
+                    now,
+                ) {
+                    tracing::warn!("refusing the deprecated inventory fetch failed: {error}");
+                }
             }
-        }
+        },
         _other => {}
     }
 }

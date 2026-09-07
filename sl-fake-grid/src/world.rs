@@ -27,7 +27,7 @@ use sl_proto::{
     ObjectProperties, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelDetails,
     ParcelInfo, ParcelRequestResult, ParcelStatus, PrimShape, PrimShapeParams, RegionIdentity,
     RegionLocalObjectId, RegionLocalParcelId, RegionTerrainComposition, SaleType, ServerEvent,
-    SimSession, TaskInventoryItem, TerrainLayerType, pcode,
+    SimSession, TaskInventoryItem, TerrainLayerType, TransactionId, pcode,
 };
 use sl_types::key::{AgentKey, InventoryFolderKey, InventoryKey, ObjectKey, OwnerKey, ParcelKey};
 use sl_types::lsl::{Rotation, Vector};
@@ -1512,7 +1512,10 @@ fn push_terrain(terrain: &TerrainFixture, sim: &mut SimSession, now: Instant) {
 /// about a taken object's asset
 /// ([`ObjectAssetPolicy`](crate::assets::ObjectAssetPolicy)). Only the derez arm
 /// reads it; the rez arm deliberately does not, because an item says for itself
-/// where its body went.
+/// where its body went. `announcement` is the same question about how a filed
+/// item is handed to the client
+/// ([`InventoryAnnouncement`](crate::inventory::InventoryAnnouncement)), and the
+/// derez arm is likewise the only reader.
 #[expect(
     clippy::too_many_arguments,
     reason = "the parameters are the stores an answer reads and writes -- the \
@@ -1520,8 +1523,9 @@ fn push_terrain(terrain: &TerrainFixture, sim: &mut SimSession, now: Instant) {
               and selection -- over the identities and policies that decide what \
               the answer says (the agent, the region, the minter the simulator's \
               own ids come from, and which live grid this one imitates for an \
-              object asset); bundling them would hide which of them a given arm \
-              touches, which is the one thing this switch is read for"
+              object asset and its announcement); bundling them would hide which \
+              of them a given arm touches, which is the one thing this switch is \
+              read for"
 )]
 pub(crate) fn answer_world_request(
     world: &mut SceneFixtures,
@@ -1529,6 +1533,7 @@ pub(crate) fn answer_world_request(
     region: &RegionIdentity,
     assets: &crate::assets::GridAssets,
     object_assets: crate::assets::ObjectAssetPolicy,
+    announcement: crate::inventory::InventoryAnnouncement,
     mint: &dyn Fn() -> uuid::Uuid,
     selection: &mut crate::object_edits::Selection,
     sim: &mut SimSession,
@@ -1587,7 +1592,8 @@ pub(crate) fn answer_world_request(
         // Whether the filed item *names* the body it was written from is the
         // one place this grid has to pick a live grid to be
         // (`ObjectAssetPolicy`): Second Life tells a viewer nothing, OpenSim
-        // tells it everything, and the rez works either way.
+        // tells it everything, and the rez works either way. **How** the item
+        // is handed over is a second such choice (`InventoryAnnouncement`).
         ServerEvent::DerezObjects {
             local_ids,
             destination,
@@ -1638,16 +1644,14 @@ pub(crate) fn answer_world_request(
                 }
             }
             if created.is_empty() {
-                // Nothing was filed, so there is no `UpdateCreateInventoryItem`
+                // Nothing was filed, so there is no created-item announcement
                 // to correlate the client's transaction with -- which is
                 // exactly what a `DeRezAck` is for.
                 if let Err(error) = sim.send_derez_ack(*transaction_id, true, now) {
                     tracing::warn!("acknowledging a derez failed: {error}");
                 }
-            } else if let Err(error) =
-                sim.send_inventory_item_created(&created, *transaction_id, true, now)
-            {
-                tracing::warn!("handing over a taken object's inventory item failed: {error}");
+            } else {
+                announce_created_items(announcement, sim, &created, *transaction_id, now);
             }
             for item in created {
                 sim.agent_inventory_mut().insert_item(item);
@@ -2227,6 +2231,38 @@ fn taken_item(
         creator_id: owner,
         group: None,
         permissions: FULL_PERMISSIONS,
+    }
+}
+
+/// Hands a client the inventory items the simulator just created, the way the
+/// live grid this one is imitating does.
+///
+/// The two shapes are not interchangeable to a viewer, which is the whole point
+/// of the switch: a client that only listens for the legacy UDP message hears
+/// nothing at all from a grid that moved inventory to AIS3, and one that only
+/// listens for the event-queue push hears nothing from OpenSim. A take against
+/// the wrong flavour is where a viewer finds that out.
+///
+/// The `BulkUpdateInventory` side carries no folder blocks: the folder the item
+/// went into already exists in the client's model — the client named it in the
+/// derez — and a real grid's bulk update announces the *changed* objects.
+fn announce_created_items(
+    announcement: crate::inventory::InventoryAnnouncement,
+    sim: &mut SimSession,
+    created: &[InventoryItem],
+    transaction_id: TransactionId,
+    now: Instant,
+) {
+    let result = match announcement {
+        crate::inventory::InventoryAnnouncement::Legacy => sim
+            .send_inventory_item_created(created, transaction_id, true, now)
+            .map_err(|error| error.to_string()),
+        crate::inventory::InventoryAnnouncement::BulkUpdate => sim
+            .enqueue_bulk_update_inventory(transaction_id, &[], created)
+            .map_err(|error| error.to_string()),
+    };
+    if let Err(error) = result {
+        tracing::warn!("handing over a taken object's inventory item failed: {error}");
     }
 }
 

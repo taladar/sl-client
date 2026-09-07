@@ -13,7 +13,7 @@
 
 use std::time::{Duration, Instant};
 
-use sl_client_tokio::{Command, CreateGroupParams, Event, GroupKey, LindenAmount};
+use sl_client_tokio::{Command, CreateGroupParams, Event, GroupKey, InventoryItem, LindenAmount};
 
 use crate::context::{Session, TestContext, TestFailure};
 use crate::grid::Grid;
@@ -142,6 +142,54 @@ pub fn secs_metric(base: &str) -> String {
 #[must_use]
 pub fn count_metric(base: &str) -> String {
     format!("{base}_count")
+}
+
+/// The [`created_item_announcement`] value for the legacy UDP
+/// `UpdateCreateInventoryItem`, which is what OpenSim answers a take with.
+pub const ANNOUNCED_LEGACY: &str = "update-create-inventory-item";
+
+/// The [`created_item_announcement`] value for the event-queue
+/// `BulkUpdateInventory`, which is what Second Life answers a take with now
+/// that inventory lives behind AIS3.
+pub const ANNOUNCED_BULK: &str = "bulk-update-inventory";
+
+/// Waits for the grid to announce an inventory item it just created, whichever
+/// of the **two shapes** it uses, and says which one arrived.
+///
+/// The live grids disagree: OpenSim sends the legacy UDP
+/// `UpdateCreateInventoryItem` ([`Event::InventoryItemCreated`]) and Second Life
+/// pushes a `BulkUpdateInventory` over the event queue
+/// ([`Event::InventoryBulkUpdate`]). A case that waits for only one of them
+/// reports a take that worked as unacknowledged against the other grid — which
+/// is what the fake grid's `ImitatedGrid` switch makes reachable offline, and
+/// why this is one helper rather than a `match` copied into every case that
+/// takes something.
+///
+/// `item_type` is the `LLAssetType` code the item must carry, because a bulk
+/// update announces every object it touched and only one of them is the item
+/// the caller asked for.
+///
+/// # Errors
+///
+/// Propagates [`Session::wait_for`]'s timeout when neither shape arrives.
+pub async fn created_item_announcement(
+    session: &mut Session,
+    timeout: Duration,
+    item_type: i32,
+) -> Result<(&'static str, InventoryItem), TestFailure> {
+    session
+        .wait_for(timeout, |event| match event {
+            Event::InventoryItemCreated { item, .. } if i32::from(item.item_type) == item_type => {
+                Some((ANNOUNCED_LEGACY, item.clone()))
+            }
+            Event::InventoryBulkUpdate { items, .. } => items
+                .iter()
+                .find(|item| i32::from(item.item_type) == item_type)
+                .cloned()
+                .map(|item| (ANNOUNCED_BULK, item)),
+            _other => None,
+        })
+        .await
 }
 
 /// One round of the group-departure confirmation poll: how long to wait for

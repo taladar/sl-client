@@ -509,9 +509,10 @@ change what it holds, and all three are answered against the region world:
   object until it learns the ids it did not choose.
 - **`DeRezObject` → `ServerEvent::DerezObjects`.** The destination decides
   both halves and nothing else does: `DeRezDestination::agent_folder` names
-  the folder an inventory item is minted in (answered with an
-  `UpdateCreateInventoryItem`, and filed into the session's own
-  `SimInventoryTree` so a later `UpdateTaskInventory` can resolve it), and
+  the folder an inventory item is minted in (announced the way the imitated
+  grid announces one — see "How this grid does inventory" — and filed into
+  the session's own `SimInventoryTree` so a later `UpdateTaskInventory` can
+  resolve it), and
   `removes_from_world` says whether the world copy then goes (answered with
   a `KillObject`). A destination that does neither gets a `DeRezAck`. The
   split follows OpenSim's own `Scene.DeRezObjects`, whose
@@ -617,12 +618,13 @@ per-behaviour setters still win where they are called; the flavour is what
 an unset knob falls back to, not a lock, which is what a test wanting one
 deliberate deviation needs. Each resolves once, in `start`.
 
-Four behaviours follow it today: a taken object's asset, whether the
+Six behaviours follow it today: a taken object's asset, whether the
 login response is trimmed to the request's `options` list (Second Life
 honours it, OpenSim sends every field regardless), whether
-`SimulatorFeatures` carries the `OpenSimExtras` block, and which
-spatial-voice backend the regions run. The last two are covered under "How
-a region introduces itself" below.
+`SimulatorFeatures` carries the `OpenSimExtras` block, which spatial-voice
+backend the regions run, and the two halves of how inventory works. The
+`SimulatorFeatures` pair is covered under "How a region introduces itself"
+below, and the inventory pair under "How this grid does inventory".
 
 That second one is small and it immediately earned its keep. Turning it on
 by default broke a fake-grid end-to-end test that expected
@@ -634,10 +636,57 @@ grid that commits to being one real grid.
 
 The divergences the flavour does **not** yet decide are audited in
 `imitates.rs` rather than left to be rediscovered, each with a roadmap item:
-the inventory API (UDP versus AIS3, and how a new item is announced —
-`SimSession` has a sender for neither), server-side bakes (dropping the
-appearance service alone leaves every avatar a silent cloud), and the
-economy price list.
+server-side bakes (dropping the appearance service alone leaves every avatar
+a silent cloud) and the economy price list.
+
+### How this grid does inventory
+
+Two rows of the flavour table rather than one, because they are the same
+divergence seen from either end, and because both are *silent* when a viewer
+gets them wrong.
+
+**The fetch.** `LegacyUdpInventory` says how the deprecated UDP
+`FetchInventoryDescendents` is answered, and it has three settings because
+the live grids take two roads and a grid without the path can take either of
+two more. An OpenSim-flavoured grid `Served`s it out of the session's own
+`SimInventoryTree` — the same tree `FetchInventoryDescendents2` reads —
+through `SimSession::send_inventory_descendents`, which packs the reply the
+way `LLClientView.SendInventoryFolderDetails` does: at most six folders or
+five items per message, folders and items never mixed ("to preserve SL
+compatibility", says the comment there), and a nil-id placeholder block
+padding whichever half of a message is empty, so an empty folder is one
+message of two placeholders rather than no message at all. The client drops
+the placeholders on their nil ids, which is a filter nothing else reached.
+A Second-Life-flavoured grid `Refused`s it with a `FeatureDisabled`. Aditi
+was measured (2026-08-12) silently *dropping* the fetch, and `Ignored`
+reproduces that faithfully — but silence is indistinguishable from a lost
+packet, so the flavour's default is the observable road rather than the
+measured one. This is the one place the table deliberately deviates from a
+measurement, and it is written down in `imitates.rs` too.
+
+**The announcement.** `InventoryAnnouncement` says how a created item is
+handed over: OpenSim's legacy UDP `UpdateCreateInventoryItem`
+(`SimSession::send_inventory_item_created`) or Second Life's
+`BulkUpdateInventory` over the event queue
+(`SimSession::enqueue_bulk_update_inventory`). A take reads it, and nothing
+else does yet.
+
+Flipping the default to Second Life immediately broke two conformance cases
+that waited only for the legacy message and reported a take that had worked
+as unacknowledged — which is exactly the failure a viewer would have had,
+and exactly why the pair is worth deciding. The fix is one shared helper,
+`support::created_item_announcement`, that accepts either shape and says
+which arrived; `object-asset-format` then asserts the shape against the
+grid's flavour, so a fake grid answering with the wrong one is a failure
+rather than something the helper papers over.
+
+It also moved the announcement in *time*, which nothing had predicted. A
+take sends the filed item and the world's `KillObject`s in one breath, but
+the kills go out over UDP immediately while an event-queue announcement
+lands on the client's next long-poll — so on the Second Life side the item
+arrives **after** the kills. A consumer that waits for the item and only
+then looks for the kills has already discarded them, which is how
+`a_taken_linkset_rezzes_back_whole` came to hang rather than fail.
 One thing is deliberately not flavour-decided and is not a to-do:
 `GridIdentity::platform` stays `OpenSim` either way, because it is what
 Firestorm's grid manager reads to decide whether it will add the grid at
@@ -1408,12 +1457,10 @@ into the wrong slot.
   the one estate command the grid answers — the viewer's `refreshmapvisibility`
   nudge — replies with OpenSim's own "Terrain map generated" `AlertMessage`.
 - **The deprecated UDP inventory fetch**
-  (`FakeGridBuilder::legacy_udp_inventory`). The fake grid does not serve
-  `FetchInventoryDescendents` at all, and of the two answers a grid without
-  that path can give, only `FeatureDisabled` is observable — silence is
-  indistinguishable from a lost packet — so `LegacyUdpInventory::Refused` is
-  the default. `Ignored` reproduces the silence Second Life empirically
-  answers with.
+  (`FakeGridBuilder::legacy_udp_inventory`, which otherwise follows the
+  flavour — see "How this grid does inventory" above for the three
+  settings and why the Second Life default is the refusal rather than the
+  measured silence).
 
 Set-Home is policy of a third kind: *every* outcome is answered, which is
 what makes it the one deterministic way to provoke an `AgentAlertMessage`.

@@ -24,12 +24,12 @@ use tokio::net::{TcpListener, UdpSocket};
 use tokio::sync::{Mutex, broadcast, watch};
 
 use crate::accounts::{Account, AccountConfig};
-use crate::agent_requests::LegacyUdpInventory;
 use crate::assets::{GridAssets, ObjectAssetPolicy};
 use crate::driver::{SharedSim, SimState, new_shared_sim, run_timer, run_udp_pump};
 use crate::economy_policy::{EconomyConfig, EconomyEvent};
 use crate::error::Error;
 use crate::imitates::ImitatedGrid;
+use crate::inventory::{InventoryAnnouncement, LegacyUdpInventory};
 use crate::map_tiles::MapTileStore;
 use crate::neighbours::NeighbourPolicy;
 use crate::scenario::Scenario;
@@ -387,8 +387,12 @@ pub(crate) struct GridCore {
     pub(crate) grid_info: GridInfo,
     /// The economy helper policy.
     pub(crate) economy: EconomyConfig,
-    /// How every session answers the deprecated UDP inventory fetch.
+    /// How every session answers the deprecated UDP inventory fetch
+    /// ([`LegacyUdpInventory`]).
     pub(crate) legacy_udp_inventory: LegacyUdpInventory,
+    /// How a session announces an inventory item it just created
+    /// ([`InventoryAnnouncement`]).
+    pub(crate) inventory_announcement: InventoryAnnouncement,
     /// The world-map tiles served under the login URI.
     pub(crate) map_tiles: MapTileStore,
     /// The world-map region catalogue every session answers map requests
@@ -684,6 +688,7 @@ impl GridCore {
             caps,
             assets: self.assets.clone(),
             object_assets: self.object_assets,
+            inventory_announcement: self.inventory_announcement,
             identity: {
                 let mut identity = region.identity(self.estate_owner);
                 identity.is_estate_manager = account.config.estate_manager;
@@ -1012,8 +1017,6 @@ pub struct FakeGridBuilder {
     identity: GridIdentity,
     /// The economy helper policy.
     economy: EconomyConfig,
-    /// How every session answers the deprecated UDP inventory fetch.
-    legacy_udp_inventory: LegacyUdpInventory,
     /// The live grid this one imitates, which every knob below that is `None`
     /// takes its answer from ([`ImitatedGrid`]).
     imitates: ImitatedGrid,
@@ -1029,6 +1032,12 @@ pub struct FakeGridBuilder {
     /// The spatial-voice backend every region serves, or `None` to follow
     /// [`imitates`](Self::imitates).
     voice_backend: Option<VoiceBackend>,
+    /// How the deprecated UDP inventory fetch is answered, or `None` to follow
+    /// [`imitates`](Self::imitates).
+    legacy_udp_inventory: Option<LegacyUdpInventory>,
+    /// How a created inventory item is announced, or `None` to follow
+    /// [`imitates`](Self::imitates).
+    inventory_announcement: Option<InventoryAnnouncement>,
     /// Builder-registered map tiles.
     map_tiles: MapTileStore,
     /// The identifier source (random unless seeded).
@@ -1053,6 +1062,8 @@ impl std::fmt::Debug for FakeGridBuilder {
             .field("object_assets", &self.object_assets)
             .field("open_sim_extras", &self.open_sim_extras)
             .field("voice_backend", &self.voice_backend)
+            .field("legacy_udp_inventory", &self.legacy_udp_inventory)
+            .field("inventory_announcement", &self.inventory_announcement)
             .field("eq_hold", &self.eq_hold)
             .field("handover_timeout", &self.handover_timeout)
             .field("http_port", &self.http_port)
@@ -1111,12 +1122,13 @@ impl FakeGridBuilder {
             http_port: 0,
             identity: GridIdentity::default(),
             economy: EconomyConfig::default(),
-            legacy_udp_inventory: LegacyUdpInventory::default(),
             imitates: ImitatedGrid::default(),
             object_assets: None,
             honor_options: None,
             open_sim_extras: None,
             voice_backend: None,
+            legacy_udp_inventory: None,
+            inventory_announcement: None,
             map_tiles: MapTileStore::default(),
         }
     }
@@ -1243,11 +1255,23 @@ impl FakeGridBuilder {
         self
     }
 
-    /// Sets how every session answers the deprecated UDP inventory fetch
-    /// (default: [`LegacyUdpInventory::Refused`]).
+    /// Overrides how every session answers the deprecated UDP inventory fetch,
+    /// which otherwise follows [`imitates`](Self::imitates): OpenSim serves it
+    /// out of the session's inventory tree, Second Life does not have the path
+    /// and this grid refuses it out loud.
     #[must_use]
     pub const fn legacy_udp_inventory(mut self, policy: LegacyUdpInventory) -> Self {
-        self.legacy_udp_inventory = policy;
+        self.legacy_udp_inventory = Some(policy);
+        self
+    }
+
+    /// Overrides how a created inventory item is announced, which otherwise
+    /// follows [`imitates`](Self::imitates): OpenSim sends the legacy UDP
+    /// `UpdateCreateInventoryItem`, Second Life a `BulkUpdateInventory` over
+    /// the event queue.
+    #[must_use]
+    pub const fn inventory_announcement(mut self, announcement: InventoryAnnouncement) -> Self {
+        self.inventory_announcement = Some(announcement);
         self
     }
 
@@ -1381,7 +1405,12 @@ impl FakeGridBuilder {
             identity: self.identity,
             grid_info,
             economy: self.economy,
-            legacy_udp_inventory: self.legacy_udp_inventory,
+            legacy_udp_inventory: self
+                .legacy_udp_inventory
+                .unwrap_or_else(|| self.imitates.legacy_udp_inventory()),
+            inventory_announcement: self
+                .inventory_announcement
+                .unwrap_or_else(|| self.imitates.inventory_announcement()),
             map_tiles,
             map,
             sessions: Mutex::new(HashMap::new()),

@@ -24,6 +24,13 @@
 //! fetchable on both is the grid's own seeded `Fixture Object`, which is what
 //! this case samples offline.
 //!
+//! The take leg also carries the **announcement** half of the inventory
+//! divergence (`take_announcement`): OpenSim answers a take with the legacy UDP
+//! `UpdateCreateInventoryItem`, Second Life with a `BulkUpdateInventory` over
+//! the event queue. The leg accepts either — it has to, or it would record a
+//! take that worked as unacknowledged — so the shape is asserted against the
+//! grid's flavour rather than left to whichever one happened to arrive.
+//!
 //! **Second Life does not tell a viewer where an object item's asset lives.**
 //! Eleven of eleven object items in the test account came back with a nil
 //! `asset_id` — in the AIS3 folder listing *and* in the per-item
@@ -64,7 +71,10 @@ use sl_object_asset::ObjectAsset;
 use crate::context::{Session, TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
-use crate::support::{LONG_TIMEOUT, REGION_TIMEOUT, REPLY_TIMEOUT, check, is_aditi, is_fake};
+use crate::support::{
+    ANNOUNCED_BULK, ANNOUNCED_LEGACY, LONG_TIMEOUT, REGION_TIMEOUT, REPLY_TIMEOUT, check,
+    created_item_announcement, is_aditi, is_fake,
+};
 
 /// How many object assets to pull. Enough for a shape to be more than one
 /// sample, few enough that a live run stays short and polite.
@@ -142,11 +152,31 @@ impl GridTest for ObjectAssetFormat {
                     || InventoryFolderKey::from(Uuid::nil()),
                     |item| item.folder_id,
                 );
-                let (step, taken) =
+                let outcome =
                     take_an_object(ctx, objects_folder, survey.trash, placement.clone(), &seen)
                         .await?;
-                ctx.metrics().set("take_step", step);
-                if let Some(taken) = taken.filter(|item| !item.asset_id.is_nil()) {
+                ctx.metrics().set("take_step", outcome.step);
+                // The announcement half of the inventory divergence. A grid
+                // that says it is OpenSim hands the item over with the legacy
+                // UDP message and one that says it is Second Life pushes a bulk
+                // update; the wait above accepts either, so nothing else would
+                // notice the fake grid answering with the wrong one.
+                if let Some(announcement) = outcome.announcement {
+                    ctx.metrics().set("take_announcement", announcement);
+                    let expected = match grid.behaves_like() {
+                        sl_fake_grid::ImitatedGrid::OpenSim => ANNOUNCED_LEGACY,
+                        sl_fake_grid::ImitatedGrid::SecondLife => ANNOUNCED_BULK,
+                    };
+                    check(
+                        announcement == expected,
+                        &format!(
+                            "a grid behaving like {:?} announced a taken object with \
+                             {announcement}, expected {expected}",
+                            grid.behaves_like()
+                        ),
+                    )?;
+                }
+                if let Some(taken) = outcome.item.filter(|item| !item.asset_id.is_nil()) {
                     survey.objects.push(taken);
                 }
             }
@@ -573,6 +603,20 @@ const AIS_FOLDER_BUDGET: i64 = 12;
 /// delivered.
 const AIS_IDLE: std::time::Duration = std::time::Duration::from_secs(3);
 
+/// What a rez-and-take produced.
+struct TakeOutcome {
+    /// How far the leg got, and what the minted item said — the `take_step`
+    /// metric.
+    step: &'static str,
+    /// Which message the grid announced the new item with, or `None` when
+    /// nothing arrived. The two live grids differ here
+    /// ([`ImitatedGrid`](sl_fake_grid::ImitatedGrid) decides it for a fake
+    /// one), which is why the leg records the shape and not just the item.
+    announcement: Option<&'static str>,
+    /// The item the grid minted, if it announced one.
+    item: Option<InventoryItem>,
+}
+
 /// Rezzes a cube and takes it, returning the inventory item the grid minted.
 ///
 /// The take is the one object this avatar fully owns, so it is the strongest
@@ -586,12 +630,16 @@ async fn take_an_object(
     trash: Option<InventoryFolderKey>,
     placement: Option<Vector>,
     seen: &HashSet<ScopedObjectId>,
-) -> Result<(&'static str, Option<InventoryItem>), TestFailure> {
+) -> Result<TakeOutcome, TestFailure> {
     // Something already in the region is the placement reference: a rez is
     // aimed by a ray, so it needs a surface, and the avatar's own position is
     // not one.
     let Some(reference) = placement else {
-        return Ok(("no-reference-prim", None));
+        return Ok(TakeOutcome {
+            step: "no-reference-prim",
+            announcement: None,
+            item: None,
+        });
     };
     let session = ctx.primary();
     // Just above the avatar, so the cube lands on the parcel the avatar is
@@ -619,7 +667,11 @@ async fn take_an_object(
         })
         .await
     else {
-        return Ok(("rez-not-echoed", None));
+        return Ok(TakeOutcome {
+            step: "rez-not-echoed",
+            announcement: None,
+            item: None,
+        });
     };
     session
         .send(Command::DerezObjects {
@@ -634,17 +686,15 @@ async fn take_an_object(
     // moved inventory to AIS3, so the new item arrives as a bulk update
     // instead. Waiting only for the legacy one is how this leg recorded
     // `take-not-acknowledged` against a take that had very likely worked.
-    let created = session
-        .wait_for(LONG_TIMEOUT, |event| match event {
-            Event::InventoryItemCreated { item, .. } => Some(item.clone()),
-            Event::InventoryBulkUpdate { items, .. } => items
-                .iter()
-                .find(|item| i32::from(item.item_type) == AssetType::Object.to_code())
-                .cloned(),
-            _other => None,
-        })
+    //
+    // **Which** of the two arrived is recorded, not just the item: it is the
+    // announcement half of what `ImitatedGrid` decides about inventory, and a
+    // viewer listening for only one of them is deaf against the other grid.
+    let announced = created_item_announcement(session, LONG_TIMEOUT, AssetType::Object.to_code())
         .await
         .ok();
+    let announcement = announced.as_ref().map(|(shape, _item)| *shape);
+    let created = announced.map(|(_shape, item)| item);
     // A take that was not acknowledged has left the cube standing in somebody
     // else's region. Nothing else will clear it — an abandoned object counts
     // against the parcel's prims until an estate manager returns it — so the
@@ -662,7 +712,11 @@ async fn take_an_object(
         Some(item) if item.asset_id.is_nil() => "item-created-nil-asset",
         Some(_taken) => "item-created-with-asset",
     };
-    Ok((step, created))
+    Ok(TakeOutcome {
+        step,
+        announcement,
+        item: created,
+    })
 }
 
 /// Removes an object this case rezzed and could not take, so no run leaves

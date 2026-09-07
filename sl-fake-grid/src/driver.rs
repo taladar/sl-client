@@ -39,6 +39,11 @@ pub(crate) struct SimState {
     /// ([`crate::assets::ObjectAssetPolicy`]). Grid-wide, like the store it
     /// decides between.
     pub(crate) object_assets: crate::assets::ObjectAssetPolicy,
+    /// How this grid announces an inventory item it just created — the legacy
+    /// UDP message or an event-queue `BulkUpdateInventory`
+    /// ([`crate::InventoryAnnouncement`]). Grid-wide, because it is a property
+    /// of which live grid this one is being.
+    pub(crate) inventory_announcement: crate::inventory::InventoryAnnouncement,
     /// The region identity sent in the automatic `RegionHandshake` greeting
     /// (on `UseCircuitCode`, before the agent's movement completes).
     pub(crate) identity: RegionIdentity,
@@ -278,6 +283,7 @@ impl SharedSim {
                     &state.identity,
                     &state.assets,
                     state.object_assets,
+                    state.inventory_announcement,
                     &move || minter.uuid(),
                     &mut state.selection,
                     &mut state.sim,

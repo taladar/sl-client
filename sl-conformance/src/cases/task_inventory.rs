@@ -23,7 +23,8 @@
 //! 2. **Donor item**: rez a second cube and **take** it into the agent's
 //!    Objects folder with [`Command::DerezObjects`]
 //!    ([`DeRezDestination::TakeIntoAgentInventory`]); the simulator materialises
-//!    the agent inventory item ([`Event::InventoryItemCreated`]) this case then
+//!    the agent inventory item ([`Event::InventoryItemCreated`] on OpenSim, an
+//!    [`Event::InventoryBulkUpdate`] on Second Life) this case then
 //!    drops into the container.
 //! 3. **Request (empty)**: [`Command::RequestTaskInventory`] on the container
 //!    returns serial `0` and an empty filename — the fresh cube's inventory is
@@ -72,7 +73,7 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use sl_client_tokio::{
-    Command, DeRezDestination, Event, FolderType, InventoryFolder, InventoryFolderKey,
+    AssetType, Command, DeRezDestination, Event, FolderType, InventoryFolder, InventoryFolderKey,
     InventoryItem, Object, ObjectKey, PrimShape, RestoreItem, SaleType, ScopedObjectId,
     TaskInventoryKey, TaskInventoryReply, TransactionId, Uuid, Vector, pcode,
 };
@@ -81,7 +82,8 @@ use crate::context::{TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
 use crate::support::{
-    REGION_TIMEOUT, REPLY_TIMEOUT, check, content_is_ours, count_metric, is_opensim, secs_metric,
+    REGION_TIMEOUT, REPLY_TIMEOUT, check, content_is_ours, count_metric, created_item_announcement,
+    is_opensim, secs_metric,
 };
 
 /// The OpenSim start location: the "Default Region" (1000,1000), centred, where
@@ -253,12 +255,11 @@ impl GridTest for TaskInventory {
                     group_id: None,
                 })
                 .await?;
-            let item = session
-                .wait_for(STEP_TIMEOUT, |event| match event {
-                    Event::InventoryItemCreated { item, .. } => Some(item.clone()),
-                    _ => None,
-                })
-                .await?;
+            // Either shape of created-item announcement: the legacy UDP one on
+            // OpenSim, the event-queue bulk update on Second Life.
+            let (_announcement, item) =
+                created_item_announcement(session, STEP_TIMEOUT, AssetType::Object.to_code())
+                    .await?;
             check(
                 !item.item_id.uuid().is_nil(),
                 "take produced an inventory item with a nil id",

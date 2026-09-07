@@ -436,7 +436,6 @@ mod test {
         "RemoveInventoryItem",
         "RemoveInventoryObjects",
         "PurgeInventoryDescendents",
-        "FetchInventoryDescendents",
         // groups
         "CreateGroupRequest",
         "JoinGroupRequest",
@@ -508,7 +507,6 @@ mod test {
         "RemoveInventoryItem",
         "RemoveInventoryObjects",
         "PurgeInventoryDescendents",
-        "FetchInventoryDescendents",
     ];
     /// The raw-forwarded messages the matching family test sends, in order.
     const GROUP_FAMILY: &[&str] = &[
@@ -638,7 +636,10 @@ mod test {
         client.remove_inventory_items(&[item], now)?;
         client.remove_inventory_objects(&[other], &[item], now)?;
         client.purge_inventory_descendents(folder, now)?;
-        client.request_folder_contents(folder, now)?;
+        // `request_folder_contents` is **not** sent here: the deprecated UDP
+        // fetch is typed since `test-fake-grid-imitates-inventory-api` (an
+        // OpenSim-flavoured grid answers it), and `tests/sim_session.rs`
+        // asserts the typed event and its reply.
 
         let relayed = assert_family(&mut client, &mut sim, now, INVENTORY_FAMILY)?;
         let AnyMessage::CreateInventoryItem(create) = find(&relayed, "CreateInventoryItem")? else {

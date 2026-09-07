@@ -11,7 +11,8 @@
 //!    placed a metre above a reference primitive already in the region, then
 //!    **take** it into the agent's Objects folder with [`Command::DerezObjects`]
 //!    ([`DeRezDestination::TakeIntoAgentInventory`]). The take materialises the
-//!    inventory item ([`Event::InventoryItemCreated`]) that the rest of the case
+//!    inventory item ([`Event::InventoryItemCreated`] on OpenSim, an
+//!    [`Event::InventoryBulkUpdate`] on Second Life) that the rest of the case
 //!    wears — the world object is removed in the process, leaving nothing rezzed
 //!    to confuse the attach step.
 //! 2. **Attach from inventory**: [`Command::RezAttachment`]
@@ -46,15 +47,17 @@ use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 use sl_client_tokio::{
-    AttachmentMode, AttachmentPoint, Command, DeRezDestination, Event, FolderType, InventoryFolder,
-    InventoryFolderKey, Object, PrimShape, RezAttachment, ScopedObjectId, TransactionId, Uuid,
-    Vector, pcode,
+    AssetType, AttachmentMode, AttachmentPoint, Command, DeRezDestination, Event, FolderType,
+    InventoryFolder, InventoryFolderKey, Object, PrimShape, RezAttachment, ScopedObjectId,
+    TransactionId, Uuid, Vector, pcode,
 };
 
 use crate::context::{TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
-use crate::support::{REGION_TIMEOUT, REPLY_TIMEOUT, check, is_opensim, secs_metric};
+use crate::support::{
+    REGION_TIMEOUT, REPLY_TIMEOUT, check, created_item_announcement, is_opensim, secs_metric,
+};
 
 /// The OpenSim start location: the "Default Region" (1000,1000), centred, where
 /// this workspace's test object lives and serves as the rez placement reference.
@@ -217,12 +220,14 @@ impl GridTest for AttachDetach {
                     group_id: None,
                 })
                 .await?;
-            let item = session
-                .wait_for(STEP_TIMEOUT, |event| match event {
-                    Event::InventoryItemCreated { item, .. } => Some(item.clone()),
-                    _ => None,
-                })
-                .await?;
+            // Whichever shape this grid announces a created item with — the
+            // legacy UDP message on OpenSim, an event-queue bulk update on
+            // Second Life. The same take in `object-rez-derez` and
+            // `task-inventory` timed out against a fake grid imitating Second
+            // Life while it waited only for the first.
+            let (_announcement, item) =
+                created_item_announcement(session, STEP_TIMEOUT, AssetType::Object.to_code())
+                    .await?;
             check(
                 !item.item_id.uuid().is_nil(),
                 "take produced an inventory item with a nil id",

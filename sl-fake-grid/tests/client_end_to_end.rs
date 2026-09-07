@@ -319,6 +319,34 @@ mod test {
         }
     }
 
+    /// Waits for the item a take just filed, **whichever way this grid
+    /// announces one**: the legacy UDP `UpdateCreateInventoryItem` on an
+    /// OpenSim-flavoured grid, a `BulkUpdateInventory` over the event queue on
+    /// a Second-Life-flavoured one (`sl_fake_grid::InventoryAnnouncement`).
+    ///
+    /// Waiting for only the first is how these tests hung when the flavour
+    /// started deciding it — and `wait_on`'s timeout is per *event*, so a grid
+    /// still sending pings never trips it. That is the same trap a viewer that
+    /// only listens for the legacy message falls into, which is the whole point
+    /// of the switch.
+    async fn wait_for_taken_item(
+        events: &mut mpsc::Receiver<Event>,
+    ) -> Result<sl_client_tokio::InventoryItem, TestError> {
+        wait_on(events, |event| match event {
+            Event::InventoryItemCreated { item, .. }
+                if i32::from(item.item_type) == sl_proto::AssetType::Object.to_code() =>
+            {
+                Some(item.clone())
+            }
+            Event::InventoryBulkUpdate { items, .. } => items
+                .iter()
+                .find(|item| i32::from(item.item_type) == sl_proto::AssetType::Object.to_code())
+                .cloned(),
+            _ => None,
+        })
+        .await
+    }
+
     #[tokio::test]
     async fn arrival_world_burst_reaches_client() -> Result<(), TestError> {
         let mut running = start().await?;
@@ -3280,11 +3308,7 @@ mod test {
                 group_id: None,
             })
             .await?;
-        wait_on(&mut avatar.events, |event| match event {
-            Event::InventoryItemCreated { item, .. } => Some(item.clone()),
-            _ => None,
-        })
-        .await
+        wait_for_taken_item(&mut avatar.events).await
     }
 
     /// The `UpdateTaskInventory` payload that drops `item` into a prim. The
@@ -3693,27 +3717,43 @@ mod test {
                 group_id: None,
             })
             .await?;
-        let item = wait_on(&mut avatar.events, |event| match event {
-            Event::InventoryItemCreated { item, .. } => Some(item.clone()),
-            _ => None,
-        })
-        .await?;
-        // Both kills in one pass: they arrive in the order the region removed
-        // them, which is not this loop's to choose.
+        // The filed item and both kills in **one** pass, because their order is
+        // the grid's and not this test's to assume. The kills go out over UDP
+        // straight away; a Second-Life-flavoured take's item rides the event
+        // queue and lands on the next long-poll, so it arrives *after* them.
+        // Draining for the item first is how this test hung once the flavour
+        // started deciding the announcement — the wait for the item ate both
+        // kills on its way past, and the wait for the kills then never ended.
         let mut standing: Vec<_> = [root.local_id, child.local_id]
             .into_iter()
             .map(|local_id| sl_client_tokio::ScopedObjectId::new(avatar.circuit, local_id))
             .collect();
-        while !standing.is_empty() {
-            let gone = wait_on(&mut avatar.events, |event| match event {
-                Event::ObjectRemoved { local_id, .. } if standing.contains(local_id) => {
-                    Some(*local_id)
+        let mut taken = None;
+        while taken.is_none() || !standing.is_empty() {
+            let event = tokio::time::timeout(WAIT, avatar.events.recv())
+                .await?
+                .ok_or("client event stream ended early")?;
+            match event {
+                Event::InventoryItemCreated { item, .. }
+                    if i32::from(item.item_type) == sl_proto::AssetType::Object.to_code() =>
+                {
+                    taken = Some(item);
                 }
-                _ => None,
-            })
-            .await?;
-            standing.retain(|waiting| *waiting != gone);
+                Event::InventoryBulkUpdate { items, .. } => {
+                    taken = items
+                        .into_iter()
+                        .find(|item| {
+                            i32::from(item.item_type) == sl_proto::AssetType::Object.to_code()
+                        })
+                        .or(taken);
+                }
+                Event::ObjectRemoved { local_id, .. } => {
+                    standing.retain(|waiting| *waiting != local_id);
+                }
+                _other => {}
+            }
         }
+        let item = taken.ok_or("the take filed no object item")?;
 
         let landing = Vector {
             x: 150.0,
@@ -3878,11 +3918,7 @@ mod test {
                 group_id: None,
             })
             .await?;
-        let item = wait_on(&mut avatar.events, |event| match event {
-            Event::InventoryItemCreated { item, .. } => Some(item.clone()),
-            _ => None,
-        })
-        .await?;
+        let item = wait_for_taken_item(&mut avatar.events).await?;
         assert!(
             !item.asset_id.is_nil(),
             "an OpenSim-flavoured take filed an item with no asset id"

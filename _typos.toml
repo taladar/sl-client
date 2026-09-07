@@ -102,3 +102,10 @@ lso2 = "lso2"
 # status-bar menu-search filter — cited verbatim so it stays greppable in the
 # reference source; theirs to spell, not ours to correct.
 hightlightAndHide = "hightlightAndHide"
+# `AddNullFolderBlockToDecendentsPacket` is OpenSim's own (misspelled) method
+# name in `LLClientView` — the placeholder block a `send_inventory_descendents`
+# reply copies. Cited verbatim so it stays greppable in the reference source;
+# theirs to spell, not ours to correct. (Its sibling
+# `AddNullItemBlockToDescendentsPacket` *is* spelled correctly, which is why
+# only one of the pair is listed here.)
+AddNullFolderBlockToDecendentsPacket = "AddNullFolderBlockToDecendentsPacket"

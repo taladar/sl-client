@@ -23,14 +23,23 @@
 //! path — partial), or silence (partial on a grid documented to ignore the
 //! message; a failure on OpenSim, which demonstrably serves UDP inventory).
 //!
-//! The fake grid takes the second road deliberately: it serves no UDP
-//! inventory at all, and of the two answers a grid without that path can give,
-//! only `FeatureDisabled` is observable — silence is indistinguishable from a
-//! lost packet. Its
-//! [`LegacyUdpInventory`](sl_fake_grid::LegacyUdpInventory) policy therefore
-//! defaults to refusing the fetch, which is what makes this case assert
-//! something offline instead of recording `partial` after its whole reply
-//! window; the policy's other setting reproduces Second Life's silence.
+//! The fake grid answers **as the live grid it is imitating**
+//! ([`LegacyUdpInventory`](sl_fake_grid::LegacyUdpInventory), derived from
+//! [`ImitatedGrid`]), so this case declares both flavours and the probe means
+//! something different on each:
+//!
+//! - `FakeSl` refuses it with a `FeatureDisabled`. Of the two answers a grid
+//!   without the UDP path can give, only that one is observable — silence is
+//!   indistinguishable from a lost packet — so the fake grid takes the loud
+//!   road where aditi takes the quiet one, and the policy's `Ignored` setting
+//!   reproduces the real silence for a test that wants it.
+//! - `FakeOpensim` **serves** it, out of the session's own inventory tree, the
+//!   way OpenSim's `LLClientView` still does. A normal reply is the right
+//!   answer there and is asserted rather than recorded as a gap.
+//!
+//! That pair is the fetch half of what `ImitatedGrid` decides about inventory:
+//! a viewer still reaching for the legacy path works against one grid and not
+//! the other, and running this on one flavour alone would leave that unproven.
 //!
 //! Whatever the live outcome, the *decode* of both messages is guaranteed by
 //! the in-process client ↔ `SimSession` round-trip
@@ -40,6 +49,7 @@
 use std::time::Instant;
 
 use sl_client_tokio::{AnyMessage, Command, Event, Reliability, Throttle};
+use sl_fake_grid::ImitatedGrid;
 use sl_wire::messages::{
     FetchInventoryDescendents, FetchInventoryDescendentsAgentDataBlock,
     FetchInventoryDescendentsInventoryDataBlock,
@@ -106,7 +116,11 @@ impl GridTest for ServerErrorCase {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::FakeSl, Grid::Opensim, Grid::Aditi]
+        // **Both** fake flavours: the probe is refused on the Second Life one
+        // and served on the OpenSim one, and that difference is the fetch half
+        // of what `ImitatedGrid` decides about inventory. Running it on one
+        // flavour would leave the other side of the switch unexercised.
+        &[Grid::FakeSl, Grid::FakeOpensim, Grid::Opensim, Grid::Aditi]
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
@@ -240,7 +254,18 @@ impl GridTest for ServerErrorCase {
                         folders_count >= 0 && items_count >= 0,
                         "inventory count exceeded i64",
                     )?;
-                    if is_opensim(grid) {
+                    if grid == Grid::FakeOpensim {
+                        // The OpenSim-flavoured fake grid *promises* to serve
+                        // this, out of the same tree the modern capability
+                        // reads. A reply naming the folder with nothing in it
+                        // would mean the switch flipped but the sender did not
+                        // reach the inventory, so the children are the check.
+                        check(
+                            folders_count.saturating_add(items_count) > 0,
+                            "the OpenSim-flavoured fake grid served the deprecated fetch but \
+                             answered an empty folder; the agent root has children",
+                        )?;
+                    } else if is_opensim(grid) {
                         ctx.mark_partial(
                             "OpenSim never emits Error/FeatureDisabled (its source has no \
                              sender for either); the UDP FetchInventoryDescendents probe is \
@@ -257,9 +282,10 @@ impl GridTest for ServerErrorCase {
                 }
                 ProbeOutcome::Silence => {
                     ctx.metrics().set("reply_kind", "none");
-                    if is_opensim(grid) {
-                        // OpenSim demonstrably serves UDP inventory; silence there
-                        // is a real anomaly, not a documented gap.
+                    if grid.behaves_like() == ImitatedGrid::OpenSim {
+                        // An OpenSim-flavoured grid — the live one, or the fake
+                        // one imitating it — demonstrably serves UDP inventory;
+                        // silence there is a real anomaly, not a documented gap.
                         return Err(TestFailure::Assertion(
                             "OpenSim serves UDP inventory, but the FetchInventoryDescendents \
                              probe drew no reply"

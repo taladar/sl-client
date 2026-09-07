@@ -21,7 +21,7 @@ mod test {
         GlobalCoordinates, GodRegionUpdate, GridCoordinates, GridRectangle, GroupAccountDetails,
         GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
         GroupAccountTransactions, GroupActiveProposalItem, GroupKey, GroupName, GroupRequestId,
-        GroupRoleKey, GroupVote, GroupVoteHistoryItem, ImDialog, InstantMessage,
+        GroupRoleKey, GroupVote, GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder,
         InventoryFolderKey, InventoryItem, InventoryItemMove, InventoryItemOrFolderKey,
         InventoryKey, InventoryType, InvoiceId, Kick, LandArea, LandBrushAction, LandBrushSize,
         LandEdit, LandSearchType, LandStatItem, LandStatReportType, LandingType, LightData,
@@ -8185,6 +8185,223 @@ mod test {
                 Event::ObjectRemoved { local_id: removed, .. } if removed.id() == local_id
             )),
             "expected the taken object to be killed"
+        );
+        Ok(())
+    }
+
+    /// The **deprecated UDP inventory fetch**, both halves: the client's
+    /// `FetchInventoryDescendents` reaches the simulator as a typed
+    /// [`ServerEvent::RequestInventoryDescendents`] — which is what took it off
+    /// the `RAW_FORWARDED` ledger in `tests/sim_session_symmetry.rs` — and
+    /// `send_inventory_descendents` answers it out of the serving tree.
+    ///
+    /// The folder is deliberately larger than one message holds. OpenSim caps a
+    /// message at six folders or five items and never mixes the two, so eight
+    /// sub-folders and seven items is four messages the client has to fold back
+    /// into one listing; getting the chunking wrong loses children silently,
+    /// which is the failure this test exists for.
+    #[test]
+    fn session_udp_inventory_fetch_is_typed_and_answered() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+
+        let folder = InventoryFolderKey::from(uuid::Uuid::from_u128(0x1_0000));
+        sim.agent_inventory_mut().insert_folder(InventoryFolder {
+            folder_id: folder,
+            parent_id: None,
+            name: "Objects".to_owned(),
+            folder_type: 6,
+            version: 9,
+        });
+        for index in 0..8_u128 {
+            sim.agent_inventory_mut().insert_folder(InventoryFolder {
+                folder_id: InventoryFolderKey::from(uuid::Uuid::from_u128(0x1_0100 + index)),
+                parent_id: Some(folder),
+                name: format!("Sub {index}"),
+                folder_type: -1,
+                version: 1,
+            });
+        }
+        for index in 0..7_u128 {
+            sim.agent_inventory_mut().insert_item(InventoryItem {
+                item_id: InventoryKey::from(uuid::Uuid::from_u128(0x1_0200 + index)),
+                folder_id: folder,
+                name: format!("Item {index}"),
+                ..wearable_item()
+            });
+        }
+
+        client.request_folder_contents(folder, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let request = drain_server(&mut sim)
+            .into_iter()
+            .find_map(|event| match event {
+                ServerEvent::RequestInventoryDescendents { .. } => Some(event),
+                _ => None,
+            })
+            .ok_or("expected a typed RequestInventoryDescendents")?;
+        let ServerEvent::RequestInventoryDescendents {
+            folder_id,
+            owner_id,
+            sort_order,
+            fetch_folders,
+            fetch_items,
+        } = request
+        else {
+            return Err("expected a typed RequestInventoryDescendents".into());
+        };
+        assert_eq!(folder_id, folder);
+        assert_eq!(owner_id, AgentKey::from(uuid::Uuid::from_u128(1)));
+        // The client asks for everything, sorted by name.
+        assert_eq!(sort_order, 0);
+        assert!(fetch_folders);
+        assert!(fetch_items);
+
+        assert!(sim.send_inventory_descendents(
+            folder_id,
+            owner_id,
+            sort_order,
+            fetch_folders,
+            fetch_items,
+            now,
+        )?);
+        pump(&mut client, &mut sim, now)?;
+        let replies: Vec<(i32, i32, usize, usize)> = drain_client(&mut client)
+            .into_iter()
+            .filter_map(|event| match event {
+                Event::InventoryDescendents {
+                    folder_id: replied,
+                    version,
+                    descendents,
+                    folders,
+                    items,
+                } if replied == folder => Some((version, descendents, folders.len(), items.len())),
+                _ => None,
+            })
+            .collect();
+        // Two folder messages (6 + 2) and two item messages (5 + 2), each
+        // carrying the folder's own version and full child count.
+        assert_eq!(
+            replies,
+            vec![(9, 15, 6, 0), (9, 15, 2, 0), (9, 15, 0, 5), (9, 15, 0, 2)]
+        );
+        // Every child landed in the client's model, the last chunk of each kind
+        // included — and the placeholder blocks padding the empty half of every
+        // message did not, because the client drops them on their nil ids.
+        for index in 0..8_u128 {
+            let child = InventoryFolderKey::from(uuid::Uuid::from_u128(0x1_0100 + index));
+            assert_eq!(
+                client.inventory_folder(child).map(|held| held.name.clone()),
+                Some(format!("Sub {index}"))
+            );
+        }
+        for index in 0..7_u128 {
+            let child = InventoryKey::from(uuid::Uuid::from_u128(0x1_0200 + index));
+            assert_eq!(
+                client.inventory_item(child).map(|held| held.name.clone()),
+                Some(format!("Item {index}"))
+            );
+        }
+        assert!(
+            client
+                .inventory_folder(InventoryFolderKey::from(uuid::Uuid::nil()))
+                .is_none(),
+            "the nil-id placeholder folder must not reach the client's model"
+        );
+
+        // An **empty** folder is still answered — one message of two
+        // placeholders, which is how OpenSim tells a viewer the folder it asked
+        // about has nothing in it.
+        let empty = InventoryFolderKey::from(uuid::Uuid::from_u128(0x1_0300));
+        sim.agent_inventory_mut().insert_folder(InventoryFolder {
+            folder_id: empty,
+            parent_id: Some(folder),
+            name: "Empty".to_owned(),
+            folder_type: -1,
+            version: 3,
+        });
+        assert!(sim.send_inventory_descendents(empty, owner_id, 0, true, true, now)?);
+        pump(&mut client, &mut sim, now)?;
+        let empty_reply = drain_client(&mut client)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::InventoryDescendents {
+                    folder_id: replied,
+                    folders,
+                    items,
+                    descendents,
+                    ..
+                } if replied == empty => Some((descendents, folders.len(), items.len())),
+                _ => None,
+            })
+            .ok_or("expected a reply for the empty folder")?;
+        assert_eq!(empty_reply, (0, 0, 0));
+
+        // A folder neither tree holds is answered with nothing at all, and says
+        // so rather than pretending it sent an empty listing.
+        let unknown = InventoryFolderKey::from(uuid::Uuid::from_u128(0x1_0400));
+        assert!(!sim.send_inventory_descendents(unknown, owner_id, 0, true, true, now)?);
+        assert!(sim.poll_transmit().is_none());
+        Ok(())
+    }
+
+    /// The **Second Life** shape of an inventory announcement: the new item
+    /// arrives over the event queue as a `BulkUpdateInventory` rather than as
+    /// the legacy UDP `UpdateCreateInventoryItem`. A fake grid picks between the
+    /// two by which live grid it is imitating, so both senders have to reach the
+    /// client's cache with the same item.
+    #[test]
+    fn session_bulk_update_inventory_reaches_client_over_the_event_queue() -> Result<(), TestError>
+    {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+
+        let folder = InventoryFolderKey::from(uuid::Uuid::from_u128(0x2_0000));
+        let transaction = TransactionId::from(uuid::Uuid::from_u128(0x2_0001));
+        let item = InventoryItem {
+            item_id: InventoryKey::from(uuid::Uuid::from_u128(0x2_0002)),
+            folder_id: folder,
+            name: "Taken Object".to_owned(),
+            item_type: 6,
+            inv_type: 6,
+            ..wearable_item()
+        };
+        let created_folder = InventoryFolder {
+            folder_id: folder,
+            parent_id: None,
+            name: "Objects".to_owned(),
+            folder_type: 6,
+            version: 2,
+        };
+        sim.enqueue_bulk_update_inventory(
+            transaction,
+            std::slice::from_ref(&created_folder),
+            std::slice::from_ref(&item),
+        )?;
+        let events = deliver_caps(&mut client, &mut sim, now)?;
+        let update = events
+            .into_iter()
+            .find_map(|event| match event {
+                Event::InventoryBulkUpdate {
+                    transaction_id,
+                    folders,
+                    items,
+                    ..
+                } => Some((transaction_id, folders, items)),
+                _ => None,
+            })
+            .ok_or("expected an InventoryBulkUpdate client event")?;
+        assert_eq!(update.0, transaction.get());
+        assert_eq!(update.1.len(), 1);
+        assert_eq!(update.2, vec![item.clone()]);
+        // The item is in the client's model, which is the whole point of the
+        // announcement: a viewer that only listened for the UDP form would show
+        // an inventory the grid has already moved past.
+        assert_eq!(
+            client
+                .inventory_item(item.item_id)
+                .map(|held| held.name.clone()),
+            Some("Taken Object".to_owned())
         );
         Ok(())
     }

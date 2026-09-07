@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 55 |
 | in-progress | 18 |
 | bugs | 59 |
-| done | 1003 |
+| done | 1004 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1586** |
+| **total** | **1587** |
 
 ## ideas (100)
 
@@ -951,10 +951,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   The built-in UI sounds the viewer plays on arrival 404
 - [`test-fake-grid-imitates-economy`](ready/test-fake-grid-imitates-economy.md)
   — The fake grid's money is a stock OpenSim region's on either flavour
-- [`test-fake-grid-imitates-inventory-api`](ready/test-fake-grid-imitates-inventory-api.md)
-  — The fake grid is OpenSim about inventory whichever grid it says it is
 - [`test-fake-grid-imitates-server-bakes`](ready/test-fake-grid-imitates-server-bakes.md)
   — The fake grid runs a bake service on a grid that says it is OpenSim
+- [`test-fake-grid-imitates-upload-announcements`](ready/test-fake-grid-imitates-upload-announcements.md)
+  — An uploaded item is announced the legacy way whichever grid this is
 - [`test-fake-grid-login-matrix-and-timeouts`](ready/test-fake-grid-login-matrix-and-timeouts.md)
   — The login refusals and handover timeouts nothing tests
 - [`test-fake-grid-object-sounds`](ready/test-fake-grid-object-sounds.md) — The
@@ -1328,7 +1328,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1003)
+## done (1004)
 
 ### protocol
 
@@ -3217,6 +3217,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Named scenarios and a fixed-port launcher for the fake grid
 - [`test-fake-grid-imitates-audit`](done/test-fake-grid-imitates-audit.md) — The
   fake grid was nobody in particular
+- [`test-fake-grid-imitates-inventory-api`](done/test-fake-grid-imitates-inventory-api.md)
+  — The fake grid is OpenSim about inventory whichever grid it says it is
 - [`test-fake-grid-imitates-simulator-features`](done/test-fake-grid-imitates-simulator-features.md)
   — A grid claiming to be Second Life still introduces itself as OpenSim
 - [`test-fake-grid-neighbours-crossing`](done/test-fake-grid-neighbours-crossing.md)

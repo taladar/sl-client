@@ -14,6 +14,7 @@ pub mod fixtures;
 mod http_answer;
 mod http_service;
 pub mod imitates;
+pub mod inventory;
 mod login_endpoint;
 mod map_tiles;
 pub mod marker;
@@ -32,7 +33,7 @@ pub mod world;
 mod world_map;
 
 pub use accounts::AccountConfig;
-pub use agent_requests::{AgentPolicy, LegacyUdpInventory};
+pub use agent_requests::AgentPolicy;
 pub use assets::ObjectAssetPolicy;
 pub use crossing::CROSSING_ARRIVAL_TIMEOUT;
 pub use economy_policy::{EconomyConfig, EconomyEvent, stock_prices};
@@ -43,6 +44,7 @@ pub use fixtures::{
     PrimFixture, RegionFixture, SculptKind, catalogue, linkset,
 };
 pub use imitates::ImitatedGrid;
+pub use inventory::{InventoryAnnouncement, LegacyUdpInventory};
 pub use map_tiles::STOCK_TILE_JPEG;
 pub use marker::{
     MARKER_METHOD, NEIGHBOUR_MARKER_PREFIX, marker, marker_name, neighbour_marker,
