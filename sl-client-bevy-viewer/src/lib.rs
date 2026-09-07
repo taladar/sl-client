@@ -76,6 +76,7 @@ pub(crate) const REGISTRARS: &[fn(&mut crate::settings::ViewerSettings)] = &[
     crate::audio::register_settings,
     crate::debug_settings::register_settings,
     crate::notification_host::register_settings,
+    crate::rlv::register_settings,
 ];
 
 // The leaf toolkit (geometry math, render leaves, small models) is its own
@@ -253,6 +254,11 @@ pub(crate) use sl_viewer_world_scene::particles;
 pub(crate) use sl_viewer_world_scene::probes;
 pub(crate) use sl_viewer_world_view::physics;
 pub mod render_gallery;
+pub(crate) use sl_viewer_rlv::rlv_behaviours;
+pub(crate) use sl_viewer_rlv::rlv_console;
+pub(crate) use sl_viewer_rlv::rlv_locks;
+pub(crate) use sl_viewer_rlv::rlv_strings;
+pub(crate) use sl_viewer_world_api::rlv;
 pub(crate) use sl_viewer_world_objects::render_priority;
 #[cfg(test)]
 mod full_stack_test;
@@ -1421,6 +1427,11 @@ fn run_session(
     // this avatar has derendered, with Re-render / Clear temporary. After
     // DerenderPlugin, whose list it presents.
     .add_plugins(AssetBlacklistPlugin)
+    // The RLVa control surface (viewer-rlva-floaters-toggles): the console,
+    // the restrictions / locks / strings windows, and the RLVa menu's toggles.
+    // They read the one RlvSession the world-API tier holds, so they can go
+    // anywhere after it is initialised.
+    .add_plugins(sl_viewer_rlv::RlvUiPlugins)
     .add_plugins(GroupProfilePlugin)
     // The group-notice toast host (viewer-group-notice-display): pops a card —
     // group image, subject, body and any attached item — when a group posts a

@@ -8556,6 +8556,7 @@ dependencies = [
  "sl-viewer-places",
  "sl-viewer-platform",
  "sl-viewer-preferences",
+ "sl-viewer-rlv",
  "sl-viewer-search",
  "sl-viewer-settings",
  "sl-viewer-spacenav",
@@ -9394,6 +9395,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-viewer-rlv"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "pretty_assertions",
+ "sl-client-bevy",
+ "sl-rlv",
+ "sl-settings",
+ "sl-viewer-platform",
+ "sl-viewer-settings",
+ "sl-viewer-ui-core",
+ "sl-viewer-ui-widgets",
+ "sl-viewer-world-api",
+ "uuid",
+]
+
+[[package]]
 name = "sl-viewer-search"
 version = "0.1.0"
 dependencies = [
@@ -9503,6 +9521,8 @@ dependencies = [
  "pretty_assertions",
  "serde",
  "sl-client-bevy",
+ "sl-rlv",
+ "sl-settings",
  "sl-terrain",
  "sl-viewer-kit",
  "sl-viewer-settings",

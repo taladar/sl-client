@@ -16,6 +16,7 @@
 //! a single upward reference added here would put the whole feature tier back
 //! underneath the world.
 
+pub mod rlv;
 pub mod world_scoped;
 
 use std::collections::{BTreeMap, HashMap, HashSet};

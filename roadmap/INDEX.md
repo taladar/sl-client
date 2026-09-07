@@ -12,9 +12,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 310 |
+| ready | 309 |
 | blocked | 45 |
-| in-progress | 18 |
+| in-progress | 19 |
 | bugs | 59 |
 | done | 1004 |
 | deferred | 25 |
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (310)
+## ready (309)
 
 ### protocol
 
@@ -820,9 +820,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rlv-vision-render`](ready/viewer-rlv-vision-render.md) — RLV
   vision-restriction rendering (blocked by `viewer-rlv-restriction-state`
   (done))
-- [`viewer-rlva-floaters-toggles`](ready/viewer-rlva-floaters-toggles.md) —
-  "RLVa UI: console, restrictions/strings/locks floaters + toggles" (blocked by
-  `viewer-rlv-restriction-state` (done))
 - [`viewer-screen-space-reflections`](ready/viewer-screen-space-reflections.md)
   — Screen-space reflections (SSR)
 - [`viewer-script-error-window`](ready/viewer-script-error-window.md) — Script
@@ -1103,7 +1100,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (18)
+## in-progress (19)
 
 ### viewer
 
@@ -1135,6 +1132,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Render context matrix — subjects × eye, time of day, mirror, layering
   (blocked by `viewer-render-pixel-oracle` (done), `viewer-plugin-groups`
   (done), `viewer-render-gpu-serialisation` (done))
+- [`viewer-rlva-floaters-toggles`](in-progress/viewer-rlva-floaters-toggles.md)
+  — "RLVa UI: console, restrictions/strings/locks floaters + toggles" (blocked
+  by `viewer-rlv-restriction-state` (done))
 - [`viewer-streaming-audio`](in-progress/viewer-streaming-audio.md) — Parcel
   streaming-audio / media-audio player
 - [`viewer-ui-text-caret-grapheme-motion`](in-progress/viewer-ui-text-caret-grapheme-motion.md)

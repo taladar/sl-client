@@ -3701,3 +3701,49 @@ about-credits-intro = sl-client-bevy-viewer is an independent open-source viewer
 about-credits-protocol = Second Life and the Second Life protocol are by Linden Research, Inc. (Linden Lab). This viewer speaks the same protocols but shares no code with the official viewer.
 about-credits-reference = The Firestorm viewer project and the OpenSimulator project served as read-only behavioural references; their source made faithful reimplementation possible.
 about-credits-engine = Rendering and UI are built on the Bevy engine and the wider Rust ecosystem — see the Licenses tab for every crate this viewer ships with.
+
+## The RLVa control surface (viewer-rlva-floaters-toggles) — the four windows
+## onto the live RLV restriction state, reached from the RLVa menu.
+
+# The RLVa console: type @-commands at your own viewer.
+rlv-console-title = RLVa Console
+# Empties the console transcript.
+rlv-console-clear = Clear
+
+# The Restrictions window: what RLV currently holds over this viewer.
+rlv-behaviours-title = RLVa Restrictions
+# Its three tabs.
+rlv-behaviours-tab-restrictions = Restrictions
+rlv-behaviours-tab-exceptions = Exceptions
+rlv-behaviours-tab-modifiers = Modifiers
+# Copies the whole restriction set to the clipboard, grouped by object.
+rlv-behaviours-copy = Copy
+# The summary line under the tabs.
+rlv-behaviours-count = { $restrictions } restrictions, { $exceptions } exceptions, from { $objects } objects
+# Shared column headers across the Restrictions window's three tables.
+rlv-col-behaviour = Behaviour
+rlv-col-issuer = Issued by
+rlv-col-option = Option
+rlv-col-modifier = Modifier
+rlv-col-value = Value
+rlv-col-primary = Primary object
+
+# The Locks window: what may not be worn on or taken off.
+rlv-locks-title = RLVa Locks
+rlv-locks-col-type = Lock
+# Which way the lock points: add (nothing new may go here) or rem (what is
+# here may not come off); a folder lock also carries its permission and scope.
+rlv-locks-col-direction = Direction
+rlv-locks-col-target = Target
+rlv-locks-col-origin = Held by
+rlv-locks-count = { $locks } locks in force
+# The Lock column's values, one per registry the lock model keeps.
+rlv-locks-type-attachment = Attachment
+rlv-locks-type-attachment-point = Attachment point
+rlv-locks-type-wearable = Wearable layer
+rlv-locks-type-folder = Folder
+
+# The Strings window: the canned texts RLVa emits.
+rlv-strings-title = RLVa Strings
+# Puts the reference's own wording back for the selected string.
+rlv-strings-restore = Restore default
