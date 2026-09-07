@@ -38,11 +38,26 @@ spawn instead of `DeferredFloaterContent`.
   inventory item.
 - **About Landmark** (`about_landmark.rs`, `"about-landmark"`) — per landmark
   item ([[viewer-about-landmark-floater]]).
-- **Notecard / script editors** (`edit_notecard.rs` `"notecard-editor"`,
-  `edit_script.rs` `"script-editor"`) — per asset; the reference happily opens
-  several scripts at once, and this one also risks *losing edits* when the
-  window is re-pointed, so it is the highest-value conversion after the
-  profile.
+- ~~**Notecard / script editors** (`edit_notecard.rs` `"notecard-editor"`,
+  `edit_script.rs` `"script-editor"`)~~ — **done** (2026-09-06). Each window
+  carries its own `NotecardEditorState` / `ScriptEditorState` (source, baseline,
+  in-flight load and save, field entities, run state), and a task-held asset is
+  keyed by **object and item**, since two rezzed copies of one object carry the
+  same item ids. The edit-losing bug is fixed twice over: a second asset opens
+  its own window, and re-opening an asset already up only **raises** it — never
+  re-fetches, which is what used to replace typed text with the grid's copy
+  (`reopening_a_notecard_does_not_refetch_it`, `reopening_a_script_does_not_\
+  refetch_it`). The Save / Running observers resolve their window with
+  `host_floater`, and the notecard **drop** now names its window:
+  `AddEmbeddedItem` carries the editor entity that `inventory_drag`'s
+  `notecard_target_at` resolved, instead of the drop landing in whichever
+  notecard a resource held. Live-checked on the local grid: two notecards and
+  two scripts, each window with its own text, Save reporting into its own
+  status line, and a re-open focusing without touching what was typed. The
+  check also turned up three bugs of its own, all filed and two already fixed —
+  [[viewer-new-notecard-unreadable-on-opensim]],
+  [[viewer-saved-asset-reopens-stale]] and
+  [[viewer-notecard-preview-ignores-unsaved-text]].
 - **Texture picker** (`ui_texture_picker.rs`, `"texture-picker"`) — per field
   being edited; two open pickers is a real workflow. This is the first likely
   customer for `FloaterKey::Named`, whose instances *do* keep their own

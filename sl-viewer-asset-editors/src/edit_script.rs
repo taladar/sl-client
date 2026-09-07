@@ -52,6 +52,17 @@
 //! (`RequestScriptRunning`) on open and shows a **Running** checkbox reflecting
 //! it, whose value the Save carries through — the reference's Running toggle.
 //!
+//! # One window per script
+//!
+//! A script editor is a **keyed floater** ([`FloaterKey`]): opening a second
+//! script opens a second window rather than re-pointing the first — the
+//! reference happily has several open at once (`LLPreviewLSL` per item id) —
+//! and each window's **unsaved source**, run state and compile diagnostics are
+//! its own. A task script is keyed by its object *and* item, because two rezzed
+//! copies of one object carry the same item ids. Re-opening a script already up
+//! only raises its window: a re-fetch would replace what the resident has typed
+//! with the grid's copy.
+//!
 //! Reference (Firestorm, read-only): `llpreviewscript`, `llscripteditor`,
 //! `llfloaterscriptdebug`.
 
@@ -63,9 +74,12 @@ use sl_client_bevy::{
     SlCommand, SlEvent, SlSessionEvent, Uuid,
 };
 
-use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
+use crate::floater::{
+    Floater, FloaterCaps, FloaterHandle, FloaterKey, FloaterSpec, FloaterSystems, KeyedFloaterOpen,
+    KeyedFloaters, host_floater,
+};
 use crate::i18n::{TransArgs, Translated, Translator};
-use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use crate::ui::{column, row};
 use crate::ui_element::ElementCx;
 use crate::ui_font::UiFont;
 use crate::world_api::{OpenScript, ScriptSource};
@@ -120,43 +134,46 @@ const READONLY_BODY_WIDTH: f32 = 520.0;
 pub struct EditScriptPlugin;
 
 impl Plugin for EditScriptPlugin {
-    /// Register the open message and state, and spawn the (hidden) floater.
+    /// Register the open message and the open / ingest / report systems.
+    ///
+    /// Nothing spawns at `Startup`: a script window exists only while that
+    /// script is open, so `open_script` spawns the instance and builds its
+    /// content. The per-window systems are gated on there being a window.
     fn build(&self, app: &mut App) {
-        app.init_resource::<ScriptEditorState>()
-            .add_message::<OpenScript>()
-            .add_systems(
-                Startup,
-                spawn_script_floater.after(UiScaffoldSystems::SpawnRoot),
-            )
-            .add_systems(
-                Update,
+        app.add_message::<OpenScript>().add_systems(
+            Update,
+            (
+                // After the manager's command pass — see `FloaterSystems`:
+                // the click that opens a script (an object-contents row)
+                // also raises the window it landed in, and the later raise
+                // wins.
+                open_script.after(FloaterSystems::Commands),
                 (
-                    open_script,
                     ingest_script_asset,
                     report_script_running,
                     report_script_save,
                 )
-                    .chain(),
-            );
+                    .chain()
+                    .run_if(any_with_component::<ScriptEditorState>),
+            )
+                .chain(),
+        );
     }
 }
 
-/// The script editor floater's entities and live state.
-#[derive(Resource, Debug, Default)]
+/// One open script window's entities and live state — a **component on the
+/// window**, since script editors open per script ([`FloaterKey`]). The
+/// reference opens several at once, and each one's unsaved source is its own.
+#[derive(Component, Debug)]
 struct ScriptEditorState {
-    /// The floater root (carries [`UiPanelShown`]).
-    panel: Option<Entity>,
-    /// The rebuilt-per-open content column.
-    content: Option<Entity>,
-    /// The title-bar text node (set to the script's name on open).
-    title_text: Option<Entity>,
-    /// Where the script currently shown lives (Save target), set on open.
-    source: Option<ScriptSource>,
-    /// Whether the script currently shown is editable, set on open.
+    /// The content column this window's editor is built under.
+    content: Entity,
+    /// Where this window's script lives (Save target), fixed for its life.
+    source: ScriptSource,
+    /// Whether this window's script is editable, fixed for its life.
     editable: bool,
-    /// The compile backend to request for the shown script, set on open;
-    /// `None` before the first open.
-    target: Option<ScriptTarget>,
+    /// The compile backend to request for this window's script.
+    target: ScriptTarget,
     /// The asset id awaited (`FetchAsset` sent), matched on `AssetReceived`.
     pending_load: Option<Uuid>,
     /// Whether a save is in flight (matched on the next `ScriptUploaded` /
@@ -205,89 +222,85 @@ pub fn script_editor_floater_spec() -> FloaterSpec {
     }
 }
 
-/// Spawn the script editor floater, hidden, and stash its handles.
-fn spawn_script_floater(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = spawn_floater(&mut commands, root.0, script_editor_floater_spec());
-    // Subject-bound: the shown script is not persisted, so neither is the
-    // floater's position (matching the notecard editor / previews).
-    commands
-        .entity(handle.root)
-        .insert(crate::floater_persist::FloaterPersistExempt);
-    commands.insert_resource(ScriptEditorState {
-        panel: Some(handle.root),
-        content: Some(handle.content),
-        title_text: Some(handle.title_text),
-        ..ScriptEditorState::default()
-    });
+/// The [`FloaterKey`] of the window showing the script at `source`.
+///
+/// A task-held script is keyed by its **object and item**, not the item alone:
+/// two rezzed copies of one object carry the same item ids, and they are two
+/// different scripts.
+fn script_key(source: ScriptSource) -> FloaterKey {
+    match source {
+        ScriptSource::Agent { item_id } => FloaterKey::subject(&item_id),
+        ScriptSource::Task { task_id, item_id } => {
+            FloaterKey::subject(&format!("{task_id}/{item_id}"))
+        }
+    }
 }
 
-// ---------------------------------------------------------------------------
-// Open → fetch.
-// ---------------------------------------------------------------------------
-
-/// Open the editor on the newest [`OpenScript`]: clear the content, show a
-/// loading line, request the source asset (and the run state for a task script),
-/// and reveal the floater.
+/// Open a script **per script** (`viewer-keyed-floater-audit`): raise this
+/// script's window when it is already up, and otherwise spawn one, hang its
+/// state off it, fetch the source and (for a task script) query its run state.
+///
+/// Every open of the frame is honoured, not just the last. A window already up
+/// is only raised — never re-fetched — because a re-fetch would replace the
+/// resident's unsaved source with the grid's copy, which is the very thing
+/// keying these windows is for.
 fn open_script(
     mut opens: MessageReader<OpenScript>,
-    mut state: ResMut<ScriptEditorState>,
-    children: Query<&Children>,
-    mut texts: Query<&mut Text>,
-    mut panels: Query<&mut UiPanelShown>,
+    mut floaters: KeyedFloaters,
     mut commands: Commands,
     mut sl_commands: MessageWriter<SlCommand>,
 ) {
-    let Some(open) = opens.read().last().cloned() else {
-        return;
-    };
-    let (Some(content), Some(panel)) = (state.content, state.panel) else {
-        return;
-    };
-
-    // Set the title to the script's name (the title node carries no Fluent key,
-    // so a direct text set is not fought by the translator).
-    if let Some(title) = state.title_text
-        && let Ok(mut text) = texts.get_mut(title)
-    {
-        open.name.clone_into(&mut text.0);
-    }
-
-    tear_down(&mut commands, &children, content);
-    let status = spawn_status(&mut commands, content, "script-status-loading", DIM_COLOR);
-
-    state.pending_load = Some(open.asset_id);
-    state.saving = false;
-    state.body_field = None;
-    state.status = Some(status);
-    state.errors = None;
-    state.source = Some(open.source);
-    state.editable = open.editable;
-    state.target = Some(open.target);
-    state.running = None;
-    state.running_glyph = None;
-    state.pending_running = None;
-
-    sl_commands.write(SlCommand(Command::FetchAsset {
-        asset_id: AssetKey::from(open.asset_id),
-        asset_type: AssetType::ScriptText,
-        byte_range: None,
-    }));
-
-    // A task script has a run state the save must preserve; query it so the
-    // Running checkbox reflects reality rather than a guess.
-    if let ScriptSource::Task { task_id, item_id } = open.source
-        && open.editable
-    {
-        state.pending_running = Some((task_id, item_id));
-        sl_commands.write(SlCommand(Command::RequestScriptRunning {
-            object_id: task_id,
-            item_id,
+    for open in opens.read().cloned() {
+        let opened = floaters.open(script_editor_floater_spec(), script_key(open.source));
+        let KeyedFloaterOpen::Spawned(handle) = opened else {
+            continue;
+        };
+        build_script_window(&mut commands, handle, &open);
+        sl_commands.write(SlCommand(Command::FetchAsset {
+            asset_id: AssetKey::from(open.asset_id),
+            asset_type: AssetType::ScriptText,
+            byte_range: None,
         }));
+        // A task script has a run state the save must preserve; query it so the
+        // Running checkbox reflects reality rather than a guess.
+        if let ScriptSource::Task { task_id, item_id } = open.source
+            && open.editable
+        {
+            sl_commands.write(SlCommand(Command::RequestScriptRunning {
+                object_id: task_id,
+                item_id,
+            }));
+        }
     }
+}
 
-    if let Ok(mut shown) = panels.get_mut(panel) {
-        shown.0 = true;
-    }
+/// Furnish a freshly spawned script window: its title, a loading line, and the
+/// [`ScriptEditorState`] the per-window systems find it by.
+fn build_script_window(commands: &mut Commands, handle: FloaterHandle, open: &OpenScript) {
+    // The title is the script's name (the title node carries no Fluent key, so
+    // a direct text set is not fought by the translator).
+    commands
+        .entity(handle.title_text)
+        .insert(Text::new(open.name.clone()));
+    let status = spawn_status(commands, handle.content, "script-status-loading", DIM_COLOR);
+    let pending_running = match open.source {
+        ScriptSource::Task { task_id, item_id } if open.editable => Some((task_id, item_id)),
+        ScriptSource::Task { .. } | ScriptSource::Agent { .. } => None,
+    };
+    commands.entity(handle.root).insert(ScriptEditorState {
+        content: handle.content,
+        source: open.source,
+        editable: open.editable,
+        target: open.target,
+        pending_load: Some(open.asset_id),
+        saving: false,
+        body_field: None,
+        status: Some(status),
+        errors: None,
+        running: None,
+        running_glyph: None,
+        pending_running,
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -298,44 +311,50 @@ fn open_script(
 /// UTF-8 text, then build the read-only or editable body.
 fn ingest_script_asset(
     mut events: MessageReader<SlEvent>,
-    mut state: ResMut<ScriptEditorState>,
+    mut windows: Query<&mut ScriptEditorState>,
     children: Query<&Children>,
     mut commands: Commands,
 ) {
-    for event in events.read() {
-        let SlSessionEvent::AssetReceived(asset) = &event.0 else {
-            continue;
-        };
-        if state.pending_load != Some(asset.id) {
-            continue;
+    // Collected once and replayed per window: a reader is consumed by the first
+    // pass over it, so with two scripts open the second would see nothing.
+    let frame: Vec<&SlEvent> = events.read().collect();
+    if frame.is_empty() {
+        return;
+    }
+    for mut state in &mut windows {
+        for event in &frame {
+            let SlSessionEvent::AssetReceived(asset) = &event.0 else {
+                continue;
+            };
+            if state.pending_load != Some(asset.id) {
+                continue;
+            }
+            state.pending_load = None;
+            let (content, source) = (state.content, state.source);
+
+            // Script source is plain UTF-8 text; a non-UTF-8 byte (a corrupt asset)
+            // is shown lossily rather than refused, so the resident sees what is
+            // there instead of an opaque error.
+            let text = String::from_utf8_lossy(&asset.data).into_owned();
+
+            let editable = state.editable;
+            let running = state.running.unwrap_or(true);
+            tear_down(&mut commands, &children, content);
+            let built = populate_editor(
+                &mut commands,
+                content,
+                &text,
+                editable,
+                source,
+                running,
+                FONT_SIZE,
+                true,
+            );
+            state.body_field = built.body_field;
+            state.status = built.status;
+            state.errors = built.errors;
+            state.running_glyph = built.running_glyph;
         }
-        state.pending_load = None;
-        let (Some(content), Some(source)) = (state.content, state.source) else {
-            continue;
-        };
-
-        // Script source is plain UTF-8 text; a non-UTF-8 byte (a corrupt asset)
-        // is shown lossily rather than refused, so the resident sees what is
-        // there instead of an opaque error.
-        let text = String::from_utf8_lossy(&asset.data).into_owned();
-
-        let editable = state.editable;
-        let running = state.running.unwrap_or(true);
-        tear_down(&mut commands, &children, content);
-        let built = populate_editor(
-            &mut commands,
-            content,
-            &text,
-            editable,
-            source,
-            running,
-            FONT_SIZE,
-            true,
-        );
-        state.body_field = built.body_field;
-        state.status = built.status;
-        state.errors = built.errors;
-        state.running_glyph = built.running_glyph;
     }
 }
 
@@ -451,20 +470,29 @@ fn attach_save(commands: &mut Commands, button: Entity, source: ScriptSource, bo
     commands.entity(button).observe(
         move |press: On<Pointer<Press>>,
               fields: Query<&EditableText>,
-              mut state: ResMut<ScriptEditorState>,
+              parents: Query<&ChildOf>,
+              floaters: Query<(Entity, &Floater)>,
+              mut windows: Query<&mut ScriptEditorState>,
               children: Query<&Children>,
               mut sl_commands: MessageWriter<SlCommand>,
               mut commands: Commands| {
             if press.button != PointerButton::Primary {
                 return;
             }
+            // Compile *this* window's source: the button is inside it.
+            let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+                return;
+            };
+            let Ok(mut state) = windows.get_mut(window) else {
+                return;
+            };
             let Ok(field) = fields.get(body_field) else {
                 return;
             };
             let running = state.running.unwrap_or(true);
             sl_commands.write(SlCommand(Command::UploadScript {
                 location: source.location(running),
-                target: state.target.unwrap_or(ScriptTarget::Mono),
+                target: state.target,
                 source: field.value().to_string().into_bytes(),
             }));
             state.saving = true;
@@ -487,23 +515,29 @@ fn attach_save(commands: &mut Commands, button: Entity, source: ScriptSource, bo
 /// state and repaint the checkbox glyph.
 fn report_script_running(
     mut events: MessageReader<SlEvent>,
-    mut state: ResMut<ScriptEditorState>,
+    mut windows: Query<&mut ScriptEditorState>,
     mut commands: Commands,
 ) {
-    for event in events.read() {
-        let SlSessionEvent::ScriptRunning {
-            object_id,
-            item_id,
-            running,
-        } = &event.0
-        else {
-            continue;
-        };
-        if state.pending_running != Some((*object_id, *item_id)) {
-            continue;
+    let frame: Vec<&SlEvent> = events.read().collect();
+    if frame.is_empty() {
+        return;
+    }
+    for mut state in &mut windows {
+        for event in &frame {
+            let SlSessionEvent::ScriptRunning {
+                object_id,
+                item_id,
+                running,
+            } = &event.0
+            else {
+                continue;
+            };
+            if state.pending_running != Some((*object_id, *item_id)) {
+                continue;
+            }
+            state.running = Some(*running);
+            repaint_running_glyph(&mut commands, state.running_glyph, *running);
         }
-        state.running = Some(*running);
-        repaint_running_glyph(&mut commands, state.running_glyph, *running);
     }
 }
 
@@ -517,48 +551,74 @@ fn report_script_running(
 /// outcome; an [`SlSessionEvent::AssetUploadFailed`] is a transport failure.
 fn report_script_save(
     mut events: MessageReader<SlEvent>,
-    mut state: ResMut<ScriptEditorState>,
+    mut windows: Query<&mut ScriptEditorState>,
+    mut inventory: Option<ResMut<crate::inventory::InventoryModel>>,
     children: Query<&Children>,
     translator: Translator,
     mut commands: Commands,
 ) {
-    for event in events.read() {
-        if !state.saving {
-            continue;
-        }
-        match &event.0 {
-            SlSessionEvent::ScriptUploaded {
-                compiled, errors, ..
-            } => {
-                state.saving = false;
-                let (key, color) = if *compiled {
-                    ("script-status-saved", DIM_COLOR)
-                } else {
-                    ("script-status-compile-failed", ERROR_COLOR)
-                };
-                if let Some(status) = state.status {
-                    set_status(&mut commands, status, key, color);
-                }
-                if let Some(container) = state.errors {
-                    tear_down(&mut commands, &children, container);
-                    for error in errors {
-                        spawn_error_row(&mut commands, container, &translator, error, FONT_SIZE);
+    let frame: Vec<&SlEvent> = events.read().collect();
+    if frame.is_empty() {
+        return;
+    }
+    for mut state in &mut windows {
+        for event in &frame {
+            if !state.saving {
+                continue;
+            }
+            match &event.0 {
+                SlSessionEvent::ScriptUploaded {
+                    new_asset,
+                    compiled,
+                    errors,
+                    ..
+                } => {
+                    state.saving = false;
+                    // Follow the item onto the asset the save wrote, or the
+                    // next open of this script fetches the source as it was
+                    // *before* — see the notecard editor for the same
+                    // rebinding and why the reply's item id is not relied on.
+                    if let (Some(new_asset), ScriptSource::Agent { item_id }) =
+                        (new_asset, state.source)
+                        && let Some(model) = inventory.as_mut()
+                    {
+                        let _folder = model.rebind_asset(item_id, *new_asset);
+                    }
+                    let (key, color) = if *compiled {
+                        ("script-status-saved", DIM_COLOR)
+                    } else {
+                        ("script-status-compile-failed", ERROR_COLOR)
+                    };
+                    if let Some(status) = state.status {
+                        set_status(&mut commands, status, key, color);
+                    }
+                    if let Some(container) = state.errors {
+                        tear_down(&mut commands, &children, container);
+                        for error in errors {
+                            spawn_error_row(
+                                &mut commands,
+                                container,
+                                &translator,
+                                error,
+                                FONT_SIZE,
+                            );
+                        }
                     }
                 }
-            }
-            SlSessionEvent::AssetUploadFailed { reason } => {
-                warn!("script save failed: {reason}");
-                state.saving = false;
-                if let Some(status) = state.status {
-                    set_status(
-                        &mut commands,
-                        status,
-                        "script-status-save-failed",
-                        ERROR_COLOR,
-                    );
+                SlSessionEvent::AssetUploadFailed { reason } => {
+                    warn!("script save failed: {reason}");
+                    state.saving = false;
+                    if let Some(status) = state.status {
+                        set_status(
+                            &mut commands,
+                            status,
+                            "script-status-save-failed",
+                            ERROR_COLOR,
+                        );
+                    }
                 }
+                _other => {}
             }
-            _other => {}
         }
     }
 }
@@ -703,12 +763,22 @@ fn spawn_running_toggle(
 /// this does not send a separate `SetScriptRunning`.
 fn on_running_toggle(
     press: On<Pointer<Press>>,
-    mut state: ResMut<ScriptEditorState>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
+    mut windows: Query<&mut ScriptEditorState>,
     mut commands: Commands,
 ) {
     if press.button != PointerButton::Primary {
         return;
     }
+    // The toggle belongs to the window it sits in — with two scripts open,
+    // this must not flip the other one's run state.
+    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+        return;
+    };
+    let Ok(mut state) = windows.get_mut(window) else {
+        return;
+    };
     let running = !state.running.unwrap_or(true);
     state.running = Some(running);
     repaint_running_glyph(&mut commands, state.running_glyph, running);
@@ -878,5 +948,170 @@ mod tests {
                 experience: None,
             }
         );
+    }
+
+    /// **One window per script** (`viewer-keyed-floater-audit`): the open path,
+    /// driven by the message an object-contents row writes.
+    ///
+    /// The reference opens several scripts at once, and each window's unsaved
+    /// source is its own — which the singleton editor could not hold.
+    mod instances {
+        use super::super::{ScriptEditorState, open_script, script_key};
+        use crate::floater::{Floater, FloaterCommand, FloaterOp, FloaterPlugin};
+        use crate::ui::UiRoot;
+        use crate::world_api::{OpenScript, ScriptSource};
+        use bevy::prelude::*;
+        use pretty_assertions::assert_eq;
+        use sl_client_bevy::{Command, InventoryKey, ObjectKey, ScriptTarget, SlCommand, Uuid};
+
+        /// A boxed error so tests can use `?` rather than the disallowed
+        /// `unwrap` / `expect`.
+        type TestError = Box<dyn core::error::Error>;
+
+        /// Two scripts: one in the agent's inventory, one inside an object.
+        fn scripts() -> (ScriptSource, ScriptSource) {
+            (
+                ScriptSource::Agent {
+                    item_id: InventoryKey::from(Uuid::from_u128(0xC3)),
+                },
+                ScriptSource::Task {
+                    task_id: ObjectKey::from(Uuid::from_u128(0xD4)),
+                    item_id: InventoryKey::from(Uuid::from_u128(0xE5)),
+                },
+            )
+        }
+
+        /// An app with the floater manager and this module's open path.
+        fn editor_app() -> App {
+            let mut app = App::new();
+            app.add_message::<SlCommand>()
+                .add_message::<OpenScript>()
+                .init_resource::<UiScale>()
+                .init_resource::<ButtonInput<KeyCode>>()
+                .add_plugins(FloaterPlugin)
+                .add_systems(Update, open_script);
+            let root = app.world_mut().spawn(Node::default()).id();
+            app.insert_resource(UiRoot(root));
+            app.update();
+            app
+        }
+
+        /// Open a script the way every caller does — by writing the message.
+        fn open(app: &mut App, source: ScriptSource, asset: u128) {
+            app.world_mut().write_message(OpenScript {
+                name: "A script".to_owned(),
+                asset_id: Uuid::from_u128(asset),
+                editable: true,
+                source,
+                target: ScriptTarget::Mono,
+            });
+            app.update();
+        }
+
+        /// Every live script window, as (entity, source) pairs.
+        fn windows(app: &mut App) -> Vec<(Entity, ScriptSource)> {
+            app.world_mut()
+                .query::<(Entity, &ScriptEditorState)>()
+                .iter(app.world())
+                .map(|(entity, state)| (entity, state.source))
+                .collect()
+        }
+
+        /// How many asset fetches the session was asked for this frame.
+        fn fetches(app: &App) -> usize {
+            app.world()
+                .resource::<Messages<SlCommand>>()
+                .iter_current_update_messages()
+                .filter(|command| matches!(command.0, Command::FetchAsset { .. }))
+                .count()
+        }
+
+        /// Two scripts are two windows, each with its own source and content
+        /// column — including a task script, which is keyed by object *and*
+        /// item so two rezzed copies of one object stay apart.
+        #[test]
+        fn two_scripts_open_two_windows() -> Result<(), TestError> {
+            let (agent_script, task_script) = scripts();
+            let mut app = editor_app();
+            open(&mut app, agent_script, 0xC3_00);
+            open(&mut app, task_script, 0xE5_00);
+
+            let open_windows = windows(&mut app);
+            assert_eq!(
+                open_windows.len(),
+                2,
+                "the second script reused the first window"
+            );
+            let world = app.world();
+            let contents: Vec<Entity> = open_windows
+                .iter()
+                .filter_map(|(window, _source)| world.get::<ScriptEditorState>(*window))
+                .map(|state| state.content)
+                .collect();
+            assert!(
+                contents.first() != contents.get(1),
+                "both windows build into one content column"
+            );
+            let keys: Vec<Option<&crate::floater::FloaterKey>> = open_windows
+                .iter()
+                .map(|(window, _source)| world.get::<Floater>(*window).and_then(Floater::key))
+                .collect();
+            assert!(keys.contains(&Some(&script_key(agent_script))));
+            assert!(keys.contains(&Some(&script_key(task_script))));
+            // The task key names the object as well as the item.
+            assert!(
+                script_key(task_script).as_str().contains('/'),
+                "a task script must be keyed by its object and item"
+            );
+            Ok(())
+        }
+
+        /// **Re-opening a script that is already up never re-fetches it** — the
+        /// unsaved-source guarantee.
+        #[test]
+        fn reopening_a_script_does_not_refetch_it() -> Result<(), TestError> {
+            let (agent_script, _task) = scripts();
+            let mut app = editor_app();
+            open(&mut app, agent_script, 0xC3_00);
+            assert_eq!(fetches(&app), 1, "the first open must fetch the source");
+
+            open(&mut app, agent_script, 0xC3_00);
+            assert_eq!(
+                fetches(&app),
+                0,
+                "a re-open re-fetched the source, which would discard unsaved edits"
+            );
+            assert_eq!(windows(&mut app).len(), 1);
+            Ok(())
+        }
+
+        /// Closing one script ends that window and leaves the other open.
+        #[test]
+        fn closing_one_script_leaves_the_other() -> Result<(), TestError> {
+            let (agent_script, task_script) = scripts();
+            let mut app = editor_app();
+            open(&mut app, agent_script, 0xC3_00);
+            open(&mut app, task_script, 0xE5_00);
+            let target = windows(&mut app)
+                .into_iter()
+                .find_map(|(window, source)| (source == agent_script).then_some(window))
+                .ok_or("the agent script has no window")?;
+
+            app.world_mut()
+                .resource_mut::<Messages<FloaterCommand>>()
+                .write(FloaterCommand {
+                    floater: target,
+                    op: FloaterOp::Close,
+                });
+            app.update();
+
+            let left = windows(&mut app);
+            assert_eq!(left.len(), 1);
+            assert_eq!(
+                left.first().map(|(_window, source)| *source),
+                Some(task_script)
+            );
+            Ok(())
+        }
     }
 }

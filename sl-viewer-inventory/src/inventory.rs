@@ -47,7 +47,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use sl_client_bevy::{
     AssetType, Command, FolderInfo, FolderState, FolderType, InventoryFolder, InventoryFolderKey,
-    InventoryKey, InventoryType, ItemInfo, Permissions, SlCommand, SlEvent, SlSessionEvent,
+    InventoryKey, InventoryType, ItemInfo, Permissions, SlCommand, SlEvent, SlSessionEvent, Uuid,
     Wearable, WearableType,
 };
 
@@ -283,6 +283,36 @@ impl InventoryModel {
             .values()
             .flat_map(|items| items.iter())
             .find(|info| info.item_id == item)
+    }
+
+    /// Point a loaded item at a **newly uploaded asset**, returning the folder
+    /// it lives in (or `None` when the item is not loaded).
+    ///
+    /// Saving an edited asset writes a *new* asset and rebinds the item to it —
+    /// the `Update*Inventory` capabilities answer with the new asset id, and so
+    /// does a script upload. Until the model follows, every re-open of that
+    /// item fetches the **old** asset: on Second Life the previous revision, and
+    /// on OpenSim the one-byte placeholder a new notecard is created with, so a
+    /// saved notecard reads back blank.
+    ///
+    /// Two callers, because grids differ about what a save answers with: this
+    /// module rebinds when the upload reply names the item, and an **editor**
+    /// rebinds from the item it saved when the reply does not (OpenSim's
+    /// `UpdateNotecardAgentInventory` returns the new asset alone).
+    pub fn rebind_asset(
+        &mut self,
+        item: InventoryKey,
+        asset_id: Uuid,
+    ) -> Option<InventoryFolderKey> {
+        self.items.iter_mut().find_map(|(folder, items)| {
+            items
+                .iter_mut()
+                .find(|info| info.item_id == item)
+                .map(|info| {
+                    info.asset_id = asset_id;
+                    *folder
+                })
+        })
     }
 
     /// Whether a folder belongs to the read-only shared Library tree.
@@ -2031,6 +2061,25 @@ fn drain_skeleton_merge(
     }
 }
 
+/// Rebind a saved item to its new asset and refresh the folder it lives in.
+///
+/// Both halves matter: the in-place rebind fixes the very next open (the
+/// editor reads the item's asset id straight out of the model), and the folder
+/// re-query brings back whatever else the save changed server-side.
+fn rebind_saved_asset(
+    model: &mut InventoryModel,
+    item: Uuid,
+    new_asset: Uuid,
+    commands: &mut MessageWriter<SlCommand>,
+) {
+    let Some(folder) = model.rebind_asset(InventoryKey::from(item), new_asset) else {
+        return;
+    };
+    if model.requested.contains(&folder) {
+        query_folder_page(folder, commands);
+    }
+}
+
 /// Fold the high-level inventory events into [`InventoryModel`], marking the view
 /// dirty (via `InventoryModel`'s change tick) whenever something it draws moved.
 fn ingest_inventory(
@@ -2110,6 +2159,22 @@ fn ingest_inventory(
                 // Gesture would otherwise only appear after an unrelated
                 // refresh).
                 request_folder(&mut model, item.folder_id, &mut commands);
+            }
+            // A save wrote a new asset and the grid rebound the item to it.
+            // Follow, or the next open of that item fetches the asset it had
+            // *before* the save — which is how a saved notecard read back
+            // blank on OpenSim, where a fresh notecard's placeholder asset is
+            // a single NUL byte.
+            SlSessionEvent::AssetUploaded {
+                new_asset,
+                new_inventory_item: Some(item),
+            }
+            | SlSessionEvent::ScriptUploaded {
+                new_asset: Some(new_asset),
+                new_inventory_item: Some(item),
+                ..
+            } => {
+                rebind_saved_asset(&mut model, *item, *new_asset, &mut commands);
             }
             SlSessionEvent::AgentWearables { wearables, .. } => {
                 model.wearables.clone_from(wearables);
@@ -3420,6 +3485,12 @@ pub struct OpenMaterialEditor {
 pub struct AddEmbeddedItem {
     /// The inventory item to embed.
     pub item: ItemInfo,
+    /// **Which** notecard window the item was dropped on — the floater root
+    /// carrying the [`NotecardDropTarget`](crate::world_api::NotecardDropTarget)
+    /// the pointer was over. A notecard editor opens per notecard, so a drop
+    /// names its window; without it the item would land in whichever one a
+    /// resource happened to hold.
+    pub editor: Entity,
 }
 
 #[cfg(test)]
@@ -3491,6 +3562,30 @@ mod tests {
             &[item(10, 2, "Blue shirt", InventoryType::Wearable)],
         );
         model
+    }
+
+    /// **A save rebinds its item to the asset the save wrote.**
+    ///
+    /// Without this the next open of an edited notecard or script fetches the
+    /// asset the item had *before* — on OpenSim the one-byte placeholder a new
+    /// notecard is created with, so a notecard that saved successfully read
+    /// back blank every time.
+    #[test]
+    fn a_saved_item_is_rebound_to_its_new_asset() {
+        let mut model = sample_model();
+        let item = sl_client_bevy::InventoryKey::from(sl_client_bevy::Uuid::from_u128(10));
+        let folder = sl_client_bevy::InventoryFolderKey::from(sl_client_bevy::Uuid::from_u128(2));
+        let saved = sl_client_bevy::Uuid::from_u128(0x5A5A);
+
+        assert_eq!(model.rebind_asset(item, saved), Some(folder));
+        assert_eq!(
+            model.find_item(item).map(|info| info.asset_id),
+            Some(saved),
+            "the item still points at the asset it had before the save"
+        );
+        // An item the model has never loaded is simply not ours to rebind.
+        let stranger = sl_client_bevy::InventoryKey::from(sl_client_bevy::Uuid::from_u128(0xFFFF));
+        assert_eq!(model.rebind_asset(stranger, saved), None);
     }
 
     /// The names of a row list, for concise assertions.

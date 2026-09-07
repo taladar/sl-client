@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 306 |
 | blocked | 55 |
 | in-progress | 19 |
-| bugs | 59 |
-| done | 1001 |
+| bugs | 60 |
+| done | 1003 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1577** |
+| **total** | **1580** |
 
 ## ideas (98)
 
@@ -1168,7 +1168,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (59)
+## bugs (60)
 
 ### viewer
 
@@ -1266,6 +1266,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A blocked resident's chat and IMs are still shown
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
+- [`viewer-notecard-preview-ignores-unsaved-text`](bugs/viewer-notecard-preview-ignores-unsaved-text.md)
+  — The notecard's View Items preview shows the loaded text, not what you typed
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
   — Own avatar looks broken after a teleport
 - [`viewer-own-avatar-facing-drifts-idle`](bugs/viewer-own-avatar-facing-drifts-idle.md)
@@ -1313,7 +1315,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1001)
+## done (1003)
 
 ### protocol
 
@@ -2023,6 +2025,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   tags — preference toggles (blocked by `viewer-preferences-floater` (done))
 - [`viewer-nametags-occluded-by-clouds`](done/viewer-nametags-occluded-by-clouds.md)
   — Name tags render behind the cloud layer (near tag occluded by far clouds)
+- [`viewer-new-notecard-unreadable-on-opensim`](done/viewer-new-notecard-unreadable-on-opensim.md)
+  — A notecard created on OpenSim opened as "could not be read"
 - [`viewer-nonblocking-overlay-steals-focus`](done/viewer-nonblocking-overlay-steals-focus.md)
   — A see-through container in front of a field clears its focus, at random
 - [`viewer-notecard-format`](done/viewer-notecard-format.md) — Notecard format —
@@ -2586,6 +2590,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   regressions
 - [`viewer-rlv-command-parser`](done/viewer-rlv-command-parser.md) — RLV — parse
   the @-command chat protocol
+- [`viewer-saved-asset-reopens-stale`](done/viewer-saved-asset-reopens-stale.md)
+  — A saved notecard or script re-opened as it was before the save
 - [`viewer-scene-dump`](done/viewer-scene-dump.md) — Emit the shared scene-dump
   JSON beside the frames
 - [`viewer-scene-dump-animations`](done/viewer-scene-dump-animations.md) — A

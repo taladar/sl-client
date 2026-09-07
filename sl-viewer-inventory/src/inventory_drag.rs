@@ -725,11 +725,14 @@ pub(crate) fn on_row_drag_end(
     let over_editable_notecard = hover_map
         .values()
         .flat_map(|hits| hits.keys())
-        .any(|hovered| notecard_target_at(*hovered, &notecard_targets, &child_of));
-    if over_editable_notecard {
+        .find_map(|hovered| notecard_target_at(*hovered, &notecard_targets, &child_of));
+    if let Some(editor) = over_editable_notecard {
         for (source, _from_library) in &active.sources {
             if let MenuTarget::Item(item) = source {
-                add_embedded.write(crate::inventory::AddEmbeddedItem { item: item.clone() });
+                add_embedded.write(crate::inventory::AddEmbeddedItem {
+                    item: item.clone(),
+                    editor,
+                });
             }
         }
         return;
@@ -970,23 +973,26 @@ fn contents_target_at(
     }
 }
 
-/// Whether a hovered UI node is (or descends from) the notecard editor while it
+/// **Which** notecard editor a hovered UI node belongs to, when that editor
 /// accepts a dropped item — the node's own or nearest-ancestor
 /// [`crate::world_api::NotecardDropTarget`] with `editable` set. The
 /// ancestor walk lets the floater stamp its root while a child is hovered.
+///
+/// The entity, not a yes/no: notecard editors open **per notecard**, so the
+/// drop has to name the window the pointer was actually over.
 fn notecard_target_at(
     hovered: Entity,
     notecard_targets: &Query<&crate::world_api::NotecardDropTarget>,
     child_of: &Query<&ChildOf>,
-) -> bool {
+) -> Option<Entity> {
     let mut node = hovered;
     loop {
         if let Ok(target) = notecard_targets.get(node) {
-            return target.editable;
+            return target.editable.then_some(node);
         }
         match child_of.get(node) {
             Ok(parent) => node = parent.parent(),
-            Err(_root) => return false,
+            Err(_root) => return None,
         }
     }
 }

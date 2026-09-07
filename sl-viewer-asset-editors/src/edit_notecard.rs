@@ -48,6 +48,16 @@
 //! Save button, so its text is never presented as editable when a save would be
 //! refused.
 //!
+//! # One window per notecard
+//!
+//! A notecard editor is a **keyed floater** ([`FloaterKey`]): opening a second
+//! notecard opens a second window rather than re-pointing the first, which is
+//! what the reference does (`LLPreviewNotecard` is registered per item id) and
+//! what keeps a window's **unsaved text** from vanishing because someone opened
+//! another notecard. Each window's state — the notecard it shows, the baseline
+//! its embedded-item markers reconcile against, its in-flight load / save, its
+//! field entities — is a component on that window, and closing one ends it.
+//!
 //! Reference (Firestorm, read-only): `llpreviewnotecard`, `llfloaternotecard`,
 //! `llviewertexteditor`.
 
@@ -58,11 +68,14 @@ use sl_client_bevy::{
     SlCommand, SlEvent, SlSessionEvent, UpdatableAssetType, Uuid,
 };
 
-use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
+use crate::floater::{
+    Floater, FloaterCaps, FloaterHandle, FloaterKey, FloaterSpec, FloaterSystems, KeyedFloaterOpen,
+    KeyedFloaters, host_floater,
+};
 use crate::inventory::AddEmbeddedItem;
 use crate::linkified_text::LinkTextStyle;
 use crate::notecard_render::spawn_notecard_body;
-use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use crate::ui::{column, row};
 use crate::ui_element::{ElementCx, TextMayClip};
 use crate::ui_font::UiFont;
 use crate::world_api::{NotecardDropTarget, NotecardSource, OpenNotecard};
@@ -103,40 +116,44 @@ const READONLY_BODY_WIDTH: f32 = 460.0;
 pub struct EditNotecardPlugin;
 
 impl Plugin for EditNotecardPlugin {
-    /// Register the open message and state, and spawn the (hidden) floater.
+    /// Register the open message and the open / ingest / report systems.
+    ///
+    /// Nothing spawns at `Startup`: a notecard window exists only while that
+    /// notecard is open, so `open_notecard` spawns the instance and builds its
+    /// content. The per-window systems are gated on there being a window.
     fn build(&self, app: &mut App) {
-        app.init_resource::<NotecardEditorState>()
-            .add_message::<OpenNotecard>()
+        app.add_message::<OpenNotecard>()
             .add_message::<AddEmbeddedItem>()
-            .add_systems(
-                Startup,
-                spawn_notecard_floater.after(UiScaffoldSystems::SpawnRoot),
-            )
             .add_systems(
                 Update,
                 (
-                    open_notecard,
-                    ingest_notecard_asset,
-                    ingest_added_items,
-                    report_notecard_save,
+                    // After the manager's command pass — see `FloaterSystems`:
+                    // the click that opens a notecard (an inventory row, a
+                    // link) also raises the window it landed in, and the later
+                    // raise wins.
+                    open_notecard.after(FloaterSystems::Commands),
+                    (
+                        ingest_notecard_asset,
+                        ingest_added_items,
+                        report_notecard_save,
+                    )
+                        .chain()
+                        .run_if(any_with_component::<NotecardEditorState>),
                 )
                     .chain(),
             );
     }
 }
 
-/// The notecard editor floater's entities and live state.
-#[derive(Resource, Debug, Default)]
+/// One open notecard window's entities and live state — a **component on the
+/// window**, since notecard editors open per notecard ([`FloaterKey`]).
+#[derive(Component, Debug)]
 struct NotecardEditorState {
-    /// The floater root (carries [`UiPanelShown`]).
-    panel: Option<Entity>,
-    /// The rebuilt-per-open content column.
-    content: Option<Entity>,
-    /// The title-bar text node (set to the notecard's name on open).
-    title_text: Option<Entity>,
-    /// Where the notecard currently shown lives (Save target), set on open.
-    source: Option<NotecardSource>,
-    /// Whether the notecard currently shown is editable, set on open.
+    /// The content column this window's editor is built under.
+    content: Entity,
+    /// Where this window's notecard lives (Save target), fixed for its life.
+    source: NotecardSource,
+    /// Whether this window's notecard is editable, fixed for its life.
     editable: bool,
     /// The originally decoded notecard, kept as the baseline the edited text's
     /// embedded-item markers resolve against on save.
@@ -180,79 +197,78 @@ pub fn notecard_editor_floater_spec() -> FloaterSpec {
     }
 }
 
-/// Spawn the notecard editor floater, hidden, and stash its handles.
-fn spawn_notecard_floater(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = spawn_floater(&mut commands, root.0, notecard_editor_floater_spec());
-    // Subject-bound: the shown notecard is not persisted, so neither is the
-    // floater's position (matching the previews / properties floater). The root
-    // is the inventory-drag drop target (no drop accepted until a modifiable
-    // notecard is shown).
-    commands.entity(handle.root).insert((
-        crate::floater_persist::FloaterPersistExempt,
-        NotecardDropTarget::default(),
-    ));
-    commands.insert_resource(NotecardEditorState {
-        panel: Some(handle.root),
-        content: Some(handle.content),
-        title_text: Some(handle.title_text),
-        ..NotecardEditorState::default()
-    });
+/// The [`FloaterKey`] of the window showing the notecard at `source`.
+///
+/// A task-held notecard is keyed by its **object and item**, not the item
+/// alone: two rezzed copies of one object carry the same item ids, and they are
+/// two different notecards.
+fn notecard_key(source: NotecardSource) -> FloaterKey {
+    match source {
+        NotecardSource::Agent { item_id } => FloaterKey::subject(&item_id),
+        NotecardSource::Task { task_id, item_id } => {
+            FloaterKey::subject(&format!("{task_id}/{item_id}"))
+        }
+    }
 }
 
-// ---------------------------------------------------------------------------
-// Open → fetch.
-// ---------------------------------------------------------------------------
-
-/// Open the editor on the newest [`OpenNotecard`]: clear the content, show a
-/// loading line, request the asset, and reveal the floater.
+/// Open a notecard **per notecard** (`viewer-keyed-floater-audit`): raise this
+/// notecard's window when it is already up, and otherwise spawn one, hang its
+/// state off it and fetch the asset.
+///
+/// Every open of the frame is honoured, not just the last. A window already up
+/// is only raised — never re-fetched and never rebuilt — because rebuilding it
+/// would throw away exactly what a second open must not touch: the resident's
+/// unsaved edits.
 fn open_notecard(
     mut opens: MessageReader<OpenNotecard>,
-    mut state: ResMut<NotecardEditorState>,
-    children: Query<&Children>,
-    mut texts: Query<&mut Text>,
-    mut panels: Query<&mut UiPanelShown>,
+    mut floaters: KeyedFloaters,
     mut commands: Commands,
     mut sl_commands: MessageWriter<SlCommand>,
 ) {
-    let Some(open) = opens.read().last().cloned() else {
-        return;
-    };
-    let (Some(content), Some(panel)) = (state.content, state.panel) else {
-        return;
-    };
-
-    // Set the title to the notecard's name (the title node carries no Fluent
-    // key, so a direct text set is not fought by the translator).
-    if let Some(title) = state.title_text
-        && let Ok(mut text) = texts.get_mut(title)
-    {
-        open.name.clone_into(&mut text.0);
+    for open in opens.read().cloned() {
+        let opened = floaters.open(notecard_editor_floater_spec(), notecard_key(open.source));
+        let KeyedFloaterOpen::Spawned(handle) = opened else {
+            continue;
+        };
+        build_notecard_window(&mut commands, handle, &open);
+        sl_commands.write(SlCommand(Command::FetchAsset {
+            asset_id: AssetKey::from(open.asset_id),
+            asset_type: AssetType::Notecard,
+            byte_range: None,
+        }));
     }
+}
 
-    tear_down(&mut commands, &children, content);
-    let status = spawn_status(&mut commands, content, "notecard-status-loading", DIM_COLOR);
-
-    state.pending_load = Some(open.asset_id);
-    state.pending_save = None;
-    state.body_field = None;
-    state.status = Some(status);
-    state.baseline = None;
-    state.source = Some(open.source);
-    state.editable = open.editable;
-
-    // A modifiable notecard accepts a dragged item as a new embedded item.
-    commands.entity(panel).insert(NotecardDropTarget {
+/// Furnish a freshly spawned notecard window: its title, its drop target, a
+/// loading line, and the [`NotecardEditorState`] the per-window systems find it
+/// by.
+fn build_notecard_window(commands: &mut Commands, handle: FloaterHandle, open: &OpenNotecard) {
+    // The title is the notecard's name (the title node carries no Fluent key,
+    // so a direct text set is not fought by the translator).
+    commands
+        .entity(handle.title_text)
+        .insert(Text::new(open.name.clone()));
+    // A modifiable notecard accepts a dragged item as a new embedded item; the
+    // drop names this window (`AddEmbeddedItem::editor`).
+    commands.entity(handle.root).insert(NotecardDropTarget {
         editable: open.editable,
     });
-
-    sl_commands.write(SlCommand(Command::FetchAsset {
-        asset_id: AssetKey::from(open.asset_id),
-        asset_type: AssetType::Notecard,
-        byte_range: None,
-    }));
-    if let Ok(mut shown) = panels.get_mut(panel) {
-        shown.0 = true;
-    }
+    let status = spawn_status(
+        commands,
+        handle.content,
+        "notecard-status-loading",
+        DIM_COLOR,
+    );
+    commands.entity(handle.root).insert(NotecardEditorState {
+        content: handle.content,
+        source: open.source,
+        editable: open.editable,
+        baseline: None,
+        pending_load: Some(open.asset_id),
+        pending_save: None,
+        body_field: None,
+        status: Some(status),
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -263,55 +279,88 @@ fn open_notecard(
 /// then build the read-only or editable body and the embedded-item list.
 fn ingest_notecard_asset(
     mut events: MessageReader<SlEvent>,
-    mut state: ResMut<NotecardEditorState>,
+    mut windows: Query<&mut NotecardEditorState>,
     children: Query<&Children>,
     mut commands: Commands,
 ) {
-    for event in events.read() {
-        let SlSessionEvent::AssetReceived(asset) = &event.0 else {
-            continue;
-        };
-        if state.pending_load != Some(asset.id) {
-            continue;
-        }
-        state.pending_load = None;
-        let (Some(content), Some(source)) = (state.content, state.source) else {
-            continue;
-        };
-
-        let notecard = match sl_notecard::Notecard::decode(&asset.data) {
-            Ok(notecard) => notecard,
-            Err(error) => {
-                warn!("failed to decode notecard {}: {error}", asset.id);
-                tear_down(&mut commands, &children, content);
-                let status = spawn_status(
-                    &mut commands,
-                    content,
-                    "notecard-status-decode-failed",
-                    ERROR_COLOR,
-                );
-                state.status = Some(status);
-                state.body_field = None;
-                state.baseline = None;
+    // Collected once and replayed per window: a reader is consumed by the first
+    // pass over it, so with two notecards open the second would see nothing.
+    let frame: Vec<&SlEvent> = events.read().collect();
+    if frame.is_empty() {
+        return;
+    }
+    for mut state in &mut windows {
+        for event in &frame {
+            let SlSessionEvent::AssetReceived(asset) = &event.0 else {
+                continue;
+            };
+            if state.pending_load != Some(asset.id) {
                 continue;
             }
-        };
+            state.pending_load = None;
+            let (content, source) = (state.content, state.source);
 
-        let editable = state.editable;
-        tear_down(&mut commands, &children, content);
-        let built = populate_editor(
-            &mut commands,
-            content,
-            &notecard,
-            editable,
-            source,
-            editable.then_some(source),
-            FONT_SIZE,
-        );
-        state.body_field = built.body_field;
-        state.status = built.status;
-        state.baseline = Some(notecard);
+            let notecard = match decode_notecard_asset(&asset.data) {
+                Ok(notecard) => notecard,
+                Err(error) => {
+                    warn!("failed to decode notecard {}: {error}", asset.id);
+                    tear_down(&mut commands, &children, content);
+                    let status = spawn_status(
+                        &mut commands,
+                        content,
+                        "notecard-status-decode-failed",
+                        ERROR_COLOR,
+                    );
+                    state.status = Some(status);
+                    state.body_field = None;
+                    state.baseline = None;
+                    continue;
+                }
+            };
+
+            let editable = state.editable;
+            tear_down(&mut commands, &children, content);
+            let built = populate_editor(
+                &mut commands,
+                content,
+                &notecard,
+                editable,
+                source,
+                editable.then_some(source),
+                FONT_SIZE,
+            );
+            state.body_field = built.body_field;
+            state.status = built.status;
+            state.baseline = Some(notecard);
+        }
     }
+}
+
+/// Decode a fetched notecard asset, reading an **empty** payload as an empty
+/// notecard rather than a malformed one.
+///
+/// A notecard the resident just created has no body yet, and grids write that
+/// differently: Second Life stores a valid empty Linden-text container, while
+/// OpenSim's server-side `CreateInventoryItem` stores a **single `0x00` byte**.
+/// Both mean "nothing in it", and both must open as an empty editable notecard
+/// — otherwise every notecard made on OpenSim reads as unreadable and can never
+/// be written into, since the first Save needs an editor to type in.
+///
+/// This is deliberately narrow: only an all-zero (or zero-length) payload takes
+/// the empty path. A valid notecard always starts with `Linden text version `,
+/// so no truncation of a real one can be mistaken for empty, and any other
+/// malformed asset still fails, logs and shows the unreadable status.
+fn decode_notecard_asset(
+    data: &[u8],
+) -> Result<sl_notecard::Notecard, sl_notecard::decode::NotecardError> {
+    if data.iter().all(|byte| *byte == 0) {
+        return Ok(sl_notecard::Notecard {
+            source_version: sl_notecard::NotecardVersion::V2,
+            items: Vec::new(),
+            text: String::new(),
+        });
+    }
+    sl_notecard::Notecard::decode(data)
 }
 
 /// The entities [`populate_editor`] hands back to the live state.
@@ -552,12 +601,22 @@ fn attach_save(
     commands.entity(button).observe(
         move |press: On<Pointer<Press>>,
               fields: Query<&EditableText>,
-              mut state: ResMut<NotecardEditorState>,
+              parents: Query<&ChildOf>,
+              floaters: Query<(Entity, &Floater)>,
+              mut windows: Query<&mut NotecardEditorState>,
               mut sl_commands: MessageWriter<SlCommand>,
               mut commands: Commands| {
             if press.button != PointerButton::Primary {
                 return;
             }
+            // Save *this* window's notecard: the button is inside it, so the
+            // window is the floater the press sits under.
+            let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+                return;
+            };
+            let Ok(mut state) = windows.get_mut(window) else {
+                return;
+            };
             let Ok(field) = fields.get(body_field) else {
                 return;
             };
@@ -590,42 +649,63 @@ fn attach_save(
 /// is pending is treated as its result.
 fn report_notecard_save(
     mut events: MessageReader<SlEvent>,
-    mut state: ResMut<NotecardEditorState>,
+    mut windows: Query<&mut NotecardEditorState>,
+    mut inventory: Option<ResMut<crate::inventory::InventoryModel>>,
     mut commands: Commands,
 ) {
-    for event in events.read() {
-        let Some(pending) = state.pending_save else {
-            continue;
-        };
-        match &event.0 {
-            SlSessionEvent::AssetUploaded {
-                new_inventory_item, ..
-            } => {
-                // Prefer the returned item id; a save reports the item it wrote,
-                // so a mismatching upload (a baked texture, another floater's
-                // asset) is not ours. A `None` item id is accepted as ours
-                // rather than leaving the status stuck on "saving".
-                if matches!(new_inventory_item, Some(id) if *id != pending) {
-                    continue;
+    let frame: Vec<&SlEvent> = events.read().collect();
+    if frame.is_empty() {
+        return;
+    }
+    for mut state in &mut windows {
+        for event in &frame {
+            let Some(pending) = state.pending_save else {
+                continue;
+            };
+            match &event.0 {
+                SlSessionEvent::AssetUploaded {
+                    new_asset,
+                    new_inventory_item,
+                } => {
+                    // Prefer the returned item id; a save reports the item it wrote,
+                    // so a mismatching upload (a baked texture, another floater's
+                    // asset) is not ours. A `None` item id is accepted as ours
+                    // rather than leaving the status stuck on "saving".
+                    if matches!(new_inventory_item, Some(id) if *id != pending) {
+                        continue;
+                    }
+                    state.pending_save = None;
+                    // The save wrote a **new** asset and the grid rebound the
+                    // item to it. Point the inventory model at it too, or the
+                    // next open of this notecard fetches the asset it had
+                    // *before* the save — which is what made a saved notecard
+                    // read back blank. The rebind comes from the item this
+                    // window saved rather than from the reply, because a grid
+                    // may answer with the new asset alone (OpenSim's
+                    // `UpdateNotecardAgentInventory` does).
+                    if let NotecardSource::Agent { item_id } = state.source
+                        && let Some(model) = inventory.as_mut()
+                    {
+                        let _folder = model.rebind_asset(item_id, *new_asset);
+                    }
+                    if let Some(status) = state.status {
+                        set_status(&mut commands, status, "notecard-status-saved", DIM_COLOR);
+                    }
                 }
-                state.pending_save = None;
-                if let Some(status) = state.status {
-                    set_status(&mut commands, status, "notecard-status-saved", DIM_COLOR);
+                SlSessionEvent::AssetUploadFailed { reason } => {
+                    warn!("notecard save failed: {reason}");
+                    state.pending_save = None;
+                    if let Some(status) = state.status {
+                        set_status(
+                            &mut commands,
+                            status,
+                            "notecard-status-save-failed",
+                            ERROR_COLOR,
+                        );
+                    }
                 }
+                _other => {}
             }
-            SlSessionEvent::AssetUploadFailed { reason } => {
-                warn!("notecard save failed: {reason}");
-                state.pending_save = None;
-                if let Some(status) = state.status {
-                    set_status(
-                        &mut commands,
-                        status,
-                        "notecard-status-save-failed",
-                        ERROR_COLOR,
-                    );
-                }
-            }
-            _other => {}
         }
     }
 }
@@ -642,10 +722,15 @@ fn report_notecard_save(
 /// draws it inline; the read-only preview shows it as a clickable item at once.
 fn ingest_added_items(
     mut adds: MessageReader<AddEmbeddedItem>,
-    mut state: ResMut<NotecardEditorState>,
+    mut windows: Query<&mut NotecardEditorState>,
     mut fields: Query<&mut EditableText>,
 ) {
     for add in adds.read() {
+        // The drop names the window it landed on, so the item joins *that*
+        // notecard rather than whichever one was opened last.
+        let Ok(mut state) = windows.get_mut(add.editor) else {
+            continue;
+        };
         // Only a modifiable notecard with a live edit field and baseline can
         // take an added item.
         if !state.editable {
@@ -1034,7 +1119,9 @@ fn specimen_notecard(text: &str) -> sl_notecard::Notecard {
 
 #[cfg(test)]
 mod tests {
-    use super::{proto_asset_type_name, proto_inv_type_name, to_embedded_item};
+    use super::{
+        decode_notecard_asset, proto_asset_type_name, proto_inv_type_name, to_embedded_item,
+    };
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{
         AgentKey, AssetType, InventoryFolderKey, InventoryKey, InventoryType, ItemInfo, OwnerKey,
@@ -1109,5 +1196,213 @@ mod tests {
         assert_eq!(survivor.permissions.creator_id.0, Uuid::from_u128(0x60));
         assert_eq!(survivor.asset_id.0, Uuid::from_u128(0x30));
         Ok(())
+    }
+
+    /// A brand-new notecard's asset opens as an **empty** notecard, whichever
+    /// way the grid represents "nothing in it" — Second Life's empty container
+    /// or OpenSim's single `0x00` byte. Anything else malformed still fails, so
+    /// this is a reading of the grid's empty, not a swallowed error.
+    #[test]
+    fn an_empty_asset_reads_as_an_empty_notecard() -> TestResult {
+        for empty in [b"".as_slice(), b"\0".as_slice(), b"\0\0\0\0".as_slice()] {
+            let notecard =
+                decode_notecard_asset(empty).map_err(|error| format!("empty asset: {error}"))?;
+            assert_eq!(notecard.text, "");
+            assert!(notecard.items.is_empty());
+        }
+        // A real notecard still decodes as itself.
+        let encoded = sl_notecard::Notecard {
+            source_version: sl_notecard::NotecardVersion::V2,
+            items: Vec::new(),
+            text: "hello".to_owned(),
+        }
+        .encode();
+        let decoded =
+            decode_notecard_asset(&encoded).map_err(|error| format!("round trip: {error}"))?;
+        assert_eq!(decoded.text, "hello");
+        // And a non-empty, non-notecard blob is still an error.
+        assert_eq!(
+            decode_notecard_asset(b"not a notecard at all").ok(),
+            None,
+            "a malformed asset must still be refused, not read as empty"
+        );
+        Ok(())
+    }
+
+    /// **One window per notecard** (`viewer-keyed-floater-audit`): the open
+    /// path, driven by the message an inventory row's double-click writes.
+    ///
+    /// What the keying buys is not two windows for their own sake — it is that
+    /// opening a second notecard cannot touch the first window's **unsaved
+    /// text**, which the singleton editor tore down on every open.
+    mod instances {
+        use super::super::{NotecardEditorState, notecard_key, open_notecard};
+        use crate::floater::{Floater, FloaterCommand, FloaterOp, FloaterPlugin};
+        use crate::ui::UiRoot;
+        use crate::world_api::{NotecardDropTarget, NotecardSource, OpenNotecard};
+        use bevy::prelude::*;
+        use pretty_assertions::assert_eq;
+        use sl_client_bevy::{Command, InventoryKey, SlCommand, Uuid};
+
+        /// A boxed error so tests can use `?` rather than the disallowed
+        /// `unwrap` / `expect`.
+        type TestError = Box<dyn core::error::Error>;
+
+        /// Two notecards in the agent's own inventory.
+        fn notecards() -> (NotecardSource, NotecardSource) {
+            (
+                NotecardSource::Agent {
+                    item_id: InventoryKey::from(Uuid::from_u128(0xA1)),
+                },
+                NotecardSource::Agent {
+                    item_id: InventoryKey::from(Uuid::from_u128(0xB2)),
+                },
+            )
+        }
+
+        /// An app with the floater manager and this module's open path. The
+        /// systems that fill a window need the asset pipeline and a live
+        /// session; the open is where the singleton bug lived.
+        fn editor_app() -> App {
+            let mut app = App::new();
+            app.add_message::<SlCommand>()
+                .add_message::<OpenNotecard>()
+                .init_resource::<UiScale>()
+                .init_resource::<ButtonInput<KeyCode>>()
+                .add_plugins(FloaterPlugin)
+                .add_systems(Update, open_notecard);
+            let root = app.world_mut().spawn(Node::default()).id();
+            app.insert_resource(UiRoot(root));
+            app.update();
+            app
+        }
+
+        /// Open a notecard the way every caller does — by writing the message.
+        fn open(app: &mut App, source: NotecardSource, asset: u128, editable: bool) {
+            app.world_mut().write_message(OpenNotecard {
+                name: "A notecard".to_owned(),
+                asset_id: Uuid::from_u128(asset),
+                editable,
+                source,
+            });
+            app.update();
+        }
+
+        /// Every live notecard window, as (entity, source) pairs.
+        fn windows(app: &mut App) -> Vec<(Entity, NotecardSource)> {
+            app.world_mut()
+                .query::<(Entity, &NotecardEditorState)>()
+                .iter(app.world())
+                .map(|(entity, state)| (entity, state.source))
+                .collect()
+        }
+
+        /// How many asset fetches the session was asked for.
+        fn fetches(app: &App) -> usize {
+            app.world()
+                .resource::<Messages<SlCommand>>()
+                .iter_current_update_messages()
+                .filter(|command| matches!(command.0, Command::FetchAsset { .. }))
+                .count()
+        }
+
+        /// Two notecards are two windows, each with its own source, its own
+        /// content column and its own drop target.
+        #[test]
+        fn two_notecards_open_two_windows() -> Result<(), TestError> {
+            let (first, second) = notecards();
+            let mut app = editor_app();
+            open(&mut app, first, 0xA1_00, true);
+            open(&mut app, second, 0xB2_00, true);
+
+            let open_windows = windows(&mut app);
+            assert_eq!(
+                open_windows.len(),
+                2,
+                "the second notecard reused the first window"
+            );
+            let sources: Vec<NotecardSource> = open_windows
+                .iter()
+                .map(|(_entity, source)| *source)
+                .collect();
+            assert!(sources.contains(&first) && sources.contains(&second));
+
+            let world = app.world();
+            let contents: Vec<Entity> = open_windows
+                .iter()
+                .filter_map(|(window, _source)| world.get::<NotecardEditorState>(*window))
+                .map(|state| state.content)
+                .collect();
+            assert!(
+                contents.first() != contents.get(1),
+                "both windows build into one content column"
+            );
+            for (window, _source) in &open_windows {
+                assert!(
+                    world.get::<NotecardDropTarget>(*window).is_some(),
+                    "a notecard window is not its own drop target"
+                );
+            }
+            let keys: Vec<Option<&crate::floater::FloaterKey>> = open_windows
+                .iter()
+                .map(|(window, _source)| world.get::<Floater>(*window).and_then(Floater::key))
+                .collect();
+            assert!(keys.contains(&Some(&notecard_key(first))));
+            assert!(keys.contains(&Some(&notecard_key(second))));
+            Ok(())
+        }
+
+        /// **Re-opening a notecard that is already up never re-fetches it.**
+        /// That is the unsaved-edit guarantee: a second open of the same
+        /// notecard must raise its window, not replace the resident's text with
+        /// the grid's copy.
+        #[test]
+        fn reopening_a_notecard_does_not_refetch_it() -> Result<(), TestError> {
+            let (first, _second) = notecards();
+            let mut app = editor_app();
+            open(&mut app, first, 0xA1_00, true);
+            assert_eq!(fetches(&app), 1, "the first open must fetch the asset");
+            assert_eq!(windows(&mut app).len(), 1);
+
+            open(&mut app, first, 0xA1_00, true);
+            assert_eq!(
+                fetches(&app),
+                0,
+                "a re-open re-fetched the asset, which would overwrite unsaved edits"
+            );
+            assert_eq!(
+                windows(&mut app).len(),
+                1,
+                "a re-open spawned a second window"
+            );
+            Ok(())
+        }
+
+        /// Closing one notecard ends that window — its baseline, its field and
+        /// its pending save go with it — and leaves the other open.
+        #[test]
+        fn closing_one_notecard_leaves_the_other() -> Result<(), TestError> {
+            let (first, second) = notecards();
+            let mut app = editor_app();
+            open(&mut app, first, 0xA1_00, true);
+            open(&mut app, second, 0xB2_00, true);
+            let target = windows(&mut app)
+                .into_iter()
+                .find_map(|(window, source)| (source == first).then_some(window))
+                .ok_or("the first notecard has no window")?;
+
+            app.world_mut()
+                .resource_mut::<Messages<FloaterCommand>>()
+                .write(FloaterCommand {
+                    floater: target,
+                    op: FloaterOp::Close,
+                });
+            app.update();
+
+            let left = windows(&mut app);
+            assert_eq!(left.len(), 1);
+            assert_eq!(left.first().map(|(_window, source)| *source), Some(second));
+            Ok(())
+        }
     }
 }

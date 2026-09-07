@@ -259,7 +259,8 @@ pub(crate) const FLOATERS: &[FloaterElement] = &[
     FloaterElement {
         id: "notecard-editor",
         summary: "Notecard: the view toggle over the editable body and the Save button — the \
-                  notecard asset editor.",
+                  notecard asset editor. One window per notecard, so a second one cannot \
+                  discard the first's unsaved text.",
         spec: crate::edit_notecard::notecard_editor_floater_spec,
         content: FloaterContent::Specimen(crate::edit_notecard::spawn_notecard_editor_specimen),
     },
@@ -315,7 +316,8 @@ pub(crate) const FLOATERS: &[FloaterElement] = &[
     FloaterElement {
         id: "script-editor",
         summary: "Script: the LSL editor's body, the Running toggle, Save & Compile, and the \
-                  compile-diagnostic rows.",
+                  compile-diagnostic rows. One window per script, as the reference opens \
+                  several at once.",
         spec: crate::edit_script::script_editor_floater_spec,
         content: FloaterContent::Specimen(crate::edit_script::spawn_script_editor_specimen),
     },
