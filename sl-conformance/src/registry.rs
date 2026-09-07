@@ -25,6 +25,13 @@ pub trait GridTest: Send + Sync {
     fn description(&self) -> &'static str;
 
     /// The grids on which this test is meaningful.
+    ///
+    /// The fake grid is two of them — [`Grid::FakeSl`] and
+    /// [`Grid::FakeOpensim`] — because it can be either live grid where the two
+    /// disagree. Almost every case names only [`Grid::FakeSl`], the flavour this
+    /// workspace targets; a case names the other when what it came to assert is
+    /// OpenSim's behaviour, and **both** when it is a survey whose answer
+    /// differs between them and both answers are worth having.
     fn grids(&self) -> &'static [Grid];
 
     /// How many distinct logged-in avatars the test needs (1, 2, or 3).
@@ -38,20 +45,6 @@ pub trait GridTest: Send + Sync {
     /// reused across a relogin (the `inventory-cache-skip` case).
     fn inventory_cache(&self) -> bool {
         false
-    }
-
-    /// Which live grid the **fake** grid should imitate for a taken object's
-    /// asset, where Second Life and OpenSim disagree about whether a viewer may
-    /// see one at all (`sl_fake_grid::ObjectAssetPolicy`).
-    ///
-    /// Defaults to the fake grid's own default, which is Second Life: a take
-    /// files an item with a nil asset id and nothing serves the body. A case
-    /// overrides it when what it came to assert is the *other* grid's
-    /// behaviour — `asset-round-trip` reads a taken object's asset back, which
-    /// only OpenSim ever lets a viewer do. Ignored on every live grid, which
-    /// behaves however it behaves.
-    fn fake_object_assets(&self) -> sl_fake_grid::ObjectAssetPolicy {
-        sl_fake_grid::ObjectAssetPolicy::default()
     }
 
     /// The `start` location every avatar of this test logs in at, as the wire

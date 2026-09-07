@@ -4,7 +4,7 @@
 //! Most of these tests are *not* part of `cargo test`: they log in to a real
 //! grid (the local OpenSim or Second Life Beta "aditi") and record a
 //! git-stamped result into the committed `records/` tree. The exception is
-//! [`Grid::Fake`] — an [`sl_fake_grid`] started inside the test process — which
+//! [`Grid::FakeSl`] — an [`sl_fake_grid`] started inside the test process — which
 //! the cases listed in [`fake::OFFLINE_CASES`] run against on every `cargo
 //! test`, with no network, no credentials and no record.
 //!

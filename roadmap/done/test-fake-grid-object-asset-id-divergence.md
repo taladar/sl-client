@@ -78,11 +78,20 @@ simulator resolves the body and the viewer never needed it. That was the one
 thing this could plausibly have broken, and it is what
 `a_take_withholds_the_object_asset_and_the_rez_still_works` pins.
 
-The fourth leg of `asset-round-trip` did **not** have to move to a unit test:
-`GridTest::fake_object_assets` lets a case name the flavour it needs, and that
-case asks for `Served` explicitly. `object-asset-format` runs on the default,
-so its fake-grid leg now records `take_step = item-created-nil-asset`, the same
-string it records on aditi.
+The fourth leg of `asset-round-trip` did **not** have to move to a unit test: a
+case can name the flavour it needs, and that case asks for the OpenSim one.
+`object-asset-format` runs on the Second Life one, so its fake-grid leg now
+records `take_step = item-created-nil-asset`, the same string it records on
+aditi.
+
+> **Superseded the same day, in the good way.** This landed as a knob of its
+> own — a `GridTest::fake_object_assets` a case answered — and the review that
+> followed made the right point: which grid the fake one imitates is not one
+> behaviour's business. [[test-fake-grid-imitates-audit]] replaced the knob with
+> `sl_fake_grid::ImitatedGrid` and split the harness's `Grid::Fake` into
+> `Grid::FakeSl` and `Grid::FakeOpensim`, so a case names a *grid* rather than
+> answering a question about object assets. Everything above about what the two
+> sides do is still exactly what happens; only who decides changed.
 
 **What the switch does not govern**, stated here because it is the honest
 residue: the seeded `Fixture Object` (`sl-test-assets`) keeps its asset id and

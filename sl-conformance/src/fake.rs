@@ -19,7 +19,17 @@
 //!   grid-initiated teleport are decisions a region makes, and a fake grid
 //!   simulates no movement to make them with; [`FakeControl`] is the handle a
 //!   case reaches for through [`TestContext::fake`] to make them itself. Only a
-//!   [`Grid::Fake`]-only case may: on a live grid there is nothing to hold.
+//!   fake-grid-only case may: on a live grid there is nothing to hold.
+//!
+//! # Two of them
+//!
+//! The fake grid can be either live grid where the two disagree, so it is two
+//! entries in [`Grid`]: [`Grid::FakeSl`] and [`Grid::FakeOpensim`]. The flavour
+//! is *the grid*, not a setting on the run — [`FakeGridHarness::start`] takes
+//! it, a case declares the flavours it is meaningful on in
+//! [`GridTest::grids`], and [`run_offline_case`] runs the case once per flavour
+//! it declared. A case that behaves the same on both (almost all of them) names
+//! only [`Grid::FakeSl`], which is what this workspace targets.
 //!
 //! [`Credentials`]: sl_repl::Credentials
 
@@ -103,9 +113,11 @@ pub const EAST_REGION: &str = "Fake Region East";
 /// trusting it: a partial run is a failure here.
 ///
 /// The list is asserted against the registry in both directions (each name
-/// resolves and declares [`Grid::Fake`]; no case declares [`Grid::Fake`]
-/// without being listed), so it cannot drift into naming a case that does not
-/// exist or missing one that opted in.
+/// resolves and declares *a* fake grid; no case declares one without being
+/// listed), so it cannot drift into naming a case that does not exist or
+/// missing one that opted in. Which flavours each name runs on is the case's
+/// own [`GridTest::grids`], not this list's business — a case that declares
+/// both is run twice under the one name.
 pub const OFFLINE_CASES: &[&str] = &[
     "login-handshake",
     "keepalive-ping",
@@ -144,7 +156,7 @@ pub const OFFLINE_CASES: &[&str] = &[
 /// The grid-side half of a fake-grid run: the simulator a case may talk to as
 /// well as through.
 ///
-/// Handed to the case body on [`Grid::Fake`] only (see
+/// Handed to the case body on a fake grid only (see
 /// [`TestContext::fake`]). It carries the grid itself — region handles, region
 /// names, the neighbour graph — and the live session handle for the primary
 /// avatar, which is what the handover calls
@@ -197,6 +209,10 @@ impl FakeControl {
 pub struct FakeGridHarness {
     /// The running grid.
     grid: Arc<sl_fake_grid::FakeGrid>,
+    /// Which fake grid this is — the flavour it was started with, carried so
+    /// every session and record it produces is filed under the grid the case
+    /// was actually run against rather than under "fake" in general.
+    flavour: Grid,
     /// The synthesised accounts, each naming the URI the grid bound.
     credentials: Credentials,
     /// Login notices, subscribed before any login, so the grid-side session
@@ -206,22 +222,30 @@ pub struct FakeGridHarness {
 
 impl FakeGridHarness {
     /// Start a grid serving the catalogue region and its eastern neighbour,
-    /// with the three accounts registered.
+    /// with the three accounts registered, **imitating the live grid `grid`
+    /// names** ([`Grid::imitates`]).
     ///
-    /// `test` is the case about to run, because a couple of the grid's policies
-    /// are a case's to choose: which live grid it imitates for a taken object's
-    /// asset ([`GridTest::fake_object_assets`]) is the one so far. The grid is
-    /// started per case, so this costs nothing beyond reading the answer.
+    /// The flavour comes from the grid being run against rather than from a
+    /// question put to the case, which is what makes it a *grid* rather than a
+    /// per-case setting: a case declares `Grid::FakeOpensim` in
+    /// [`GridTest::grids`] the same way it declares `Grid::Aditi`, and the run
+    /// is reported and recorded under that name.
     ///
     /// # Errors
     ///
-    /// Returns [`TestFailure::State`] if the grid cannot bind its sockets, and
-    /// [`TestFailure::Auth`] if the synthesised credentials do not parse (which
-    /// would be a bug in this module, not in the caller's input).
-    pub async fn start(test: &dyn GridTest) -> Result<Self, TestFailure> {
+    /// Returns [`TestFailure::State`] if `grid` is not a fake grid at all or if
+    /// the grid cannot bind its sockets, and [`TestFailure::Auth`] if the
+    /// synthesised credentials do not parse (which would be a bug in this
+    /// module, not in the caller's input).
+    pub async fn start(grid_flavour: Grid) -> Result<Self, TestFailure> {
+        let imitates = grid_flavour.imitates().ok_or_else(|| {
+            TestFailure::State(format!(
+                "{grid_flavour} is a live grid; there is nothing to start"
+            ))
+        })?;
         let mut builder = sl_fake_grid::FakeGridBuilder::new()
             .deterministic(SEED)
-            .object_assets(test.fake_object_assets());
+            .imitates(imitates);
         for (label, first_name, agent_id) in ACCOUNTS {
             let account = sl_fake_grid::AccountConfig::new(first_name, LAST_NAME, PASSWORD)
                 .with_agent_id(AgentKey::from(Uuid::from_u128(agent_id)));
@@ -252,6 +276,7 @@ impl FakeGridHarness {
         let credentials = credentials_for(&grid.login_uri())?;
         Ok(Self {
             grid: Arc::new(grid),
+            flavour: grid_flavour,
             credentials,
             logins: tokio::sync::Mutex::new(logins),
         })
@@ -344,11 +369,11 @@ impl FakeGridHarness {
             let avatar = self.avatar(label)?;
             sessions.push(
                 crate::context::login(
-                    Grid::Fake,
+                    self.flavour,
                     avatar,
                     CHANNEL,
                     clap::crate_version!(),
-                    test.start_location(Grid::Fake),
+                    test.start_location(self.flavour),
                     &state_dir,
                     // Nothing to force: the fake grid rate-limits nothing.
                     false,
@@ -364,7 +389,7 @@ impl FakeGridHarness {
             .next()
             .ok_or_else(|| TestFailure::Assertion("a case needs at least one avatar".to_owned()))?;
         let context = TestContext::new(
-            Grid::Fake,
+            self.flavour,
             primary,
             sessions.next(),
             sessions.next(),
@@ -402,12 +427,48 @@ fn credentials_for(login_uri: &url::Url) -> Result<Credentials, TestFailure> {
     Credentials::from_toml_str(&text).map_err(|error| TestFailure::Auth(error.to_string()))
 }
 
-/// Start a grid, run `test` against it, log every avatar out and shut it down.
+/// Run `test` against **every fake flavour it declares**, each on its own grid.
 ///
 /// The whole of what an offline case needs, and what the `cargo test` harness
 /// calls once per name in [`OFFLINE_CASES`]. Unlike the runner this writes no
 /// record: the assertion *is* the record, and it is re-made on every test run
 /// rather than committed and left to go stale.
+///
+/// A case that names both flavours is run twice, and a failure says which one
+/// failed — that is the point of the pair being two grids rather than one grid
+/// with a setting. A case that names neither is a caller error rather than a
+/// silent no-op: the alternative is a case the suite reports as passing while
+/// running nothing.
+///
+/// # Errors
+///
+/// Returns the first flavour's failure — the case's own [`TestFailure`], the
+/// failure that stopped it from starting (the grid, the login, the account
+/// resolution), or [`TestFailure::Assertion`] naming the reason it recorded
+/// partial — with the grid it happened on named.
+pub async fn run_offline_case(test: &dyn GridTest) -> Result<(), TestFailure> {
+    let flavours: Vec<Grid> = test
+        .grids()
+        .iter()
+        .copied()
+        .filter(|grid| grid.is_fake())
+        .collect();
+    if flavours.is_empty() {
+        return Err(TestFailure::Assertion(format!(
+            "{} declares no fake grid, so running it offline would assert nothing",
+            test.name()
+        )));
+    }
+    for flavour in flavours {
+        run_offline_case_on(test, flavour)
+            .await
+            .map_err(|failure| TestFailure::Assertion(format!("on {flavour}: {failure}")))?;
+    }
+    Ok(())
+}
+
+/// One run of `test` against a freshly started `flavour` of the fake grid: log
+/// every avatar out and shut the grid down afterwards, whatever happened.
 ///
 /// A case that finishes [`Completeness::Partial`] **fails** here, which is the
 /// second membership rule enforced rather than documented: a partial run is a
@@ -421,8 +482,8 @@ fn credentials_for(login_uri: &url::Url) -> Result<Credentials, TestFailure> {
 /// Returns the case's own [`TestFailure`], the failure that stopped it from
 /// starting (the grid, the login, the account resolution), or
 /// [`TestFailure::Assertion`] naming the reason it recorded partial.
-pub async fn run_offline_case(test: &dyn GridTest) -> Result<(), TestFailure> {
-    let harness = FakeGridHarness::start(test).await?;
+async fn run_offline_case_on(test: &dyn GridTest, flavour: Grid) -> Result<(), TestFailure> {
+    let harness = FakeGridHarness::start(flavour).await?;
     let mut context = harness.context(test).await?;
     let outcome =
         crate::isolate::run_isolated(test.run(&mut context), crate::isolate::DEFAULT_CASE_TIMEOUT)
@@ -446,7 +507,6 @@ pub async fn run_offline_case(test: &dyn GridTest) -> Result<(), TestFailure> {
 #[cfg(test)]
 mod tests {
     use super::{ACCOUNTS, OFFLINE_CASES, credentials_for};
-    use crate::grid::Grid;
     use crate::registry::find;
     use pretty_assertions::assert_eq;
 
@@ -475,24 +535,29 @@ mod tests {
     }
 
     /// The offline list and the registry agree: every name resolves, every one
-    /// of them declares the fake grid, and no case declares the fake grid
-    /// without being listed. A list that drifted either way would silently stop
-    /// running a case the pre-commit suite believes it runs.
+    /// of them declares a fake grid, and no case declares a fake grid without
+    /// being listed. A list that drifted either way would silently stop running
+    /// a case the pre-commit suite believes it runs.
+    ///
+    /// *A* fake grid, not a particular one: which flavours a case declares is
+    /// its own business ([`run_offline_case`] runs it once per flavour), and a
+    /// case that moved from one to the other would otherwise vanish from the
+    /// offline suite without a word.
     #[test]
     fn the_offline_list_matches_the_registry() {
         for name in OFFLINE_CASES {
             let test = find(name);
             assert!(test.is_some(), "the offline case {name} is not registered");
             assert!(
-                test.is_some_and(|test| test.grids().contains(&Grid::Fake)),
-                "the offline case {name} does not declare the fake grid"
+                test.is_some_and(|test| test.grids().iter().any(|grid| grid.is_fake())),
+                "the offline case {name} does not declare any fake grid"
             );
         }
         for test in crate::registry::registry() {
             assert_eq!(
-                test.grids().contains(&Grid::Fake),
+                test.grids().iter().any(|grid| grid.is_fake()),
                 OFFLINE_CASES.contains(&test.name()),
-                "{} declares the fake grid but is not in OFFLINE_CASES (or the reverse)",
+                "{} declares a fake grid but is not in OFFLINE_CASES (or the reverse)",
                 test.name()
             );
         }

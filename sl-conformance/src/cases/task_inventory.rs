@@ -132,7 +132,7 @@ impl GridTest for TaskInventory {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi, Grid::Fake]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl]
     }
 
     fn start_location(&self, grid: Grid) -> &'static str {

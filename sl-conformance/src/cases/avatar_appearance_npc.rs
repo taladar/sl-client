@@ -53,7 +53,7 @@ impl GridTest for AvatarAppearanceNpc {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Fake]
+        &[Grid::FakeSl]
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {

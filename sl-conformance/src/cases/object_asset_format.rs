@@ -10,16 +10,19 @@
 //! | --- | --- | --- |
 //! | OpenSim | yes — every object item names one | `<SceneObjectGroup>` XML |
 //! | Second Life | **no** | unobservable |
-//! | fake, a take | **no** by default, Second Life's side | withheld |
-//! | fake, its seeded `Fixture Object` | yes | the Linden text form |
+//! | `FakeSl`, a take | **no**, Second Life's side | withheld |
+//! | `FakeOpensim`, a take | yes | the Linden text form |
+//! | either fake, its seeded `Fixture Object` | yes | the Linden text form |
 //!
-//! The fake grid's row was one row until this case measured the other two.
-//! It now imitates Second Life for what a **take** files away
-//! (`sl_fake_grid::ObjectAssetPolicy`, whose default is `Withheld`), so the
-//! `take_step` metric below reads `item-created-nil-asset` there exactly as it
-//! does on aditi; a case that wants OpenSim's side asks for it
-//! (`asset-round-trip` does). What stays fetchable either way is the grid's own
-//! seeded `Fixture Object`, which is what this case samples offline.
+//! The fake grid's row was one row until this case measured the other two, and
+//! it is now two grids: the fake grid imitates whichever live one it was asked
+//! for (`sl_fake_grid::ImitatedGrid`). **This case declares both**, because it
+//! is a survey of exactly what they disagree about — the `take_step` metric
+//! below reads `item-created-nil-asset` on the Second Life side, matching
+//! aditi, and `item-created-with-asset` on the OpenSim one — so running it on
+//! one flavour alone would leave half the switch unexercised. What stays
+//! fetchable on both is the grid's own seeded `Fixture Object`, which is what
+//! this case samples offline.
 //!
 //! **Second Life does not tell a viewer where an object item's asset lives.**
 //! Eleven of eleven object items in the test account came back with a nil
@@ -85,7 +88,12 @@ impl GridTest for ObjectAssetFormat {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Fake, Grid::Opensim, Grid::Aditi]
+        // **Both** fake flavours, which no other case needs. This is a survey of
+        // exactly the thing the two disagree about, so it answers differently on
+        // each — `take_step` reads `item-created-nil-asset` on the Second Life
+        // side and `item-created-with-asset` on the OpenSim one — and running it
+        // on only one of them would leave half the switch unexercised.
+        &[Grid::FakeSl, Grid::FakeOpensim, Grid::Opensim, Grid::Aditi]
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
@@ -126,8 +134,10 @@ impl GridTest for ObjectAssetFormat {
                 // and takes is its own creation, full-perm to it, so it is the
                 // one object whose asset id the grid has no reason to hide. On
                 // Second Life that one came back nil too, so the class is
-                // simply not fetchable by a viewer — and the fake grid now says
-                // the same by default, which is what `take_step` records here.
+                // simply not fetchable by a viewer — and a fake grid imitating
+                // Second Life now says the same, which is what `take_step`
+                // records here (and the OpenSim-flavoured run records the
+                // opposite, which is why this case declares both).
                 let objects_folder = survey.objects_without_asset.first().map_or_else(
                     || InventoryFolderKey::from(Uuid::nil()),
                     |item| item.folder_id,

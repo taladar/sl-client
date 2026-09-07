@@ -592,12 +592,52 @@ asset id and stays fetchable either way. It is the fake grid's own fixture,
 seeded so `asset-round-trip` has an authored object body to read back, and
 no live grid has an item like it at all.
 
-A conformance case names the flavour it needs with
-`GridTest::fake_object_assets`. `asset-round-trip` asks for `Served`,
-because its fourth leg reads a taken object's asset back and only OpenSim
-ever lets a viewer do that; `object-asset-format` runs on the default, so
-its fake-grid leg records `take_step = item-created-nil-asset` — the same
-string it records on aditi.
+A conformance case names the flavour it needs by naming the *grid*:
+`asset-round-trip` declares `Grid::FakeOpensim`, because its fourth leg
+reads a taken object's asset back and only OpenSim ever lets a viewer do
+that; `object-asset-format` declares both fake grids and is run twice, so
+its Second Life leg records `take_step = item-created-nil-asset` — the same
+string it records on aditi — and its OpenSim leg records
+`item-created-with-asset`.
+
+### Which grid the fake one is
+
+The object asset is one divergence of several, and picking a side per
+behaviour is how the fake grid ended up being nobody in particular: before
+`imitates::ImitatedGrid` a stock grid announced `platform: OpenSim`, kept
+every login field like OpenSim, and withheld a taken object's asset like
+Second Life, all at once. A viewer passing against that has not been tested
+against anything.
+
+So the grid names the live one it is being, once —
+`FakeGridBuilder::imitates(ImitatedGrid::OpenSim)`, default Second Life —
+and every divergent behaviour takes its default from that. The
+per-behaviour setters still win where they are called; the flavour is what
+an unset knob falls back to, not a lock, which is what a test wanting one
+deliberate deviation needs. Each resolves once, in `start`.
+
+Two behaviours follow it today: a taken object's asset, and whether the
+login response is trimmed to the request's `options` list (Second Life
+honours it, OpenSim sends every field regardless).
+
+That second one is small and it immediately earned its keep. Turning it on
+by default broke a fake-grid end-to-end test that expected
+`map-server-url` in the login response — and the test was right to expect
+it while the *client* was wrong: `LoginRequest::new` asked for six options
+and consumed a seventh, so against Second Life the grid's map-tile server
+URL would simply never have arrived. That is the entire point of a fake
+grid that commits to being one real grid.
+
+The divergences the flavour does **not** yet decide are audited in
+`imitates.rs` rather than left to be rediscovered, each with a roadmap item:
+the inventory API (UDP versus AIS3, and how a new item is announced —
+`SimSession` has a sender for neither), server-side bakes (dropping the
+appearance service alone leaves every avatar a silent cloud), the
+`OpenSimExtras` block and the voice backend, and the economy price list.
+One thing is deliberately not flavour-decided and is not a to-do:
+`GridIdentity::platform` stays `OpenSim` either way, because it is what
+Firestorm's grid manager reads to decide whether it will add the grid at
+all, and a grid Firestorm refuses to add tests nothing.
 
 ### The edit surfaces
 

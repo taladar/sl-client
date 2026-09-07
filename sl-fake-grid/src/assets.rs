@@ -42,8 +42,14 @@ use std::sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use sl_proto::InMemoryAssetSource;
 use sl_types::key::InventoryKey;
 
-/// Which live grid the fake one imitates for `AssetType::Object` — the class
-/// where the two disagree about whether a viewer may see an asset at all.
+/// What a take's object asset is worth to a viewer: the `AssetType::Object`
+/// half of [`ImitatedGrid`](crate::ImitatedGrid), the class where the two live
+/// grids disagree about whether a viewer may see an asset at all.
+///
+/// A grid takes its side from the live grid it is imitating
+/// ([`ImitatedGrid::object_assets`](crate::ImitatedGrid::object_assets)); set it
+/// directly only to make a grid that is deliberately one grid about everything
+/// else and the other about this.
 ///
 /// Measured, not assumed. On **Second Life** (aditi, 2026-09-06, the
 /// `object-asset-format` conformance case) a viewer is given no asset id for an
@@ -55,11 +61,10 @@ use sl_types::key::InventoryKey;
 /// `ViewerAsset` serves it as `SceneObjectSerializer` XML.
 ///
 /// Both are real grid behaviour, so the fake grid does both and says which. The
-/// **default is [`Withheld`](Self::Withheld)**, because that is the grid this
-/// workspace targets and because it is the configuration that *fails* a viewer
-/// which has come to rely on opening a taken object's asset — something Second
-/// Life will never let it do. A test that wants the OpenSim side asks for
-/// [`Served`](Self::Served).
+/// **default is [`Withheld`](Self::Withheld)**, because the grid a fake grid
+/// imitates by default is Second Life, and because it is the configuration that
+/// *fails* a viewer which has come to rely on opening a taken object's asset —
+/// something Second Life will never let it do.
 ///
 /// Either way the **rez** works: a taken object comes back into the world in
 /// both configurations, because on Second Life too the simulator resolves the
@@ -147,9 +152,15 @@ mod test {
     use super::*;
 
     /// The default is the grid this workspace targets: Second Life tells a
-    /// viewer nothing about where an object item's asset lives.
+    /// viewer nothing about where an object item's asset lives. Stated as "the
+    /// default *is* what the default grid does" rather than as a literal, so a
+    /// flavour that changed its mind could not leave the two disagreeing.
     #[test]
-    fn the_default_policy_withholds() {
+    fn the_default_policy_is_the_default_grids() {
+        assert_eq!(
+            ObjectAssetPolicy::default(),
+            crate::ImitatedGrid::default().object_assets()
+        );
         assert_eq!(ObjectAssetPolicy::default(), ObjectAssetPolicy::Withheld);
     }
 

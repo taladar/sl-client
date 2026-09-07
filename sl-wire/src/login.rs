@@ -226,10 +226,18 @@ impl LoginRequest {
             // Request the inventory root and folder skeleton so the login
             // response carries the agent's full folder tree, the matching
             // Library ("OpenSim Library" / "Library") roots and skeleton so it
-            // carries the shared read-only library tree, and the buddy list so
-            // it carries the agent's friends and their rights. (`home`,
-            // `look_at`, `agent_access[_max]`, and `max-agent-groups` are
-            // standard top-level fields and need no option.)
+            // carries the shared read-only library tree, the buddy list so
+            // it carries the agent's friends and their rights, and the grid's
+            // map-tile server so the world map has somewhere to fetch from.
+            // (`home`, `look_at`, `agent_access[_max]`, and `max-agent-groups`
+            // are standard top-level fields and need no option.)
+            //
+            // **Ask for everything read back.** A grid that honours this list
+            // — Second Life does; OpenSim sends every field whatever was asked
+            // for — simply omits what is not named here, so a field consumed
+            // but unrequested is `None` on the one grid this workspace targets
+            // and present on the one it tests against. `map-server-url` was
+            // exactly that until a fake grid imitating Second Life caught it.
             options: vec![
                 "inventory-root".to_owned(),
                 "inventory-skeleton".to_owned(),
@@ -237,6 +245,7 @@ impl LoginRequest {
                 "inventory-lib-owner".to_owned(),
                 "inventory-skel-lib".to_owned(),
                 "buddy-list".to_owned(),
+                "map-server-url".to_owned(),
             ],
         }
     }

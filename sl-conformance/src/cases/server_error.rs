@@ -106,7 +106,7 @@ impl GridTest for ServerErrorCase {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Fake, Grid::Opensim, Grid::Aditi]
+        &[Grid::FakeSl, Grid::Opensim, Grid::Aditi]
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {

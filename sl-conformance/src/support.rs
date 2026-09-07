@@ -67,10 +67,18 @@ pub const fn is_aditi(grid: Grid) -> bool {
     matches!(grid, Grid::Aditi)
 }
 
-/// Whether the test is running against the in-process fake grid.
+/// Whether the test is running against the in-process fake grid, **whichever
+/// live grid that one is imitating**.
+///
+/// Nearly every use of this is asking "is this a grid whose content and
+/// policies this workspace wrote", which is true of both flavours. A case that
+/// really does mean one of them compares against [`Grid::FakeSl`] or
+/// [`Grid::FakeOpensim`] itself — and if it is doing that to decide *what to
+/// assert*, it should be declaring the flavour it needs in
+/// [`GridTest::grids`](crate::registry::GridTest::grids) instead.
 #[must_use]
 pub const fn is_fake(grid: Grid) -> bool {
-    matches!(grid, Grid::Fake)
+    grid.is_fake()
 }
 
 /// Whether the region's contents are something this workspace declares, so a
@@ -516,10 +524,10 @@ mod tests {
         assert!(!is_aditi(Grid::Opensim));
         assert!(is_aditi(Grid::Aditi));
         assert!(!is_opensim(Grid::Aditi));
-        assert!(is_fake(Grid::Fake));
+        assert!(is_fake(Grid::FakeSl));
         assert!(!is_fake(Grid::Opensim));
         assert!(content_is_ours(Grid::Opensim));
-        assert!(content_is_ours(Grid::Fake));
+        assert!(content_is_ours(Grid::FakeSl));
         assert!(!content_is_ours(Grid::Aditi));
     }
 

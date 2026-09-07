@@ -29,6 +29,7 @@ use crate::assets::{GridAssets, ObjectAssetPolicy};
 use crate::driver::{SharedSim, SimState, new_shared_sim, run_timer, run_udp_pump};
 use crate::economy_policy::{EconomyConfig, EconomyEvent};
 use crate::error::Error;
+use crate::imitates::ImitatedGrid;
 use crate::map_tiles::MapTileStore;
 use crate::neighbours::NeighbourPolicy;
 use crate::scenario::Scenario;
@@ -974,8 +975,6 @@ pub struct FakeGridBuilder {
     scenario: Scenario,
     /// The login policy gates.
     gates: LoginGates,
-    /// Whether login responses honour the request's `options` list.
-    honor_options: bool,
     /// The `EventQueueGet` hold before the 502 re-poll answer.
     eq_hold: Duration,
     /// An override for the handover arrival budget (see the builder method).
@@ -988,8 +987,15 @@ pub struct FakeGridBuilder {
     economy: EconomyConfig,
     /// How every session answers the deprecated UDP inventory fetch.
     legacy_udp_inventory: LegacyUdpInventory,
-    /// Which live grid this one imitates for a taken object's asset.
-    object_assets: ObjectAssetPolicy,
+    /// The live grid this one imitates, which every knob below that is `None`
+    /// takes its answer from ([`ImitatedGrid`]).
+    imitates: ImitatedGrid,
+    /// What a take's object asset is worth to a viewer, or `None` to follow
+    /// [`imitates`](Self::imitates).
+    object_assets: Option<ObjectAssetPolicy>,
+    /// Whether the login response is trimmed to the request's `options`, or
+    /// `None` to follow [`imitates`](Self::imitates).
+    honor_options: Option<bool>,
     /// Builder-registered map tiles.
     map_tiles: MapTileStore,
     /// The identifier source (random unless seeded).
@@ -1006,7 +1012,12 @@ impl std::fmt::Debug for FakeGridBuilder {
             .field("regions", &self.regions)
             .field("scenario", &self.scenario)
             .field("gates", &self.gates)
+            .field("imitates", &self.imitates)
+            // The derived knobs print as `None` until something overrides one,
+            // which is what to look at first when a grid behaves like the other
+            // one: an override outranks the flavour above.
             .field("honor_options", &self.honor_options)
+            .field("object_assets", &self.object_assets)
             .field("eq_hold", &self.eq_hold)
             .field("handover_timeout", &self.handover_timeout)
             .field("http_port", &self.http_port)
@@ -1049,7 +1060,8 @@ impl FakeGridBuilder {
     }
 
     /// A builder with no accounts, no regions, the stock scenario, no login
-    /// gates, and a 30 s event-queue hold on an ephemeral port.
+    /// gates, and a 30 s event-queue hold on an ephemeral port — imitating
+    /// [`ImitatedGrid`]'s default, which is Second Life.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -1059,14 +1071,15 @@ impl FakeGridBuilder {
             minter: IdMinter::default(),
             clock: system_clock(),
             gates: LoginGates::default(),
-            honor_options: false,
             eq_hold: Duration::from_secs(30),
             handover_timeout: None,
             http_port: 0,
             identity: GridIdentity::default(),
             economy: EconomyConfig::default(),
             legacy_udp_inventory: LegacyUdpInventory::default(),
-            object_assets: ObjectAssetPolicy::default(),
+            imitates: ImitatedGrid::default(),
+            object_assets: None,
+            honor_options: None,
             map_tiles: MapTileStore::default(),
         }
     }
@@ -1100,11 +1113,26 @@ impl FakeGridBuilder {
         self
     }
 
-    /// Makes login responses honour the request's `options` list
-    /// (SL behaviour; the default keeps every field like OpenSim).
+    /// Sets the live grid this one imitates where the two disagree
+    /// ([`ImitatedGrid`], default Second Life).
+    ///
+    /// This is the setting to reach for: every divergent behaviour takes its
+    /// default from it, so a grid is one grid rather than a mixture. The
+    /// per-behaviour setters below still win where they are called — the
+    /// flavour is what an unset knob falls back to, not a lock — which is what
+    /// a test wanting one deliberate deviation needs.
+    #[must_use]
+    pub const fn imitates(mut self, grid: ImitatedGrid) -> Self {
+        self.imitates = grid;
+        self
+    }
+
+    /// Overrides whether login responses are trimmed to the request's `options`
+    /// list, which otherwise follows [`imitates`](Self::imitates): Second Life
+    /// honours the list, OpenSim sends every field whatever was asked for.
     #[must_use]
     pub const fn honor_options(mut self, honor: bool) -> Self {
-        self.honor_options = honor;
+        self.honor_options = Some(honor);
         self
     }
 
@@ -1160,17 +1188,14 @@ impl FakeGridBuilder {
         self
     }
 
-    /// Sets which live grid this one imitates for a taken object's asset
-    /// (default: [`ObjectAssetPolicy::Withheld`], which is Second Life).
-    ///
-    /// The default is the strict one: an object a resident takes is filed under
-    /// a **nil** asset id and its body is unfetchable, exactly as Second Life
-    /// leaves a viewer. Ask for [`ObjectAssetPolicy::Served`] to get OpenSim's
-    /// side of the divergence, where the item names the body and the grid serves
-    /// it. Rezzing the item back into the world works either way.
+    /// Overrides what a take's object asset is worth to a viewer, which
+    /// otherwise follows [`imitates`](Self::imitates): Second Life files the
+    /// item under a **nil** asset id and leaves the body unfetchable, OpenSim
+    /// names a minted id and serves the body under it. Rezzing the item back
+    /// into the world works either way.
     #[must_use]
     pub const fn object_assets(mut self, policy: ObjectAssetPolicy) -> Self {
-        self.object_assets = policy;
+        self.object_assets = Some(policy);
         self
     }
 
@@ -1269,10 +1294,16 @@ impl FakeGridBuilder {
             estate_owner,
             regions,
             gates: self.gates,
-            honor_options: self.honor_options,
+            // Each derived knob resolves here, once: an explicit setter wins,
+            // and anything left unset is whatever the grid being imitated does.
+            honor_options: self
+                .honor_options
+                .unwrap_or_else(|| self.imitates.honors_login_options()),
             minter: minter.clone(),
             assets,
-            object_assets: self.object_assets,
+            object_assets: self
+                .object_assets
+                .unwrap_or_else(|| self.imitates.object_assets()),
             clock: self.clock,
             eq_hold: self.eq_hold,
             handover_timeout: self.handover_timeout,

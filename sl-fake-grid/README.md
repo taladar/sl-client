@@ -128,6 +128,27 @@ at).
 scenario and prints, once the grid answers `get_grid_info`, the login URI
 as an IPv4 literal plus the `--grid` argument Firestorm wants.
 
+## Which grid this one is
+
+The fake grid exists to fail a viewer the way a real grid would, and there are
+two real grids that do not agree. Where they differ one of them has to be
+picked — and picking per behaviour produces a grid that is nobody: a stock fake
+grid used to announce `platform: OpenSim`, keep every login field like OpenSim,
+and withhold a taken object's asset like Second Life, all at once.
+
+So the grid names the live one it is being, once —
+`FakeGridBuilder::imitates(ImitatedGrid::OpenSim)`, defaulting to Second Life,
+the grid this workspace targets — and every divergent behaviour takes its
+default from that. A per-behaviour setter still wins where it is called: the
+flavour is what an unset knob falls back to, not a lock.
+
+Two behaviours follow it today: a taken object's asset (below) and whether the
+login response is trimmed to the request's `options` list (Second Life honours
+it, OpenSim sends every field regardless). The divergences it does **not** yet
+decide — the inventory API, server bakes, `OpenSimExtras`, voice, the economy —
+are audited in `imitates.rs` with a roadmap item each, rather than left to be
+rediscovered.
+
 ## A taken object's asset
 
 The two live grids disagree about `AssetType::Object`, so the fake grid says
@@ -140,13 +161,13 @@ the "no asset id unless you fully own it" rule, it is the class. OpenSim is the
 opposite: every object item names an asset and `ViewerAsset` serves it as
 `SceneObjectSerializer` XML.
 
-`assets::ObjectAssetPolicy` picks a side, and the **default is Second Life**
-(`Withheld`): an object a resident takes is filed under a nil asset id and its
-body goes into a store no capability reads. That is deliberately the strict
-configuration — a viewer that has come to rely on opening a taken object's
-asset fails against it, which is what the fake grid is for.
-`FakeGridBuilder::object_assets(ObjectAssetPolicy::Served)` asks for OpenSim's
-side instead, where the item names the body and the grid serves it.
+`assets::ObjectAssetPolicy` picks a side, and it follows the grid this one is
+imitating (see below), so the **default is Second Life** (`Withheld`): an object
+a resident takes is filed under a nil asset id and its body goes into a store no
+capability reads. That is deliberately the strict configuration — a viewer that
+has come to rely on opening a taken object's asset fails against it, which is
+what the fake grid is for. A grid imitating OpenSim serves it instead, where the
+item names the body and the grid hands it over.
 
 Rezzing the item back into the world works under **both**: on Second Life too
 the simulator resolves the body itself, and the viewer never needs to see it.

@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 308 |
+| ready | 313 |
 | blocked | 55 |
 | in-progress | 18 |
 | bugs | 59 |
-| done | 1001 |
+| done | 1002 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1580** |
+| **total** | **1586** |
 
 ## ideas (100)
 
@@ -237,7 +237,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (308)
+## ready (313)
 
 ### protocol
 
@@ -599,6 +599,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-login-screen`](ready/viewer-login-screen.md) — Login screen — grid
   select, saved credentials, MFA (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-login-voice-config-unread`](ready/viewer-login-voice-config-unread.md)
+  — The login response's voice-config is decoded and read by nobody
 - [`viewer-lookat-faithful`](ready/viewer-lookat-faithful.md) — Faithful look-at
   (LLHUDEffectLookAt) (blocked by `viewer-camera-third-person-orbit` (done))
 - [`viewer-lsl-editor-widget`](ready/viewer-lsl-editor-widget.md) — LSL editor
@@ -947,6 +949,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
 - [`test-fake-grid-builtin-sounds`](ready/test-fake-grid-builtin-sounds.md) —
   The built-in UI sounds the viewer plays on arrival 404
+- [`test-fake-grid-imitates-economy`](ready/test-fake-grid-imitates-economy.md)
+  — The fake grid's money is a stock OpenSim region's on either flavour
+- [`test-fake-grid-imitates-inventory-api`](ready/test-fake-grid-imitates-inventory-api.md)
+  — The fake grid is OpenSim about inventory whichever grid it says it is
+- [`test-fake-grid-imitates-server-bakes`](ready/test-fake-grid-imitates-server-bakes.md)
+  — The fake grid runs a bake service on a grid that says it is OpenSim
+- [`test-fake-grid-imitates-simulator-features`](ready/test-fake-grid-imitates-simulator-features.md)
+  — A grid claiming to be Second Life still introduces itself as OpenSim
 - [`test-fake-grid-login-matrix-and-timeouts`](ready/test-fake-grid-login-matrix-and-timeouts.md)
   — The login refusals and handover timeouts nothing tests
 - [`test-fake-grid-object-sounds`](ready/test-fake-grid-object-sounds.md) — The
@@ -1320,7 +1330,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1001)
+## done (1002)
 
 ### protocol
 
@@ -3207,6 +3217,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   viewer can edit nothing on the fake grid
 - [`test-fake-grid-fixed-port-scenario`](done/test-fake-grid-fixed-port-scenario.md)
   — Named scenarios and a fixed-port launcher for the fake grid
+- [`test-fake-grid-imitates-audit`](done/test-fake-grid-imitates-audit.md) — The
+  fake grid was nobody in particular
 - [`test-fake-grid-neighbours-crossing`](done/test-fake-grid-neighbours-crossing.md)
   — Neighbour child agents and a scripted region crossing (blocked by
   `test-fake-grid-npc-avatars` (done))

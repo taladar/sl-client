@@ -62,12 +62,15 @@ mod test {
     async fn xml_rpc_login_succeeds_and_bad_password_fails() -> Result<(), TestError> {
         let grid = start_grid().await?;
 
-        let text = post_login(
-            &grid,
-            "text/xml",
-            build_login_request(&login_request("password")),
-        )
-        .await?;
+        // Asking for `voice-config` explicitly, because the stock grid imitates
+        // Second Life and Second Life sends only what the request's `options`
+        // named. `LoginRequest::new` does not ask for it -- nothing in this
+        // workspace reads it yet, and asking for a field nothing reads would be
+        // the opposite mistake -- so a test that wants to watch the grid
+        // advertise voice has to ask the way a viewer wanting voice would.
+        let mut request = login_request("password");
+        request.options.push("voice-config".to_owned());
+        let text = post_login(&grid, "text/xml", build_login_request(&request)).await?;
         let LoginResponse::Success(success) = parse_login_response(&text)? else {
             return Err("expected a successful login".into());
         };

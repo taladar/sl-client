@@ -59,7 +59,7 @@ impl GridTest for RegionCrossing {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Fake]
+        &[Grid::FakeSl]
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {

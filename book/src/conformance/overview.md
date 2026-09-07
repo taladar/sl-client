@@ -21,7 +21,7 @@ against one grid, when you want to check that feature on that grid.
 Not every case needs a grid somebody stood up. A case that asserts protocol
 *shape* — a handshake, a ping, a throttle, a parcel record, the world map, a
 region crossing — needs only fixtures the workspace already ships, and
-`Grid::Fake` gives it those: an `sl-fake-grid` started inside the test process
+`Grid::FakeSl` gives it those: an `sl-fake-grid` started inside the test process
 on ephemeral ports, serving the same fixture catalogue the viewer's render
 harness photographs.
 

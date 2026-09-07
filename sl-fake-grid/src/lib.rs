@@ -13,6 +13,7 @@ pub mod estate;
 pub mod fixtures;
 mod http_answer;
 mod http_service;
+pub mod imitates;
 mod login_endpoint;
 mod map_tiles;
 pub mod marker;
@@ -40,6 +41,7 @@ pub use fixtures::{
     CatalogueEntry, FaceStyle, Landmark, NamedScenario, NpcAppearance, NpcBake, NpcFixture,
     PrimFixture, RegionFixture, SculptKind, catalogue, linkset,
 };
+pub use imitates::ImitatedGrid;
 pub use map_tiles::STOCK_TILE_JPEG;
 pub use marker::{
     MARKER_METHOD, NEIGHBOUR_MARKER_PREFIX, marker, marker_name, neighbour_marker,
