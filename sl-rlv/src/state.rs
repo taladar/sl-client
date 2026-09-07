@@ -589,6 +589,18 @@ impl RlvState {
         core::mem::take(&mut self.pending)
     }
 
+    /// Whether anything is waiting in [`take_notifications`](Self::take_notifications).
+    ///
+    /// A consumer that drains the queue on a fixed tick asks this first, so the
+    /// common case — nobody is listening, so nothing is ever queued — costs it
+    /// a read rather than the mutable borrow taking would need. In a Bevy
+    /// viewer that borrow is not free: it is what tells every other reader of
+    /// the state that something changed.
+    #[must_use]
+    pub const fn has_notifications(&self) -> bool {
+        !self.pending.is_empty()
+    }
+
     /// Report an added or lifted restriction to the `@notify` subscribers.
     ///
     /// Nobody listening is the common case and this sits on the path of every
@@ -1265,33 +1277,12 @@ impl RlvState {
     /// command that is not a query, both [`RlvOutcome::FailedParam`].
     ///
     /// ```
-    /// # use sl_rlv::{parse_chat_line, RlvOutcome, RlvState};
-    /// # use sl_rlv::{RlvAttachmentPoint, RlvFolderWear, RlvPathTarget, RlvQuerySource, RlvWearableSlot};
+    /// # use sl_rlv::{parse_chat_line, RlvNoFacts, RlvOutcome, RlvState};
     /// # use uuid::Uuid;
-    /// # struct Bare;
-    /// # impl RlvQuerySource for Bare {
-    /// #     fn agent(&self) -> Uuid { Uuid::nil() }
-    /// #     fn attachment_count(&self, _: RlvAttachmentPoint) -> u32 { 0 }
-    /// #     fn can_attach(&self, _: RlvAttachmentPoint) -> bool { true }
-    /// #     fn can_detach(&self, _: RlvAttachmentPoint, _: Option<Uuid>) -> bool { false }
-    /// #     fn wearable_count(&self, _: RlvWearableSlot) -> u32 { 0 }
-    /// #     fn can_wear(&self, _: RlvWearableSlot) -> bool { true }
-    /// #     fn can_remove(&self, _: RlvWearableSlot, _: Option<Uuid>) -> bool { false }
-    /// #     fn hide_locked_attachments(&self) -> bool { false }
-    /// #     fn hide_locked_layers(&self) -> bool { false }
-    /// #     fn sit_target(&self) -> Option<Uuid> { None }
-    /// #     fn active_group(&self) -> Option<String> { None }
-    /// #     fn hover_height(&self) -> Option<f32> { Some(0.0) }
-    /// #     fn camera_avatar_distance(&self) -> Option<f32> { Some(0.0) }
-    /// #     fn camera_field_of_view(&self) -> Option<f32> { Some(1.0) }
-    /// #     fn has_shared_root(&self) -> bool { false }
-    /// #     fn shared_folder_children(&self, _: &str) -> Option<Vec<String>> { None }
-    /// #     fn shared_folder_wear(&self, _: &str) -> Option<RlvFolderWear> { None }
-    /// #     fn find_shared_folders(&self, _: &str) -> Vec<String> { Vec::new() }
-    /// #     fn shared_paths_of(&self, _: RlvPathTarget, _: Uuid) -> Vec<String> { Vec::new() }
-    /// # }
     /// # fn main() -> Result<(), Box<dyn core::error::Error>> {
-    /// # let source = Bare;
+    /// // `@getstatus` reads nothing outside the state machine, so the
+    /// // factless source answers it in full.
+    /// let source = RlvNoFacts::new(Uuid::nil());
     /// let collar = Uuid::from_u128(1);
     /// let mut state = RlvState::new();
     /// let fly = parse_chat_line("@fly=n").ok_or("not rlv")?;

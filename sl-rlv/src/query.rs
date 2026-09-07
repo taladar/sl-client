@@ -674,6 +674,146 @@ impl RlvQuery {
             _ => Err(RlvOutcome::FailedParam),
         }
     }
+
+    /// Whether answering this query reads a fact only the viewer knows, so an
+    /// [`RlvQuerySource`] that does not have it would answer *wrongly* rather
+    /// than not at all.
+    ///
+    /// The split is what lets a consumer whose viewer facts are not wired up
+    /// yet still answer the half of the language that needs none — the
+    /// `@version` handshake every RLV device opens with, `@getstatus`,
+    /// `@getcommand`, and the `@getcam_*` limits, all of which come out of the
+    /// state machine itself. The other half stays **silent**, because a
+    /// `@getattach` answered all-zeros for a fully dressed avatar is worse for
+    /// the script than no answer at all: it is a lie the script will act on.
+    ///
+    /// A source that *does* know everything simply never asks this.
+    ///
+    /// ```
+    /// # use sl_rlv::{RlvCommand, RlvQuery};
+    /// # fn main() -> Result<(), Box<dyn core::error::Error>> {
+    /// let version = RlvQuery::classify(&RlvCommand::parse_field("version=2222")?)
+    ///     .map_err(|outcome| format!("{outcome:?}"))?;
+    /// assert!(!version.needs_source());
+    ///
+    /// let attach = RlvQuery::classify(&RlvCommand::parse_field("getattach=2222")?)
+    ///     .map_err(|outcome| format!("{outcome:?}"))?;
+    /// assert!(attach.needs_source());
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[must_use]
+    pub const fn needs_source(&self) -> bool {
+        match *self {
+            Self::Version { .. }
+            | Self::VersionNum { .. }
+            | Self::GetStatus { .. }
+            | Self::GetCommand { .. }
+            | Self::GetCamLimit { .. }
+            | Self::GetCamTextures => false,
+            Self::GetOutfit { .. }
+            | Self::GetOutfitNames { .. }
+            | Self::GetAttach { .. }
+            | Self::GetAttachNames { .. }
+            | Self::GetInv { .. }
+            | Self::GetInvWorn { .. }
+            | Self::FindFolder { .. }
+            | Self::GetPath { .. }
+            | Self::GetSitId
+            | Self::GetGroup
+            | Self::GetHeightOffset
+            | Self::GetCamAvdist
+            | Self::GetCamFov => true,
+        }
+    }
+}
+
+/// An [`RlvQuerySource`] that knows the agent's own id and **no viewer facts at
+/// all** — the source a consumer passes while its appearance, inventory and
+/// camera mirrors are not wired up yet.
+///
+/// It is only ever correct together with [`RlvQuery::needs_source`]: ask that
+/// first, answer the queries that say `false`, and stay silent on the rest.
+/// Handing this to a fact-reading query would answer a naked avatar and an
+/// empty inventory, which is the one thing worse than not answering.
+///
+/// It is also what the crate's own examples are written against, since a
+/// hand-rolled twenty-method stub in every doctest says nothing about the
+/// example.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RlvNoFacts {
+    /// The agent's own id, which is the one thing this source does know: it is
+    /// what decides whether a query is a loopback (and so may answer on channel
+    /// `0`).
+    agent: Uuid,
+}
+
+impl RlvNoFacts {
+    /// A factless source for the agent with id `agent`.
+    #[must_use]
+    pub const fn new(agent: Uuid) -> Self {
+        Self { agent }
+    }
+}
+
+impl RlvQuerySource for RlvNoFacts {
+    fn agent(&self) -> Uuid {
+        self.agent
+    }
+    fn attachment_count(&self, _point: RlvAttachmentPoint) -> u32 {
+        0
+    }
+    fn can_attach(&self, _point: RlvAttachmentPoint) -> bool {
+        false
+    }
+    fn can_detach(&self, _point: RlvAttachmentPoint, _except: Option<Uuid>) -> bool {
+        false
+    }
+    fn wearable_count(&self, _slot: RlvWearableSlot) -> u32 {
+        0
+    }
+    fn can_wear(&self, _slot: RlvWearableSlot) -> bool {
+        false
+    }
+    fn can_remove(&self, _slot: RlvWearableSlot, _except: Option<Uuid>) -> bool {
+        false
+    }
+    fn hide_locked_attachments(&self) -> bool {
+        false
+    }
+    fn hide_locked_layers(&self) -> bool {
+        false
+    }
+    fn sit_target(&self) -> Option<Uuid> {
+        None
+    }
+    fn active_group(&self) -> Option<String> {
+        None
+    }
+    fn hover_height(&self) -> Option<f32> {
+        None
+    }
+    fn camera_avatar_distance(&self) -> Option<f32> {
+        None
+    }
+    fn camera_field_of_view(&self) -> Option<f32> {
+        None
+    }
+    fn has_shared_root(&self) -> bool {
+        false
+    }
+    fn shared_folder_children(&self, _path: &str) -> Option<Vec<String>> {
+        None
+    }
+    fn shared_folder_wear(&self, _path: &str) -> Option<RlvFolderWear> {
+        None
+    }
+    fn find_shared_folders(&self, _criteria: &str) -> Vec<String> {
+        Vec::new()
+    }
+    fn shared_paths_of(&self, _target: RlvPathTarget, _issuer: Uuid) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 /// A query that takes no option at all, and fails if given one.
@@ -1344,7 +1484,8 @@ mod tests {
         RlvVersionNum, RlvWearableSlot, is_valid_reply_channel, split_chat, truncate_chat,
     };
     use crate::{
-        RlvCommand, RlvModifier, RlvOutcome, RlvParamKind, RlvState, parse_chat_line, version_reply,
+        RlvCommand, RlvModifier, RlvNoFacts, RlvOutcome, RlvParamKind, RlvState, parse_chat_line,
+        version_reply,
     };
     use uuid::Uuid;
 
@@ -2088,6 +2229,81 @@ mod tests {
                 // The whole line arrives lower-cased, paths and all.
                 path: "clothes/boots".to_owned()
             })
+        );
+        Ok(())
+    }
+    /// Every query is classified as needing viewer facts or not, and the split
+    /// is the one the intake relies on: the handshake and the state-machine
+    /// reads answer without a source, everything that reads the avatar or the
+    /// inventory does not.
+    #[test]
+    fn only_the_fact_reading_queries_need_a_source() -> Result<(), TestError> {
+        let needs = |field: &str| -> Result<bool, TestError> {
+            let command = RlvCommand::parse_field(field)?;
+            Ok(RlvQuery::classify(&command)
+                .map_err(|outcome| format!("{outcome:?}"))?
+                .needs_source())
+        };
+        for stateless in [
+            "version=2222",
+            "versionnew=2222",
+            "versionnum=2222",
+            "getstatus=2222",
+            "getstatusall=2222",
+            "getcommand=2222",
+            "getcam_fovmin=2222",
+            "getcam_textures=2222",
+        ] {
+            assert!(!needs(stateless)?, "{stateless} should answer from state");
+        }
+        for from_viewer in [
+            "getoutfit=2222",
+            "getattach=2222",
+            "getattachnames=2222",
+            "getinv=2222",
+            "getinvworn=2222",
+            "findfolder:boots=2222",
+            "getpath=2222",
+            "getsitid=2222",
+            "getgroup=2222",
+            "getheightoffset=2222",
+            "getcam_avdist=2222",
+            "getcam_fov=2222",
+        ] {
+            assert!(needs(from_viewer)?, "{from_viewer} reads the viewer");
+        }
+        Ok(())
+    }
+
+    /// The factless source answers the whole handshake, which is what a device
+    /// asks before it tries anything else.
+    #[test]
+    fn the_factless_source_answers_the_handshake() -> Result<(), TestError> {
+        let state = RlvState::new();
+        let source = RlvNoFacts::new(AGENT);
+        let command = RlvCommand::parse_field("version=2222")?;
+        let answer = state.answer(Uuid::from_u128(1), &command, &source);
+        assert_eq!(answer.outcome, RlvOutcome::Success);
+        assert_eq!(
+            answer.reply.ok_or("no reply")?.message,
+            version_reply(true, false)
+        );
+        Ok(())
+    }
+
+    /// It still knows the agent, so a loopback query may answer on channel `0`
+    /// and an object's may not — the one fact it is allowed to have.
+    #[test]
+    fn the_factless_source_still_knows_the_agent() -> Result<(), TestError> {
+        let state = RlvState::new();
+        let source = RlvNoFacts::new(AGENT);
+        let command = RlvCommand::parse_field("version=0")?;
+        assert!(state.answer(AGENT, &command, &source).reply.is_some());
+        assert!(
+            state
+                .answer(Uuid::from_u128(1), &command, &source)
+                .reply
+                .is_none()
         );
         Ok(())
     }

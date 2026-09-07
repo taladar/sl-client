@@ -2997,6 +2997,21 @@ notification-experience-event-attachment = An attachment was allowed to [EventTy
 notification-rl-va-change-strings = Changes won't take effect until after you restart the viewer.
 notification-rl-va-list-requested = [NAME_SLURL] has requested to be sent a list of your currently active RLV restrictions.
 
+## The two RLV toggle warnings have no reference counterpart: there the
+## setting needs a restart, so nothing has happened yet to warn about.
+## This viewer applies the switch at once, and both directions leave the
+## user in a state worth explaining.
+
+notification-rl-va-toggled-on = RLV is now on, and takes effect immediately — no restart needed.
+    Devices you were already wearing may not notice. A device asks the viewer whether it supports RLV
+    when it is attached, and anything that asked while RLV was off was told no and will not ask again.
+    Detach and re-attach anything that does not respond.
+notification-rl-va-toggled-off = RLV is now off, and takes effect immediately — no restart needed.
+    Every restriction an object had placed on you has been released. Commands from objects you are
+    wearing are no longer obeyed either, and will appear in your chat as ordinary text from those
+    objects instead of being hidden. A device will not restrain you again until you turn RLV back on
+    and re-attach it.
+
 ## The reference `ignoretext` lines — one per suppressible / checkbox-only
 ## notification, keyed notification-ignoretext-<kebab-of-name>. The alerts
 ## tab's row labels; for a CheckboxOnly template, the checkbox label.

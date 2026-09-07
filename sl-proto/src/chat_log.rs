@@ -18,7 +18,7 @@
 //! with a Firestorm install.
 
 use crate::session::SessionMessage;
-use crate::types::ImDialog;
+use crate::types::{ChatType, ImDialog};
 use sl_types::key::AgentKey;
 use std::collections::BTreeSet;
 
@@ -232,6 +232,13 @@ impl Default for InventoryCacheConfig {
 /// **seconds on**, 24-hour, the [`LOG_RECALL_SIZE`] window, the 30-day index
 /// retention).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "these are four independent user preferences, each mirroring one \
+              Firestorm per-account toggle a runtime reads on its own — not the \
+              state of anything, so there is no machine to fold them into and \
+              pairing them into enums would only rename them"
+)]
 pub struct ChatLogConfig {
     /// The text-chat types whose messages are written to a transcript. Empty means
     /// the feature is fully off.
@@ -262,6 +269,11 @@ pub struct ChatLogConfig {
     /// (Firestorm `FSConversationLogLifetime`); defaults to
     /// [`CONVERSATION_LOG_RETENTION_DAYS`].
     pub conversation_log_retention_days: u32,
+    /// Keep an object's RLV command lines out of the nearby transcript
+    /// ([`swallows_rlv_command`](Self::swallows_rlv_command)); set by the viewer
+    /// from its `RestrainedLove` master switch, and off by default because a
+    /// runtime that does not obey RLV has no reason to hide the attempt.
+    pub swallow_rlv_commands: bool,
 }
 
 impl Default for ChatLogConfig {
@@ -274,6 +286,7 @@ impl Default for ChatLogConfig {
             recall_window: LOG_RECALL_SIZE,
             conversation_log: false,
             conversation_log_retention_days: CONVERSATION_LOG_RETENTION_DAYS,
+            swallow_rlv_commands: false,
         }
     }
 }
@@ -290,6 +303,24 @@ impl ChatLogConfig {
     #[must_use]
     pub fn logs_nearby(&self) -> bool {
         self.enabled.contains(&LoggedChatType::Nearby)
+    }
+
+    /// Whether this arriving nearby line is one the transcript **swallows**: an
+    /// object speaking `@`-commands at a viewer that obeys them.
+    ///
+    /// An `llOwnerSay` line beginning with `@` is not conversation, it is a
+    /// worn object driving the viewer, and a viewer that acts on it eats it
+    /// rather than showing it (`llviewermessage.cpp:3142`). The transcript is
+    /// one of the surfaces it must not surface on — a collar's traffic would
+    /// otherwise fill the day's nearby log and record, in plain text on disk,
+    /// exactly what it did.
+    ///
+    /// Gated on [`swallow_rlv_commands`](Self::swallow_rlv_commands), because a
+    /// runtime with RLV switched off does *not* act on the line, and there
+    /// seeing the attempt in the log is the point.
+    #[must_use]
+    pub fn swallows_rlv_command(&self, chat_type: ChatType, message: &str) -> bool {
+        self.swallow_rlv_commands && chat_type == ChatType::Owner && sl_rlv::is_rlv_line(message)
     }
 
     /// Whether messages of `kind` (a session conversation, not nearby chat) are
@@ -711,7 +742,7 @@ mod tests {
         conversation_log_file, conversation_log_line, conversation_log_unix, format_log_line,
         group_log_file_name, im_log_file_name, nearby_log_file_name, parse_log_lines,
     };
-    use crate::types::ImDialog;
+    use crate::types::{ChatType, ImDialog};
     use pretty_assertions::assert_eq;
     use sl_types::key::AgentKey;
     use std::collections::BTreeSet;
@@ -993,5 +1024,35 @@ mod tests {
         assert_eq!(config.logs_nearby(), true);
         assert_eq!(config.logs_conversation(ConversationKind::Group), true);
         assert_eq!(config.logs_conversation(ConversationKind::Direct), false);
+    }
+
+    #[test]
+    fn an_rlv_command_line_is_swallowed_only_when_the_viewer_obeys_it() {
+        let obeying = ChatLogConfig {
+            swallow_rlv_commands: true,
+            ..ChatLogConfig::default()
+        };
+        // An object commanding a viewer that acts on it: taken, not recorded.
+        assert_eq!(
+            obeying.swallows_rlv_command(ChatType::Owner, "@detach=n"),
+            true
+        );
+        // The same viewer still logs what the object actually says.
+        assert_eq!(
+            obeying.swallows_rlv_command(ChatType::Owner, "the collar is on"),
+            false
+        );
+        // And a person typing `@detach=n` out loud is conversation, however
+        // much it looks like a command.
+        assert_eq!(
+            obeying.swallows_rlv_command(ChatType::Normal, "@detach=n"),
+            false
+        );
+        // A runtime that does not obey RLV records the attempt, which is the
+        // whole point of seeing it there.
+        assert_eq!(
+            ChatLogConfig::default().swallows_rlv_command(ChatType::Owner, "@detach=n"),
+            false
+        );
     }
 }

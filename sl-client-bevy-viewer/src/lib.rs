@@ -1432,6 +1432,13 @@ fn run_session(
     // They read the one RlvSession the world-API tier holds, so they can go
     // anywhere after it is initialised.
     .add_plugins(sl_viewer_rlv::RlvUiPlugins)
+    // The RLV command intake (viewer-rlv-command-intake): the owner-say gate a
+    // worn collar speaks through, the one seam every `@get*` / `@notify` answer
+    // is shouted back by, and the pass that lifts a vanished object's
+    // restrictions. Separate from the windows above because it is the wiring
+    // that makes the engine reachable at all rather than a surface that draws
+    // it; after them, since it fills the console they show.
+    .add_plugins(sl_viewer_rlv::intake::RlvIntakePlugin)
     .add_plugins(GroupProfilePlugin)
     // The group-notice toast host (viewer-group-notice-display): pops a card —
     // group image, subject, body and any attached item — when a group posts a

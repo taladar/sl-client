@@ -15,8 +15,9 @@
 //!
 //! - [`RlvSession`] — the [`RlvState`] machine itself, a revision counter that
 //!   ticks whenever a command changes it (so a floater rebuilds only when there
-//!   is something new to draw), and the **console transcript**: the lines the
-//!   RLVa console shows.
+//!   is something new to draw), the **console transcript** the RLVa console
+//!   shows, and the **reply queue**: the lines the engine owes the grid, which
+//!   three unrelated producers fill and one system sends.
 //! - [`RLV_STRINGS`] — the canned texts RLVa emits (`rlva_strings.xml` in the
 //!   reference). The eight the reference marks *customizable* are registered as
 //!   settings, so the Strings floater edits them through the ordinary settings
@@ -43,9 +44,15 @@
 use std::collections::VecDeque;
 
 use bevy::prelude::*;
-use sl_rlv::{RlvDebugSetting, RlvDebugValue, RlvExtSource, RlvState, is_rlv_line};
+use sl_client_bevy::{ChatType, ObjectKey};
+use sl_rlv::{
+    RlvAttachmentPoint, RlvDebugSetting, RlvDebugValue, RlvExtSource, RlvObjectAttachment,
+    RlvReply, RlvState, is_rlv_line,
+};
 use sl_settings::SettingValue;
 use sl_viewer_settings::ViewerSettings;
+
+use crate::{MAX_PARENT_WALK, ObjectState};
 
 /// The `[rlv]` section every RLV setting is grouped under in the settings file.
 pub const RLV_SECTION: &[&str] = &["rlv"];
@@ -518,8 +525,13 @@ pub struct RlvConsoleLine {
 /// `RestrainedLoveDebug` session cannot grow without bound.
 pub const RLV_CONSOLE_CAPACITY: usize = 512;
 
-/// The viewer's one RLV state machine, its revision, and the console
-/// transcript.
+/// How many unsent replies are kept. A burst of `@notify` traffic with nothing
+/// draining it (no session, a headless test) drops its oldest lines rather than
+/// growing forever.
+pub const RLV_REPLY_CAPACITY: usize = 256;
+
+/// The viewer's one RLV state machine, its revision, the console transcript,
+/// and the lines it owes the grid.
 ///
 /// The revision is what a floater watches: `RlvState` is a plain value with no
 /// change detection of its own inside the resource, and Bevy's `Res` change
@@ -538,6 +550,9 @@ pub struct RlvSession {
     console: VecDeque<RlvConsoleLine>,
     /// Ticks whenever a console line is appended or the transcript is cleared.
     console_revision: u64,
+    /// The lines waiting to be shouted back at the objects that asked for them,
+    /// oldest first. See [`push_reply`](Self::push_reply).
+    replies: VecDeque<RlvReply>,
 }
 
 impl RlvSession {
@@ -586,6 +601,71 @@ impl RlvSession {
             text: text.into(),
         });
         self.console_revision = self.console_revision.wrapping_add(1);
+    }
+
+    /// Queue one line to be chatted back to the grid.
+    ///
+    /// Three unrelated parts of the engine build a line and cannot send it —
+    /// the `@get*` answer ([`RlvState::answer`]), the `@notify` subscribers'
+    /// reports ([`RlvState::take_notifications`]) and the `@getdebug_*` answer
+    /// ([`RlvState::run_extension`]). They all hand back an
+    /// [`RlvReply`] that is already truncated and channel-checked, so what they
+    /// need is not three sends but **one**: they queue here, and the single
+    /// system that owns the session's chat send drains it. A fourth producer
+    /// added later inherits the send for free.
+    ///
+    /// Bounded like the console transcript, and for the same reason: a session
+    /// with no chat send running (a headless test, a viewer between circuits)
+    /// must not grow this without limit. The oldest line falls off, because a
+    /// reply whose script has long since stopped waiting is the one worth
+    /// losing.
+    pub fn push_reply(&mut self, reply: RlvReply) {
+        if self.replies.len() >= RLV_REPLY_CAPACITY {
+            self.replies.pop_front();
+        }
+        self.replies.push_back(reply);
+    }
+
+    /// Whether anything is waiting in [`take_replies`](Self::take_replies) —
+    /// the read the drain system does before taking the mutable borrow.
+    #[must_use]
+    pub fn has_replies(&self) -> bool {
+        !self.replies.is_empty()
+    }
+
+    /// Take every queued reply, oldest first.
+    #[must_use]
+    pub fn take_replies(&mut self) -> Vec<RlvReply> {
+        self.replies.drain(..).collect()
+    }
+
+    /// Release **everything** the RLV engine is holding: every object's
+    /// restrictions, exceptions, locks, modifier slots and `@notify`
+    /// subscriptions, and any reply not yet sent.
+    ///
+    /// This is what turning the `RestrainedLove` master switch off does. The
+    /// reference has no equivalent because it does not need one: its switch
+    /// takes effect on the next **restart**, and a restart is a fresh process
+    /// with an empty state machine. Applying the switch at once means reaching
+    /// that same state at once — otherwise "off" would leave a viewer still
+    /// restrained by a collar, with the RLVa windows that could show it greyed
+    /// out because RLV is off.
+    ///
+    /// The queued replies go with it. A `@notify` subscriber being told its
+    /// restriction was lifted, by a viewer that has just stopped speaking RLV
+    /// at all, is a message about a conversation that has ended; the
+    /// reference's restart likewise tells nobody.
+    ///
+    /// The **console transcript is kept**: it is the log of what happened, and
+    /// what just happened is part of it.
+    pub fn release_all(&mut self) {
+        let held = self.state.restricting_objects().next().is_some();
+        self.state = RlvState::new();
+        self.replies.clear();
+        // Only a real release is a change the floaters need to redraw for.
+        if held {
+            self.revision = self.revision.wrapping_add(1);
+        }
     }
 
     /// Empty the transcript (the console's Clear button).
@@ -739,13 +819,85 @@ pub fn is_rlv_command_line(line: &str) -> bool {
     is_rlv_line(line)
 }
 
+/// Whether an arriving chat line is an object speaking `@`-commands at this
+/// viewer, and so is taken by the RLV engine instead of being shown.
+///
+/// This is the **whole** of the reference's admission test
+/// (`llviewermessage.cpp:3142`), and it is deliberately loose:
+///
+/// - the chat is `CHAT_TYPE_OWNER`, which only `llOwnerSay` and
+///   `llRegionSayTo` produce and which the **simulator** delivers only to the
+///   object's owner. That is the security boundary, and it is drawn on the
+///   server: somebody else's furniture cannot reach this agent's chat as
+///   owner-say at all, which is why the reference does not re-check ownership
+///   here and why this must not invent a check that only looks like safety;
+/// - the line starts with `@`.
+///
+/// There is no attachment test. A rezzed in-world prim the agent owns — a bed,
+/// a cage, a cuff-post — commands the viewer directly and always has; a club's
+/// poseball cannot, which is exactly why *relays* exist, and a relay is worn,
+/// owned, and indistinguishable from any other worn object down here. The one
+/// case the reference excludes is a *temporary* attachment while
+/// `RLVaEnableTemporaryAttachments` is off, which this viewer cannot yet tell
+/// apart (it does not keep an attachment's `AttachItemID`) and which its
+/// default — the flag on — would not exclude anyway.
+///
+/// Every surface that displays or records nearby chat asks this, so the line
+/// the engine takes cannot leak out of one of them.
+#[must_use]
+pub fn swallows_owner_say(
+    settings: Option<&ViewerSettings>,
+    chat_type: ChatType,
+    message: &str,
+) -> bool {
+    rlv_is_enabled(settings) && chat_type == ChatType::Owner && is_rlv_line(message)
+}
+
+/// Where the object with grid-wide key `key` sits on the avatar, or `None` when
+/// it is not (part of) a worn attachment this viewer has streamed.
+///
+/// The prim that *speaks* is often a child of the attachment, and a bare
+/// `@detach=n` locks the **attachment**, not the prim — so this chases the
+/// linkset up to the first ancestor carrying an attachment point (the reference
+/// takes `pObj->getRootEdit()->getID()` for the same reason) and reports that
+/// root with its point. The walk is bounded exactly like
+/// [`ObjectState::wearer_of`]'s, against a malformed parent cycle.
+///
+/// The intake caches the answer on the state machine
+/// ([`RlvState::set_object_attachment`]) the first time it resolves, because
+/// `@detach=y` may well arrive after the object is gone and there would be
+/// nothing left to ask.
+#[must_use]
+pub fn object_attachment(objects: &ObjectState, key: ObjectKey) -> Option<RlvObjectAttachment> {
+    let mut current = objects
+        .objects
+        .iter()
+        .find(|(_scoped, tracked)| tracked.full_key == key)
+        .map(|(scoped, _tracked)| *scoped)?;
+    for _step in 0..MAX_PARENT_WALK {
+        let tracked = objects.objects.get(&current)?;
+        if let Some(point) = tracked.attachment_point {
+            return RlvAttachmentPoint::from_index(point)
+                .map(|point| RlvObjectAttachment::new(tracked.full_key.uuid(), point));
+        }
+        if tracked.is_root {
+            return None;
+        }
+        current = tracked.parent;
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        RLV_BOOL_SETTINGS, RLV_CONSOLE_CAPACITY, RLV_PREFIX_SETTINGS, RLV_STRINGS, RlvConsoleKind,
-        RlvSession, rlv_flag, rlv_string, rlv_string_def,
+        RLV_BOOL_SETTINGS, RLV_CONSOLE_CAPACITY, RLV_PREFIX_SETTINGS, RLV_REPLY_CAPACITY,
+        RLV_STRINGS, RlvConsoleKind, RlvSession, rlv_flag, rlv_string, rlv_string_def,
+        swallows_owner_say,
     };
     use pretty_assertions::assert_eq;
+    use sl_client_bevy::{ChatType, Uuid};
+    use sl_rlv::{RlvNoFacts, parse_chat_line};
     use std::collections::HashSet;
 
     /// Every setting name in the three rosters is unique — a duplicate would
@@ -868,5 +1020,151 @@ mod tests {
         assert_eq!(session.revision(), before);
         session.bump();
         pretty_assertions::assert_ne!(session.revision(), before);
+    }
+
+    /// With RLV off nothing is swallowed — an object's attempt to command the
+    /// viewer is exactly what a person wants to see in that case.
+    #[test]
+    fn nothing_is_swallowed_while_rlv_is_off() {
+        assert!(!swallows_owner_say(None, ChatType::Owner, "@detach=n"));
+    }
+
+    /// The two halves of the gate are both required, and neither is more than
+    /// it says: an avatar saying `@detach=n` out loud is a person typing, and
+    /// an object's ordinary chatter is conversation.
+    ///
+    /// Written against the roster's defaults rather than a store, so this pins
+    /// the shape of the test and not a settings fixture; the enabled case is
+    /// what [`crate::rlv`]'s consumers exercise with a real store.
+    #[test]
+    fn the_gate_needs_owner_say_and_the_prefix() {
+        for (chat_type, message) in [
+            (ChatType::Normal, "@detach=n"),
+            (ChatType::Shout, "@detach=n"),
+            (ChatType::Owner, "the collar is on"),
+            (ChatType::Direct, "@detach=n"),
+        ] {
+            assert!(
+                !swallows_owner_say(None, chat_type, message),
+                "{chat_type:?} {message:?} is not an RLV command line"
+            );
+        }
+    }
+
+    /// One `@notify` subscription and one command is a line the engine owes the
+    /// grid, and it reaches the queue as the same [`sl_rlv::RlvReply`] a query
+    /// answer does — which is the whole point of the single seam.
+    #[test]
+    fn a_notification_reaches_the_queue_as_a_reply() -> Result<(), Box<dyn core::error::Error>> {
+        let mut session = RlvSession::default();
+        let watcher = Uuid::from_u128(3);
+        let collar = Uuid::from_u128(1);
+        for (object, line) in [(watcher, "@notify:2222=n"), (collar, "@fly=n")] {
+            let parsed = parse_chat_line(line).ok_or("not an RLV line")?;
+            let command = parsed
+                .first()
+                .ok_or("no command")?
+                .as_ref()
+                .map_err(ToString::to_string)?;
+            session.state_mut().apply(object, command);
+        }
+        assert!(session.state().has_notifications());
+        let owed = session.state_mut().take_notifications();
+        let notification = owed.last().ok_or("nothing owed")?.clone();
+        session.push_reply(sl_rlv::RlvReply::from(notification));
+        assert!(session.has_replies());
+        let drained = session.take_replies();
+        assert_eq!(drained.first().map(|reply| reply.channel), Some(2222));
+        assert_eq!(
+            drained.first().map(|reply| reply.message.as_str()),
+            Some("/fly=n")
+        );
+        assert!(!session.has_replies());
+        Ok(())
+    }
+
+    /// The reply queue is bounded like the transcript, and drains oldest-first
+    /// so a script's answers arrive in the order it asked for them.
+    #[test]
+    fn the_reply_queue_is_a_bounded_ring() -> Result<(), Box<dyn core::error::Error>> {
+        let mut session = RlvSession::default();
+        let collar = Uuid::from_u128(1);
+        let parsed = parse_chat_line("@version=2222").ok_or("not an RLV line")?;
+        let command = parsed
+            .first()
+            .ok_or("no command")?
+            .as_ref()
+            .map_err(ToString::to_string)?;
+        let base = session
+            .state()
+            .answer(collar, command, &RlvNoFacts::new(Uuid::nil()))
+            .reply
+            .ok_or("no reply")?;
+        assert!(!session.has_replies());
+        for index in 0..RLV_REPLY_CAPACITY + 5 {
+            let mut reply = base.clone();
+            // The channel is what tells the lines apart; the queue keeps the
+            // newest and drops the oldest whatever they say.
+            reply.channel = 2000_i32.saturating_add(i32::try_from(index).unwrap_or(0));
+            session.push_reply(reply);
+        }
+        let drained = session.take_replies();
+        assert_eq!(drained.len(), RLV_REPLY_CAPACITY);
+        assert_eq!(
+            drained.first().map(|reply| reply.channel),
+            Some(2005),
+            "the oldest replies should have fallen off the front"
+        );
+        assert!(!session.has_replies());
+        Ok(())
+    }
+
+    /// Turning RLV off releases everything the engine held — the state the
+    /// reference reaches by restarting, which is what its own switch demands.
+    /// The console survives, because it is the record of what happened.
+    #[test]
+    fn releasing_everything_empties_the_engine() -> Result<(), Box<dyn core::error::Error>> {
+        let mut session = RlvSession::default();
+        let collar = Uuid::from_u128(1);
+        for line in ["@notify:2222=n", "@fly=n", "@detach=n"] {
+            let parsed = parse_chat_line(line).ok_or("not an RLV line")?;
+            let command = parsed
+                .first()
+                .ok_or("no command")?
+                .as_ref()
+                .map_err(ToString::to_string)?;
+            session.state_mut().apply(collar, command);
+        }
+        session.bump();
+        session.log(RlvConsoleKind::Info, "a collar said something");
+        let owed = session.state_mut().take_notifications();
+        for notification in owed {
+            session.push_reply(sl_rlv::RlvReply::from(notification));
+        }
+        assert!(session.has_replies());
+        let before = session.revision();
+
+        session.release_all();
+
+        assert_eq!(session.state().restricting_objects().count(), 0);
+        assert!(!session.state().has_behaviour(sl_rlv::RlvBehaviour::Fly));
+        assert!(!session.state().has_notifications());
+        assert!(
+            !session.has_replies(),
+            "a reply owed to a subscription that no longer exists must not go out"
+        );
+        pretty_assertions::assert_ne!(session.revision(), before);
+        assert_eq!(session.console().len(), 1, "the log is not the state");
+        Ok(())
+    }
+
+    /// Releasing an engine that held nothing is not a change, so a floater
+    /// watching the revision is not woken by a switch flipped twice.
+    #[test]
+    fn releasing_nothing_is_not_a_change() {
+        let mut session = RlvSession::default();
+        let before = session.revision();
+        session.release_all();
+        assert_eq!(session.revision(), before);
     }
 }

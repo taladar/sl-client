@@ -164,9 +164,9 @@ pub use notify::RlvNotification;
 pub use query::{
     CHAT_CHANNEL_DEBUG, FOLDER_INVALID_CHAR, FOLDER_PREFIX_HIDDEN, MAX_CHAT_BYTES,
     OPTION_SEPARATOR, RlvAnswer, RlvAttachGroup, RlvAttachmentPoint, RlvFolderWear,
-    RlvFolderWearChild, RlvFolderWearCounts, RlvImQuery, RlvNamesQuery, RlvPathTarget, RlvQuery,
-    RlvQuerySource, RlvReply, RlvVersionNum, RlvWearableSlot, SHARED_ROOT_FOLDER, STATUS_SEPARATOR,
-    is_valid_reply_channel, split_chat, truncate_chat,
+    RlvFolderWearChild, RlvFolderWearCounts, RlvImQuery, RlvNamesQuery, RlvNoFacts, RlvPathTarget,
+    RlvQuery, RlvQuerySource, RlvReply, RlvVersionNum, RlvWearableSlot, SHARED_ROOT_FOLDER,
+    STATUS_SEPARATOR, is_valid_reply_channel, split_chat, truncate_chat,
 };
 pub use restriction::{RlvOptionArity, RlvOptionMeaning, RlvRestrictionRule};
 pub use state::{

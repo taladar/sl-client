@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 310 |
-| blocked | 45 |
+| ready | 311 |
+| blocked | 46 |
 | in-progress | 19 |
 | bugs | 59 |
-| done | 1005 |
+| done | 1006 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1575** |
+| **total** | **1578** |
 
 ## ideas (98)
 
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (310)
+## ready (311)
 
 ### protocol
 
@@ -477,6 +477,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-event-details`](ready/viewer-event-details.md) — Event details
   floater + reminders (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-experience-event-stream`](ready/viewer-experience-event-stream.md) —
+  Experience event stream — the ExperienceEvent log and its notifications
 - [`viewer-experiences-floater`](ready/viewer-experiences-floater.md) —
   Experiences floater — lists, profile, search (blocked by
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
@@ -809,9 +811,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-resync-animations`](ready/viewer-resync-animations.md) — Resync
   animations action
-- [`viewer-rlv-command-intake`](ready/viewer-rlv-command-intake.md) — RLV — the
-  owner-say command intake and the reply/notify chat path (blocked by
-  `viewer-rlv-restriction-state` (done))
 - [`viewer-rlv-enforce-camera`](ready/viewer-rlv-enforce-camera.md) — RLV —
   camera restrictions and vision overlay (blocked by
   `viewer-rlv-restriction-state` (done), `viewer-camera-third-person-orbit`
@@ -819,6 +818,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rlv-environment-commands`](ready/viewer-rlv-environment-commands.md)
   — RLV — @setenv_*/@getenv_* environment control (blocked by
   `viewer-rlv-restriction-state` (done))
+- [`viewer-rlv-temp-attachment-gate`](ready/viewer-rlv-temp-attachment-gate.md)
+  — RLV — the temporary-attachment half of the owner-say gate
 - [`viewer-rlv-vision-render`](ready/viewer-rlv-vision-render.md) — RLV
   vision-restriction rendering (blocked by `viewer-rlv-restriction-state`
   (done))
@@ -966,7 +967,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-binary-duplication`](ready/repl-audit-binary-duplication.md) —
   The two REPL binaries share ~400 near-verbatim lines and have already drifted
 
-## blocked (45)
+## blocked (46)
 
 ### viewer
 
@@ -1043,6 +1044,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   toggle axis — every effect must differ where it should and nowhere else
   (blocked by `viewer-render-context-matrix`, `viewer-render-overrides-resource`
   (done))
+- [`viewer-rlv-blocked-objects`](blocked/viewer-rlv-blocked-objects.md) — RLV —
+  the blocked-object list for an unapproved experience's attachment (blocked by
+  `viewer-experience-event-stream`, `viewer-rlv-temp-attachment-gate`)
 - [`viewer-rlv-enforce-forced-actions`](blocked/viewer-rlv-enforce-forced-actions.md)
   — RLV — forced actions and the #RLV inventory sub-protocol (blocked by
   `viewer-rlv-restriction-state` (done), `viewer-sit-stand-actions`,
@@ -1298,7 +1302,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1005)
+## done (1006)
 
 ### protocol
 
@@ -2563,6 +2567,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-render-test-harness`](done/viewer-render-test-harness.md) — 3D render
   test harness — render one object without a grid, assert automatically, catch
   regressions
+- [`viewer-rlv-command-intake`](done/viewer-rlv-command-intake.md) — RLV — the
+  owner-say command intake and the reply/notify chat path (blocked by
+  `viewer-rlv-restriction-state` (done))
 - [`viewer-rlv-command-parser`](done/viewer-rlv-command-parser.md) — RLV — parse
   the @-command chat protocol
 - [`viewer-rlv-debug-settings-commands`](done/viewer-rlv-debug-settings-commands.md)

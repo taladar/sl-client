@@ -20,6 +20,13 @@
 //! - [`rlv_strings`] — the canned texts RLVa emits, and the user's rewrites of
 //!   them.
 //!
+//! It is also where the **command intake** lives ([`intake`]): the owner-say
+//! gate a worn collar actually speaks through, the one seam every answer is
+//! chatted back by, and the pass that lifts a vanished object's restrictions.
+//! That is not a window, but it is the same feature and the same state — and
+//! keeping it here rather than one tier down keeps the world-API crate what it
+//! is, a crate of types with no schedules of its own.
+//!
 //! # Why the windows are here and the state is not
 //!
 //! The floaters *draw* the RLV state, but the chat bar, the session command
@@ -44,6 +51,7 @@
               protocol, not an accident of naming"
 )]
 
+pub mod intake;
 pub mod rlv_behaviours;
 pub mod rlv_console;
 pub mod rlv_locks;

@@ -17,11 +17,14 @@
 //! - The **logging** options feed `chat_log_config_from_settings`; the
 //!   rebuilt [`ChatLogConfig`] is pushed to the runtime's chat logger via
 //!   [`Command::SetChatLogConfig`] — once when the account scope loads at
-//!   login (`push_chat_log_config_at_login`) and again on every OK press
-//!   that changed it (`apply_chat_privacy`). Until the login push lands the
-//!   runtime logs under the all-types-on default it was built with (a benign
-//!   few-frame window). The log *path* stays with the network & cache tab; the
-//!   12/24-hour clock style has no reference setting and stays 24-hour.
+//!   login (`push_chat_log_config_at_login`), on every OK press that changed
+//!   it (`apply_chat_privacy`), and whenever the RLV master switch is flipped
+//!   from the RLVa menu (`push_chat_log_config_on_rlv_toggle`) — a viewer that
+//!   obeys a worn object's `@`-commands does not write them to the transcript.
+//!   Until the login push lands the runtime logs under the all-types-on default
+//!   it was built with (a benign few-frame window). The log *path* stays with
+//!   the network & cache tab; the 12/24-hour clock style has no reference
+//!   setting and stays 24-hour.
 //! - The **automatic replies** are account-scoped texts *consumed* by the
 //!   do-not-disturb / away mode machinery in `sl-viewer-people`'s `presence`
 //!   (whose keys are [`crate::presence`]); the keys keep their original names,
@@ -517,6 +520,12 @@ pub(crate) fn chat_log_config_from_settings(settings: &ViewerSettings) -> ChatLo
     });
     ChatLogConfig {
         enabled,
+        // The transcript follows the RLV master switch: a viewer that obeys a
+        // worn object's `@`-commands eats them, and eating them includes not
+        // writing them down. Not a chat *preference*, which is why it is not on
+        // this tab — the RLVa menu owns the switch, and the push system below
+        // is what carries a flip of it here.
+        swallow_rlv_commands: sl_viewer_world_api::rlv::rlv_is_enabled(Some(settings)),
         legacy_im_names: flag(SETTING_LOG_LEGACY_NAMES, false),
         date_suffix: flag(SETTING_LOG_FILENAME_DATE, false),
         timestamp,
@@ -549,6 +558,48 @@ fn push_chat_log_config_at_login(
     }
     *done = true;
     let config = chat_log_config_from_settings(&settings);
+    sl.write(SlCommand(Command::SetChatLogConfig(Box::new(
+        config.clone(),
+    ))));
+    pushed.0 = Some(config);
+}
+
+/// Push a rebuilt chat-log configuration whenever the **RLV master switch**
+/// changes, because that is the one input to it the preferences OK press does
+/// not own — the RLVa menu flips `RestrainedLove`, and the transcript has to
+/// stop (or start) recording an object's commands the moment it does.
+///
+/// It diffs against [`PushedChatLogConfig`] like the OK path, so it can only
+/// ever send when something actually changed, and it deliberately reads the
+/// whole configuration rather than one field: there is one shape of this
+/// message, and two systems building different halves of it would be the place
+/// they drift.
+fn push_chat_log_config_on_rlv_toggle(
+    settings: Option<Res<ViewerSettings>>,
+    mut pushed: ResMut<PushedChatLogConfig>,
+    mut sl: MessageWriter<SlCommand>,
+    mut last: Local<Option<bool>>,
+) {
+    let Some(settings) = settings else {
+        return;
+    };
+    if !settings.is_changed() {
+        return;
+    }
+    let enabled = sl_viewer_world_api::rlv::rlv_is_enabled(Some(&settings));
+    if *last == Some(enabled) {
+        return;
+    }
+    *last = Some(enabled);
+    // Nothing has been pushed yet: the login push is still to come and will
+    // carry the current switch with it, so there is nothing to correct.
+    if pushed.0.is_none() {
+        return;
+    }
+    let config = chat_log_config_from_settings(&settings);
+    if pushed.0.as_ref() == Some(&config) {
+        return;
+    }
     sl.write(SlCommand(Command::SetChatLogConfig(Box::new(
         config.clone(),
     ))));
@@ -684,6 +735,7 @@ impl Plugin for PreferencesChatPlugin {
                 Update,
                 (
                     push_chat_log_config_at_login.after(crate::settings::load_account_settings),
+                    push_chat_log_config_on_rlv_toggle.after(push_chat_log_config_at_login),
                     request_user_info_on_open,
                     seed_user_info,
                     apply_chat_privacy.after(seed_user_info),

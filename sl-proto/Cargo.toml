@@ -20,6 +20,9 @@ md5 = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 sl-lsl = { workspace = true }
 sl-marketplace = { path = "../sl-marketplace", version = "0.1.0" }
+# For the one predicate the chat log needs: what an RLV command line looks like.
+# A pure leaf crate (`thiserror` + `uuid`), so this adds nothing to the tree.
+sl-rlv = { path = "../sl-rlv", version = "0.1.0" }
 sl-types = { workspace = true }
 sl-wire = { workspace = true, features = ["serde"] }
 thiserror = { workspace = true }

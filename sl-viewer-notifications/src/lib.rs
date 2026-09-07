@@ -20461,6 +20461,46 @@ pub const NOTIFICATIONS: &[NotificationTemplate] = &[
         form: ALLOW_ALWAYS_ALLOW_DENY_FORM,
         input: None,
     },
+    // The next two have **no reference counterpart**, and could not: there,
+    // `RestrainedLove` needs a restart to take effect, so the toggle raises a
+    // `GenericAlert` reading "RLVa will be enabled after you restart" and the
+    // menu item wears a "(pending restart)" suffix until you do. This viewer
+    // applies the change at once, which is friendlier and is what makes these
+    // necessary — the change has consequences the user has to be told about,
+    // and the reference never had to tell anyone because nothing happened yet.
+    //
+    // `Alert` rather than `AlertModal`: it must be acknowledged (it is not a
+    // tip that can fade past unread) but it does not need to block the world,
+    // since it reports something that has already happened. `unique` so that
+    // flipping the switch twice leaves one card, not a stack.
+    NotificationTemplate {
+        name: "RLVaToggledOn",
+        kind: NotificationKind::Alert,
+        message_key: "notification-rl-va-toggled-on",
+        title_key: None,
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: true,
+        ignore: NotificationIgnore::None,
+        ignore_key: None,
+        form: OK_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "RLVaToggledOff",
+        kind: NotificationKind::Alert,
+        message_key: "notification-rl-va-toggled-off",
+        title_key: None,
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: true,
+        ignore: NotificationIgnore::None,
+        ignore_key: None,
+        form: OK_FORM,
+        input: None,
+    },
 ];
 
 /// Look up a catalogue [`NotificationTemplate`] by its [`name`](NotificationTemplate::name).

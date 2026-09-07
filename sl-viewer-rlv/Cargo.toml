@@ -20,6 +20,7 @@ bevy = { version = "0.19.0" }
 sl-client-bevy = { workspace = true }
 sl-rlv = { path = "../sl-rlv", version = "0.1.0" }
 sl-settings = { path = "../sl-settings", version = "0.1.0" }
+sl-viewer-notifications = { workspace = true }
 sl-viewer-platform = { workspace = true }
 sl-viewer-settings = { workspace = true }
 sl-viewer-ui-core = { workspace = true }
@@ -29,6 +30,11 @@ uuid = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
+# The loopback grid the `fake_grid_rlv_commands` tier drives a real owner-say
+# through; `sync` for its `broadcast` receivers, `rt-multi-thread` to host it.
+sl-fake-grid = { path = "../sl-fake-grid", version = "0.1.0" }
+sl-proto = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "sync"] }
 
 [lints]
 workspace = true

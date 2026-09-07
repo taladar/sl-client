@@ -35,6 +35,7 @@ use crate::ui::BottomArea;
 use crate::ui::UiRoot;
 use crate::ui_font::UiFont;
 use crate::world_api::LocalChatNotice;
+use crate::world_api::rlv::swallows_owner_say;
 use crate::world_api::{
     SETTING_CHAT_FONT_SIZE, SETTING_CHAT_MAX_LINES, SETTING_NEARBY_TOAST_LIFETIME,
 };
@@ -326,8 +327,12 @@ pub fn update_chat_overlay(
         ));
     };
     for event in events.read() {
+        // An owner-say `@`-line is an object commanding the viewer, and the
+        // RLV intake takes it: it is not something the person said and must not
+        // float over the world as if it were.
         if let SlSessionEvent::ChatReceived(message) = &event.0
             && is_displayable(message)
+            && !swallows_owner_say(settings.as_deref(), message.chat_type, &message.message)
         {
             spawn_line(
                 format_chat_line(message),

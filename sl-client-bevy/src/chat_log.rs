@@ -505,7 +505,15 @@ impl ChatLog {
     pub(crate) fn observe_event(&mut self, session: &Session, event: &sl_proto::Event) {
         match event {
             sl_proto::Event::ChatReceived(chat) => {
-                self.log_nearby(&chat.from_name, &chat.message);
+                // A worn object's `@`-commands are the viewer's traffic, not
+                // the person's conversation, and a viewer that obeys them eats
+                // them rather than writing them down.
+                if !self
+                    .config
+                    .swallows_rlv_command(chat.chat_type, &chat.message)
+                {
+                    self.log_nearby(&chat.from_name, &chat.message);
+                }
             }
             sl_proto::Event::InstantMessageReceived(im) if im.dialog == ImDialog::Message => {
                 self.log_inbound_im(

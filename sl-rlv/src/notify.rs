@@ -23,6 +23,8 @@ use std::collections::BTreeMap;
 
 use uuid::Uuid;
 
+use crate::query::{RlvReply, truncate_chat};
+
 /// One line for the consumer to chat back on a channel.
 ///
 /// Producing the line is this crate's job; saying it is not. The reference
@@ -36,6 +38,23 @@ pub struct RlvNotification {
     pub channel: i32,
     /// What to say, `/`-prefixed exactly as the reference sends it.
     pub message: String,
+}
+
+/// A report is a line to chat back like any other, so a consumer that owns one
+/// chat send for the whole engine takes it as one.
+///
+/// The `@get*` answer and the `@getdebug_*` answer are already
+/// [`RlvReply`]s; making this one too is what lets all three producers queue on
+/// a single seam rather than each teaching its consumer a shape of its own. The
+/// text is truncated here, because the answers were truncated where they were
+/// built and a line that goes out the same way has to be measured the same way.
+impl From<RlvNotification> for RlvReply {
+    fn from(notification: RlvNotification) -> Self {
+        Self {
+            channel: notification.channel,
+            message: truncate_chat(&notification.message).to_owned(),
+        }
+    }
 }
 
 /// One `@notify` subscription: where to report, and what to report.

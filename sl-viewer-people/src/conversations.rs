@@ -84,6 +84,7 @@ use crate::ui::{
 };
 use crate::ui_font::UiFont;
 use crate::ui_tab::{TabDivider, TabPlacement, TabStrip, TabStripWidth, resize_strip_width};
+use crate::world_api::rlv::swallows_owner_say;
 use crate::world_api::{
     AvatarPicked, ConversationKey, OpenAvatarPicker, OpenConversation, StartConference,
 };
@@ -1772,7 +1773,14 @@ pub(crate) fn ingest_conversation_events(
                 // Skip the typing-animation triggers and any empty line, like the
                 // overlay does. Our own local chat is echoed here too, under our
                 // name — the same as the overlay shows it.
-                if is_displayable(&message.chat_type, &message.message) {
+                //
+                // An owner-say `@`-line is an object talking to the *viewer*,
+                // not to the person, and the RLV intake takes it: showing the
+                // commands a collar issues in the transcript is both noise and
+                // a leak of what it is doing.
+                if is_displayable(&message.chat_type, &message.message)
+                    && !swallows_owner_say(settings.as_deref(), message.chat_type, &message.message)
+                {
                     model.push_nearby(&message.from_name, &message.source, &message.message);
                 }
             }
