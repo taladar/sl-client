@@ -68,3 +68,13 @@ viewer-assets/fs_static_assets/* -whitespace
 opensim-assets/textures/*.j2c binary
 opensim-assets/textures/* -whitespace
 opensim-assets/licenses.txt -whitespace
+
+# The two reference object assets (sl-object-asset/tests/data/README.md): the
+# complete assets the reference viewer carries in its own test sources, kept
+# byte-for-byte because they are what the decoder is pinned against. Their
+# whitespace is the format's — a lone tab is how an empty `scratchpad` block is
+# written, and the reference's own writer emits `linked \t` with a space before
+# the tab — so git's whitespace checking (`git diff-index --check`, the
+# repo-wide pre-commit check a per-file skipchecks cannot reach) is unset for
+# them.
+sl-object-asset/tests/data/*.txt -whitespace

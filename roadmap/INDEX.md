@@ -11,17 +11,22 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 98 |
-| ready | 313 |
+| ideas | 100 |
+| ready | 318 |
 | blocked | 55 |
 | in-progress | 19 |
 | bugs | 63 |
-| done | 1006 |
+| done | 1013 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1593** |
+| **total** | **1607** |
 
-## ideas (98)
+## ideas (100)
+
+### protocol
+
+- [`protocol-audit-legacy-permission-blocks`](ideas/protocol-audit-legacy-permission-blocks.md)
+  — The legacy permissions block has three writers and two readers
 
 ### viewer
 
@@ -181,6 +186,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
+- [`test-fake-grid-rezzed-prim-texture`](ideas/test-fake-grid-rezzed-prim-texture.md)
+  — A prim the fake grid rezzes carries no TextureEntry
 - [`test-firestorm-fake-grid-crosscheck`](ideas/test-firestorm-fake-grid-crosscheck.md)
   — Point Firestorm at the fake grid to calibrate oracles
 - [`test-reference-cpp-oracles`](ideas/test-reference-cpp-oracles.md) —
@@ -230,10 +237,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (313)
+## ready (318)
 
 ### protocol
 
+- [`protocol-ais3-library-cap`](ready/protocol-ais3-library-cap.md) — An AIS3
+  request for a library folder goes to the wrong capability
+- [`protocol-ais3-nested-embedded`](ready/protocol-ais3-nested-embedded.md) — An
+  AIS3 depth fetch reads only its first level
 - [`protocol-audit-asset-store-duplication`](ready/protocol-audit-asset-store-duplication.md)
   — Three hand-rolled copies of the same asset store
 - [`protocol-audit-conversions-test-coverage`](ready/protocol-audit-conversions-test-coverage.md)
@@ -602,6 +613,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-login-screen`](ready/viewer-login-screen.md) — Login screen — grid
   select, saved credentials, MFA (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-login-voice-config-unread`](ready/viewer-login-voice-config-unread.md)
+  — The login response's voice-config is decoded and read by nobody
 - [`viewer-lookat-faithful`](ready/viewer-lookat-faithful.md) — Faithful look-at
   (LLHUDEffectLookAt) (blocked by `viewer-camera-third-person-orbit` (done))
 - [`viewer-lsl-editor-widget`](ready/viewer-lsl-editor-widget.md) — LSL editor
@@ -942,8 +955,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Does a grid hand back the asset you saved?
 - [`test-assets-gesture-codec`](ready/test-assets-gesture-codec.md) — Read and
   write a gesture asset (LLMultiGesture)
-- [`test-assets-object-asset-codec`](ready/test-assets-object-asset-codec.md) —
-  Read and write an inventory object asset
 - [`test-assets-remaining-class-audit`](ready/test-assets-remaining-class-audit.md)
   — Decide what the remaining asset classes are worth
 - [`test-audit-conformance-boilerplate`](ready/test-audit-conformance-boilerplate.md)
@@ -952,6 +963,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
 - [`test-fake-grid-builtin-sounds`](ready/test-fake-grid-builtin-sounds.md) —
   The built-in UI sounds the viewer plays on arrival 404
+- [`test-fake-grid-imitates-economy`](ready/test-fake-grid-imitates-economy.md)
+  — The fake grid's money is a stock OpenSim region's on either flavour
+- [`test-fake-grid-imitates-upload-announcements`](ready/test-fake-grid-imitates-upload-announcements.md)
+  — An uploaded item is announced the legacy way whichever grid this is
 - [`test-fake-grid-login-matrix-and-timeouts`](ready/test-fake-grid-login-matrix-and-timeouts.md)
   — The login refusals and handover timeouts nothing tests
 - [`test-fake-grid-object-sounds`](ready/test-fake-grid-object-sounds.md) — The
@@ -962,6 +977,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
+- [`test-object-asset-missing-fields`](ready/test-object-asset-missing-fields.md)
+  — A take through the object asset drops half a prim
 
 ### repl
 
@@ -1335,7 +1352,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1006)
+## done (1013)
 
 ### protocol
 
@@ -3151,6 +3168,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — HTTP ViewerAsset fetch through the caching AssetStore (sl-asset crate)
 - [`test-asset-upload`](done/test-asset-upload-upload-an-asset-via-caps-newfileagentinventory-uploader.md)
   — upload an asset via CAPS NewFileAgentInventory uploader
+- [`test-assets-object-asset-codec`](done/test-assets-object-asset-codec.md) —
+  Read and write an inventory object asset
 - [`test-assets-rigged-mesh-encoder`](done/test-assets-rigged-mesh-encoder.md) —
   A rigged mesh fixture whose deformation is analytically checkable (blocked by
   `viewer-mesh-encoder` (done))
@@ -3236,12 +3255,22 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   viewer can edit nothing on the fake grid
 - [`test-fake-grid-fixed-port-scenario`](done/test-fake-grid-fixed-port-scenario.md)
   — Named scenarios and a fixed-port launcher for the fake grid
+- [`test-fake-grid-imitates-audit`](done/test-fake-grid-imitates-audit.md) — The
+  fake grid was nobody in particular
+- [`test-fake-grid-imitates-inventory-api`](done/test-fake-grid-imitates-inventory-api.md)
+  — The fake grid is OpenSim about inventory whichever grid it says it is
+- [`test-fake-grid-imitates-server-bakes`](done/test-fake-grid-imitates-server-bakes.md)
+  — The fake grid runs a bake service on a grid that says it is OpenSim
+- [`test-fake-grid-imitates-simulator-features`](done/test-fake-grid-imitates-simulator-features.md)
+  — A grid claiming to be Second Life still introduces itself as OpenSim
 - [`test-fake-grid-neighbours-crossing`](done/test-fake-grid-neighbours-crossing.md)
   — Neighbour child agents and a scripted region crossing (blocked by
   `test-fake-grid-npc-avatars` (done))
 - [`test-fake-grid-npc-avatars`](done/test-fake-grid-npc-avatars.md) — NPC
   avatars with appearance, animations and attachments (blocked by
   `test-fake-grid-render-fixtures` (done))
+- [`test-fake-grid-object-asset-id-divergence`](done/test-fake-grid-object-asset-id-divergence.md)
+  — The fake grid names an object's asset where Second Life never does
 - [`test-fake-grid-object-write-path`](done/test-fake-grid-object-write-path.md)
   — The fake grid has no way to rez, take or fill an object
 - [`test-fake-grid-own-avatar-appearance`](done/test-fake-grid-own-avatar-appearance.md)
@@ -3250,6 +3279,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Typed prim fixtures — textured, mesh, sculpt, PBR, light, particles, linksets
   (blocked by `test-fake-grid-terrain-layerdata` (done),
   `test-shared-test-assets` (done))
+- [`test-fake-grid-rez-from-inventory`](done/test-fake-grid-rez-from-inventory.md)
+  — The fake grid takes an object but cannot rez one back
 - [`test-fake-grid-seated-crossing`](done/test-fake-grid-seated-crossing.md) —
   Crossing a border seated on a vehicle, alone and with other riders
 - [`test-fake-grid-self-avatar-baked-textures-rejected`](done/test-fake-grid-self-avatar-baked-textures-rejected.md)

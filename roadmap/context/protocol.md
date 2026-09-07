@@ -253,10 +253,13 @@ usable later by a real simulator). Conventions:
   (CAPS) alternative for the same job — verified against the Firestorm
   and OpenSim sources, not assumed. Skips are pinned as `Legacy` rows in
   the coverage table so each one stays a deliberate, documented
-  decision (e.g. UDP `FetchInventoryDescendents` serving is skipped —
-  `FetchInventoryDescendents2`/AISv3 exist on both grids — while the
-  Xfer transaction upload stays: the in-place wearable save has no cap
-  on either grid).
+  decision (e.g. the legacy UDP inventory *mutations* stay skipped —
+  AISv3 covers them on both grids — while the Xfer transaction upload
+  stays implemented: the in-place wearable save has no cap on either
+  grid). The UDP `FetchInventoryDescendents` **read** left that list in
+  `test-fake-grid-imitates-inventory-api`: OpenSim still serves it and
+  Second Life does not, so which of the two a grid is doing is itself
+  the thing worth modelling.
 - **Boundary unchanged.** Protocol surface is in scope; the
   world-authority grid — persistence, physics, multi-client broadcast,
   socket/event-loop I/O — remains the consumer's job (the `sl-fake-grid`

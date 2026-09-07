@@ -10,7 +10,9 @@ mod test {
         ChatChannel, ChatType, Client, Command, Event, LoginParams, LoginRequest, StartLocation,
         VoiceProvisionRequest,
     };
-    use sl_fake_grid::{AccountConfig, FakeAgent, FakeGrid, FakeGridBuilder, RegionConfig};
+    use sl_fake_grid::{
+        AccountConfig, FakeAgent, FakeGrid, FakeGridBuilder, ImitatedGrid, RegionConfig,
+    };
     use sl_proto::{ServerEvent, VoiceChannelUri};
     use sl_types::lsl::Vector;
     use sl_types::map::RegionCoordinates;
@@ -33,19 +35,22 @@ mod test {
     async fn connect_to(
         regions: Vec<RegionConfig>,
     ) -> Result<(FakeGrid, Client, FakeAgent), TestError> {
-        connect_configured(regions, None).await
+        connect_configured(regions, None, ImitatedGrid::default()).await
     }
 
     /// [`connect_to`], optionally shortening how long the grid waits for a
     /// client to complete its movement into a handover destination — what a
     /// test of the **failure** path needs, since the real budget is tens of
-    /// seconds.
+    /// seconds — and naming the live grid this one imitates, for the tests
+    /// that are about the divergence itself.
     async fn connect_configured(
         regions: Vec<RegionConfig>,
         handover_timeout: Option<Duration>,
+        imitates: ImitatedGrid,
     ) -> Result<(FakeGrid, Client, FakeAgent), TestError> {
         let mut builder = FakeGridBuilder::new()
             .account(AccountConfig::new("Test", "User", "password"))
+            .imitates(imitates)
             .event_queue_hold(Duration::from_secs(2));
         if let Some(timeout) = handover_timeout {
             builder = builder.handover_timeout(timeout);
@@ -103,16 +108,15 @@ mod test {
                 {
                     greeted = true;
                 }
-                // The stock SimulatorFeatures carry the grid's OpenSimExtras
-                // URLs (tile server, currency helper) — fetched over real CAPS.
+                // The stock grid imitates Second Life, whose SimulatorFeatures
+                // has no `OpenSimExtras` key at all — and does name its voice
+                // backend. Fetched over real CAPS. The tile server the extras
+                // would have carried arrived in the login response instead
+                // (asserted above); the OpenSim-flavoured shape is
+                // `an_opensim_flavoured_grid_introduces_itself_as_opensim`.
                 Event::SimulatorFeatures(features) => {
-                    let extras = features
-                        .open_sim_extras
-                        .as_ref()
-                        .ok_or("SimulatorFeatures without OpenSimExtras")?;
-                    assert_eq!(extras.map_server_url.as_ref(), Some(&grid.login_uri()));
-                    assert_eq!(extras.currency_base_uri.as_ref(), Some(&grid.login_uri()));
-                    assert_eq!(extras.currency.as_deref(), Some("L$"));
+                    assert_eq!(features.open_sim_extras, None);
+                    assert_eq!(features.voice_server_type.as_deref(), Some("webrtc"));
                     features_seen = true;
                 }
                 _other => {}
@@ -201,16 +205,17 @@ mod test {
 
     /// [`start`] against a grid serving `regions`.
     async fn start_in(regions: Vec<RegionConfig>) -> Result<Running, TestError> {
-        start_configured(regions, None).await
+        start_configured(regions, None, ImitatedGrid::default()).await
     }
 
-    /// [`start_in`] with the handover arrival budget of
+    /// [`start_in`] with the handover arrival budget and imitated grid of
     /// [`connect_configured`].
     async fn start_configured(
         regions: Vec<RegionConfig>,
         handover_timeout: Option<Duration>,
+        imitates: ImitatedGrid,
     ) -> Result<Running, TestError> {
-        let (grid, client, agent) = connect_configured(regions, handover_timeout).await?;
+        let (grid, client, agent) = connect_configured(regions, handover_timeout, imitates).await?;
         let circuit = client.root_circuit_id().ok_or("no root circuit")?;
         let (event_tx, event_rx) = mpsc::channel::<Event>(256);
         let (command_tx, command_rx) = mpsc::channel::<Command>(8);
@@ -312,6 +317,34 @@ mod test {
                 return Ok(value);
             }
         }
+    }
+
+    /// Waits for the item a take just filed, **whichever way this grid
+    /// announces one**: the legacy UDP `UpdateCreateInventoryItem` on an
+    /// OpenSim-flavoured grid, a `BulkUpdateInventory` over the event queue on
+    /// a Second-Life-flavoured one (`sl_fake_grid::InventoryAnnouncement`).
+    ///
+    /// Waiting for only the first is how these tests hung when the flavour
+    /// started deciding it — and `wait_on`'s timeout is per *event*, so a grid
+    /// still sending pings never trips it. That is the same trap a viewer that
+    /// only listens for the legacy message falls into, which is the whole point
+    /// of the switch.
+    async fn wait_for_taken_item(
+        events: &mut mpsc::Receiver<Event>,
+    ) -> Result<sl_client_tokio::InventoryItem, TestError> {
+        wait_on(events, |event| match event {
+            Event::InventoryItemCreated { item, .. }
+                if i32::from(item.item_type) == sl_proto::AssetType::Object.to_code() =>
+            {
+                Some(item.clone())
+            }
+            Event::InventoryBulkUpdate { items, .. } => items
+                .iter()
+                .find(|item| i32::from(item.item_type) == sl_proto::AssetType::Object.to_code())
+                .cloned(),
+            _ => None,
+        })
+        .await
     }
 
     #[tokio::test]
@@ -879,6 +912,185 @@ mod test {
             .with_sim(|sim| sim.voice().connection(&viewer_session).is_none())
             .await;
         assert!(closed);
+        Ok(())
+    }
+
+    /// The other flavour introduces itself the other way, through the real
+    /// client: `SimulatorFeatures` carries the `OpenSimExtras` block with the
+    /// grid's own URLs, and the region speaks no voice at all — no
+    /// `VoiceServerType`, no `RequiredVoiceVersion` push on arrival, and a
+    /// provision request refused for want of a backend. Both strings appear
+    /// nowhere in OpenSim's sources, and both of its voice modules are off in
+    /// a stock region.
+    ///
+    /// Runs the loop itself rather than going through [`start_imitating`]
+    /// because the claim is about an event that must **not** arrive, and a
+    /// wait that stepped over the arrival burst on its way to the handshake
+    /// would have consumed the push this is looking for. Here nothing reads
+    /// the stream before the loop below does.
+    #[tokio::test]
+    async fn an_opensim_flavoured_grid_introduces_itself_as_opensim() -> Result<(), TestError> {
+        let (grid, client, agent) =
+            connect_configured(vec![RegionConfig::default()], None, ImitatedGrid::OpenSim).await?;
+        let login_uri = grid.login_uri();
+        let mut server_events = agent.events();
+        let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
+        let (command_tx, command_rx) = mpsc::channel::<Command>(8);
+        let (diag_tx, _diag_rx) = mpsc::channel(16);
+        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+
+        // A viewer arriving anywhere asks for voice the only way this
+        // workspace knows how to ask -- WebRTC, since Vivox is implemented
+        // nowhere here. A silent region refuses it.
+        let offer = "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n\
+            m=audio 9 UDP/TLS/RTP/SAVPF 111\r\nc=IN IP4 0.0.0.0\r\n\
+            a=setup:actpass\r\na=mid:0\r\na=sendrecv\r\na=rtpmap:111 opus/48000/2\r\n";
+        command_tx
+            .send(Command::RequestVoiceAccount {
+                request: VoiceProvisionRequest::webrtc(offer, "local", None),
+            })
+            .await?;
+
+        // The features fetch is the terminating condition; the arrival push,
+        // had there been one, would have been enqueued before it.
+        let mut features = None;
+        let mut named_a_backend = false;
+        while features.is_none() {
+            let event = tokio::time::timeout(WAIT, event_rx.recv())
+                .await?
+                .ok_or("client event stream ended early")?;
+            match event {
+                Event::SimulatorFeatures(reply) => features = Some(reply.as_ref().clone()),
+                Event::RequiredVoiceVersion(_version) => named_a_backend = true,
+                _other => {}
+            }
+        }
+        let features = features.ok_or("no SimulatorFeatures")?;
+        let extras = features
+            .open_sim_extras
+            .as_ref()
+            .ok_or("an OpenSim-flavoured grid sent no OpenSimExtras")?;
+        assert_eq!(extras.map_server_url.as_ref(), Some(&login_uri));
+        assert_eq!(extras.currency_base_uri.as_ref(), Some(&login_uri));
+        assert_eq!(extras.currency.as_deref(), Some("L$"));
+        assert_eq!(features.voice_server_type, None);
+        assert!(!named_a_backend, "OpenSim sends no RequiredVoiceVersion");
+
+        // Grid-side, because a refusal is what the *grid* decided; the client
+        // only learns that its POST failed.
+        loop {
+            let event = tokio::time::timeout(WAIT, server_events.recv()).await??;
+            if let ServerEvent::VoiceProvisionRequested { outcome, .. } = &event {
+                assert_eq!(
+                    *outcome,
+                    sl_proto::VoiceProvisionOutcome::Refused(
+                        sl_proto::VoiceProvisionRefusal::BackendUnavailable
+                    )
+                );
+                break;
+            }
+        }
+
+        drop(command_tx);
+        run.abort();
+        Ok(())
+    }
+
+    /// **A grid that does not central-bake says so four times over.**
+    ///
+    /// Server-side baking is not one advertisement, it is four, and the reason
+    /// they are asserted together is that moving fewer than all of them is
+    /// *worse than moving none*: a viewer that has decided an avatar is
+    /// server-baked and finds no service URL asks for no baked texture at all
+    /// (`LLVOAvatar::getImageURL` answers an empty string), so every avatar
+    /// stays a cloud with nothing logged. Three of the four are here — the
+    /// fourth, the login field itself, is pinned on the raw response in
+    /// `http_glue`, because its absence is not something the client re-exposes.
+    ///
+    /// Both flavours run, because "the OpenSim one withholds it" is only half a
+    /// claim: a knob that answered the same on both would pass a test that
+    /// checked one side and would still leave the fake grid nobody in
+    /// particular.
+    #[tokio::test]
+    async fn a_client_baking_grid_withholds_every_bake_signal() -> Result<(), TestError> {
+        for (imitates, bakes) in [
+            (ImitatedGrid::SecondLife, true),
+            (ImitatedGrid::OpenSim, false),
+        ] {
+            let (_grid, mut client, _agent) =
+                connect_configured(vec![RegionConfig::default()], None, imitates).await?;
+            let (caps_tx, mut caps_rx) = mpsc::channel(4);
+            client.set_caps_reporter(caps_tx);
+            let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
+            let (command_tx, command_rx) = mpsc::channel::<Command>(8);
+            let (diag_tx, _diag_rx) = mpsc::channel(16);
+            let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+
+            // The region handshake and the agent's own appearance both arrive
+            // in the arrival burst; neither is requested, so this reads the
+            // stream until it has both rather than asking for either.
+            let mut protocols = None;
+            let mut appearance = None;
+            while protocols.is_none() || appearance.is_none() {
+                let event = tokio::time::timeout(WAIT, event_rx.recv())
+                    .await?
+                    .ok_or("client event stream ended early")?;
+                match event {
+                    Event::RegionInfoHandshake(identity) => {
+                        protocols = Some(identity.region_protocols);
+                    }
+                    Event::AvatarAppearance(record) => appearance = Some(*record),
+                    _other => {}
+                }
+            }
+            let protocols = protocols.ok_or("no region identity")?;
+            let appearance = appearance.ok_or("no appearance")?;
+
+            // (1) `RegionProtocols` bit 0, which the reference viewer reads as
+            // `getCentralBakeVersion()` — what decides whether the agent bakes
+            // and uploads its *own* appearance.
+            assert_eq!(
+                protocols & sl_fake_grid::REGION_PROTOCOL_SERVER_BAKES != 0,
+                bakes,
+                "a grid imitating {imitates:?} claimed central baking = {}",
+                protocols & sl_fake_grid::REGION_PROTOCOL_SERVER_BAKES != 0
+            );
+            // The other bit in that field is Bakes on Mesh, an OpenSim
+            // extension that rides along and is not the bake policy's.
+            assert_eq!(
+                protocols & sl_fake_grid::REGION_PROTOCOL_BAKES_ON_MESH != 0,
+                imitates == ImitatedGrid::OpenSim
+            );
+
+            // (2) the per-avatar `AppearanceData` block, which is
+            // `setIsUsingServerBakes(appearance_version > 0)`. Absent, not
+            // zeroed: OpenSim writes no block at all.
+            assert_eq!(appearance.appearance_version.is_some(), bakes);
+            assert_eq!(appearance.cof_version.is_some(), bakes);
+            assert_eq!(appearance.appearance_flags.is_some(), bakes);
+            // What the avatar *looks* like is the same either way — both grids
+            // publish baked ids, they disagree only about how to fetch them.
+            assert!(!appearance.visual_params.is_empty());
+            assert!(
+                appearance
+                    .texture_entry
+                    .texture_id(sl_proto::avatar_texture::UPPER_BAKED)
+                    .is_some()
+            );
+
+            // (3) the `UpdateAvatarAppearance` capability — the POST that
+            // triggers a central bake. A viewer that finds none bakes locally.
+            let caps = tokio::time::timeout(WAIT, caps_rx.recv())
+                .await?
+                .ok_or("no capability map")?;
+            assert_eq!(caps.contains_key("UpdateAvatarAppearance"), bakes);
+            // A neighbouring upload cap is still there on both, so the check
+            // above is about this capability and not about the seed grant.
+            assert!(caps.contains_key("UploadBakedTexture"));
+
+            drop(command_tx);
+            run.abort();
+        }
         Ok(())
     }
 
@@ -1778,6 +1990,7 @@ mod test {
         let running = start_configured(
             vec![RegionConfig::default(), east_region()],
             Some(SHORT_HANDOVER),
+            ImitatedGrid::default(),
         )
         .await?;
         assert!(
@@ -1834,6 +2047,7 @@ mod test {
         let mut running = start_configured(
             vec![RegionConfig::default(), adjacent_east_region()],
             Some(SHORT_HANDOVER),
+            ImitatedGrid::default(),
         )
         .await?;
         running
@@ -3192,11 +3406,7 @@ mod test {
                 group_id: None,
             })
             .await?;
-        wait_on(&mut avatar.events, |event| match event {
-            Event::InventoryItemCreated { item, .. } => Some(item.clone()),
-            _ => None,
-        })
-        .await
+        wait_for_taken_item(&mut avatar.events).await
     }
 
     /// The `UpdateTaskInventory` payload that drops `item` into a prim. The
@@ -3526,5 +3736,424 @@ mod test {
             );
         }
         Ok(())
+    }
+
+    /// A **linkset** survives a take and comes back whole.
+    ///
+    /// Two things are being asserted, and neither holds by accident. A take
+    /// names only the root — that is what a viewer selects — so the child has
+    /// to be gathered on the grid side or it stays behind in the region with a
+    /// parent nothing holds any more. And what comes back is rebuilt out of the
+    /// asset text: the region mints four fresh ids (two local, two keys), reads
+    /// the root's placement from `pos` and the child's from `childpos`, and
+    /// re-parents the child to the root's *new* local id. A child rezzed at its
+    /// stored offset but parented to nothing would stand a metre from the root
+    /// instead of on it, and the region would still look right in the log.
+    #[tokio::test]
+    async fn a_taken_linkset_rezzes_back_whole() -> Result<(), TestError> {
+        let grid = two_avatar_grid().await?;
+        let mut avatar = join(&grid, "First").await?;
+
+        let base = Vector {
+            x: 140.0,
+            y: 130.0,
+            z: 26.0,
+        };
+        let above = Vector {
+            z: base.z + 1.0,
+            ..base.clone()
+        };
+        let root = rez_cube(&mut avatar, &base).await?;
+        let child = rez_cube(&mut avatar, &above).await?;
+        avatar
+            .commands
+            .send(Command::LinkObjects {
+                local_ids: vec![
+                    sl_client_tokio::ScopedObjectId::new(avatar.circuit, root.local_id),
+                    sl_client_tokio::ScopedObjectId::new(avatar.circuit, child.local_id),
+                ],
+            })
+            .await?;
+        // The child re-sent with the root's local id as its `ParentID`: the
+        // link took, and its position is now the offset a take will serialise.
+        let child_key = child.full_id;
+        let root_local_id = root.local_id;
+        let linked = wait_on(&mut avatar.events, |event| match event {
+            Event::ObjectUpdated(object)
+                if object.full_id == child_key && object.parent_id == root_local_id =>
+            {
+                Some((**object).clone())
+            }
+            _ => None,
+        })
+        .await?;
+
+        let objects_folder = avatar
+            .agent
+            .with_sim(|sim| {
+                sim.agent_inventory()
+                    .folders()
+                    .find(|folder| {
+                        folder.folder_type == sl_client_tokio::FolderType::Object.to_code()
+                    })
+                    .map(|folder| folder.folder_id)
+            })
+            .await
+            .ok_or("the seeded account has no Objects folder")?;
+        // The take names the root alone, exactly as a viewer's selection does.
+        avatar
+            .commands
+            .send(Command::DerezObjects {
+                local_ids: vec![sl_client_tokio::ScopedObjectId::new(
+                    avatar.circuit,
+                    root.local_id,
+                )],
+                destination: sl_client_tokio::DeRezDestination::TakeIntoAgentInventory(
+                    objects_folder,
+                ),
+                transaction_id: sl_client_tokio::TransactionId::from(uuid::Uuid::from_u128(0x11E5)),
+                group_id: None,
+            })
+            .await?;
+        // The filed item and both kills in **one** pass, because their order is
+        // the grid's and not this test's to assume. The kills go out over UDP
+        // straight away; a Second-Life-flavoured take's item rides the event
+        // queue and lands on the next long-poll, so it arrives *after* them.
+        // Draining for the item first is how this test hung once the flavour
+        // started deciding the announcement — the wait for the item ate both
+        // kills on its way past, and the wait for the kills then never ended.
+        let mut standing: Vec<_> = [root.local_id, child.local_id]
+            .into_iter()
+            .map(|local_id| sl_client_tokio::ScopedObjectId::new(avatar.circuit, local_id))
+            .collect();
+        let mut taken = None;
+        while taken.is_none() || !standing.is_empty() {
+            let event = tokio::time::timeout(WAIT, avatar.events.recv())
+                .await?
+                .ok_or("client event stream ended early")?;
+            match event {
+                Event::InventoryItemCreated { item, .. }
+                    if i32::from(item.item_type) == sl_proto::AssetType::Object.to_code() =>
+                {
+                    taken = Some(item);
+                }
+                Event::InventoryBulkUpdate { items, .. } => {
+                    taken = items
+                        .into_iter()
+                        .find(|item| {
+                            i32::from(item.item_type) == sl_proto::AssetType::Object.to_code()
+                        })
+                        .or(taken);
+                }
+                Event::ObjectRemoved { local_id, .. } => {
+                    standing.retain(|waiting| *waiting != local_id);
+                }
+                _other => {}
+            }
+        }
+        let item = taken.ok_or("the take filed no object item")?;
+
+        let landing = Vector {
+            x: 150.0,
+            y: 150.0,
+            z: 30.0,
+        };
+        avatar
+            .commands
+            .send(Command::RezObjectFromInventory {
+                params: Box::new(rez_params(&item, &landing)),
+            })
+            .await?;
+        let mut rezzed = Vec::new();
+        while rezzed.len() < 2 {
+            let object = wait_on(&mut avatar.events, |event| match event {
+                Event::ObjectAdded(object) => Some((**object).clone()),
+                _ => None,
+            })
+            .await?;
+            rezzed.push(object);
+        }
+        let (rezzed_root, rezzed_child) = match rezzed.as_slice() {
+            [first, second] if first.parent_id == sl_client_tokio::RegionLocalObjectId(0) => {
+                (first, second)
+            }
+            [first, second] => (second, first),
+            _unreachable => return Err("the rez streamed something other than two objects".into()),
+        };
+        assert_eq!(
+            rezzed_child.parent_id, rezzed_root.local_id,
+            "the rezzed child was not parented to the rezzed root"
+        );
+        assert_ne!(
+            rezzed_root.full_id, root.full_id,
+            "the rez reused the taken object's key instead of minting one"
+        );
+        assert_eq!(
+            rezzed_root.motion.position, landing,
+            "the root did not land where the ray ended"
+        );
+        assert_eq!(
+            rezzed_child.motion.position, linked.motion.position,
+            "the child came back at something other than its offset from the root"
+        );
+        assert_eq!(rezzed_root.scale, root.scale);
+        assert_eq!(rezzed_child.scale, child.scale);
+        Ok(())
+    }
+
+    /// **A take tells a viewer nothing about where the object lives**, and the
+    /// rez works anyway.
+    ///
+    /// This is the fake grid imitating Second Life, which is what it does unless
+    /// asked otherwise ([`sl_fake_grid::ObjectAssetPolicy`]). Measured on aditi
+    /// 2026-09-06: eleven of eleven object inventory items answered with a nil
+    /// `asset_id`, in the AIS3 listing and in the per-item fetch, every one of
+    /// them full-perm to its owner — so the withholding is about the class, not
+    /// about permissions, and no viewer can open an object asset there at all.
+    ///
+    /// The second half is the half that is easy to get wrong. Withholding the id
+    /// must not cost the resident the object: on Second Life a taken object
+    /// drags back out of inventory like any other, because the *simulator*
+    /// resolves the body and the viewer never needed it. A fake grid that
+    /// withheld the id by simply not writing the body would pass the first
+    /// assertion here and fail a resident.
+    #[tokio::test]
+    async fn a_take_withholds_the_object_asset_and_the_rez_still_works() -> Result<(), TestError> {
+        let grid = two_avatar_grid().await?;
+        let mut avatar = join(&grid, "First").await?;
+
+        let item = take_a_donor_item(
+            &mut avatar,
+            &Vector {
+                x: 143.0,
+                y: 137.0,
+                z: 26.0,
+            },
+        )
+        .await?;
+        assert!(
+            item.asset_id.is_nil(),
+            "the take named an asset ({}); Second Life names none",
+            item.asset_id
+        );
+
+        let landing = Vector {
+            x: 144.0,
+            y: 138.0,
+            z: 28.0,
+        };
+        avatar
+            .commands
+            .send(Command::RezObjectFromInventory {
+                params: Box::new(rez_params(&item, &landing)),
+            })
+            .await?;
+        let rezzed = wait_on(&mut avatar.events, |event| match event {
+            Event::ObjectAdded(object) if object.motion.position == landing => {
+                Some((**object).clone())
+            }
+            _ => None,
+        })
+        .await?;
+        assert_eq!(
+            rezzed.motion.position, landing,
+            "an item with no asset id did not come back into the world"
+        );
+        Ok(())
+    }
+
+    /// The other grid: a take **names** the object's asset, and it is fetchable
+    /// and describes the object that was taken.
+    ///
+    /// OpenSim's side of the same divergence, asked for explicitly
+    /// ([`sl_fake_grid::ObjectAssetPolicy::Served`]). Two things are asserted
+    /// together because either alone would pass a grid that is broken in the
+    /// other way: an id nothing serves is the failure the whole asset-id family
+    /// exists to catch, and bytes that describe some *other* prim would be a
+    /// take that filed the wrong object.
+    #[tokio::test]
+    async fn an_opensim_flavoured_take_names_a_fetchable_object_asset() -> Result<(), TestError> {
+        let grid = FakeGridBuilder::new()
+            .account(AccountConfig::new("First", "User", "password"))
+            .event_queue_hold(Duration::from_secs(2))
+            .object_assets(sl_fake_grid::ObjectAssetPolicy::Served)
+            .region(RegionConfig::default())
+            .start()
+            .await?;
+        let mut avatar = join(&grid, "First").await?;
+
+        let position = Vector {
+            x: 147.0,
+            y: 139.0,
+            z: 26.0,
+        };
+        // The object's own key, kept from the rez: what the asset has to name
+        // back if the take serialised the prim it was pointed at.
+        let taken = rez_cube(&mut avatar, &position).await?;
+        let objects_folder = avatar
+            .agent
+            .with_sim(|sim| {
+                sim.agent_inventory()
+                    .folders()
+                    .find(|folder| {
+                        folder.folder_type == sl_client_tokio::FolderType::Object.to_code()
+                    })
+                    .map(|folder| folder.folder_id)
+            })
+            .await
+            .ok_or("the seeded account has no Objects folder")?;
+        avatar
+            .commands
+            .send(Command::DerezObjects {
+                local_ids: vec![sl_client_tokio::ScopedObjectId::new(
+                    avatar.circuit,
+                    taken.local_id,
+                )],
+                destination: sl_client_tokio::DeRezDestination::TakeIntoAgentInventory(
+                    objects_folder,
+                ),
+                transaction_id: sl_client_tokio::TransactionId::from(uuid::Uuid::from_u128(0x0B1E)),
+                group_id: None,
+            })
+            .await?;
+        let item = wait_for_taken_item(&mut avatar.events).await?;
+        assert!(
+            !item.asset_id.is_nil(),
+            "an OpenSim-flavoured take filed an item with no asset id"
+        );
+
+        avatar
+            .commands
+            .send(Command::FetchAsset {
+                asset_id: sl_client_tokio::AssetKey::from(item.asset_id),
+                asset_type: sl_proto::AssetType::Object,
+                byte_range: None,
+            })
+            .await?;
+        let fetched_id = item.asset_id;
+        let bytes = wait_on(&mut avatar.events, |event| match event {
+            Event::AssetReceived(fetched) if fetched.id == fetched_id => Some(fetched.data.clone()),
+            _ => None,
+        })
+        .await?;
+        let asset = sl_object_asset::ObjectAsset::decode(&bytes)?;
+        let prim = asset.root().ok_or("the taken object's asset has no prim")?;
+        assert_eq!(
+            prim.task_id,
+            taken.full_id.uuid(),
+            "the asset names a different prim than the one taken"
+        );
+        assert_eq!(prim.name, item.name);
+        Ok(())
+    }
+
+    /// A **no-copy** item is consumed by the rez: the object goes into the
+    /// world and the item is gone, and the client is told so.
+    ///
+    /// This is OpenSim's rule (`DoPostRezWhenFromItem`) and it is decided by the
+    /// item's own owner mask, not by the `remove_item` flag the client sent —
+    /// the flag is what the viewer *expected*, and a viewer that dragged out a
+    /// no-copy object and kept the item would be showing a copy the grid does
+    /// not have. Everything the fake grid mints is full-permission, so the copy
+    /// bit is cleared on the grid side here to reach the arm at all.
+    #[tokio::test]
+    async fn rezzing_a_no_copy_item_consumes_it() -> Result<(), TestError> {
+        let grid = two_avatar_grid().await?;
+        let mut avatar = join(&grid, "First").await?;
+
+        let item = take_a_donor_item(
+            &mut avatar,
+            &Vector {
+                x: 145.0,
+                y: 135.0,
+                z: 26.0,
+            },
+        )
+        .await?;
+        let item_id = item.item_id;
+        let stripped = avatar
+            .agent
+            .with_sim(|sim| {
+                let mut held = sim.agent_inventory().item(item_id).cloned()?;
+                held.permissions.owner =
+                    held.permissions.owner & !sl_client_tokio::Permissions::COPY;
+                sim.agent_inventory_mut().insert_item(held.clone());
+                Some(held)
+            })
+            .await
+            .ok_or("the take's item was not in the agent's inventory")?;
+
+        avatar
+            .commands
+            .send(Command::RezObjectFromInventory {
+                params: Box::new(rez_params(
+                    &stripped,
+                    &Vector {
+                        x: 146.0,
+                        y: 136.0,
+                        z: 27.0,
+                    },
+                )),
+            })
+            .await?;
+        // The object still rezzes -- consuming the item is what happens
+        // *after* the rez, not instead of it.
+        let rezzed = wait_on(&mut avatar.events, |event| match event {
+            Event::ObjectAdded(object) => Some((**object).clone()),
+            _ => None,
+        })
+        .await?;
+        assert_eq!(
+            rezzed.motion.position,
+            Vector {
+                x: 146.0,
+                y: 136.0,
+                z: 27.0
+            }
+        );
+        let removed = wait_on(&mut avatar.events, |event| match event {
+            Event::InventoryItemsRemoved { items } if items.contains(&item_id) => Some(()),
+            _ => None,
+        })
+        .await;
+        assert!(
+            removed.is_ok(),
+            "a no-copy item survived the rez that consumed it"
+        );
+        let still_held = avatar
+            .agent
+            .with_sim(|sim| sim.agent_inventory().item(item_id).is_some())
+            .await;
+        assert!(
+            !still_held,
+            "the grid kept a no-copy item it told the client it had removed"
+        );
+        Ok(())
+    }
+
+    /// The [`RezObjectParams`](sl_client_tokio::RezObjectParams) that rez `item`
+    /// at `position`, as a viewer's drag-out builds them: the ray is bypassed so
+    /// the object lands exactly there, and the masks and CRC are what the client
+    /// believes about the item rather than anything the grid checks.
+    fn rez_params(
+        item: &sl_client_tokio::InventoryItem,
+        position: &Vector,
+    ) -> sl_client_tokio::RezObjectParams {
+        sl_client_tokio::RezObjectParams {
+            group_id: None,
+            from_task_id: None,
+            bypass_raycast: true,
+            ray_start: position.clone(),
+            ray_end: position.clone(),
+            ray_target_id: None,
+            ray_end_is_intersection: false,
+            rez_selected: false,
+            remove_item: false,
+            item_flags: item.flags,
+            group_mask: item.permissions.group.bits(),
+            everyone_mask: item.permissions.everyone.bits(),
+            next_owner_mask: item.permissions.next_owner.bits(),
+            item: task_item(item),
+        }
     }
 }

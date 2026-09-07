@@ -86,7 +86,7 @@ impl GridTest for ParcelEdit {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi, Grid::Fake]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl]
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {

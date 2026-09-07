@@ -26,6 +26,7 @@ sl-mesh = { workspace = true }
 # The notecard and landmark fixtures are written by the crates that own those
 # formats, so a fixture body and the bytes a grid really serves cannot drift.
 sl-notecard = { path = "../sl-notecard", version = "0.1.0" }
+sl-object-asset = { workspace = true }
 sl-proto = { workspace = true }
 sl-sound = { path = "../sl-sound", version = "0.1.0" }
 sl-texture = { path = "../sl-texture", version = "0.1.0", features = ["encode"] }

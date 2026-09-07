@@ -21,17 +21,18 @@
 //! declared class" by comparing against [`SeededAsset::body`] alone,
 //! without linking every decoder itself.
 //!
-//! Two classes are deliberately absent, and their absence is the finding:
-//! [`AssetType::Object`] has no codec in this workspace at all (an object asset
-//! is `LLViewerObject`'s nested-block text, unrelated to the `ObjectUpdate`
-//! wire form a fixture builds today), and [`AssetType::Gesture`] has no
-//! *decoder* — its body here is written from the reference's format by hand and
-//! is the one entry whose round trip is byte-level only. See
-//! [`unsupported_classes`] for the machine-readable form of both statements.
+//! One class is deliberately absent a *decoder*: [`AssetType::Gesture`]'s body
+//! here is written from the reference's format by hand and is the one entry
+//! whose round trip is byte-level only. See [`unsupported_classes`] for the
+//! machine-readable form of every class that has no body at all.
 
 use std::collections::BTreeMap;
 
 use sl_avatar::{SaleType, WearableAsset, WearablePermissions};
+use sl_object_asset::{
+    IDENTITY_ROTATION, LegacyFace, LegacyPathParams, LegacyPermissions, LegacyProfileParams,
+    LegacyShape, LinkState, ObjectAsset, PrimBlock, PrimPlacement,
+};
 use sl_proto::{AssetType, InventoryType, UpdatableAssetType, WearableType};
 use sl_types::map::RegionCoordinates;
 use uuid::Uuid;
@@ -228,6 +229,16 @@ pub fn seeded_assets() -> Result<Vec<SeededAsset>, FixtureError> {
             wearable_type: Some(WearableType::Shape),
         },
         SeededAsset {
+            name: "Fixture Object",
+            asset_type: AssetType::Object,
+            inv_type: InventoryType::Object,
+            asset_id: fixture_id(AssetType::Object),
+            body: object_body(1),
+            edited_body: object_body(2),
+            save_path: SavePath::NewFileOnly,
+            wearable_type: None,
+        },
+        SeededAsset {
             name: "Fixture Notecard",
             asset_type: AssetType::Notecard,
             inv_type: InventoryType::Notecard,
@@ -319,11 +330,6 @@ pub fn fixture_id(asset_type: AssetType) -> Uuid {
 pub const fn unsupported_classes() -> &'static [(AssetType, &'static str)] {
     &[
         (
-            AssetType::Object,
-            "no codec: an object asset is LLViewerObject's nested-block text, \
-             which nothing in this workspace reads or writes (test-assets-object-asset-codec)",
-        ),
-        (
             AssetType::CallingCard,
             "no consumer: nothing fetches a calling card's body, and whether the \
              class is worth a fixture at all is test-assets-remaining-class-audit's call",
@@ -414,6 +420,84 @@ fn wearable_body(name: &str, wearable_type: WearableType, param: i32, weight: f3
     asset.to_text(&FIXTURE_WEARABLE_PERMISSIONS).into_bytes()
 }
 
+/// An object body of `prims` prims: one box, or a root and that many children
+/// linked to it — the two shapes an object asset comes in.
+///
+/// Every prim is a plain box under full permissions, because what this fixture
+/// exists to prove is that the *class* resolves and decodes; the shape variety
+/// belongs in `sl-object-asset`'s own tests, against the reference assets.
+fn object_body(prims: usize) -> Vec<u8> {
+    let box_shape = LegacyShape {
+        path: LegacyPathParams {
+            // A straight path swept through a square profile: a box.
+            curve: 0x10,
+            end: 1.0,
+            scale_x: 1.0,
+            scale_y: 1.0,
+            revolutions: 1.0,
+            ..LegacyPathParams::default()
+        },
+        profile: LegacyProfileParams {
+            curve: 0x01,
+            end: 1.0,
+            ..LegacyProfileParams::default()
+        },
+    };
+    let prim = |index: usize, link: Option<LinkState>| PrimBlock {
+        task_id: Uuid::from_u128(
+            OBJECT_TASK_ID_BASE.wrapping_add(u128::try_from(index).unwrap_or(0)),
+        ),
+        name: "Fixture Object".to_owned(),
+        permissions: LegacyPermissions {
+            base_mask: FULL_PERMISSIONS,
+            owner_mask: FULL_PERMISSIONS,
+            next_owner_mask: FULL_PERMISSIONS,
+            ..LegacyPermissions::default()
+        },
+        pcode: PCODE_VOLUME,
+        scale: sl_types::lsl::Vector {
+            x: 0.5,
+            y: 0.5,
+            z: 0.5,
+        },
+        shape: box_shape,
+        faces: vec![LegacyFace::new(fixture_id(AssetType::Texture)); OBJECT_FACE_COUNT],
+        link,
+        ..PrimBlock::default()
+    };
+    let asset = if prims <= 1 {
+        ObjectAsset::single(prim(0, None))
+    } else {
+        // Children first and the root last, as a simulator writes them.
+        let mut blocks: Vec<PrimBlock> = (1..prims)
+            .map(|index| PrimBlock {
+                placement: PrimPlacement::Child {
+                    position: sl_types::lsl::Vector {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.5,
+                    },
+                    rotation: IDENTITY_ROTATION,
+                },
+                ..prim(index, Some(LinkState::Child))
+            })
+            .collect();
+        blocks.push(prim(0, Some(LinkState::Root)));
+        ObjectAsset { prims: blocks }
+    };
+    asset.encode()
+}
+
+/// The base of the `task_id`s the object fixture's prims carry, so a prim key
+/// in a log is recognisable as the fixture's.
+const OBJECT_TASK_ID_BASE: u128 = 0x5A55_E700_0B1E_C700_0000_0000_0000_0000;
+
+/// `LL_PCODE_VOLUME`: the object class every modern prim is.
+const PCODE_VOLUME: u8 = 9;
+
+/// How many faces the fixture object's box prims carry.
+const OBJECT_FACE_COUNT: usize = 6;
+
 /// A gesture body in the reference's `LLGesture` text format: the version, the
 /// key/mask the gesture is bound to, its trigger word, its replacement text,
 /// and a single chat step.
@@ -497,6 +581,18 @@ mod test {
             AssetType::Notecard => sl_notecard::Notecard::decode(body)
                 .map(drop)
                 .map_err(|error| format!("not a notecard: {error}")),
+            AssetType::Object => {
+                let asset = ObjectAsset::decode(body)
+                    .map_err(|error| format!("not an object asset: {error}"))?;
+                // An object asset with no prims decodes cleanly and rezzes
+                // nothing, which is not a body of the class in any useful
+                // sense.
+                if asset.root().is_some() {
+                    Ok(())
+                } else {
+                    Err("an object asset with no root prim".to_owned())
+                }
+            }
             AssetType::ScriptText => {
                 let parsed = sl_lsl::parse(text(body)?);
                 if parsed.errors.is_empty() {

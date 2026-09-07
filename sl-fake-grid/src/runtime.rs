@@ -24,16 +24,19 @@ use tokio::net::{TcpListener, UdpSocket};
 use tokio::sync::{Mutex, broadcast, watch};
 
 use crate::accounts::{Account, AccountConfig};
-use crate::agent_requests::LegacyUdpInventory;
-use crate::assets::GridAssets;
+use crate::assets::{GridAssets, ObjectAssetPolicy};
+use crate::bakes::BakePolicy;
 use crate::driver::{SharedSim, SimState, new_shared_sim, run_timer, run_udp_pump};
 use crate::economy_policy::{EconomyConfig, EconomyEvent};
 use crate::error::Error;
+use crate::imitates::ImitatedGrid;
+use crate::inventory::{InventoryAnnouncement, LegacyUdpInventory};
 use crate::map_tiles::MapTileStore;
 use crate::neighbours::NeighbourPolicy;
 use crate::scenario::Scenario;
 use crate::terrain::TerrainFixture;
 use crate::time::{Now, system_clock};
+use crate::voice::VoiceBackend;
 use crate::world::AVATAR_CENTRE_ABOVE_GROUND_M;
 
 /// How the grid describes itself in `get_grid_info` and the login message.
@@ -172,7 +175,10 @@ impl RegionEntry {
     /// `estate_owner` is the grid's own ([`GridCore::estate_owner`]): a region
     /// is owned by whoever holds its estate, and a region owned by nobody is
     /// one whose About Land and Region/Estate floaters both name "(nobody)".
-    fn identity(&self, estate_owner: AgentKey) -> RegionIdentity {
+    /// `region_protocols` is the grid's own too
+    /// ([`GridCore::region_protocols`]): what a region claims to speak is a
+    /// property of the grid running it, not of the patch of land.
+    fn identity(&self, estate_owner: AgentKey, region_protocols: u64) -> RegionIdentity {
         let handle = self.handle();
         RegionIdentity {
             sim_name: region_name_from_wire("fake-grid", &self.config.name)
@@ -186,7 +192,7 @@ impl RegionEntry {
             ),
             region_flags: 0,
             region_flags_extended: 0,
-            region_protocols: 0,
+            region_protocols,
             maturity: self.config.maturity,
             product: ProductType::FullRegion,
             product_sku: String::new(),
@@ -358,6 +364,14 @@ pub(crate) struct GridCore {
     /// folded into one, because an asset id names a blob the whole grid knows
     /// (see [`crate::assets`]).
     pub(crate) assets: GridAssets,
+    /// Which live grid this one imitates for a taken object's asset — the one
+    /// class where Second Life and OpenSim disagree about whether a viewer may
+    /// see an asset at all ([`ObjectAssetPolicy`]).
+    pub(crate) object_assets: ObjectAssetPolicy,
+    /// Whether `SimulatorFeatures` carries the `OpenSimExtras` block.
+    pub(crate) open_sim_extras: bool,
+    /// The spatial-voice backend every region serves ([`VoiceBackend`]).
+    pub(crate) voice_backend: VoiceBackend,
     /// The clock every session machine is stamped from.
     pub(crate) clock: Now,
     /// How long an empty `EventQueueGet` poll is held before the 502.
@@ -377,8 +391,19 @@ pub(crate) struct GridCore {
     pub(crate) grid_info: GridInfo,
     /// The economy helper policy.
     pub(crate) economy: EconomyConfig,
-    /// How every session answers the deprecated UDP inventory fetch.
+    /// How every session answers the deprecated UDP inventory fetch
+    /// ([`LegacyUdpInventory`]).
     pub(crate) legacy_udp_inventory: LegacyUdpInventory,
+    /// How a session announces an inventory item it just created
+    /// ([`InventoryAnnouncement`]).
+    pub(crate) inventory_announcement: InventoryAnnouncement,
+    /// Who composites this grid's avatars ([`BakePolicy`]): the appearance
+    /// service, the central-bake protocol bit, the `AppearanceData` block and
+    /// the `UpdateAvatarAppearance` capability all follow it.
+    pub(crate) bakes: BakePolicy,
+    /// The `RegionProtocols` field every region handshake carries: the bake
+    /// policy's bit 0 and whatever else the imitated grid claims.
+    pub(crate) region_protocols: u64,
     /// The world-map tiles served under the login URI.
     pub(crate) map_tiles: MapTileStore,
     /// The world-map region catalogue every session answers map requests
@@ -522,16 +547,20 @@ impl GridCore {
         }
         success.message = Some(self.identity.message.clone());
         success.map_server_url = Some(self.login_uri.clone());
-        // The grid's avatar-baking service. Without it the viewer decides the
-        // avatar is server-baked, finds no URL to fetch a bake from, and
-        // leaves every avatar a cloud -- silently, because `getImageURL`
-        // returns an empty string rather than a failing request. See
+        // The grid's avatar-baking service, on a grid that bakes. Naming it is
+        // half of a pair: a viewer that has decided an avatar is server-baked
+        // and finds no URL here leaves every avatar a cloud -- silently,
+        // because `getImageURL` returns an empty string rather than a failing
+        // request -- so the rest of `BakePolicy` moves with this field, and a
+        // client-baking grid tells the viewer to bake instead. See
         // `crate::http_service::appearance_texture_id` for why it is mounted
         // per session.
-        success.agent_appearance_service = self
-            .login_uri
-            .join(&format!("sim/{}/appearance/", prepared.seq))
-            .ok();
+        if self.bakes.advertises_appearance_service() {
+            success.agent_appearance_service = self
+                .login_uri
+                .join(&format!("sim/{}/appearance/", prepared.seq))
+                .ok();
+        }
         success.currency = Some(self.economy.currency_symbol.clone());
         Ok((prepared, success))
     }
@@ -630,11 +659,25 @@ impl GridCore {
             sim.add_parcel(cover);
         }
         region.scenario.udp_assets.register_xfer_files(&mut sim);
+        // The scenario's setup gets first refusal on the voice backend: it may
+        // have enabled one itself, and a region that speaks a backend of its
+        // own choosing outranks the flavour. Otherwise the grid installs the
+        // one the imitated grid runs.
+        if sim.voice().advertised_server_type().is_none() {
+            match self.voice_backend {
+                VoiceBackend::WebRtc => sim
+                    .voice_mut()
+                    .enable_webrtc(sl_proto::WebRtcStub::default()),
+                VoiceBackend::Silent => {}
+            }
+        }
         if *sim.simulator_features() == SimulatorFeatures::default() {
-            // The scenario left the feature document untouched: advertise
-            // the grid-wide URLs (map tiles, currency helper) the way an
-            // OpenSim region does through `OpenSimExtras`, and the voice
-            // backend the scenario enabled (`VoiceServerType`).
+            // The scenario left the feature document untouched: advertise the
+            // grid-wide URLs the way an OpenSim region does through
+            // `OpenSimExtras`, and the voice backend that ended up enabled
+            // (`VoiceServerType`). A silent region advertises neither — which
+            // is exactly the pair of things a stock OpenSim region does not
+            // send.
             let mut features = self.simulator_features();
             features.voice_server_type = sim.voice().advertised_server_type().map(str::to_owned);
             sim.set_simulator_features(features);
@@ -644,7 +687,16 @@ impl GridCore {
             format!("http://127.0.0.1:{}/sim/{seq}", self.http_port).parse()?;
         let caps = {
             let minter = self.minter.clone();
-            sl_proto::SimCaps::new(base_url, self.minter.uuid(), move || minter.uuid())
+            let mut caps =
+                sl_proto::SimCaps::new(base_url, self.minter.uuid(), move || minter.uuid());
+            if !self.bakes.grants_bake_capability() {
+                // A grid that does not central-bake offers no trigger to bake
+                // with, and a viewer that finds none composites the avatar
+                // itself and uploads the result -- which is the whole of what a
+                // stock OpenSim region does about appearance.
+                let _withheld = caps.withhold(sl_proto::CAP_UPDATE_AVATAR_APPEARANCE);
+            }
+            caps
         };
         let seed_url = caps.seed_url();
 
@@ -659,8 +711,11 @@ impl GridCore {
             sim,
             caps,
             assets: self.assets.clone(),
+            object_assets: self.object_assets,
+            inventory_announcement: self.inventory_announcement,
+            bakes: self.bakes,
             identity: {
-                let mut identity = region.identity(self.estate_owner);
+                let mut identity = region.identity(self.estate_owner, self.region_protocols);
                 identity.is_estate_manager = account.config.estate_manager;
                 identity
             },
@@ -809,13 +864,20 @@ impl GridCore {
         None
     }
 
-    /// The stock `SimulatorFeatures` document: mesh enabled plus the
-    /// `OpenSimExtras` URLs pointing back at this grid.
+    /// The stock `SimulatorFeatures` document: mesh enabled, plus — on a grid
+    /// that sends the block at all — the `OpenSimExtras` URLs pointing back at
+    /// this grid.
+    ///
+    /// A Second-Life-flavoured grid omits the block entirely, as Second Life
+    /// does. Nothing goes missing with it: the map-tile server is in the login
+    /// response's `map-server-url`, the currency symbol in its `currency`, and
+    /// the currency helper base in `get_grid_info`'s `economy` key — the routes
+    /// the reference viewer reads when no extras block overrode them.
     fn simulator_features(&self) -> SimulatorFeatures {
         SimulatorFeatures {
             mesh_rez_enabled: Some(true),
             mesh_upload_enabled: Some(true),
-            open_sim_extras: Some(OpenSimExtras {
+            open_sim_extras: self.open_sim_extras.then(|| OpenSimExtras {
                 map_server_url: Some(self.login_uri.clone()),
                 currency: Some(self.economy.currency_symbol.clone()),
                 currency_base_uri: Some(self.login_uri.clone()),
@@ -910,7 +972,8 @@ fn enrich_success(
     success.region_size_y = Some(256);
     success.agent_access = Some("M".to_owned());
     success.agent_access_max = Some("A".to_owned());
-    // The `voice-config` section mirrors the backend the scenario enabled.
+    // The `voice-config` section mirrors the backend the region ended up
+    // running; a silent region sends no section at all.
     success.voice_config = sim
         .voice()
         .advertised_server_type()
@@ -969,8 +1032,6 @@ pub struct FakeGridBuilder {
     scenario: Scenario,
     /// The login policy gates.
     gates: LoginGates,
-    /// Whether login responses honour the request's `options` list.
-    honor_options: bool,
     /// The `EventQueueGet` hold before the 502 re-poll answer.
     eq_hold: Duration,
     /// An override for the handover arrival budget (see the builder method).
@@ -981,8 +1042,30 @@ pub struct FakeGridBuilder {
     identity: GridIdentity,
     /// The economy helper policy.
     economy: EconomyConfig,
-    /// How every session answers the deprecated UDP inventory fetch.
-    legacy_udp_inventory: LegacyUdpInventory,
+    /// The live grid this one imitates, which every knob below that is `None`
+    /// takes its answer from ([`ImitatedGrid`]).
+    imitates: ImitatedGrid,
+    /// What a take's object asset is worth to a viewer, or `None` to follow
+    /// [`imitates`](Self::imitates).
+    object_assets: Option<ObjectAssetPolicy>,
+    /// Whether the login response is trimmed to the request's `options`, or
+    /// `None` to follow [`imitates`](Self::imitates).
+    honor_options: Option<bool>,
+    /// Whether `SimulatorFeatures` carries the `OpenSimExtras` block, or
+    /// `None` to follow [`imitates`](Self::imitates).
+    open_sim_extras: Option<bool>,
+    /// The spatial-voice backend every region serves, or `None` to follow
+    /// [`imitates`](Self::imitates).
+    voice_backend: Option<VoiceBackend>,
+    /// How the deprecated UDP inventory fetch is answered, or `None` to follow
+    /// [`imitates`](Self::imitates).
+    legacy_udp_inventory: Option<LegacyUdpInventory>,
+    /// How a created inventory item is announced, or `None` to follow
+    /// [`imitates`](Self::imitates).
+    inventory_announcement: Option<InventoryAnnouncement>,
+    /// Who composites this grid's avatars, or `None` to follow
+    /// [`imitates`](Self::imitates).
+    bakes: Option<BakePolicy>,
     /// Builder-registered map tiles.
     map_tiles: MapTileStore,
     /// The identifier source (random unless seeded).
@@ -999,7 +1082,17 @@ impl std::fmt::Debug for FakeGridBuilder {
             .field("regions", &self.regions)
             .field("scenario", &self.scenario)
             .field("gates", &self.gates)
+            .field("imitates", &self.imitates)
+            // The derived knobs print as `None` until something overrides one,
+            // which is what to look at first when a grid behaves like the other
+            // one: an override outranks the flavour above.
             .field("honor_options", &self.honor_options)
+            .field("object_assets", &self.object_assets)
+            .field("open_sim_extras", &self.open_sim_extras)
+            .field("voice_backend", &self.voice_backend)
+            .field("legacy_udp_inventory", &self.legacy_udp_inventory)
+            .field("inventory_announcement", &self.inventory_announcement)
+            .field("bakes", &self.bakes)
             .field("eq_hold", &self.eq_hold)
             .field("handover_timeout", &self.handover_timeout)
             .field("http_port", &self.http_port)
@@ -1042,7 +1135,8 @@ impl FakeGridBuilder {
     }
 
     /// A builder with no accounts, no regions, the stock scenario, no login
-    /// gates, and a 30 s event-queue hold on an ephemeral port.
+    /// gates, and a 30 s event-queue hold on an ephemeral port — imitating
+    /// [`ImitatedGrid`]'s default, which is Second Life.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -1052,13 +1146,19 @@ impl FakeGridBuilder {
             minter: IdMinter::default(),
             clock: system_clock(),
             gates: LoginGates::default(),
-            honor_options: false,
             eq_hold: Duration::from_secs(30),
             handover_timeout: None,
             http_port: 0,
             identity: GridIdentity::default(),
             economy: EconomyConfig::default(),
-            legacy_udp_inventory: LegacyUdpInventory::default(),
+            imitates: ImitatedGrid::default(),
+            object_assets: None,
+            honor_options: None,
+            open_sim_extras: None,
+            voice_backend: None,
+            legacy_udp_inventory: None,
+            inventory_announcement: None,
+            bakes: None,
             map_tiles: MapTileStore::default(),
         }
     }
@@ -1092,11 +1192,52 @@ impl FakeGridBuilder {
         self
     }
 
-    /// Makes login responses honour the request's `options` list
-    /// (SL behaviour; the default keeps every field like OpenSim).
+    /// Sets the live grid this one imitates where the two disagree
+    /// ([`ImitatedGrid`], default Second Life).
+    ///
+    /// This is the setting to reach for: every divergent behaviour takes its
+    /// default from it, so a grid is one grid rather than a mixture. The
+    /// per-behaviour setters below still win where they are called — the
+    /// flavour is what an unset knob falls back to, not a lock — which is what
+    /// a test wanting one deliberate deviation needs.
+    #[must_use]
+    pub const fn imitates(mut self, grid: ImitatedGrid) -> Self {
+        self.imitates = grid;
+        self
+    }
+
+    /// Overrides whether login responses are trimmed to the request's `options`
+    /// list, which otherwise follows [`imitates`](Self::imitates): Second Life
+    /// honours the list, OpenSim sends every field whatever was asked for.
     #[must_use]
     pub const fn honor_options(mut self, honor: bool) -> Self {
-        self.honor_options = honor;
+        self.honor_options = Some(honor);
+        self
+    }
+
+    /// Overrides whether `SimulatorFeatures` carries the `OpenSimExtras`
+    /// block, which otherwise follows [`imitates`](Self::imitates): OpenSim
+    /// always sends it, Second Life has no such key.
+    ///
+    /// Turning it off hides no URL. The map-tile server, the currency symbol
+    /// and the currency helper base each reach a viewer by a route both grids
+    /// serve — the login response's `map-server-url` and `currency`, and
+    /// `get_grid_info`'s `economy` key.
+    #[must_use]
+    pub const fn open_sim_extras(mut self, advertise: bool) -> Self {
+        self.open_sim_extras = Some(advertise);
+        self
+    }
+
+    /// Overrides the spatial-voice backend every region serves, which
+    /// otherwise follows [`imitates`](Self::imitates): Second Life is WebRTC,
+    /// a stock OpenSim region is [`VoiceBackend::Silent`].
+    ///
+    /// A scenario whose `setup` enables a backend itself outranks this — the
+    /// grid only installs one into a session whose voice store is still empty.
+    #[must_use]
+    pub const fn voice_backend(mut self, backend: VoiceBackend) -> Self {
+        self.voice_backend = Some(backend);
         self
     }
 
@@ -1144,11 +1285,48 @@ impl FakeGridBuilder {
         self
     }
 
-    /// Sets how every session answers the deprecated UDP inventory fetch
-    /// (default: [`LegacyUdpInventory::Refused`]).
+    /// Overrides how every session answers the deprecated UDP inventory fetch,
+    /// which otherwise follows [`imitates`](Self::imitates): OpenSim serves it
+    /// out of the session's inventory tree, Second Life does not have the path
+    /// and this grid refuses it out loud.
     #[must_use]
     pub const fn legacy_udp_inventory(mut self, policy: LegacyUdpInventory) -> Self {
-        self.legacy_udp_inventory = policy;
+        self.legacy_udp_inventory = Some(policy);
+        self
+    }
+
+    /// Overrides how a created inventory item is announced, which otherwise
+    /// follows [`imitates`](Self::imitates): OpenSim sends the legacy UDP
+    /// `UpdateCreateInventoryItem`, Second Life a `BulkUpdateInventory` over
+    /// the event queue.
+    #[must_use]
+    pub const fn inventory_announcement(mut self, announcement: InventoryAnnouncement) -> Self {
+        self.inventory_announcement = Some(announcement);
+        self
+    }
+
+    /// Overrides what a take's object asset is worth to a viewer, which
+    /// otherwise follows [`imitates`](Self::imitates): Second Life files the
+    /// item under a **nil** asset id and leaves the body unfetchable, OpenSim
+    /// names a minted id and serves the body under it. Rezzing the item back
+    /// into the world works either way.
+    #[must_use]
+    pub const fn object_assets(mut self, policy: ObjectAssetPolicy) -> Self {
+        self.object_assets = Some(policy);
+        self
+    }
+
+    /// Overrides who composites this grid's avatars, which otherwise follows
+    /// [`imitates`](Self::imitates): Second Life central-bakes, a stock OpenSim
+    /// region leaves it to each viewer.
+    ///
+    /// All four advertisements move together ([`BakePolicy`]) — the appearance
+    /// service, the central-bake protocol bit, the `AppearanceData` block and
+    /// the `UpdateAvatarAppearance` capability — because a grid that moves
+    /// fewer than all four leaves avatars cloud-shaped without saying so.
+    #[must_use]
+    pub const fn bakes(mut self, policy: BakePolicy) -> Self {
+        self.bakes = Some(policy);
         self
     }
 
@@ -1242,14 +1420,28 @@ impl FakeGridBuilder {
             .iter()
             .find(|account| account.config.estate_manager)
             .map_or_else(|| AgentKey::from(Uuid::nil()), |account| account.agent_id);
+        let bakes = self.bakes.unwrap_or_else(|| self.imitates.bakes());
         let core = Arc::new(GridCore {
             accounts,
             estate_owner,
             regions,
             gates: self.gates,
-            honor_options: self.honor_options,
+            // Each derived knob resolves here, once: an explicit setter wins,
+            // and anything left unset is whatever the grid being imitated does.
+            honor_options: self
+                .honor_options
+                .unwrap_or_else(|| self.imitates.honors_login_options()),
             minter: minter.clone(),
             assets,
+            object_assets: self
+                .object_assets
+                .unwrap_or_else(|| self.imitates.object_assets()),
+            open_sim_extras: self
+                .open_sim_extras
+                .unwrap_or_else(|| self.imitates.advertises_open_sim_extras()),
+            voice_backend: self
+                .voice_backend
+                .unwrap_or_else(|| self.imitates.voice_backend()),
             clock: self.clock,
             eq_hold: self.eq_hold,
             handover_timeout: self.handover_timeout,
@@ -1258,7 +1450,18 @@ impl FakeGridBuilder {
             identity: self.identity,
             grid_info,
             economy: self.economy,
-            legacy_udp_inventory: self.legacy_udp_inventory,
+            legacy_udp_inventory: self
+                .legacy_udp_inventory
+                .unwrap_or_else(|| self.imitates.legacy_udp_inventory()),
+            inventory_announcement: self
+                .inventory_announcement
+                .unwrap_or_else(|| self.imitates.inventory_announcement()),
+            bakes,
+            // The two halves of `RegionProtocols` compose: the bake policy
+            // claims the central-bake bit (and an explicit `bakes` override
+            // moves it), the flavour claims everything else it sets — today
+            // OpenSim's "more than 6 baked textures".
+            region_protocols: self.imitates.region_protocol_bits() | bakes.region_protocol_bits(),
             map_tiles,
             map,
             sessions: Mutex::new(HashMap::new()),

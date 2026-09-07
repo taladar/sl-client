@@ -196,8 +196,10 @@ UDP read and a task save.
 
 ## What is still open
 
-- **The object asset.** A take still mints an unbacked id, because nothing
-  serialises an object — [[test-assets-object-asset-codec]].
+- ~~**The object asset.**~~ Closed 2026-09-06 by
+  [[test-assets-object-asset-codec]]: `sl-object-asset` serialises the object
+  and the take stores it under the id it mints, with this case's fourth leg
+  asserting the asset describes the object taken.
 - **Whether an echo is right.** The fake grid stores what it was given. A real
   grid very probably re-serialises a settings or material asset, rewrites a
   notecard's embedded ids, and produces a second (bytecode) asset for a script

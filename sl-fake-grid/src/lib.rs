@@ -2,7 +2,8 @@
 
 pub mod accounts;
 pub mod agent_requests;
-mod assets;
+pub mod assets;
+pub mod bakes;
 mod caps_endpoint;
 pub mod crossing;
 mod driver;
@@ -13,6 +14,8 @@ pub mod estate;
 pub mod fixtures;
 mod http_answer;
 mod http_service;
+pub mod imitates;
+pub mod inventory;
 mod login_endpoint;
 mod map_tiles;
 pub mod marker;
@@ -26,11 +29,14 @@ pub mod terrain;
 pub mod time;
 pub mod udp_assets;
 mod uploads;
+pub mod voice;
 pub mod world;
 mod world_map;
 
 pub use accounts::AccountConfig;
-pub use agent_requests::{AgentPolicy, LegacyUdpInventory};
+pub use agent_requests::AgentPolicy;
+pub use assets::ObjectAssetPolicy;
+pub use bakes::{BakePolicy, REGION_PROTOCOL_BAKES_ON_MESH, REGION_PROTOCOL_SERVER_BAKES};
 pub use crossing::CROSSING_ARRIVAL_TIMEOUT;
 pub use economy_policy::{EconomyConfig, EconomyEvent, stock_prices};
 pub use error::Error;
@@ -39,6 +45,8 @@ pub use fixtures::{
     CatalogueEntry, FaceStyle, Landmark, NamedScenario, NpcAppearance, NpcBake, NpcFixture,
     PrimFixture, RegionFixture, SculptKind, catalogue, linkset,
 };
+pub use imitates::ImitatedGrid;
+pub use inventory::{InventoryAnnouncement, LegacyUdpInventory};
 pub use map_tiles::STOCK_TILE_JPEG;
 pub use marker::{
     MARKER_METHOD, NEIGHBOUR_MARKER_PREFIX, marker, marker_name, neighbour_marker,
@@ -54,6 +62,7 @@ pub use teleport::TELEPORT_ARRIVAL_TIMEOUT;
 pub use terrain::{Heightfield, TerrainFixture};
 pub use time::{Now, system_clock, tokio_clock};
 pub use udp_assets::{UdpAssetFixtures, flat_terrain_raw};
+pub use voice::VoiceBackend;
 pub use world::{
     AvatarIdentity, ParcelAccessLists, ParcelListing, RegionChange, RegionUpdate, RegionWorld,
     SceneFixtures, TaskInventory, avatar_prim, box_prim, default_object_properties,

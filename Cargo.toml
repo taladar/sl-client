@@ -28,6 +28,7 @@ members = [
   "sl-mesh",
   "sl-msg-template",
   "sl-notecard",
+  "sl-object-asset",
   "sl-prim",
   "sl-proto",
   "sl-repl",
@@ -119,6 +120,7 @@ sl-lsl = { path = "sl-lsl", version = "0.1.0" }
 sl-material = { path = "sl-material", version = "0.1.0" }
 sl-media = { path = "sl-media", version = "0.1.0" }
 sl-mesh = { path = "sl-mesh", version = "0.1.0" }
+sl-object-asset = { path = "sl-object-asset", version = "0.1.0" }
 sl-prim = { path = "sl-prim", version = "0.1.0" }
 sl-proto = { path = "sl-proto", version = "0.1.0" }
 sl-repl = { path = "sl-repl", version = "0.1.0" }

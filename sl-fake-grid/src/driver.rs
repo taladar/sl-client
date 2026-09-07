@@ -35,6 +35,19 @@ pub(crate) struct SimState {
     /// caps ([`crate::assets`]). Every session shares one; an asset id names
     /// a blob the whole grid knows, not one region's.
     pub(crate) assets: GridAssets,
+    /// Which live grid this one imitates for a taken object's asset
+    /// ([`crate::assets::ObjectAssetPolicy`]). Grid-wide, like the store it
+    /// decides between.
+    pub(crate) object_assets: crate::assets::ObjectAssetPolicy,
+    /// How this grid announces an inventory item it just created — the legacy
+    /// UDP message or an event-queue `BulkUpdateInventory`
+    /// ([`crate::InventoryAnnouncement`]). Grid-wide, because it is a property
+    /// of which live grid this one is being.
+    pub(crate) inventory_announcement: crate::inventory::InventoryAnnouncement,
+    /// Who composites this grid's avatars ([`crate::BakePolicy`]). Grid-wide,
+    /// and what decides whether an `AvatarAppearance` this session pushes
+    /// carries an `AppearanceData` block at all.
+    pub(crate) bakes: crate::bakes::BakePolicy,
     /// The region identity sent in the automatic `RegionHandshake` greeting
     /// (on `UseCircuitCode`, before the agent's movement completes).
     pub(crate) identity: RegionIdentity,
@@ -208,6 +221,7 @@ impl SharedSim {
                         &state.world.lock(),
                         &state.terrain,
                         &state.identity,
+                        state.bakes,
                         &mut state.sim,
                         now,
                     );
@@ -216,7 +230,9 @@ impl SharedSim {
             if matches!(event, ServerEvent::AgentArrived) {
                 // A voice-enabled region tells the arriving viewer which
                 // backend to load (`RequiredVoiceVersion` over the event
-                // queue, as the simulator does on region entry).
+                // queue, as a Second Life simulator does on region entry).
+                // A silent region -- a stock OpenSim one -- sends no such
+                // push; the string appears nowhere in OpenSim's sources.
                 if let Some(voice_server_type) = state.sim.voice().advertised_server_type() {
                     state
                         .sim
@@ -237,6 +253,7 @@ impl SharedSim {
                     &state.terrain,
                     &state.avatar,
                     &state.assets,
+                    state.bakes,
                     &mut state.sim,
                     now,
                 );
@@ -270,6 +287,9 @@ impl SharedSim {
                     &mut world,
                     &state.avatar,
                     &state.identity,
+                    &state.assets,
+                    state.object_assets,
+                    state.inventory_announcement,
                     &move || minter.uuid(),
                     &mut state.selection,
                     &mut state.sim,

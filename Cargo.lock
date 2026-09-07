@@ -8620,6 +8620,7 @@ dependencies = [
  "serde_json",
  "sl-client-tokio",
  "sl-fake-grid",
+ "sl-object-asset",
  "sl-repl",
  "sl-test-assets",
  "sl-wire",
@@ -8680,6 +8681,7 @@ dependencies = [
  "sl-anim",
  "sl-client-tokio",
  "sl-mesh",
+ "sl-object-asset",
  "sl-proto",
  "sl-test-assets",
  "sl-texture",
@@ -8869,6 +8871,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-object-asset"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
+ "sl-prim",
+ "sl-proto",
+ "sl-types",
+ "thiserror 2.0.19",
+ "uuid",
+]
+
+[[package]]
 name = "sl-prim"
 version = "0.1.0"
 dependencies = [
@@ -9035,6 +9049,7 @@ dependencies = [
  "sl-material",
  "sl-mesh",
  "sl-notecard",
+ "sl-object-asset",
  "sl-proto",
  "sl-sound",
  "sl-texture",

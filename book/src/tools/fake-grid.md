@@ -348,8 +348,9 @@ over a small generic `xmlrpc` module):
   entry is the login URI itself.
 - **`GET /map-<zoom>-<x>-<y>-objects.jpg`** — world-map tiles, in the
   file-name shape `sl-map-apis` and the viewer's world map request. The
-  login response's `map-server-url` and the stock `SimulatorFeatures`
-  `OpenSimExtras` both point at the login URI, so a viewer's world map
+  login response's `map-server-url` points at the login URI on either
+  flavour (and an OpenSim-flavoured grid's `SimulatorFeatures`
+  `OpenSimExtras` says it a second time), so a viewer's world map
   loads tiles from the fake grid. Every configured region gets a stock
   zoom-1 tile (an embedded JPEG); `FakeGridBuilder::map_tile` registers
   others. Absent tiles are 404; tiles carry `Cache-Control`/`ETag` so the
@@ -508,15 +509,28 @@ change what it holds, and all three are answered against the region world:
   object until it learns the ids it did not choose.
 - **`DeRezObject` → `ServerEvent::DerezObjects`.** The destination decides
   both halves and nothing else does: `DeRezDestination::agent_folder` names
-  the folder an inventory item is minted in (answered with an
-  `UpdateCreateInventoryItem`, and filed into the session's own
-  `SimInventoryTree` so a later `UpdateTaskInventory` can resolve it), and
+  the folder an inventory item is minted in (announced the way the imitated
+  grid announces one — see "How this grid does inventory" — and filed into
+  the session's own `SimInventoryTree` so a later `UpdateTaskInventory` can
+  resolve it), and
   `removes_from_world` says whether the world copy then goes (answered with
   a `KillObject`). A destination that does neither gets a `DeRezAck`. The
   split follows OpenSim's own `Scene.DeRezObjects`, whose
   `takeCopyGroups` / `takeDeleteGroups` lists are exactly these two
   predicates. An id the region does not have is killed on the client
-  anyway, so the two agree again.
+  anyway, so the two agree again. A take also *writes* the object down —
+  see "A taken object's asset" below for where those bytes go, which is
+  the one place the fake grid has to pick a live grid to be.
+- **`RezObject` from an item → `ServerEvent::RezObjectFromInventory`.** The
+  other half of a take. The item is resolved by id out of the agent's own
+  inventory (the masks and CRC the client sends are what the *viewer*
+  believes, and OpenSim does not check them either), its object body is
+  decoded, and the region mints an id per prim — so a linkset comes back
+  whole, children re-parented to the root's new region-local id. The root
+  lands at the ray's end point; a child keeps its stored offset. The item
+  survives unless it is no-copy, which is OpenSim's rule
+  (`DoPostRezWhenFromItem`) and is decided by the item's own owner mask
+  rather than by the client's `remove_item` flag.
 - **`UpdateTaskInventory` → `ServerEvent::UpdateTaskInventory`.** The item
   is resolved **by id from the agent's own inventory**, not trusted from
   the copy the client sent, minted a fresh task item id (a task copy is a
@@ -538,6 +552,246 @@ is a ghost object standing in that viewer until its next refetch.
 `sl-conformance`'s `task-inventory` case runs the whole of this offline —
 rez a container, rez and take a donor, drop it in, watch the serial
 advance, read the listing back over Xfer, trash the container.
+
+### A taken object's asset
+
+The two live grids disagree about `AssetType::Object`, and the disagreement
+is total, so the fake grid says which of them it is being rather than
+picking whichever was easier to build.
+
+Measured on aditi 2026-09-06 by the `object-asset-format` conformance case:
+**Second Life gives a viewer no asset id for an object inventory item.**
+Eleven of eleven object items answered with a nil `asset_id`, in the AIS3
+folder listing and again in the per-item `GET /item/<id>`, and all eleven
+were full-perm to their owner — so it is not the familiar "no asset id
+unless you fully own it" rule, it is the class. OpenSim is the opposite:
+every object item names an asset, and `ViewerAsset` serves it as
+`SceneObjectSerializer` XML.
+
+`assets::ObjectAssetPolicy` picks a side and
+`FakeGridBuilder::object_assets` sets it. The **default is Second Life**
+(`Withheld`), because that is the grid this workspace targets and because
+it is the configuration that *fails* a viewer which has come to rely on
+opening a taken object's asset. A take then files its item under a nil
+asset id and the object's body goes into a second store inside
+`GridAssets`, keyed by the **item** id, that no capability reads. The two
+stores share no keyspace, so the body is unfetchable by construction rather
+than by an id nobody can guess. Ask for `ObjectAssetPolicy::Served` to get
+OpenSim's side, where the item names a minted asset id and the grid serves
+the body under it.
+
+The take reads the policy once, in `world::taken_item`; `store_taken_asset`
+then reads the rule back off the *item* — a nil id means the withheld store
+— so the two halves cannot disagree about where a body went. And
+`rez_from_inventory` asks the item first and the store second, which is why
+**a rez works under both**: on Second Life too a taken object drags back out
+of inventory, because the simulator resolves the body itself and the viewer
+never needed it. The divergence is about what a viewer may *fetch*, not what
+a resident may *do*.
+
+One thing the switch does not govern: the seeded `Fixture Object` keeps its
+asset id and stays fetchable either way. It is the fake grid's own fixture,
+seeded so `asset-round-trip` has an authored object body to read back, and
+no live grid has an item like it at all.
+
+A conformance case names the flavour it needs by naming the *grid*:
+`asset-round-trip` declares `Grid::FakeOpensim`, because its fourth leg
+reads a taken object's asset back and only OpenSim ever lets a viewer do
+that; `object-asset-format` declares both fake grids and is run twice, so
+its Second Life leg records `take_step = item-created-nil-asset` — the same
+string it records on aditi — and its OpenSim leg records
+`item-created-with-asset`.
+
+### Which grid the fake one is
+
+The object asset is one divergence of several, and picking a side per
+behaviour is how the fake grid ended up being nobody in particular: before
+`imitates::ImitatedGrid` a stock grid announced `platform: OpenSim`, kept
+every login field like OpenSim, and withheld a taken object's asset like
+Second Life, all at once. A viewer passing against that has not been tested
+against anything.
+
+So the grid names the live one it is being, once —
+`FakeGridBuilder::imitates(ImitatedGrid::OpenSim)`, default Second Life —
+and every divergent behaviour takes its default from that. The
+per-behaviour setters still win where they are called; the flavour is what
+an unset knob falls back to, not a lock, which is what a test wanting one
+deliberate deviation needs. Each resolves once, in `start`.
+
+Seven behaviours follow it today: a taken object's asset, whether the
+login response is trimmed to the request's `options` list (Second Life
+honours it, OpenSim sends every field regardless), whether
+`SimulatorFeatures` carries the `OpenSimExtras` block, which spatial-voice
+backend the regions run, the two halves of how inventory works, and who
+composites an avatar. The `SimulatorFeatures` pair is covered under "How a
+region introduces itself" below, the inventory pair under "How this grid
+does inventory", and the bakes under "Who bakes an avatar".
+
+That second one is small and it immediately earned its keep. Turning it on
+by default broke a fake-grid end-to-end test that expected
+`map-server-url` in the login response — and the test was right to expect
+it while the *client* was wrong: `LoginRequest::new` asked for six options
+and consumed a seventh, so against Second Life the grid's map-tile server
+URL would simply never have arrived. That is the entire point of a fake
+grid that commits to being one real grid.
+
+The divergences the flavour does **not** yet decide are audited in
+`imitates.rs` rather than left to be rediscovered, each with a roadmap item:
+the economy price list, and how an *upload*-created inventory item is
+announced.
+
+### Who bakes an avatar
+
+`BakePolicy` says whether this grid composites avatars or leaves it to each
+viewer, and it is one setting rather than four because the four have to move
+together. Second Life central-bakes ("Sunshine"); a stock OpenSim region
+runs no bake service and every viewer bakes its own agent and uploads the
+result as an ordinary texture asset.
+
+What moves with it:
+
+| what | `ServerSide` | `ClientSide` |
+| --- | --- | --- |
+| the login `agent_appearance_service` | the per-session route | absent |
+| `RegionProtocols` bit 0 | set | clear |
+| the appearance's `AppearanceData` block | present, version 1 | no block |
+| the `UpdateAvatarAppearance` capability | granted | withheld |
+
+The reason they move together is the failure mode of moving fewer. A viewer
+decides per avatar whether that avatar is server-baked, from the
+`AppearanceData` block's version
+(`setIsUsingServerBakes(appearance_version > 0)`); once it has decided so,
+`LLVOAvatar::getImageURL` is the only way it will ever ask for a baked slot,
+and with no service URL to build from that function returns an **empty
+string**. No request, no failure, no warning — every avatar including the
+agent's own stays a cloud and nothing says why. Dropping the service on its
+own is therefore worse than leaving it there.
+
+Bit 0 is the half that is easy to forget, because it is about the *agent's
+own* appearance rather than about looking at anyone: the reference viewer
+reads it as `LLViewerRegion::getCentralBakeVersion()` and never sends
+`AgentSetAppearance` in a region that claims to central-bake. A grid that
+sets the bit and serves no bake service has an agent that can neither be
+baked nor bake itself.
+
+Every client-baked answer is what OpenSim's `LLClientView` actually writes:
+`SendRegionHandshake` sends `RegionProtocols = 1 << 63` (bit 0 clear, bit 63
+being the unrelated "more than 6 baked textures" extension, which
+`ImitatedGrid::region_protocol_bits` contributes separately), and
+`SendAppearance` writes a literal zero block count where `AppearanceData`
+would go. The fake grid's own bakes are fabricated per session either way
+and their bytes live in the grid asset store under the ids the appearance
+names, so on the client-baked flavour a viewer reaches them the only road
+left: `GetTexture`, by id.
+
+### How this grid does inventory
+
+Two rows of the flavour table rather than one, because they are the same
+divergence seen from either end, and because both are *silent* when a viewer
+gets them wrong.
+
+**The fetch.** `LegacyUdpInventory` says how the deprecated UDP
+`FetchInventoryDescendents` is answered, and it has three settings because
+the live grids take two roads and a grid without the path can take either of
+two more. An OpenSim-flavoured grid `Served`s it out of the session's own
+`SimInventoryTree` — the same tree `FetchInventoryDescendents2` reads —
+through `SimSession::send_inventory_descendents`, which packs the reply the
+way `LLClientView.SendInventoryFolderDetails` does: at most six folders or
+five items per message, folders and items never mixed ("to preserve SL
+compatibility", says the comment there), and a nil-id placeholder block
+padding whichever half of a message is empty, so an empty folder is one
+message of two placeholders rather than no message at all. The client drops
+the placeholders on their nil ids, which is a filter nothing else reached.
+A Second-Life-flavoured grid `Refused`s it with a `FeatureDisabled`. Aditi
+was measured (2026-08-12) silently *dropping* the fetch, and `Ignored`
+reproduces that faithfully — but silence is indistinguishable from a lost
+packet, so the flavour's default is the observable road rather than the
+measured one. This is the one place the table deliberately deviates from a
+measurement, and it is written down in `imitates.rs` too.
+
+**The announcement.** `InventoryAnnouncement` says how a created item is
+handed over: OpenSim's legacy UDP `UpdateCreateInventoryItem`
+(`SimSession::send_inventory_item_created`) or Second Life's
+`BulkUpdateInventory` over the event queue
+(`SimSession::enqueue_bulk_update_inventory`). A take reads it, and nothing
+else does yet.
+
+Flipping the default to Second Life immediately broke two conformance cases
+that waited only for the legacy message and reported a take that had worked
+as unacknowledged — which is exactly the failure a viewer would have had,
+and exactly why the pair is worth deciding. The fix is one shared helper,
+`support::created_item_announcement`, that accepts either shape and says
+which arrived; `object-asset-format` then asserts the shape against the
+grid's flavour, so a fake grid answering with the wrong one is a failure
+rather than something the helper papers over.
+
+It also moved the announcement in *time*, which nothing had predicted. A
+take sends the filed item and the world's `KillObject`s in one breath, but
+the kills go out over UDP immediately while an event-queue announcement
+lands on the client's next long-poll — so on the Second Life side the item
+arrives **after** the kills. A consumer that waits for the item and only
+then looks for the kills has already discarded them, which is how
+`a_taken_linkset_rezzes_back_whole` came to hang rather than fail.
+One thing is deliberately not flavour-decided and is not a to-do:
+`GridIdentity::platform` stays `OpenSim` either way, because it is what
+Firestorm's grid manager reads to decide whether it will add the grid at
+all, and a grid Firestorm refuses to add tests nothing.
+
+### How a region introduces itself
+
+`SimulatorFeatures` is where the two grids describe themselves, and they
+describe themselves differently in two ways that the flavour now decides.
+
+**`OpenSimExtras`.** OpenSim always sends the block —
+`SimulatorFeaturesModule` fills it in unconditionally and `GridService`
+injects the grid-wide URLs into it — and Second Life has no such key. It is
+the one structural difference that reliably tells the two replies apart, so
+a Second-Life-flavoured fake grid omits it
+(`FakeGridBuilder::open_sim_extras` overrides).
+
+The part that had to be checked rather than assumed is that **nothing goes
+missing with the block**. What rides in it that a viewer actually reads is
+the map-tile server, the currency symbol and the currency helper base, and
+each has a second route that both grids serve and the reference viewer
+reads first when no extras block overrode it: the login response's
+`map-server-url` (`LLStartUp::process_login_success_response`), the login
+response's `currency`, and `get_grid_info`'s `economy` key
+(`LLGridManager::getHelperURI`). `LFSimFeatureHandler` treats the extras
+copies as *overrides* of those, not as the only source. So dropping the
+block removes a duplicate, not a surface — which is what the assertions in
+`http_misc.rs`'s `grid_info_is_served_as_xml_and_xml_rpc` are there to keep
+true.
+
+**Voice** (`FakeGridBuilder::voice_backend`).
+
+| | Second Life | OpenSim |
+| --- | --- | --- |
+| backend | WebRTC (`WebRtcStub`) | none (`VoiceBackend::Silent`) |
+| `SimulatorFeatures.VoiceServerType` | `"webrtc"` | absent |
+| login `voice-config` | present | absent |
+| `RequiredVoiceVersion` push on arrival | sent | absent |
+| `ProvisionVoiceAccountRequest` | answered | refused (`BackendUnavailable`) |
+
+The OpenSim column is one decision, not four: with no backend installed
+every advertisement falls away on its own, and the provision refuses
+itself. That is what a *stock* OpenSim region is — both its voice modules
+(`VivoxVoiceModule`, `FreeSwitchVoiceModule`) are optional and off by
+default — and modelling the stock region is the same choice `stock_prices`
+makes for money.
+
+It is also the only honest option here. Both OpenSim modules answer with
+the Vivox SIP account shape, and this workspace implements Vivox-shaped
+voice nowhere: Second Life removed Vivox for WebRTC, and OpenSim support
+for a leaf feature like voice is not a priority. A Vivox flavour would mean
+a fixture serving a path nothing in the workspace will ever speak, so there
+is no third variant to pick.
+
+Worth knowing anyway, because it is why OpenSim never needed
+`VoiceServerType`: a viewer told nothing falls back to Vivox by itself
+(`LLVoiceClient::handleSimulatorFeaturesReceived` turns an empty
+`VoiceServerType` into `VIVOX_VOICE_SERVER_TYPE`). Against a silent region
+it then finds no capability and gives up, which is exactly what a viewer
+meets on a stock OpenSim grid today.
 
 ### The edit surfaces
 
@@ -1090,14 +1344,14 @@ their item ids plus a constant, pointing at nothing, both declaring class
 will eventually fetch, so those items looked fine in an inventory window
 and failed at every attempt to *use* them.
 
-Two classes have no fixture, and the absence is the finding.
-`AssetType::Object` has no codec in this workspace at all — an object asset
-is `LLViewerObject`'s nested-block text, unrelated to the `ObjectUpdate`
-wire form a fixture builds (`test-assets-object-asset-codec`). `Gesture`
-has a body but no *decoder*, so it is the one entry whose round trip is
-byte-level only. `inventory::unsupported_classes()` carries the reason for
-every class with neither, and a crate test fails if a class has both a body
-and a recorded reason, or neither.
+`AssetType::Object` was the last class with no codec at all — an object
+asset is `LLViewerObject`'s nested-block text, unrelated to the
+`ObjectUpdate` wire form a fixture builds — and `sl-object-asset` closed
+that, so a `Fixture Object` is seeded like every other class.
+`Gesture` has a body but no *decoder*, so it is the one entry whose round
+trip is byte-level only. `inventory::unsupported_classes()` carries the
+reason for every class with no fixture, and a crate test fails if a class
+has both a body and a recorded reason, or neither.
 
 ## Walking over a border
 
@@ -1248,12 +1502,10 @@ into the wrong slot.
   the one estate command the grid answers — the viewer's `refreshmapvisibility`
   nudge — replies with OpenSim's own "Terrain map generated" `AlertMessage`.
 - **The deprecated UDP inventory fetch**
-  (`FakeGridBuilder::legacy_udp_inventory`). The fake grid does not serve
-  `FetchInventoryDescendents` at all, and of the two answers a grid without
-  that path can give, only `FeatureDisabled` is observable — silence is
-  indistinguishable from a lost packet — so `LegacyUdpInventory::Refused` is
-  the default. `Ignored` reproduces the silence Second Life empirically
-  answers with.
+  (`FakeGridBuilder::legacy_udp_inventory`, which otherwise follows the
+  flavour — see "How this grid does inventory" above for the three
+  settings and why the Second Life default is the refusal rather than the
+  measured silence).
 
 Set-Home is policy of a third kind: *every* outcome is answered, which is
 what makes it the one deterministic way to provoke an `AgentAlertMessage`.
@@ -1277,16 +1529,23 @@ them like any other asset.
 
 ## Voice signalling
 
-The stock scenario speaks **WebRTC voice**: `default_setup` enables the
-`WebRtcStub` answerer on `SimSession::voice_mut()` and files the stock
-parcel's estate-wide channel (its `channel_uri` is the region id, the
-form Second Life sends) with the agent standing on it. The runtime
-derives every backend advertisement from that — the login response's
-`voice-config`, `SimulatorFeatures.VoiceServerType`, and a
-`RequiredVoiceVersion` push over the event queue when the avatar
-arrives — so a scenario that leaves voice disabled advertises none of
-them, and one that sets a Vivox fixture instead (`set_vivox_account`)
-advertises `vivox`. A client's `RequestVoiceAccount` (WebRTC offer) is
+A stock Second-Life-flavoured grid speaks **WebRTC voice**. The two halves
+come from different places, deliberately: `default_setup` files the stock
+parcel's estate-wide channel (its `channel_uri` is the region id, the form
+Second Life sends) with the agent standing on it — a parcel's channel is
+scene fixture, it says *where* voice happens — while the **backend** that
+serves it is the grid's, installed by the runtime from
+`ImitatedGrid::voice_backend` after the scenario's setup has had first
+refusal. A scenario that enables one itself keeps it.
+
+Every backend advertisement then derives from the backend that ended up
+installed: the login response's `voice-config`,
+`SimulatorFeatures.VoiceServerType`, and a `RequiredVoiceVersion` push over
+the event queue when the avatar arrives. A `VoiceBackend::Silent` region —
+the OpenSim flavour — advertises none of them and refuses a provision
+request with `BackendUnavailable`.
+
+A client's `RequestVoiceAccount` (WebRTC offer) is
 answered with a JSEP answer, its `SendVoiceSignaling` trickle is recorded
 on the connection, `RequestParcelVoiceInfo` returns the region-id
 channel, and a logout closes the session; the grid side sees

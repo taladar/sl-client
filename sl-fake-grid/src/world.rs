@@ -14,7 +14,7 @@
 //! The fixture types are `sl-proto`'s own [`ParcelInfo`] and [`Object`] —
 //! the records the client decodes — so a test asserts what it seeded.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -22,12 +22,12 @@ use crate::estate::EstateFixture;
 use crate::fixtures::{NpcAppearance, NpcFixture};
 use crate::terrain::TerrainFixture;
 use sl_proto::{
-    AnimationKey, AssetKey, AssetType, GlobalCoordinates, InventoryItem, InventoryType, Object,
-    ObjectExtraParams, ObjectMotion, ObjectPlayingAnimation, ObjectProperties, ParcelAccessEntry,
-    ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelInfo, ParcelRequestResult,
-    ParcelStatus, PrimShape, PrimShapeParams, RegionIdentity, RegionLocalObjectId,
-    RegionLocalParcelId, RegionTerrainComposition, SaleType, ServerEvent, SimSession,
-    TaskInventoryItem, TerrainLayerType, pcode,
+    AnimationKey, AssetKey, AssetSource as _, AssetType, GlobalCoordinates, InventoryItem,
+    InventoryType, Object, ObjectExtraParams, ObjectMotion, ObjectPlayingAnimation,
+    ObjectProperties, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelDetails,
+    ParcelInfo, ParcelRequestResult, ParcelStatus, PrimShape, PrimShapeParams, RegionIdentity,
+    RegionLocalObjectId, RegionLocalParcelId, RegionTerrainComposition, SaleType, ServerEvent,
+    SimSession, TaskInventoryItem, TerrainLayerType, TransactionId, pcode,
 };
 use sl_types::key::{AgentKey, InventoryFolderKey, InventoryKey, ObjectKey, OwnerKey, ParcelKey};
 use sl_types::lsl::{Rotation, Vector};
@@ -1240,6 +1240,7 @@ pub(crate) fn push_arrival_world(
     terrain: &TerrainFixture,
     identity: &AvatarIdentity,
     assets: &crate::assets::GridAssets,
+    bakes: crate::bakes::BakePolicy,
     sim: &mut SimSession,
     now: Instant,
 ) {
@@ -1258,7 +1259,7 @@ pub(crate) fn push_arrival_world(
     if let Err(error) = sim.send_object_update(&[avatar], REAL_TIME_DILATION, now) {
         tracing::warn!("rezzing the arriving avatar failed: {error}");
     }
-    push_own_appearance(identity, assets, sim, now);
+    push_own_appearance(identity, assets, bakes, sim, now);
     push_own_animation(identity, sim, now);
     if let Err(error) = sim.send_parcel_overlay(&world.overlay_for(identity.agent_id), now) {
         tracing::warn!("sending the parcel overlay failed: {error}");
@@ -1276,7 +1277,7 @@ pub(crate) fn push_arrival_world(
     {
         tracing::warn!("rezzing the fixture objects failed: {error}");
     }
-    push_npcs(&world.npcs, sim, now);
+    push_npcs(&world.npcs, bakes, sim, now);
     push_object_animations(&world.object_animations, sim, now);
 }
 
@@ -1299,6 +1300,7 @@ pub(crate) fn push_child_world(
     world: &SceneFixtures,
     terrain: &TerrainFixture,
     identity: &sl_proto::RegionIdentity,
+    bakes: crate::bakes::BakePolicy,
     sim: &mut SimSession,
     now: Instant,
 ) {
@@ -1307,7 +1309,7 @@ pub(crate) fn push_child_world(
     {
         tracing::warn!("rezzing a neighbour's objects failed: {error}");
     }
-    push_npcs(&world.npcs, sim, now);
+    push_npcs(&world.npcs, bakes, sim, now);
     push_object_animations(&world.object_animations, sim, now);
     push_terrain(terrain, sim, now);
     // The overlay is the whole region's parcel layout, which a neighbouring
@@ -1379,6 +1381,7 @@ pub const AVATAR_CENTRE_ABOVE_GROUND_M: f32 = 0.95;
 fn push_own_appearance(
     identity: &AvatarIdentity,
     assets: &crate::assets::GridAssets,
+    bakes: crate::bakes::BakePolicy,
     sim: &mut SimSession,
     now: Instant,
 ) {
@@ -1389,9 +1392,11 @@ fn push_own_appearance(
             let _previous = store.insert(key, bytes);
         }
     }
-    if let Err(error) =
-        sim.send_avatar_appearance(&appearance.record(identity.agent_id, Vec::new()), now)
-    {
+    // Both flavours publish the same ids for the same body; only the
+    // `AppearanceData` block around them tells the viewer whether to fetch them
+    // from the appearance service or as ordinary assets (`crate::bakes`).
+    let record = bakes.applied(appearance.record(identity.agent_id, Vec::new()));
+    if let Err(error) = sim.send_avatar_appearance(&record, now) {
         tracing::warn!("sending the arriving agent's own appearance failed: {error}");
     }
 }
@@ -1430,7 +1435,12 @@ fn push_own_animation(identity: &AvatarIdentity, sim: &mut SimSession, now: Inst
 /// name an avatar the client has to already know, and the attachments last
 /// because each names its wearer's region-local id as its parent. Send
 /// failures are logged, never fatal.
-fn push_npcs(npcs: &[NpcFixture], sim: &mut SimSession, now: Instant) {
+fn push_npcs(
+    npcs: &[NpcFixture],
+    bakes: crate::bakes::BakePolicy,
+    sim: &mut SimSession,
+    now: Instant,
+) {
     if npcs.is_empty() {
         return;
     }
@@ -1439,7 +1449,8 @@ fn push_npcs(npcs: &[NpcFixture], sim: &mut SimSession, now: Instant) {
         tracing::warn!("rezzing the NPC avatars failed: {error}");
     }
     for npc in npcs {
-        if let Err(error) = sim.send_avatar_appearance(&npc.appearance_record(), now) {
+        let record = bakes.applied(npc.appearance_record());
+        if let Err(error) = sim.send_avatar_appearance(&record, now) {
             tracing::warn!("sending an NPC's appearance failed: {error}");
         }
     }
@@ -1507,19 +1518,33 @@ fn push_terrain(terrain: &TerrainFixture, sim: &mut SimSession, now: Instant) {
 /// `mint` supplies the ids the simulator chooses (object keys, inventory item
 /// ids): the grid's own [`IdMinter`](crate::runtime::IdMinter) reaches through
 /// here, so a seeded grid rezzes the same object twice.
+///
+/// `object_assets` is which live grid this one imitates where they disagree
+/// about a taken object's asset
+/// ([`ObjectAssetPolicy`](crate::assets::ObjectAssetPolicy)). Only the derez arm
+/// reads it; the rez arm deliberately does not, because an item says for itself
+/// where its body went. `announcement` is the same question about how a filed
+/// item is handed to the client
+/// ([`InventoryAnnouncement`](crate::inventory::InventoryAnnouncement)), and the
+/// derez arm is likewise the only reader.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the parameters are the two stores an answer reads and writes -- \
-              the region's world and this session's machine and selection -- \
-              over the three identities that decide what the answer says (the \
-              agent, the region, and the minter the simulator's own ids come \
-              from); bundling them would hide which of them a given arm \
-              touches, which is the one thing this switch is read for"
+    reason = "the parameters are the stores an answer reads and writes -- the \
+              region's world, the grid's assets, and this session's machine \
+              and selection -- over the identities and policies that decide what \
+              the answer says (the agent, the region, the minter the simulator's \
+              own ids come from, and which live grid this one imitates for an \
+              object asset and its announcement); bundling them would hide which \
+              of them a given arm touches, which is the one thing this switch is \
+              read for"
 )]
 pub(crate) fn answer_world_request(
     world: &mut SceneFixtures,
     identity: &AvatarIdentity,
     region: &RegionIdentity,
+    assets: &crate::assets::GridAssets,
+    object_assets: crate::assets::ObjectAssetPolicy,
+    announcement: crate::inventory::InventoryAnnouncement,
     mint: &dyn Fn() -> uuid::Uuid,
     selection: &mut crate::object_edits::Selection,
     sim: &mut SimSession,
@@ -1559,10 +1584,27 @@ pub(crate) fn answer_world_request(
             }
             return vec![RegionChange::Rezzed(Box::new(object))];
         }
+        // An inventory item dragged back into the world. The other half of a
+        // take: the item names an asset, the asset holds the prims, and the
+        // region mints every id they come back under.
+        ServerEvent::RezObjectFromInventory { params } => {
+            return rez_from_inventory(world, assets, mint, sim, params, now);
+        }
         // A take, a save, a return, a delete to trash. What each does is the
         // destination's business, and the destination alone decides both
         // halves: whether an inventory item is minted, and whether the world
         // copy goes.
+        //
+        // A **linkset** is filed and removed whole. A viewer derezzes its
+        // selection, and a selected linkset is named by its root alone, so the
+        // children have to be gathered here or a take would leave them standing
+        // in the region with a parent that no longer exists.
+        //
+        // Whether the filed item *names* the body it was written from is the
+        // one place this grid has to pick a live grid to be
+        // (`ObjectAssetPolicy`): Second Life tells a viewer nothing, OpenSim
+        // tells it everything, and the rez works either way. **How** the item
+        // is handed over is a second such choice (`InventoryAnnouncement`).
         ServerEvent::DerezObjects {
             local_ids,
             destination,
@@ -1572,7 +1614,13 @@ pub(crate) fn answer_world_request(
             let mut created = Vec::new();
             let mut changes = Vec::new();
             let mut killed = Vec::new();
+            let mut handled: BTreeSet<RegionLocalObjectId> = BTreeSet::new();
             for local_id in local_ids {
+                if !handled.insert(*local_id) {
+                    // Already taken as another named object's child: a viewer
+                    // that sent a whole linkset's ids must not file it twice.
+                    continue;
+                }
                 let Some(object) = world.object_by_local_id(*local_id) else {
                     // The client believes in an object this region does not
                     // have. A real simulator kills it on the client rather
@@ -1584,26 +1632,37 @@ pub(crate) fn answer_world_request(
                     killed.push(*local_id);
                     continue;
                 };
+                let mut linkset = vec![object];
+                linkset.extend(
+                    world
+                        .objects
+                        .iter()
+                        .filter(|child| child.parent_id == *local_id)
+                        .cloned(),
+                );
+                handled.extend(linkset.iter().map(|member| member.local_id));
                 if let Some(folder) = destination.agent_folder() {
-                    created.push(taken_item(&object, folder, identity.agent_id, mint));
+                    let item = taken_item(&linkset, folder, identity.agent_id, mint, object_assets);
+                    store_taken_asset(assets, &item, &linkset);
+                    created.push(item);
                 }
                 if destination.removes_from_world() {
-                    let _removed = world.remove_object(*local_id);
-                    killed.push(*local_id);
-                    changes.push(RegionChange::Killed(*local_id));
+                    for member in &linkset {
+                        let _removed = world.remove_object(member.local_id);
+                        killed.push(member.local_id);
+                        changes.push(RegionChange::Killed(member.local_id));
+                    }
                 }
             }
             if created.is_empty() {
-                // Nothing was filed, so there is no `UpdateCreateInventoryItem`
+                // Nothing was filed, so there is no created-item announcement
                 // to correlate the client's transaction with -- which is
                 // exactly what a `DeRezAck` is for.
                 if let Err(error) = sim.send_derez_ack(*transaction_id, true, now) {
                     tracing::warn!("acknowledging a derez failed: {error}");
                 }
-            } else if let Err(error) =
-                sim.send_inventory_item_created(&created, *transaction_id, true, now)
-            {
-                tracing::warn!("handing over a taken object's inventory item failed: {error}");
+            } else {
+                announce_created_items(announcement, sim, &created, *transaction_id, now);
             }
             for item in created {
                 sim.agent_inventory_mut().insert_item(item);
@@ -1932,32 +1991,246 @@ pub fn default_object_properties(object: &Object) -> ObjectProperties {
     }
 }
 
+/// Rezzes an inventory item back into the world: the other half of a take.
+///
+/// The item is resolved **by id alone**, out of the agent's own inventory. The
+/// permission masks and the CRC the client sends in `RezObjectParams` are what
+/// the *viewer* believes about the item and are not checked against it, which
+/// is what OpenSim does (`object-rez-derez` records that a rez with a zero CRC
+/// and invented masks is honoured there); a fake grid that validated them would
+/// fail a viewer for something no real grid fails it for.
+///
+/// A **linkset** comes back whole. The asset states which prim is the root and
+/// carries each child's offset from it, so the region mints an id per prim and
+/// parents the children to the root's region-local id — the same `ParentID` a
+/// link would have set.
+///
+/// Where it lands is the ray's end point: the fake grid casts no rays, and
+/// every viewer sets `bypass_raycast` on a drag-out anyway, so `ray_end` is
+/// where the resident aimed. Only the root is moved there; a child's position
+/// is its offset from the root and moving it would take the linkset apart.
+///
+/// The item survives unless it is **no-copy**, which is the rule OpenSim
+/// applies (`DoPostRezWhenFromItem`): the client's `remove_item` flag is not
+/// consulted, because the flag says what the viewer expected rather than what
+/// the item permits. Everything the fake grid mints is full-permission, so this
+/// bites only for an item a fixture deliberately seeded without copy.
+///
+/// A rez out of a **prim's** contents (`from_task_id`) is not served: the item
+/// is looked for in the agent's own inventory and a rez naming a task is left
+/// unanswered, which is what a simulator does with a rez of an item it cannot
+/// resolve.
+fn rez_from_inventory(
+    world: &mut SceneFixtures,
+    assets: &crate::assets::GridAssets,
+    mint: &dyn Fn() -> uuid::Uuid,
+    sim: &mut SimSession,
+    params: &sl_proto::RezObjectParams,
+    now: Instant,
+) -> Vec<RegionChange> {
+    let item_id = params.item.item_id;
+    if let Some(task) = params.from_task_id {
+        tracing::debug!(
+            "a rez named item {item_id} in the contents of {task}; \
+             the fake grid rezzes from the agent's own inventory only"
+        );
+        return Vec::new();
+    }
+    let Some(item) = sim.agent_inventory().item(item_id).cloned() else {
+        tracing::debug!("a rez named item {item_id}, which this agent does not hold");
+        return Vec::new();
+    };
+    let Some(bytes) = taken_object_body(assets, &item) else {
+        tracing::debug!("a rez named item {item_id}, whose object body nothing holds");
+        return Vec::new();
+    };
+    let asset = match sl_object_asset::ObjectAsset::decode(&bytes) {
+        Ok(asset) => asset,
+        Err(error) => {
+            tracing::warn!("the object body item {item_id} names does not decode: {error}");
+            return Vec::new();
+        }
+    };
+    let Some(root_prim) = asset.root() else {
+        tracing::warn!("the object body item {item_id} names has no root prim");
+        return Vec::new();
+    };
+    let region_handle = sim.region_handle();
+    let root_local_id = world.mint_local_id();
+    let mut root = root_prim.to_object(sl_object_asset::RezTarget {
+        region_handle,
+        local_id: root_local_id,
+        full_id: mint(),
+        parent_id: RegionLocalObjectId(0),
+    });
+    root.motion.position = params.ray_end.clone();
+    root.properties = Some(rezzed_properties(root_prim, root.full_id, &item));
+    let mut rezzed = vec![root];
+    for child_prim in asset.children() {
+        let mut child = child_prim.to_object(sl_object_asset::RezTarget {
+            region_handle,
+            local_id: world.mint_local_id(),
+            full_id: mint(),
+            parent_id: root_local_id,
+        });
+        child.properties = Some(rezzed_properties(child_prim, child.full_id, &item));
+        rezzed.push(child);
+    }
+    world.objects.extend(rezzed.iter().cloned());
+    if let Err(error) = sim.send_object_update(&rezzed, REAL_TIME_DILATION, now) {
+        tracing::warn!("streaming an object rezzed from inventory failed: {error}");
+    }
+    if !item.permissions.owner.contains(sl_wire::Permissions::COPY) {
+        let _consumed = sim.agent_inventory_mut().take_item(item_id);
+        if let Err(error) = sim.send_remove_inventory_item(&[item_id], now) {
+            tracing::warn!("retiring a no-copy item a rez consumed failed: {error}");
+        }
+    }
+    rezzed
+        .into_iter()
+        .map(|object| RegionChange::Rezzed(Box::new(object)))
+        .collect()
+}
+
+/// The object body `item` stands for, from whichever of the grid's two stores
+/// holds it.
+///
+/// An item that **names** an asset is resolved through it, as every other class
+/// is; an item with a nil asset id is resolved by its own id out of the withheld
+/// store ([`crate::assets::ObjectAssetPolicy::Withheld`]). The item is asked
+/// first and the store second, rather than the other way round, because the
+/// nil id is the *observable* — a viewer that was told nothing about where this
+/// object lives is exactly the case the withheld store exists for, and the
+/// simulator resolving it anyway is what makes a Second Life rez work.
+fn taken_object_body(assets: &crate::assets::GridAssets, item: &InventoryItem) -> Option<Vec<u8>> {
+    if item.asset_id.is_nil() {
+        return assets.withheld_object(item.item_id);
+    }
+    assets
+        .read()
+        .get(AssetKey::from(item.asset_id))
+        .map(<[u8]>::to_vec)
+}
+
+/// The properties record of one just-rezzed prim: what the asset says about it,
+/// with the three things the *region* knows and the asset cannot.
+///
+/// The owner is the item's holder rather than whoever owned the prim where it
+/// was taken from, and the item and folder are what this object was rezzed
+/// from — the pair a viewer's "find in inventory" follows back.
+fn rezzed_properties(
+    prim: &sl_object_asset::PrimBlock,
+    object_id: ObjectKey,
+    item: &InventoryItem,
+) -> ObjectProperties {
+    let mut properties = prim.to_properties(object_id);
+    properties.owner = item.owner;
+    properties.item_id = item.item_id;
+    properties.folder_id = Some(item.folder_id);
+    properties
+}
+
+/// The object asset a **take** authors, filed where the item says it lives.
+///
+/// A take is not a round trip: nothing uploaded these bytes, the grid *writes*
+/// them from the live object, which is why the asset carries the item's name
+/// and description rather than the object's own (an object rezzed by
+/// `ObjectAdd` has no `ObjectProperties` yet, and the item is what a viewer
+/// shows). Until this existed the take minted an id and left it unbacked, so
+/// every path that opens what a take filed away — rezzing it again, reading it
+/// back to check the take — had nothing to fetch.
+///
+/// **Which store is the item's own business.** An item that names an asset gets
+/// its body in the served store under that id, as OpenSim does; an item with a
+/// nil asset id gets it in the withheld store under the item's id, as Second
+/// Life leaves a viewer with — see
+/// [`ObjectAssetPolicy`](crate::assets::ObjectAssetPolicy), which is what
+/// [`taken_item`] read to decide. Reading the rule off the item rather than off
+/// the policy a second time is what keeps the two halves from ever disagreeing
+/// about where a body went.
+///
+/// `linkset` is the object being taken and, after it, its children — the whole
+/// set in one asset, root **first** here and written children-first by
+/// [`ObjectAsset::linkset`](sl_object_asset::ObjectAsset::linkset), which is the
+/// order the reference writes them in. An empty slice writes nothing.
+///
+/// The asset lock is taken while the caller still holds the region's, which is
+/// the order [`push_arrival_world`] already establishes (it writes an arriving
+/// agent's bakes under the same two locks). Nothing anywhere takes the region
+/// lock while holding the asset one, so the pair cannot invert.
+fn store_taken_asset(assets: &crate::assets::GridAssets, item: &InventoryItem, linkset: &[Object]) {
+    let mut prims = linkset.iter().map(taken_prim);
+    let Some(mut root) = prims.next() else {
+        return;
+    };
+    item.name.clone_into(&mut root.name);
+    root.description = Some(item.description.clone());
+    let body = sl_object_asset::ObjectAsset::linkset(root, prims.collect()).encode();
+    if item.asset_id.is_nil() {
+        assets.insert_withheld_object(item.item_id, body);
+        return;
+    }
+    let _previous = assets.write().insert(AssetKey::from(item.asset_id), body);
+}
+
+/// One object as the asset prim a take serialises it into.
+fn taken_prim(object: &Object) -> sl_object_asset::PrimBlock {
+    let faces = sl_object_asset::rendered_face_count(&object.shape);
+    let mut prim = sl_object_asset::PrimBlock::from_object(object, faces);
+    if prim.name.is_empty() {
+        // What a viewer shows for a prim nobody has named, and what the item
+        // itself is called. A prim the fake grid rezzed has no
+        // `ObjectProperties` until something edits it, so this is the common
+        // case rather than the odd one.
+        DEFAULT_OBJECT_NAME.clone_into(&mut prim.name);
+    }
+    if prim.faces.is_empty() {
+        // A prim rezzed here carries no `TextureEntry` at all (`bare_object`
+        // leaves it empty and nothing fills it in), while a real simulator
+        // gives a new prim the default texture. The asset still has to state
+        // the faces the shape renders -- an object asset with no faces rezzes
+        // an object nothing can texture -- so they are stated as untextured
+        // rather than omitted.
+        prim.faces = vec![sl_object_asset::LegacyFace::default(); faces];
+    }
+    prim
+}
+
 /// The agent inventory item a **take** files an object away as.
 ///
-/// A real grid also writes the object's serialisation as an asset and points
-/// the item at it; nothing here fetches that asset (the take is observable
-/// through the item and the `KillObject`), so the id is minted and left
-/// unbacked rather than invented as nil — an item with a nil asset id is a
-/// *broken* item, and a viewer says so.
+/// Named after the linkset's **root** — the first of `linkset` — because that
+/// is the object a resident selected and the name a viewer shows for the whole
+/// set.
+///
+/// Whether the item **names** its asset is the grid's flavour talking
+/// ([`ObjectAssetPolicy`](crate::assets::ObjectAssetPolicy)): OpenSim mints an
+/// id and a viewer may fetch the body under it, Second Life hands a viewer a nil
+/// id and no way to reach the body at all.
+///
+/// Either way the body itself is written — [`store_taken_asset`] follows this
+/// choice and files it in the store the item points at. What must not happen is
+/// a *minted* id nothing serves: that is the failure the round-trip cases hunt,
+/// and it is worse than a nil one, because it fails later and looks fine in an
+/// inventory window until it does.
 fn taken_item(
-    object: &Object,
+    linkset: &[Object],
     folder: InventoryFolderKey,
     owner: AgentKey,
     mint: &dyn Fn() -> uuid::Uuid,
+    object_assets: crate::assets::ObjectAssetPolicy,
 ) -> InventoryItem {
-    let named = object
-        .properties
-        .as_ref()
-        .map_or(DEFAULT_OBJECT_NAME, |properties| properties.name.as_str());
+    let properties = linkset.first().and_then(|root| root.properties.as_ref());
+    let named = properties.map_or(DEFAULT_OBJECT_NAME, |properties| properties.name.as_str());
     InventoryItem {
         item_id: InventoryKey::from(mint()),
         folder_id: folder,
         name: named.to_owned(),
-        description: object
-            .properties
-            .as_ref()
+        description: properties
             .map_or_else(String::new, |properties| properties.description.clone()),
-        asset_id: mint(),
+        asset_id: match object_assets {
+            crate::assets::ObjectAssetPolicy::Withheld => uuid::Uuid::nil(),
+            crate::assets::ObjectAssetPolicy::Served => mint(),
+        },
         item_type: narrow_code(AssetType::Object.to_code()),
         inv_type: narrow_code(InventoryType::Object.to_code()),
         flags: 0,
@@ -1969,6 +2242,38 @@ fn taken_item(
         creator_id: owner,
         group: None,
         permissions: FULL_PERMISSIONS,
+    }
+}
+
+/// Hands a client the inventory items the simulator just created, the way the
+/// live grid this one is imitating does.
+///
+/// The two shapes are not interchangeable to a viewer, which is the whole point
+/// of the switch: a client that only listens for the legacy UDP message hears
+/// nothing at all from a grid that moved inventory to AIS3, and one that only
+/// listens for the event-queue push hears nothing from OpenSim. A take against
+/// the wrong flavour is where a viewer finds that out.
+///
+/// The `BulkUpdateInventory` side carries no folder blocks: the folder the item
+/// went into already exists in the client's model — the client named it in the
+/// derez — and a real grid's bulk update announces the *changed* objects.
+fn announce_created_items(
+    announcement: crate::inventory::InventoryAnnouncement,
+    sim: &mut SimSession,
+    created: &[InventoryItem],
+    transaction_id: TransactionId,
+    now: Instant,
+) {
+    let result = match announcement {
+        crate::inventory::InventoryAnnouncement::Legacy => sim
+            .send_inventory_item_created(created, transaction_id, true, now)
+            .map_err(|error| error.to_string()),
+        crate::inventory::InventoryAnnouncement::BulkUpdate => sim
+            .enqueue_bulk_update_inventory(transaction_id, &[], created)
+            .map_err(|error| error.to_string()),
+    };
+    if let Err(error) = result {
+        tracing::warn!("handing over a taken object's inventory item failed: {error}");
     }
 }
 

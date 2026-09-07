@@ -1,0 +1,185 @@
+{'task_id':u1fd77b79-a8e7-25a5-9454-02a4d948ba1c}
+{
+	name	Object|
+	permissions 0
+	{
+		base_mask	7fffffff
+		owner_mask	7fffffff
+		group_mask	00000000
+		everyone_mask	00000000
+		next_owner_mask	00082000
+		creator_id	3c115e51-04f4-523c-9fa6-98aff1034730
+		owner_id	3c115e51-04f4-523c-9fa6-98aff1034730
+		last_owner_id	00000000-0000-0000-0000-000000000000
+		group_id	00000000-0000-0000-0000-000000000000
+	}
+	local_id	10284
+	total_crc	35
+	type	1
+	task_valid	2
+	travel_access	21
+	displayopts	2
+	displaytype	v
+	pos	0	0	0
+	oldpos	0	0	0
+	rotation	4.371139183945160766597837e-08	1	4.371139183945160766597837e-08	0
+	velocity	0	0	0
+	angvel	0	0	0
+	scale	0.2816932	0.2816932	0.2816932
+	sit_offset	0	0	0
+	camera_eye_offset	0	0	0
+	camera_at_offset	0	0	0
+	sit_quat	0	0	0	1
+	sit_hint	0
+	state	80
+	material	3
+	soundid	00000000-0000-0000-0000-000000000000
+	soundgain	0
+	soundradius	0
+	soundflags	0
+	textcolor	0 0 0 1
+	selected	0
+	selector	00000000-0000-0000-0000-000000000000
+	usephysics	0
+	rotate_x	1
+	rotate_y	1
+	rotate_z	1
+	phantom	0
+	remote_script_access_pin	0
+	volume_detect	0
+	block_grabs	0
+	die_at_edge	0
+	return_at_edge	0
+	temporary	0
+	sandbox	0
+	sandboxhome	0	0	0
+	shape 0
+	{
+		path 0
+		{
+			curve	16
+			begin	0
+			end	1
+			scale_x	1
+			scale_y	1
+			shear_x	0
+			shear_y	0
+			twist	0
+			twist_begin	0
+			radius_offset	0
+			taper_x	0
+			taper_y	0
+			revolutions	1
+			skew	0
+		}
+		profile 0
+		{
+			curve	1
+			begin	0
+			end	1
+			hollow	0
+		}
+	}
+	faces	6
+	{
+		imageid	89556747-24cb-43ed-920b-47caed15465f
+		colors	1 1 1 1
+		scales	0.56
+		scalet	0.56
+		offsets	0
+		offsett	0
+		imagerot	0
+		bump	0
+		fullbright	0
+		media_flags	0
+	}
+	{
+		imageid	89556747-24cb-43ed-920b-47caed15465f
+		colors	1 1 1 1
+		scales	0.56
+		scalet	0.56
+		offsets	0
+		offsett	0
+		imagerot	0
+		bump	0
+		fullbright	0
+		media_flags	0
+	}
+	{
+		imageid	89556747-24cb-43ed-920b-47caed15465f
+		colors	1 1 1 1
+		scales	0.56
+		scalet	0.56
+		offsets	0
+		offsett	0
+		imagerot	0
+		bump	0
+		fullbright	0
+		media_flags	0
+	}
+	{
+		imageid	89556747-24cb-43ed-920b-47caed15465f
+		colors	1 1 1 1
+		scales	0.56
+		scalet	0.56
+		offsets	0
+		offsett	0
+		imagerot	0
+		bump	0
+		fullbright	0
+		media_flags	0
+	}
+	{
+		imageid	89556747-24cb-43ed-920b-47caed15465f
+		colors	1 1 1 1
+		scales	0.56
+		scalet	0.56
+		offsets	0
+		offsett	0
+		imagerot	0
+		bump	0
+		fullbright	0
+		media_flags	0
+	}
+	{
+		imageid	89556747-24cb-43ed-920b-47caed15465f
+		colors	1 1 1 1
+		scales	0.56
+		scalet	0.56
+		offsets	0
+		offsett	0
+		imagerot	0
+		bump	0
+		fullbright	0
+		media_flags	0
+	}
+	ps_next_crc	1
+	gpw_bias	1
+	ip	0
+	complete	TRUE
+	delay	50000
+	nextstart	1132625972249870
+	birthtime	1132625953120694
+	reztime	1132625953120694
+	parceltime	1132625953120694
+	tax_rate	1.01615
+	namevalue	AttachmentOrientation VEC3 RW DS -3.141593, 0.000000, -3.141593
+	namevalue	AttachmentOffset VEC3 RW DS 0.000000, 0.000000, 0.000000
+	namevalue	AttachPt U32 RW S 5
+	namevalue	AttachItemID STRING RW SV 1f9975c0-2951-1b93-dd83-46e2b932fcc8
+	scratchpad	0
+	{
+	
+	}
+	sale_info	0
+	{
+		sale_type	not
+		sale_price	10
+	}
+	orig_asset_id	52019cdd-b464-ba19-e66d-3da751fef9da
+	orig_item_id	1f9975c0-2951-1b93-dd83-46e2b932fcc8
+	correct_family_id	00000000-0000-0000-0000-000000000000
+	has_rezzed	0
+	pre_link_base_mask	7fffffff
+	default_pay_price	-2	1	5	10	20
+}

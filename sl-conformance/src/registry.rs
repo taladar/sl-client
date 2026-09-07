@@ -25,6 +25,13 @@ pub trait GridTest: Send + Sync {
     fn description(&self) -> &'static str;
 
     /// The grids on which this test is meaningful.
+    ///
+    /// The fake grid is two of them — [`Grid::FakeSl`] and
+    /// [`Grid::FakeOpensim`] — because it can be either live grid where the two
+    /// disagree. Almost every case names only [`Grid::FakeSl`], the flavour this
+    /// workspace targets; a case names the other when what it came to assert is
+    /// OpenSim's behaviour, and **both** when it is a survey whose answer
+    /// differs between them and both answers are worth having.
     fn grids(&self) -> &'static [Grid];
 
     /// How many distinct logged-in avatars the test needs (1, 2, or 3).
@@ -125,6 +132,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::object_update_decode::ObjectUpdateDecode),
         Box::new(crate::cases::object_properties::ObjectProperties),
         Box::new(crate::cases::object_rez_derez::ObjectRezDerez),
+        Box::new(crate::cases::object_asset_format::ObjectAssetFormat),
         Box::new(crate::cases::object_touch_grab::ObjectTouchGrab),
         Box::new(crate::cases::object_link_delink::ObjectLinkDelink),
         Box::new(crate::cases::object_edit::ObjectEdit),

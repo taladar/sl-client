@@ -712,7 +712,7 @@ pub struct TestContext {
     completeness: Completeness,
     /// The note explaining a partial run.
     completeness_note: Option<String>,
-    /// The other end of the conversation, on [`Grid::Fake`] only.
+    /// The other end of the conversation, on [`Grid::FakeSl`] only.
     ///
     /// A live grid is something a case can only ask questions of; the fake grid
     /// is something a case can also *tell*. The handovers — a border crossing,
@@ -744,7 +744,7 @@ impl TestContext {
         }
     }
 
-    /// Attach the grid-side handle a [`Grid::Fake`] run drives the simulator
+    /// Attach the grid-side handle a [`Grid::FakeSl`] run drives the simulator
     /// with.
     #[must_use]
     pub fn with_fake(mut self, control: crate::fake::FakeControl) -> Self {
@@ -756,7 +756,7 @@ impl TestContext {
     ///
     /// `None` on a live grid, where nothing in the harness can speak as the
     /// simulator — which is why every case that reaches for this declares
-    /// [`Grid::Fake`] as its only grid.
+    /// [`Grid::FakeSl`] as its only grid.
     #[must_use]
     pub const fn fake(&self) -> Option<&crate::fake::FakeControl> {
         self.fake.as_ref()

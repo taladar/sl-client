@@ -118,9 +118,10 @@ multi-region offsets, in-flight asset leaks, NPC appearance delivery.
   two-avatar case per surface, which a live grid could not, since without
   locking its interleaving is luck.
 - `sl-conformance`'s **offline tier** — the same fake grid, asserted on the
-  wire instead of in pixels. `Grid::Fake` starts a grid inside the test
+  wire instead of in pixels. `Grid::FakeSl` and `Grid::FakeOpensim` — the
+  same grid imitating either live one — start a grid inside the test
   process (the catalogue region plus the border scene east of it as its
-  neighbour) and synthesises the credentials that reach it, so the ordinary
+  neighbour) and synthesise the credentials that reach it, so the ordinary
   login path runs offline; the cases named in `fake::OFFLINE_CASES` are
   `#[tokio::test]`s in `sl-conformance/tests/offline.rs`, each on its own
   grid. A case belongs there when **every fixture it needs is offline** *and*
@@ -230,7 +231,7 @@ multi-region offsets, in-flight asset leaks, NPC appearance delivery.
   in `world_test.rs` is the worked example.
 - **a fake-grid fixture**: a `PrimFixture`/`NpcFixture` in
   `sl-fake-grid/src/fixtures/`, named in the catalogue so the viewer
-  harness, the conformance `Grid::Fake` branch and the Firestorm
+  harness, the conformance fake-grid branch and the Firestorm
   cross-check binary all see the same region. The ground is not scenario
   content but region content: `RegionConfig::terrain` carries a
   `TerrainFixture` (`sl-fake-grid/src/terrain.rs`) whose `Heightfield`

@@ -2,7 +2,7 @@
 //! feature, in a row a camera can sweep.
 //!
 //! This is the fixture the full-stack viewer harness, the `sl-conformance`
-//! `Grid::Fake` cases and anyone pointing Firestorm at the standalone binary
+//! the fake-grid conformance cases and anyone pointing Firestorm at the binary
 //! all load, so "the mesh prim" means the same object with the same id at the
 //! same place in every one of them. Each entry is a [`CatalogueEntry`] naming
 //! what it is and where it stands; a test looks its subject up by

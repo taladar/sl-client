@@ -1,0 +1,656 @@
+{'task_id':ucc706f2d-0b68-68f8-11a4-f1043ff35ca0}
+{
+	name	Object|
+	permissions 0
+	{
+		base_mask	7fffffff
+		owner_mask	7fffffff
+		group_mask	00000000
+		everyone_mask	00000000
+		next_owner_mask	7fffffff
+		creator_id	13fd9595-a47b-4d64-a5fb-6da645f038e0
+		owner_id	3c115e51-04f4-523c-9fa6-98aff1034730
+		last_owner_id	3c115e51-04f4-523c-9fa6-98aff1034730
+		group_id	00000000-0000-0000-0000-000000000000
+	}
+	local_id	217444921
+	total_crc	323
+	type	2
+	task_valid	2
+	travel_access	13
+	displayopts	2
+	displaytype	v
+	pos	-0.368634403	0.00781063363	-0.569040775
+	oldpos	150.117996	25.8658009	8.19664001
+	rotation	-0.06293071806430816650390625	-0.6995697021484375	-0.7002241611480712890625	0.1277817934751510620117188
+	childpos	-0.00499999989	-0.0359999985	0.307999998
+	childrot	-0.515492737293243408203125	-0.46601200103759765625	0.529055416584014892578125	0.4870323240756988525390625
+	scale	0.074629	0.289956	0.01
+	sit_offset	0	0	0
+	camera_eye_offset	0	0	0
+	camera_at_offset	0	0	0
+	sit_quat	0	0	0	1
+	sit_hint	0
+	state	160
+	material	3
+	soundid	00000000-0000-0000-0000-000000000000
+	soundgain	0
+	soundradius	0
+	soundflags	0
+	textcolor	0 0 0 1
+	selected	0
+	selector	00000000-0000-0000-0000-000000000000
+	usephysics	0
+	rotate_x	1
+	rotate_y	1
+	rotate_z	1
+	phantom	0
+	remote_script_access_pin	0
+	volume_detect	0
+	block_grabs	0
+	die_at_edge	0
+	return_at_edge	0
+	temporary	0
+	sandbox	0
+	sandboxhome	0	0	0
+	shape 0
+	{
+		path 0
+		{
+			curve	16
+			begin	0
+			end	1
+			scale_x	1
+			scale_y	1
+			shear_x	0
+			shear_y	0
+			twist	0
+			twist_begin	0
+			radius_offset	0
+			taper_x	0
+			taper_y	0
+			revolutions	1
+			skew	0
+		}
+		profile 0
+		{
+			curve	1
+			begin	0
+			end	1
+			hollow	0
+		}
+	}
+	faces	6
+	{
+		imageid	ddde1ffc-678b-3cda-1748-513086bdf01b
+		colors	0.937255 0.796078 0.494118 1
+		scales	1
+		scalet	1
+		offsets	0
+		offsett	0
+		imagerot	0
+		bump	0
+		fullbright	0
+		media_flags	0
+	}
+	{
+		imageid	f54a0c32-3cd1-d49a-5b4f-7b792bebc204
+		colors	0.937255 0.796078 0.494118 1
+		scales	1
+		scalet	1
+		offsets	0
+		offsett	0
+		imagerot	0
+		bump	0
+		fullbright	0
+		media_flags	0
+	}
+	{
+		imageid	f54a0c32-3cd1-d49a-5b4f-7b792bebc204
+		colors	0.937255 0.796078 0.494118 1
+		scales	1
+		scalet	1
+		offsets	0
+		offsett	0
+		imagerot	0
+		bump	0
+		fullbright	0
+		media_flags	0
+	}
+	{
+		imageid	f54a0c32-3cd1-d49a-5b4f-7b792bebc204
+		colors	0.937255 0.796078 0.494118 1
+		scales	1
+		scalet	1
+		offsets	0
+		offsett	0
+		imagerot	0
+		bump	0
+		fullbright	0
+		media_flags	0
+	}
+	{
+		imageid	f54a0c32-3cd1-d49a-5b4f-7b792bebc204
+		colors	0.937255 0.796078 0.494118 1
+		scales	1
+		scalet	1
+		offsets	0
+		offsett	0
+		imagerot	0
+		bump	0
+		fullbright	0
+		media_flags	0
+	}
+	{
+		imageid	ddde1ffc-678b-3cda-1748-513086bdf01b
+		colors	0.937255 0.796078 0.494118 1
+		scales	1
+		scalet	-1
+		offsets	0
+		offsett	0
+		imagerot	0
+		bump	0
+		fullbright	0
+		media_flags	0
+	}
+	ps_next_crc	1
+	gpw_bias	1
+	ip	0
+	complete	TRUE
+	delay	50000
+	nextstart	0
+	birthtime	1061088050622956
+	reztime	1094866329019785
+	parceltime	1133568981980596
+	tax_rate	1.00084
+	scratchpad	0
+	{
+	
+	}
+	sale_info	0
+	{
+		sale_type	not
+		sale_price	10
+	}
+	correct_family_id	00000000-0000-0000-0000-000000000000
+	has_rezzed	0
+	pre_link_base_mask	7fffffff
+	linked 	child
+	default_pay_price	-2	1	5	10	20
+}
+{'task_id':u61fa7364-e151-0597-774c-523312dae31b}
+{
+	name	Object|
+	permissions 0
+	{
+		base_mask	7fffffff
+		owner_mask	7fffffff
+		group_mask	00000000
+		everyone_mask	00000000
+		next_owner_mask	7fffffff
+		creator_id	13fd9595-a47b-4d64-a5fb-6da645f038e0
+		owner_id	3c115e51-04f4-523c-9fa6-98aff1034730
+		last_owner_id	3c115e51-04f4-523c-9fa6-98aff1034730
+		group_id	00000000-0000-0000-0000-000000000000
+	}
+	local_id	217444922
+	total_crc	324
+	type	2
+	task_valid	2
+	travel_access	13
+	displayopts	2
+	displaytype	v
+	pos	-0.367110789	0.00780026987	-0.566269755
+	oldpos	150.115005	25.8479004	8.18669987
+	rotation	0.47332942485809326171875	-0.380102097988128662109375	-0.5734078884124755859375	0.550168216228485107421875
+	childpos	-0.00499999989	-0.0370000005	0.305000007
+	childrot	-0.736649334430694580078125	-0.03042060509324073791503906	-0.02784589119255542755126953	0.67501628398895263671875
+	scale	0.074629	0.289956	0.01
+	sit_offset	0	0	0
+	camera_eye_offset	0	0	0
+	camera_at_offset	0	0	0
+	sit_quat	0	0	0	1
+	sit_hint	0
+	state	160
+	material	3
+	soundid	00000000-0000-0000-0000-000000000000
+	soundgain	0
+	soundradius	0
+	soundflags	0
+	textcolor	0 0 0 1
+	selected	0
+	selector	00000000-0000-0000-0000-000000000000
+	usephysics	0
+	rotate_x	1
+	rotate_y	1
+	rotate_z	1
+	phantom	0
+	remote_script_access_pin	0
+	volume_detect	0
+	block_grabs	0
+	die_at_edge	0
+	return_at_edge	0
+	temporary	0
+	sandbox	0
+	sandboxhome	0	0	0
+	shape 0
+	{
+		path 0
+		{
+			curve	16
+			begin	0
+			end	1
+			scale_x	1
+			scale_y	1
+			shear_x	0
+			shear_y	0
+			twist	0
+			twist_begin	0
+			radius_offset	0
+			taper_x	0
+			taper_y	0
+			revolutions	1
+			skew	0
+		}
+		profile 0
+		{
+			curve	1
+			begin	0
+			end	1
+			hollow	0
+		}
+	}
+	faces	6
+	{
+		imageid	ddde1ffc-678b-3cda-1748-513086bdf01b
+		colors	0.937255 0.796078 0.494118 1
+		scales	1
+		scalet	1
+		offsets	0
+		offsett	0
+		imagerot	0
+		bump	0
+		fullbright	0
+		media_flags	0
+	}
+	{
+		imageid	f54a0c32-3cd1-d49a-5b4f-7b792bebc204
+		colors	0.937255 0.796078 0.494118 1
+		scales	1
+		scalet	1
+		offsets	0
+		offsett	0
+		imagerot	0
+		bump	0
+		fullbright	0
+		media_flags	0
+	}
+	{
+		imageid	f54a0c32-3cd1-d49a-5b4f-7b792bebc204
+		colors	0.937255 0.796078 0.494118 1
+		scales	1
+		scalet	1
+		offsets	0
+		offsett	0
+		imagerot	0
+		bump	0
+		fullbright	0
+		media_flags	0
+	}
+	{
+		imageid	f54a0c32-3cd1-d49a-5b4f-7b792bebc204
+		colors	0.937255 0.796078 0.494118 1
+		scales	1
+		scalet	1
+		offsets	0
+		offsett	0
+		imagerot	0
+		bump	0
+		fullbright	0
+		media_flags	0
+	}
+	{
+		imageid	f54a0c32-3cd1-d49a-5b4f-7b792bebc204
+		colors	0.937255 0.796078 0.494118 1
+		scales	1
+		scalet	1
+		offsets	0
+		offsett	0
+		imagerot	0
+		bump	0
+		fullbright	0
+		media_flags	0
+	}
+	{
+		imageid	ddde1ffc-678b-3cda-1748-513086bdf01b
+		colors	0.937255 0.796078 0.494118 1
+		scales	1
+		scalet	-1
+		offsets	0
+		offsett	0
+		imagerot	0
+		bump	0
+		fullbright	0
+		media_flags	0
+	}
+	ps_next_crc	1
+	gpw_bias	1
+	ip	0
+	complete	TRUE
+	delay	50000
+	nextstart	0
+	birthtime	1061087839248891
+	reztime	1094866329020800
+	parceltime	1133568981981983
+	tax_rate	1.00084
+	scratchpad	0
+	{
+	
+	}
+	sale_info	0
+	{
+		sale_type	not
+		sale_price	10
+	}
+	correct_family_id	00000000-0000-0000-0000-000000000000
+	has_rezzed	0
+	pre_link_base_mask	7fffffff
+	linked 	child
+	default_pay_price	-2	1	5	10	20
+}
+{'task_id':ub8d68643-7dd8-57af-0d24-8790032aed0c}
+{
+	name	Object|
+	permissions 0
+	{
+		base_mask	7fffffff
+		owner_mask	7fffffff
+		group_mask	00000000
+		everyone_mask	00000000
+		next_owner_mask	7fffffff
+		creator_id	13fd9595-a47b-4d64-a5fb-6da645f038e0
+		owner_id	3c115e51-04f4-523c-9fa6-98aff1034730
+		last_owner_id	3c115e51-04f4-523c-9fa6-98aff1034730
+		group_id	00000000-0000-0000-0000-000000000000
+	}
+	local_id	217444923
+	total_crc	235
+	type	2
+	task_valid	2
+	travel_access	13
+	displayopts	2
+	displaytype	v
+	pos	-0.120029509	-0.00284469454	-0.0302077383
+	oldpos	150.710999	25.8584995	8.19172001
+	rotation	0.145459949970245361328125	-0.1646589934825897216796875	0.659558117389678955078125	-0.718826770782470703125
+	childpos	0	-0.182999998	-0.26699999
+	childrot	0.991444766521453857421875	3.271923924330621957778931e-05	-0.0002416197530692443251609802	0.1305266767740249633789062
+	scale	0.0382982	0.205957	0.368276
+	sit_offset	0	0	0
+	camera_eye_offset	0	0	0
+	camera_at_offset	0	0	0
+	sit_quat	0	0	0	1
+	sit_hint	0
+	state	160
+	material	3
+	soundid	00000000-0000-0000-0000-000000000000
+	soundgain	0
+	soundradius	0
+	soundflags	0
+	textcolor	0 0 0 1
+	selected	0
+	selector	00000000-0000-0000-0000-000000000000
+	usephysics	0
+	rotate_x	1
+	rotate_y	1
+	rotate_z	1
+	phantom	0
+	remote_script_access_pin	0
+	volume_detect	0
+	block_grabs	0
+	die_at_edge	0
+	return_at_edge	0
+	temporary	0
+	sandbox	0
+	sandboxhome	0	0	0
+	shape 0
+	{
+		path 0
+		{
+			curve	32
+			begin	0.3
+			end	0.65
+			scale_x	1
+			scale_y	0.05
+			shear_x	0
+			shear_y	0
+			twist	0
+			twist_begin	0
+			radius_offset	0
+			taper_x	0
+			taper_y	0
+			revolutions	1
+			skew	0
+		}
+		profile 0
+		{
+			curve	0
+			begin	0
+			end	1
+			hollow	0
+		}
+	}
+	faces	3
+	{
+		imageid	e7150bed-3e3e-c698-eb15-d17b178148af
+		colors	0.843137 0.156863 0.156863 1
+		scales	15
+		scalet	1
+		offsets	0
+		offsett	0
+		imagerot	-1.57084
+		bump	0
+		fullbright	0
+		media_flags	0
+	}
+	{
+		imageid	e7150bed-3e3e-c698-eb15-d17b178148af
+		colors	0.843137 0.156863 0.156863 1
+		scales	15
+		scalet	1
+		offsets	0
+		offsett	0
+		imagerot	-1.57084
+		bump	0
+		fullbright	0
+		media_flags	0
+	}
+	{
+		imageid	e7150bed-3e3e-c698-eb15-d17b178148af
+		colors	0.843137 0.156863 0.156863 1
+		scales	15
+		scalet	1
+		offsets	0
+		offsett	0
+		imagerot	-1.57084
+		bump	0
+		fullbright	0
+		media_flags	0
+	}
+	ps_next_crc	1
+	gpw_bias	1
+	ip	0
+	complete	TRUE
+	delay	50000
+	nextstart	0
+	birthtime	1061087534454174
+	reztime	1094866329021741
+	parceltime	1133568981982889
+	tax_rate	1.00326
+	scratchpad	0
+	{
+	
+	}
+	sale_info	0
+	{
+		sale_type	not
+		sale_price	10
+	}
+	correct_family_id	00000000-0000-0000-0000-000000000000
+	has_rezzed	0
+	pre_link_base_mask	7fffffff
+	linked 	child
+	default_pay_price	-2	1	5	10	20
+}
+{'task_id':ue4b19200-9d33-962f-c8c5-6f25be3a3fd0}
+{
+	name	Fixture_Linkset_Root|
+	permissions 0
+	{
+		base_mask	7fffffff
+		owner_mask	7fffffff
+		group_mask	00000000
+		everyone_mask	00000000
+		next_owner_mask	7fffffff
+		creator_id	13fd9595-a47b-4d64-a5fb-6da645f038e0
+		owner_id	3c115e51-04f4-523c-9fa6-98aff1034730
+		last_owner_id	3c115e51-04f4-523c-9fa6-98aff1034730
+		group_id	00000000-0000-0000-0000-000000000000
+	}
+	local_id	217444924
+	total_crc	675
+	type	1
+	task_valid	2
+	travel_access	13
+	displayopts	2
+	displaytype	v
+	pos	-0.34780401	-0.00968400016	-0.260098994
+	oldpos	0	0	0
+	rotation	0.73164522647857666015625	-0.67541944980621337890625	-0.07733880728483200073242188	0.05022468417882919311523438
+	velocity	0	0	0
+	angvel	0	0	0
+	scale	0.0382982	0.32228	0.383834
+	sit_offset	0	0	0
+	camera_eye_offset	0	0	0
+	camera_at_offset	0	0	0
+	sit_quat	0	0	0	1
+	sit_hint	0
+	state	160
+	material	3
+	soundid	00000000-0000-0000-0000-000000000000
+	soundgain	0
+	soundradius	0
+	soundflags	0
+	textcolor	0 0 0 1
+	selected	0
+	selector	00000000-0000-0000-0000-000000000000
+	usephysics	0
+	rotate_x	1
+	rotate_y	1
+	rotate_z	1
+	phantom	0
+	remote_script_access_pin	0
+	volume_detect	0
+	block_grabs	0
+	die_at_edge	0
+	return_at_edge	0
+	temporary	0
+	sandbox	0
+	sandboxhome	0	0	0
+	shape 0
+	{
+		path 0
+		{
+			curve	32
+			begin	0.3
+			end	0.65
+			scale_x	1
+			scale_y	0.05
+			shear_x	0
+			shear_y	0
+			twist	0
+			twist_begin	0
+			radius_offset	0
+			taper_x	0
+			taper_y	0
+			revolutions	1
+			skew	0
+		}
+		profile 0
+		{
+			curve	0
+			begin	0
+			end	1
+			hollow	0
+		}
+	}
+	faces	3
+	{
+		imageid	e7150bed-3e3e-c698-eb15-d17b178148af
+		colors	0.843137 0.156863 0.156863 1
+		scales	15
+		scalet	1
+		offsets	0
+		offsett	0
+		imagerot	-1.57084
+		bump	0
+		fullbright	0
+		media_flags	0
+	}
+	{
+		imageid	e7150bed-3e3e-c698-eb15-d17b178148af
+		colors	0.843137 0.156863 0.156863 1
+		scales	15
+		scalet	1
+		offsets	0
+		offsett	0
+		imagerot	-1.57084
+		bump	0
+		fullbright	0
+		media_flags	0
+	}
+	{
+		imageid	e7150bed-3e3e-c698-eb15-d17b178148af
+		colors	0.843137 0.156863 0.156863 1
+		scales	15
+		scalet	1
+		offsets	0
+		offsett	0
+		imagerot	-1.57084
+		bump	0
+		fullbright	0
+		media_flags	0
+	}
+	ps_next_crc	1
+	gpw_bias	1
+	ip	0
+	complete	TRUE
+	delay	50000
+	nextstart	0
+	birthtime	1061087463950186
+	reztime	1094866329022555
+	parceltime	1133568981984359
+	description	(No Description)|
+	tax_rate	1.01736
+	namevalue	AttachPt U32 RW S 10
+	namevalue	AttachmentOrientation VEC3 RW DS -3.110088, -0.182018, 1.493795
+	namevalue	AttachmentOffset VEC3 RW DS -0.347804, -0.009684, -0.260099
+	namevalue	AttachItemID STRING RW SV 20f36c3a-b44b-9bc7-87f3-018bfdfc8cda
+	scratchpad	0
+	{
+	
+	}
+	sale_info	0
+	{
+		sale_type	not
+		sale_price	10
+	}
+	orig_asset_id	8747acbc-d391-1e59-69f1-41d06830e6c0
+	orig_item_id	20f36c3a-b44b-9bc7-87f3-018bfdfc8cda
+	from_task_id	3c115e51-04f4-523c-9fa6-98aff1034730
+	correct_family_id	00000000-0000-0000-0000-000000000000
+	has_rezzed	0
+	pre_link_base_mask	7fffffff
+	linked 	linked
+	default_pay_price	-2	1	5	10	20
+}

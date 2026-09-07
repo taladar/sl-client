@@ -91,8 +91,9 @@ use sl_wire::messages::{
 use sl_wire::messages::{
     DeRezAck, DeRezAckTransactionDataBlock, ForceObjectSelect, ForceObjectSelectDataBlock,
     ForceObjectSelectHeaderBlock, GrantGodlikePowers, GrantGodlikePowersAgentDataBlock,
-    GrantGodlikePowersGrantDataBlock, MoveInventoryItem, MoveInventoryItemAgentDataBlock,
-    MoveInventoryItemInventoryDataBlock, RemoveInventoryFolder,
+    GrantGodlikePowersGrantDataBlock, InventoryDescendents, InventoryDescendentsAgentDataBlock,
+    InventoryDescendentsFolderDataBlock, InventoryDescendentsItemDataBlock, MoveInventoryItem,
+    MoveInventoryItemAgentDataBlock, MoveInventoryItemInventoryDataBlock, RemoveInventoryFolder,
     RemoveInventoryFolderAgentDataBlock, RemoveInventoryFolderFolderDataBlock, RemoveInventoryItem,
     RemoveInventoryItemAgentDataBlock, RemoveInventoryItemInventoryDataBlock,
     RemoveInventoryObjects, RemoveInventoryObjectsAgentDataBlock,
@@ -371,6 +372,16 @@ const MAX_XFER_RECEIVE_BYTES: usize = 16 * 1024 * 1024;
 /// to a client that has stopped long-polling cannot grow the queue without
 /// bound.
 const MAX_CAPS_EVENTS: usize = 4096;
+
+/// The most `FolderData` blocks one `InventoryDescendents` message carries.
+/// OpenSim's `MAX_FOLDERS_PER_PACKET`: an inventory block is roughly 550 bytes,
+/// so the limit is what keeps the message inside the MTU rather than anything
+/// the protocol states.
+const MAX_DESCENDENT_FOLDERS_PER_MESSAGE: usize = 6;
+
+/// The most `ItemData` blocks one `InventoryDescendents` message carries
+/// (OpenSim's `MAX_ITEMS_PER_PACKET`; an item block is the larger of the two).
+const MAX_DESCENDENT_ITEMS_PER_MESSAGE: usize = 5;
 
 /// The largest number of script-permission answers recorded for one session.
 /// The registry is keyed by (task, item) and only ever grows, so it is bounded
@@ -1855,6 +1866,31 @@ pub enum ServerEvent {
         track_no: Option<i32>,
         /// The parsed update the store merged.
         update: Box<EnvironmentUpdate>,
+    },
+    /// The client asked for a folder's contents over the **deprecated UDP**
+    /// `FetchInventoryDescendents`; the simulator answers with
+    /// [`SimSession::send_inventory_descendents`].
+    ///
+    /// The modern read path is the `FetchInventoryDescendents2` capability,
+    /// which [`SimCaps`](crate::SimCaps) serves from the same tree without
+    /// reaching a driver at all. This one is here because the two live grids
+    /// disagree about whether it still works: OpenSim serves it, Second Life
+    /// dropped it. Which of those a driver is has to be the driver's answer, so
+    /// the request is surfaced rather than answered — a grid imitating Second
+    /// Life ignores it or refuses it with
+    /// [`send_feature_disabled`](SimSession::send_feature_disabled).
+    RequestInventoryDescendents {
+        /// The folder whose direct children were asked for.
+        folder_id: InventoryFolderKey,
+        /// Whose inventory the client believes the folder is in — its own
+        /// agent id, or the shared Library's owner. Echoed in the reply.
+        owner_id: AgentKey,
+        /// `0` sorts the items by name, anything else by creation date.
+        sort_order: i32,
+        /// Whether the sub-folders were asked for.
+        fetch_folders: bool,
+        /// Whether the items were asked for.
+        fetch_items: bool,
     },
     /// The client created an inventory folder over the `InventoryAPIv3`
     /// create verb or the `CreateInventoryCategory` capability. The folder is
@@ -8072,6 +8108,182 @@ impl SimSession {
         Ok(())
     }
 
+    /// Sends the `InventoryDescendents` reply to a deprecated UDP
+    /// [`ServerEvent::RequestInventoryDescendents`]: `folder_id`'s direct
+    /// children, read out of whichever serving tree holds the folder (the
+    /// agent's, else the Library's — the same two
+    /// [`SimCaps`](crate::SimCaps) serves `FetchInventoryDescendents2` from).
+    ///
+    /// Returns `false` when neither tree has the folder, in which case nothing
+    /// was sent: a simulator asked for a folder its inventory service does not
+    /// know answers nothing at all, and a client that asked for one is holding
+    /// a stale id.
+    ///
+    /// **The packing is OpenSim's**, because OpenSim is the grid that still
+    /// serves this: at most six folders or five items per message, folders and
+    /// items **never in the same message** ("to preserve SL compatibility", says
+    /// `LLClientView.SendInventoryFolderDetails`), and every message padded to
+    /// carry at least one block of each kind — a nil-id placeholder where there
+    /// is nothing to say. An empty folder is therefore one message of two
+    /// placeholders rather than no message. The client filters the placeholders
+    /// out by their nil ids; a driver that copies this shape is what makes that
+    /// filter reachable.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if a message fails to encode.
+    pub fn send_inventory_descendents(
+        &mut self,
+        folder_id: InventoryFolderKey,
+        owner_id: AgentKey,
+        sort_order: i32,
+        fetch_folders: bool,
+        fetch_items: bool,
+        now: Instant,
+    ) -> Result<bool, Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        // Whichever tree holds it: the agent's inventory and the shared Library
+        // are one inventory service to a viewer, and the request's `OwnerID`
+        // says who the *client* believes owns the folder, which is not a thing
+        // to route on — a client fetching the Library with its own id in that
+        // field is asking about a folder that exists, and gets it.
+        let listing = self
+            .agent_inventory
+            .descendents(folder_id, fetch_folders, fetch_items, sort_order)
+            .or_else(|| {
+                self.library_inventory.descendents(
+                    folder_id,
+                    fetch_folders,
+                    fetch_items,
+                    sort_order,
+                )
+            });
+        let Some(Event::InventoryDescendents {
+            version,
+            descendents,
+            folders,
+            items,
+            ..
+        }) = listing
+        else {
+            return Ok(false);
+        };
+        let agent_id = self.agent_id.map_or_else(Uuid::nil, |agent| agent.uuid());
+        let folder_blocks: Vec<InventoryDescendentsFolderDataBlock> = folders
+            .iter()
+            .map(|folder| InventoryDescendentsFolderDataBlock {
+                folder_id: folder.folder_id.uuid(),
+                parent_id: crate::types::optional_key_to_wire(folder.parent_id, |parent| {
+                    parent.uuid()
+                }),
+                r#type: folder.folder_type,
+                name: with_nul(&folder.name),
+            })
+            .collect();
+        let mut item_blocks = Vec::with_capacity(items.len());
+        for item in &items {
+            let (item_owner, group_id) = crate::types::object_owner_to_wire(item.owner, item.group);
+            item_blocks.push(InventoryDescendentsItemDataBlock {
+                item_id: item.item_id.uuid(),
+                folder_id: item.folder_id.uuid(),
+                creator_id: item.creator_id.uuid(),
+                owner_id: item_owner,
+                group_id,
+                base_mask: item.permissions.base.bits(),
+                owner_mask: item.permissions.owner.bits(),
+                group_mask: item.permissions.group.bits(),
+                everyone_mask: item.permissions.everyone.bits(),
+                next_owner_mask: item.permissions.next_owner.bits(),
+                group_owned: item.owner.is_group(),
+                asset_id: item.asset_id,
+                r#type: item.item_type,
+                inv_type: item.inv_type,
+                flags: item.flags,
+                sale_type: item.sale_type,
+                sale_price: crate::types::linden_price_to_wire(
+                    "SalePrice",
+                    item.sale_price.as_ref(),
+                )?,
+                name: with_nul(&item.name),
+                description: with_nul(&item.description),
+                creation_date: item.creation_date,
+                // The permissions checksum a viewer recomputes to notice a
+                // tampered item. The client's decode discards it, so a
+                // simulator that has no reason to lie writes zero.
+                crc: 0,
+            });
+        }
+        // Folders first, then items, never mixed — and one padded message even
+        // when there is neither.
+        let mut messages: Vec<(Vec<_>, Vec<_>)> = folder_blocks
+            .chunks(MAX_DESCENDENT_FOLDERS_PER_MESSAGE)
+            .map(|chunk| (chunk.to_vec(), Vec::new()))
+            .chain(
+                item_blocks
+                    .chunks(MAX_DESCENDENT_ITEMS_PER_MESSAGE)
+                    .map(|chunk| (Vec::new(), chunk.to_vec())),
+            )
+            .collect();
+        if messages.is_empty() {
+            messages.push((Vec::new(), Vec::new()));
+        }
+        for (folder_data, item_data) in messages {
+            let message = AnyMessage::InventoryDescendents(InventoryDescendents {
+                agent_data: InventoryDescendentsAgentDataBlock {
+                    agent_id,
+                    folder_id: folder_id.uuid(),
+                    owner_id: owner_id.uuid(),
+                    version,
+                    descendents,
+                },
+                folder_data: if folder_data.is_empty() {
+                    vec![null_descendent_folder_block()]
+                } else {
+                    folder_data
+                },
+                item_data: if item_data.is_empty() {
+                    vec![null_descendent_item_block()]
+                } else {
+                    item_data
+                },
+            });
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(true)
+    }
+
+    /// Enqueues a CAPS `BulkUpdateInventory` push: the folders and items the
+    /// simulator just minted or re-wrote, delivered over the event queue.
+    ///
+    /// The **Second Life** shape of an inventory announcement. The legacy UDP
+    /// [`send_inventory_item_created`](Self::send_inventory_item_created) says
+    /// the same thing on OpenSim, and the two are not interchangeable to a
+    /// viewer: a client that only listens for the UDP message hears nothing
+    /// from a grid that moved inventory to AIS3, which is exactly the trap this
+    /// pair exists to let a fake grid set.
+    ///
+    /// `transaction` echoes whatever the client correlated its request with
+    /// (nil where it sent none). Nothing here writes the serving tree — the
+    /// caller applies its own mutation, as it does for the UDP form.
+    ///
+    /// # Errors
+    ///
+    /// Returns a wire error if an item's L$ sale price exceeds the signed
+    /// 32-bit range the wire field can hold.
+    pub fn enqueue_bulk_update_inventory(
+        &mut self,
+        transaction: TransactionId,
+        folders: &[InventoryFolder],
+        items: &[InventoryItem],
+    ) -> Result<(), sl_wire::WireError> {
+        let body = crate::bulk_update_inventory_to_llsd(transaction.get(), folders, items)?;
+        self.enqueue_caps_event("BulkUpdateInventory", body);
+        Ok(())
+    }
+
     /// Sends a `RemoveInventoryItem` — tells the client the simulator deleted one
     /// or more inventory items server-side, so a client mirroring inventory can
     /// drop them (the inverse of the client's
@@ -10143,6 +10355,16 @@ impl SimSession {
             AnyMessage::AgentWearablesRequest(_request) => {
                 self.events.push_back(ServerEvent::RequestAgentWearables);
             }
+            AnyMessage::FetchInventoryDescendents(request) => {
+                self.events
+                    .push_back(ServerEvent::RequestInventoryDescendents {
+                        folder_id: InventoryFolderKey::from(request.inventory_data.folder_id),
+                        owner_id: AgentKey::from(request.inventory_data.owner_id),
+                        sort_order: request.inventory_data.sort_order,
+                        fetch_folders: request.inventory_data.fetch_folders,
+                        fetch_items: request.inventory_data.fetch_items,
+                    });
+            }
             AnyMessage::GetScriptRunning(request) => {
                 self.events.push_back(ServerEvent::RequestScriptRunning {
                     object_id: ObjectKey::from(request.script.object_id),
@@ -11792,6 +12014,48 @@ fn trimmed_string(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes)
         .trim_end_matches('\0')
         .to_owned()
+}
+
+/// The placeholder `FolderData` block a message with no folders to report
+/// carries: nil ids, folder type `-1` and an empty name. OpenSim's
+/// `AddNullFolderBlockToDecendentsPacket`, field for field — the block exists
+/// only because the message must carry one, and the client drops it on the nil
+/// id.
+const fn null_descendent_folder_block() -> InventoryDescendentsFolderDataBlock {
+    InventoryDescendentsFolderDataBlock {
+        folder_id: Uuid::nil(),
+        parent_id: Uuid::nil(),
+        r#type: -1,
+        name: Vec::new(),
+    }
+}
+
+/// The placeholder `ItemData` block a message with no items to report carries —
+/// OpenSim's `AddNullItemBlockToDescendentsPacket`, which writes no CRC either.
+const fn null_descendent_item_block() -> InventoryDescendentsItemDataBlock {
+    InventoryDescendentsItemDataBlock {
+        item_id: Uuid::nil(),
+        folder_id: Uuid::nil(),
+        creator_id: Uuid::nil(),
+        owner_id: Uuid::nil(),
+        group_id: Uuid::nil(),
+        base_mask: 0,
+        owner_mask: 0,
+        group_mask: 0,
+        everyone_mask: 0,
+        next_owner_mask: 0,
+        group_owned: false,
+        asset_id: Uuid::nil(),
+        r#type: -1,
+        inv_type: 0,
+        flags: 0,
+        sale_type: 0,
+        sale_price: 0,
+        name: Vec::new(),
+        description: Vec::new(),
+        creation_date: 0,
+        crc: 0,
+    }
 }
 
 /// Encodes a string as NUL-terminated UTF-8 bytes, as a simulator sends variable

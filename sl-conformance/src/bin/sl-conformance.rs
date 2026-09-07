@@ -160,14 +160,14 @@ fn resolve_tertiary<'creds>(
 /// The default credentials path for a grid when `--credentials` is omitted, or
 /// `None` for a grid whose accounts are not an operator's to write down.
 ///
-/// The fake grid is that `None`: [`FakeGridHarness`] registers its accounts as
-/// it starts and synthesises the credentials that reach them, so there is no
+/// Either fake grid is that `None`: [`FakeGridHarness`] registers its accounts
+/// as it starts and synthesises the credentials that reach them, so there is no
 /// file to default to.
 fn default_credentials(grid: Grid) -> Option<PathBuf> {
     match grid {
         Grid::Opensim => Some(PathBuf::from("credentials.toml")),
         Grid::Aditi => Some(PathBuf::from("credentials.aditi.toml")),
-        Grid::Fake => None,
+        Grid::FakeSl | Grid::FakeOpensim => None,
     }
 }
 
@@ -192,10 +192,13 @@ async fn run(args: RunArgs) -> Result<(), Error> {
 
     // The fake grid comes up here, before anything else needs it: it registers
     // the accounts, so it is also where the credentials come from. It is held
-    // for the whole run — dropping it shuts every session and socket down.
+    // for the whole run — dropping it shuts every session and socket down. It
+    // is started as the flavour `--grid` named, which is what makes
+    // `--grid fake-opensim` a different grid rather than the same one with a
+    // different label on the record.
     let fake = match args.grid {
-        Grid::Fake => Some(
-            FakeGridHarness::start()
+        Grid::FakeSl | Grid::FakeOpensim => Some(
+            FakeGridHarness::start(args.grid)
                 .await
                 .map_err(|error| Error::Test(error.to_string()))?,
         ),

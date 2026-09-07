@@ -201,6 +201,13 @@ async fn handle_request(
             if method != "GET" {
                 return Ok(plain_status(HttpStatusCode::METHOD_NOT_ALLOWED));
             }
+            // A grid that does not central-bake runs no bake service, and a
+            // route that answers anyway would be a URL no login ever named:
+            // the client-baked flavour has to be reachable only the way a
+            // stock OpenSim region is, by asset id (`crate::bakes`).
+            if !core.bakes.advertises_appearance_service() {
+                return Ok(plain_status(HttpStatusCode::NOT_FOUND));
+            }
             // Straight from the grid-wide store: the session was only ever
             // looked up to decide whether this path resolves at all, and a
             // bake's bytes belong to the grid rather than to the circuit that

@@ -16,7 +16,9 @@
 //! 2. **Take** it into the agent's Objects folder with [`Command::DerezObjects`]
 //!    ([`DeRezDestination::TakeIntoAgentInventory`]). The object leaves the
 //!    world and the simulator materialises the inventory item, delivered as an
-//!    [`Event::InventoryItemCreated`] — the item this case then rezzes.
+//!    [`Event::InventoryItemCreated`] on OpenSim and an
+//!    [`Event::InventoryBulkUpdate`] on Second Life (`take_announcement`
+//!    records which) — the item this case then rezzes.
 //! 3. **Rez from inventory**: [`Command::RezObjectFromInventory`] with the taken
 //!    item's full payload rezzes it back into the world as a fresh object — a
 //!    second [`Event::ObjectAdded`] with a new region-local id, the operation
@@ -26,27 +28,32 @@
 //!    [`Event::ObjectRemoved`] (`KillObject`) for that id, leaving the world
 //!    scene as it was found.
 //!
-//! `1av`, `[both]`. Force-deleting with `ObjectDelete`
+//! `1av`, `[both]`, and **offline**. Force-deleting with `ObjectDelete`
 //! ([`Command::DeleteObjects`]) is a no-op on stock OpenSim, so the portable
 //! delete is the derez-to-Trash above; OpenSim resolves the caller's own Trash
 //! folder for a `Delete` derez regardless of the destination id, and looks the
 //! source item up by id alone for the rez (the permission masks and CRC in the
 //! rez payload are not validated), so this round trip is self-contained on the
-//! local grid. On OpenSim the avatar is forced into the "Default Region", which
-//! holds this workspace's rezzed test object as the placement reference, so a
-//! primitive is guaranteed and its absence fails the case. On Second Life the
-//! landing region's contents are uncontrolled; a region that streams no
-//! primitive to place against within the window is recorded `partial` rather
-//! than failed. The take leaves the created item in the Objects folder and the
-//! final delete leaves a copy in Trash — inventory residue bounded to two items
-//! per run, acceptable on a throwaway grid. The aditi run is deferred with the
-//! rest of the Aditi batch (no aditi record this session).
+//! local grid. The fake grid does the same — it mints the take's asset itself
+//! and rezzes it back by item id, ignoring the masks the payload carries — so
+//! all four legs run offline as well, which is what took the one case that
+//! exercises `sl-object-asset` end to end out of the "needs a live grid" set.
+//! On OpenSim the avatar is forced into the "Default Region", which holds this
+//! workspace's rezzed test object as the placement reference, and the fake
+//! region is the fixture catalogue, so on both a primitive is guaranteed and
+//! its absence fails the case. On Second Life the landing region's contents are
+//! uncontrolled; a region that streams no primitive to place against within the
+//! window is recorded `partial` rather than failed. The take leaves the created
+//! item in the Objects folder and the final delete leaves a copy in Trash —
+//! inventory residue bounded to two items per run, acceptable on a throwaway
+//! grid. The aditi run is deferred with the rest of the Aditi batch (no aditi
+//! record this session).
 
 use std::collections::HashSet;
 use std::time::Duration;
 
 use sl_client_tokio::{
-    Command, DeRezDestination, Event, FolderType, InventoryFolder, InventoryFolderKey,
+    AssetType, Command, DeRezDestination, Event, FolderType, InventoryFolder, InventoryFolderKey,
     InventoryItem, Object, PrimShape, RestoreItem, RezObjectParams, SaleType, ScopedObjectId,
     TransactionId, Uuid, Vector, pcode,
 };
@@ -54,7 +61,10 @@ use sl_client_tokio::{
 use crate::context::{TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
-use crate::support::{REGION_TIMEOUT, REPLY_TIMEOUT, check, is_opensim, secs_metric};
+use crate::support::{
+    REGION_TIMEOUT, REPLY_TIMEOUT, check, content_is_ours, created_item_announcement, is_opensim,
+    secs_metric,
+};
 
 /// The OpenSim start location: the "Default Region" (1000,1000), centred, where
 /// this workspace's test object lives and serves as the rez placement
@@ -99,7 +109,7 @@ impl GridTest for ObjectRezDerez {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl]
     }
 
     fn start_location(&self, grid: Grid) -> &'static str {
@@ -163,9 +173,9 @@ impl GridTest for ObjectRezDerez {
 
             let reference = match reference {
                 Some(reference) => reference,
-                None if is_opensim(grid) => {
+                None if content_is_ours(grid) => {
                     return Err(TestFailure::Assertion(
-                        "no primitive appeared in the Default Region object stream".to_owned(),
+                        "no primitive appeared in the region's object stream".to_owned(),
                     ));
                 }
                 None => {
@@ -216,12 +226,13 @@ impl GridTest for ObjectRezDerez {
                     group_id: None,
                 })
                 .await?;
-            let item = session
-                .wait_for(STEP_TIMEOUT, |event| match event {
-                    Event::InventoryItemCreated { item, .. } => Some(item.clone()),
-                    _ => None,
-                })
-                .await?;
+            // Whichever shape this grid announces a created item with: the
+            // legacy UDP message on OpenSim, an event-queue bulk update on
+            // Second Life. Waiting for only the first is how this case timed
+            // out against a fake grid imitating Second Life.
+            let (announcement, item) =
+                created_item_announcement(session, STEP_TIMEOUT, AssetType::Object.to_code())
+                    .await?;
             let take_rtt = take_started.elapsed();
             check(
                 !item.item_id.uuid().is_nil(),
@@ -276,6 +287,7 @@ impl GridTest for ObjectRezDerez {
 
             let metrics = ctx.metrics();
             metrics.set("item_id", item.item_id.to_string());
+            metrics.set("take_announcement", announcement);
             metrics.set("item_name", item.name.clone());
             metrics.set("created_object", created.full_id.to_string());
             metrics.set("rezzed_object", rezzed.full_id.to_string());

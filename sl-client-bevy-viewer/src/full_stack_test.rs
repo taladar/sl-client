@@ -196,12 +196,19 @@ pub(crate) fn stock_fixture() -> RegionFixture {
 
 /// What a harness may be built differently for.
 ///
-/// One field so far, and it earns its struct: pinning the day is right for every
-/// test *except* the one whose subject is the environment itself, and a bare
-/// `Option<f32>` parameter on `start_in` would say nothing about which it was at
-/// the call site.
+/// Each field earns its place by being right for every test *except* the one
+/// whose subject is that very thing: pinning the day is wrong only for the
+/// environment test, and imitating Second Life is wrong only for a test of what
+/// the other flavour does. A bare parameter on `start_in` would say nothing
+/// about which was which at the call site.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct HarnessOptions {
+    /// The live grid the fake one imitates where the two disagree.
+    ///
+    /// Second Life is the default because it is what this workspace targets and
+    /// what the fake grid itself defaults to; a test whose subject is a
+    /// divergence names the other one.
+    imitates: sl_fake_grid::ImitatedGrid,
     /// Where the day is pinned, as a fraction of the day cycle, or `None` to
     /// render the region's **own** environment as the grid serves it.
     ///
@@ -218,6 +225,7 @@ pub(crate) struct HarnessOptions {
 impl Default for HarnessOptions {
     fn default() -> Self {
         Self {
+            imitates: sl_fake_grid::ImitatedGrid::default(),
             day_position: Some(DAY_POSITION),
         }
     }
@@ -226,7 +234,18 @@ impl Default for HarnessOptions {
 impl HarnessOptions {
     /// Render whatever environment the region serves, rather than a pinned day.
     fn following_the_region_environment() -> Self {
-        Self { day_position: None }
+        Self {
+            day_position: None,
+            ..Self::default()
+        }
+    }
+
+    /// Run against a grid imitating `grid` rather than the default Second Life.
+    fn imitating(grid: sl_fake_grid::ImitatedGrid) -> Self {
+        Self {
+            imitates: grid,
+            ..Self::default()
+        }
     }
 }
 
@@ -275,6 +294,18 @@ impl ViewerHarness {
         Self::start_in(vec![fixture.into_region(RegionConfig::default())])
     }
 
+    /// [`start`](Self::start) against a grid imitating `grid` where the two
+    /// live ones disagree, rather than the default Second Life.
+    pub(crate) fn start_imitating(
+        fixture: RegionFixture,
+        grid: sl_fake_grid::ImitatedGrid,
+    ) -> Result<Self, TestError> {
+        Self::start_in_with(
+            vec![fixture.into_region(RegionConfig::default())],
+            HarnessOptions::imitating(grid),
+        )
+    }
+
     /// [`start`](Self::start) against a grid serving `regions`, the first of
     /// which the account starts in.
     ///
@@ -302,6 +333,7 @@ impl ViewerHarness {
             .build()?;
         let mut builder = FakeGridBuilder::new()
             .account(AccountConfig::new(FIRST_NAME, LAST_NAME, PASSWORD))
+            .imitates(options.imitates)
             // A long hold, so the CAPS long-poll is not a busy loop competing
             // with the render for this machine's cores.
             .event_queue_hold(Duration::from_secs(2));
@@ -2250,6 +2282,83 @@ mod tests {
             still < STILL_SHARE,
             "the ground beside the NPC changed by {still} over the same second, so {moved} of \
              the body changing says nothing about the avatar"
+        );
+        harness.logout()
+    }
+
+    /// **An avatar on a grid that does not bake still has a skin.**
+    ///
+    /// The other half of [`an_npc_arrives_with_its_bakes_and_plays_its_animation`]:
+    /// the same NPC on a grid imitating OpenSim, where nobody central-bakes.
+    /// The grid names no `agent_appearance_service`, sets no central-bake
+    /// protocol bit, grants no `UpdateAvatarAppearance` and stamps no
+    /// `AppearanceData` block, so the very same baked ids have to reach the
+    /// body by a completely different road — an ordinary `GetTexture` fetch by
+    /// asset id, the road a client-baking grid's textures travel.
+    ///
+    /// This is the test the divergence needed, and it is a *picture* test for a
+    /// reason. Withdrawing the appearance service is the half of the change
+    /// that is easy to get wrong in the direction nothing reports: a viewer
+    /// that has decided an avatar is server-baked and finds no service URL asks
+    /// for no bake at all — `LLVOAvatar::getImageURL` returns an empty string
+    /// rather than a request that fails — and the avatar stays a cloud with
+    /// nothing in the log. There is no event to wait for and no warning to
+    /// assert on. Only the pixels say whether the skin arrived.
+    ///
+    /// The animation half is [`an_npc_arrives_with_its_bakes_and_plays_its_animation`]'s
+    /// and is not repeated: nothing about who composites a skin touches what
+    /// drives a skeleton.
+    ///
+    /// [`NPC_BAKE_COLOR`]: sl_fake_grid::fixtures::catalogue::NPC_BAKE_COLOR
+    #[test]
+    fn an_npc_wears_its_bakes_on_a_grid_that_does_not_bake() -> Result<(), TestError> {
+        use sl_fake_grid::fixtures::catalogue::NPC_LOCAL_ID;
+        let mut harness = ViewerHarness::start_imitating(
+            sl_fake_grid::catalogue(),
+            sl_fake_grid::ImitatedGrid::OpenSim,
+        )?;
+        harness.set_setting(
+            crate::name_tag_billboard::SETTING_SHOW_NAME_TAGS,
+            sl_settings::SettingValue::Bool(false),
+        );
+        harness.login()?;
+        // The grid this one is imitating runs no bake service, and says so the
+        // only way a login can: by naming none.
+        let service = harness
+            .world()
+            .resource::<sl_client_bevy::SlIdentity>()
+            .agent_appearance_service
+            .clone();
+        assert!(
+            service.is_none(),
+            "a grid imitating OpenSim named an appearance service: {service:?}"
+        );
+        harness.wait_event("the catalogue NPC's body", |event| match event {
+            sl_client_bevy::SlSessionEvent::ObjectAdded(object)
+            | sl_client_bevy::SlSessionEvent::ObjectUpdated(object)
+                if object.local_id == NPC_LOCAL_ID =>
+            {
+                Some(())
+            }
+            _ => None,
+        })?;
+        frame_the_npc_against_the_ground(&mut harness);
+        harness.hold_clock();
+        let Some(frame) = harness.capture_after(0.0)? else {
+            no_adapter("the client-baked appearance check");
+            return Ok(());
+        };
+        let root = npc_body_root(&harness)?;
+        let bake = world_disc(
+            &mut harness,
+            Vec3::new(root.x, root.y + NPC_CHEST_ABOVE_ROOT, root.z),
+            NPC_BAKE_DISC,
+        )?;
+        let share = coverage(&frame, bake, Marker::Blue);
+        assert!(
+            share > BAKE_SHARE,
+            "the NPC paints only {share} of its own chest in blue on a grid that names no \
+             appearance service — the baked ids never reached the body by asset id"
         );
         harness.logout()
     }

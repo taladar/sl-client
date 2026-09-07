@@ -1,0 +1,29 @@
+[package]
+name = "sl-object-asset"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+description = "Pure decoder/encoder for the Second Life / OpenSim inventory object asset — the nested-block text a simulator writes when an object is taken, and reads when it is rezzed"
+readme = { workspace = true }
+license = { workspace = true }
+
+repository = { workspace = true }
+keywords = ["asset", "inventory", "object", "opensim", "secondlife"]
+categories = ["encoding", "game-development", "parser-implementations"]
+publish = { workspace = true }
+
+exclude = { workspace = true }
+
+[dependencies]
+sl-prim = { workspace = true }
+sl-proto = { workspace = true }
+sl-types = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+
+[lints]
+workspace = true

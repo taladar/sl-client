@@ -148,15 +148,16 @@ impl Fixtures {
     /// and `None` for a grid whose environment is not something an operator
     /// prepares.
     ///
-    /// The fake grid is that `None`: it *is* the fixture, so there is nothing
-    /// for a file to point at — every id a case would look up there is a
-    /// constant in [`sl_fake_grid::fixtures`].
+    /// Either fake grid is that `None`: it *is* the fixture, so there is
+    /// nothing for a file to point at — every id a case would look up there is
+    /// a constant in [`sl_fake_grid::fixtures`], and both flavours serve the
+    /// same fixture catalogue.
     #[must_use]
     pub fn default_path(grid: Grid) -> Option<PathBuf> {
         match grid {
             Grid::Opensim => Some(PathBuf::from("fixtures.toml")),
             Grid::Aditi => Some(PathBuf::from("fixtures.aditi.toml")),
-            Grid::Fake => None,
+            Grid::FakeSl | Grid::FakeOpensim => None,
         }
     }
 
@@ -302,14 +303,14 @@ mod tests {
             Fixtures::default_path(Grid::Aditi).map(|path| path.to_string_lossy().into_owned()),
             Some("fixtures.aditi.toml".to_owned())
         );
-        assert_eq!(Fixtures::default_path(Grid::Fake), None);
+        assert_eq!(Fixtures::default_path(Grid::FakeSl), None);
     }
 
     /// With no file to consult, the fake grid loads the empty fixtures rather
     /// than failing.
     #[test]
     fn the_fake_grid_needs_no_fixtures_file() {
-        assert!(matches!(Fixtures::load(Grid::Fake, None), Ok(_empty)));
+        assert!(matches!(Fixtures::load(Grid::FakeSl, None), Ok(_empty)));
     }
 
     /// An explicit, non-existent fixtures path is a read error, not silently
