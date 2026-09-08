@@ -709,12 +709,11 @@ packet, so the flavour's default is the observable road rather than the
 measured one. This is the one place the table deliberately deviates from a
 measurement, and it is written down in `imitates.rs` too.
 
-**The announcement.** `InventoryAnnouncement` says how a created item is
-handed over: OpenSim's legacy UDP `UpdateCreateInventoryItem`
+**The take's announcement.** `InventoryAnnouncement` says how a **taken**
+item is handed over: OpenSim's legacy UDP `UpdateCreateInventoryItem`
 (`SimSession::send_inventory_item_created`) or Second Life's
 `BulkUpdateInventory` over the event queue
-(`SimSession::enqueue_bulk_update_inventory`). A take reads it, and nothing
-else does yet.
+(`SimSession::enqueue_bulk_update_inventory`).
 
 Flipping the default to Second Life immediately broke two conformance cases
 that waited only for the legacy message and reported a take that had worked
@@ -732,6 +731,62 @@ lands on the client's next long-poll — so on the Second Life side the item
 arrives **after** the kills. A consumer that waits for the item and only
 then looks for the kills has already discarded them, which is how
 `a_taken_linkset_rezzes_back_whole` came to hang rather than fail.
+
+**An upload's announcement, which is not the same answer.**
+`UploadAnnouncement` says what follows a **capability upload** — a
+`NewFileAgentInventory` completion, or an asset saved in place over an
+`Update*AgentInventory`. Here Second Life sends the *legacy* UDP
+`UpdateCreateInventoryItem` and OpenSim sends *nothing at all*: the two
+grids take the opposite sides from the ones they take on a take. One enum
+could not have said both, which is why there are two.
+
+Both numbers are measurements, taken 2026-09-08 by the conformance cases
+that already did the uploads — `notecard-create-update` records
+`save_announcement` (aditi: `update-create-inventory-item`; OpenSim:
+`none`) and `asset-upload` records `upload_announcement` (OpenSim: `none`).
+Taking them needed `support::observe_upload` rather than another
+`wait_for`: an announcement is a UDP push and a completion an HTTP
+response, so an announcement can arrive *first*, and a `wait_for` looking
+for the completion would have discarded it on the way past and recorded the
+grid as silent. The reference viewer wants no push anyway:
+`LLBufferedAssetUploadInfo::finishUpload` builds the item out of the
+response body.
+
+**The two announcement rows diverge for opposite reasons**, and reading the
+second as "Second Life does something extra" gets it backwards. The push is
+the older behaviour and OpenSim is the grid that omits it, which its own
+source says twice over: at the in-place save,
+`InventoryAccessModule.CapsUpdateInventoryItemAsset` ends on a
+commented-out `SendInventoryItemCreateUpdate` and answers with an
+`AlertMessage` instead — commented out since 2007-08, when that capability
+path was first written, and carried through the 2007-12 rename and the 2010
+move into the module still commented — and a `NewFileAgentInventory`
+completion reaches inventory through `Scene.AddUploadedInventoryItem`,
+which calls the *client-less* `AddInventoryItem` overload sitting right
+beside the one that announces. So the take's row is Second Life having
+**moved on** (inventory went behind AIS3 and the announcement went with
+it), and the upload's row is OpenSim having **never sent** what a Linden
+simulator sends — which is also why Second Life's side of it is the legacy
+`UpdateCreateInventoryItem` rather than anything newer.
+
+Second Life's `NewFileAgentInventory` completion is the one half that is
+extrapolated from the other rather than measured, and it cannot be measured
+the way the rest were: that capability accepts only the chargeable
+file-upload classes there — it answers a notecard with `Invalid asset
+type`, which is why `asset-upload` records `partial` on aditi — so reaching
+it costs an upload fee and needs the price list
+`test-fake-grid-imitates-economy` has yet to measure. The extrapolation is
+a mild one: the message is the general-purpose legacy "here is an item you
+now have", the grid was measured sending exactly it for the neighbouring
+path, and Second Life keeping the push for a *rewritten* item while
+dropping it for a *created* one would be the surprising behaviour.
+
+The legacy UDP transaction save follows neither knob and that is not a gap:
+`UpdateInventoryItem`'s `UpdateCreateInventoryItem` is the **reply** to a
+UDP request, echoing the transaction and callback ids the client sent, and
+OpenSim sends it there (`AssetXferUploader`) precisely where it stays quiet
+after a capability upload.
+
 One thing is deliberately not flavour-decided and is not a to-do:
 `GridIdentity::platform` stays `OpenSim` either way, because it is what
 Firestorm's grid manager reads to decide whether it will add the grid at

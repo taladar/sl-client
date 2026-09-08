@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 322 |
 | blocked | 46 |
 | in-progress | 20 |
-| bugs | 62 |
-| done | 1026 |
+| bugs | 63 |
+| done | 1027 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1616** |
+| **total** | **1618** |
 
 ## ideas (101)
 
@@ -979,8 +979,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   The built-in UI sounds the viewer plays on arrival 404
 - [`test-fake-grid-imitates-economy`](ready/test-fake-grid-imitates-economy.md)
   — The fake grid's money is a stock OpenSim region's on either flavour
-- [`test-fake-grid-imitates-upload-announcements`](ready/test-fake-grid-imitates-upload-announcements.md)
-  — An uploaded item is announced the legacy way whichever grid this is
+- [`test-fake-grid-imitates-sl-new-file-upload-announcement`](ready/test-fake-grid-imitates-sl-new-file-upload-announcement.md)
+  — The one upload announcement Second Life would only tell us for money
 - [`test-fake-grid-login-matrix-and-timeouts`](ready/test-fake-grid-login-matrix-and-timeouts.md)
   — The login refusals and handover timeouts nothing tests
 - [`test-fake-grid-object-sounds`](ready/test-fake-grid-object-sounds.md) — The
@@ -1193,7 +1193,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (62)
+## bugs (63)
 
 ### viewer
 
@@ -1323,6 +1323,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-tree-species-all-rendered-as-trees`](bugs/viewer-tree-species-all-rendered-as-trees.md)
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)
+- [`viewer-uploaded-item-never-enters-the-model`](bugs/viewer-uploaded-item-never-enters-the-model.md)
+  — An item the viewer just uploaded is not in its own inventory
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 - [`viewer-water-refraction-smears-avatar-silhouette`](bugs/viewer-water-refraction-smears-avatar-silhouette.md)
@@ -1344,7 +1346,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1026)
+## done (1027)
 
 ### protocol
 
@@ -3282,6 +3284,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The fake grid runs a bake service on a grid that says it is OpenSim
 - [`test-fake-grid-imitates-simulator-features`](done/test-fake-grid-imitates-simulator-features.md)
   — A grid claiming to be Second Life still introduces itself as OpenSim
+- [`test-fake-grid-imitates-upload-announcements`](done/test-fake-grid-imitates-upload-announcements.md)
+  — An uploaded item is announced the legacy way whichever grid this is
 - [`test-fake-grid-neighbours-crossing`](done/test-fake-grid-neighbours-crossing.md)
   — Neighbour child agents and a scripted region crossing (blocked by
   `test-fake-grid-npc-avatars` (done))

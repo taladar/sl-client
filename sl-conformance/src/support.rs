@@ -13,7 +13,9 @@
 
 use std::time::{Duration, Instant};
 
-use sl_client_tokio::{Command, CreateGroupParams, Event, GroupKey, InventoryItem, LindenAmount};
+use sl_client_tokio::{
+    Command, CreateGroupParams, Event, GroupKey, InventoryItem, InventoryKey, LindenAmount, Uuid,
+};
 
 use crate::context::{Session, TestContext, TestFailure};
 use crate::grid::Grid;
@@ -152,6 +154,180 @@ pub const ANNOUNCED_LEGACY: &str = "update-create-inventory-item";
 /// `BulkUpdateInventory`, which is what Second Life answers a take with now
 /// that inventory lives behind AIS3.
 pub const ANNOUNCED_BULK: &str = "bulk-update-inventory";
+
+/// The [`UploadObservation::announced_for`] value for an upload the grid
+/// completed **without announcing the item at all** — the HTTP completion, and
+/// nothing else.
+///
+/// A real answer rather than a missing one: a viewer that waits for a push
+/// after an upload waits forever against such a grid, so "nothing arrived" is
+/// the measurement the fake grid has to be able to imitate.
+pub const ANNOUNCED_NOTHING: &str = "none";
+
+/// How long [`observe_upload`] keeps watching the event stream **after** the
+/// upload's own completion, before concluding the grid announced nothing.
+///
+/// Long enough for a `BulkUpdateInventory` riding the event queue to arrive on
+/// the next long-poll (the announcement's slow road — see
+/// `sl_fake_grid::InventoryAnnouncement`), which is the shape a shorter window
+/// would silently miss and record as [`ANNOUNCED_NOTHING`].
+pub const UPLOAD_SETTLE: Duration = Duration::from_secs(15);
+
+/// One inventory announcement seen around an upload: which message shape it
+/// was, and the items it named.
+#[derive(Debug, Clone)]
+pub struct Announcement {
+    /// [`ANNOUNCED_LEGACY`] or [`ANNOUNCED_BULK`].
+    pub shape: &'static str,
+    /// The items the message carried — several, for a bulk update.
+    pub items: Vec<InventoryKey>,
+}
+
+/// What an upload's own completion said: the asset the grid stored, and the
+/// inventory item it minted (`None` for a save onto an existing item, and for a
+/// baked texture, which names no item at all).
+#[derive(Debug, Clone, Copy)]
+pub struct UploadCompletion {
+    /// The stored asset's id.
+    pub new_asset: Uuid,
+    /// The item the upload created, when it created one.
+    pub new_inventory_item: Option<Uuid>,
+}
+
+/// What a grid did around one upload completing: the completion itself, and
+/// every inventory announcement that arrived with it.
+#[derive(Debug, Clone)]
+pub struct UploadObservation {
+    /// The upload's own completion, or the grid's refusal.
+    pub outcome: Result<UploadCompletion, String>,
+    /// The announcements seen, in arrival order — before the completion as well
+    /// as after it, because the two travel by different roads (a UDP push and
+    /// an HTTP response) and neither order is guaranteed.
+    pub announcements: Vec<Announcement>,
+    /// How long the completion took to arrive.
+    pub elapsed: Duration,
+}
+
+impl UploadObservation {
+    /// The announcement shapes that named `item`, joined with `+`, or
+    /// [`ANNOUNCED_NOTHING`] when the grid announced it in no shape at all —
+    /// the value a case records as a metric.
+    #[must_use]
+    pub fn announced_for(&self, item: InventoryKey) -> String {
+        let shapes: Vec<&str> = self
+            .announcements
+            .iter()
+            .filter(|announcement| announcement.items.contains(&item))
+            .map(|announcement| announcement.shape)
+            .collect();
+        if shapes.is_empty() {
+            ANNOUNCED_NOTHING.to_owned()
+        } else {
+            shapes.join("+")
+        }
+    }
+}
+
+/// Sends nothing; waits for an upload to complete and **keeps watching** for
+/// [`UPLOAD_SETTLE`] afterwards, reporting every inventory announcement the
+/// grid pushed around it.
+///
+/// This is the measuring instrument for "what does a grid send after an upload,
+/// besides the HTTP response". A plain [`Session::wait_for`] cannot answer it:
+/// it discards every event its predicate rejects, so an announcement that
+/// arrived *before* the completion — perfectly possible, the completion being
+/// an HTTP response while a legacy announcement is a UDP push — would be eaten
+/// on the way past and the grid recorded as silent.
+///
+/// The caller sends the upload command first; this waits for the
+/// [`Event::AssetUploaded`] / [`Event::AssetUploadFailed`] that ends it. A
+/// refusal is returned in [`UploadObservation::outcome`] rather than failing,
+/// because a grid that declines an upload is a measurement too.
+///
+/// # Errors
+///
+/// Propagates [`Session::wait_for`]'s timeout when the completion never
+/// arrives, and any intervening disconnect.
+pub async fn observe_upload(
+    session: &mut Session,
+    timeout: Duration,
+) -> Result<UploadObservation, TestFailure> {
+    let started = Instant::now();
+    let mut announcements = Vec::new();
+    let outcome = session
+        .wait_for(timeout, |event| {
+            collect_announcement(&mut announcements, event);
+            match event {
+                Event::AssetUploaded {
+                    new_asset,
+                    new_inventory_item,
+                } => Some(Ok(UploadCompletion {
+                    new_asset: *new_asset,
+                    new_inventory_item: *new_inventory_item,
+                })),
+                Event::AssetUploadFailed { reason } => Some(Err(reason.clone())),
+                _other => None,
+            }
+        })
+        .await?;
+    let elapsed = started.elapsed();
+
+    announcements.extend(drain_announcements(session, UPLOAD_SETTLE).await?);
+
+    Ok(UploadObservation {
+        outcome,
+        announcements,
+        elapsed,
+    })
+}
+
+/// Watches the event stream for `window`, discarding everything but the
+/// inventory announcements, which it returns.
+///
+/// Two uses, both about attribution. As [`observe_upload`]'s settle it is what
+/// gives a late announcement time to arrive; called between two steps of a case
+/// it is what stops the *first* step's trailing announcement from being counted
+/// as the second's — the same "drain to quiet before measuring" the terrain
+/// cases do for their patch floods.
+///
+/// # Errors
+///
+/// Propagates an intervening disconnect; the window elapsing is the normal exit
+/// and is not an error.
+pub async fn drain_announcements(
+    session: &mut Session,
+    window: Duration,
+) -> Result<Vec<Announcement>, TestFailure> {
+    let mut seen = Vec::new();
+    // A wait whose predicate never matches, so it always ends in its own
+    // timeout — the point is the events it sees on the way.
+    match session
+        .wait_for(window, |event| {
+            collect_announcement(&mut seen, event);
+            Option::<()>::None
+        })
+        .await
+    {
+        Ok(()) | Err(TestFailure::Timeout(_)) => Ok(seen),
+        Err(other) => Err(other),
+    }
+}
+
+/// Records `event` in `seen` when it is one of the two inventory announcement
+/// shapes, and ignores it otherwise.
+fn collect_announcement(seen: &mut Vec<Announcement>, event: &Event) {
+    match event {
+        Event::InventoryItemCreated { item, .. } => seen.push(Announcement {
+            shape: ANNOUNCED_LEGACY,
+            items: vec![item.item_id],
+        }),
+        Event::InventoryBulkUpdate { items, .. } => seen.push(Announcement {
+            shape: ANNOUNCED_BULK,
+            items: items.iter().map(|item| item.item_id).collect(),
+        }),
+        _other => {}
+    }
+}
 
 /// Waits for the grid to announce an inventory item it just created, whichever
 /// of the **two shapes** it uses, and says which one arrived.

@@ -26,15 +26,27 @@
 //! So on Second Life the case records `partial` with the server's reason — the
 //! client correctly formed and POSTed the request; the grid declined the asset
 //! class — mirroring `asset-fetch-http`'s aditi handling.
-
-use std::time::Instant;
+//!
+//! # The `upload_announcement` measurement
+//!
+//! What a grid pushes after an upload completes *besides* the HTTP response is
+//! the question `sl_fake_grid::InventoryAnnouncement` leaves open for the
+//! upload paths (`test-fake-grid-imitates-upload-announcements`), so the
+//! completion is watched with [`observe_upload`] rather than merely awaited and
+//! the shapes naming the new item are recorded as `upload_announcement`
+//! (`update-create-inventory-item`, `bulk-update-inventory`, or `none`).
+//!
+//! It is the OpenSim half of that measurement and only ever will be: the
+//! Second Life run never reaches it, the grid having declined the asset class
+//! before there is anything to announce. The in-place save the other flavour
+//! *does* serve is measured by `notecard-create-update`.
 
 use sl_client_tokio::{AssetType, Command, Event, InventoryKey, InventoryType, Throttle, Uuid};
 
 use crate::context::{TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
-use crate::support::{LONG_TIMEOUT, REGION_TIMEOUT, check, is_aditi};
+use crate::support::{LONG_TIMEOUT, REGION_TIMEOUT, check, is_aditi, observe_upload};
 
 /// Uploads a notecard over the `NewFileAgentInventory` capability.
 #[derive(Debug)]
@@ -96,7 +108,6 @@ impl GridTest for AssetUpload {
             let body = notecard_bytes(&format!("sl-conformance asset-upload {tag}\n"));
             let byte_len = body.len();
 
-            let start = Instant::now();
             session
                 .send(Command::UploadAsset {
                     folder_id: root,
@@ -115,21 +126,18 @@ impl GridTest for AssetUpload {
                 .await?;
 
             // The two-step uploader completes as `AssetUploaded` (stored asset +
-            // created item) or `AssetUploadFailed` (a grid/permission error).
-            let outcome = session
-                .wait_for(LONG_TIMEOUT, |event| match event {
-                    Event::AssetUploaded {
-                        new_asset,
-                        new_inventory_item,
-                    } => Some(Ok((*new_asset, *new_inventory_item))),
-                    Event::AssetUploadFailed { reason } => Some(Err(reason.clone())),
-                    _other => None,
-                })
-                .await?;
-            let upload_secs = start.elapsed().as_secs_f64();
+            // created item) or `AssetUploadFailed` (a grid/permission error) —
+            // watched rather than merely awaited, so what the grid pushes
+            // *besides* the completion is recorded too (see the module docs).
+            let observed = observe_upload(session, LONG_TIMEOUT).await?;
+            // The completion's own round trip, not the watch's: `observe_upload`
+            // keeps listening for a settle window after the upload finished, and
+            // timing that in would make every recorded upload look like it took
+            // the settle.
+            let upload_secs = observed.elapsed.as_secs_f64();
 
-            let (new_asset, new_item) = match outcome {
-                Ok(pair) => pair,
+            let completion = match observed.outcome.clone() {
+                Ok(completion) => completion,
                 Err(reason) => {
                     // Second Life declines a notecard through this capability (it
                     // uploads only file-based asset classes; a notecard is created
@@ -146,16 +154,22 @@ impl GridTest for AssetUpload {
                     )));
                 }
             };
+            let new_asset = completion.new_asset;
             check(!new_asset.is_nil(), "upload stored a nil asset id")?;
-            let new_item = new_item.filter(|item| !item.is_nil()).ok_or_else(|| {
-                TestFailure::Assertion("upload created no inventory item".to_owned())
-            })?;
+            let new_item = completion
+                .new_inventory_item
+                .filter(|item| !item.is_nil())
+                .ok_or_else(|| {
+                    TestFailure::Assertion("upload created no inventory item".to_owned())
+                })?;
+            let announcement = observed.announced_for(InventoryKey::from(new_item));
 
             let metrics = ctx.metrics();
             metrics.set_timing("upload_secs", upload_secs);
             metrics.set("asset_bytes", i64::try_from(byte_len).unwrap_or(-1));
             metrics.set("new_asset", new_asset.to_string());
             metrics.set("new_item", new_item.to_string());
+            metrics.set("upload_announcement", announcement);
 
             // Best-effort cleanup: delete the created notecard so runs do not
             // accumulate inventory. A failure here does not fail the case — the

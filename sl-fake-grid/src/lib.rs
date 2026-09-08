@@ -46,7 +46,7 @@ pub use fixtures::{
     PrimFixture, RegionFixture, SculptKind, catalogue, linkset,
 };
 pub use imitates::ImitatedGrid;
-pub use inventory::{InventoryAnnouncement, LegacyUdpInventory};
+pub use inventory::{InventoryAnnouncement, LegacyUdpInventory, UploadAnnouncement};
 pub use map_tiles::STOCK_TILE_JPEG;
 pub use marker::{
     MARKER_METHOD, NEIGHBOUR_MARKER_PREFIX, marker, marker_name, neighbour_marker,

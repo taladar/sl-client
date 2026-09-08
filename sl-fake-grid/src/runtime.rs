@@ -30,7 +30,7 @@ use crate::driver::{SharedSim, SimState, new_shared_sim, run_timer, run_udp_pump
 use crate::economy_policy::{EconomyConfig, EconomyEvent};
 use crate::error::Error;
 use crate::imitates::ImitatedGrid;
-use crate::inventory::{InventoryAnnouncement, LegacyUdpInventory};
+use crate::inventory::{InventoryAnnouncement, LegacyUdpInventory, UploadAnnouncement};
 use crate::map_tiles::MapTileStore;
 use crate::neighbours::NeighbourPolicy;
 use crate::scenario::Scenario;
@@ -397,6 +397,10 @@ pub(crate) struct GridCore {
     /// How a session announces an inventory item it just created
     /// ([`InventoryAnnouncement`]).
     pub(crate) inventory_announcement: InventoryAnnouncement,
+    /// How a session announces an item a capability upload created or rewrote
+    /// ([`UploadAnnouncement`]) — a different question, with the two live grids
+    /// on the opposite sides of it.
+    pub(crate) upload_announcement: UploadAnnouncement,
     /// Who composites this grid's avatars ([`BakePolicy`]): the appearance
     /// service, the central-bake protocol bit, the `AppearanceData` block and
     /// the `UpdateAvatarAppearance` capability all follow it.
@@ -713,6 +717,7 @@ impl GridCore {
             assets: self.assets.clone(),
             object_assets: self.object_assets,
             inventory_announcement: self.inventory_announcement,
+            upload_announcement: self.upload_announcement,
             bakes: self.bakes,
             identity: {
                 let mut identity = region.identity(self.estate_owner, self.region_protocols);
@@ -1063,6 +1068,9 @@ pub struct FakeGridBuilder {
     /// How a created inventory item is announced, or `None` to follow
     /// [`imitates`](Self::imitates).
     inventory_announcement: Option<InventoryAnnouncement>,
+    /// How an uploaded item is announced, or `None` to follow
+    /// [`imitates`](Self::imitates).
+    upload_announcement: Option<UploadAnnouncement>,
     /// Who composites this grid's avatars, or `None` to follow
     /// [`imitates`](Self::imitates).
     bakes: Option<BakePolicy>,
@@ -1092,6 +1100,7 @@ impl std::fmt::Debug for FakeGridBuilder {
             .field("voice_backend", &self.voice_backend)
             .field("legacy_udp_inventory", &self.legacy_udp_inventory)
             .field("inventory_announcement", &self.inventory_announcement)
+            .field("upload_announcement", &self.upload_announcement)
             .field("bakes", &self.bakes)
             .field("eq_hold", &self.eq_hold)
             .field("handover_timeout", &self.handover_timeout)
@@ -1158,6 +1167,7 @@ impl FakeGridBuilder {
             voice_backend: None,
             legacy_udp_inventory: None,
             inventory_announcement: None,
+            upload_announcement: None,
             bakes: None,
             map_tiles: MapTileStore::default(),
         }
@@ -1302,6 +1312,21 @@ impl FakeGridBuilder {
     #[must_use]
     pub const fn inventory_announcement(mut self, announcement: InventoryAnnouncement) -> Self {
         self.inventory_announcement = Some(announcement);
+        self
+    }
+
+    /// Overrides how an item a **capability upload** created or rewrote is
+    /// announced, which otherwise follows [`imitates`](Self::imitates): Second
+    /// Life pushes the legacy UDP `UpdateCreateInventoryItem`, OpenSim sends
+    /// nothing at all.
+    ///
+    /// Not the same knob as
+    /// [`inventory_announcement`](Self::inventory_announcement), and not the
+    /// same answer: the two grids swap sides between a take and an upload — see
+    /// the [`inventory`](crate::inventory) module docs.
+    #[must_use]
+    pub const fn upload_announcement(mut self, announcement: UploadAnnouncement) -> Self {
+        self.upload_announcement = Some(announcement);
         self
     }
 
@@ -1456,6 +1481,9 @@ impl FakeGridBuilder {
             inventory_announcement: self
                 .inventory_announcement
                 .unwrap_or_else(|| self.imitates.inventory_announcement()),
+            upload_announcement: self
+                .upload_announcement
+                .unwrap_or_else(|| self.imitates.upload_announcement()),
             bakes,
             // The two halves of `RegionProtocols` compose: the bake policy
             // claims the central-bake bit (and an explicit `bakes` override

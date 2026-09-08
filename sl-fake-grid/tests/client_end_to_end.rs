@@ -683,6 +683,113 @@ mod test {
         Ok(())
     }
 
+    /// A capability upload's item is pushed to the client on a
+    /// Second-Life-flavoured grid and on no other — the measurement
+    /// `sl_fake_grid::UploadAnnouncement` carries, asserted from the client's
+    /// side because that is the side it is visible from.
+    ///
+    /// Worth both halves rather than one: a viewer that waits for a push after
+    /// an upload works against the flavour that sends one and hangs against the
+    /// flavour that does not, and a viewer that ignores the push and reads the
+    /// capability's own response works against both. Only running the two shows
+    /// which kind this workspace's client is.
+    #[tokio::test]
+    async fn only_a_second_life_flavoured_grid_announces_an_uploaded_item() -> Result<(), TestError>
+    {
+        let item = sl_fake_grid::scenario::fixture_item_id(sl_proto::AssetType::Notecard);
+
+        // Second Life: the legacy UDP push follows the completion. In one wait,
+        // because the two travel by different roads (an HTTP response and a UDP
+        // packet) and neither order is promised.
+        let mut running = start_configured(
+            vec![RegionConfig::default()],
+            None,
+            ImitatedGrid::SecondLife,
+        )
+        .await?;
+        save_over_seeded_notecard(&running, item).await?;
+        let mut completed = false;
+        let mut announced = false;
+        running
+            .wait_until(
+                "the save's completion and its legacy announcement",
+                |event| {
+                    match event {
+                        Event::AssetUploaded { .. } => completed = true,
+                        Event::InventoryItemCreated { item: got, .. } if got.item_id == item => {
+                            announced = true;
+                        }
+                        _other => {}
+                    }
+                    completed && announced
+                },
+            )
+            .await?;
+
+        // OpenSim: the completion, and nothing else. The task-inventory listing
+        // is the terminating condition — it is requested *after* the save
+        // finished and answered on the same circuit, so an announcement the
+        // save was going to make would already have arrived.
+        let mut running =
+            start_configured(vec![RegionConfig::default()], None, ImitatedGrid::OpenSim).await?;
+        save_over_seeded_notecard(&running, item).await?;
+        running
+            .wait_until("the save's completion", |event| {
+                matches!(event, Event::AssetUploaded { .. })
+            })
+            .await?;
+        running
+            .commands
+            .send(Command::FetchTaskInventory {
+                target: sl_client_tokio::ScopedObjectId::new(
+                    running.circuit,
+                    sl_fake_grid::scenario::STOCK_SCRIPTED_OBJECT_LOCAL_ID,
+                ),
+            })
+            .await?;
+        let mut spoke = false;
+        running
+            .wait_until("the listing that follows the save", |event| match event {
+                Event::InventoryItemCreated { item: got, .. } if got.item_id == item => {
+                    spoke = true;
+                    true
+                }
+                Event::TaskInventoryContents { .. } => true,
+                _other => false,
+            })
+            .await?;
+        assert!(
+            !spoke,
+            "an OpenSim-flavoured grid announced an item a capability upload rewrote"
+        );
+        Ok(())
+    }
+
+    /// Saves a fresh body over the seeded notecard fixture through the
+    /// `UpdateNotecardAgentInventory` capability — the in-place save both live
+    /// grids serve, and the one whose announcement they disagree about.
+    async fn save_over_seeded_notecard(
+        running: &Running,
+        item: sl_types::key::InventoryKey,
+    ) -> Result<(), TestError> {
+        // The fixture's own edited body, so the bytes are a notecard the
+        // workspace's decoder accepts rather than a string this test invented.
+        let body = sl_test_assets::inventory::seeded_assets()?
+            .into_iter()
+            .find(|asset| asset.asset_type == sl_proto::AssetType::Notecard)
+            .ok_or("no seeded notecard fixture")?
+            .edited_body;
+        running
+            .commands
+            .send(Command::UpdateInventoryAsset {
+                location: sl_client_tokio::AssetUpdateLocation::AgentInventory { item_id: item },
+                asset_type: sl_client_tokio::UpdatableAssetType::Notecard,
+                data: body,
+            })
+            .await?;
+        Ok(())
+    }
+
     #[tokio::test]
     async fn estate_covenant_round_trips() -> Result<(), TestError> {
         let mut running = start().await?;

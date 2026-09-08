@@ -229,7 +229,12 @@ const AGENT_SYSTEM_FOLDER_BASE: u128 = 0xFA80;
 const AGENT_FIXTURE_ITEM_BASE: u128 = 0xFA_E000;
 
 /// The inventory item id for the seeded fixture of `asset_type`.
-fn fixture_item_id(asset_type: AssetType) -> InventoryKey {
+///
+/// Public because a test that saves over one of these items has to name it, and
+/// re-deriving the same id from the fixture id base on the far side would be
+/// the fixture's layout written down twice.
+#[must_use]
+pub fn fixture_item_id(asset_type: AssetType) -> InventoryKey {
     let code = u128::try_from(asset_type.to_code()).unwrap_or(0);
     InventoryKey::from(uuid::Uuid::from_u128(
         AGENT_FIXTURE_ITEM_BASE.saturating_add(code),

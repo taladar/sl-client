@@ -170,13 +170,48 @@ answers a grid without it can give, this one takes the loud road: a
 that — but silence is indistinguishable from a lost packet, so it is not the
 default a test would have to wait out.
 
-**The announcement.** A take is answered with the legacy UDP
+**The take's announcement.** A take is answered with the legacy UDP
 `UpdateCreateInventoryItem` on OpenSim and with a `BulkUpdateInventory` over
 the event queue on Second Life. `InventoryAnnouncement` picks between them
 (`FakeGridBuilder::inventory_announcement` overrides). A client listening for
 only one of the two hears nothing at all from the other grid, which is why the
 conformance cases that take something use one shared helper that accepts
 either and records which arrived.
+
+**An upload's announcement is a different question, and the grids swap sides
+on it.** After a capability upload — a `NewFileAgentInventory` completion or an
+asset saved in place over an `Update*AgentInventory` — Second Life pushes the
+legacy `UpdateCreateInventoryItem` and OpenSim sends *nothing at all*, the
+HTTP response having named both the asset and the new item. So
+`UploadAnnouncement` is its own knob
+(`FakeGridBuilder::upload_announcement`), and reusing the take's answer for it
+would be wrong about a live grid in both directions at once.
+
+Measured 2026-09-08 by the conformance cases `notecard-create-update`
+(`save_announcement`: `update-create-inventory-item` on aditi, `none` on
+OpenSim) and `asset-upload` (`upload_announcement`: `none` on OpenSim).
+
+The two rows diverge for **opposite reasons**, which is worth knowing before
+reading the second as "Second Life does something extra". The push is the older
+behaviour and OpenSim is the grid that omits it: at the in-place save
+`CapsUpdateInventoryItemAsset` ends on a commented-out
+`SendInventoryItemCreateUpdate` — commented since 2007-08, when that capability
+path was written — and answers with an `AlertMessage`, while the
+`NewFileAgentInventory` completion reaches inventory through the *client-less*
+`AddInventoryItem` overload. So the take's row is Second Life having moved on to
+AIS3, and the upload's row is OpenSim having never sent what a Linden simulator
+sends. The reference viewer wants neither push: it builds the item from the
+response body.
+
+The one half that is extrapolated rather than measured is Second Life's
+`NewFileAgentInventory` completion, which that grid serves only for the
+chargeable upload classes; see `sl_fake_grid::inventory` for why, and for what
+would settle it.
+
+The legacy UDP transaction save (`UpdateInventoryItem`, how a wearable is
+saved) follows neither knob: its `UpdateCreateInventoryItem` is the **reply**
+to a UDP request, echoing the transaction and callback ids the client sent, and
+OpenSim sends it there exactly where it stays quiet after a capability upload.
 
 ## How a region introduces itself
 

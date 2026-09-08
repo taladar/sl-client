@@ -44,6 +44,11 @@ pub(crate) struct SimState {
     /// ([`crate::InventoryAnnouncement`]). Grid-wide, because it is a property
     /// of which live grid this one is being.
     pub(crate) inventory_announcement: crate::inventory::InventoryAnnouncement,
+    /// How this grid announces an item a **capability upload** created or
+    /// rewrote ([`crate::UploadAnnouncement`]) — the legacy UDP message, or
+    /// nothing at all. Grid-wide for the same reason, and a separate knob
+    /// because the two live grids take opposite sides of it and of the take.
+    pub(crate) upload_announcement: crate::inventory::UploadAnnouncement,
     /// Who composites this grid's avatars ([`crate::BakePolicy`]). Grid-wide,
     /// and what decides whether an `AvatarAppearance` this session pushes
     /// carries an `AppearanceData` block at all.
@@ -276,6 +281,7 @@ impl SharedSim {
             let _upload = crate::uploads::answer_upload(
                 &state.assets,
                 &state.world,
+                state.upload_announcement,
                 &mut state.sim,
                 &event,
                 now,
