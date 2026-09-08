@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 101 |
-| ready | 320 |
+| ready | 319 |
 | blocked | 46 |
 | in-progress | 20 |
 | bugs | 63 |
-| done | 1032 |
+| done | 1033 |
 | deferred | 26 |
 | wont-do | 14 |
 | **total** | **1622** |
@@ -240,7 +240,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (320)
+## ready (319)
 
 ### protocol
 
@@ -979,8 +979,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Factor the repeated session/id acquisition out of the conformance cases
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
-- [`test-fake-grid-builtin-sounds`](ready/test-fake-grid-builtin-sounds.md) —
-  The built-in UI sounds the viewer plays on arrival 404
 - [`test-fake-grid-timeline`](ready/test-fake-grid-timeline.md) — Scripted
   scenario timelines with markers (blocked by `test-fake-grid-determinism`
   (done), `viewer-fake-grid-render-harness` (done))
@@ -1342,7 +1340,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1032)
+## done (1033)
 
 ### protocol
 
@@ -3264,6 +3262,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   A synthetic animation asset the fake grid can actually serve
 - [`test-fake-grid-asset-round-trip`](done/test-fake-grid-asset-round-trip.md) —
   An asset id the grid hands out should name bytes the grid can serve
+- [`test-fake-grid-builtin-sounds`](done/test-fake-grid-builtin-sounds.md) — The
+  built-in UI sounds the viewer plays on arrival 404
 - [`test-fake-grid-builtin-textures`](done/test-fake-grid-builtin-textures.md) —
   Serve the built-in sky, water and prim textures the viewer asks for
 - [`test-fake-grid-concurrent-edits`](done/test-fake-grid-concurrent-edits.md) —

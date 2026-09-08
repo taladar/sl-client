@@ -3621,6 +3621,45 @@ mod test {
         Ok(())
     }
 
+    /// Every **built-in UI sound** — the typing chirp, the money chime, the
+    /// teleport whoosh, the snapshot shutter — is served under its real Linden
+    /// id from the stock library, and what comes back is the tone that id was
+    /// assigned.
+    ///
+    /// No viewer ships these (the reference's `static_assets` folders hold no
+    /// sound at all), so a grid that answers none of them leaves a viewer's own
+    /// feedback silent for a whole session: the fetch fails once, the id is
+    /// marked unavailable, and nothing ever plays. Comparing against the
+    /// fixture bytes rather than only checking for an Ogg header is what makes
+    /// this a test of *which* sound is served: the stand-ins differ only by
+    /// pitch, and the encoder is deterministic, so the wrong tone under an id
+    /// fails here rather than being noticed by ear months later.
+    #[tokio::test]
+    async fn every_built_in_ui_sound_is_fetchable() -> Result<(), TestError> {
+        let mut running = start().await?;
+        for (id, expected) in sl_test_assets::builtin::library_sounds()? {
+            running
+                .commands
+                .send(Command::FetchAsset {
+                    asset_id: sl_client_tokio::AssetKey::from(id),
+                    asset_type: sl_proto::AssetType::Sound,
+                    byte_range: None,
+                })
+                .await?;
+            let bytes = running
+                .wait_for(|event| match event {
+                    Event::AssetReceived(fetched) if fetched.id == id => Some(fetched.data.clone()),
+                    _ => None,
+                })
+                .await?;
+            assert_eq!(
+                bytes, expected,
+                "the built-in UI sound {id} is not the tone it was assigned"
+            );
+        }
+        Ok(())
+    }
+
     /// An EEP **settings** asset a region was handed is fetchable under its own
     /// id, and what comes back decodes into the day cycle the fixture wrote.
     ///

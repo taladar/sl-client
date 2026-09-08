@@ -1278,6 +1278,19 @@ They are stand-ins rather than Linden's own pixels, shaped to be
 recognisable in the role: a disc reads as a sun, and the halo's bright
 band sits at the 22° radius the shader samples it at.
 
+The library's other half is sound. The twelve **built-in UI sounds** a
+viewer plays for its own events — the typing chirp, the money chime, the
+teleport whoosh, the snapshot shutter — are library ids too
+(`sl_proto::BUILTIN_UI_SOUNDS`), and the reference viewer ships no sound
+anywhere in its tree, so a grid that answers none of them leaves every one
+of those events silent for the whole session: the fetch fails once, the id
+is marked unavailable, and nothing plays again. `default_assets` serves an
+Ogg Vorbis tone for each (`sl_test_assets::builtin::library_sounds`), one
+whole tone apart over two octaves from A3 up, in the order the shared list
+names them — so which built-in just played is something an ear can tell,
+and `sl_test_assets::builtin::ui_sound_pitch_hz` is where a test asks
+which pitch belongs to which id.
+
 `RegionConfig::environment` is the region's other environmental half: an
 `EnvironmentSettings` (day cycle, day length, sky-track altitudes) served
 by the `ExtEnvironment` capability. Left `None`, the session's stock

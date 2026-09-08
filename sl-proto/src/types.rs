@@ -33,6 +33,7 @@ mod report;
 mod script;
 mod server_error;
 mod session;
+mod sound;
 mod terrain;
 mod voice;
 
@@ -556,6 +557,11 @@ pub use server_error::{FeatureDisabled, Kick, ServerError};
 pub use session::{
     Camera, CameraError, DisconnectReason, Kilobits, LoginHttpRequest, LoginParams, MovementMode,
     Reliability, StartLocationSlot, Throttle, ThrottleBuilder, ThrottleError, Transmit,
+};
+pub use sound::{
+    BUILTIN_UI_SOUNDS, UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER, UI_SOUND_INVALID_OP,
+    UI_SOUND_MONEY_DOWN, UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT, UI_SOUND_SNAPSHOT,
+    UI_SOUND_TELEPORT_OUT, UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE, UI_SOUND_WINDOW_OPEN,
 };
 pub use terrain::{TerrainLayerType, TerrainPatch};
 pub use voice::RequiredVoiceVersion;

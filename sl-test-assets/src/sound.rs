@@ -127,14 +127,14 @@ const fn round_to_u32(value: f32) -> u32 {
     value.round().clamp(0.0, 4_294_967_295.0) as u32
 }
 
+/// The **audio oracle**: read a served sound back the way a viewer would, and
+/// say what pitch it is. The counterpart of the pixel oracles' dominant-channel
+/// classification, and shared by every test in this crate that asserts about a
+/// sound asset rather than only about its length.
 #[cfg(test)]
-mod tests {
-    use super::{TONE_SECONDS, marker_tone, tone_samples, tones};
-    use core::num::NonZeroU32;
-    use pretty_assertions::assert_eq;
-
-    /// The error type the tests bubble out through `?`.
-    type TestError = Box<dyn core::error::Error>;
+pub(crate) mod oracle {
+    /// What an oracle returns when the bytes it was handed are not a sound.
+    pub(crate) type OracleError = Box<dyn core::error::Error>;
 
     /// [`sl_sound::SL_SAMPLE_RATE`] as an `f32`.
     fn rate() -> f32 {
@@ -144,7 +144,7 @@ mod tests {
     /// The magnitude of `samples` at `frequency`, by the Goertzel recurrence: a
     /// single-bin discrete Fourier transform, which is all "is this the tone it
     /// was written as" needs.
-    fn magnitude_at(samples: &[f32], frequency: f32) -> f32 {
+    pub(crate) fn magnitude_at(samples: &[f32], frequency: f32) -> f32 {
         let omega = core::f32::consts::TAU * frequency / rate();
         let coefficient = 2.0 * omega.cos();
         let (mut previous, mut older) = (0.0_f32, 0.0_f32);
@@ -160,7 +160,7 @@ mod tests {
 
     /// Decodes an asset through **the viewer's own decoder** — `symphonium`,
     /// which is what `sl-audio`'s `decode_clip` hands the bytes to.
-    fn decode(asset: &[u8]) -> Result<Vec<Vec<f32>>, TestError> {
+    pub(crate) fn decode(asset: &[u8]) -> Result<Vec<Vec<f32>>, OracleError> {
         let probed = symphonium::probe_from_source(
             Box::new(std::io::Cursor::new(asset.to_vec())),
             None,
@@ -175,6 +175,17 @@ mod tests {
         )?;
         Ok(decoded.data)
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::oracle::{decode, magnitude_at};
+    use super::{TONE_SECONDS, marker_tone, tone_samples, tones};
+    use core::num::NonZeroU32;
+    use pretty_assertions::assert_eq;
+
+    /// The error type the tests bubble out through `?`.
+    type TestError = Box<dyn core::error::Error>;
 
     /// A fixture tone decodes back through `symphonium` to the tone it was
     /// written as: one channel, the frames that went in, and a spectrum whose
