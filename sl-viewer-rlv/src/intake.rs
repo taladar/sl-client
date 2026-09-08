@@ -69,15 +69,15 @@ use sl_client_bevy::{
     SlSessionEvent,
 };
 use sl_rlv::{
-    RlvEnvSource, RlvExtSource, RlvNoFacts, RlvOutcome, RlvParam, RlvQuery, RlvReply, RlvState,
-    is_valid_reply_channel, parse_chat_line,
+    RlvBehaviour, RlvEnvSource, RlvExtSource, RlvNoFacts, RlvOutcome, RlvParam, RlvParamKind,
+    RlvQuery, RlvReply, RlvState, is_valid_reply_channel, parse_chat_line,
 };
 use sl_viewer_notifications::ShowNotification;
 use sl_viewer_settings::ViewerSettings;
 use sl_viewer_world_api::rlv::{
     RlvConsoleKind, RlvEnvironmentSlot, RlvExtFacts, RlvSession, SETTING_DEBUG,
-    SETTING_DEBUG_HIDE_UNSET_DUPLICATE, ViewerRlvExt, object_attachment, rlv_flag, rlv_is_enabled,
-    swallows_owner_say,
+    SETTING_DEBUG_HIDE_UNSET_DUPLICATE, SETTING_NO_SET_ENV, ViewerRlvExt, object_attachment,
+    rlv_flag, rlv_is_enabled, swallows_owner_say,
 };
 use sl_viewer_world_api::{AvatarControls, ObjectState};
 use uuid::Uuid;
@@ -249,6 +249,35 @@ impl MasterSwitch {
     }
 }
 
+/// What a look at any boolean setting found.
+///
+/// Three answers rather than two, because "it is on" and "it has just been
+/// turned on" are different things to a system that has to both *apply* a
+/// setting and *report* a change in it: the first look of a session is the
+/// state the user logged in with, and telling them it just happened would be a
+/// lie.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlagLook {
+    /// The first look of the session, with the value found.
+    Initial(bool),
+    /// It has not moved since the last look.
+    Unchanged,
+    /// It moved to this value while the session was already running.
+    Moved(bool),
+}
+
+/// Compare a boolean setting against the last value seen, and record the new
+/// one.
+///
+/// `last` is `None` before the first look.
+pub const fn observe_flag(last: &mut Option<bool>, value: bool) -> FlagLook {
+    match last.replace(value) {
+        None => FlagLook::Initial(value),
+        Some(previous) if previous == value => FlagLook::Unchanged,
+        Some(_) => FlagLook::Moved(value),
+    }
+}
+
 /// Compare the switch's current value against the last one seen, and record
 /// the new one.
 ///
@@ -260,10 +289,10 @@ impl MasterSwitch {
 /// the first frame is silent and every real move is not — is testable without
 /// an app.
 pub const fn observe_master_switch(last: &mut Option<bool>, enabled: bool) -> MasterSwitch {
-    match last.replace(enabled) {
-        None => MasterSwitch::Initial,
-        Some(previous) if previous == enabled => MasterSwitch::Unchanged,
-        Some(_) => MasterSwitch::Toggled { enabled },
+    match observe_flag(last, enabled) {
+        FlagLook::Initial(_) => MasterSwitch::Initial,
+        FlagLook::Unchanged => MasterSwitch::Unchanged,
+        FlagLook::Moved(enabled) => MasterSwitch::Toggled { enabled },
     }
 }
 
@@ -434,6 +463,9 @@ impl Plugin for RlvIntakePlugin {
                     // Ahead of the intake, so the frame the switch moves is
                     // reported before anything it changes is acted on.
                     report_master_switch_change,
+                    // Likewise ahead of it, so a command arriving in the same
+                    // frame the user blocked its keyword is already refused.
+                    apply_blocked_behaviours,
                     take_rlv_owner_say,
                     resolve_rlv_objects,
                     // Runs after all three, so a reply an arriving command
@@ -510,6 +542,79 @@ fn report_master_switch_change(
             "RLV switched off — every restriction released, and owner-say commands              are no longer taken"
         },
     );
+}
+
+/// The dictionary row `RestrainedLoveNoSetEnv` takes out of the language.
+///
+/// `@setenv=n` and `@setenv=y`, and nothing else. The obvious reading of the
+/// setting's name is the wrong one: the `@setenv_*` **force** commands are a
+/// different keyword of a different kind and keep working, because what the
+/// setting refuses is an object *taking the environment away from the user* —
+/// the restriction that greys their own environment menu and locks every other
+/// object out of the sky — not an object repainting the sky (which the user can
+/// undo, and which [`can_change_environment`](sl_viewer_world_api::rlv::can_change_environment)
+/// still lets them).
+const NO_SET_ENV_ROW: (&str, RlvParamKind) = ("setenv", RlvParamKind::AddRem);
+
+/// Apply `RestrainedLoveNoSetEnv` to the state machine's blocked set, and say so
+/// in the console when it moves.
+///
+/// The reference reads this setting once, while it builds its behaviour
+/// dictionary (`rlvhelper.cpp:358`), so there it needs a relog and there can
+/// never be a held `@setenv` to reconcile. Here it is live, the same divergence
+/// the RLVa strings and the master switch already take — which means the moment
+/// the user turns it on, the collar that got in first has to lose the sky.
+/// [`RlvState::set_behaviour_blocked`](sl_rlv::RlvState::set_behaviour_blocked)
+/// does that releasing; this system is only the bridge from the settings store.
+///
+/// It is deliberately **not** gated on the master switch. With RLV off nothing
+/// is applying commands at all, and keeping the blocked set in step regardless
+/// means switching RLV back on does not need a second look at this setting.
+fn apply_blocked_behaviours(
+    settings: Option<Res<ViewerSettings>>,
+    mut session: ResMut<RlvSession>,
+    mut last: Local<Option<bool>>,
+) {
+    let Some(settings) = settings else {
+        return;
+    };
+    // Only a settings write can move it; the common frame reads nothing and,
+    // just as importantly, takes no mutable borrow of the session.
+    if !settings.is_changed() && last.is_some() {
+        return;
+    }
+    let blocked = rlv_flag(Some(&settings), SETTING_NO_SET_ENV);
+    let look = observe_flag(&mut last, blocked);
+    if look == FlagLook::Unchanged {
+        return;
+    }
+    // Read before the block, because blocking is what takes it away.
+    let held = session.state().has_behaviour(RlvBehaviour::Setenv);
+    if !session
+        .state_mut()
+        .set_behaviour_blocked(NO_SET_ENV_ROW.0, NO_SET_ENV_ROW.1, blocked)
+    {
+        error!(
+            "no `@{}` restriction to block: `{SETTING_NO_SET_ENV}` cannot be honoured",
+            NO_SET_ENV_ROW.0
+        );
+        return;
+    }
+    // A released restriction is a change the floaters watching the held set
+    // have to redraw for; turning the setting *off* releases nothing.
+    if blocked && held {
+        session.bump();
+    }
+    if let FlagLook::Moved(_) = look {
+        session.log(
+            RlvConsoleKind::Info,
+            if blocked {
+                "@setenv=n is now refused — no object may take your environment away, and any that had it has lost it"
+            } else {
+                "@setenv=n is accepted again — an object may take your environment away"
+            },
+        );
+    }
 }
 
 /// Feed every arriving owner-say `@`-line to the state machine as the object
@@ -728,13 +833,19 @@ fn drain_rlv_replies(mut session: ResMut<RlvSession>, mut commands: MessageWrite
 #[cfg(test)]
 mod tests {
     use super::{
-        GONE_STRIKES, MasterSwitch, NOTIFY_TOGGLED_OFF, NOTIFY_TOGGLED_ON,
+        FlagLook, GONE_STRIKES, MasterSwitch, NOTIFY_TOGGLED_OFF, NOTIFY_TOGGLED_ON,
         OBJECT_WATCH_INTERVAL_SECONDS, OwnerSayRun, RlvObjectWatch, UNRESOLVED_STRIKES,
-        WORLD_RESET_GRACE_TICKS, apply_owner_say, observe_master_switch,
+        WORLD_RESET_GRACE_TICKS, apply_owner_say, observe_flag, observe_master_switch,
     };
+    use bevy::prelude::*;
     use pretty_assertions::assert_eq;
     use sl_rlv::{RlvBehaviour, RlvState, is_valid_reply_channel};
-    use sl_viewer_world_api::rlv::{RlvConsoleKind, RlvEnvironmentSlot, RlvExtFacts, ViewerRlvExt};
+    use sl_settings::{Scope, SettingValue, SettingsStore};
+    use sl_viewer_settings::ViewerSettings;
+    use sl_viewer_world_api::rlv::{
+        RlvConsoleKind, RlvEnvironmentSlot, RlvExtFacts, RlvSession, SETTING_NO_SET_ENV,
+        ViewerRlvExt, register_settings,
+    };
     use uuid::Uuid;
 
     /// A `Box<dyn Error>` alias, so a test can use `?`.
@@ -1035,5 +1146,141 @@ mod tests {
                 "{name} is not in the catalogue"
             );
         }
+    }
+
+    // --- `RestrainedLoveNoSetEnv` ------------------------------------------
+
+    /// The same three-way look the master switch takes, on the setting every
+    /// other boolean one is read with.
+    #[test]
+    fn a_flag_reports_its_first_look_apart_from_every_move() {
+        let mut last = None;
+        assert_eq!(observe_flag(&mut last, true), FlagLook::Initial(true));
+        assert_eq!(observe_flag(&mut last, true), FlagLook::Unchanged);
+        assert_eq!(observe_flag(&mut last, false), FlagLook::Moved(false));
+        assert_eq!(observe_flag(&mut last, true), FlagLook::Moved(true));
+    }
+
+    /// An app with the bridge system and nothing else — no grid, no login, and
+    /// no other RLV system, so what the assertions see is this system's doing.
+    fn blocked_app() -> App {
+        let mut settings = ViewerSettings::from_store_for_test(SettingsStore::new());
+        register_settings(&mut settings);
+        let mut app = App::new();
+        app.insert_resource(settings)
+            .init_resource::<RlvSession>()
+            .add_systems(Update, super::apply_blocked_behaviours);
+        app
+    }
+
+    /// Move the setting the way its RLVa menu entry and the debug-settings
+    /// editor do, and run the frame that notices.
+    fn set_no_set_env(app: &mut App, enabled: bool) {
+        app.world_mut().resource_mut::<ViewerSettings>().set(
+            Scope::Global,
+            SETTING_NO_SET_ENV,
+            SettingValue::Bool(enabled),
+        );
+        app.update();
+    }
+
+    /// Say one command as the collar, straight at the session's state machine.
+    fn collar_says(app: &mut App, line: &str) -> OwnerSayRun {
+        let mut ext = ViewerRlvExt {
+            settings: None,
+            facts: RlvExtFacts::default(),
+        };
+        let mut env = RlvEnvironmentSlot::default();
+        let mut session = app.world_mut().resource_mut::<RlvSession>();
+        apply_owner_say(
+            session.state_mut(),
+            COLLAR,
+            AGENT,
+            line,
+            false,
+            &mut ext,
+            &mut env,
+        )
+    }
+
+    /// The setting the user logged in with is applied — and applied silently,
+    /// because nothing moved.
+    #[test]
+    fn the_setting_is_applied_on_the_first_frame() {
+        let mut app = blocked_app();
+        set_no_set_env(&mut app, true);
+        let run = collar_says(&mut app, "@setenv=n");
+        assert!(!run.changed);
+        assert!(
+            !app.world()
+                .resource::<RlvSession>()
+                .state()
+                .has_behaviour(RlvBehaviour::Setenv)
+        );
+
+        // A second app, left at the declared default, takes the command.
+        let mut open = blocked_app();
+        open.update();
+        let run = collar_says(&mut open, "@setenv=n");
+        assert!(run.changed);
+        assert!(
+            open.world()
+                .resource::<RlvSession>()
+                .state()
+                .has_behaviour(RlvBehaviour::Setenv)
+        );
+    }
+
+    /// Turning it on mid-session takes the sky back off the collar that already
+    /// had it, wakes the floaters watching the held set, and says so.
+    #[test]
+    fn turning_it_on_releases_what_a_collar_already_held() {
+        let mut app = blocked_app();
+        app.update();
+        assert!(collar_says(&mut app, "@setenv=n").changed);
+        let before = app.world().resource::<RlvSession>().revision();
+
+        set_no_set_env(&mut app, true);
+        let session = app.world().resource::<RlvSession>();
+        assert!(!session.state().has_behaviour(RlvBehaviour::Setenv));
+        pretty_assertions::assert_ne!(session.revision(), before, "the floaters must redraw");
+        assert!(
+            session
+                .console()
+                .iter()
+                .any(|line| line.kind == RlvConsoleKind::Info && line.text.contains("@setenv=n")),
+            "a move of the setting belongs in the RLV traffic log: {:?}",
+            session.console()
+        );
+
+        // And turning it off gives the keyword back.
+        set_no_set_env(&mut app, false);
+        assert!(collar_says(&mut app, "@setenv=n").changed);
+        assert!(
+            app.world()
+                .resource::<RlvSession>()
+                .state()
+                .has_behaviour(RlvBehaviour::Setenv)
+        );
+    }
+
+    /// Switching RLV off resets the state machine; the user's own setting is
+    /// not the state machine's to reset.
+    #[test]
+    fn the_blocked_set_survives_the_master_switch() {
+        let mut app = blocked_app();
+        set_no_set_env(&mut app, true);
+        app.world_mut().resource_mut::<RlvSession>().release_all();
+        // No settings write, so the bridge does not run again — the carry-over
+        // is what has to hold.
+        app.update();
+        let run = collar_says(&mut app, "@setenv=n");
+        assert!(!run.changed);
+        assert!(
+            !app.world()
+                .resource::<RlvSession>()
+                .state()
+                .has_behaviour(RlvBehaviour::Setenv)
+        );
     }
 }

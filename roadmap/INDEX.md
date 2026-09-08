@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 101 |
-| ready | 323 |
+| ready | 322 |
 | blocked | 46 |
 | in-progress | 20 |
 | bugs | 62 |
-| done | 1028 |
+| done | 1029 |
 | deferred | 25 |
 | wont-do | 14 |
 | **total** | **1619** |
@@ -240,7 +240,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (323)
+## ready (322)
 
 ### protocol
 
@@ -844,8 +844,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-resync-animations`](ready/viewer-resync-animations.md) — Resync
   animations action
-- [`viewer-rlv-blocked-behaviours`](ready/viewer-rlv-blocked-behaviours.md) —
-  RLV — blocked behaviours, and RestrainedLoveNoSetEnv as the one that uses them
 - [`viewer-rlv-enforce-camera`](ready/viewer-rlv-enforce-camera.md) — RLV —
   camera restrictions and vision overlay (blocked by
   `viewer-rlv-restriction-state` (done), `viewer-camera-third-person-orbit`
@@ -1346,7 +1344,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1028)
+## done (1029)
 
 ### protocol
 
@@ -2628,6 +2626,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-render-test-harness`](done/viewer-render-test-harness.md) — 3D render
   test harness — render one object without a grid, assert automatically, catch
   regressions
+- [`viewer-rlv-blocked-behaviours`](done/viewer-rlv-blocked-behaviours.md) — RLV
+  — blocked behaviours, and RestrainedLoveNoSetEnv as the one that uses them
 - [`viewer-rlv-command-intake`](done/viewer-rlv-command-intake.md) — RLV — the
   owner-say command intake and the reply/notify chat path (blocked by
   `viewer-rlv-restriction-state` (done))

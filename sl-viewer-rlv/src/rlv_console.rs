@@ -166,6 +166,7 @@ pub const fn outcome_suffix(outcome: RlvOutcome) -> Option<&'static str> {
         RlvOutcome::FailedLock => Some("already held by another object"),
         RlvOutcome::FailedUnheldBehaviour => Some("behaviour not held"),
         RlvOutcome::FailedNoSharedRoot => Some("no #RLV folder"),
+        RlvOutcome::FailedDisabled => Some("turned off in your settings"),
         _ => Some("failed"),
     }
 }
@@ -887,6 +888,20 @@ mod tests {
         );
         assert!(outcome_suffix(RlvOutcome::Success).is_none());
         assert!(outcome_suffix(RlvOutcome::FailedParam).is_some());
+    }
+
+    /// A keyword the *user* turned off does not read as one the viewer never
+    /// had: the console is where they find out it was their own doing.
+    #[test]
+    fn a_disabled_keyword_says_whose_doing_it_was() {
+        assert_eq!(
+            report_line("setenv=n", RlvOutcome::FailedDisabled),
+            "@setenv=n (turned off in your settings)"
+        );
+        assert_eq!(
+            outcome_stream(RlvOutcome::FailedDisabled),
+            RlvConsoleKind::Error
+        );
     }
 
     /// Running a real line applies it and reports one line per command.

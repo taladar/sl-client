@@ -672,9 +672,19 @@ impl RlvSession {
     ///
     /// The **console transcript is kept**: it is the log of what happened, and
     /// what just happened is part of it.
+    ///
+    /// So are the **blocked keywords**
+    /// ([`RlvState::set_behaviour_blocked`]). Those are the user's own
+    /// settings rather than anything an object held, and dropping them here
+    /// would quietly un-block `@setenv` for the next device the moment RLV was
+    /// switched off and on again.
     pub fn release_all(&mut self) {
         let held = self.state.restricting_objects().next().is_some();
+        let blocked: Vec<_> = self.state.blocked_behaviours().collect();
         self.state = RlvState::new();
+        for (keyword, kind) in blocked {
+            let _known = self.state.set_behaviour_blocked(keyword, kind, true);
+        }
         self.replies.clear();
         // Only a real release is a change the floaters need to redraw for.
         if held {
@@ -1562,6 +1572,26 @@ mod tests {
         pretty_assertions::assert_ne!(session.revision(), before);
         assert_eq!(session.console().len(), 1, "the log is not the state");
         Ok(())
+    }
+
+    /// The user's blocked keywords are their settings, not anything an object
+    /// held, so a release carries them across. Without this, switching RLV off
+    /// and on again would quietly hand `@setenv` back to the next device.
+    #[test]
+    fn a_release_keeps_the_blocked_keywords() {
+        let mut session = RlvSession::default();
+        assert!(session.state_mut().set_behaviour_blocked(
+            "setenv",
+            sl_rlv::RlvParamKind::AddRem,
+            true
+        ));
+        session.release_all();
+        assert!(
+            session
+                .state()
+                .is_behaviour_blocked("setenv", sl_rlv::RlvParamKind::AddRem)
+        );
+        assert_eq!(session.state().blocked_behaviours().count(), 1);
     }
 
     /// Releasing an engine that held nothing is not a change, so a floater

@@ -47,7 +47,7 @@ pub enum RlvParam {
 /// can be turned on can always be turned off again. Turning a *behaviour* on is
 /// a different question from *doing* it or *asking* about it, and the table
 /// answers each separately — see [`RlvBehaviour::accepts`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum RlvParamKind {
     /// [`RlvParam::Add`] or [`RlvParam::Remove`] — a restriction
     /// (`RLV_TYPE_ADDREM`).
