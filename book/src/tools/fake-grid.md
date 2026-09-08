@@ -1484,6 +1484,15 @@ position, velocity)`, which refuses a destination that does not border
 the agent's region (`Error::NotAdjacent`) and publishes a
 `CrossingNotice` on `FakeGrid::crossings()`.
 
+A crossing has the teleport's arrival timeout too: no `AgentArrived`
+within `CROSSING_ARRIVAL_TIMEOUT` and the agent stays where it was
+(`Error::CrossingTimedOut`). The cleanup rule is the teleport's, one
+destination shape narrower — a crossing destination is nearly always a
+neighbour whose child circuit the *announcement* opened, so the failure
+is not entitled to take it down. `FakeGridBuilder::handover_timeout`
+shortens both budgets, which is what makes either failure a test rather
+than a thirty-second wait.
+
 ### Sitting, and riding across a border
 
 A sit is a conversation: the client's `AgentRequestSit`, the region's
@@ -1561,6 +1570,43 @@ simulates no movement to make it with — so `TestContext::fake()` hands the cas
 `FakeGrid::cross_agent`; and `neighbour-child-circuits` needs two adjacent
 regions an avatar may walk between, which neither live grid reliably offers.
 See the *conformance testing* chapter.
+
+### The logins that are refused
+
+Every conformance case starts from a login that *succeeded* — a `TestContext`
+is assembled out of live sessions — so no case can be the one that asserts a
+login was declined. `sl-conformance/tests/login_refusals.rs` is the other half,
+and it uses no registry at all: one grid built per case with exactly the gate
+under test set, driving `sl_client_tokio::Client::connect` straight at it.
+
+`FakeGridBuilder::gates` and `AccountConfig::mfa` between them cover every
+reason a real grid declines a correctly-addressed login, and each has to reach
+the client as something it can act on — a `tos` a viewer can put a dialog in
+front of, an MFA challenge it can answer, a `presence` it may retry:
+
+- a wrong password and an unknown account, which must be **indistinguishable**
+  or the endpoint tells a caller which names exist;
+- `tos` and `critical`, refused with the text to display and cleared by the
+  same login re-sent with `agree_to_tos` / `read_critical`. Note that
+  `LoginRequest::new` leaves both flags *set*, which is right for a driver
+  logging into a grid it has already agreed with — a viewer that has to show
+  the terms sends its first attempt without them;
+- `presence`, classified as retryable from the message rather than the reason
+  code;
+- an MFA challenge, answered by the one-time code or by echoing the
+  `mfa_hash` the challenge handed out ("remember this device") — and *not*
+  raised for a wrong password, which would tell an attacker the password was
+  right;
+- a redirect, followed to the grid that answers it, and abandoned at the hop
+  bound when it loops.
+
+`FakeGridBuilder::stale_presence` is the ghost rather than the gate: it refuses
+**one** login as already-logged-in and the refusal itself clears it, which is
+what OpenSim's login service does on its way to reporting one. That is the
+whole reason a driver may retry such a rejection at all, and the conformance
+runner's retry branch — the only production code in this workspace that reacts
+to an `AlreadyLoggedIn` — had no way to be exercised until a grid could both
+refuse and then relent.
 
 ## Policy: what the grid charges, permits and refuses
 

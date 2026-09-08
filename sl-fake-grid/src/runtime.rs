@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
@@ -356,6 +356,11 @@ pub(crate) struct GridCore {
     regions: Vec<RegionEntry>,
     /// The login policy gates applied to every account.
     pub(crate) gates: LoginGates,
+    /// Whether a stale presence is waiting to be evicted: the next login that
+    /// would otherwise succeed is refused as already-logged-in, and the
+    /// refusal clears it (see
+    /// [`FakeGridBuilder::stale_presence`](crate::FakeGridBuilder::stale_presence)).
+    pub(crate) stale_presence: AtomicBool,
     /// Whether the login response is trimmed to the request's `options`.
     pub(crate) honor_options: bool,
     /// The identifier source every login and capability grant draws from.
@@ -1127,6 +1132,9 @@ pub struct FakeGridBuilder {
     scenario: Scenario,
     /// The login policy gates.
     gates: LoginGates,
+    /// Whether the grid starts holding a stale presence (see the builder
+    /// method).
+    stale_presence: bool,
     /// The `EventQueueGet` hold before the 502 re-poll answer.
     eq_hold: Duration,
     /// An override for the handover arrival budget (see the builder method).
@@ -1184,6 +1192,7 @@ impl std::fmt::Debug for FakeGridBuilder {
             .field("regions", &self.regions)
             .field("scenario", &self.scenario)
             .field("gates", &self.gates)
+            .field("stale_presence", &self.stale_presence)
             .field("imitates", &self.imitates)
             // The derived knobs print as `None` until something overrides one,
             // which is what to look at first when a grid behaves like the other
@@ -1249,6 +1258,7 @@ impl FakeGridBuilder {
             minter: IdMinter::default(),
             clock: system_clock(),
             gates: LoginGates::default(),
+            stale_presence: false,
             eq_hold: Duration::from_secs(30),
             handover_timeout: None,
             http_port: 0,
@@ -1294,6 +1304,25 @@ impl FakeGridBuilder {
     #[must_use]
     pub fn gates(mut self, gates: LoginGates) -> Self {
         self.gates = gates;
+        self
+    }
+
+    /// Starts the grid holding **one stale presence**: the next login that
+    /// would otherwise succeed is refused as already-logged-in, and the
+    /// refusal itself clears it, so the attempt after that goes through.
+    ///
+    /// Distinct from [`LoginGates::already_logged_in`], which refuses *every*
+    /// login and is the genuinely-online duplicate. This is the ghost: a prior
+    /// session that did not log out cleanly leaves a presence record behind,
+    /// and OpenSim's login service marks the grid-user logged out on its way to
+    /// returning the rejection — so a client that retries gets in. That
+    /// self-clearing refusal is the whole reason a driver may retry an
+    /// [`AlreadyLoggedIn`](sl_wire::LoginRejectKind::AlreadyLoggedIn)
+    /// rejection at all, and a grid that only ever refuses or only ever accepts
+    /// cannot exercise the retry.
+    #[must_use]
+    pub const fn stale_presence(mut self) -> Self {
+        self.stale_presence = true;
         self
     }
 
@@ -1575,6 +1604,7 @@ impl FakeGridBuilder {
             estate_owner,
             regions,
             gates: self.gates,
+            stale_presence: AtomicBool::new(self.stale_presence),
             // Each derived knob resolves here, once: an explicit setter wins,
             // and anything left unset is whatever the grid being imitated does.
             honor_options: self

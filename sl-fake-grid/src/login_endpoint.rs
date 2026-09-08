@@ -81,6 +81,26 @@ async fn respond(core: &Arc<GridCore>, parsed: &ParsedLoginRequest) -> LoginResp
     if let Some(rejection) = LoginServer::rejection(parsed, &account.credential, &core.gates) {
         return rejection;
     }
+    // The ghost: a presence left behind by a session that did not log out
+    // cleanly. It is checked here rather than through `LoginGates` because it
+    // is not a policy but a piece of state the refusal itself consumes — the
+    // login service evicts the stale presence on its way to reporting it, so
+    // the next attempt succeeds. Only a login that would otherwise have gone
+    // through meets it, so a wrong password does not spend the eviction.
+    if core
+        .stale_presence
+        .swap(false, std::sync::atomic::Ordering::Relaxed)
+    {
+        tracing::info!(
+            "login: {} {} refused as already-logged-in; the stale presence is now evicted",
+            account.config.first_name,
+            account.config.last_name,
+        );
+        return LoginResponse::Failure(LoginFailure::new(
+            LoginServer::PRESENCE_REASON,
+            LoginServer::ALREADY_LOGGED_IN_MESSAGE,
+        ));
+    }
     let Some(region) = core.start_region(&account) else {
         return LoginResponse::Failure(LoginFailure::new(
             "key",

@@ -2064,14 +2064,81 @@ mod test {
         Ok(())
     }
 
+    /// **A crossing the client never completes leaves everything where it
+    /// was.**
+    ///
+    /// The teleport path has had its arrival timeout asserted twice; the
+    /// crossing path has the same branch —
+    /// [`CROSSING_ARRIVAL_TIMEOUT`](sl_fake_grid::CROSSING_ARRIVAL_TIMEOUT),
+    /// its own `wait_for_arrival` — and nothing had ever reached it. The
+    /// destination here is a *neighbour*, which is what a crossing destination
+    /// almost always is: the child circuit was opened by the neighbour
+    /// announcement, not by this crossing, so the failure is not entitled to
+    /// take it down. The client is stopped so its movement can never complete,
+    /// which is the one way to hold a handover open deterministically.
+    #[tokio::test]
+    async fn a_crossing_that_never_arrives_leaves_the_neighbour_alone() -> Result<(), TestError> {
+        let mut running = start_configured(
+            vec![RegionConfig::default(), adjacent_east_region()],
+            Some(SHORT_HANDOVER),
+            ImitatedGrid::default(),
+        )
+        .await?;
+        running
+            .wait_until("the east region's child circuit", |event| match event {
+                Event::GenericMessage(generic) => {
+                    sl_fake_grid::neighbour_marker_region(generic).as_deref()
+                        == Some("Fake Region East")
+                }
+                _ => false,
+            })
+            .await?;
+        let before = running._grid.sessions_in("Fake Region East").await;
+        let before_seq = before.first().ok_or("no child")?.session_seq().await;
+
+        // Stop the client: from here nothing can complete the movement.
+        running.run.abort();
+        let error = running
+            ._grid
+            .cross_agent(
+                &running.agent,
+                "Fake Region East",
+                RegionCoordinates::new(2.0, 128.0, 26.0),
+                Vector {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            )
+            .await
+            .err()
+            .ok_or("a crossing nobody completes cannot succeed")?;
+        assert!(matches!(error, sl_fake_grid::Error::CrossingTimedOut));
+
+        let after = running._grid.sessions_in("Fake Region East").await;
+        assert_eq!(after.len(), 1, "the neighbour's circuit is still there");
+        let survivor = after.first().ok_or("no child")?;
+        assert_eq!(
+            survivor.session_seq().await,
+            before_seq,
+            "and it is the same session, not a replacement"
+        );
+        assert!(!survivor.is_closed());
+        assert!(
+            !running.agent.is_closed() && running.agent.with_sim(|sim| sim.is_root_agent()).await,
+            "the agent stays the root agent of the region it never left"
+        );
+        Ok(())
+    }
+
     /// How long the failure tests let the grid wait for an arrival that is
     /// never coming.
     ///
     /// Long enough that it is a *timeout* and not a race with the announcement
-    /// that precedes it, short enough that four tests of the failure half cost
-    /// less than a second between them. `TELEPORT_ARRIVAL_TIMEOUT` is thirty
-    /// seconds, which is right for a viewer on a bad link and wrong for a
-    /// suite.
+    /// that precedes it, short enough that every test of the failure half
+    /// together costs less than a second. `TELEPORT_ARRIVAL_TIMEOUT` is thirty
+    /// seconds and `CROSSING_ARRIVAL_TIMEOUT` fifteen, which is right for a
+    /// viewer on a bad link and wrong for a suite.
     const SHORT_HANDOVER: Duration = Duration::from_millis(250);
 
     /// **A teleport into a region the agent already borders reuses its child
@@ -3234,6 +3301,129 @@ mod test {
         // What comes back is the mesh asset the fixture wrote: its header
         // parses and names every level of detail.
         assert_eq!(mesh, sl_test_assets::mesh::unit_cube_mesh_asset()?);
+        Ok(())
+    }
+
+    /// **A capability fetch carrying a `Range` returns the range, not the
+    /// asset.**
+    ///
+    /// This is how a viewer pulls one mesh level of detail out of a mesh asset
+    /// without transferring the rest: the asset's header names each LOD's byte
+    /// offsets and the fetcher asks for exactly that span. The asset caps have
+    /// honoured a `Range` since they were written and no test had ever sent
+    /// one — and a grid that ignored the header and answered `200` with the
+    /// whole asset would look identical to a client that only inspects the
+    /// bytes it asked about, so the assertion is that what comes back is
+    /// *shorter* as well as equal.
+    ///
+    /// Both asset surfaces are asked, because they are two capabilities:
+    /// `GetMesh2` (the mesh route) and `ViewerAsset` (the generic one).
+    #[tokio::test]
+    async fn a_ranged_capability_fetch_returns_only_the_range() -> Result<(), TestError> {
+        use sl_fake_grid::fixtures::catalogue::{MESH_ASSET, NPC_ANIMATION};
+
+        /// The span asked for: not at the start of the asset, so an answer that
+        /// ignored the header would differ in its bytes and not only its
+        /// length, and not `0..len-1`, which a server may honestly answer whole.
+        const RANGE: (u32, u32) = (16, 47);
+        /// How many bytes an inclusive `RANGE` covers.
+        const RANGE_LEN: usize = 32;
+
+        let region = sl_fake_grid::catalogue().into_region(RegionConfig::default());
+        let mut running = start_in(vec![region]).await?;
+
+        let whole_mesh = sl_test_assets::mesh::unit_cube_mesh_asset()?;
+        assert!(
+            whole_mesh.len() > RANGE_LEN,
+            "a range test needs an asset longer than the range"
+        );
+        running
+            .commands
+            .send(Command::FetchMesh {
+                mesh_id: MESH_ASSET,
+                byte_range: Some(RANGE),
+            })
+            .await?;
+        let slice = running
+            .wait_for(|event| match event {
+                Event::AssetReceived(fetched) if fetched.id == MESH_ASSET.uuid() => {
+                    Some(fetched.data.clone())
+                }
+                _ => None,
+            })
+            .await?;
+        assert_eq!(slice.len(), RANGE_LEN, "a ranged fetch is the range's size");
+        assert_eq!(
+            slice,
+            whole_mesh
+                .get(16..48)
+                .ok_or("the mesh asset is too short")?,
+            "the bytes are the ones at the offsets asked for"
+        );
+
+        // The generic asset capability answers the same way.
+        let whole_animation = sl_test_assets::anim::chest_twist_animation_asset();
+        running
+            .commands
+            .send(Command::FetchAsset {
+                asset_id: sl_client_tokio::AssetKey::from(NPC_ANIMATION),
+                asset_type: sl_proto::AssetType::Animation,
+                byte_range: Some(RANGE),
+            })
+            .await?;
+        let slice = running
+            .wait_for(|event| match event {
+                Event::AssetReceived(fetched) if fetched.id == NPC_ANIMATION => {
+                    Some(fetched.data.clone())
+                }
+                _ => None,
+            })
+            .await?;
+        assert_eq!(slice.len(), RANGE_LEN);
+        assert_eq!(
+            slice,
+            whole_animation
+                .get(16..48)
+                .ok_or("the animation asset is too short")?
+        );
+        Ok(())
+    }
+
+    /// A range that starts past the end of the asset is `416`, which the client
+    /// reports as a failed transfer rather than as an empty asset.
+    ///
+    /// The distinction is what a progressive fetcher walks a mesh with: it asks
+    /// for the next span until one of them is refused, and an empty *success*
+    /// would leave it asking forever.
+    #[tokio::test]
+    async fn a_range_past_the_end_of_an_asset_is_refused() -> Result<(), TestError> {
+        use sl_fake_grid::fixtures::catalogue::MESH_ASSET;
+
+        let region = sl_fake_grid::catalogue().into_region(RegionConfig::default());
+        let mut running = start_in(vec![region]).await?;
+        let past_the_end = u32::try_from(sl_test_assets::mesh::unit_cube_mesh_asset()?.len())?;
+        running
+            .commands
+            .send(Command::FetchMesh {
+                mesh_id: MESH_ASSET,
+                byte_range: Some((past_the_end, past_the_end.saturating_add(63))),
+            })
+            .await?;
+        // Both outcomes are picked up, so an answer that served bytes anyway
+        // fails the assertion instead of hanging until the deadline.
+        let refused = running
+            .wait_for(|event| match event {
+                Event::AssetTransferFailed { asset_id, .. } if *asset_id == MESH_ASSET.uuid() => {
+                    Some(true)
+                }
+                Event::AssetReceived(fetched) if fetched.id == MESH_ASSET.uuid() => Some(false),
+                _ => None,
+            })
+            .await?;
+        assert!(
+            refused,
+            "a range starting past the end of the asset came back as an asset"
+        );
         Ok(())
     }
 
