@@ -138,6 +138,10 @@ merely inert — it is untested, and it was wrong.
 
 ## What is left
 
-[[viewer-teleport-reset-defeated-by-a-v1-grid]] — the client's `dest_is_child`
-test still cannot tell a V1 grid's pre-announced destination from a neighbour
-it has been holding, so on such a grid the reset is still suppressed.
+Nothing. The one thing this left behind — the client's `dest_is_child` test
+still cannot tell a V1 grid's pre-announced destination from a neighbour it has
+been holding — was filed as
+[[viewer-teleport-reset-defeated-by-a-v1-grid]] and then **decided against**:
+neither Second Life nor any current OpenSim sends that announcement, so the fix
+would carry real machinery (and a known hole on the sim-initiated teleport path)
+for a grid nobody runs. That file has the reasoning and what would reopen it.

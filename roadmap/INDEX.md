@@ -12,13 +12,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 101 |
-| ready | 323 |
+| ready | 322 |
 | blocked | 46 |
 | in-progress | 20 |
 | bugs | 60 |
 | done | 1030 |
 | deferred | 25 |
-| wont-do | 14 |
+| wont-do | 15 |
 | **total** | **1619** |
 
 ## ideas (101)
@@ -240,7 +240,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (323)
+## ready (322)
 
 ### protocol
 
@@ -894,9 +894,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-about-floater` (done))
 - [`viewer-table-widget-remaining`](ready/viewer-table-widget-remaining.md) —
   Remaining table-widget migrations (inventory columns, full friends rights)
-- [`viewer-teleport-reset-defeated-by-a-v1-grid`](ready/viewer-teleport-reset-defeated-by-a-v1-grid.md)
-  — A grid that announces the teleport destination first suppresses the world
-  reset
 - [`viewer-terrain-edit-brushes`](ready/viewer-terrain-edit-brushes.md) —
   Terrain editing — sculpt brushes (blocked by `viewer-input-action-map` (done),
   `viewer-region-options-debug` (done))
@@ -3658,7 +3655,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-recommit-conformance-records`](deferred/test-recommit-conformance-records.md)
   — Revisit committing sl-conformance records once implementation churn settles
 
-## wont-do (14)
+## wont-do (15)
 
 ### protocol
 
@@ -3685,6 +3682,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   night in them
 - [`viewer-stand-foot-ik-knee-asymmetry`](wont-do/viewer-stand-foot-ik-knee-asymmetry.md)
   — Standing foot-IK bends the two knees by different amounts on flat ground
+- [`viewer-teleport-reset-defeated-by-a-v1-grid`](wont-do/viewer-teleport-reset-defeated-by-a-v1-grid.md)
+  — A grid that announces the teleport destination first suppresses the world
+  reset
 - [`viewer-ui-radial-menu-concentric-rings`](wont-do/viewer-ui-radial-menu-concentric-rings.md)
   — Concentric-ring pie menu (angle picks direction, distance picks ring)
 - [`viewer-voice-morphing`](wont-do/viewer-voice-morphing.md) — Voice morphing
