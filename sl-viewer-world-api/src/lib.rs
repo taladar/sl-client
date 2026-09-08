@@ -2286,6 +2286,35 @@ pub enum OverlayCamera {
     HudAndUi,
 }
 
+/// Marks an entity that draws a **second copy of another entity's skinned
+/// geometry** and names the entity it copies — so the avatar layer poses the two
+/// alike.
+///
+/// A viewer draws the same posed mesh twice in more than one place: the waterline
+/// split gives a straddling face a twin clipped to the other side
+/// (`sl-viewer-world-scene`'s `water_clip`), and the build tool's selection
+/// highlight outlines a rigged face with a wireframe of its own geometry
+/// (`sl-viewer-edit`'s `selection_wireframe`). Sharing the mesh asset is not
+/// enough to share the *pose*, because this viewer skins on the GPU: the palette
+/// of a rigged draw is written per **entity** by the avatar pipeline, from a
+/// binding that entity carries. A copy that has only cloned `SkinnedMesh` falls
+/// back to Bevy's own skin extract, which reads the placeholder joints a
+/// GPU-posed rig binds, and draws the geometry collapsed.
+///
+/// So the copy carries this marker instead, and the crate that owns the skinning
+/// (`sl-viewer-world-avatar`) copies the pose binding across for as long as the
+/// source has one. It lives here because neither the water layer nor the build
+/// tool may depend on the avatar layer, and none of them may reach the other two.
+///
+/// The copy still needs the `SkinnedMesh` itself — that is what makes Bevy
+/// allocate it a palette at all, and its absence is a wgpu validation error, not
+/// an artifact.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SkinPoseTwin {
+    /// The skinned entity whose pose this one must be drawn at.
+    pub source: Entity,
+}
+
 /// The drivable state of the [`ViewerCamera`], shared by every mode.
 ///
 /// Third person reads the orbit fields (`azimuth` /

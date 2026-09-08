@@ -42,6 +42,7 @@ use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatars::AvatarBody;
 use crate::world_api::AvatarState;
 use crate::world_api::PoseSlotKey;
+use crate::world_api::SkinPoseTwin;
 
 /// The GPU-avatar **skin binding** written at skin-build time
 /// (`roadmap/context/gpu-avatars.md` §1.1): which pose slot a skinned submesh
@@ -67,6 +68,57 @@ pub(crate) struct GpuSkinBinding {
     /// The canonical skeleton joint index of each palette slot, in the skin's
     /// own joint order (parallel to `SkinnedMesh.joints`).
     pub(crate) canonical: Arc<[u32]>,
+}
+
+/// Give every [`SkinPoseTwin`] the pose binding of the entity it copies, so a
+/// second draw of a rigged face is posed with it.
+///
+/// A twin shares its source's **mesh** (or, for the build tool's outline, a mesh
+/// derived from it), which is what decides the *pipeline* — but the palette a
+/// GPU-posed skin draws with is written per **entity**, keyed by the binding
+/// below. A twin without one falls through to Bevy's `extract_skins`, which reads
+/// the placeholder joints a GPU-posed rig binds and collapses the geometry, so
+/// the twin silently draws nothing. Copying the binding is what makes the two
+/// draws land on the same posed vertices — and it also earns the twin the
+/// read-back posed `Aabb` from [`apply_gpu_avatar_bounds`], which keys on the
+/// same component, so the twin culls like its source rather than by a
+/// meaningless bind-pose bound.
+///
+/// The binding is copied every frame it differs, and taken away again when the
+/// source loses its own (a body swapped out from under a selection), because a
+/// stale slot would draw the twin at another avatar's pose.
+pub(crate) fn sync_skin_pose_twins(
+    twins: Query<(Entity, &SkinPoseTwin, Option<&GpuSkinBinding>)>,
+    sources: Query<&GpuSkinBinding>,
+    mut commands: Commands,
+) {
+    for (entity, twin, own) in &twins {
+        match sources.get(twin.source) {
+            Ok(binding) => {
+                // The canonical table is shared by `Arc` across every submesh of
+                // one rig, so pointer equality settles "same binding" without
+                // walking a joint table per twin per frame.
+                let matches = own.is_some_and(|current| {
+                    current.slot == binding.slot
+                        && Arc::ptr_eq(&current.canonical, &binding.canonical)
+                });
+                if !matches {
+                    commands.entity(entity).insert(binding.clone());
+                }
+            }
+            Err(_missing) => {
+                if own.is_some() {
+                    // `ExternallyPosedSkin` goes with it: it is only correct
+                    // while something else writes this entity's palette, and left
+                    // behind it would exclude the twin from the one path that
+                    // still could (`extract_skins`).
+                    commands
+                        .entity(entity)
+                        .remove::<(GpuSkinBinding, ExternallyPosedSkin)>();
+                }
+            }
+        }
+    }
 }
 
 /// One avatar's latest CPU-published pose data, as published by the pose

@@ -1023,6 +1023,61 @@ fn gpu_skin_binding_requires_externally_posed_marker() {
     );
 }
 
+/// A [`SkinPoseTwin`] — a second draw of a rigged face (the waterline split's
+/// twin, the build tool's selection outline) — is posed by copying its source's
+/// [`GpuSkinBinding`], because the palette of a GPU-posed skin is written per
+/// entity. Without the copy the twin falls through to Bevy's own skin extract,
+/// reads the placeholder joints a GPU-posed rig binds, and draws collapsed.
+#[test]
+fn skin_pose_twin_takes_its_sources_binding() -> Result<(), TestError> {
+    use bevy::ecs::system::RunSystemOnce as _;
+    use bevy::pbr::ExternallyPosedSkin;
+
+    use super::GpuSkinBinding;
+    use super::stage::sync_skin_pose_twins;
+    use crate::world_api::{PoseSlotKey, SkinPoseTwin};
+
+    let mut world = World::new();
+    let canonical: Arc<[u32]> = Arc::from(vec![3_u32, 7]);
+    let source = world
+        .spawn(GpuSkinBinding {
+            slot: PoseSlotKey::Crowd(2),
+            canonical: Arc::clone(&canonical),
+        })
+        .id();
+    let twin = world.spawn(SkinPoseTwin { source }).id();
+    world
+        .run_system_once(sync_skin_pose_twins)
+        .map_err(|error| format!("running the twin sync: {error}"))?;
+
+    let binding = world
+        .entity(twin)
+        .get::<GpuSkinBinding>()
+        .ok_or("the twin takes its source's pose binding")?;
+    assert_eq!(binding.slot, PoseSlotKey::Crowd(2));
+    assert!(
+        Arc::ptr_eq(&binding.canonical, &canonical),
+        "the canonical joint table is shared, not rebuilt"
+    );
+    assert!(
+        world.entity(twin).contains::<ExternallyPosedSkin>(),
+        "the copied binding pulls in the marker that keeps `extract_skins` off the twin"
+    );
+
+    // The source losing its binding takes the twin's away with it: a stale slot
+    // would draw the twin at whatever avatar next held that slot.
+    world.entity_mut(source).remove::<GpuSkinBinding>();
+    world
+        .run_system_once(sync_skin_pose_twins)
+        .map_err(|error| format!("re-running the twin sync: {error}"))?;
+    assert!(
+        !world.entity(twin).contains::<GpuSkinBinding>()
+            && !world.entity(twin).contains::<ExternallyPosedSkin>(),
+        "an unbound source leaves no binding — nor the marker that suppresses the fallback"
+    );
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Phase 2 golden tests (§9.2): the pass A/B Rust mirrors against `sl_anim`
 // itself — sample (loop wrap, binary-search edges, quat nlerp/slerp), blend

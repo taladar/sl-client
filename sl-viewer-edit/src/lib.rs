@@ -65,3 +65,4 @@ pub mod edit_texture_align;
 pub mod edit_tool;
 pub mod edit_undo;
 pub mod gizmos;
+pub(crate) mod selection_wireframe;

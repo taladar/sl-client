@@ -228,6 +228,11 @@ impl Plugin for GpuAvatarsPlugin {
                             .after(crate::animations::pose_avatar_skeletons)
                             .after(crate::animesh::publish_control_avatars)
                             .after(crowd::publish_crowd),
+                        // A second draw of a rigged face (the waterline split's
+                        // twin, the build tool's selection outline) is posed by
+                        // copying its source's binding, before the stage that
+                        // reads every binding.
+                        stage::sync_skin_pose_twins.before(stage::stage_gpu_avatars),
                         // Phase 5: set each avatar's `Aabb` from its read-back
                         // world bound (so off-screen avatars frustum-cull), after
                         // the stage refreshed the slot map and before Bevy's

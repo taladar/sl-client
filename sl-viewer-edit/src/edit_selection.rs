@@ -33,7 +33,9 @@
 //!   selected object (and its linkset children) gets a translucent unlit
 //!   overlay child sharing its mesh — a simpler stand-in for the reference's
 //!   silhouette edge rendering (`generateSilhouette`), deliberately not a
-//!   port of it.
+//!   port of it. A **rigged** face wears a wireframe of its posed geometry
+//!   instead, which is what the reference draws for a mesh object
+//!   (`renderMeshSelection_f`); see the `selection_wireframe` module.
 //!
 //! Reference (Firestorm, read-only): `llselectmgr`, `lltoolselect`,
 //! `lltoolselectrect`.
@@ -66,6 +68,7 @@ use crate::objects::{
 use crate::ui::UiRoot;
 use crate::world_api::InputContext;
 use crate::world_api::ObjectState;
+use crate::world_api::SkinPoseTwin;
 use crate::world_api::ViewerCamera;
 use crate::world_api::on_hud_layer;
 use crate::world_api::pointer_over_blocking_ui;
@@ -882,9 +885,14 @@ fn apply_selection_highlight(
     assets: Res<HighlightAssets>,
     children: Query<&Children>,
     scene: Query<(), With<SceneObject>>,
-    faces: Query<&Mesh3d, With<PrimFaceEntity>>,
-    skinned_faces: Query<(), (With<PrimFaceEntity>, With<SkinnedMesh>)>,
-    overlays: Query<(Entity, &ChildOf, &SelectionHighlightOverlay)>,
+    faces: HighlightFaceQuery,
+    mut overlays: Query<(
+        Entity,
+        &ChildOf,
+        &mut SelectionHighlightOverlay,
+        &mut MeshMaterial3d<FaceMaterial>,
+    )>,
+    mut meshes: ResMut<Assets<Mesh>>,
     mut commands: Commands,
 ) {
     // The desired overlay set: face entity → outline kind. A committed
@@ -927,42 +935,104 @@ fn apply_selection_highlight(
             );
         }
     }
-    // Despawn stale overlays, keep matching ones.
-    for (overlay, child_of, marker) in overlays.iter() {
-        match desired.get(&child_of.parent()) {
-            Some(kind) if *kind == marker.kind => {
-                desired.remove(&child_of.parent());
+    // Despawn stale overlays; an overlay whose face is still highlighted stays,
+    // taking the new colour in place rather than being rebuilt. That matters for
+    // a rigged face, whose overlay is a derived wireframe mesh: promoting one
+    // selection to primary re-colours a whole linkset, and rebuilding a body's
+    // worth of edges to change a tint would be a visible hitch.
+    for (overlay, child_of, mut marker, mut material) in &mut overlays {
+        match desired.remove(&child_of.parent()) {
+            Some(kind) => {
+                if kind != marker.kind {
+                    marker.kind = kind;
+                    material.0 = assets.material(kind);
+                }
             }
-            _stale => commands.entity(overlay).despawn(),
+            None => commands.entity(overlay).despawn(),
         }
     }
-    // Spawn the missing ones: an inflated shell sharing the face's mesh,
-    // front faces culled, so only the rim shows (the silhouette-glow
-    // approximation).
+    // Spawn the missing ones: an inflated shell sharing the face's mesh (a
+    // wireframe of it, for a rigged one) — see [`spawn_outline_overlay`].
     for (face, kind) in desired {
-        let Ok(mesh) = faces.get(face) else {
+        let Ok((mesh, skin)) = faces.get(face) else {
             continue;
         };
-        // A skinned face (an animesh, or any rigged in-world mesh) cannot take
-        // the inverted-hull shell: the shell reuses the face's mesh, which
-        // carries joint attributes, so the renderer specialises it into the
-        // skinned pipeline — but a shell has no `SkinnedMesh`, so it is handed
-        // the non-skinned (`model_only`) bind group. That mismatch is a wgpu
-        // validation error the render layer quits on. (The entity-scale inflate
-        // could not skin-deform the rim anyway.) Skip the outline for it.
-        if skinned_faces.get(face).is_ok() {
-            continue;
-        }
+        spawn_outline_overlay(
+            face,
+            mesh,
+            skin,
+            assets.material(kind),
+            SelectionHighlightOverlay { kind },
+            &mut meshes,
+            &mut commands,
+        );
+    }
+}
+
+/// The face-mesh query both highlight reconcilers walk: a face's mesh and, when
+/// it is rigged, the skin its overlay has to be drawn with.
+type HighlightFaceQuery<'w, 's> =
+    Query<'w, 's, (&'static Mesh3d, Option<&'static SkinnedMesh>), With<PrimFaceEntity>>;
+
+/// Spawn one outline overlay on `face` — the shared body of the selection
+/// highlight and the drag-drop hover highlight, which draw the same shell in
+/// different colours under different markers.
+///
+/// An ordinary face wears an **inverted-hull shell**: its own mesh again, front
+/// faces culled and pushed out by an entity-`Transform` scale, so only the rim
+/// shows.
+///
+/// A **rigged** face cannot wear that, and the reference does not draw one for a
+/// mesh object either — it draws a wireframe of the posed geometry instead. So a
+/// rigged face gets [`crate::selection_wireframe`]'s line-list derivation of its
+/// mesh, the skin that poses it, and the [`SkinPoseTwin`] that earns that skin
+/// the same GPU palette as the face. See that module for why the shell is
+/// impossible here and what the reference does (`renderMeshSelection_f`).
+///
+/// A rigged face whose mesh is not loaded (or is not an indexed triangle list)
+/// gets no overlay this frame; the reconciler runs every frame, so it gains one
+/// as soon as the mesh is there.
+fn spawn_outline_overlay(
+    face: Entity,
+    mesh: &Mesh3d,
+    skin: Option<&SkinnedMesh>,
+    material: Handle<FaceMaterial>,
+    marker: impl Bundle,
+    meshes: &mut Assets<Mesh>,
+    commands: &mut Commands,
+) {
+    let Some(skin) = skin else {
         commands.spawn((
             Mesh3d(mesh.0.clone()),
-            MeshMaterial3d(assets.material(kind)),
+            MeshMaterial3d(material),
             Transform::from_scale(Vec3::splat(OUTLINE_INFLATE)),
             NotShadowCaster,
-            SelectionHighlightOverlay { kind },
+            marker,
             EditorOverlay,
             ChildOf(face),
         ));
-    }
+        return;
+    };
+    let Some(wireframe) = meshes
+        .get(&mesh.0)
+        .and_then(crate::selection_wireframe::wireframe_mesh)
+    else {
+        return;
+    };
+    commands.spawn((
+        Mesh3d(meshes.add(wireframe)),
+        MeshMaterial3d(material),
+        // No inflate: a skinned draw places its vertices from the joint palette
+        // and ignores this transform entirely, which is why the wireframe carries
+        // its lift in the geometry instead.
+        Transform::IDENTITY,
+        NotShadowCaster,
+        skin.clone(),
+        SkinPoseTwin { source: face },
+        marker,
+        EditorOverlay,
+        ChildOf(face),
+    ));
 }
 
 /// Draw the drag-drop hover outline: while an inventory drag hovers an object
@@ -970,14 +1040,27 @@ fn apply_selection_highlight(
 /// its linkset family) gets an outline overlay — green when you may edit it, red
 /// when it is foreign (the reference's `highlightObjectAndFamily` during a drag).
 /// A separate overlay from the selection's, so the two reconcilers never fight.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries: the hover state, \
+              the shared outline materials, the hierarchy / face / overlay queries, the mesh \
+              store the rigged overlay derives into, and the stage the diagnostic dedups on"
+)]
 fn apply_drag_hover_highlight(
     hover: Res<DragHoverHighlight>,
     assets: Res<HighlightAssets>,
     children: Query<&Children>,
     scene: Query<(), With<SceneObject>>,
-    faces: Query<&Mesh3d, With<PrimFaceEntity>>,
-    overlays: Query<(Entity, &ChildOf, &DragHoverOverlay)>,
+    faces: HighlightFaceQuery,
+    mut overlays: Query<(
+        Entity,
+        &ChildOf,
+        &mut DragHoverOverlay,
+        &mut MeshMaterial3d<FaceMaterial>,
+    )>,
+    mut meshes: ResMut<Assets<Mesh>>,
     mut commands: Commands,
+    mut last_target: Local<Option<Entity>>,
 ) {
     let mut desired: HashMap<Entity, HighlightKind> = HashMap::new();
     if let Some(target) = hover.hover {
@@ -998,30 +1081,48 @@ fn apply_drag_hover_highlight(
             &mut desired,
         );
     }
-    // Despawn stale overlays, keep matching ones.
-    for (overlay, child_of, marker) in overlays.iter() {
-        match desired.get(&child_of.parent()) {
-            Some(kind) if *kind == marker.kind => {
-                desired.remove(&child_of.parent());
+    // The draw half of the same diagnostic the hover driver writes
+    // (`sl_viewer::drag_hover`): with a target published, this says how many faces
+    // of it the outline actually found. A target with **no** faces is the one
+    // failure the driver cannot see — an object whose render entity is not the one
+    // its faces hang under.
+    let target = hover.hover.map(|target| target.root);
+    if *last_target != target {
+        *last_target = target;
+        debug!(
+            target: crate::inventory_drag::DRAG_HOVER_LOG_TARGET,
+            "drag hover outline: target {target:?}, {} face(s) to outline",
+            desired.len()
+        );
+    }
+    // Despawn stale overlays; one still hovered stays and takes the new colour in
+    // place (a drop target that flips own → foreign), as the selection outline does.
+    for (overlay, child_of, mut marker, mut material) in &mut overlays {
+        match desired.remove(&child_of.parent()) {
+            Some(kind) => {
+                if kind != marker.kind {
+                    marker.kind = kind;
+                    material.0 = assets.material(kind);
+                }
             }
-            _stale => commands.entity(overlay).despawn(),
+            None => commands.entity(overlay).despawn(),
         }
     }
-    // Spawn the missing ones (the same inflated inverted-hull shell the selection
-    // outline uses).
+    // Spawn the missing ones (the same overlay the selection outline draws —
+    // a shell on an ordinary face, a posed wireframe on a rigged one).
     for (face, kind) in desired {
-        let Ok(mesh) = faces.get(face) else {
+        let Ok((mesh, skin)) = faces.get(face) else {
             continue;
         };
-        commands.spawn((
-            Mesh3d(mesh.0.clone()),
-            MeshMaterial3d(assets.material(kind)),
-            Transform::from_scale(Vec3::splat(OUTLINE_INFLATE)),
-            NotShadowCaster,
+        spawn_outline_overlay(
+            face,
+            mesh,
+            skin,
+            assets.material(kind),
             DragHoverOverlay { kind },
-            EditorOverlay,
-            ChildOf(face),
-        ));
+            &mut meshes,
+            &mut commands,
+        );
     }
 }
 
@@ -1036,7 +1137,7 @@ fn collect_faces(
     root: Entity,
     children: &Query<&Children>,
     scene: &Query<(), With<SceneObject>>,
-    faces: &Query<&Mesh3d, With<PrimFaceEntity>>,
+    faces: &HighlightFaceQuery,
     root_kind: HighlightKind,
     child_kind: HighlightKind,
     desired: &mut HashMap<Entity, HighlightKind>,
@@ -1189,6 +1290,7 @@ type CursorFaceQuery<'w, 's> = Query<
         &'static Mesh3d,
         &'static PrimFaceEntity,
         &'static FaceTextureDebug,
+        Option<&'static SkinnedMesh>,
     ),
 >;
 
@@ -1238,7 +1340,7 @@ fn apply_face_cursor_highlight(
     // Spawn the missing cursors: the face's mesh, the grid material carrying the
     // face's own UV transform, pulled in front of the face by a depth bias.
     for (face, FaceTextureDebug(texture_face)) in desired {
-        let Ok((mesh, _marker, _debug)) = cursor_faces.get(face) else {
+        let Ok((mesh, _marker, _debug, skin)) = cursor_faces.get(face) else {
             continue;
         };
         // An inert `FaceMaterial` (bit-identical to the bare `StandardMaterial`) so
@@ -1259,7 +1361,7 @@ fn apply_face_cursor_highlight(
             depth_bias: FACE_CURSOR_DEPTH_BIAS,
             ..Default::default()
         }));
-        commands.spawn((
+        let mut cursor = commands.spawn((
             Mesh3d(mesh.0.clone()),
             MeshMaterial3d(material),
             NotShadowCaster,
@@ -1267,6 +1369,15 @@ fn apply_face_cursor_highlight(
             EditorOverlay,
             ChildOf(face),
         ));
+        // A rigged face's cursor shares its **mesh**, which carries the skin
+        // attributes — so Bevy specializes it into the skinned pipeline and would
+        // then hand this entity a model-only bind group, a wgpu validation error
+        // the viewer quits on. It needs the skin, and the pose that goes with it
+        // ([`SkinPoseTwin`]); the cursor is coplanar with the face, so skinning it
+        // identically is also exactly where it belongs.
+        if let Some(skin) = skin {
+            cursor.insert((skin.clone(), SkinPoseTwin { source: face }));
+        }
     }
 }
 
@@ -1289,7 +1400,7 @@ fn collect_own_face_ids(
         if entity != root && scene.contains(entity) {
             continue;
         }
-        if let Ok((_mesh, marker, debug)) = cursor_faces.get(entity)
+        if let Ok((_mesh, marker, debug, _skin)) = cursor_faces.get(entity)
             && wanted.is_none_or(|set| set.contains(&marker.face_id))
         {
             desired.insert(entity, *debug);
@@ -1366,6 +1477,11 @@ pub fn promote_selection_to_roots(selection: &mut SelectionSet, objects: &Object
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "a failed expectation is the intended failure signal in a unit test"
+    )]
+
     use super::{HighlightAssets, SelectionSet, WireSelection, promote_selection_to_roots};
     use crate::face_material::FaceMaterial;
     use bevy::app::{App, TaskPoolPlugin};
@@ -1453,6 +1569,218 @@ mod tests {
         assert!(
             app.world().get_resource::<HighlightAssets>().is_some(),
             "HighlightAssets should build once Assets<FaceMaterial> is registered"
+        );
+    }
+
+    /// A world holding one object with a single face, and the assets both
+    /// highlight reconcilers need: the app, the object's root, and its face.
+    /// `skinned` gives the face the skin (and skin vertex attributes) a rigged one
+    /// carries.
+    fn face_app(skinned: bool) -> (App, Entity, Entity) {
+        use bevy::asset::RenderAssetUsages;
+        use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
+        use bevy::mesh::{Indices, PrimitiveTopology};
+        use bevy::prelude::*;
+        use sl_client_bevy::PrimFaceId;
+
+        use crate::objects::{ObjectCategory, PrimFaceEntity, SceneObject};
+        use crate::world_api::EditToolState;
+
+        let mut app = App::new();
+        app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()));
+        app.init_asset::<FaceMaterial>();
+        app.init_asset::<Mesh>();
+        app.init_asset::<SkinnedMeshInverseBindposes>();
+        app.init_resource::<HighlightAssets>();
+        app.insert_resource(EditToolState {
+            active: true,
+            ..EditToolState::default()
+        });
+
+        // A single triangle, with the skin attributes when the face is rigged —
+        // the wireframe derivation walks the real geometry.
+        let mut mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        );
+        mesh.insert_attribute(
+            Mesh::ATTRIBUTE_POSITION,
+            vec![[0.0_f32, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+        );
+        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0_f32, 0.0, 1.0]; 3]);
+        if skinned {
+            mesh.insert_attribute(
+                Mesh::ATTRIBUTE_JOINT_INDEX,
+                bevy::mesh::VertexAttributeValues::Uint16x4(vec![[0_u16; 4]; 3]),
+            );
+            mesh.insert_attribute(
+                Mesh::ATTRIBUTE_JOINT_WEIGHT,
+                vec![[1.0_f32, 0.0, 0.0, 0.0]; 3],
+            );
+        }
+        mesh.insert_indices(Indices::U32(vec![0, 1, 2]));
+        let mesh = app.world_mut().resource_mut::<Assets<Mesh>>().add(mesh);
+
+        let root = app
+            .world_mut()
+            .spawn(SceneObject {
+                scoped_id: scoped(1),
+                category: ObjectCategory::Prim,
+            })
+            .id();
+        let mut face = app.world_mut().spawn((
+            Mesh3d(mesh),
+            PrimFaceEntity {
+                face_id: PrimFaceId::new(0),
+            },
+            ChildOf(root),
+        ));
+        if skinned {
+            let bindposes = face.world_scope(|world| {
+                world
+                    .resource_mut::<Assets<SkinnedMeshInverseBindposes>>()
+                    .add(SkinnedMeshInverseBindposes::from(vec![Mat4::IDENTITY]))
+            });
+            let joint = face.world_scope(|world| world.spawn(Transform::default()).id());
+            face.insert(SkinnedMesh {
+                inverse_bindposes: bindposes,
+                joints: vec![joint],
+            });
+        }
+        let face = face.id();
+        (app, root, face)
+    }
+
+    /// [`face_app`] with the object **selected** and the selection reconciler
+    /// running: the app and the face.
+    fn selected_face_app(skinned: bool) -> (App, Entity) {
+        let (mut app, root, face) = face_app(skinned);
+        app.add_systems(bevy::app::Update, super::apply_selection_highlight);
+        let mut selection = SelectionSet::default();
+        selection.insert(scoped(1), full(1), root);
+        app.insert_resource(selection);
+        app.update();
+        (app, face)
+    }
+
+    /// The **drag-drop hover** outline draws the same overlay as the selection's,
+    /// off its own state: publishing a hover target outlines that object's faces.
+    /// It shares one spawn path with the selection outline and had no coverage of
+    /// its own, which is how it kept the crash-on-a-rigged-face the selection
+    /// outline was given a mitigation for in 2026-08-05.
+    #[test]
+    fn a_drag_hover_target_outlines_the_object() {
+        use bevy::prelude::*;
+
+        use crate::world_api::{DragHover, DragHoverHighlight};
+
+        let (mut app, root, face) = face_app(false);
+        app.add_systems(bevy::app::Update, super::apply_drag_hover_highlight);
+        app.insert_resource(DragHoverHighlight {
+            hover: Some(DragHover {
+                root,
+                foreign: false,
+            }),
+        });
+        app.update();
+        let overlay = app
+            .world_mut()
+            .query_filtered::<&ChildOf, With<super::DragHoverOverlay>>()
+            .iter(app.world())
+            .any(|child_of| child_of.parent() == face);
+        assert!(
+            overlay,
+            "a published drop target outlines the face of the object it names"
+        );
+
+        // Dropping the target takes the outline with it.
+        app.world_mut().resource_mut::<DragHoverHighlight>().hover = None;
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<Entity, With<super::DragHoverOverlay>>()
+                .iter(app.world())
+                .count(),
+            0,
+            "the outline goes when the drag leaves the object"
+        );
+    }
+
+    /// An ordinary face wears the inverted-hull shell: its own mesh again,
+    /// inflated by the entity transform.
+    #[test]
+    fn an_unrigged_face_wears_the_inflated_shell() {
+        use bevy::prelude::*;
+
+        let (mut app, face) = selected_face_app(false);
+        let overlay = app
+            .world_mut()
+            .query::<(Entity, &ChildOf)>()
+            .iter(app.world())
+            .find(|(_entity, child_of)| child_of.parent() == face)
+            .map(|(entity, _child_of)| entity)
+            .expect("the selected face gets a highlight overlay");
+        let world = app.world();
+        assert_eq!(
+            world.get::<Transform>(overlay).map(Transform::to_matrix),
+            Some(Transform::from_scale(Vec3::splat(super::OUTLINE_INFLATE)).to_matrix()),
+            "the shell is the face's mesh pushed out by an entity scale"
+        );
+        assert!(
+            world
+                .get::<bevy::mesh::skinning::SkinnedMesh>(overlay)
+                .is_none(),
+            "an unrigged shell carries no skin"
+        );
+    }
+
+    /// A rigged face wears a **wireframe** of its posed geometry instead: the
+    /// shell is impossible on a skinned draw (the entity scale is ignored, and a
+    /// shell without the skin is the wgpu validation error that quits the
+    /// viewer), and a wireframe is what the reference draws for a mesh object.
+    /// The overlay carries the skin *and* the pose marker, which is what makes it
+    /// land on the same posed vertices as the face.
+    #[test]
+    fn a_rigged_face_wears_a_posed_wireframe() {
+        use bevy::mesh::skinning::SkinnedMesh;
+        use bevy::mesh::{Mesh, PrimitiveTopology};
+        use bevy::prelude::*;
+
+        use crate::world_api::SkinPoseTwin;
+
+        let (mut app, face) = selected_face_app(true);
+        let overlay = app
+            .world_mut()
+            .query::<(Entity, &ChildOf)>()
+            .iter(app.world())
+            .find(|(_entity, child_of)| child_of.parent() == face)
+            .map(|(entity, _child_of)| entity)
+            .expect("the selected rigged face gets a highlight overlay");
+        let world = app.world();
+        let mesh = world
+            .get::<Mesh3d>(overlay)
+            .expect("the overlay draws a mesh");
+        let asset = world
+            .resource::<Assets<Mesh>>()
+            .get(&mesh.0)
+            .expect("its mesh is loaded");
+        assert_eq!(
+            asset.primitive_topology(),
+            PrimitiveTopology::LineList,
+            "a rigged face is outlined by a wireframe, not a hull"
+        );
+        assert!(
+            asset.contains_attribute(Mesh::ATTRIBUTE_JOINT_INDEX),
+            "the wireframe skins with the face it outlines"
+        );
+        assert!(
+            world.get::<SkinnedMesh>(overlay).is_some(),
+            "without the skin the shared skinned pipeline gets a model-only bind group"
+        );
+        assert_eq!(
+            world.get::<SkinPoseTwin>(overlay),
+            Some(&SkinPoseTwin { source: face }),
+            "the overlay is posed from the face's own GPU palette binding"
         );
     }
 }

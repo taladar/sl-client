@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 46 |
 | in-progress | 20 |
 | bugs | 61 |
-| done | 1027 |
+| done | 1029 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1616** |
+| **total** | **1618** |
 
 ## ideas (101)
 
@@ -1271,8 +1271,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   terrain)
 - [`viewer-disabled-field-selection-flash`](bugs/viewer-disabled-field-selection-flash.md)
   — A disabled text field flashes a selection, and cannot be copied from
-- [`viewer-edit-outline-skinned-mesh`](bugs/viewer-edit-outline-skinned-mesh.md)
-  — Edit-selection outline can't shell a skinned / animesh object
 - [`viewer-groups-pane-empty-on-opensim`](bugs/viewer-groups-pane-empty-on-opensim.md)
   — The Groups pane lists nothing while the profile's group list has the same
   groups
@@ -1283,6 +1281,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   oracle at scale)
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
   Some worn mesh hair does not render (visible in Firestorm)
+- [`viewer-mesh-objects-outlined-by-a-shell`](bugs/viewer-mesh-objects-outlined-by-a-shell.md)
+  — An unrigged mesh object is outlined by a hull where the reference wireframes
+  it
 - [`viewer-minimap-avatar-dot-color`](bugs/viewer-minimap-avatar-dot-color.md) —
   Minimap other-avatar dots are red, not green like the reference
 - [`viewer-mouselook-own-head-visible-from-inside`](bugs/viewer-mouselook-own-head-visible-from-inside.md)
@@ -1342,7 +1343,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1027)
+## done (1029)
 
 ### protocol
 
@@ -1812,6 +1813,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-edit-gizmo-interaction-tests`](done/viewer-edit-gizmo-interaction-tests.md)
   — Gizmo handle drags — press, constrain, stream, release (blocked by
   `viewer-world-test-harness` (done))
+- [`viewer-edit-outline-skinned-mesh`](done/viewer-edit-outline-skinned-mesh.md)
+  — Edit-selection outline can't shell a skinned / animesh object
 - [`viewer-edit-selection-interaction-tests`](done/viewer-edit-selection-interaction-tests.md)
   — Selecting for edit — click, shift-click, rubber band, faces (blocked by
   `viewer-world-test-harness` (done))
@@ -2879,6 +2882,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The water surface's deep-water colour is a flat tint, not the fogged one
 - [`viewer-water-transparency-scene-matrix`](done/viewer-water-transparency-scene-matrix.md)
   — Walk the translucent-vs-water combinations exhaustively in the readback tier
+- [`viewer-water-twin-loses-the-pose`](done/viewer-water-twin-loses-the-pose.md)
+  — The waterline split's twin of a rigged face drew at no pose at all
 - [`viewer-water-wave-phase-jumps-far-from-origin`](done/viewer-water-wave-phase-jumps-far-from-origin.md)
   — The sea's ripple phase jumps instead of scrolling, worse the further from
   the origin

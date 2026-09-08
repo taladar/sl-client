@@ -58,6 +58,7 @@ use sl_viewer_world_objects::objects::PrimFaceEntity;
 
 use crate::face_material::FaceMaterial;
 use crate::water::{DEFAULT_WATER_HEIGHT, WaterLevel};
+use crate::world_api::SkinPoseTwin;
 
 /// The tracing target of the straddling-split diagnostics: which faces were found
 /// to cross the waterline and split in two. Off by default; turn it on with
@@ -255,8 +256,18 @@ fn reconcile_water_clip_twins(
         // crash near other people's avatars rather than as anything about water.
         //
         // Anything added to that table later belongs here too.
+        //
+        // The skin is two things, not one: the `SkinnedMesh` that makes Bevy
+        // allocate this entity a palette at all (without it, the validation error
+        // above), and the **pose** that palette is filled with. This viewer skins
+        // on the GPU and writes each entity's palette from a binding the avatar
+        // layer keeps, so a twin carrying only the cloned `SkinnedMesh` is posed
+        // by Bevy's own extract from the placeholder joints a GPU-posed rig binds
+        // — drawing the underwater half collapsed rather than clipped. The
+        // [`SkinPoseTwin`] marker is what has the avatar layer pose it with its
+        // face.
         if let Some(skin) = skin {
-            spawned.insert(skin.clone());
+            spawned.insert((skin.clone(), SkinPoseTwin { source: face }));
         }
         if let Some(morph) = morph {
             spawned.insert(morph.clone());

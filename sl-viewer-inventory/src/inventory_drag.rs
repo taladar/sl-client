@@ -62,6 +62,18 @@ use crate::world_api::ViewerCamera;
 use crate::world_api::pointer_over_blocking_ui;
 use crate::world_api::{DragPickActive, DragPickHit, DragWorldPick, WorldPhase};
 
+/// The tracing target of the drag-hover diagnostics: which stage of the chain
+/// between "a drag is in flight" and "this object is outlined" the current frame
+/// stops at. Off by default; turn it on with
+/// `RUST_LOG=info,sl_viewer::drag_hover=debug`.
+///
+/// The chain crosses three tiers — the inventory panel starts the drag, the world
+/// tier picks under the cursor, the build tier draws the outline — and each talks
+/// to the next only through a resource, so an outline that never appears has half
+/// a dozen equally plausible causes and nothing on screen distinguishes them. One
+/// deduplicated line per stage change is what settles it in a single run.
+pub const DRAG_HOVER_LOG_TARGET: &str = "sl_viewer::drag_hover";
+
 /// The ghost's offset from the pointer, in logical pixels — clear of the hot
 /// pixel so the pointer, not the ghost, decides the drop target.
 const GHOST_OFFSET: Vec2 = Vec2::new(14.0, 10.0);
@@ -1113,49 +1125,64 @@ fn drive_drag_object_hover(
     keyboard: Res<ButtonInput<KeyCode>>,
     occlusion: (Res<HoverMap>, Query<&Pickable>, Query<&ComputedNode>),
     mut hover_out: ResMut<crate::world_api::DragHoverHighlight>,
+    mut last_stage: Local<Option<&'static str>>,
 ) {
-    let clear = |hover_out: &mut crate::world_api::DragHoverHighlight| {
-        if hover_out.hover.is_some() {
-            hover_out.hover = None;
+    // Where this frame's answer comes from, for [`DRAG_HOVER_LOG_TARGET`]: every
+    // bail names itself, so a missing outline is one log line rather than a
+    // guess between the drag, the modifier rule, the pick and the draw.
+    let mut stage = "outlining the object under the cursor";
+    let want = 'decide: {
+        let Some(active) = state.active.as_ref() else {
+            stage = "no drag in flight";
+            break 'decide None;
+        };
+        let (hover_map, pickables, node_sizes) = occlusion;
+        // Over a floater / the list itself, the list-drop path owns the drop — no
+        // world outline.
+        if pointer_over_blocking_ui(&hover_map, &pickables, &node_sizes) {
+            stage = "pointer is over blocking UI; the list-drop path owns this drop";
+            break 'decide None;
         }
-    };
-    let Some(active) = state.active.as_ref() else {
-        clear(&mut hover_out);
-        return;
-    };
-    let (hover_map, pickables, node_sizes) = occlusion;
-    // Over a floater / the list itself, the list-drop path owns the drop — no
-    // world outline.
-    if pointer_over_blocking_ui(&hover_map, &pickables, &node_sizes) {
-        clear(&mut hover_out);
-        return;
-    }
-    // Would the current drag drop into an object's contents? Non-object items
-    // always do; an object item only with Ctrl held (else it rezzes).
-    let ctrl = keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight);
-    let drops_into_contents = active.sources.iter().any(|(source, _library)| {
-        matches!(source, MenuTarget::Item(item)
-            if !matches!(item.inv_type, InventoryType::Object | InventoryType::Attachment) || ctrl)
-    });
-    if !drops_into_contents {
-        clear(&mut hover_out);
-        return;
-    }
-    // The latest resolved GPU pick under the cursor (kept fresh by the world
-    // tier's drag pick driver); only an object face can be an outline
-    // target.
-    let target = match world_pick.hit {
-        Some(DragPickHit::Object { entity, .. }) => {
-            resolve_hover_entity(entity, &scene, &child_of, &objects)
+        // Would the current drag drop into an object's contents? Non-object items
+        // always do; an object item only with Ctrl held (else it rezzes).
+        let ctrl =
+            keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight);
+        let drops_into_contents = active.sources.iter().any(|(source, _library)| {
+            matches!(source, MenuTarget::Item(item)
+                if !matches!(item.inv_type, InventoryType::Object | InventoryType::Attachment)
+                    || ctrl)
+        });
+        if !drops_into_contents {
+            stage = "this drag does not drop into contents (an object item needs Ctrl)";
+            break 'decide None;
         }
-        _not_an_object => None,
+        // The latest resolved GPU pick under the cursor (kept fresh by the world
+        // tier's drag pick driver); only an object face can be an outline
+        // target.
+        let Some(DragPickHit::Object { entity, .. }) = world_pick.hit else {
+            stage = match world_pick.hit {
+                None => "no drag pick has resolved under the cursor yet",
+                Some(DragPickHit::Avatar(_)) => "the cursor is over an avatar",
+                Some(DragPickHit::Ground { .. }) => "the cursor is over ground or water",
+                Some(DragPickHit::Object { .. }) => unreachable!("matched above"),
+            };
+            break 'decide None;
+        };
+        let Some((root, scoped)) = resolve_hover_entity(entity, &scene, &child_of, &objects) else {
+            stage = "the object under the cursor accepts no drop (not modifiable, no add flag)";
+            break 'decide None;
+        };
+        Some(crate::world_api::DragHover {
+            root,
+            // Foreign (red) when you cannot modify it — you may only drop via its
+            // "allow anyone to add inventory" flag.
+            foreign: !objects.agent_can_modify(&scoped),
+        })
     };
-    let want = target.map(|(root, scoped)| crate::world_api::DragHover {
-        root,
-        // Foreign (red) when you cannot modify it — you may only drop via its
-        // "allow anyone to add inventory" flag.
-        foreign: !objects.agent_can_modify(&scoped),
-    });
+    if *last_stage != Some(stage) {
+        *last_stage = Some(stage);
+        debug!(target: DRAG_HOVER_LOG_TARGET, "drag hover: {stage}");
+    }
     let changed = match (hover_out.hover, want) {
         (None, None) => false,
         (Some(a), Some(b)) => a.root != b.root || a.foreign != b.foreign,
