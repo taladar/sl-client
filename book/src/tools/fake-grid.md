@@ -1181,16 +1181,20 @@ under the login's identity (the client opens every circuit with its login
    localises; `sl_proto::teleport_strings` holds them);
 2. the destination session is prepared, placed (`set_arrival_position`
    — the `AgentMovementComplete` lands the avatar where the request
-   asked) and **registered before it is announced**, because the client
-   POSTs the destination seed the moment `EstablishAgentCommunication`
-   arrives and an unregistered `/sim/<n>/…` answers 404;
-3. the event-queue trio on the source: `EnableSimulator` (the client
-   opens a child circuit), `EstablishAgentCommunication` (the seed), and
-   `TeleportFinish` — the full reference record (`TeleportFinishInfo`:
-   agent id, region handle, region size, …; Firestorm builds the
-   destination region object from the handle, and the client reports the
-   wire handle rather than the one it requested, which is what a lure or
-   landmark teleport needs);
+   asked) and **registered before the finish names it**, because the
+   client contacts the destination the moment `TeleportFinish` arrives
+   and an unregistered `/sim/<n>/…` answers 404 to the seed it POSTs;
+3. `TeleportFinish` on the source's event queue, and **nothing before
+   it** — the full reference record (`TeleportFinishInfo`: agent id,
+   region handle, region size, …; Firestorm builds the destination
+   region object from the handle, and the client reports the wire handle
+   rather than the one it requested, which is what a lure or landmark
+   teleport needs). No `EnableSimulator` / `EstablishAgentCommunication`
+   precedes it: that is `TransferAgent_V2`'s shape (*"send TP Finish
+   directly, without prior ES or EAC. That's what happens in the Linden
+   grid"*), and announcing the destination first would make the client
+   mistake it for a neighbour it had been holding all along and keep the
+   world it should have thrown away;
 4. once the destination sees `AgentArrived`, the source is retired:
    `DisableSimulator` to the client, the session closed
    (`ServerEvent::CircuitRetired`, the pumps exit on the per-session

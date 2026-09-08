@@ -156,16 +156,31 @@ impl WorldScopedRegistry {
 /// session sets it exactly on the fresh-circuit branch, so a crossing or a
 /// neighbour teleport (which keep the world and re-base it) leave the flag
 /// false. A burst of them in one frame is still one reset.
+///
+/// Every region change logs which way the flag fell, at `info`, because the
+/// decision is made deep in the session from state no log otherwise names and
+/// is wrong in a way nothing else notices: a grid that hands the client its
+/// teleport destination before the finish makes every distant teleport look
+/// like a step next door, and the world it should have thrown away is kept
+/// silently. That is not hypothetical — it is what `sl-fake-grid` did, and one
+/// readable line per arrival is what settles it on any grid worth asking about.
 pub fn detect_world_reset(mut events: MessageReader<SlEvent>, mut frame: ResMut<WorldResetFrame>) {
-    let reset = events.read().any(|event| {
-        matches!(
-            &event.0,
-            SlSessionEvent::RegionChanged {
-                world_reset: true,
-                ..
+    let mut reset = false;
+    for event in events.read() {
+        if let SlSessionEvent::RegionChanged {
+            region_handle,
+            world_reset,
+            ..
+        } = &event.0
+        {
+            reset |= *world_reset;
+            if *world_reset {
+                info!("region change to {region_handle}: the world is purged and rebuilt");
+            } else {
+                info!("region change to {region_handle}: the world is kept and re-based");
             }
-        )
-    });
+        }
+    }
     // Write-on-change: the flag is false on almost every frame of a session, and
     // rewriting it would mark the resource changed forever.
     if frame.0 != reset {

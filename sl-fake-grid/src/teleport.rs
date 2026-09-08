@@ -5,11 +5,27 @@
 //! (`TransferAgent_V2`): `TeleportStart` + progress on the source, a
 //! **second** session in the destination region (a `SimSession` has its
 //! region handle fixed at construction, so a teleport is always a new
-//! socket/session/CAPS triple), the event-queue trio `EnableSimulator` +
-//! `EstablishAgentCommunication` (the client opens a child circuit and POSTs
-//! the destination seed) + `TeleportFinish` (the client promotes the child
-//! with `CompleteAgentMovement`), and — only once the destination saw the
-//! arrival — the source circuit's retirement with `DisableSimulator`.
+//! socket/session/CAPS triple), a `TeleportFinish` on the source's event
+//! queue naming that destination and its seed — and **nothing announcing the
+//! destination ahead of it** — after which the client opens the destination's
+//! circuit itself (`UseCircuitCode` + `CompleteAgentMovement`), and, only once
+//! the destination saw the arrival, the source circuit's retirement with
+//! `DisableSimulator`.
+//!
+//! The absent announcement is the part worth stating, because the grid used to
+//! send one. `TransferAgent_V2` says so in the source — "New protocol: send TP
+//! Finish directly, without prior ES or EAC. That's what happens in the Linden
+//! grid" — and only the legacy `TransferAgent_V1` prefixes the finish with
+//! `EnableSimulator` + `EstablishAgentCommunication`, and even then only for a
+//! destination outside view range. A destination handed over as a child
+//! circuit *before* the finish is indistinguishable, to the client, from a
+//! neighbour it has been holding all along, which is how this grid used to make
+//! every distant teleport keep the world it should have thrown away.
+//!
+//! A destination that is genuinely a **neighbour** was of course already
+//! announced — by [`crate::neighbours`], as a neighbour, long before any
+//! teleport — and this path reuses that session rather than opening a second
+//! one for the same region handle.
 //!
 //! Two entry points share [`teleport_session`]: the per-session
 //! responder task answering the client's own requests (location, landmark,
@@ -38,7 +54,7 @@ use crate::runtime::{GridCore, TeleportNotice};
 pub const TELEPORT_ARRIVAL_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// How long the grid waits for the client to acknowledge the `TeleportStart`
-/// before it announces the destination anyway.
+/// before it sends the `TeleportFinish` anyway.
 ///
 /// A real simulator does not wait for this ack, and does not have to: the
 /// handover it performs between the start and the finish is tens of
@@ -136,9 +152,8 @@ pub(crate) async fn teleport_session(
     }
 
     // The black screen goes up, and the viewer learns what is happening. The
-    // start's sequence number is kept so the destination can be announced
-    // behind the client's acknowledgement of it
-    // ([`TELEPORT_START_ACK_TIMEOUT`]).
+    // start's sequence number is kept so the finish can be held behind the
+    // client's acknowledgement of it ([`TELEPORT_START_ACK_TIMEOUT`]).
     let start_sequence = source
         .with_sim(|sim| {
             let now = source.now();
@@ -153,9 +168,9 @@ pub(crate) async fn teleport_session(
     // The destination session. A neighbour of the source is already open as a
     // child circuit ([`crate::neighbours`]) — reuse it, or the client is handed
     // two simulators for one region handle and streams the destination's scene
-    // twice. Otherwise a fresh one, registered before it is announced: the
-    // client POSTs the seed the moment `EstablishAgentCommunication` arrives,
-    // and an unregistered `/sim/<seq>/…` answers 404.
+    // twice. Otherwise a fresh one, registered before the finish names it: the
+    // client contacts the destination the moment the `TeleportFinish` arrives,
+    // and an unregistered `/sim/<seq>/…` answers 404 to the seed it POSTs.
     let (dest, dest_seq, dest_addr, dest_seed, opened_here) =
         match core.session_of(agent_id, request.region).await {
             Some(shared) => {
@@ -193,7 +208,7 @@ pub(crate) async fn teleport_session(
                 )
             }
         };
-    // Subscribe before announcing, or the arrival can slip past.
+    // Subscribe before the finish goes out, or the arrival can slip past.
     let mut dest_events = dest.subscribe_events();
 
     let finish = TeleportFinishInfo {
@@ -201,7 +216,7 @@ pub(crate) async fn teleport_session(
         location_id: sl_proto::TELEPORT_FINISH_LOCATION_ID,
         dest: dest_addr,
         region_handle: dest_handle,
-        seed: dest_seed.clone(),
+        seed: dest_seed,
         sim_access,
         teleport_flags: request.flags,
         region_size: (
@@ -216,19 +231,30 @@ pub(crate) async fn teleport_session(
     if !wait_for_start_ack(source, start_sequence).await {
         tracing::debug!(
             "teleport of session {source_seq}: no TeleportStart ack within \
-             {TELEPORT_START_ACK_TIMEOUT:?}; announcing the destination regardless"
+             {TELEPORT_START_ACK_TIMEOUT:?}; sending the finish regardless"
         );
     }
 
     source
         .with_sim(|sim| {
             let now = source.now();
-            // Re-announced even for a circuit the client already holds: the
-            // announcement is idempotent (the client keeps one child circuit
-            // per address) and a destination it somehow lost is one the
-            // `TeleportFinish` below could not promote.
-            sim.enqueue_enable_simulator(dest_handle, dest_addr);
-            sim.enqueue_establish_agent_communication(dest_addr, &dest_seed);
+            // The destination is **not** announced first. `TransferAgent_V2`
+            // sends the finish on its own — "New protocol: send TP Finish
+            // directly, without prior ES or EAC. That's what happens in the
+            // Linden grid" — and only the legacy `TransferAgent_V1` puts an
+            // `EnableSimulator` + `EstablishAgentCommunication` in front of it,
+            // and then only for a destination outside view range. The reference
+            // viewer needs no announcement either: `process_teleport_finish`
+            // sends `UseCircuitCode` to the address the finish names whether or
+            // not it already holds that region.
+            //
+            // The difference is not cosmetic. A client that is handed the
+            // destination as a child circuit before the finish cannot tell a
+            // teleport destination from a neighbour it has been holding all
+            // along, so it keeps the departed world instead of dropping it —
+            // which is exactly how this grid made every distant teleport report
+            // `world_reset = false`. See the roadmap task
+            // `viewer-teleport-never-resets-the-world`.
             sim.send_teleport_progress(teleport_strings::ARRIVING, request.flags, now)?;
             sim.enqueue_teleport_finish(&finish);
             Ok::<(), sl_proto::Error>(())

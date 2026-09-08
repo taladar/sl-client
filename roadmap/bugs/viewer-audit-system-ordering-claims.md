@@ -33,3 +33,13 @@ non-reproduced legacy-specular edit crash seen on aditi.
 
 Fix: add `.chain()` or explicit `.after()` edges so the schedule matches the
 comments — or correct the comments where the order genuinely does not matter.
+
+One member of this family has since been found *live* rather than statically and
+fixed: the world-reset purge and the object fold both read `SlEvent` with no
+edge to the system that writes it, so they disagreed by a frame about the same
+batch and a teleport arrived in an empty region
+([[viewer-teleport-never-resets-the-world]]). The edge it needed did not exist
+to be written — `sl_client_bevy`'s writer is private — so that fix added
+`SlClientSystems::SessionDrained` as the name to order against. Any other reader
+of `SlEvent` whose *effect* must land in a particular frame has the same
+problem, and now has the same vocabulary for it.

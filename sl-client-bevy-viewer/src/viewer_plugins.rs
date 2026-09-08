@@ -28,8 +28,8 @@ use bevy::camera::visibility::{RenderLayers, VisibilitySystems};
 use bevy::light::DirectionalLightShadowMap;
 use bevy::prelude::*;
 use sl_client_bevy::{
-    CloudMaterialPlugin, SkyMaterialPlugin, StarMaterialPlugin, SunDiscMaterialPlugin,
-    TerrainMaterialPlugin, WaterMaterialPlugin,
+    CloudMaterialPlugin, SkyMaterialPlugin, SlClientSystems, StarMaterialPlugin,
+    SunDiscMaterialPlugin, TerrainMaterialPlugin, WaterMaterialPlugin,
 };
 
 use crate::animations::AnimationPlayback;
@@ -431,12 +431,27 @@ impl Plugin for ViewerWorldPlugins {
         // anchor, so re-centring afterwards simply anchors on the destination instead
         // of shifting the (already purged) scene by a delta from the region we left.
         // A crossing or a neighbour teleport keeps the world and never purges at all.
+        //
+        // `Detect` is pinned **after** the session drain, and that edge is the
+        // load-bearing one. Both `detect_world_reset` and the folds below read
+        // the same `SlEvent` channel, and neither was ordered against the system
+        // that writes it — so the scheduler was free to run the detector before
+        // the writer and the object fold after it, which puts them a whole frame
+        // apart on the same batch. The arrival then went: fold the destination's
+        // objects (frame N), notice the reset (frame N+1), purge the scene that
+        // had just been built. A teleport landed in an empty region and nothing
+        // failed, because the flag that drives all of this had never once been
+        // true against a real grid. See the roadmap task
+        // `viewer-teleport-never-resets-the-world`.
         app.configure_sets(
             Update,
-            WorldResetSystems::Purge
-                .before(recenter_terrain)
-                .before(recenter_objects)
-                .before(recenter_avatars),
+            (
+                WorldResetSystems::Detect.after(SlClientSystems::SessionDrained),
+                WorldResetSystems::Purge
+                    .before(recenter_terrain)
+                    .before(recenter_objects)
+                    .before(recenter_avatars),
+            ),
         );
         app.init_resource::<EnvironmentState>();
         app.init_resource::<VolumeMorphGain>();

@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 101 |
-| ready | 322 |
+| ready | 323 |
 | blocked | 46 |
 | in-progress | 20 |
-| bugs | 61 |
-| done | 1029 |
+| bugs | 60 |
+| done | 1030 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1618** |
+| **total** | **1619** |
 
 ## ideas (101)
 
@@ -240,7 +240,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (322)
+## ready (323)
 
 ### protocol
 
@@ -894,6 +894,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-about-floater` (done))
 - [`viewer-table-widget-remaining`](ready/viewer-table-widget-remaining.md) —
   Remaining table-widget migrations (inventory columns, full friends rights)
+- [`viewer-teleport-reset-defeated-by-a-v1-grid`](ready/viewer-teleport-reset-defeated-by-a-v1-grid.md)
+  — A grid that announces the teleport destination first suppresses the world
+  reset
 - [`viewer-terrain-edit-brushes`](ready/viewer-terrain-edit-brushes.md) —
   Terrain editing — sculpt brushes (blocked by `viewer-input-action-map` (done),
   `viewer-region-options-debug` (done))
@@ -1193,7 +1196,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (61)
+## bugs (60)
 
 ### viewer
 
@@ -1315,9 +1318,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A sunlit opaque face pins red and green rather than showing its texture
 - [`viewer-takeoff-hold-jumps-instead-of-flying`](bugs/viewer-takeoff-hold-jumps-instead-of-flying.md)
   — Holding the fly key jumps instead of taking off
-- [`viewer-teleport-never-resets-the-world`](bugs/viewer-teleport-never-resets-the-world.md)
-  — A teleport never sets world_reset, so the world-scoped purge may be dead
-  code
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
@@ -1343,7 +1343,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1029)
+## done (1030)
 
 ### protocol
 
@@ -2734,6 +2734,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-teleport-flow-progress`](done/viewer-teleport-flow-progress.md) —
   Teleport flow — progress screen & arrival (blocked by
   `viewer-ui-notification-host` (done))
+- [`viewer-teleport-never-resets-the-world`](done/viewer-teleport-never-resets-the-world.md)
+  — A teleport never set world_reset, because the fake grid announced the
+  destination first
 - [`viewer-terrain-region-edge-seam-slope`](done/viewer-terrain-region-edge-seam-slope.md)
   — Terrain seam / misalignment at region edges on slopes
 - [`viewer-test-baseline-format`](done/viewer-test-baseline-format.md) — One

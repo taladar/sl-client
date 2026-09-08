@@ -493,6 +493,27 @@ pub struct SlClientPlugin {
     pub offline: bool,
 }
 
+/// The points in a frame that a consumer of the session's output orders itself
+/// against.
+///
+/// Without one of these, a system that reads [`SlEvent`] is unordered against
+/// the system that *writes* it, so which frame it sees a given event in is up to
+/// the scheduler — and two such systems can disagree by a frame about the same
+/// event. That is harmless for a reader that only accumulates, and a real bug
+/// for two readers whose effects must land in the right order: the world-reset
+/// purge reading a `RegionChanged` one frame after the object fold read the
+/// arrival burst deletes the scene it was supposed to make room for.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SlClientSystems {
+    /// This frame's session events have been written to [`SlEvent`] and the
+    /// region mirror ([`SlIdentity`] and the region index behind it) folded
+    /// from them.
+    ///
+    /// A reader ordered after this sees **this** frame's events, so every such
+    /// reader agrees on which frame an event belongs to.
+    SessionDrained,
+}
+
 impl Plugin for SlClientPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<SlEvent>()
@@ -519,7 +540,12 @@ impl Plugin for SlClientPlugin {
             .init_resource::<SlRegionIndex>()
             .add_systems(Startup, start_login)
             // `maintain_world` reads the events `drive` writes, so chain it after.
-            .add_systems(Update, (drive, maintain_world).chain());
+            .add_systems(
+                Update,
+                (drive, maintain_world)
+                    .chain()
+                    .in_set(SlClientSystems::SessionDrained),
+            );
     }
 }
 

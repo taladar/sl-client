@@ -88,19 +88,37 @@ TeleportStarted
 
 ## Cross-region handover and child circuits
 
-For a cross-region teleport (and for ordinary border crossings), the destination
-must be reachable before the avatar arrives. The current region announces the
-destination so the client can pre-establish a connection:
+A region **announces its neighbours**, so a client is already connected to the
+regions around it before it ever steps across a border:
 
 - an **`EnableSimulator`** message and/or an **`EstablishAgentCommunication`**
-  event give the neighbour/destination's address and **seed capability**
-  (surfaced here as `Event::NeighborSeed { sim, seed_capability }` and
+  event give the neighbour's address and **seed capability** (surfaced here as
+  `Event::NeighborSeed { sim, seed_capability }` and
   `Event::NeighborDiscovered`),
 - the client POSTs that seed to establish a **child circuit**, and
-- on the teleport finishing, that child circuit is promoted to the root circuit.
+- on a crossing — or a teleport *into that neighbour* — the child circuit is
+  promoted to the root circuit.
 
-This is the same mechanism that lets an avatar see and step into a neighbouring
-region seamlessly — a deliberate teleport is just the long-distance version.
+A **distant** teleport is not the long-distance version of that. Its
+destination is announced by nothing: `TeleportFinish` carries the destination's
+address and seed itself, and the client opens the circuit off the back of it
+(`UseCircuitCode` + `CompleteAgentMovement`). OpenSim's `TransferAgent_V2` says
+so where it sends the finish — *"New protocol: send TP Finish directly, without
+prior ES or EAC. That's what happens in the Linden grid"* — and the reference
+viewer's `process_teleport_finish` matches, sending `UseCircuitCode` to the
+address the finish names whether or not it already holds that region. Only the
+legacy `TransferAgent_V1`, taken when the destination speaks a simulator
+protocol older than 0.2, puts an `EnableSimulator` +
+`EstablishAgentCommunication` in front of the finish.
+
+That difference is what `Event::RegionChanged`'s **`world_reset`** flag reads.
+A destination that is already a child circuit, or positionally adjacent, keeps
+the world and merely re-bases it; anything else replaces it, and the flag tells
+the viewer to purge every store scoped to the world it just left. A grid that
+announced its teleport destinations would make every destination look like a
+neighbour and the flag would never fire — which is exactly what `sl-fake-grid`
+did until it was corrected; the roadmap task
+`viewer-teleport-never-resets-the-world` has the whole story.
 
 > **Practical note.** True cross-region teleport requires holding child-agent
 > circuits to the destination. The `sl-survey` tool sidesteps this: rather than
@@ -124,14 +142,19 @@ position and look-at; `TeleportViaLandmark`; `TeleportViaLure`;
   `send_teleport_progress`, and either `send_teleport_local` (an
   intra-region finish — no circuit change) or `send_teleport_failed`
   (back to active with a reason).
-- **The event-queue trio** for an inter-region teleport, enqueued on the
-  source's CAPS event queue: `enqueue_enable_simulator` (the client
-  opens a *child* circuit to the destination),
-  `enqueue_establish_agent_communication` (the child's seed capability —
-  this event has **no** UDP form), and `enqueue_teleport_finish` (the
-  client promotes the child and sends `CompleteAgentMovement` on it).
-  `enqueue_crossed_region` is the border-crossing variant (no teleport
-  screen).
+- **Event-queue mechanics** on the source's CAPS event queue:
+  `enqueue_teleport_finish` finishes an inter-region teleport on its own
+  (the client opens the destination's circuit and sends
+  `CompleteAgentMovement` on it), and `enqueue_crossed_region` is the
+  border-crossing variant (no teleport screen).
+- **Neighbour announcement**, which is a *separate* concern that happens
+  on arrival rather than on teleport: `enqueue_enable_simulator` (the
+  client opens a *child* circuit) and
+  `enqueue_establish_agent_communication` (that child's seed capability —
+  this event has **no** UDP form). Putting these in front of a teleport's
+  finish is the legacy `TransferAgent_V1` shape, and it hides a distant
+  destination behind a neighbour's face; see [Cross-region handover and
+  child circuits](#cross-region-handover-and-child-circuits).
 
 The destination `SimSession` tracks **agent presence**: a circuit opened
 by `UseCircuitCode` alone hosts a *child* agent

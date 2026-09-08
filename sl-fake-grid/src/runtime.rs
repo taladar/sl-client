@@ -1618,8 +1618,9 @@ impl FakeGrid {
 
     /// Teleports a logged-in agent to `region_name` — the grid-initiated
     /// counterpart of a client request (what a lure or a scripted push does):
-    /// `TeleportStart`, the destination session, the event-queue trio, and
-    /// the source's retirement once the destination confirms the arrival.
+    /// `TeleportStart`, the destination session, the `TeleportFinish` naming
+    /// it, and the source's retirement once the destination confirms the
+    /// arrival.
     /// Returns the handle onto the destination session; a same-region request
     /// finishes as a `TeleportLocal` and returns `agent` itself.
     ///

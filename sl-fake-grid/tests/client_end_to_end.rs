@@ -1118,10 +1118,12 @@ mod test {
 
     /// The full inter-region teleport over the loopback: the client's own
     /// `TeleportLocationRequest` is answered with the teleport screen, the
-    /// progress keys, the destination's child seed, a `TeleportFinish` naming
-    /// the destination handle, and the arrival — the client lands with a
-    /// world-resetting `RegionChanged`, the destination's handshake and world
-    /// burst follow, and the source session is retired.
+    /// progress keys, and a `TeleportFinish` naming the destination handle,
+    /// address and seed — with **nothing** announcing that destination before
+    /// the finish, as on a real grid. The client opens the destination circuit
+    /// itself and lands with a world-resetting `RegionChanged`, the
+    /// destination's handshake and world burst follow, and the source session
+    /// is retired.
     #[tokio::test]
     async fn inter_region_teleport_over_loopback() -> Result<(), TestError> {
         let mut running = start_in(vec![RegionConfig::default(), east_region()]).await?;
@@ -1150,11 +1152,18 @@ mod test {
         running
             .wait_for(|event| matches!(event, Event::TeleportStarted).then_some(()))
             .await?;
-        // The destination's `RegionHandshake` arrives on the child circuit
-        // (before the finish), so its name is collected across the sequence.
+        // The destination's `RegionHandshake` only arrives once the client has
+        // opened its circuit, which it does on the finish — but the client is
+        // quick about it, so the name is collected across the whole sequence
+        // rather than waited for at one point.
         let mut handshakes = Vec::new();
         let mut progress = Vec::new();
-        let dest_sim = running
+        // Every simulator the client was handed a seed for before the finish.
+        // Nothing announces the destination ahead of it (see
+        // `sl_fake_grid::teleport`), so the finish is where the client first
+        // learns the destination's address, and this list must not contain it.
+        let mut seeded = Vec::new();
+        let (finished_handle, dest_sim) = running
             .wait_for(|event| match event {
                 Event::TeleportProgress { message, .. } => {
                     progress.push(message.clone());
@@ -1164,30 +1173,27 @@ mod test {
                     handshakes.push(identity.sim_name.as_ref().map(ToString::to_string));
                     None
                 }
-                Event::NeighborSeed { sim, .. } => Some(*sim),
+                Event::NeighborSeed { sim, .. } => {
+                    seeded.push(*sim);
+                    None
+                }
+                Event::TeleportFinished {
+                    region_handle, sim, ..
+                } => Some((*region_handle, *sim)),
                 _ => None,
             })
             .await?;
-        // UDP progress lines may outrun the CAPS seed; the keys are what
+        // UDP progress lines may outrun the CAPS finish; the keys are what
         // matters, in order.
         assert_eq!(progress.first().map(String::as_str), Some("resolving"));
         assert_eq!(progress.get(1).map(String::as_str), Some("sending_dest"));
         assert!(dest_sim.ip().is_loopback());
-
-        let (finished_handle, finished_sim) = running
-            .wait_for(|event| match event {
-                Event::TeleportFinished {
-                    region_handle, sim, ..
-                } => Some((*region_handle, *sim)),
-                Event::RegionInfoHandshake(identity) => {
-                    handshakes.push(identity.sim_name.as_ref().map(ToString::to_string));
-                    None
-                }
-                _ => None,
-            })
-            .await?;
         assert_eq!(finished_handle, dest_handle);
-        assert_eq!(finished_sim, dest_sim);
+        assert!(
+            !seeded.contains(&dest_sim),
+            "the teleport destination {dest_sim} was seeded before the finish, so the client \
+             cannot tell it from a neighbour it was already holding — seeded: {seeded:?}"
+        );
 
         let (changed_handle, world_reset) = running
             .wait_for(|event| match event {
@@ -1204,13 +1210,20 @@ mod test {
             })
             .await?;
         assert_eq!(changed_handle, dest_handle);
-        // The destination was announced (`EnableSimulator`) before the
-        // finish, so the client already held it as a child circuit and keeps
-        // its scene — distance alone does not reset the world.
-        assert!(!world_reset, "a pre-announced destination keeps the scene");
+        // Ten regions east, and nothing handed the client that region before
+        // the finish: the destination is neither adjacent nor already a child
+        // circuit, so the world the agent left is thrown away rather than
+        // re-based. This is the flag every `WorldScoped` store's purge hangs
+        // off — see the roadmap task `viewer-teleport-never-resets-the-world`
+        // for the sessions that reported `false` here because this grid
+        // announced the destination first.
+        assert!(
+            world_reset,
+            "a distant teleport to an unannounced region resets the world"
+        );
 
-        // The destination greeted the child circuit with its own handshake,
-        // and the arrival world burst follows the promotion.
+        // The destination greeted the circuit the client opened for the
+        // handover, and the arrival world burst follows the promotion.
         if !handshakes.contains(&Some("Fake Region East".to_owned())) {
             running
                 .wait_for(|event| match event {
@@ -1913,11 +1926,31 @@ mod test {
                 },
             })
             .await?;
+        let mut world_reset = None;
         running
             .wait_until("the arrival in the east region", |event| {
-                matches!(event, Event::RegionChanged { region_handle, .. } if *region_handle == east)
+                if let Event::RegionChanged {
+                    region_handle,
+                    world_reset: reset,
+                    ..
+                } = event
+                    && *region_handle == east
+                {
+                    world_reset = Some(*reset);
+                }
+                world_reset.is_some()
             })
             .await?;
+        // The other half of the pair `inter_region_teleport_over_loopback`
+        // pins: a destination the client already borders *and* already holds a
+        // circuit to keeps its scene, where a distant unannounced one throws it
+        // away. Both halves have to be nailed down, or "always reset" and
+        // "never reset" each pass one test.
+        assert_eq!(
+            world_reset,
+            Some(false),
+            "a teleport next door re-bases the scene it has; it does not throw it away"
+        );
 
         let notice = tokio::time::timeout(WAIT, teleports.recv()).await??;
         assert_eq!(
@@ -1947,14 +1980,14 @@ mod test {
     /// already open, so the grid has almost no work to do between the UDP
     /// `TeleportStart` and the CAPS `TeleportFinish` — and those two travel on
     /// different transports, which the client's driver reads with an unbiased
-    /// select. Announce the destination too soon and the client can decode the
-    /// finish first, surfacing `TeleportFinished` ahead of `TeleportStarted`
-    /// (see `sl-proto`'s `a_caps_finish_ahead_of_the_udp_start_reorders_the_phases`
+    /// select. Send the finish too soon and the client can decode it first,
+    /// surfacing `TeleportFinished` ahead of `TeleportStarted` (see
+    /// `sl-proto`'s `a_caps_finish_ahead_of_the_udp_start_reorders_the_phases`
     /// for exactly what that produces).
     ///
     /// The grid closes that window by waiting for the client's acknowledgement
-    /// of the start before it announces the destination, so the whole sequence
-    /// is collected here in **one** wait and asserted as an order, not a set.
+    /// of the start before it sends the finish, so the whole sequence is
+    /// collected here in **one** wait and asserted as an order, not a set.
     #[tokio::test]
     async fn a_neighbour_teleport_starts_before_it_finishes() -> Result<(), TestError> {
         let mut running = start_in(vec![RegionConfig::default(), adjacent_east_region()]).await?;

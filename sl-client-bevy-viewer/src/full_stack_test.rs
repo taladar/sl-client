@@ -2641,12 +2641,16 @@ mod tests {
 
     /// Step frames until every circuit in `source` has left the object store.
     ///
-    /// The departed region's objects do **not** go away on the arrival event.
-    /// They go when the source circuit is retired, which the grid does only once
-    /// the destination has confirmed the arrival — strictly after the
-    /// `RegionChanged` that [`ViewerHarness::teleport_to`] waits for, and after
-    /// the quiet [`ViewerHarness::capture`] waits for, since "quiet" means a
-    /// region is up and no asset work is outstanding and says nothing about a
+    /// Two mechanisms empty it and neither is done when the arrival is. The
+    /// `world_reset` purge takes the store on the `RegionChanged` frame — but
+    /// the source circuit is still **live** at that moment, and goes on
+    /// streaming until the grid retires it, which it does only once the
+    /// destination has confirmed the arrival. So an update that was already in
+    /// flight can land *after* the purge and put the departed region back in the
+    /// store, and only retirement closes that window. Both are strictly after
+    /// the `RegionChanged` that [`ViewerHarness::teleport_to`] waits for, and
+    /// after the quiet [`ViewerHarness::capture`] waits for, since "quiet" means
+    /// a region is up and no asset work is outstanding and says nothing about a
     /// circuit that is on its way out.
     ///
     /// So a test that asserts the store is clean the moment it gets a frame is
