@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 322 |
 | blocked | 46 |
 | in-progress | 20 |
-| bugs | 61 |
-| done | 1025 |
+| bugs | 62 |
+| done | 1026 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1614** |
+| **total** | **1616** |
 
 ## ideas (101)
 
@@ -1193,7 +1193,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (61)
+## bugs (62)
 
 ### viewer
 
@@ -1314,6 +1314,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A sunlit opaque face pins red and green rather than showing its texture
 - [`viewer-takeoff-hold-jumps-instead-of-flying`](bugs/viewer-takeoff-hold-jumps-instead-of-flying.md)
   — Holding the fly key jumps instead of taking off
+- [`viewer-teleport-never-resets-the-world`](bugs/viewer-teleport-never-resets-the-world.md)
+  — A teleport never sets world_reset, so the world-scoped purge may be dead
+  code
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
@@ -1341,7 +1344,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1025)
+## done (1026)
 
 ### protocol
 
@@ -3504,6 +3507,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Typing indicator — [aditi] variant
 - [`test-wearables-request`](done/test-wearables-request-request-current-wearables-agentwearablesrequest-and-assert-t.md)
   — request current wearables (AgentWearablesRequest) and assert the simul
+- [`viewer-full-stack-teleport-leftover-race`](done/viewer-full-stack-teleport-leftover-race.md)
+  — The full-stack teleport tests sampled a postcondition nothing waited for
 
 ### api
 

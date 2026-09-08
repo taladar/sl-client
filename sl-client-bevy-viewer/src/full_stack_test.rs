@@ -2628,15 +2628,7 @@ mod tests {
         let now = centroid(&after, disc_after, Marker::Red)
             .ok_or("the destination's checker is not in the picture")?;
 
-        let left: Vec<sl_proto::CircuitId> = tracked_circuits(&harness)
-            .into_iter()
-            .filter(|circuit| source_circuits.contains(circuit))
-            .collect();
-        assert!(
-            left.is_empty(),
-            "the region the teleport left still has objects in the world ({left:?}) — the scene \
-             was emptied around them rather than purged"
-        );
+        wait_for_circuits_to_leave(&mut harness, &source_circuits)?;
 
         let drift = Vec2::new(now.x - was.x, now.y - was.y).length();
         assert!(
@@ -2645,6 +2637,39 @@ mod tests {
              destination's scene was not built on the destination's origin"
         );
         harness.logout()
+    }
+
+    /// Step frames until every circuit in `source` has left the object store.
+    ///
+    /// The departed region's objects do **not** go away on the arrival event.
+    /// They go when the source circuit is retired, which the grid does only once
+    /// the destination has confirmed the arrival — strictly after the
+    /// `RegionChanged` that [`ViewerHarness::teleport_to`] waits for, and after
+    /// the quiet [`ViewerHarness::capture`] waits for, since "quiet" means a
+    /// region is up and no asset work is outstanding and says nothing about a
+    /// circuit that is on its way out.
+    ///
+    /// So a test that asserts the store is clean the moment it gets a frame is
+    /// sampling a value that has not settled, and whether it has is a matter of
+    /// how many frames fitted in a wall-clock budget — which is exactly why
+    /// these tests failed under parallel load and passed alone
+    /// (`viewer-full-stack-teleport-leftover-race`). Waiting for the
+    /// postcondition itself makes it deterministic without weakening it: a
+    /// removal that never happens still fails, as a timeout carrying the
+    /// harness's full report.
+    fn wait_for_circuits_to_leave(
+        harness: &mut ViewerHarness,
+        source: &[sl_proto::CircuitId],
+    ) -> Result<(), TestError> {
+        harness.run_until(
+            "the departed region's objects to leave the store",
+            |harness| {
+                tracked_circuits(harness)
+                    .into_iter()
+                    .all(|circuit| !source.contains(&circuit))
+                    .then_some(())
+            },
+        )
     }
 
     /// Every circuit the viewer currently has tracked objects from.
@@ -2744,14 +2769,7 @@ mod tests {
             return Ok(());
         };
 
-        let left: Vec<sl_proto::CircuitId> = tracked_circuits(&harness)
-            .into_iter()
-            .filter(|circuit| source_circuits.contains(circuit))
-            .collect();
-        assert!(
-            left.is_empty(),
-            "objects from the region the teleport left are still in the world ({left:?})"
-        );
+        wait_for_circuits_to_leave(&mut harness, &source_circuits)?;
         let outstanding = harness.world().resource::<SceneWork>().outstanding;
         assert!(
             outstanding == 0,
