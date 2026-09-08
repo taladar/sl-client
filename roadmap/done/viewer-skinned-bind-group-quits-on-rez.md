@@ -178,9 +178,18 @@ The cost that buys is real and is written down rather than papered over: avatar
 faces now pay the straddle test every frame, because the posed bound is
 rewritten every frame ([[viewer-posed-avatar-bounds-rewritten-every-frame]]).
 
-## Still worth deciding separately
+## Decided: a validation error stays fatal
 
-Whether a wgpu validation error should be fatal in a release build at all. The
-reference viewer logs and drops the draw. Nothing here depends on that answer
-any more, but it is the difference between one bad content path being a crash
-and being an artifact.
+Whether a wgpu validation error should be fatal in a release build was left open
+while the cause was being found, since the reference viewer logs and drops the
+draw. **Decided (2026-09-08): it stays fatal.** A crash is preferable to
+corruption — crashes get fixed, silent corruption does not — and at this stage
+nothing is released, so there is no user to spare the hard failure. That the
+reference viewer chooses otherwise is not a reason to copy it; it ships to
+people who cannot fix it.
+
+The effort belongs in making a fatal error *say what broke*, not in making it
+quieter. `crate::skin_agreement` is that: it fails **earlier** than the wgpu
+error it pre-empts, in the main world, naming the entity, its ancestry and its
+mesh — which is what turned this bug from an unattributable crash into a
+diagnosis in one run.

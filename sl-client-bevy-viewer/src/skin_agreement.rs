@@ -47,10 +47,12 @@
 //! **before** the extract that would hand the mismatch to wgpu — and fails
 //! naming the entity, its ancestry and its mesh.
 //!
-//! It is deliberately still fatal. Making the validation error non-fatal would
-//! hide a real bug in exactly the release builds this project tests with; the
-//! point here is to fail *earlier*, and to say something actionable when it
-//! does. The static twin of this check is `crate::render_test`'s
+//! It is deliberately still fatal, and that is a settled decision rather than an
+//! oversight: a crash is preferable to corruption, because crashes get fixed and
+//! silent corruption does not — and nothing here is released, so there is no
+//! user to spare the hard failure. The reference viewer logs and drops the draw;
+//! it also ships to people who cannot fix it. So the effort goes into failing
+//! *earlier* and saying something actionable, not into failing more quietly. The static twin of this check is `crate::render_test`'s
 //! `unskinned_violations`, which decides the same property for the scenes a test
 //! can build — this one covers the content only a grid can produce.
 
