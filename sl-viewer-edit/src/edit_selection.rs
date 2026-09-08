@@ -31,11 +31,13 @@
 //!   object killed out of the scene is pruned.
 //! - The **highlight** (`apply_selection_highlight`): every face mesh of a
 //!   selected object (and its linkset children) gets a translucent unlit
-//!   overlay child sharing its mesh — a simpler stand-in for the reference's
-//!   silhouette edge rendering (`generateSilhouette`), deliberately not a
-//!   port of it. A **rigged** face wears a wireframe of its posed geometry
-//!   instead, which is what the reference draws for a mesh object
-//!   (`renderMeshSelection_f`); see the `selection_wireframe` module.
+//!   overlay child. Which overlay follows the reference's own split by object
+//!   kind: a face of an uploaded **mesh** object (`isMesh()`, rigged or not)
+//!   wears a wireframe of its geometry — posed with it when it is rigged —
+//!   as `renderMeshSelection_f` draws, see the `selection_wireframe` module;
+//!   every other face (prim, sculpt, tree, grass) wears an inflated shell
+//!   sharing its mesh, a simpler stand-in for the reference's silhouette edge
+//!   rendering (`generateSilhouette`), deliberately not a port of it.
 //!
 //! Reference (Firestorm, read-only): `llselectmgr`, `lltoolselect`,
 //! `lltoolselectrect`.
@@ -63,7 +65,7 @@ use crate::gizmos::GizmoInteraction;
 use crate::inventory::InventoryModel;
 use crate::objects::ObjectPicker;
 use crate::objects::{
-    FaceTextureDebug, ObjectCategory, ObjectSlMotion, PrimFaceEntity, SceneObject,
+    FaceTextureDebug, ObjectCategory, ObjectSlMotion, PrimFaceEntity, SceneObject, WornPickTarget,
 };
 use crate::ui::UiRoot;
 use crate::world_api::InputContext;
@@ -884,8 +886,10 @@ fn apply_selection_highlight(
     selection: Res<SelectionSet>,
     assets: Res<HighlightAssets>,
     children: Query<&Children>,
-    scene: Query<(), With<SceneObject>>,
+    scene: Query<&SceneObject>,
+    transforms: Query<&Transform>,
     faces: HighlightFaceQuery,
+    worn: WornFaceQuery,
     mut overlays: Query<(
         Entity,
         &ChildOf,
@@ -895,10 +899,13 @@ fn apply_selection_highlight(
     mut meshes: ResMut<Assets<Mesh>>,
     mut commands: Commands,
 ) {
-    // The desired overlay set: face entity → outline kind. A committed
-    // outline (primary, then root, then child) wins over a tentative one when
-    // both apply.
-    let mut desired: HashMap<Entity, HighlightKind> = HashMap::new();
+    // The desired overlay set: face entity → the outline it should wear. A
+    // committed outline (primary, then root, then child) wins over a tentative one
+    // when both apply.
+    let mut desired: HashMap<Entity, DesiredOutline> = HashMap::new();
+    // The same set by scoped id, for the worn rigged faces the hierarchy walk
+    // cannot reach ([`collect_worn_faces`]).
+    let mut objects: HashMap<ScopedObjectId, HighlightKind> = HashMap::new();
     // In Select Face mode the per-face grid cursor ([`apply_face_cursor_highlight`])
     // is the highlight; the whole-object silhouette outline is suppressed so the
     // two do not stack.
@@ -917,10 +924,12 @@ fn apply_selection_highlight(
                 node.entity,
                 &children,
                 &scene,
+                &transforms,
                 &faces,
                 root_kind,
                 HighlightKind::Child,
                 &mut desired,
+                &mut objects,
             );
         }
         for (_scoped, entity) in selection.rect_pending() {
@@ -928,32 +937,36 @@ fn apply_selection_highlight(
                 *entity,
                 &children,
                 &scene,
+                &transforms,
                 &faces,
                 HighlightKind::Pending,
                 HighlightKind::Pending,
                 &mut desired,
+                &mut objects,
             );
         }
+        collect_worn_faces(&objects, &worn, &mut desired);
     }
     // Despawn stale overlays; an overlay whose face is still highlighted stays,
     // taking the new colour in place rather than being rebuilt. That matters for
-    // a rigged face, whose overlay is a derived wireframe mesh: promoting one
+    // a mesh face, whose overlay is a derived wireframe mesh: promoting one
     // selection to primary re-colours a whole linkset, and rebuilding a body's
     // worth of edges to change a tint would be a visible hitch.
     for (overlay, child_of, mut marker, mut material) in &mut overlays {
         match desired.remove(&child_of.parent()) {
-            Some(kind) => {
-                if kind != marker.kind {
-                    marker.kind = kind;
-                    material.0 = assets.material(kind);
+            Some(outline) => {
+                if outline.kind != marker.kind {
+                    marker.kind = outline.kind;
+                    material.0 = assets.material(outline.kind);
                 }
             }
             None => commands.entity(overlay).despawn(),
         }
     }
-    // Spawn the missing ones: an inflated shell sharing the face's mesh (a
-    // wireframe of it, for a rigged one) — see [`spawn_outline_overlay`].
-    for (face, kind) in desired {
+    // Spawn the missing ones: a wireframe of the face's mesh for a mesh object (or
+    // a rigged face), an inflated shell sharing it otherwise — see
+    // [`spawn_outline_overlay`].
+    for (face, outline) in desired {
         let Ok((mesh, skin)) = faces.get(face) else {
             continue;
         };
@@ -961,8 +974,9 @@ fn apply_selection_highlight(
             face,
             mesh,
             skin,
-            assets.material(kind),
-            SelectionHighlightOverlay { kind },
+            outline,
+            assets.material(outline.kind),
+            SelectionHighlightOverlay { kind: outline.kind },
             &mut meshes,
             &mut commands,
         );
@@ -974,34 +988,69 @@ fn apply_selection_highlight(
 type HighlightFaceQuery<'w, 's> =
     Query<'w, 's, (&'static Mesh3d, Option<&'static SkinnedMesh>), With<PrimFaceEntity>>;
 
+/// The worn-rigged-face query both reconcilers walk once the hierarchy walk is
+/// done: a face and the worn object it renders. These faces hang off their
+/// **wearer's** body root, so nothing under the selected object's entity leads to
+/// them — see [`collect_worn_faces`].
+type WornFaceQuery<'w, 's> = Query<'w, 's, (Entity, &'static WornPickTarget), With<PrimFaceEntity>>;
+
+/// What one face's outline overlay should be, as [`collect_faces`] works it out
+/// from the object the face hangs under: its colour, whether that object is an
+/// uploaded **mesh** (which the reference wireframes rather than silhouettes),
+/// and the scale between the face mesh's own space and metres.
+#[derive(Clone, Copy, Debug)]
+struct DesiredOutline {
+    /// The outline colour — parent, child, primary, tentative, or a drop target's.
+    kind: HighlightKind,
+    /// Whether the face's object is an uploaded mesh asset
+    /// ([`ObjectCategory::Mesh`], the reference's `LLVOVolume::isMesh`).
+    mesh_object: bool,
+    /// Metres per unit of the face mesh's own space, from the transforms between
+    /// the selection root and the face. Only the wireframe path uses it, to keep
+    /// its lift a world distance.
+    scale: Vec3,
+}
+
 /// Spawn one outline overlay on `face` — the shared body of the selection
-/// highlight and the drag-drop hover highlight, which draw the same shell in
-/// different colours under different markers.
+/// highlight and the drag-drop hover highlight, which draw the same two
+/// highlights in different colours under different markers.
 ///
-/// An ordinary face wears an **inverted-hull shell**: its own mesh again, front
-/// faces culled and pushed out by an entity-`Transform` scale, so only the rim
-/// shows.
+/// The reference splits by **object kind**: `LLSelectMgr::renderSilhouettes`
+/// sends every object whose volume `isMesh()` — an uploaded mesh asset, rigged or
+/// not — to `renderMeshSelection_f`, which wireframes its selected faces, and
+/// only prims, sculpts, trees and grass reach `renderOneSilhouette`. So a face of
+/// an [`ObjectCategory::Mesh`] object (`outline.mesh_object`) gets
+/// [`crate::selection_wireframe`]'s line-list derivation of its mesh, and every
+/// other face wears an **inverted-hull shell**: its own mesh again, front faces
+/// culled and pushed out by an entity-`Transform` scale, so only the rim shows.
 ///
-/// A **rigged** face cannot wear that, and the reference does not draw one for a
-/// mesh object either — it draws a wireframe of the posed geometry instead. So a
-/// rigged face gets [`crate::selection_wireframe`]'s line-list derivation of its
-/// mesh, the skin that poses it, and the [`SkinPoseTwin`] that earns that skin
-/// the same GPU palette as the face. See that module for why the shell is
-/// impossible here and what the reference does (`renderMeshSelection_f`).
+/// A **rigged** face takes the wireframe whatever its object says, because the
+/// shell is impossible for it: the shared mesh specializes into the skinned
+/// pipeline (a shell without the skin is the wgpu validation error that quits the
+/// viewer) and a skinned draw ignores the entity scale that would inflate it. It
+/// additionally carries the skin that poses it and the [`SkinPoseTwin`] that
+/// earns that skin the same GPU palette as the face. See that module for the
+/// details.
 ///
-/// A rigged face whose mesh is not loaded (or is not an indexed triangle list)
-/// gets no overlay this frame; the reconciler runs every frame, so it gains one
-/// as soon as the mesh is there.
+/// A face whose mesh is not loaded (or is not an indexed triangle list) gets no
+/// wireframe this frame; the reconciler runs every frame, so it gains one as soon
+/// as the mesh is there.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the face and its mesh, its skin, what its object asks for, the colour, the caller's \
+              own marker, and the two stores the spawn writes through"
+)]
 fn spawn_outline_overlay(
     face: Entity,
     mesh: &Mesh3d,
     skin: Option<&SkinnedMesh>,
+    outline: DesiredOutline,
     material: Handle<FaceMaterial>,
     marker: impl Bundle,
     meshes: &mut Assets<Mesh>,
     commands: &mut Commands,
 ) {
-    let Some(skin) = skin else {
+    if skin.is_none() && !outline.mesh_object {
         commands.spawn((
             Mesh3d(mesh.0.clone()),
             MeshMaterial3d(material),
@@ -1012,27 +1061,37 @@ fn spawn_outline_overlay(
             ChildOf(face),
         ));
         return;
+    }
+    // A rigged face's geometry is already in metres and its entity transform is
+    // ignored by the skinned draw; an unrigged mesh object's is in the asset's
+    // normalized space, with the object's Second Life size on the geometry holder
+    // above it. Only the latter has a scale for the lift to compensate for.
+    let scale = if skin.is_some() {
+        Vec3::ONE
+    } else {
+        outline.scale
     };
     let Some(wireframe) = meshes
         .get(&mesh.0)
-        .and_then(crate::selection_wireframe::wireframe_mesh)
+        .and_then(|source| crate::selection_wireframe::wireframe_mesh(source, scale))
     else {
         return;
     };
-    commands.spawn((
+    let mut overlay = commands.spawn((
         Mesh3d(meshes.add(wireframe)),
         MeshMaterial3d(material),
-        // No inflate: a skinned draw places its vertices from the joint palette
-        // and ignores this transform entirely, which is why the wireframe carries
-        // its lift in the geometry instead.
+        // No inflate: the wireframe hugs the face it outlines, carrying its lift
+        // off the surface in the geometry — which is also the only lever left on a
+        // skinned draw, whose vertices come from the joint palette.
         Transform::IDENTITY,
         NotShadowCaster,
-        skin.clone(),
-        SkinPoseTwin { source: face },
         marker,
         EditorOverlay,
         ChildOf(face),
     ));
+    if let Some(skin) = skin {
+        overlay.insert((skin.clone(), SkinPoseTwin { source: face }));
+    }
 }
 
 /// Draw the drag-drop hover outline: while an inventory drag hovers an object
@@ -1050,8 +1109,10 @@ fn apply_drag_hover_highlight(
     hover: Res<DragHoverHighlight>,
     assets: Res<HighlightAssets>,
     children: Query<&Children>,
-    scene: Query<(), With<SceneObject>>,
+    scene: Query<&SceneObject>,
+    transforms: Query<&Transform>,
     faces: HighlightFaceQuery,
+    worn: WornFaceQuery,
     mut overlays: Query<(
         Entity,
         &ChildOf,
@@ -1062,7 +1123,7 @@ fn apply_drag_hover_highlight(
     mut commands: Commands,
     mut last_target: Local<Option<Entity>>,
 ) {
-    let mut desired: HashMap<Entity, HighlightKind> = HashMap::new();
+    let mut desired: HashMap<Entity, DesiredOutline> = HashMap::new();
     if let Some(target) = hover.hover {
         let kind = if target.foreign {
             HighlightKind::DropForeign
@@ -1071,15 +1132,19 @@ fn apply_drag_hover_highlight(
         };
         // One colour for the whole family (the drop targets this object) — pass
         // the same kind for the root and its children.
+        let mut objects: HashMap<ScopedObjectId, HighlightKind> = HashMap::new();
         collect_faces(
             target.root,
             &children,
             &scene,
+            &transforms,
             &faces,
             kind,
             kind,
             &mut desired,
+            &mut objects,
         );
+        collect_worn_faces(&objects, &worn, &mut desired);
     }
     // The draw half of the same diagnostic the hover driver writes
     // (`sl_viewer::drag_hover`): with a target published, this says how many faces
@@ -1099,18 +1164,18 @@ fn apply_drag_hover_highlight(
     // place (a drop target that flips own → foreign), as the selection outline does.
     for (overlay, child_of, mut marker, mut material) in &mut overlays {
         match desired.remove(&child_of.parent()) {
-            Some(kind) => {
-                if kind != marker.kind {
-                    marker.kind = kind;
-                    material.0 = assets.material(kind);
+            Some(outline) => {
+                if outline.kind != marker.kind {
+                    marker.kind = outline.kind;
+                    material.0 = assets.material(outline.kind);
                 }
             }
             None => commands.entity(overlay).despawn(),
         }
     }
     // Spawn the missing ones (the same overlay the selection outline draws —
-    // a shell on an ordinary face, a posed wireframe on a rigged one).
-    for (face, kind) in desired {
+    // a shell on a prim face, a wireframe on a mesh object's or a rigged one).
+    for (face, outline) in desired {
         let Ok((mesh, skin)) = faces.get(face) else {
             continue;
         };
@@ -1118,8 +1183,9 @@ fn apply_drag_hover_highlight(
             face,
             mesh,
             skin,
-            assets.material(kind),
-            DragHoverOverlay { kind },
+            outline,
+            assets.material(outline.kind),
+            DragHoverOverlay { kind: outline.kind },
             &mut meshes,
             &mut commands,
         );
@@ -1133,50 +1199,171 @@ fn apply_drag_hover_highlight(
 /// split, with the primary root distinguished. A stronger outline (primary,
 /// then root, then child) wins over a tentative ([`HighlightKind::Pending`])
 /// one when both apply.
+///
+/// The walk also carries down the two things [`spawn_outline_overlay`] cannot
+/// read off a face entity: which of the two highlights that face's **object**
+/// takes ([`ObjectCategory::Mesh`] — the reference's `isMesh()`), and the scale
+/// accumulated from the selection root down to the face, which is the object's
+/// Second Life size (it sits on the object's geometry holder, not on the object
+/// entity). Accumulating the local `Transform`s rather than reading the face's
+/// `GlobalTransform` keeps this correct on the frame a face is rebuilt, before
+/// transform propagation has run for it.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the walk reads the hierarchy, the objects, their transforms and the faces, and is \
+              parameterised by the two colours it assigns and the map it fills"
+)]
 fn collect_faces(
     root: Entity,
     children: &Query<&Children>,
-    scene: &Query<(), With<SceneObject>>,
+    scene: &Query<&SceneObject>,
+    transforms: &Query<&Transform>,
     faces: &HighlightFaceQuery,
     root_kind: HighlightKind,
     child_kind: HighlightKind,
-    desired: &mut HashMap<Entity, HighlightKind>,
+    desired: &mut HashMap<Entity, DesiredOutline>,
+    worn: &mut HashMap<ScopedObjectId, HighlightKind>,
 ) {
-    let mut stack = vec![(root, false)];
-    while let Some((entity, mut is_child)) = stack.pop() {
+    let scale_of = |entity: Entity| {
+        transforms
+            .get(entity)
+            .map_or(Vec3::ONE, |transform| transform.scale)
+    };
+    let mut stack = vec![(
+        root,
+        false,
+        scene.get(root).ok().map(|object| object.category),
+        scale_of(root),
+    )];
+    while let Some((entity, mut is_child, mut category, mut scale)) = stack.pop() {
         // Crossing into a descendant that is its own scene object means the
-        // subtree below belongs to a linkset child.
-        if entity != root && scene.contains(entity) {
+        // subtree below belongs to a linkset child, whose own kind decides its
+        // own highlight.
+        if entity != root
+            && let Ok(object) = scene.get(entity)
+        {
             is_child = true;
+            category = Some(object.category);
+        }
+        // Every object the walk crosses is noted by scoped id, because its
+        // **rigged** faces are not in this subtree at all — a worn rigged submesh
+        // hangs off its wearer's body root, not its own object entity, and is
+        // reached through [`WornPickTarget`] after the walk.
+        if let Ok(object) = scene.get(entity) {
+            let kind = if is_child { child_kind } else { root_kind };
+            merge_kind(worn, object.scoped_id, kind);
+        }
+        if entity != root {
+            // Component-wise: the glam `Vec3` operators trip the workspace
+            // `arithmetic_side_effects` lint.
+            let step = scale_of(entity);
+            scale = Vec3::new(scale.x * step.x, scale.y * step.y, scale.z * step.z);
         }
         if faces.contains(entity) {
             let kind = if is_child { child_kind } else { root_kind };
-            desired
-                .entry(entity)
-                .and_modify(|existing| {
-                    // Primary beats root beats child beats pending.
-                    let rank = |kind: HighlightKind| match kind {
-                        HighlightKind::Primary => 0_u8,
-                        HighlightKind::Root => 1_u8,
-                        HighlightKind::Child => 2_u8,
-                        HighlightKind::Pending => 3_u8,
-                        // Drag-hover kinds never merge with the selection kinds
-                        // (they are reconciled by a separate system over their own
-                        // overlay), so their relative rank is immaterial.
-                        HighlightKind::DropAccept => 4_u8,
-                        HighlightKind::DropForeign => 5_u8,
-                    };
-                    if rank(kind) < rank(*existing) {
-                        *existing = kind;
-                    }
-                })
-                .or_insert(kind);
+            merge_outline(
+                desired,
+                entity,
+                DesiredOutline {
+                    kind,
+                    mesh_object: category == Some(ObjectCategory::Mesh),
+                    scale,
+                },
+            );
         }
         if let Ok(list) = children.get(entity) {
             for child in list.iter() {
-                stack.push((child, is_child));
+                stack.push((child, is_child, category, scale));
             }
         }
+    }
+}
+
+/// How strongly one outline claims a face: a committed selection beats a
+/// tentative one, and within a selection the primary beats another root, which
+/// beats a linkset child. Used to settle a face (or an object) reached twice —
+/// selected outright *and* swept by the rubber band, or a linkset child that is
+/// also a selected root.
+const fn outline_rank(kind: HighlightKind) -> u8 {
+    match kind {
+        HighlightKind::Primary => 0_u8,
+        HighlightKind::Root => 1_u8,
+        HighlightKind::Child => 2_u8,
+        HighlightKind::Pending => 3_u8,
+        // Drag-hover kinds never merge with the selection kinds (they are
+        // reconciled by a separate system over their own overlay), so their
+        // relative rank is immaterial.
+        HighlightKind::DropAccept => 4_u8,
+        HighlightKind::DropForeign => 5_u8,
+    }
+}
+
+/// Claim `face` for `outline`, keeping the stronger colour if something already
+/// claimed it. Only the colour merges: the other fields describe the face's own
+/// object, so every claim on one face carries the same ones.
+fn merge_outline(
+    desired: &mut HashMap<Entity, DesiredOutline>,
+    face: Entity,
+    outline: DesiredOutline,
+) {
+    desired
+        .entry(face)
+        .and_modify(|existing| {
+            if outline_rank(outline.kind) < outline_rank(existing.kind) {
+                existing.kind = outline.kind;
+            }
+        })
+        .or_insert(outline);
+}
+
+/// The same merge for the by-scoped-id ledger of objects whose rigged faces are
+/// collected after the walk.
+fn merge_kind(
+    objects: &mut HashMap<ScopedObjectId, HighlightKind>,
+    scoped: ScopedObjectId,
+    kind: HighlightKind,
+) {
+    objects
+        .entry(scoped)
+        .and_modify(|existing| {
+            if outline_rank(kind) < outline_rank(*existing) {
+                *existing = kind;
+            }
+        })
+        .or_insert(kind);
+}
+
+/// Add the outline for every **worn rigged** face of the objects the walk
+/// crossed. Such a face is parented under its wearer's body root rather than its
+/// own object entity (the skinned vertices are placed by the joint palette, so
+/// the entity only carries lifecycle and visibility), which is why
+/// [`collect_faces`] cannot reach it and why it carries its
+/// [`WornPickTarget`] identity instead — the same handle the GPU pick uses to
+/// route a click on a worn mesh to the attachment pies.
+///
+/// A rigged face always wears the wireframe, so the object-kind and scale fields
+/// the shell path reads are not consulted for it.
+fn collect_worn_faces(
+    objects: &HashMap<ScopedObjectId, HighlightKind>,
+    worn: &WornFaceQuery,
+    desired: &mut HashMap<Entity, DesiredOutline>,
+) {
+    if objects.is_empty() {
+        return;
+    }
+    for (face, target) in worn {
+        let Some(kind) = objects.get(&target.scoped) else {
+            continue;
+        };
+        merge_outline(
+            desired,
+            face,
+            DesiredOutline {
+                kind: *kind,
+                mesh_object: true,
+                scale: Vec3::ONE,
+            },
+        );
     }
 }
 
@@ -1479,16 +1666,24 @@ pub fn promote_selection_to_roots(selection: &mut SelectionSet, objects: &Object
 mod tests {
     #![expect(
         clippy::expect_used,
+        clippy::panic,
         reason = "a failed expectation is the intended failure signal in a unit test"
     )]
 
     use super::{HighlightAssets, SelectionSet, WireSelection, promote_selection_to_roots};
     use crate::face_material::FaceMaterial;
+    use crate::objects::ObjectCategory;
     use bevy::app::{App, TaskPoolPlugin};
     use bevy::asset::{AssetApp as _, AssetPlugin};
+    use bevy::math::Vec3;
     use bevy::prelude::Entity;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{CircuitId, ObjectKey, RegionLocalObjectId, ScopedObjectId, Uuid};
+
+    /// The Second Life scale on the fixture object's geometry holder — big enough
+    /// that a lift taken in the mesh's own units would be visibly wrong, and not a
+    /// round power of two so a dropped factor cannot pass by luck.
+    const HOLDER_SCALE: Vec3 = Vec3::new(6.0, 6.0, 6.0);
 
     /// A scoped id for tests.
     fn scoped(id: u32) -> ScopedObjectId {
@@ -1572,18 +1767,50 @@ mod tests {
         );
     }
 
+    /// The fixture face geometry: a single triangle, with the skin attributes when
+    /// the face is rigged — the wireframe derivation walks the real geometry.
+    fn triangle_mesh(skinned: bool) -> bevy::mesh::Mesh {
+        use bevy::asset::RenderAssetUsages;
+        use bevy::mesh::{Indices, Mesh, PrimitiveTopology, VertexAttributeValues};
+
+        let mut mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        );
+        mesh.insert_attribute(
+            Mesh::ATTRIBUTE_POSITION,
+            vec![[0.0_f32, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+        );
+        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0_f32, 0.0, 1.0]; 3]);
+        if skinned {
+            mesh.insert_attribute(
+                Mesh::ATTRIBUTE_JOINT_INDEX,
+                VertexAttributeValues::Uint16x4(vec![[0_u16; 4]; 3]),
+            );
+            mesh.insert_attribute(
+                Mesh::ATTRIBUTE_JOINT_WEIGHT,
+                vec![[1.0_f32, 0.0, 0.0, 0.0]; 3],
+            );
+        }
+        mesh.insert_indices(Indices::U32(vec![0, 1, 2]));
+        mesh
+    }
+
     /// A world holding one object with a single face, and the assets both
     /// highlight reconcilers need: the app, the object's root, and its face.
     /// `skinned` gives the face the skin (and skin vertex attributes) a rigged one
-    /// carries.
-    fn face_app(skinned: bool) -> (App, Entity, Entity) {
-        use bevy::asset::RenderAssetUsages;
+    /// carries; `category` is the object's render kind, which decides between the
+    /// shell and the wireframe for an unrigged face.
+    ///
+    /// The face hangs under a geometry holder carrying the object's Second Life
+    /// scale, as the object builder spawns it — the shape the outline's lift reads
+    /// to keep itself a world distance.
+    fn face_app(skinned: bool, category: ObjectCategory) -> (App, Entity, Entity) {
         use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
-        use bevy::mesh::{Indices, PrimitiveTopology};
         use bevy::prelude::*;
         use sl_client_bevy::PrimFaceId;
 
-        use crate::objects::{ObjectCategory, PrimFaceEntity, SceneObject};
+        use crate::objects::{PrimFaceEntity, SceneObject};
         use crate::world_api::EditToolState;
 
         let mut app = App::new();
@@ -1597,43 +1824,31 @@ mod tests {
             ..EditToolState::default()
         });
 
-        // A single triangle, with the skin attributes when the face is rigged —
-        // the wireframe derivation walks the real geometry.
-        let mut mesh = Mesh::new(
-            PrimitiveTopology::TriangleList,
-            RenderAssetUsages::default(),
-        );
-        mesh.insert_attribute(
-            Mesh::ATTRIBUTE_POSITION,
-            vec![[0.0_f32, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
-        );
-        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0_f32, 0.0, 1.0]; 3]);
-        if skinned {
-            mesh.insert_attribute(
-                Mesh::ATTRIBUTE_JOINT_INDEX,
-                bevy::mesh::VertexAttributeValues::Uint16x4(vec![[0_u16; 4]; 3]),
-            );
-            mesh.insert_attribute(
-                Mesh::ATTRIBUTE_JOINT_WEIGHT,
-                vec![[1.0_f32, 0.0, 0.0, 0.0]; 3],
-            );
-        }
-        mesh.insert_indices(Indices::U32(vec![0, 1, 2]));
-        let mesh = app.world_mut().resource_mut::<Assets<Mesh>>().add(mesh);
+        let mesh = app
+            .world_mut()
+            .resource_mut::<Assets<Mesh>>()
+            .add(triangle_mesh(skinned));
 
         let root = app
             .world_mut()
-            .spawn(SceneObject {
-                scoped_id: scoped(1),
-                category: ObjectCategory::Prim,
-            })
+            .spawn((
+                SceneObject {
+                    scoped_id: scoped(1),
+                    category,
+                },
+                Transform::IDENTITY,
+            ))
+            .id();
+        let holder = app
+            .world_mut()
+            .spawn((Transform::from_scale(HOLDER_SCALE), ChildOf(root)))
             .id();
         let mut face = app.world_mut().spawn((
             Mesh3d(mesh),
             PrimFaceEntity {
                 face_id: PrimFaceId::new(0),
             },
-            ChildOf(root),
+            ChildOf(holder),
         ));
         if skinned {
             let bindposes = face.world_scope(|world| {
@@ -1653,8 +1868,8 @@ mod tests {
 
     /// [`face_app`] with the object **selected** and the selection reconciler
     /// running: the app and the face.
-    fn selected_face_app(skinned: bool) -> (App, Entity) {
-        let (mut app, root, face) = face_app(skinned);
+    fn selected_face_app(skinned: bool, category: ObjectCategory) -> (App, Entity) {
+        let (mut app, root, face) = face_app(skinned, category);
         app.add_systems(bevy::app::Update, super::apply_selection_highlight);
         let mut selection = SelectionSet::default();
         selection.insert(scoped(1), full(1), root);
@@ -1674,7 +1889,7 @@ mod tests {
 
         use crate::world_api::{DragHover, DragHoverHighlight};
 
-        let (mut app, root, face) = face_app(false);
+        let (mut app, root, face) = face_app(false, ObjectCategory::Prim);
         app.add_systems(bevy::app::Update, super::apply_drag_hover_highlight);
         app.insert_resource(DragHoverHighlight {
             hover: Some(DragHover {
@@ -1706,13 +1921,200 @@ mod tests {
         );
     }
 
-    /// An ordinary face wears the inverted-hull shell: its own mesh again,
-    /// inflated by the entity transform.
+    /// The split is by **object kind**, not by rigging: the reference sends every
+    /// object whose volume `isMesh()` to `renderMeshSelection_f`, so an ordinary
+    /// (unrigged) uploaded mesh is wireframed exactly like an animesh — no skin
+    /// and no pose twin, since there is no pose to follow.
+    ///
+    /// Its lift is a world distance, so the geometry holder's Second Life scale
+    /// divides the offset the wireframe carries in its own normalized units: a
+    /// six-metre object lifted by the local extent would stand a hand's width off
+    /// its own surface.
+    #[test]
+    fn an_unrigged_mesh_object_wears_the_wireframe() {
+        use bevy::mesh::skinning::SkinnedMesh;
+        use bevy::mesh::{Mesh, PrimitiveTopology, VertexAttributeValues};
+        use bevy::prelude::*;
+
+        use crate::world_api::SkinPoseTwin;
+
+        let (mut app, face) = selected_face_app(false, ObjectCategory::Mesh);
+        let overlay = app
+            .world_mut()
+            .query::<(Entity, &ChildOf)>()
+            .iter(app.world())
+            .find(|(_entity, child_of)| child_of.parent() == face)
+            .map(|(entity, _child_of)| entity)
+            .expect("the selected mesh face gets a highlight overlay");
+        let world = app.world();
+        let handle = world
+            .get::<Mesh3d>(overlay)
+            .expect("the overlay draws a mesh");
+        let asset = world
+            .resource::<Assets<Mesh>>()
+            .get(&handle.0)
+            .expect("its mesh is loaded");
+        assert_eq!(
+            asset.primitive_topology(),
+            PrimitiveTopology::LineList,
+            "the reference wireframes every mesh object, rigged or not"
+        );
+        assert!(
+            world.get::<SkinnedMesh>(overlay).is_none()
+                && world.get::<SkinPoseTwin>(overlay).is_none(),
+            "an unrigged wireframe has no pose to follow"
+        );
+        assert_eq!(
+            world.get::<Transform>(overlay).map(Transform::to_matrix),
+            Some(Transform::IDENTITY.to_matrix()),
+            "the wireframe hugs the face; its lift lives in the geometry"
+        );
+
+        // The holder's scale reaches the lift: with the object six metres to a
+        // side, the same offset in world metres is six times smaller in the mesh's
+        // own units than it would be at unit scale.
+        let Some(VertexAttributeValues::Float32x3(lifted)) =
+            asset.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("the wireframe carries positions");
+        };
+        let source = world
+            .resource::<Assets<Mesh>>()
+            .get(&world.get::<Mesh3d>(face).expect("the face draws a mesh").0)
+            .expect("the face's mesh is loaded");
+        let unscaled = crate::selection_wireframe::wireframe_mesh(source, Vec3::ONE)
+            .expect("the fixture mesh is an indexed triangle list");
+        let Some(VertexAttributeValues::Float32x3(unscaled)) =
+            unscaled.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("the unscaled wireframe carries positions");
+        };
+        let lift_of = |positions: &[[f32; 3]]| {
+            positions
+                .first()
+                .and_then(|position| position.get(2).copied())
+                .expect("a three-component position")
+        };
+        assert!(
+            lift_of(lifted) < lift_of(unscaled),
+            "the holder's {HOLDER_SCALE:?} must shrink the local lift, got {} against {}",
+            lift_of(lifted),
+            lift_of(unscaled)
+        );
+    }
+
+    /// A worn **rigged attachment** is outlined too, even though none of its
+    /// faces are in the subtree the walk covers: a skinned submesh hangs off its
+    /// wearer's body root, not its own object entity, so the hierarchy walk
+    /// reaches nothing. It is found by the [`WornPickTarget`] identity it carries
+    /// for exactly this reason (the GPU pick routes a click on a worn mesh the
+    /// same way), and wears the posed wireframe like any other rigged face.
+    ///
+    /// This is what "selecting my shoes highlights nothing" was.
+    #[test]
+    fn a_worn_rigged_attachment_is_outlined_through_its_wearer() {
+        use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
+        use bevy::mesh::{Mesh, PrimitiveTopology};
+        use bevy::prelude::*;
+        use sl_client_bevy::PrimFaceId;
+
+        use crate::objects::{PrimFaceEntity, SceneObject, WornPickTarget};
+        use crate::world_api::{EditToolState, SkinPoseTwin};
+
+        let mut app = App::new();
+        app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()));
+        app.init_asset::<FaceMaterial>();
+        app.init_asset::<Mesh>();
+        app.init_asset::<SkinnedMeshInverseBindposes>();
+        app.init_resource::<HighlightAssets>();
+        app.insert_resource(EditToolState {
+            active: true,
+            ..EditToolState::default()
+        });
+        app.add_systems(bevy::app::Update, super::apply_selection_highlight);
+
+        // The attachment's own object entity: a mesh object with a geometry holder
+        // and **no** faces under it, which is what a rigged attachment looks like.
+        let root = app
+            .world_mut()
+            .spawn((
+                SceneObject {
+                    scoped_id: scoped(1),
+                    category: ObjectCategory::Mesh,
+                },
+                Transform::IDENTITY,
+            ))
+            .id();
+        app.world_mut()
+            .spawn((Transform::from_scale(HOLDER_SCALE), ChildOf(root)));
+
+        // Its drawn geometry, parented under the wearer instead.
+        let mesh = app
+            .world_mut()
+            .resource_mut::<Assets<Mesh>>()
+            .add(triangle_mesh(true));
+        let bindposes = app
+            .world_mut()
+            .resource_mut::<Assets<SkinnedMeshInverseBindposes>>()
+            .add(SkinnedMeshInverseBindposes::from(vec![Mat4::IDENTITY]));
+        let wearer = app.world_mut().spawn(Transform::default()).id();
+        let joint = app.world_mut().spawn(Transform::default()).id();
+        let worn = app
+            .world_mut()
+            .spawn((
+                Mesh3d(mesh),
+                PrimFaceEntity {
+                    face_id: PrimFaceId::new(0),
+                },
+                SkinnedMesh {
+                    inverse_bindposes: bindposes,
+                    joints: vec![joint],
+                },
+                WornPickTarget { scoped: scoped(1) },
+                ChildOf(wearer),
+            ))
+            .id();
+
+        let mut selection = SelectionSet::default();
+        selection.insert(scoped(1), full(1), root);
+        app.insert_resource(selection);
+        app.update();
+
+        let overlay = app
+            .world_mut()
+            .query::<(Entity, &ChildOf)>()
+            .iter(app.world())
+            .find(|(_entity, child_of)| child_of.parent() == worn)
+            .map(|(entity, _child_of)| entity)
+            .expect("selecting the attachment outlines the submesh its wearer carries");
+        let world = app.world();
+        let handle = world
+            .get::<Mesh3d>(overlay)
+            .expect("the overlay draws a mesh");
+        assert_eq!(
+            world
+                .resource::<Assets<Mesh>>()
+                .get(&handle.0)
+                .expect("its mesh is loaded")
+                .primitive_topology(),
+            PrimitiveTopology::LineList,
+            "a worn rigged submesh wears the wireframe like any other rigged face"
+        );
+        assert_eq!(
+            world.get::<SkinPoseTwin>(overlay),
+            Some(&SkinPoseTwin { source: worn }),
+            "and follows the submesh's own GPU palette binding"
+        );
+    }
+
+    /// A prim face wears the inverted-hull shell instead: its own mesh again,
+    /// inflated by the entity transform. Prims, sculpts, trees and grass are what
+    /// the reference leaves on the silhouette path.
     #[test]
     fn an_unrigged_face_wears_the_inflated_shell() {
         use bevy::prelude::*;
 
-        let (mut app, face) = selected_face_app(false);
+        let (mut app, face) = selected_face_app(false, ObjectCategory::Prim);
         let overlay = app
             .world_mut()
             .query::<(Entity, &ChildOf)>()
@@ -1748,7 +2150,7 @@ mod tests {
 
         use crate::world_api::SkinPoseTwin;
 
-        let (mut app, face) = selected_face_app(true);
+        let (mut app, face) = selected_face_app(true, ObjectCategory::Mesh);
         let overlay = app
             .world_mut()
             .query::<(Entity, &ChildOf)>()

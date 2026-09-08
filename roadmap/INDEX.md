@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 322 |
 | blocked | 46 |
 | in-progress | 20 |
-| bugs | 60 |
-| done | 1030 |
+| bugs | 59 |
+| done | 1032 |
 | deferred | 25 |
 | wont-do | 15 |
-| **total** | **1619** |
+| **total** | **1620** |
 
 ## ideas (101)
 
@@ -1193,7 +1193,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (60)
+## bugs (59)
 
 ### viewer
 
@@ -1281,9 +1281,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   oracle at scale)
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
   Some worn mesh hair does not render (visible in Firestorm)
-- [`viewer-mesh-objects-outlined-by-a-shell`](bugs/viewer-mesh-objects-outlined-by-a-shell.md)
-  — An unrigged mesh object is outlined by a hull where the reference wireframes
-  it
 - [`viewer-minimap-avatar-dot-color`](bugs/viewer-minimap-avatar-dot-color.md) —
   Minimap other-avatar dots are red, not green like the reference
 - [`viewer-mouselook-own-head-visible-from-inside`](bugs/viewer-mouselook-own-head-visible-from-inside.md)
@@ -1340,7 +1337,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1030)
+## done (1032)
 
 ### protocol
 
@@ -2020,6 +2017,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-mesh-lod-factor-preference`](done/viewer-mesh-lod-factor-preference.md)
   — Expose the mesh/prim LOD factor as a preference (the reference "Mesh Detail"
   slider)
+- [`viewer-mesh-objects-outlined-by-a-shell`](done/viewer-mesh-objects-outlined-by-a-shell.md)
+  — An unrigged mesh object is outlined by a hull where the reference wireframes
+  it
 - [`viewer-mesh-stuck-low-lod-warm-cache`](done/viewer-mesh-stuck-low-lod-warm-cache.md)
   — Shared / warm-cache meshes stuck at a coarse LOD, never refining on approach
 - [`viewer-minimap`](done/viewer-minimap.md) — Minimap (net map) — floater,
@@ -2912,6 +2912,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-world-test-harness`](done/viewer-world-test-harness.md) — A headless
   fixture world — SlEvent in, SlCommand out (blocked by `viewer-plugin-groups`
   (done))
+- [`viewer-worn-attachment-outline-missing`](done/viewer-worn-attachment-outline-missing.md)
+  — Selecting a worn rigged attachment highlighted nothing at all
 
 ### idiomatic
 

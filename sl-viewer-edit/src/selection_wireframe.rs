@@ -1,10 +1,10 @@
-//! The selection highlight a **skinned** face wears: a wireframe of its own
-//! posed geometry.
+//! The selection highlight a **mesh object's** face wears: a wireframe of its
+//! own geometry, posed with it when it is skinned.
 //!
 //! # Why a rigged face cannot wear the shell
 //!
-//! [`crate::edit_selection`]'s highlight is an **inverted-hull shell**: a second
-//! draw of the face's mesh, front faces culled and pushed out by an entity
+//! [`crate::edit_selection`]'s other highlight is an **inverted-hull shell**: a
+//! second draw of the face's mesh, front faces culled and pushed out by an entity
 //! `Transform` scale, so only the rim shows. Skinning defeats both halves of
 //! that:
 //!
@@ -31,28 +31,36 @@
 //! first re-skins the volume (`updateRiggedVolume(true)`) so the lines follow the
 //! **pose**.
 //!
-//! So the faithful highlight for a skinned face is a posed wireframe, and that is
-//! what [`wireframe_mesh`] builds: the face's own mesh re-indexed as a
+//! The split is by **object kind**, not by rigging: `isMesh()` is the sculpt
+//! block's stitching type (`LL_SCULPT_TYPE_MESH`), so an ordinary uploaded mesh
+//! object is wireframed exactly like an animesh, while prims, sculpts, trees and
+//! grass keep the silhouette path. This viewer's equivalent predicate is
+//! [`ObjectCategory::Mesh`](crate::objects::ObjectCategory::Mesh), and a rigged
+//! face is wireframed on top of that because the shell is impossible for it.
+//!
+//! So the faithful highlight for a mesh face is a wireframe, and that is what
+//! [`wireframe_mesh`] builds: the face's own mesh re-indexed as a
 //! [`PrimitiveTopology::LineList`] over its triangle edges, carrying every vertex
-//! attribute of the source — the skin weights included, so the overlay skins with
-//! the face — with the positions lifted along their normals to win the depth test
-//! against the surface they outline (the port of the reference's polygon offset,
-//! and the one thing the entity-scale inflate can no longer do).
+//! attribute of the source — the skin weights included, so a rigged overlay skins
+//! with the face — with the positions lifted along their normals to win the depth
+//! test against the surface they outline (the port of the reference's polygon
+//! offset, and the one thing the entity-scale inflate can no longer do).
 //!
 //! Line **thickness** is not portable: `wgpu` has no line-width state, so the
 //! rim is one pixel where the reference's is five. That is the whole visual
 //! divergence.
 
 use bevy::asset::RenderAssetUsages;
+use bevy::math::Vec3;
 use bevy::mesh::{Indices, Mesh, PrimitiveTopology, VertexAttributeValues};
 use std::collections::HashSet;
 
 /// How far the wireframe is lifted off the surface it outlines, as a fraction of
-/// the mesh's own diagonal — so one constant serves an avatar-sized body and a
-/// finger-sized attachment. The reference's equivalent (`silhouette_thickness`)
-/// scales with view distance; a fixed fraction of the object is the cheap stand-in
-/// for the one thing the lift has to achieve, which is to beat the depth test
-/// against the face it hugs.
+/// the object's own diagonal **in metres** — so one constant serves an
+/// avatar-sized body and a finger-sized attachment. The reference's equivalent
+/// (`silhouette_thickness`) scales with view distance; a fixed fraction of the
+/// object is the cheap stand-in for the one thing the lift has to achieve, which
+/// is to beat the depth test against the face it hugs.
 const LIFT_FRACTION: f32 = 0.004;
 
 /// The smallest lift (metres) — a tiny mesh still has to clear the depth test.
@@ -66,6 +74,15 @@ const LIFT_MAX: f32 = 0.02;
 /// [`PrimitiveTopology::LineList`], every vertex attribute kept, the positions
 /// lifted along their normals.
 ///
+/// `scale` is how many metres one unit of the mesh's own space is worth on each
+/// axis — the entity scale the overlay will be drawn under. A rigged face's
+/// geometry is already in metres and its entity transform is ignored by a skinned
+/// draw, so that caller passes [`Vec3::ONE`]; an unrigged mesh object's geometry
+/// is in the asset's normalized space with the object's Second Life scale on its
+/// geometry holder, so that caller passes the holder's scale. Without it the lift
+/// clamps below — which are metres — would be applied to normalized units, and a
+/// 20-metre mesh object would wear its outline as a hand's-width halo.
+///
 /// Keeping **every** attribute is deliberate rather than thrifty. The overlay
 /// renders through the same [`FaceMaterial`](crate::face_material::FaceMaterial)
 /// as the face, whose shader is compiled against the vertex layout it is handed:
@@ -77,7 +94,7 @@ const LIFT_MAX: f32 = 0.02;
 /// vertex data has already been extracted to the render world (a mesh built
 /// without [`RenderAssetUsages::MAIN_WORLD`] — the caller then leaves the face
 /// unhighlighted rather than guessing at its geometry).
-pub(crate) fn wireframe_mesh(source: &Mesh) -> Option<Mesh> {
+pub(crate) fn wireframe_mesh(source: &Mesh, scale: Vec3) -> Option<Mesh> {
     if source.primitive_topology() != PrimitiveTopology::TriangleList {
         return None;
     }
@@ -86,7 +103,7 @@ pub(crate) fn wireframe_mesh(source: &Mesh) -> Option<Mesh> {
     for (attribute, values) in source.try_attributes().ok()? {
         wireframe.insert_attribute(*attribute, values.clone());
     }
-    lift_positions(source, &mut wireframe);
+    lift_positions(source, &mut wireframe, scale);
     wireframe.insert_indices(Indices::U32(triangle_edges(indices)));
     Some(wireframe)
 }
@@ -129,18 +146,24 @@ fn triangle_edges(indices: &Indices) -> Vec<u32> {
 }
 
 /// Lift `wireframe`'s positions off the surface along `source`'s normals, by a
-/// [`LIFT_FRACTION`] of the mesh's diagonal (clamped) — the port of the
+/// [`LIFT_FRACTION`] of the object's diagonal (clamped) — the port of the
 /// reference's `glPolygonOffset(3, 3)`, done in the geometry because a skinned
-/// draw has no entity-transform lever left.
+/// draw has no entity-transform lever left and because an entity scale would
+/// inflate an unrigged wireframe away from the surface instead of hugging it.
 ///
 /// The lift is applied in the mesh's own (bind-pose) space, which is where it
 /// belongs: skinning is a blend of rigid joint transforms, so a bind-pose offset
 /// arrives at the posed surface as the same offset, still along the posed normal.
 ///
+/// `scale` (metres per mesh unit, per axis) makes the lift a **world** distance
+/// rather than a local one: each vertex moves `lift / |scale · normal|` locally,
+/// which the entity scale then stretches back to `lift` metres along that normal.
+/// A uniform unit scale leaves the whole computation exactly as it was.
+///
 /// A mesh without normals keeps its positions — an unlifted wireframe z-fights
 /// its face, which is visible but not fatal, and every face this viewer builds
 /// carries normals.
-fn lift_positions(source: &Mesh, wireframe: &mut Mesh) {
+fn lift_positions(source: &Mesh, wireframe: &mut Mesh, scale: Vec3) {
     let Ok(Some(VertexAttributeValues::Float32x3(normals))) =
         source.try_attribute_option(Mesh::ATTRIBUTE_NORMAL)
     else {
@@ -152,21 +175,42 @@ fn lift_positions(source: &Mesh, wireframe: &mut Mesh) {
     else {
         return;
     };
-    let lift = lift_distance(positions);
+    let lift = lift_distance(positions, scale);
+    let axes = scale.to_array();
     for (position, normal) in positions.iter_mut().zip(normals.iter()) {
+        // How far a local step of one normal carries in metres. A normal along a
+        // flattened axis is shortened by that axis's scale and a normal across it
+        // is not, so this is per-vertex rather than one factor for the mesh. Using
+        // the normal as stored (rather than a normalized copy) makes the division
+        // exact for any normal length. Component-wise, because the glam `Vec3`
+        // operators trip the workspace `arithmetic_side_effects` lint.
+        let mut stretch = 0.0_f32;
+        for axis in 0..3_usize {
+            let (Some(direction), Some(factor)) = (normal.get(axis), axes.get(axis)) else {
+                continue;
+            };
+            let scaled = direction * factor;
+            stretch = scaled.mul_add(scaled, stretch);
+        }
+        let stretch = stretch.sqrt();
+        if stretch <= f32::EPSILON {
+            continue;
+        }
+        let local = lift / stretch;
         for axis in 0..3_usize {
             let (Some(coordinate), Some(direction)) = (position.get_mut(axis), normal.get(axis))
             else {
                 continue;
             };
-            *coordinate = direction.mul_add(lift, *coordinate);
+            *coordinate = direction.mul_add(local, *coordinate);
         }
     }
 }
 
-/// How far to lift, from the extent of `positions`: [`LIFT_FRACTION`] of the
-/// bounding box's diagonal, clamped to [`LIFT_MIN`]..=[`LIFT_MAX`].
-fn lift_distance(positions: &[[f32; 3]]) -> f32 {
+/// How far to lift, in metres: [`LIFT_FRACTION`] of the bounding box's diagonal
+/// **as drawn** (the local extent stretched by `scale`), clamped to
+/// [`LIFT_MIN`]..=[`LIFT_MAX`].
+fn lift_distance(positions: &[[f32; 3]], scale: Vec3) -> f32 {
     let mut min = [f32::MAX; 3];
     let mut max = [f32::MIN; 3];
     for position in positions {
@@ -180,12 +224,15 @@ fn lift_distance(positions: &[[f32; 3]]) -> f32 {
             *high = high.max(*coordinate);
         }
     }
+    let stretch = scale.to_array();
     let mut diagonal = 0.0_f32;
     for axis in 0..3_usize {
-        let (Some(low), Some(high)) = (min.get(axis), max.get(axis)) else {
+        let (Some(low), Some(high), Some(factor)) =
+            (min.get(axis), max.get(axis), stretch.get(axis))
+        else {
             continue;
         };
-        let span = high - low;
+        let span = (high - low) * factor.abs();
         diagonal = span.mul_add(span, diagonal);
     }
     (diagonal.sqrt() * LIFT_FRACTION).clamp(LIFT_MIN, LIFT_MAX)
@@ -201,6 +248,7 @@ mod tests {
 
     use super::{LIFT_FRACTION, LIFT_MAX, LIFT_MIN, wireframe_mesh};
     use bevy::asset::RenderAssetUsages;
+    use bevy::math::Vec3;
     use bevy::mesh::{Indices, Mesh, PrimitiveTopology, VertexAttributeValues};
     use pretty_assertions::assert_eq;
 
@@ -238,7 +286,8 @@ mod tests {
     /// triangles sharing one, not six — the shared edge is drawn once.
     #[test]
     fn edges_are_deduplicated() {
-        let wireframe = wireframe_mesh(&quad()).expect("a triangle list yields a wireframe");
+        let wireframe =
+            wireframe_mesh(&quad(), Vec3::ONE).expect("a triangle list yields a wireframe");
         assert_eq!(wireframe.primitive_topology(), PrimitiveTopology::LineList);
         let indices = wireframe.indices().expect("the wireframe is indexed");
         assert_eq!(indices.len(), 10, "five unique edges, two indices each");
@@ -249,7 +298,8 @@ mod tests {
     /// quits the viewer.
     #[test]
     fn skin_attributes_survive() {
-        let wireframe = wireframe_mesh(&quad()).expect("a triangle list yields a wireframe");
+        let wireframe =
+            wireframe_mesh(&quad(), Vec3::ONE).expect("a triangle list yields a wireframe");
         assert!(
             wireframe.contains_attribute(Mesh::ATTRIBUTE_JOINT_INDEX)
                 && wireframe.contains_attribute(Mesh::ATTRIBUTE_JOINT_WEIGHT),
@@ -267,7 +317,8 @@ mod tests {
     /// between the floor and the ceiling, so neither clamp is in play.
     #[test]
     fn positions_are_lifted_along_the_normal() {
-        let wireframe = wireframe_mesh(&quad()).expect("a triangle list yields a wireframe");
+        let wireframe =
+            wireframe_mesh(&quad(), Vec3::ONE).expect("a triangle list yields a wireframe");
         let Some(VertexAttributeValues::Float32x3(positions)) =
             wireframe.attribute(Mesh::ATTRIBUTE_POSITION)
         else {
@@ -290,6 +341,68 @@ mod tests {
         }
     }
 
+    /// The lift is a **world** distance, so the entity scale the overlay is drawn
+    /// under is folded in. A mesh asset's geometry is normalized and its object's
+    /// Second Life size lives on the geometry holder: at ten metres a side, the
+    /// quad's drawn diagonal is `10√2`, whose `LIFT_FRACTION` clears
+    /// [`LIFT_MAX`] — so the lift is the ceiling, `LIFT_MAX / 10` in the mesh's
+    /// own units. Passing the local extent instead (what the rigged-only version
+    /// did) would have lifted `√2 × LIFT_FRACTION` locally, ten centimetres out.
+    #[test]
+    fn the_lift_is_a_world_distance() {
+        let scale = Vec3::splat(10.0);
+        let wireframe = wireframe_mesh(&quad(), scale).expect("a triangle list yields a wireframe");
+        let Some(VertexAttributeValues::Float32x3(positions)) =
+            wireframe.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("the wireframe carries positions");
+        };
+        assert!(
+            2.0_f32.sqrt() * 10.0 * LIFT_FRACTION > LIFT_MAX,
+            "the fixture is meant to exercise the ceiling"
+        );
+        let expected = LIFT_MAX / 10.0;
+        for position in positions {
+            let z = position
+                .get(2)
+                .copied()
+                .expect("a three-component position");
+            assert!(
+                (z - expected).abs() < 1e-6,
+                "the ceiling is {LIFT_MAX} metres, {expected} in mesh units, got {z}"
+            );
+        }
+    }
+
+    /// A non-uniform scale is handled per vertex rather than by one factor for the
+    /// mesh: the quad's `+Z` normals ride the stretched axis, so the local lift is
+    /// divided by that axis alone — the flattened `x`/`y` extent still shrinks the
+    /// diagonal the fraction is taken of, but does not stretch the offset.
+    #[test]
+    fn a_squashed_axis_only_divides_the_normal_it_lies_along() {
+        let scale = Vec3::new(1.0, 1.0, 4.0);
+        let wireframe = wireframe_mesh(&quad(), scale).expect("a triangle list yields a wireframe");
+        let Some(VertexAttributeValues::Float32x3(positions)) =
+            wireframe.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("the wireframe carries positions");
+        };
+        // The quad is flat in `z`, so its drawn diagonal is the unscaled `√2` and
+        // the world lift is the same as the unit-scale case — but the normals lie
+        // along the axis stretched fourfold, so the local offset is a quarter of it.
+        let expected = 2.0_f32.sqrt() * LIFT_FRACTION / 4.0;
+        for position in positions {
+            let z = position
+                .get(2)
+                .copied()
+                .expect("a three-component position");
+            assert!(
+                (z - expected).abs() < 1e-6,
+                "a fourfold `z` divides the local lift by four: expected {expected}, got {z}"
+            );
+        }
+    }
+
     /// Anything that is not an indexed triangle list has no edges to walk — the
     /// caller leaves such a face unhighlighted rather than guessing.
     #[test]
@@ -297,13 +410,13 @@ mod tests {
         let mut lines = Mesh::new(PrimitiveTopology::LineList, RenderAssetUsages::default());
         lines.insert_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0.0_f32, 0.0, 0.0]; 2]);
         lines.insert_indices(Indices::U32(vec![0, 1]));
-        assert!(wireframe_mesh(&lines).is_none());
+        assert!(wireframe_mesh(&lines, Vec3::ONE).is_none());
 
         let mut unindexed = Mesh::new(
             PrimitiveTopology::TriangleList,
             RenderAssetUsages::default(),
         );
         unindexed.insert_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0.0_f32, 0.0, 0.0]; 3]);
-        assert!(wireframe_mesh(&unindexed).is_none());
+        assert!(wireframe_mesh(&unindexed, Vec3::ONE).is_none());
     }
 }
