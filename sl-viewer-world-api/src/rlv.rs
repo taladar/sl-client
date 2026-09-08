@@ -44,15 +44,29 @@
 use std::collections::VecDeque;
 
 use bevy::prelude::*;
-use sl_client_bevy::{ChatSource, ChatType, ObjectKey};
+use sl_client_bevy::{
+    ChatSource, ChatType, CloudPosDensity, Color, ColorAlpha, Glow, Key, ObjectKey, SkySettings,
+    TextureKey, Uuid, azimuth_altitude_to_rotation,
+};
 use sl_rlv::{
-    RlvAttachmentPoint, RlvDebugSetting, RlvDebugValue, RlvExtSource, RlvObjectAttachment,
-    RlvReply, RlvState, is_rlv_line,
+    RlvAttachmentPoint, RlvDebugSetting, RlvDebugValue, RlvEnvRequest, RlvEnvSource, RlvExtSource,
+    RlvObjectAttachment, RlvReply, RlvSkyBody, RlvSkyField, RlvSkyValue, RlvState, is_rlv_line,
 };
 use sl_settings::SettingValue;
+use sl_viewer_kit::coords::sky_body_direction;
 use sl_viewer_settings::ViewerSettings;
 
 use crate::{MAX_PARENT_WALK, ObjectState};
+
+/// The whole-environment change an RLV `@setenv_*` command asks for, re-exported
+/// so the scene that carries one out needs this seam and not the language crate
+/// behind it.
+pub use sl_rlv::RlvEnvRequest as RlvEnvironmentRequest;
+
+/// Whether the user may still change their own environment, or an object holds
+/// `@setenv` and has taken the menu away. Re-exported for the same reason: the
+/// menu bar reads this seam, not the language crate.
+pub use sl_rlv::can_change_environment;
 
 /// The `[rlv]` section every RLV setting is grouped under in the settings file.
 pub const RLV_SECTION: &[&str] = &["rlv"];
@@ -751,6 +765,266 @@ impl RlvExtSource for ViewerRlvExt<'_> {
     }
 }
 
+// --- The `@getenv_*` / `@setenv_*` sky -------------------------------------
+
+/// The seam between the RLV engine and the scene's environment layer.
+///
+/// [`sl_rlv`] owns the language — which subkeys exist, what each is scaled by,
+/// how a colour is spelled — and asks an [`RlvEnvSource`] for the sky behind it.
+/// The sky itself belongs to the scene, three crates away and unreachable from
+/// the RLV surface, so this resource is the meeting point: the scene publishes
+/// what it renders into [`rendered`](Self::rendered), the RLV engine edits
+/// [`edited`](Self::edited) and queues whole-environment changes in
+/// [`request`](Self::request), and the scene picks both up on its next frame.
+///
+/// It is a **holding cell, not a second copy of the truth**: nothing renders
+/// from it, and the scene overwrites `rendered` from whatever it is actually
+/// drawing. `edited` is deliberately sticky — it is the reference's `ENV_LOCAL`
+/// layer, which outlives a region change and is dropped only by
+/// `@setenv_daytime:-1` or the user going back to the shared environment.
+#[derive(Resource, Debug, Default, Clone, PartialEq)]
+pub struct RlvEnvironmentSlot {
+    /// The sky the scene is rendering, republished whenever it changes. `None`
+    /// before the first environment is ingested, which is the one state a read
+    /// cannot be answered from.
+    pub rendered: Option<SkySettings>,
+    /// The sky a script has edited, waiting for the scene to install it as the
+    /// local environment layer. Cloned from [`rendered`](Self::rendered) on the
+    /// first write, so a script never edits the region's own settings.
+    pub edited: Option<SkySettings>,
+    /// A whole-environment change (`@setenv_asset`, `@setenv_preset`,
+    /// `@setenv_daycycle`, `@setenv_daytime`) for the scene to carry out and
+    /// take.
+    pub request: Option<RlvEnvRequest>,
+    /// Whether the scene has a fixed sky pinned rather than a day cycle
+    /// running — the one fact `@getenv_daytime` reports.
+    pub fixed_sky: bool,
+}
+
+impl RlvEnvironmentSlot {
+    /// The sky a read answers from: the edited one while a script holds it,
+    /// otherwise what the scene is rendering.
+    #[must_use]
+    fn readable(&self) -> Option<&SkySettings> {
+        self.edited.as_ref().or(self.rendered.as_ref())
+    }
+
+    /// The sky a write goes into, cloning the rendered one into the local layer
+    /// on the first write as `RlvEnvironment::getTargetSky(true)` does.
+    /// `None` when there is nothing to clone.
+    fn writable(&mut self) -> Option<&mut SkySettings> {
+        if self.edited.is_none() {
+            self.edited = self.rendered.clone();
+        }
+        self.edited.as_mut()
+    }
+}
+
+/// A sky texture id as RLV reads it: the null id for a sky that names none,
+/// which is what the reference's `getSunTextureId` answers there.
+#[must_use]
+fn texture_id(texture: Option<TextureKey>) -> RlvSkyValue {
+    RlvSkyValue::Texture(texture.map_or_else(Uuid::nil, |key| key.0.0))
+}
+
+/// A texture id a script wrote, as the sky stores it: the null id means "the
+/// viewer's own default", which is `None` here.
+#[must_use]
+fn texture_key(id: Uuid) -> Option<TextureKey> {
+    (!id.is_nil()).then_some(TextureKey(Key(id)))
+}
+
+impl RlvEnvSource for RlvEnvironmentSlot {
+    /// Read one field of the sky.
+    ///
+    /// Every arm answers in the sky's own units; the scaling a script sees is
+    /// [`sl_rlv`]'s and is applied on the other side of this call.
+    fn sky_value(&self, field: RlvSkyField) -> Option<RlvSkyValue> {
+        let sky = self.readable()?;
+        Some(match field {
+            RlvSkyField::Ambient => color(sky.ambient),
+            RlvSkyField::BlueDensity => color(sky.blue_density),
+            RlvSkyField::BlueHorizon => color(sky.blue_horizon),
+            RlvSkyField::CloudColor => color(sky.cloud_color),
+            RlvSkyField::CloudPosDensity1 => cloud_pos_density(sky.cloud_pos_density1),
+            RlvSkyField::CloudPosDensity2 => cloud_pos_density(sky.cloud_pos_density2),
+            // The alpha is not a channel RLV knows about; it is kept on write.
+            RlvSkyField::SunlightColor => RlvSkyValue::Color([
+                sky.sunlight_color.red(),
+                sky.sunlight_color.green(),
+                sky.sunlight_color.blue(),
+            ]),
+            RlvSkyField::Glow => {
+                RlvSkyValue::Color([sky.glow.size(), sky.glow.reserved(), sky.glow.focus()])
+            }
+            RlvSkyField::CloudScrollRate => RlvSkyValue::Vec2(sky.cloud_scroll_rate),
+            RlvSkyField::DensityMultiplier => RlvSkyValue::Float(sky.density_multiplier),
+            RlvSkyField::DistanceMultiplier => RlvSkyValue::Float(sky.distance_multiplier),
+            RlvSkyField::DropletRadius => RlvSkyValue::Float(sky.droplet_radius),
+            RlvSkyField::HazeDensity => RlvSkyValue::Float(sky.haze_density),
+            RlvSkyField::HazeHorizon => RlvSkyValue::Float(sky.haze_horizon),
+            RlvSkyField::IceLevel => RlvSkyValue::Float(sky.ice_level),
+            RlvSkyField::MaxY => RlvSkyValue::Float(sky.max_y),
+            RlvSkyField::MoistureLevel => RlvSkyValue::Float(sky.moisture_level),
+            RlvSkyField::Gamma => RlvSkyValue::Float(sky.gamma),
+            RlvSkyField::CloudShadow => RlvSkyValue::Float(sky.cloud_shadow),
+            RlvSkyField::CloudScale => RlvSkyValue::Float(sky.cloud_scale),
+            RlvSkyField::CloudVariance => RlvSkyValue::Float(sky.cloud_variance),
+            RlvSkyField::MoonBrightness => RlvSkyValue::Float(sky.moon_brightness),
+            RlvSkyField::MoonScale => RlvSkyValue::Float(sky.moon_scale),
+            RlvSkyField::SunScale => RlvSkyValue::Float(sky.sun_scale),
+            RlvSkyField::StarBrightness => RlvSkyValue::Float(sky.star_brightness),
+            RlvSkyField::CloudTexture => texture_id(sky.cloud_texture),
+            RlvSkyField::MoonTexture => texture_id(sky.moon_texture),
+            RlvSkyField::SunTexture => texture_id(sky.sun_texture),
+        })
+    }
+
+    /// Write one field of the local sky.
+    ///
+    /// A value of the wrong shape for its field is refused rather than coerced —
+    /// [`sl_rlv`] never sends one, and a viewer that silently accepted the wrong
+    /// arm would hide the day it did.
+    fn set_sky_value(&mut self, field: RlvSkyField, value: RlvSkyValue) -> bool {
+        let Some(sky) = self.writable() else {
+            return false;
+        };
+        match (field, value) {
+            (RlvSkyField::Ambient, RlvSkyValue::Color(rgb)) => sky.ambient = sl_color(rgb),
+            (RlvSkyField::BlueDensity, RlvSkyValue::Color(rgb)) => sky.blue_density = sl_color(rgb),
+            (RlvSkyField::BlueHorizon, RlvSkyValue::Color(rgb)) => sky.blue_horizon = sl_color(rgb),
+            (RlvSkyField::CloudColor, RlvSkyValue::Color(rgb)) => sky.cloud_color = sl_color(rgb),
+            (RlvSkyField::CloudPosDensity1, RlvSkyValue::Color([x, y, density])) => {
+                sky.cloud_pos_density1 = CloudPosDensity::new(x, y, density);
+            }
+            (RlvSkyField::CloudPosDensity2, RlvSkyValue::Color([x, y, density])) => {
+                sky.cloud_pos_density2 = CloudPosDensity::new(x, y, density);
+            }
+            (RlvSkyField::SunlightColor, RlvSkyValue::Color([red, green, blue])) => {
+                sky.sunlight_color = ColorAlpha::new(red, green, blue, sky.sunlight_color.alpha());
+            }
+            (RlvSkyField::Glow, RlvSkyValue::Color([size, reserved, focus])) => {
+                sky.glow = Glow::new(size, reserved, focus);
+            }
+            (RlvSkyField::CloudScrollRate, RlvSkyValue::Vec2(pair)) => {
+                sky.cloud_scroll_rate = pair;
+            }
+            (RlvSkyField::DensityMultiplier, RlvSkyValue::Float(value)) => {
+                sky.density_multiplier = value;
+            }
+            (RlvSkyField::DistanceMultiplier, RlvSkyValue::Float(value)) => {
+                sky.distance_multiplier = value;
+            }
+            (RlvSkyField::DropletRadius, RlvSkyValue::Float(value)) => sky.droplet_radius = value,
+            (RlvSkyField::HazeDensity, RlvSkyValue::Float(value)) => sky.haze_density = value,
+            (RlvSkyField::HazeHorizon, RlvSkyValue::Float(value)) => sky.haze_horizon = value,
+            (RlvSkyField::IceLevel, RlvSkyValue::Float(value)) => sky.ice_level = value,
+            (RlvSkyField::MaxY, RlvSkyValue::Float(value)) => sky.max_y = value,
+            (RlvSkyField::MoistureLevel, RlvSkyValue::Float(value)) => sky.moisture_level = value,
+            (RlvSkyField::Gamma, RlvSkyValue::Float(value)) => sky.gamma = value,
+            (RlvSkyField::CloudShadow, RlvSkyValue::Float(value)) => sky.cloud_shadow = value,
+            (RlvSkyField::CloudScale, RlvSkyValue::Float(value)) => sky.cloud_scale = value,
+            (RlvSkyField::CloudVariance, RlvSkyValue::Float(value)) => sky.cloud_variance = value,
+            (RlvSkyField::MoonBrightness, RlvSkyValue::Float(value)) => sky.moon_brightness = value,
+            (RlvSkyField::MoonScale, RlvSkyValue::Float(value)) => sky.moon_scale = value,
+            (RlvSkyField::SunScale, RlvSkyValue::Float(value)) => sky.sun_scale = value,
+            (RlvSkyField::StarBrightness, RlvSkyValue::Float(value)) => sky.star_brightness = value,
+            (RlvSkyField::CloudTexture, RlvSkyValue::Texture(id)) => {
+                sky.cloud_texture = texture_key(id);
+            }
+            (RlvSkyField::MoonTexture, RlvSkyValue::Texture(id)) => {
+                sky.moon_texture = texture_key(id);
+            }
+            (RlvSkyField::SunTexture, RlvSkyValue::Texture(id)) => {
+                sky.sun_texture = texture_key(id);
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    /// Where the sun or moon sits — its rotation applied to the Second Life `+X`
+    /// axis, which is the form [`sl_rlv`] takes the spherical angles from.
+    fn sky_direction(&self, body: RlvSkyBody) -> Option<[f32; 3]> {
+        let sky = self.readable()?;
+        Some(sky_body_direction(match body {
+            RlvSkyBody::Sun => &sky.sun_rotation,
+            RlvSkyBody::Moon => &sky.moon_rotation,
+        }))
+    }
+
+    /// Point the sun or moon at the given spherical angles, through the
+    /// reference's own `convert_azimuth_and_altitude_to_quat`.
+    fn set_sky_angles(&mut self, body: RlvSkyBody, azimuth: f32, elevation: f32) -> bool {
+        let rotation = azimuth_altitude_to_rotation(azimuth, elevation);
+        let Some(sky) = self.writable() else {
+            return false;
+        };
+        match body {
+            RlvSkyBody::Sun => sky.sun_rotation = rotation,
+            RlvSkyBody::Moon => sky.moon_rotation = rotation,
+        }
+        true
+    }
+
+    /// Queue a whole-environment change for the scene.
+    ///
+    /// A named library preset is the one form this viewer cannot honour: the
+    /// reference resolves it against the inventory Library's `Environments`
+    /// folder, which nothing here indexes, so a name that is not an asset id is
+    /// refused — the same `RLV_RET_FAILED_OPTION` the reference gives a name it
+    /// cannot find either. The id forms of all four are queued.
+    ///
+    /// Any per-value edit still waiting is **dropped**: this replaces the whole
+    /// local layer, so the sky that edit was building no longer has a layer to
+    /// be the top of. That is the reference's own outcome for the two commands
+    /// in that order — it installs the edited sky and then replaces it — reached
+    /// without having to install the sky first.
+    fn apply_environment(&mut self, request: &RlvEnvRequest) -> bool {
+        let resolved = match *request {
+            RlvEnvRequest::Asset(id) => RlvEnvRequest::Asset(id),
+            // The reference tries the text as an id first and only then searches
+            // the library by name (`fnApplyLibraryPreset`), and an id applies the
+            // asset exactly as `@setenv_asset` would.
+            RlvEnvRequest::Preset(ref text) | RlvEnvRequest::DayCycle(ref text) => {
+                match Uuid::try_parse(text) {
+                    Ok(id) if !id.is_nil() => RlvEnvRequest::Asset(id),
+                    _ => return false,
+                }
+            }
+            RlvEnvRequest::DayTime(position) => RlvEnvRequest::DayTime(position),
+            RlvEnvRequest::Clear => RlvEnvRequest::Clear,
+        };
+        self.edited = None;
+        self.request = Some(resolved);
+        true
+    }
+
+    /// Whether a fixed sky is pinned, as the scene last published.
+    fn has_fixed_sky(&self) -> bool {
+        self.fixed_sky
+    }
+}
+
+/// A sky colour as the three channels [`sl_rlv`] works in.
+#[must_use]
+const fn color(value: Color) -> RlvSkyValue {
+    RlvSkyValue::Color([value.red(), value.green(), value.blue()])
+}
+
+/// The inverse of [`color`].
+#[must_use]
+const fn sl_color([red, green, blue]: [f32; 3]) -> Color {
+    Color::new(red, green, blue)
+}
+
+/// A cloud layer's position and density, which the reference stores and
+/// addresses as a colour.
+#[must_use]
+const fn cloud_pos_density(value: CloudPosDensity) -> RlvSkyValue {
+    RlvSkyValue::Color([value.position_x(), value.position_y(), value.density()])
+}
+
 // --- Settings --------------------------------------------------------------
 
 /// Declare every RLV setting: the boolean roster, the two shared-folder name
@@ -931,12 +1205,15 @@ pub fn object_attachment(objects: &ObjectState, key: ObjectKey) -> Option<RlvObj
 mod tests {
     use super::{
         RLV_BOOL_SETTINGS, RLV_CONSOLE_CAPACITY, RLV_PREFIX_SETTINGS, RLV_REPLY_CAPACITY,
-        RLV_STRINGS, RlvConsoleKind, RlvSession, rlv_flag, rlv_string, rlv_string_def,
-        swallows_owner_say,
+        RLV_STRINGS, RlvConsoleKind, RlvEnvironmentSlot, RlvSession, rlv_flag, rlv_string,
+        rlv_string_def, swallows_owner_say,
     };
     use pretty_assertions::assert_eq;
-    use sl_client_bevy::{ChatSource, ChatType, ObjectKey, Uuid};
-    use sl_rlv::{RlvNoFacts, parse_chat_line};
+    use sl_client_bevy::{ChatSource, ChatType, ObjectKey, SkySettings, Uuid};
+    use sl_rlv::{
+        RlvEnvRequest, RlvEnvSource as _, RlvNoFacts, RlvSkyBody, RlvSkyField, RlvSkyValue,
+        parse_chat_line,
+    };
     use std::collections::HashSet;
 
     /// Every setting name in the three rosters is unique — a duplicate would
@@ -1217,5 +1494,162 @@ mod tests {
         let before = session.revision();
         session.release_all();
         assert_eq!(session.revision(), before);
+    }
+
+    /// A slot holding the reference viewer's own default sky.
+    fn slot() -> RlvEnvironmentSlot {
+        RlvEnvironmentSlot {
+            rendered: Some(SkySettings::legacy_windlight_default("Default")),
+            ..RlvEnvironmentSlot::default()
+        }
+    }
+
+    /// With no environment ingested there is nothing to read and nothing to
+    /// clone into the local layer, which is the one state a read cannot be
+    /// answered from.
+    #[test]
+    fn an_empty_slot_answers_nothing() {
+        let mut empty = RlvEnvironmentSlot::default();
+        assert_eq!(empty.sky_value(RlvSkyField::Ambient), None);
+        assert_eq!(empty.sky_direction(RlvSkyBody::Sun), None);
+        assert!(!empty.set_sky_value(RlvSkyField::Gamma, RlvSkyValue::Float(2.0)));
+        assert!(!empty.set_sky_angles(RlvSkyBody::Sun, 0.0, 0.0));
+    }
+
+    /// A write clones the rendered sky into the local layer rather than editing
+    /// it, and every later read sees the edit — which is what lets one owner-say
+    /// line write two components of the same colour.
+    #[test]
+    fn a_write_clones_the_rendered_sky_first() {
+        let mut slot = slot();
+        assert!(slot.set_sky_value(RlvSkyField::Gamma, RlvSkyValue::Float(2.5)));
+        assert_eq!(
+            slot.sky_value(RlvSkyField::Gamma),
+            Some(RlvSkyValue::Float(2.5))
+        );
+        // The rendered sky — the scene's own — is untouched.
+        assert_eq!(
+            slot.rendered.as_ref().map(|sky| sky.gamma),
+            Some(SkySettings::legacy_windlight_default("Default").gamma)
+        );
+        assert!(slot.edited.is_some());
+    }
+
+    /// Every field a subkey can name round-trips through the slot in the kind
+    /// its declaration promises, so `sl-rlv` never has to guess.
+    #[test]
+    fn every_sky_field_round_trips() {
+        let mut slot = slot();
+        for field in [
+            RlvSkyField::Ambient,
+            RlvSkyField::BlueDensity,
+            RlvSkyField::BlueHorizon,
+            RlvSkyField::CloudColor,
+            RlvSkyField::CloudPosDensity1,
+            RlvSkyField::CloudPosDensity2,
+            RlvSkyField::SunlightColor,
+            RlvSkyField::Glow,
+            RlvSkyField::CloudScrollRate,
+            RlvSkyField::DensityMultiplier,
+            RlvSkyField::DistanceMultiplier,
+            RlvSkyField::DropletRadius,
+            RlvSkyField::HazeDensity,
+            RlvSkyField::HazeHorizon,
+            RlvSkyField::IceLevel,
+            RlvSkyField::MaxY,
+            RlvSkyField::MoistureLevel,
+            RlvSkyField::Gamma,
+            RlvSkyField::CloudShadow,
+            RlvSkyField::CloudScale,
+            RlvSkyField::CloudVariance,
+            RlvSkyField::MoonBrightness,
+            RlvSkyField::MoonScale,
+            RlvSkyField::SunScale,
+            RlvSkyField::StarBrightness,
+            RlvSkyField::CloudTexture,
+            RlvSkyField::MoonTexture,
+            RlvSkyField::SunTexture,
+        ] {
+            let written = match field.kind() {
+                sl_rlv::RlvSkyKind::Float => RlvSkyValue::Float(0.375),
+                sl_rlv::RlvSkyKind::Color => RlvSkyValue::Color([0.25, 0.5, 0.75]),
+                sl_rlv::RlvSkyKind::Vec2 => RlvSkyValue::Vec2([0.25, 0.5]),
+                sl_rlv::RlvSkyKind::Texture => RlvSkyValue::Texture(Uuid::from_u128(7)),
+            };
+            assert!(
+                slot.set_sky_value(field, written),
+                "{field:?} is not writable"
+            );
+            assert_eq!(slot.sky_value(field), Some(written), "{field:?}");
+        }
+    }
+
+    /// A texture written as the null id names no texture, and reads back as the
+    /// null id rather than as nothing — the reference's own answer for a sky
+    /// that carries the viewer's default.
+    #[test]
+    fn the_null_texture_is_the_viewer_default() {
+        let mut slot = slot();
+        assert!(slot.set_sky_value(RlvSkyField::SunTexture, RlvSkyValue::Texture(Uuid::nil())));
+        assert_eq!(
+            slot.edited.as_ref().and_then(|sky| sky.sun_texture),
+            None,
+            "a null id is stored as no texture at all"
+        );
+        assert_eq!(
+            slot.sky_value(RlvSkyField::SunTexture),
+            Some(RlvSkyValue::Texture(Uuid::nil()))
+        );
+    }
+
+    /// Placing the sun by angle and reading its direction back is a round trip:
+    /// the two halves of the reference's own conversion.
+    #[test]
+    fn the_sun_round_trips_through_its_angles() {
+        let mut slot = slot();
+        assert!(slot.set_sky_angles(RlvSkyBody::Sun, 0.0, 0.0));
+        let direction = slot.sky_direction(RlvSkyBody::Sun).unwrap_or([0.0; 3]);
+        assert_eq!(
+            direction.map(|part| format!("{part:.3}")),
+            ["1.000".to_owned(), "0.000".to_owned(), "0.000".to_owned()],
+            "a zero azimuth and elevation is due east on the horizon"
+        );
+    }
+
+    /// A preset or day cycle named by **id** is the same request as
+    /// `@setenv_asset`; one named by a library name this viewer does not index
+    /// is refused, which the script hears as a bad option.
+    #[test]
+    fn a_preset_is_resolved_by_id_only() {
+        let mut slot = slot();
+        let id = Uuid::from_u128(0x5eed);
+        assert!(slot.apply_environment(&RlvEnvRequest::Preset(id.to_string())));
+        assert_eq!(slot.request, Some(RlvEnvRequest::Asset(id)));
+        assert!(!slot.apply_environment(&RlvEnvRequest::Preset("Sunrise".to_owned())));
+        assert!(!slot.apply_environment(&RlvEnvRequest::DayCycle("Default".to_owned())));
+        assert!(
+            !slot.apply_environment(&RlvEnvRequest::Preset(Uuid::nil().to_string())),
+            "a null id names no asset"
+        );
+    }
+
+    /// A whole-environment change replaces the layer, so it takes the sky a
+    /// script was editing with it — there is no layer left for that sky to be
+    /// the top of, which is also where the reference ends up after installing
+    /// the edit and then replacing it.
+    #[test]
+    fn a_whole_environment_change_drops_a_waiting_edit() {
+        for request in [
+            RlvEnvRequest::Clear,
+            RlvEnvRequest::DayTime(0.5),
+            RlvEnvRequest::Asset(Uuid::from_u128(9)),
+        ] {
+            let mut slot = slot();
+            assert!(slot.set_sky_value(RlvSkyField::Gamma, RlvSkyValue::Float(2.5)));
+            assert!(slot.edited.is_some());
+            assert!(slot.apply_environment(&request));
+            assert_eq!(slot.edited, None, "{request:?}");
+            assert_eq!(slot.request, Some(request));
+        }
     }
 }

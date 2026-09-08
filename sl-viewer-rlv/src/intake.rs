@@ -29,11 +29,11 @@
 //!
 //! # Out: the one chat-back seam
 //!
-//! Three producers build a line and none of them can send it — the `@get*`
-//! answer, the `@notify` subscribers' reports, and the `@getdebug_*` answer.
-//! They all queue on [`RlvSession::push_reply`] and one system
-//! (`drain_rlv_replies`) shouts them, because that is one send rather than
-//! three and a fourth producer inherits it for free.
+//! Four producers build a line and none of them can send it — the `@get*`
+//! answer, the `@notify` subscribers' reports, the `@getdebug_*` answer and the
+//! `@getenv_*` one. They all queue on [`RlvSession::push_reply`] and one system
+//! (`drain_rlv_replies`) shouts them, because that is one send rather than four
+//! and a fifth producer inherits it for free.
 //!
 //! # One deliberate divergence: where the debug echo goes
 //!
@@ -69,14 +69,15 @@ use sl_client_bevy::{
     SlSessionEvent,
 };
 use sl_rlv::{
-    RlvExtSource, RlvNoFacts, RlvOutcome, RlvParam, RlvQuery, RlvReply, RlvState,
+    RlvEnvSource, RlvExtSource, RlvNoFacts, RlvOutcome, RlvParam, RlvQuery, RlvReply, RlvState,
     is_valid_reply_channel, parse_chat_line,
 };
 use sl_viewer_notifications::ShowNotification;
 use sl_viewer_settings::ViewerSettings;
 use sl_viewer_world_api::rlv::{
-    RlvConsoleKind, RlvExtFacts, RlvSession, SETTING_DEBUG, SETTING_DEBUG_HIDE_UNSET_DUPLICATE,
-    ViewerRlvExt, object_attachment, rlv_flag, rlv_is_enabled, swallows_owner_say,
+    RlvConsoleKind, RlvEnvironmentSlot, RlvExtFacts, RlvSession, SETTING_DEBUG,
+    SETTING_DEBUG_HIDE_UNSET_DUPLICATE, ViewerRlvExt, object_attachment, rlv_flag, rlv_is_enabled,
+    swallows_owner_say,
 };
 use sl_viewer_world_api::{AvatarControls, ObjectState};
 use uuid::Uuid;
@@ -106,9 +107,11 @@ pub struct OwnerSayRun {
 ///
 /// The dispatch order is the reference's, and the order matters: the state
 /// machine sees every command first, hands back anything that is not a
-/// restriction, and only then is it offered to the extension handlers
-/// (`@getdebug_*` / `@setdebug_*` / `@setrot`) and finally answered as a query.
-/// Nothing in the behaviour dictionary can be shadowed by an extension that way.
+/// restriction, and only then is it offered to the two registered extension
+/// handlers — the debug window (`@getdebug_*` / `@setdebug_*` / `@setrot`) and
+/// then the environment (`@getenv_*` / `@setenv_*`) — and finally answered as a
+/// query. Nothing in the behaviour dictionary can be shadowed by an extension
+/// that way.
 ///
 /// # Queries the viewer cannot honestly answer
 ///
@@ -129,6 +132,7 @@ pub fn apply_owner_say(
     line: &str,
     hide_unset_duplicate: bool,
     ext: &mut impl RlvExtSource,
+    env: &mut impl RlvEnvSource,
 ) -> OwnerSayRun {
     let mut run = OwnerSayRun::default();
     let Some(parsed) = parse_chat_line(line) else {
@@ -162,6 +166,15 @@ pub fn apply_owner_say(
                 if let Some(heading) = result.rotate_to {
                     run.rotate_to = Some(heading);
                 }
+                if let Some(reply) = result.reply {
+                    run.replies.push(reply);
+                }
+            } else if let Some(result) = state.run_environment(issuer, &command, env) {
+                // The second registered handler, in the reference's own order:
+                // the `@getenv_*` / `@setenv_*` sky. It never moves the avatar
+                // and never changes a restriction, so all it can leave behind is
+                // an answer.
+                outcome = result.outcome;
                 if let Some(reply) = result.reply {
                     run.replies.push(reply);
                 }
@@ -404,6 +417,12 @@ pub struct RlvIntakePlugin;
 impl Plugin for RlvIntakePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RlvObjectWatch>()
+            // The seam the `@setenv_*` family writes through. Registered here
+            // for the same reason the notification message below is: a host
+            // that wants the intake without the whole UI still gets a plugin
+            // that runs, and `init_resource` is idempotent, so the UI plugins
+            // declaring it too costs nothing.
+            .init_resource::<RlvEnvironmentSlot>()
             // Registered here rather than left to the notification host, so a
             // host that wants the intake without the whole UI still gets a
             // plugin that runs. `add_message` is idempotent, so the host
@@ -495,6 +514,14 @@ fn report_master_switch_change(
 
 /// Feed every arriving owner-say `@`-line to the state machine as the object
 /// that said it.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources: the event stream, the \
+              identity and settings that decide whether a line is taken at all, the two facts \
+              the debug-setting allowlist reads, the world mirror an issuer is resolved \
+              against, the movement controls a forced rotation writes, the environment seam \
+              the sky family writes through, and the session it all lands in"
+)]
 fn take_rlv_owner_say(
     mut events: MessageReader<SlEvent>,
     identity: Option<Res<SlIdentity>>,
@@ -502,6 +529,7 @@ fn take_rlv_owner_say(
     facts: Option<Res<RlvExtFacts>>,
     objects: Option<Res<ObjectState>>,
     mut controls: Option<ResMut<AvatarControls>>,
+    mut environment: ResMut<RlvEnvironmentSlot>,
     mut session: ResMut<RlvSession>,
 ) {
     if !rlv_is_enabled(settings.as_deref()) {
@@ -558,6 +586,7 @@ fn take_rlv_owner_say(
             &message.message,
             hide,
             &mut ext,
+            &mut *environment,
         );
         if run.changed {
             session.bump();
@@ -705,7 +734,7 @@ mod tests {
     };
     use pretty_assertions::assert_eq;
     use sl_rlv::{RlvBehaviour, RlvState, is_valid_reply_channel};
-    use sl_viewer_world_api::rlv::{RlvConsoleKind, RlvExtFacts, ViewerRlvExt};
+    use sl_viewer_world_api::rlv::{RlvConsoleKind, RlvEnvironmentSlot, RlvExtFacts, ViewerRlvExt};
     use uuid::Uuid;
 
     /// A `Box<dyn Error>` alias, so a test can use `?`.
@@ -723,7 +752,8 @@ mod tests {
             settings: None,
             facts: RlvExtFacts::default(),
         };
-        apply_owner_say(state, COLLAR, AGENT, line, false, &mut ext)
+        let mut env = RlvEnvironmentSlot::default();
+        apply_owner_say(state, COLLAR, AGENT, line, false, &mut ext, &mut env)
     }
 
     /// The whole point: a line an object says restrains the viewer, attributed
@@ -833,8 +863,19 @@ mod tests {
             settings: None,
             facts: RlvExtFacts::default(),
         };
-        apply_owner_say(&mut state, COLLAR, AGENT, "@fly=n", true, &mut ext);
-        let run = apply_owner_say(&mut state, COLLAR, AGENT, "@fly=n,detach=n", true, &mut ext);
+        let mut env = RlvEnvironmentSlot::default();
+        apply_owner_say(
+            &mut state, COLLAR, AGENT, "@fly=n", true, &mut ext, &mut env,
+        );
+        let run = apply_owner_say(
+            &mut state,
+            COLLAR,
+            AGENT,
+            "@fly=n,detach=n",
+            true,
+            &mut ext,
+            &mut env,
+        );
         assert_eq!(run.echo.len(), 1);
         assert!(
             run.echo

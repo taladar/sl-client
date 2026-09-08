@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 101 |
-| ready | 322 |
+| ready | 323 |
 | blocked | 46 |
 | in-progress | 20 |
 | bugs | 62 |
-| done | 1026 |
+| done | 1027 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1616** |
+| **total** | **1618** |
 
 ## ideas (101)
 
@@ -240,7 +240,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (322)
+## ready (323)
 
 ### protocol
 
@@ -489,6 +489,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-environment-personal-lighting`](ready/viewer-environment-personal-lighting.md)
   — Personal lighting — local environment override (blocked by
   `viewer-ui-widget-scaffold` (done))
+- [`viewer-environment-settings-index`](ready/viewer-environment-settings-index.md)
+  — Settings assets by name — the inventory index the Library Environments
+  folder needs
 - [`viewer-event-details`](ready/viewer-event-details.md) — Event details
   floater + reminders (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-experience-event-stream`](ready/viewer-experience-event-stream.md) —
@@ -841,13 +844,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-resync-animations`](ready/viewer-resync-animations.md) — Resync
   animations action
+- [`viewer-rlv-blocked-behaviours`](ready/viewer-rlv-blocked-behaviours.md) —
+  RLV — blocked behaviours, and RestrainedLoveNoSetEnv as the one that uses them
 - [`viewer-rlv-enforce-camera`](ready/viewer-rlv-enforce-camera.md) — RLV —
   camera restrictions and vision overlay (blocked by
   `viewer-rlv-restriction-state` (done), `viewer-camera-third-person-orbit`
   (done))
-- [`viewer-rlv-environment-commands`](ready/viewer-rlv-environment-commands.md)
-  — RLV — @setenv_*/@getenv_* environment control (blocked by
-  `viewer-rlv-restriction-state` (done))
 - [`viewer-rlv-vision-render`](ready/viewer-rlv-vision-render.md) — RLV
   vision-restriction rendering (blocked by `viewer-rlv-restriction-state`
   (done))
@@ -1344,7 +1346,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1026)
+## done (1027)
 
 ### protocol
 
@@ -2636,6 +2638,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-rlv-restriction-state` (done))
 - [`viewer-rlv-enforce-send-side`](done/viewer-rlv-enforce-send-side.md) — RLV —
   enforce send-side blocks at the Session boundary (blocked by
+  `viewer-rlv-restriction-state` (done))
+- [`viewer-rlv-environment-commands`](done/viewer-rlv-environment-commands.md) —
+  RLV — @setenv_*/@getenv_* environment control (blocked by
   `viewer-rlv-restriction-state` (done))
 - [`viewer-rlv-locks`](done/viewer-rlv-locks.md) — RLV — attachment, wearable
   and folder locks (blocked by `viewer-rlv-restriction-state` (done))

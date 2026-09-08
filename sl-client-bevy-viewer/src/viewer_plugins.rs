@@ -487,6 +487,7 @@ impl Plugin for ViewerWorldPlugins {
         app.init_resource::<MeshManager>();
         app.init_resource::<OwnBakeInputs>();
         app.init_resource::<crate::world_api::rlv::RlvExtFacts>();
+        app.init_resource::<crate::world_api::rlv::RlvEnvironmentSlot>();
         app.init_resource::<OwnBakePublish>();
         app.init_resource::<WearableAssetManager>();
         app.init_resource::<AnimationPlayback>();
@@ -520,6 +521,11 @@ impl Plugin for ViewerWorldPlugins {
                     // asset decodes; after `ingest_environment` so the shared
                     // environment (the Modern placeholder) is current.
                     crate::environment::resolve_modern_environment,
+                    // Install whatever the RLV `@setenv_*` family has queued and
+                    // republish the rendered sky for the next `@getenv_*` read.
+                    // Last of the four so the sky it publishes is the one this
+                    // frame settled on.
+                    crate::environment::apply_rlv_environment,
                 ),
                 // Trigger our own avatar's server-side bake so P14 has bakes to fetch.
                 drive_server_bake,

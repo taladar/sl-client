@@ -124,6 +124,22 @@ pub fn sl_rotation_to_quat(rotation: &Rotation) -> Quat {
     }
 }
 
+/// Where a sky body pointed by `rotation` sits: the Second Life `+X` axis under
+/// that rotation, in Second Life coordinates.
+///
+/// This is the reference's own derivation (`LLSettingsSky::getSunDirection`) and
+/// the exact inverse of
+/// [`azimuth_altitude_to_rotation`](sl_client_bevy::azimuth_altitude_to_rotation),
+/// which builds a sun or moon rotation from the spherical angles of the same
+/// direction. Anything that wants to know *where the sun is* rather than *how it
+/// is turned* — the scene dump, the RLV `@getenv_sunazimuth` family — asks here,
+/// so there is one derivation rather than one per reader.
+#[must_use]
+pub fn sky_body_direction(rotation: &Rotation) -> [f32; 3] {
+    let vector = sl_rotation_to_quat(rotation).mul_vec3(Vec3::X);
+    [vector.x, vector.y, vector.z]
+}
+
 /// A Second Life object's world [`Rotation`] as a Bevy [`Quat`], composing the
 /// Second Life → Bevy basis change with the object's own orientation.
 ///

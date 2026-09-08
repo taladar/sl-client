@@ -34,6 +34,7 @@ use uuid::Uuid;
 use crate::actions::{RlvActionSource, RlvActions};
 use crate::behaviour::{RlvBehaviour, RlvEntry, RlvLocalModifier};
 use crate::command::{RlvCommand, RlvParam, RlvParamKind};
+use crate::environment::{RlvEnvResult, RlvEnvSource};
 use crate::extension::{RlvDebugSetting, RlvExtResult, RlvExtSource};
 use crate::locks::{RlvLocks, RlvObjectAttachment};
 use crate::modifier::{DEFAULT_FIELD_OF_VIEW, RlvModifier, RlvModifierState, RlvModifierValue};
@@ -1362,6 +1363,54 @@ impl RlvState {
         source: &mut impl RlvExtSource,
     ) -> Option<RlvExtResult> {
         crate::extension::run(self, issuer, command, source)
+    }
+
+    /// Run a command the behaviour dictionary did not claim through the
+    /// **environment** handler: `@getenv_*` and `@setenv_*`.
+    ///
+    /// The sibling of [`run_extension`](Self::run_extension), and the second
+    /// link in the same chain: the reference registers `RlvEnvironment` and
+    /// `RlvExtGetSet` as two independent `RlvExtCommandHandler`s and offers an
+    /// unknown keyword to each in turn. `None` means the command is not one of
+    /// this family either.
+    ///
+    /// It takes the state by shared reference because nothing here changes it:
+    /// the only thing it asks is whether some *other* object holds `@setenv`.
+    ///
+    /// ```
+    /// # use sl_rlv::{RlvCommand, RlvEnvRequest, RlvEnvSource, RlvSkyBody, RlvSkyField,
+    /// #             RlvSkyValue, RlvState};
+    /// # use uuid::Uuid;
+    /// struct Viewer;
+    /// impl RlvEnvSource for Viewer {
+    ///     fn sky_value(&self, field: RlvSkyField) -> Option<RlvSkyValue> {
+    ///         (field == RlvSkyField::Ambient).then_some(RlvSkyValue::Color([0.75, 1.5, 3.0]))
+    ///     }
+    ///     fn set_sky_value(&mut self, _: RlvSkyField, _: RlvSkyValue) -> bool { false }
+    ///     fn sky_direction(&self, _: RlvSkyBody) -> Option<[f32; 3]> { None }
+    ///     fn set_sky_angles(&mut self, _: RlvSkyBody, _: f32, _: f32) -> bool { false }
+    ///     fn apply_environment(&mut self, _: &RlvEnvRequest) -> bool { false }
+    ///     fn has_fixed_sky(&self) -> bool { false }
+    /// }
+    ///
+    /// # fn main() -> Result<(), Box<dyn core::error::Error>> {
+    /// let state = RlvState::new();
+    /// let command = RlvCommand::parse_field("getenv_ambient=2222")?;
+    /// let result = state
+    ///     .run_environment(Uuid::from_u128(1), &command, &mut Viewer)
+    ///     .ok_or("not an environment command")?;
+    /// // The ambient colour is answered at a third of the sky's own value.
+    /// assert_eq!(result.reply.ok_or("no reply")?.message, "0.250000/0.500000/1.000000");
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn run_environment(
+        &self,
+        issuer: Uuid,
+        command: &RlvCommand,
+        source: &mut impl RlvEnvSource,
+    ) -> Option<RlvEnvResult> {
+        crate::environment::run(self, issuer, command, source)
     }
 
     /// What a script has written into the pseudo debug setting `setting`, if

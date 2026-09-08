@@ -27,10 +27,12 @@
 //!   that, and on the way back in: may I hear this, read that. One predicate
 //!   per question, called from everywhere, so no call site can spell a
 //!   restriction its own way and get it wrong;
-//! - the **extension commands** ([`RlvState::run_extension`]) are the ones the
-//!   dictionary never claimed: the `@getdebug_*` / `@setdebug_*` allowlist and
-//!   `@setrot`. They arrive as unknown keywords and are picked up here after
-//!   the state machine has handed them back.
+//! - the **extension commands** are the ones the dictionary never claimed. They
+//!   arrive as unknown keywords and are picked up after the state machine has
+//!   handed them back, by two independent handlers as in the reference: the
+//!   `@getdebug_*` / `@setdebug_*` allowlist and `@setrot`
+//!   ([`RlvState::run_extension`]), and the `@getenv_*` / `@setenv_*` sky
+//!   ([`RlvState::run_environment`]).
 //!
 //! The state machine also reports itself: `@notify` subscribers are told about
 //! every change it sees, and the lines they are owed wait in
@@ -123,6 +125,7 @@
 mod actions;
 mod behaviour;
 mod command;
+mod environment;
 mod extension;
 mod locks;
 mod modifier;
@@ -145,6 +148,11 @@ pub use behaviour::{
     RlvBehaviour, RlvBehaviourFlags, RlvEntry, RlvLocalModifier, RlvResolvedBehaviour, RlvValueType,
 };
 pub use command::{RLV_PREFIX, RlvCommand, RlvParam, RlvParamKind, RlvParseError};
+pub use environment::{
+    RLV_ENV_SETTINGS, RlvColorComponent, RlvEnvCommand, RlvEnvKind, RlvEnvRequest, RlvEnvResult,
+    RlvEnvSetting, RlvEnvSettingDef, RlvEnvSource, RlvEnvValue, RlvSkyBody, RlvSkyField,
+    RlvSkyKind, RlvSkyValue, can_change_environment,
+};
 pub use extension::{
     RLV_DEBUG_SETTINGS, RlvDebugKind, RlvDebugSetting, RlvDebugSettingDef, RlvDebugValue,
     RlvExtCommand, RlvExtResult, RlvExtSource, SETROT_OFFSET, is_debug_setting_locked, parse_bool,
