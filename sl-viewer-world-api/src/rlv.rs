@@ -41,12 +41,12 @@
               `rlv::RlvSession` only in the import"
 )]
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 use bevy::prelude::*;
 use sl_client_bevy::{
-    ChatSource, ChatType, CloudPosDensity, Color, ColorAlpha, Glow, Key, ObjectKey, SkySettings,
-    TextureKey, Uuid, azimuth_altitude_to_rotation,
+    ChatSource, ChatType, CloudPosDensity, Color, ColorAlpha, Glow, Key, ObjectKey, SettingsKind,
+    SkySettings, TextureKey, Uuid, azimuth_altitude_to_rotation,
 };
 use sl_rlv::{
     RlvAttachmentPoint, RlvDebugSetting, RlvDebugValue, RlvEnvRequest, RlvEnvSource, RlvExtSource,
@@ -799,6 +799,61 @@ pub struct RlvEnvironmentSlot {
     /// Whether the scene has a fixed sky pinned rather than a day cycle
     /// running — the one fact `@getenv_daytime` reports.
     pub fixed_sky: bool,
+    /// The library `Environments` folder's settings assets by name — what
+    /// `@setenv_preset:<name>` and `@setenv_daycycle:<name>` resolve against.
+    /// Published by the inventory crate's settings index; empty until the
+    /// library folder has been fetched, which is the same state the reference
+    /// is in on a grid whose library has no such folder.
+    pub library_environments: RlvLibraryEnvironments,
+}
+
+/// The library `Environments` folder, indexed the way `@setenv_preset` and
+/// `@setenv_daycycle` search it: by settings kind and **case-insensitively** by
+/// name (`RlvIsOfSettingsType`'s `boost::iequals`), first match winning.
+///
+/// It is a projection of the inventory mirror, not a second copy of it: only the
+/// three fields a name lookup needs, published by
+/// `sl_viewer_inventory::settings_index` whenever the mirror changes. It lives
+/// on [`RlvEnvironmentSlot`] because [`RlvEnvSource::apply_environment`] is
+/// called synchronously from inside the command parser, which holds no world.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct RlvLibraryEnvironments {
+    /// Keyed by kind and lower-cased name; the value is the settings **asset**
+    /// id, which is what `@setenv_asset` would have been given directly.
+    by_kind_and_name: HashMap<(SettingsKind, String), Uuid>,
+}
+
+impl RlvLibraryEnvironments {
+    /// Record one library settings item, **keeping the first** of a repeated
+    /// name: the reference takes `items.front()` of its collector's results, so
+    /// a later duplicate never displaces an earlier one.
+    pub fn insert(&mut self, kind: SettingsKind, name: &str, asset: Uuid) {
+        self.by_kind_and_name
+            .entry((kind, name.to_lowercase()))
+            .or_insert(asset);
+    }
+
+    /// The asset a name of that kind resolves to, or `None` for a name the
+    /// library does not carry — which is the reference's `RLV_RET_FAILED_OPTION`.
+    #[must_use]
+    pub fn resolve(&self, kind: SettingsKind, name: &str) -> Option<Uuid> {
+        self.by_kind_and_name
+            .get(&(kind, name.to_lowercase()))
+            .copied()
+    }
+
+    /// How many named assets are indexed — the `Environments` folder being
+    /// absent, unfetched or empty are all zero here.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.by_kind_and_name.len()
+    }
+
+    /// Whether nothing is indexed.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.by_kind_and_name.is_empty()
+    }
 }
 
 impl RlvEnvironmentSlot {
@@ -817,6 +872,23 @@ impl RlvEnvironmentSlot {
             self.edited = self.rendered.clone();
         }
         self.edited.as_mut()
+    }
+
+    /// Resolve the text of a `@setenv_preset` / `@setenv_daycycle` to a settings
+    /// asset the way `fnApplyLibraryPreset` does: as an id when it parses as a
+    /// non-nil one, otherwise by name against the library `Environments` folder
+    /// for that kind.
+    ///
+    /// The literal nil id is *searched for by name*, not applied: the reference
+    /// builds an `LLUUID` from the text and cannot tell "did not parse" from
+    /// "parsed as null", so both fall through to the name search — which no
+    /// library item answers, leaving the refusal where it belongs.
+    #[must_use]
+    fn resolve_settings(&self, text: &str, kind: SettingsKind) -> Option<Uuid> {
+        match Uuid::try_parse(text) {
+            Ok(id) if !id.is_nil() => Some(id),
+            _ => self.library_environments.resolve(kind, text),
+        }
     }
 }
 
@@ -969,11 +1041,14 @@ impl RlvEnvSource for RlvEnvironmentSlot {
 
     /// Queue a whole-environment change for the scene.
     ///
-    /// A named library preset is the one form this viewer cannot honour: the
-    /// reference resolves it against the inventory Library's `Environments`
-    /// folder, which nothing here indexes, so a name that is not an asset id is
-    /// refused — the same `RLV_RET_FAILED_OPTION` the reference gives a name it
-    /// cannot find either. The id forms of all four are queued.
+    /// `@setenv_preset` and `@setenv_daycycle` take **either** an asset id or a
+    /// name, and the reference's `fnApplyLibraryPreset` tries them in that
+    /// order: the text as an id first — applied exactly as `@setenv_asset`
+    /// would be — and only a text that is no id searched by name against the
+    /// inventory Library's `Environments` folder. The two commands search
+    /// different kinds (`preset` is `ST_SKY`, `daycycle` is `ST_DAYCYCLE`), so
+    /// they cannot share an arm; a name neither the library nor the parser
+    /// claims is refused with the reference's `RLV_RET_FAILED_OPTION`.
     ///
     /// Any per-value edit still waiting is **dropped**: this replaces the whole
     /// local layer, so the sky that edit was building no longer has a layer to
@@ -983,14 +1058,17 @@ impl RlvEnvSource for RlvEnvironmentSlot {
     fn apply_environment(&mut self, request: &RlvEnvRequest) -> bool {
         let resolved = match *request {
             RlvEnvRequest::Asset(id) => RlvEnvRequest::Asset(id),
-            // The reference tries the text as an id first and only then searches
-            // the library by name (`fnApplyLibraryPreset`), and an id applies the
-            // asset exactly as `@setenv_asset` would.
-            RlvEnvRequest::Preset(ref text) | RlvEnvRequest::DayCycle(ref text) => {
-                match Uuid::try_parse(text) {
-                    Ok(id) if !id.is_nil() => RlvEnvRequest::Asset(id),
-                    _ => return false,
-                }
+            RlvEnvRequest::Preset(ref text) => {
+                let Some(id) = self.resolve_settings(text, SettingsKind::Sky) else {
+                    return false;
+                };
+                RlvEnvRequest::Asset(id)
+            }
+            RlvEnvRequest::DayCycle(ref text) => {
+                let Some(id) = self.resolve_settings(text, SettingsKind::DayCycle) else {
+                    return false;
+                };
+                RlvEnvRequest::Asset(id)
             }
             RlvEnvRequest::DayTime(position) => RlvEnvRequest::DayTime(position),
             RlvEnvRequest::Clear => RlvEnvRequest::Clear,
@@ -1205,11 +1283,11 @@ pub fn object_attachment(objects: &ObjectState, key: ObjectKey) -> Option<RlvObj
 mod tests {
     use super::{
         RLV_BOOL_SETTINGS, RLV_CONSOLE_CAPACITY, RLV_PREFIX_SETTINGS, RLV_REPLY_CAPACITY,
-        RLV_STRINGS, RlvConsoleKind, RlvEnvironmentSlot, RlvSession, rlv_flag, rlv_string,
-        rlv_string_def, swallows_owner_say,
+        RLV_STRINGS, RlvConsoleKind, RlvEnvironmentSlot, RlvLibraryEnvironments, RlvSession,
+        rlv_flag, rlv_string, rlv_string_def, swallows_owner_say,
     };
     use pretty_assertions::assert_eq;
-    use sl_client_bevy::{ChatSource, ChatType, ObjectKey, SkySettings, Uuid};
+    use sl_client_bevy::{ChatSource, ChatType, ObjectKey, SettingsKind, SkySettings, Uuid};
     use sl_rlv::{
         RlvEnvRequest, RlvEnvSource as _, RlvNoFacts, RlvSkyBody, RlvSkyField, RlvSkyValue,
         parse_chat_line,
@@ -1617,10 +1695,11 @@ mod tests {
     }
 
     /// A preset or day cycle named by **id** is the same request as
-    /// `@setenv_asset`; one named by a library name this viewer does not index
-    /// is refused, which the script hears as a bad option.
+    /// `@setenv_asset`; a name is searched for in the library, and one the
+    /// library does not carry is refused, which the script hears as a bad
+    /// option.
     #[test]
-    fn a_preset_is_resolved_by_id_only() {
+    fn a_preset_is_resolved_by_id_first() {
         let mut slot = slot();
         let id = Uuid::from_u128(0x5eed);
         assert!(slot.apply_environment(&RlvEnvRequest::Preset(id.to_string())));
@@ -1629,7 +1708,53 @@ mod tests {
         assert!(!slot.apply_environment(&RlvEnvRequest::DayCycle("Default".to_owned())));
         assert!(
             !slot.apply_environment(&RlvEnvRequest::Preset(Uuid::nil().to_string())),
-            "a null id names no asset"
+            "a null id names no asset, and no library item is called that either"
+        );
+    }
+
+    /// **A library name resolves once the index has published one**, and each
+    /// command searches its own kind: `@setenv_preset` is `ST_SKY` and
+    /// `@setenv_daycycle` is `ST_DAYCYCLE`, so a day cycle is not an answer to
+    /// a preset even under the very same name.
+    #[test]
+    fn a_library_name_resolves_within_its_own_kind() {
+        let mut slot = slot();
+        let sky = Uuid::from_u128(0xA1);
+        let day = Uuid::from_u128(0xA2);
+        slot.library_environments
+            .insert(SettingsKind::Sky, "Sunrise", sky);
+        slot.library_environments
+            .insert(SettingsKind::DayCycle, "Sunrise", day);
+
+        assert!(slot.apply_environment(&RlvEnvRequest::Preset("Sunrise".to_owned())));
+        assert_eq!(slot.request, Some(RlvEnvRequest::Asset(sky)));
+        assert!(slot.apply_environment(&RlvEnvRequest::DayCycle("Sunrise".to_owned())));
+        assert_eq!(slot.request, Some(RlvEnvRequest::Asset(day)));
+
+        // `boost::iequals`: the name match is case-insensitive.
+        assert!(slot.apply_environment(&RlvEnvRequest::Preset("sUNRISE".to_owned())));
+        assert_eq!(slot.request, Some(RlvEnvRequest::Asset(sky)));
+
+        // Water is indexed but no `@setenv_*` command searches it, so a water
+        // preset of that name never becomes an answer to either command.
+        slot.library_environments
+            .insert(SettingsKind::Water, "Deep", Uuid::from_u128(0xA3));
+        assert!(!slot.apply_environment(&RlvEnvRequest::Preset("Deep".to_owned())));
+        assert!(!slot.apply_environment(&RlvEnvRequest::DayCycle("Deep".to_owned())));
+    }
+
+    /// A repeated library name keeps the **first** published, as the reference's
+    /// `items.front()` does — a second item of that name never displaces it.
+    #[test]
+    fn a_repeated_library_name_keeps_the_first() {
+        let mut library = RlvLibraryEnvironments::default();
+        assert!(library.is_empty());
+        library.insert(SettingsKind::Sky, "Sunrise", Uuid::from_u128(1));
+        library.insert(SettingsKind::Sky, "SUNRISE", Uuid::from_u128(2));
+        assert_eq!(library.len(), 1);
+        assert_eq!(
+            library.resolve(SettingsKind::Sky, "sunrise"),
+            Some(Uuid::from_u128(1))
         );
     }
 

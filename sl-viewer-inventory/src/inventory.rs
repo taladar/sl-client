@@ -372,6 +372,49 @@ impl InventoryModel {
         &self.roots
     }
 
+    /// The read-only shared Library's root folder — the scope
+    /// `rlvGetLibraryEnvironmentsFolder` searches, and the half of the tree the
+    /// agent does not own.
+    #[must_use]
+    pub fn library_root(&self) -> Option<InventoryFolderKey> {
+        self.roots
+            .iter()
+            .copied()
+            .find(|root| self.library_folders.contains(root))
+    }
+
+    /// The first folder named `name` (exactly, case-sensitively) anywhere under
+    /// `root`, breadth-first — `LLNameCategoryCollector`'s rule, which is how
+    /// the library's `Environments` folder is found.
+    ///
+    /// Breadth-first rather than the reference's traversal order because ours has
+    /// to be reproducible: `collectDescendentsIf` walks a hash map, so two runs
+    /// can disagree about which of two same-named folders is `cats.front()`.
+    #[must_use]
+    pub fn folder_by_name_under(
+        &self,
+        root: InventoryFolderKey,
+        name: &str,
+    ) -> Option<InventoryFolderKey> {
+        let mut queue = vec![root];
+        let mut cursor = 0;
+        while let Some(&current) = queue.get(cursor) {
+            // `collectDescendentsIf` collects *descendants*: the root it is
+            // given is never itself a candidate, however it is named.
+            if cursor != 0
+                && self
+                    .folders
+                    .get(&current)
+                    .is_some_and(|info| info.name == name)
+            {
+                return Some(current);
+            }
+            queue.extend_from_slice(self.children_of(current));
+            cursor = cursor.saturating_add(1);
+        }
+        None
+    }
+
     /// The legacy worn-wearables set, for the wear / take-off wiring.
     pub(crate) fn worn_wearables(&self) -> &[Wearable] {
         &self.wearables
@@ -537,7 +580,7 @@ impl InventoryModel {
 
     /// Store a fetched page of a folder's items (replacing any earlier page),
     /// sorted by name.
-    fn set_items(&mut self, folder: InventoryFolderKey, items: &[ItemInfo]) {
+    pub(crate) fn set_items(&mut self, folder: InventoryFolderKey, items: &[ItemInfo]) {
         let mut owned: Vec<ItemInfo> = items.to_vec();
         owned.sort_by_key(|item| item.name.to_lowercase());
         self.items.insert(folder, owned);
@@ -569,7 +612,7 @@ impl InventoryModel {
 
     /// Whether a folder's contents still need requesting (never asked, and not
     /// already held).
-    fn needs_fetch(&self, folder: InventoryFolderKey) -> bool {
+    pub(crate) fn needs_fetch(&self, folder: InventoryFolderKey) -> bool {
         !self.requested.contains(&folder) && !self.items.contains_key(&folder)
     }
 
@@ -2229,7 +2272,7 @@ pub(crate) fn request_all_agent_folders(
 
 /// Mark a folder requested and query its page (which auto-schedules the session's
 /// own fetch when the folder is not yet loaded).
-fn request_folder(
+pub(crate) fn request_folder(
     model: &mut InventoryModel,
     folder: InventoryFolderKey,
     commands: &mut MessageWriter<SlCommand>,

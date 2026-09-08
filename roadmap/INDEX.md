@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 46 |
 | in-progress | 20 |
 | bugs | 62 |
-| done | 1027 |
+| done | 1028 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1618** |
+| **total** | **1619** |
 
 ## ideas (101)
 
@@ -489,9 +489,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-environment-personal-lighting`](ready/viewer-environment-personal-lighting.md)
   — Personal lighting — local environment override (blocked by
   `viewer-ui-widget-scaffold` (done))
-- [`viewer-environment-settings-index`](ready/viewer-environment-settings-index.md)
-  — Settings assets by name — the inventory index the Library Environments
-  folder needs
 - [`viewer-event-details`](ready/viewer-event-details.md) — Event details
   floater + reminders (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-experience-event-stream`](ready/viewer-experience-event-stream.md) —
@@ -793,6 +790,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-quick-preferences-editor`](ready/viewer-quick-preferences-editor.md)
   — Quick-preferences in-viewer editor (blocked by `viewer-quick-preferences`
   (done))
+- [`viewer-quick-prefs-environment-presets`](ready/viewer-quick-prefs-environment-presets.md)
+  — Quick preferences — sky / water / day-cycle combos over inventory (blocked
+  by `viewer-environment-settings-index` (done))
 - [`viewer-r17a`](ready/viewer-r17a-verify-the-shoe-lift-on-a-shod-avatar.md) —
   Verify the shoe lift live on a shod avatar
 - [`viewer-region-debug-console`](ready/viewer-region-debug-console.md) — Region
@@ -1346,7 +1346,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1027)
+## done (1028)
 
 ### protocol
 
@@ -1827,6 +1827,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-emoji-picker-floater`](done/viewer-emoji-picker-floater.md) — Emoji
   picker floater (blocked by `viewer-emoji-data` (done),
   `viewer-ui-floater-basic` (done))
+- [`viewer-environment-settings-index`](done/viewer-environment-settings-index.md)
+  — Settings assets by name — the inventory index the Library Environments
+  folder needs
 - [`viewer-experience-permission-body-links`](done/viewer-experience-permission-body-links.md)
   — Experience card name — clickable experience-profile SLURL (blocked by
   `viewer-url-linkification` (done))

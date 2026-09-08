@@ -193,6 +193,7 @@ pub(crate) use sl_viewer_inventory::inventory_drag;
 pub(crate) use sl_viewer_inventory::inventory_filters;
 pub(crate) use sl_viewer_inventory::inventory_gallery;
 pub(crate) use sl_viewer_inventory::inventory_properties;
+pub(crate) use sl_viewer_inventory::settings_index;
 mod land_menu;
 pub(crate) use sl_viewer_notices::linkified_text;
 pub(crate) use sl_viewer_world_objects::legacy_materials;
@@ -429,6 +430,7 @@ use crate::session::{
 };
 use crate::settings::{AccountContext, ViewerSettings, flush_settings, load_account_settings};
 use crate::settings_binding::SettingsBindingPlugin;
+use crate::settings_index::SettingsIndexPlugin;
 use crate::stand_stop_button::StandStopButtonPlugin;
 use crate::ui::{UiScaffoldSystems, ViewerUiPlugin};
 use crate::ui_element::UiAction;
@@ -1279,6 +1281,11 @@ fn run_session(
     .add_plugins(InventoryFiltersPlugin)
     .add_plugins(InventoryGalleryPlugin)
     .add_plugins(InventoryPropertiesPlugin)
+    // The settings-asset index (viewer-environment-settings-index): every sky /
+    // water / day-cycle item the mirror holds, grouped by kind and addressable
+    // by name — what `@setenv_preset:<name>` resolves against, and what the
+    // environment pickers list. Needs InventoryPlugin's model, so it follows it.
+    .add_plugins(SettingsIndexPlugin)
     .add_plugins(AboutLandmarkPlugin)
     .add_plugins(AvatarPickerPlugin)
     // The avatar profile floater (viewer-social-profiles): 2nd Life / Web /

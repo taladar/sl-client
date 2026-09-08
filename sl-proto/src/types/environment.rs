@@ -235,6 +235,104 @@ pub enum EnvironmentAsset {
     DayCycle(Box<DayCycle>),
 }
 
+impl EnvironmentAsset {
+    /// Which of the three kinds this decoded asset is — the same distinction
+    /// [`SettingsKind`] carries, reached by having parsed the body rather than
+    /// by reading an inventory item's flags.
+    #[must_use]
+    pub const fn kind(&self) -> SettingsKind {
+        match *self {
+            Self::Sky(_) => SettingsKind::Sky,
+            Self::Water(_) => SettingsKind::Water,
+            Self::DayCycle(_) => SettingsKind::DayCycle,
+        }
+    }
+}
+
+/// Which kind of settings asset an inventory item holds, carried in the low byte
+/// of the item's `flags` (`II_FLAGS_SUBTYPE_MASK`) exactly as a wearable's slot
+/// and a script's language are (`LLSettingsType::type_e`).
+///
+/// This is the *only* way to tell one settings item from another **without
+/// fetching it**: an [`EnvironmentAsset`] tags its own kind in its body, but a
+/// list of every settings item in inventory cannot afford to download them all
+/// to find out what they are. The reference reads the same byte for the same
+/// reason (`LLSettingsType::fromInventoryFlags`).
+///
+/// The reference casts the byte straight to its enum, so an unrecognised one
+/// becomes a value no arm of its `switch` matches and the item is logged and
+/// dropped; here that is [`None`], which reaches the same outcome by a route
+/// that cannot be mistaken for a valid kind.
+/// Deliberately **not** `#[non_exhaustive]`, unlike its neighbours: these three
+/// are the whole of `LLSettingsType::type_e`, its two sentinels being the
+/// [`None`] this type's constructors return rather than kinds. Every consumer
+/// files an asset under exactly one of them, and a fourth kind would be a
+/// protocol change that ought to break each of those matches rather than fall
+/// into a wildcard that quietly drops it.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub enum SettingsKind {
+    /// A single sky frame (`ST_SKY = 0`).
+    Sky,
+    /// A single water frame (`ST_WATER = 1`).
+    Water,
+    /// A whole day cycle (`ST_DAYCYCLE = 2`).
+    DayCycle,
+}
+
+impl SettingsKind {
+    /// The item-`flags` low-byte mask carrying the settings subtype
+    /// (`II_FLAGS_SUBTYPE_MASK`) — the same byte
+    /// [`ScriptLanguage`](crate::ScriptLanguage) and a wearable's slot use.
+    pub const SUBTYPE_MASK: u32 = 0x0000_00ff;
+
+    /// The `LLSettingsType::type_e` byte for this kind.
+    #[must_use]
+    pub const fn subtype(self) -> u8 {
+        match self {
+            Self::Sky => 0,
+            Self::Water => 1,
+            Self::DayCycle => 2,
+        }
+    }
+
+    /// Classifies an `LLSettingsType::type_e` byte, or `None` for one that names
+    /// no kind (the reference's `ST_INVALID` / `ST_NONE` included).
+    #[must_use]
+    pub const fn from_subtype(byte: u8) -> Option<Self> {
+        match byte {
+            0 => Some(Self::Sky),
+            1 => Some(Self::Water),
+            2 => Some(Self::DayCycle),
+            _ => None,
+        }
+    }
+
+    /// The kind recorded in an inventory item's `flags`, reading the subtype low
+    /// byte ([`SUBTYPE_MASK`](Self::SUBTYPE_MASK)); `None` for an unknown one.
+    ///
+    /// The caller must already know the item *is* a settings item — every
+    /// inventory item has flags, and a wearable's slot byte would be read as a
+    /// kind just as happily.
+    #[must_use]
+    pub fn from_item_flags(flags: u32) -> Option<Self> {
+        let byte = u8::try_from(flags & Self::SUBTYPE_MASK).ok()?;
+        Self::from_subtype(byte)
+    }
+
+    /// The reference's own short name for the kind
+    /// (`LLSettingsType::getDefaultName` keys: `"sky"`, `"water"`, `"day"`).
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Sky => "sky",
+            Self::Water => "water",
+            Self::DayCycle => "day",
+        }
+    }
+}
+
 /// A single water frame (`LLSettingsWater`): the surface and underwater state at
 /// one keyframe.
 ///
@@ -1482,5 +1580,58 @@ mod tests {
                 && noon.water_fog_density.to_bits() == reference.water_fog_density.to_bits()
                 && noon.name == reference.name
         }));
+    }
+
+    #[test]
+    fn settings_kind_reads_the_reference_subtype_bytes_both_ways() {
+        use super::SettingsKind;
+        // `LLSettingsType::type_e`: ST_SKY = 0, ST_WATER = 1, ST_DAYCYCLE = 2.
+        for (kind, byte) in [
+            (SettingsKind::Sky, 0_u8),
+            (SettingsKind::Water, 1),
+            (SettingsKind::DayCycle, 2),
+        ] {
+            assert_eq!(kind.subtype(), byte);
+            assert_eq!(SettingsKind::from_subtype(byte), Some(kind));
+        }
+        // ST_INVALID (255) and everything else names no kind.
+        assert_eq!(SettingsKind::from_subtype(3), None);
+        assert_eq!(SettingsKind::from_subtype(255), None);
+    }
+
+    #[test]
+    fn settings_kind_masks_the_low_flag_byte_and_ignores_the_rest() {
+        use super::SettingsKind;
+        // Only `II_FLAGS_SUBTYPE_MASK` carries the kind: the high bits are other
+        // item flags (`II_FLAGS_OBJECT_SLAM_PERM`, the shared-reference bit, …)
+        // and must not change the answer.
+        assert_eq!(SettingsKind::from_item_flags(0), Some(SettingsKind::Sky));
+        assert_eq!(
+            SettingsKind::from_item_flags(0xdead_ff00 | 2),
+            Some(SettingsKind::DayCycle)
+        );
+        assert_eq!(
+            SettingsKind::from_item_flags(0x4000_0001),
+            Some(SettingsKind::Water)
+        );
+        // A byte no kind claims is refused rather than cast into one, which is
+        // where the reference's unchecked cast lands its `default:` arm.
+        assert_eq!(SettingsKind::from_item_flags(0xff), None);
+    }
+
+    #[test]
+    fn a_decoded_asset_reports_the_kind_its_flags_would_have_carried() {
+        use super::{EnvironmentAsset, SettingsKind, SkySettings, WaterSettings};
+        let sky = EnvironmentAsset::Sky(Box::new(SkySettings::legacy_windlight_default(
+            super::DEFAULT_SKY_FRAME,
+        )));
+        let water =
+            EnvironmentAsset::Water(WaterSettings::legacy_default(super::DEFAULT_WATER_FRAME));
+        let day = EnvironmentAsset::DayCycle(Box::new(
+            EnvironmentSettings::legacy_windlight_default().day_cycle,
+        ));
+        assert_eq!(sky.kind(), SettingsKind::Sky);
+        assert_eq!(water.kind(), SettingsKind::Water);
+        assert_eq!(day.kind(), SettingsKind::DayCycle);
     }
 }
