@@ -6,17 +6,17 @@ use crate::GroupRoleKey;
 use crate::appearance;
 use crate::bookkeeping_ids::ImSessionId;
 use crate::types::{
-    ActiveGroup, AssetType, AvatarAppearance, AvatarAttachment, AvatarGroupMembership,
-    AvatarInterests, AvatarName, AvatarPickerResult, AvatarProperties, ChatAudible, ChatMessage,
-    ChatSource, ChatType, ClassifiedCategory, ClassifiedInfo, CloudPosDensity, Color, ColorAlpha,
-    DayCycle, DayCycleFrame, DisplayNameUpdate, EconomyData, EnvironmentAsset, EnvironmentSettings,
-    EnvironmentUpdate, EstateAccessKind, EstateInfo, Event, Friend, FriendRights, Glow,
-    GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
-    GroupAccountTransactions, GroupActiveProposalItem, GroupMember, GroupMembership, GroupName,
-    GroupNotice, GroupNoticeKey, GroupProfile, GroupRole, GroupTitle, GroupVote,
-    GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem, InventoryType,
-    LandingType, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity,
-    MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags, MuteType, NavMeshBuildStatus,
+    AccountBenefits, ActiveGroup, AssetType, AvatarAppearance, AvatarAttachment,
+    AvatarGroupMembership, AvatarInterests, AvatarName, AvatarPickerResult, AvatarProperties,
+    ChatAudible, ChatMessage, ChatSource, ChatType, ClassifiedCategory, ClassifiedInfo,
+    CloudPosDensity, Color, ColorAlpha, DayCycle, DayCycleFrame, DisplayNameUpdate, EconomyData,
+    EnvironmentAsset, EnvironmentSettings, EnvironmentUpdate, EstateAccessKind, EstateInfo, Event,
+    Friend, FriendRights, Glow, GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary,
+    GroupAccountTransaction, GroupAccountTransactions, GroupActiveProposalItem, GroupMember,
+    GroupMembership, GroupName, GroupNotice, GroupNoticeKey, GroupProfile, GroupRole, GroupTitle,
+    GroupVote, GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
+    InventoryType, LandingType, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags,
+    Maturity, MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags, MuteType, NavMeshBuildStatus,
     NavMeshStatus, NeighborInfo, Object, ObjectProperties, ObjectTransform, OpenRegionInfo,
     ParcelCategory, ParcelInfo, ParcelRequestResult, ParcelStatus, PickInfo, PickKey,
     PlayingAnimation, PrimShapeParams, ProductType, ProposalCandidateId, ProposalVoteId,
@@ -1564,6 +1564,33 @@ pub(crate) fn classified_info(
             data.price_for_listing,
         )?,
     })
+}
+
+/// Decodes the login response's `account_level_benefits` blob.
+///
+/// `None` both when the grid sent no such field — every OpenSim grid — and when
+/// what it sent is not a benefits map this build can read. The two are not
+/// distinguished here on purpose: a consumer's answer to "no benefits package"
+/// is the same either way (fall back to the legacy
+/// [`EconomyData`](crate::EconomyData) prices), and the reference viewer draws
+/// the same line, refusing a package with a missing field exactly as it refuses
+/// an absent one.
+pub(crate) fn benefits_of(blob: Option<&sl_wire::Llsd>) -> Option<AccountBenefits> {
+    match blob? {
+        sl_wire::Llsd::Map(map) => AccountBenefits::from_llsd(map),
+        _not_a_map => None,
+    }
+}
+
+/// Decodes the login response's `premium_packages` blob into the per-package
+/// benefits map, empty when the grid sent none.
+pub(crate) fn packages_of(
+    blob: Option<&sl_wire::Llsd>,
+) -> std::collections::BTreeMap<String, AccountBenefits> {
+    match blob {
+        Some(sl_wire::Llsd::Map(map)) => crate::types::packages_from_llsd(map),
+        _absent_or_not_a_map => std::collections::BTreeMap::new(),
+    }
 }
 
 /// Converts a login [`SkeletonFolder`] into an [`InventoryFolder`].

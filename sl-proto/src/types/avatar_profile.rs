@@ -1,6 +1,8 @@
 //! Avatar profile and relationships: properties, picks, classifieds, friends.
 
-use super::Maturity;
+use std::collections::BTreeMap;
+
+use super::{AccountBenefits, Maturity};
 use sl_types::key::{
     AgentKey, ClassifiedKey, FriendKey, GroupKey, InventoryFolderKey, ParcelKey, TextureKey,
 };
@@ -341,6 +343,43 @@ pub struct LoginAccount {
     /// The maximum maturity rating the account is entitled to
     /// (`agent_access_max`); a client may not raise its preference above this.
     pub agent_access_max: Maturity,
+    /// The account's maturity *preference* (`agent_region_access`) — the rating
+    /// it has chosen to see, always at or below
+    /// [`agent_access_max`](Self::agent_access_max).
+    ///
+    /// `None` when the grid did not send one, which is every OpenSim grid: the
+    /// field appears nowhere in OpenSim's source. Second Life sends it, and the
+    /// reference viewer seeds its `PreferredMaturity` setting from it.
+    ///
+    /// A client with `None` here should fall back to
+    /// [`agent_access_max`](Self::agent_access_max), which is what the reference
+    /// viewer does — deliberately, and with the ticket written down: *"FIRE-8854:
+    /// Set the preferred maturity here to the maximum in case the sim doesn't
+    /// send it at login, like OpenSim doesn't."*
+    pub preferred_maturity: Option<Maturity>,
+    /// The subscription package this account is on (`account_type`), e.g.
+    /// `"Base"`, `"Premium"` or `"Premium_Plus"`. `None` off Second Life.
+    ///
+    /// The key into [`packages`](Self::packages), and what the reference viewer
+    /// compares against `"Base"` to decide whether to offer an upgrade.
+    pub account_type: Option<String>,
+    /// What this account's package entitles it to
+    /// (`account_level_benefits`), or `None` on a grid that sends no benefits
+    /// package at all — every OpenSim grid.
+    ///
+    /// **This, not [`EconomyData`](crate::EconomyData), is where a modern viewer
+    /// reads upload prices on Second Life.** See the
+    /// [`benefits`](crate::types::AccountBenefits) docs for why the legacy field
+    /// is the OpenSim path rather than the other way round.
+    pub benefits: Option<AccountBenefits>,
+    /// Every subscription package the grid described (`premium_packages`), by
+    /// name — not only this account's.
+    ///
+    /// Empty off Second Life. It is what lets a viewer say "Premium would give
+    /// you N" beside what this account has; the reference viewer requires both
+    /// `Base` and `Premium` to be present and complains at startup when they are
+    /// not.
+    pub packages: BTreeMap<String, AccountBenefits>,
     /// The maximum number of groups this account may join (`max-agent-groups`),
     /// or `None` if the grid did not report a limit. Check before joining a
     /// group.

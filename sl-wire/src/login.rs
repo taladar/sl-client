@@ -465,6 +465,19 @@ pub struct LoginSuccess {
     /// The account's current maturity/content rating (`agent_access`), as the
     /// grid's short code: `"PG"`, `"M"` (mature), or `"A"` (adult). `None` if
     /// the grid did not provide it.
+    ///
+    /// **Not the preference and not the ceiling**, and the least understood of
+    /// the three. Aditi answered `"M"` on three runs whose
+    /// [`agent_access_max`](Self::agent_access_max) *and*
+    /// [`agent_region_access`](Self::agent_region_access) were both `"A"`, and
+    /// OpenSim hard-codes `"M"` for every avatar. Two readings fit: a
+    /// *clearance* (what the account is cleared for — an unverified account is
+    /// cleared to Moderate while entitled to Adult), or the start region's own
+    /// rating (that avatar's start region is also Mature, so the run cannot
+    /// separate them). The reference viewer reads the other two at login and
+    /// never this one, and nothing here reads it either — so the question is
+    /// parked rather than open work (roadmap `protocol-agent-access-meaning`,
+    /// which says what would settle it and why it is not worth going after).
     pub agent_access: Option<String>,
     /// The maximum maturity rating the account is entitled to
     /// (`agent_access_max`), in the same short-code form as
@@ -521,9 +534,19 @@ pub struct LoginSuccess {
     /// The real/owning agent id behind this login (`real_id`), used by grids
     /// that support aliased logins. Nil/absent on most grids.
     pub real_id: Option<AgentKey>,
-    /// The maturity rating of the *region* the avatar starts in
-    /// (`agent_region_access`), in the same `"PG"`/`"M"`/`"A"` short-code form
-    /// as [`agent_access`](Self::agent_access).
+    /// The account's maturity *preference* (`agent_region_access`) — the rating
+    /// it has chosen to see — in the same `"PG"`/`"M"`/`"A"` short-code form as
+    /// [`agent_access`](Self::agent_access).
+    ///
+    /// Despite the name this is not a property of a region. The reference viewer
+    /// reads it as *"the value of their preference setting for that content,
+    /// which will always be `<=` `agent_access_max`"* and seeds its
+    /// `PreferredMaturity` setting from it.
+    ///
+    /// `None` on every OpenSim grid: the field appears nowhere in OpenSim's
+    /// sources. A client should then fall back to
+    /// [`agent_access_max`](Self::agent_access_max), which is what the reference
+    /// viewer does deliberately (Firestorm's FIRE-8854).
     pub agent_region_access: Option<String>,
     /// The start location the grid actually granted (`start_location`):
     /// `"last"`, `"home"`, or `"url"` — the *granted* category, not the

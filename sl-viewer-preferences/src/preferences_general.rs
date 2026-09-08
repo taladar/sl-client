@@ -448,10 +448,27 @@ fn ingest_maturity_events(
         match &event.0 {
             SlSessionEvent::Account(account) => {
                 sync.ceiling = Some(account.agent_access_max);
-                sync.pending_server = Some(maturity_short(account.agent_access).to_owned());
+                // The login's statement of the preference is
+                // `agent_region_access`, **not** `agent_access`. This read
+                // `agent_access` and called it "the login echo", which the grid
+                // disagrees with: aditi answers `agent_access = "M"` for an
+                // account whose preference and ceiling are both `"A"`
+                // (2026-09-08), so the panel showed Moderate for an Adult
+                // preference until `AgentPreferences` arrived to correct it —
+                // and stayed wrong wherever that reply never comes.
+                //
+                // A grid that sends no preference at all — every OpenSim grid,
+                // the field being absent from its sources — falls back to the
+                // ceiling, which is what the reference viewer does deliberately
+                // rather than by omission (Firestorm's FIRE-8854).
+                let preference = account
+                    .preferred_maturity
+                    .unwrap_or(account.agent_access_max);
+                sync.pending_server = Some(maturity_short(preference).to_owned());
                 sync.in_flight = None;
                 // Ask for the stored preference set too — its `access_prefs.max`
-                // is the authoritative value (agent_access is the login echo).
+                // is the authoritative value, and the only one that reflects a
+                // change made from another viewer since this login.
                 sl.write(SlCommand(Command::RequestAgentPreferences));
             }
             SlSessionEvent::AgentPreferences(prefs) => {
@@ -757,14 +774,30 @@ mod tests {
             .collect()
     }
 
-    /// The login [`SlSessionEvent::Account`] with the given current / maximum
-    /// ratings.
-    fn account_event(access: Maturity, ceiling: Maturity) -> SlEvent {
+    /// The login [`SlSessionEvent::Account`] stating `preference` as the
+    /// account's chosen rating and `ceiling` as its entitlement.
+    ///
+    /// `agent_access` is fixed at [`Maturity::Mature`] rather than taking the
+    /// preference, because that is what both live grids were measured sending
+    /// regardless of either (aditi 2026-09-08, and OpenSim hard-codes it) — and
+    /// because a helper that set it *from* the preference would let a test pass
+    /// that reads the wrong field.
+    fn account_event(preference: Maturity, ceiling: Maturity) -> SlEvent {
+        account_event_with(Some(preference), ceiling)
+    }
+
+    /// The same, for a grid that sends no preference at all — every OpenSim
+    /// grid.
+    fn account_event_with(preference: Option<Maturity>, ceiling: Maturity) -> SlEvent {
         SlEvent(SlSessionEvent::Account(Box::new(LoginAccount {
             home: None,
             look_at: None,
-            agent_access: access,
+            agent_access: Maturity::Mature,
             agent_access_max: ceiling,
+            preferred_maturity: preference,
+            account_type: None,
+            benefits: None,
+            packages: std::collections::BTreeMap::new(),
             max_agent_groups: None,
             library_root: None,
             library_owner: None,
@@ -791,8 +824,25 @@ mod tests {
             );
     }
 
-    /// Login seeds the setting from the grid's current rating and asks for the
-    /// stored preference set.
+    /// A grid that sends no preference seeds the setting from the **ceiling**,
+    /// not from `agent_access`.
+    ///
+    /// This is the reference viewer's deliberate fallback for grids without the
+    /// field — every OpenSim grid — written down as FIRE-8854. Seeding from
+    /// `agent_access` instead, which this did until the field was measured,
+    /// showed Moderate for an account entitled to Adult: aditi sends
+    /// `agent_access = "M"` whatever the preference and ceiling are.
+    #[test]
+    fn login_without_a_preference_falls_back_to_the_ceiling() {
+        let mut app = maturity_app();
+        app.world_mut()
+            .write_message(account_event_with(None, Maturity::Adult));
+        app.update();
+        assert_eq!(stored_maturity(&app), "A");
+    }
+
+    /// Login seeds the setting from the grid's stated preference and asks for
+    /// the stored preference set.
     #[test]
     fn login_seeds_rating_and_requests_preferences() {
         let mut app = maturity_app();

@@ -1,6 +1,7 @@
 //! Grid accounts: the credentials the login endpoint checks and the stable
 //! per-account identity minted when the grid starts.
 
+use sl_proto::Maturity;
 use sl_types::key::AgentKey;
 use sl_wire::{Credential, MfaPolicy, password_hash};
 
@@ -25,6 +26,31 @@ pub struct AccountConfig {
     /// fails is not a check — see
     /// [`AgentPolicy`](crate::agent_requests::AgentPolicy).
     pub estate_manager: bool,
+    /// The highest content rating this account is entitled to
+    /// (`agent_access_max`), and so the ceiling its maturity preference may not
+    /// exceed.
+    ///
+    /// [`Maturity::Adult`] by default, which is what a viewer has always been
+    /// told here — and precisely the reason this is a knob. A client's
+    /// `canSetMaturity` rule reads this field, and against a grid that hands
+    /// every account the maximum, **that rule has never once been exercised**.
+    /// Lower it to build the account that makes it fire.
+    pub maturity_ceiling: Maturity,
+    /// The content rating this account has *chosen* (`agent_region_access`), or
+    /// `None` to send no preference at all.
+    ///
+    /// Distinct from [`maturity_ceiling`](Self::maturity_ceiling): the ceiling
+    /// is the entitlement, this is the setting, and a conforming grid keeps the
+    /// second at or below the first. `None` is not "no preference" but "this
+    /// grid does not send the field", which is every OpenSim grid — and it is
+    /// the OpenSim flavour's answer whatever this says.
+    pub preferred_maturity: Option<Maturity>,
+    /// The subscription package this account is on (`account_type`), naming
+    /// which entry of the grid's package table its benefits come from.
+    ///
+    /// `"Base"` by default. Ignored entirely on a grid whose flavour sends no
+    /// benefits package.
+    pub package: String,
 }
 
 impl AccountConfig {
@@ -43,7 +69,38 @@ impl AccountConfig {
             start_region: None,
             mfa: None,
             estate_manager: false,
+            maturity_ceiling: Maturity::Adult,
+            preferred_maturity: None,
+            package: "Base".to_owned(),
         }
+    }
+
+    /// The same account, entitled only up to `ceiling`.
+    ///
+    /// The account to build when the thing under test is a *refusal*: a client
+    /// may not raise its preference above this, and a grid may not let it into
+    /// a region above it.
+    #[must_use]
+    pub const fn maturity_ceiling(mut self, ceiling: Maturity) -> Self {
+        self.maturity_ceiling = ceiling;
+        self
+    }
+
+    /// The same account, having chosen `preference` as its content rating.
+    ///
+    /// Only a Second-Life-flavoured grid sends this; the OpenSim flavour omits
+    /// the field whatever is set here, because no OpenSim grid has ever sent it.
+    #[must_use]
+    pub const fn preferred_maturity(mut self, preference: Maturity) -> Self {
+        self.preferred_maturity = Some(preference);
+        self
+    }
+
+    /// The same account, on the named subscription package.
+    #[must_use]
+    pub fn package(mut self, package: impl Into<String>) -> Self {
+        self.package = package.into();
+        self
     }
 
     /// The same account, holding estate powers over the grid's regions.

@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 101 |
-| ready | 322 |
+| ready | 323 |
 | blocked | 46 |
 | in-progress | 20 |
 | bugs | 63 |
-| done | 1028 |
-| deferred | 25 |
+| done | 1029 |
+| deferred | 26 |
 | wont-do | 14 |
-| **total** | **1619** |
+| **total** | **1622** |
 
 ## ideas (101)
 
@@ -240,12 +240,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (322)
+## ready (323)
 
 ### protocol
 
-- [`protocol-account-benefits-package`](ready/protocol-account-benefits-package.md)
-  — What an upload actually costs is in the benefits package nothing decodes
 - [`protocol-ais3-library-cap`](ready/protocol-ais3-library-cap.md) — An AIS3
   request for a library folder goes to the wrong capability
 - [`protocol-ais3-nested-embedded`](ready/protocol-ais3-nested-embedded.md) — An
@@ -796,6 +794,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Verify the shoe lift live on a shod avatar
 - [`viewer-region-debug-console`](ready/viewer-region-debug-console.md) — Region
   (sim) debug console (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-region-entry-maturity-gate`](ready/viewer-region-entry-maturity-gate.md)
+  — Eight ported notifications for a refused entry, and nothing raises one
 - [`viewer-region-estate-group-picker`](ready/viewer-region-estate-group-picker.md)
   — Group picker for the Region/Estate Access → Allowed Groups list
 - [`viewer-region-estate-object-return`](ready/viewer-region-estate-object-return.md)
@@ -866,6 +866,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   recompile / reset / run-state (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-scripted-followcam-llsetcameraparams`](ready/viewer-scripted-followcam-llsetcameraparams.md)
   — Apply scripted follow-camera parameters (llSetCameraParams)
+- [`viewer-search-maturity-filter`](ready/viewer-search-maturity-filter.md) —
+  Search asks for every rating whatever the account is allowed to see
 - [`viewer-seated-region-crossing`](ready/viewer-seated-region-crossing.md) —
   Seamless seated region crossing (keep sit-implied permissions)
 - [`viewer-settings-backup`](ready/viewer-settings-backup.md) — Settings backup
@@ -1346,7 +1348,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1028)
+## done (1029)
 
 ### protocol
 
@@ -1469,6 +1471,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-8`](done/protocol-8-script-dialogs-permissions.md) — Script dialogs
   & permissions
 - [`protocol-9`](done/protocol-9-mute-list.md) — Mute list
+- [`protocol-account-benefits-package`](done/protocol-account-benefits-package.md)
+  — What an account is entitled to arrives at login, and nothing decodes it
 - [`protocol-audit-asset-decoder-allocation-caps`](done/protocol-audit-asset-decoder-allocation-caps.md)
   — Notecard, animation and legacy-material decoders reserve from a
   wire-supplied count
@@ -3586,7 +3590,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](done/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## deferred (25)
+## deferred (26)
+
+### protocol
+
+- [`protocol-agent-access-meaning`](deferred/protocol-agent-access-meaning.md) —
+  What the login response's agent_access actually means
 
 ### viewer
 

@@ -8,6 +8,7 @@ mod alert;
 mod appearance;
 mod asset;
 mod avatar_profile;
+mod benefits;
 mod chat;
 mod diagnostic;
 pub(crate) mod directory;
@@ -471,6 +472,7 @@ pub use avatar_profile::{
     ClassifiedInfo, ClassifiedUpdate, DirectoryVisibility, Friend, FriendRights, InterestsUpdate,
     LoginAccount, PickInfo, PickKey, PickUpdate, ProfileUpdate, UserInfo,
 };
+pub use benefits::{AccountBenefits, MIN_2K_TEXTURE_AREA, packages_from_llsd};
 pub use chat::{
     ChatAudible, ChatMessage, ChatSource, ChatSourceType, ChatType, ChatTypeNotAVolume,
     GroupInvitationReceived, GroupNoticeItem, GroupNoticeReceived, ImDialog, InstantMessage,

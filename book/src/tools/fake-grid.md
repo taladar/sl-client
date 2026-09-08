@@ -618,16 +618,16 @@ per-behaviour setters still win where they are called; the flavour is what
 an unset knob falls back to, not a lock, which is what a test wanting one
 deliberate deviation needs. Each resolves once, in `start`.
 
-Eight behaviours follow it today: a taken object's asset, whether the
+Nine behaviours follow it today: a taken object's asset, whether the
 login response is trimmed to the request's `options` list (Second Life
 honours it, OpenSim sends every field regardless), whether
 `SimulatorFeatures` carries the `OpenSimExtras` block, which spatial-voice
 backend the regions run, the two halves of how inventory works, who
-composites an avatar, and what the grid charges. The `SimulatorFeatures`
-pair is covered under "How a region introduces itself" below, the inventory
-pair under "How this grid does inventory", the bakes under "Who bakes an
-avatar", and the price list under "Policy: what the grid charges, permits
-and refuses".
+composites an avatar, what the grid charges, and what it says the account
+is entitled to. The `SimulatorFeatures` pair is covered under "How a region
+introduces itself" below, the inventory pair under "How this grid does
+inventory", the bakes under "Who bakes an avatar", and the last two under
+"Policy: what the grid charges, permits and refuses".
 
 That second one is small and it immediately earned its keep. Turning it on
 by default broke a fake-grid end-to-end test that expected
@@ -1643,6 +1643,82 @@ encoder-slot check the synthetic all-distinct table used to provide: both
 sides of the comparison come from the same constant, and neither real list
 is all-distinct. That check stayed where it belongs, in `sl-proto`'s own
 `send_economy_data` round trip.
+
+### What the account is entitled to
+
+The price list is not where a modern viewer reads upload costs on Second
+Life. `LLAgentBenefits` reads them from the login response's **benefits
+package**, and Firestorm's `OpenSim legacy economy` patches fall back to
+`EconomyData`'s `price_upload` *only when the grid is not Second Life* — so
+the legacy field is the OpenSim path and the benefits package is the Second
+Life one, the opposite way round from how it reads.
+
+`ImitatedGrid::describes_account_entitlements` decides whether the grid
+sends any of it. Second Life sends `account_type` (the package the account
+is on), `account_level_benefits` (that package's numbers) and
+`premium_packages` (every package's numbers, so a viewer can render "Premium
+would give you N"). A stock OpenSim grid sends none of the three — its login
+service has no notion of a subscription — which is why Firestorm gates its
+whole benefits init behind `isInSecondLife()`: the reference parse *fails*
+on a missing field and insists on seeing both `Base` and `Premium`, so a
+grid sending half of this would make a viewer complain at every login.
+
+The table `sl-fake-grid` serves is measured, one aditi login on 2026-09-08
+(`sl-conformance`'s `login-handshake` records all of it):
+
+| package | texture | 2K texture | sound/anim | group | groups | animesh |
+| --- | --- | --- | --- | --- | --- | --- |
+| `Base` | 10 | **50** | 10 | 100 | 50 | 1 |
+| `Plus` | 10 | 50 | 10 | 100 | 55 | 1 |
+| `Premium` | 10 | **40** | 10 | 100 | 80 | 2 |
+| `Premium_Plus` | **0** | **0** | **0** | **10** | 150 | 3 |
+| `Premium_Plus_No_Stipend` | 0 | 0 | 0 | 10 | 150 | 3 |
+
+**Texture uploads are tiered**, which is the thing `EconomyData` cannot
+express: above `MIN_2K_TEXTURE_AREA` (1024×1024) a texture costs L$ 50 on
+`Base` against L$ 10 below it, while the legacy reply quotes a flat 10. A
+client sending the legacy figure as its `expected_upload_cost` for a large
+texture is refused and told nothing useful.
+
+Aditi sends **five** packages, not the two the viewer demands, so the fake
+grid sends five: the shape a viewer meets on the real grid includes tiers it
+has no special knowledge of. `picks_limit` (20) and `attachment_limit` (38)
+are identical on all five, so a viewer gating either on the subscription
+would be gating on nothing.
+
+### The maturity trio
+
+Three login fields, and the divergence is again mostly one of presence.
+
+| field | Second Life | stock OpenSim |
+| --- | --- | --- |
+| `agent_access_max` | per account | hard-coded `A` |
+| `agent_region_access` | per account | **absent** |
+| `agent_access` | `M` (see below) | hard-coded `M` |
+
+`agent_access_max` is the entitlement, and it is the one a client's
+`canSetMaturity` rule reads. `AccountConfig::maturity_ceiling` sets it, and
+it exists because until it did **every fake account was entitled to
+everything** — so that rule had never once been exercised against an account
+that could fail it.
+
+`agent_region_access` is, despite its name, not a property of a region: the
+reference viewer reads it as the account's *preference* and seeds
+`PreferredMaturity` from it. No OpenSim grid sends it — the field appears
+nowhere in OpenSim's sources — and Firestorm handles the absence
+deliberately, defaulting the preference to the ceiling (FIRE-8854).
+
+`agent_access` is the least understood, and the fake grid copies the
+measurement rather than deriving it. Aditi answered `M` on three runs whose
+ceiling *and* preference were both `A`; OpenSim hard-codes `M` for everyone.
+Two readings fit: a **clearance** (what the account is cleared for as
+against what its type permits — an unverified account is cleared to Moderate
+while entitled to Adult, and the same axis carried the pre-2010 Teen Grid
+restriction), or the **start region's own rating**. That avatar's start
+region is itself Mature, so the run cannot separate them; what it does rule
+out is a vestigial constant, since the value coincides with something rather
+than sitting where it was left. A login at a differently-rated region, or an
+age-verified avatar, settles it in one run.
 
 `AgentPolicy` is the per-session half — what *this* agent may do:
 

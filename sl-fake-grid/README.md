@@ -144,13 +144,30 @@ the grid this workspace targets — and every divergent behaviour takes its
 default from that. A per-behaviour setter still wins where it is called: the
 flavour is what an unset knob falls back to, not a lock.
 
-Six behaviours follow it today: a taken object's asset (below), whether the
+Nine behaviours follow it today: a taken object's asset (below), whether the
 login response is trimmed to the request's `options` list (Second Life honours
 it, OpenSim sends every field regardless), the two that make up how a region
-introduces itself (below), and the two that make up how it does inventory
-(below). The divergences it does **not** yet decide — server bakes and the
-economy — are audited in `imitates.rs` with a roadmap item each, rather than
-left to be rediscovered.
+introduces itself (below), the two that make up how it does inventory (below),
+who composites an avatar, what the grid charges, and what it says the account
+is entitled to.
+
+There is no longer a list of divergences the flavour does *not* decide: every
+one this crate has measured is derived from it. `imitates.rs` keeps the audit
+so a divergence taken one-sidedly in future has somewhere to be written down
+rather than rediscovered.
+
+**What the grid charges** is the price list an `EconomyDataRequest` is answered
+with, measured on both grids — plus the currency symbol, where the divergence is
+one of *presence*: Second Life says `L$` and a stock OpenSim grid says nothing
+at all, leaving a viewer on its own default (`OS$` in Firestorm).
+
+**What the account is entitled to** is the login response's benefits package —
+`account_type`, `account_level_benefits`, `premium_packages` — and the maturity
+preference beside it. Second Life sends all four; a stock OpenSim grid sends
+none, which is why a modern viewer prices uploads from the package on one grid
+and from the legacy `EconomyData` on the other. It matters because the package
+is where **tiered** texture pricing lives: L$ 50 above 1024×1024 against L$ 10
+below it on the free tier, a distinction the older reply cannot express.
 
 ## How inventory is fetched, and how a new item is announced
 

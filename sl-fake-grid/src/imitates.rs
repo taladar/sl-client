@@ -29,6 +29,7 @@
 //! | the rest of `RegionProtocols` ([`region_protocol_bits`](ImitatedGrid::region_protocol_bits)) | nothing else claimed | bit 63, "more than 6 baked textures" |
 //! | the `EconomyData` price list ([`prices`](ImitatedGrid::prices)) | measured on aditi: L$ 10 an upload, L$ 100 a group, a 20 000 LI region | its `SampleMoneyModule` defaults: most prices free, no group price stated, a 15 000 LI region |
 //! | the currency symbol ([`currency_symbol`](ImitatedGrid::currency_symbol)) | `L$`, in the login response and nothing else | none announced anywhere, so a viewer falls back to its own default (`OS$`) |
+//! | the account's entitlements ([`describes_account_entitlements`](ImitatedGrid::describes_account_entitlements)) | a benefits package, its subscription name, every package's numbers, and the maturity preference | none of the four; a viewer prices uploads from the legacy `EconomyData` instead |
 //!
 //! **The inventory rows are the divergence a viewer is most likely to trip
 //! over**, which is why they are three rows rather than one setting. An
@@ -287,6 +288,32 @@ impl ImitatedGrid {
         }
     }
 
+    /// Whether this grid's login response describes what the account is
+    /// entitled to: the benefits package and the maturity *preference*.
+    ///
+    /// Second Life sends `account_type`, `account_level_benefits` and
+    /// `premium_packages`, and separately `agent_region_access`. A stock OpenSim
+    /// grid sends none of the four — `agent_region_access` appears nowhere in
+    /// its source, and its login service has no notion of a subscription at all.
+    ///
+    /// The four move together because the reference viewer treats them as one
+    /// decision: Firestorm gates its whole benefits init behind
+    /// `isInSecondLife()`, because the parse *fails* on a missing field and
+    /// insists on both a `Base` and a `Premium` package — so a grid that sent
+    /// half of this would make a viewer complain at every login, which is worse
+    /// than sending none.
+    ///
+    /// It leaves the *other* two maturity fields alone. `agent_access` and
+    /// `agent_access_max` are sent by both grids; what differs there is that
+    /// OpenSim hard-codes them to `M`/`A` for every account while Second Life
+    /// answers per account, which is
+    /// [`AccountConfig::maturity_ceiling`](crate::AccountConfig::maturity_ceiling)'s
+    /// business rather than this knob's.
+    #[must_use]
+    pub const fn describes_account_entitlements(self) -> bool {
+        matches!(self, Self::SecondLife)
+    }
+
     /// The `RegionProtocols` bits this grid claims that are **not** the bake
     /// policy's to claim.
     ///
@@ -349,6 +376,10 @@ mod test {
         assert_ne!(sl.region_protocol_bits(), opensim.region_protocol_bits());
         assert_ne!(sl.prices(), opensim.prices());
         assert_ne!(sl.currency_symbol(), opensim.currency_symbol());
+        assert_ne!(
+            sl.describes_account_entitlements(),
+            opensim.describes_account_entitlements()
+        );
     }
 
     /// Only one grid names a currency, and the other names none rather than

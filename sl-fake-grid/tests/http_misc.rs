@@ -7,8 +7,9 @@ mod test {
     use pretty_assertions::assert_eq;
     use sl_fake_grid::{
         AccountConfig, EconomyConfig, EconomyEvent, FakeGrid, FakeGridBuilder, GridIdentity,
-        RegionConfig, STOCK_TILE_JPEG,
+        ImitatedGrid, RegionConfig, STOCK_TILE_JPEG,
     };
+    use sl_proto::{AccountBenefits, Maturity};
     use sl_wire::{
         BuyCurrencyRequest, CURRENCY_HELPER_PATH, CurrencyQuoteRequest, GRID_INFO_PATH,
         HelperOutcome, LAND_TOOL_HELPER_PATH, LandPrepRequest, LoginRequest, LoginResponse,
@@ -322,6 +323,173 @@ mod test {
             parse_preflight_land_prep_response(&text)?,
             HelperOutcome::Failed(_)
         ));
+        Ok(())
+    }
+
+    /// Logs `account` in against a grid of `flavour` and returns the response.
+    async fn login_as(
+        flavour: ImitatedGrid,
+        account: AccountConfig,
+    ) -> Result<sl_wire::LoginSuccess, TestError> {
+        let grid = FakeGridBuilder::new()
+            .account(account)
+            .region(RegionConfig::default())
+            .imitates(flavour)
+            .start()
+            .await?;
+        let text = post_xml(
+            &grid,
+            "",
+            build_login_request(&LoginRequest::new(
+                "Test",
+                "User",
+                "password",
+                StartLocation::Last,
+                "sl-fake-grid-test",
+                "0.0",
+            )),
+        )
+        .await?;
+        match parse_login_response(&text)? {
+            LoginResponse::Success(success) => Ok(*success),
+            other => Err(format!("expected a successful login, got {other:?}").into()),
+        }
+    }
+
+    /// A Second-Life-flavoured grid says what the account is entitled to, and
+    /// says it the way aditi did.
+    ///
+    /// Every number here is the one `sl-conformance`'s `login-handshake` case
+    /// recorded on aditi (2026-09-08) — including the pair this whole family
+    /// exists for: a texture costs L$ 10 and a texture larger than 1024×1024
+    /// costs L$ 50, a difference `EconomyData`'s flat `price_upload` cannot
+    /// express at all.
+    ///
+    /// The package *map* is asserted as well as the account's own package,
+    /// because the reference viewer refuses to finish initialising benefits
+    /// unless both `Base` and `Premium` are described — a grid that sent only
+    /// the account's own tier would make a real viewer complain at every login.
+    #[tokio::test]
+    async fn a_second_life_flavoured_grid_describes_the_account_entitlements()
+    -> Result<(), TestError> {
+        let success = login_as(
+            ImitatedGrid::SecondLife,
+            AccountConfig::new("Test", "User", "password"),
+        )
+        .await?;
+
+        assert_eq!(success.account_type.as_deref(), Some("Base"));
+        let benefits_blob = success
+            .account_level_benefits
+            .as_ref()
+            .ok_or("no account_level_benefits")?;
+        let sl_wire::Llsd::Map(map) = benefits_blob else {
+            return Err("account_level_benefits is not a map".into());
+        };
+        let benefits = AccountBenefits::from_llsd(map).ok_or("benefits did not decode")?;
+        assert_eq!(
+            benefits.texture_upload_cost,
+            sl_types::money::LindenAmount(10)
+        );
+        assert_eq!(
+            benefits.large_texture_upload_cost(),
+            sl_types::money::LindenAmount(50)
+        );
+        assert_eq!(
+            benefits.create_group_cost,
+            sl_types::money::LindenAmount(100)
+        );
+        assert_eq!(benefits.group_membership_limit, 50);
+        // The tier boundary itself, from the encoded package rather than from
+        // the constructor: a 1024x1024 texture is not "large", 2048x2048 is.
+        assert_eq!(
+            benefits.texture_upload_cost_for(1024, 1024),
+            sl_types::money::LindenAmount(10)
+        );
+        assert_eq!(
+            benefits.texture_upload_cost_for(2048, 2048),
+            sl_types::money::LindenAmount(50)
+        );
+
+        let packages_blob = success.premium_packages.as_ref().ok_or("no packages")?;
+        let sl_wire::Llsd::Map(packages_map) = packages_blob else {
+            return Err("premium_packages is not a map".into());
+        };
+        let packages = sl_proto::packages_from_llsd(packages_map);
+        assert!(packages.contains_key("Base"), "no Base package");
+        assert!(packages.contains_key("Premium"), "no Premium package");
+        // And a paid tier really is cheaper, which is the thing a viewer would
+        // render as a reason to upgrade.
+        let premium = packages.get("Premium").ok_or("no Premium")?;
+        assert_eq!(
+            premium.large_texture_upload_cost(),
+            sl_types::money::LindenAmount(40)
+        );
+        assert_eq!(premium.group_membership_limit, 80);
+
+        // The maturity trio: the ceiling is the account's, the preference is
+        // sent, and `agent_access` is the `M` both live grids were measured
+        // sending whatever else is true.
+        assert_eq!(success.agent_access_max.as_deref(), Some("A"));
+        assert_eq!(success.agent_region_access.as_deref(), Some("A"));
+        assert_eq!(success.agent_access.as_deref(), Some("M"));
+        Ok(())
+    }
+
+    /// A restricted account is expressible, which it was not before: the
+    /// ceiling follows the account and drags the other two ratings under it.
+    ///
+    /// This is the shape the client's `canSetMaturity` rule exists to enforce
+    /// and had never once met — every fake account was entitled to everything,
+    /// so a viewer that ignored the ceiling entirely would have passed.
+    #[tokio::test]
+    async fn a_restricted_account_is_capped_at_its_ceiling() -> Result<(), TestError> {
+        let success = login_as(
+            ImitatedGrid::SecondLife,
+            AccountConfig::new("Test", "User", "password").maturity_ceiling(Maturity::Pg),
+        )
+        .await?;
+        assert_eq!(success.agent_access_max.as_deref(), Some("PG"));
+        assert_eq!(success.agent_region_access.as_deref(), Some("PG"));
+        // Clamped, not the measured `M`: `M` under a `PG` ceiling is the one
+        // pair no grid could produce.
+        assert_eq!(success.agent_access.as_deref(), Some("PG"));
+
+        // And a preference above the ceiling is refused rather than forwarded.
+        let above = login_as(
+            ImitatedGrid::SecondLife,
+            AccountConfig::new("Test", "User", "password")
+                .maturity_ceiling(Maturity::Pg)
+                .preferred_maturity(Maturity::Adult),
+        )
+        .await?;
+        assert_eq!(above.agent_region_access.as_deref(), Some("PG"));
+        Ok(())
+    }
+
+    /// A stock OpenSim grid describes none of it, and that absence is the
+    /// divergence rather than a gap in the fixture.
+    ///
+    /// `agent_region_access` appears nowhere in OpenSim's sources, its login
+    /// service has no notion of a subscription, and it hard-codes the other two
+    /// ratings for every avatar — so this flavour ignores the account config
+    /// entirely, including a ceiling somebody set. A grid that honoured it here
+    /// would make a restricted account *look* supported on the flavour that
+    /// cannot express one.
+    #[tokio::test]
+    async fn an_opensim_flavoured_grid_describes_no_entitlements() -> Result<(), TestError> {
+        let success = login_as(
+            ImitatedGrid::OpenSim,
+            AccountConfig::new("Test", "User", "password").maturity_ceiling(Maturity::Pg),
+        )
+        .await?;
+        assert_eq!(success.account_type, None);
+        assert_eq!(success.account_level_benefits, None);
+        assert_eq!(success.premium_packages, None);
+        assert_eq!(success.agent_region_access, None);
+        // OpenSim's hard-coded pair, the ceiling above ignored.
+        assert_eq!(success.agent_access.as_deref(), Some("M"));
+        assert_eq!(success.agent_access_max.as_deref(), Some("A"));
         Ok(())
     }
 }

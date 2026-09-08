@@ -5,8 +5,8 @@ use super::conversions::{
     agent_list_voice_updates_from_llsd, agent_state_update_from_llsd,
     ais_inventory_update_from_llsd, ais_updated_category_versions, avatar_animations,
     avatar_appearance, avatar_group, avatar_interests, avatar_names, avatar_picker_result,
-    avatar_properties, bulk_update_folder, bulk_update_inventory_from_llsd, bulk_update_item,
-    chat_message, chat_session_roster_from_llsd, chatterbox_invitation_from_llsd,
+    avatar_properties, benefits_of, bulk_update_folder, bulk_update_inventory_from_llsd,
+    bulk_update_item, chat_message, chat_session_roster_from_llsd, chatterbox_invitation_from_llsd,
     chatterbox_session_start_reply_from_llsd, classified_info, created_category_from_llsd,
     crossed_region_from_caps_llsd, display_name_update_from_llsd, economy_data,
     enable_simulator_from_caps_llsd, environment_from_llsd,
@@ -19,7 +19,7 @@ use super::conversions::{
     inventory_item_from_create, inventory_offer_bucket, invite_channel_from_llsd, map_item,
     map_layer, map_region_info, money_balance, nav_mesh_status_from_llsd, neighbor_info,
     object_from_full_update, object_properties, offline_messages_from_llsd,
-    open_region_info_from_llsd, pack_uuids, parcel_info, parcel_info_from_llsd,
+    open_region_info_from_llsd, pack_uuids, packages_of, parcel_info, parcel_info_from_llsd,
     parse_lure_region_handle, parse_mute_list, parse_task_inventory, parse_uuid_string, pick_info,
     region_identity, region_limits, required_voice_version_from_llsd, script_dialog,
     script_permission_request, script_running_from_caps_llsd, server_appearance_update_from_llsd,
@@ -1738,6 +1738,18 @@ impl Session {
                     agent_access_max: Maturity::from_login_access(
                         success.agent_access_max.as_deref(),
                     ),
+                    // `Maturity::from_login_access` maps an unrecognised code to
+                    // `Unknown`, which is the wrong answer for a field a whole
+                    // grid family omits: absent has to stay distinguishable from
+                    // present-but-unparsable, because absent has a defined
+                    // fallback (the ceiling) and unparsable does not.
+                    preferred_maturity: success
+                        .agent_region_access
+                        .as_deref()
+                        .map(|access| Maturity::from_login_access(Some(access))),
+                    account_type: success.account_type.clone(),
+                    benefits: benefits_of(success.account_level_benefits.as_ref()),
+                    packages: packages_of(success.premium_packages.as_ref()),
                     max_agent_groups: success.max_agent_groups,
                     library_root: success.library_root,
                     library_owner: success.library_owner,

@@ -1,7 +1,7 @@
 //! The grid orchestrator: the builder, the running [`FakeGrid`], and the
 //! per-login session bring-up shared by the HTTP endpoints.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -370,6 +370,15 @@ pub(crate) struct GridCore {
     pub(crate) object_assets: ObjectAssetPolicy,
     /// Whether `SimulatorFeatures` carries the `OpenSimExtras` block.
     pub(crate) open_sim_extras: bool,
+    /// The subscription packages the login response describes, when this grid
+    /// describes any ([`account_entitlements`](Self::account_entitlements)).
+    pub(crate) packages: BTreeMap<String, sl_proto::AccountBenefits>,
+    /// Whether the login response describes what the account is entitled to:
+    /// the benefits package, its subscription name, and the maturity
+    /// preference. Also decides whether the two maturity fields both grids send
+    /// mean anything per account, or are OpenSim's hard-coded `M`/`A`
+    /// ([`ImitatedGrid::describes_account_entitlements`]).
+    pub(crate) account_entitlements: bool,
     /// The spatial-voice backend every region serves ([`VoiceBackend`]).
     pub(crate) voice_backend: VoiceBackend,
     /// The clock every session machine is stamped from.
@@ -547,7 +556,14 @@ impl GridCore {
         {
             let mut state = prepared.shared.state.lock().await;
             register_account_display_name(&mut state.sim, account);
-            enrich_success(&mut success, account, region, &state.sim);
+            enrich_success(
+                &mut success,
+                account,
+                region,
+                &state.sim,
+                self.account_entitlements,
+                &self.packages,
+            );
         }
         success.message = Some(self.identity.message.clone());
         success.map_server_url = Some(self.login_uri.clone());
@@ -972,6 +988,8 @@ fn enrich_success(
     account: &Account,
     region: &RegionEntry,
     sim: &SimSession,
+    account_entitlements: bool,
+    packages: &BTreeMap<String, sl_proto::AccountBenefits>,
 ) {
     success.first_name = Some(account.config.first_name.clone());
     success.last_name = Some(account.config.last_name.clone());
@@ -979,8 +997,75 @@ fn enrich_success(
     success.region_y = region.config.grid_y.checked_mul(256);
     success.region_size_x = Some(256);
     success.region_size_y = Some(256);
-    success.agent_access = Some("M".to_owned());
-    success.agent_access_max = Some("A".to_owned());
+    // `agent_access` is **not** the account's preference or its ceiling: aditi
+    // sent `M` on three runs whose ceiling *and* preference were both `A`
+    // (2026-09-08), and OpenSim's login service hard-codes the same `M` for
+    // every avatar. Sending the preference here, which is the reading its name
+    // invites, is what the first attempt did and it disagreed with every aditi
+    // run.
+    //
+    // Two readings survive the measurement, and `login-handshake` records the
+    // figure that separates them:
+    //
+    //   * a **clearance** rather than an entitlement — what the account is
+    //     cleared for, against what its type permits. A beta account that has
+    //     never been age-verified is cleared to Moderate and entitled to Adult,
+    //     exactly the measured `M`/`A`, and the same axis carried the pre-2010
+    //     Teen Grid restriction.
+    //   * the **start region's own rating**, nothing to do with the account.
+    //
+    // The aditi run cannot tell them apart, because that avatar's start region
+    // is itself Mature (`start_region_maturity`, recorded beside the account
+    // fields for exactly this reason). What it does rule out is "vestigial
+    // constant": the value coincides with something rather than sitting where it
+    // was left. A login at a differently-rated region, or an age-verified
+    // avatar, separates the two in one run.
+    //
+    // Under either reading neither grid derives it from the account config, so
+    // it is not per-account on either flavour — and if the region reading wins,
+    // this should follow `region` rather than the ceiling. Parked rather than
+    // chased: roadmap `protocol-agent-access-meaning` (deferred) says what would
+    // settle it, and nothing is blocked on the answer.
+    let ceiling = account.config.maturity_ceiling;
+    if account_entitlements {
+        // Second Life: the measured `M`, clamped down when the account could not
+        // hold it — `M` beneath a `PG` ceiling is the one pair no grid could
+        // produce, whichever rule generates the value.
+        let cleared = if Maturity::Mature.permitted_by(ceiling) {
+            Maturity::Mature
+        } else {
+            ceiling
+        };
+        success.agent_access = cleared.to_login_access().map(str::to_owned);
+        success.agent_access_max = ceiling.to_login_access().map(str::to_owned);
+        // The preference, which only this flavour sends. A preference above the
+        // ceiling is not a state a grid lets exist, so it is clamped rather than
+        // forwarded: a test that sets an impossible pair should meet the grid's
+        // answer to it, not have the impossible pair handed to the client as if
+        // a real grid had sent it.
+        let preference = match account.config.preferred_maturity {
+            Some(preference) if preference.permitted_by(ceiling) => preference,
+            _clamped_or_unset => ceiling,
+        };
+        success.agent_region_access = preference.to_login_access().map(str::to_owned);
+
+        // What this account may do, and what every other tier would grant. Both
+        // are sent: a viewer that got only the account's own package would warn
+        // at startup, because the reference parse insists on seeing at least
+        // `Base` and `Premium` described.
+        success.account_type = Some(account.config.package.clone());
+        success.account_level_benefits = packages
+            .get(&account.config.package)
+            .map(crate::benefits::to_llsd);
+        success.premium_packages = Some(crate::benefits::packages_to_llsd(packages));
+    } else {
+        // OpenSim: literally these two, for every avatar, whatever the account
+        // config says. Honouring a ceiling here would model a grid that does not
+        // exist and would make a restricted account *look* supported on the
+        // flavour that cannot express one.
+        success.agent_access = Some("M".to_owned());
+        success.agent_access_max = Some("A".to_owned());
+    }
     // The `voice-config` section mirrors the backend the region ended up
     // running; a silent region sends no section at all.
     success.voice_config = sim
@@ -1052,6 +1137,9 @@ pub struct FakeGridBuilder {
     /// The economy helper policy and price list, or `None` to follow
     /// [`imitates`](Self::imitates).
     economy: Option<EconomyConfig>,
+    /// The subscription packages described at login, or `None` for the measured
+    /// Second Life table.
+    packages: Option<BTreeMap<String, sl_proto::AccountBenefits>>,
     /// The live grid this one imitates, which every knob below that is `None`
     /// takes its answer from ([`ImitatedGrid`]).
     imitates: ImitatedGrid,
@@ -1165,6 +1253,7 @@ impl FakeGridBuilder {
             http_port: 0,
             identity: GridIdentity::default(),
             economy: None,
+            packages: None,
             imitates: ImitatedGrid::default(),
             object_assets: None,
             honor_options: None,
@@ -1307,6 +1396,19 @@ impl FakeGridBuilder {
     #[must_use]
     pub fn economy(mut self, economy: EconomyConfig) -> Self {
         self.economy = Some(economy);
+        self
+    }
+
+    /// Overrides the subscription packages the login response describes, which
+    /// otherwise are the five `sl-conformance` measured on aditi
+    /// ([`second_life_packages`](crate::second_life_packages)).
+    ///
+    /// Ignored entirely on a grid whose flavour describes no entitlements: an
+    /// OpenSim-flavoured grid sends no packages however this is set, because no
+    /// OpenSim grid has ever sent any.
+    #[must_use]
+    pub fn packages(mut self, packages: BTreeMap<String, sl_proto::AccountBenefits>) -> Self {
+        self.packages = Some(packages);
         self
     }
 
@@ -1479,6 +1581,10 @@ impl FakeGridBuilder {
             open_sim_extras: self
                 .open_sim_extras
                 .unwrap_or_else(|| self.imitates.advertises_open_sim_extras()),
+            account_entitlements: self.imitates.describes_account_entitlements(),
+            packages: self
+                .packages
+                .unwrap_or_else(crate::benefits::second_life_packages),
             voice_backend: self
                 .voice_backend
                 .unwrap_or_else(|| self.imitates.voice_backend()),
