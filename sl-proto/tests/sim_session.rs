@@ -2737,6 +2737,161 @@ mod test {
         Ok(())
     }
 
+    /// The four sounds a simulator sends: a one-shot at a place
+    /// (`llTriggerSound`), a clip bound to an object (`llPlaySound`), a live
+    /// volume change on it (`llSetSoundVolume`) and a "fetch this now"
+    /// (`llPreloadSound`). Each reaches the client as its own event, carrying
+    /// what a viewer needs to place, mute and fetch it.
+    #[test]
+    fn simulator_sounds_reach_client() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+
+        let object = ObjectKey::from(uuid::Uuid::from_u128(0x50B1));
+        let root = ObjectKey::from(uuid::Uuid::from_u128(0x50B0));
+        let owner = AgentKey::from(uuid::Uuid::from_u128(0x50A1));
+        let bell = AssetKey::from(uuid::Uuid::from_u128(0x50C1));
+        let hum = AssetKey::from(uuid::Uuid::from_u128(0x50C2));
+        let position = sl_types::lsl::Vector {
+            x: 128.5,
+            y: 64.25,
+            z: 25.0,
+        };
+
+        sim.send_sound_trigger(
+            bell,
+            OwnerKey::Agent(owner),
+            object,
+            Some(root),
+            position.clone(),
+            0.75,
+            now,
+        )?;
+        sim.send_attached_sound(
+            object,
+            OwnerKey::Agent(owner),
+            hum,
+            0.5,
+            sl_proto::SoundFlags(sl_proto::SoundFlags::LOOP),
+            now,
+        )?;
+        sim.send_attached_sound_gain_change(object, 0.25, now)?;
+        sim.send_preload_sound(
+            &[sl_proto::SoundPreload {
+                sound_id: bell.uuid(),
+                object_id: object,
+                owner_id: owner.uuid(),
+            }],
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+
+        let events = drain_client(&mut client);
+        let trigger = events
+            .iter()
+            .find_map(|event| match event {
+                Event::SoundTrigger {
+                    sound_id,
+                    owner_id,
+                    object_id,
+                    parent_id,
+                    region_handle,
+                    position,
+                    gain,
+                } => Some((
+                    *sound_id,
+                    *owner_id,
+                    *object_id,
+                    *parent_id,
+                    *region_handle,
+                    position.clone(),
+                    *gain,
+                )),
+                _other => None,
+            })
+            .ok_or("expected a SoundTrigger client event")?;
+        assert_eq!(trigger.0, bell.uuid());
+        assert_eq!(trigger.1, owner.uuid());
+        assert_eq!(trigger.2, object);
+        assert_eq!(trigger.3, Some(root), "the linkset root survives");
+        assert_eq!(
+            trigger.4,
+            RegionHandle(REGION_HANDLE),
+            "the trigger is placed in the region that sent it"
+        );
+        assert_eq!(trigger.5, position);
+        assert!((trigger.6 - 0.75).abs() < f32::EPSILON);
+
+        let attached = events
+            .iter()
+            .find_map(|event| match event {
+                Event::AttachedSound {
+                    sound_id,
+                    object_id,
+                    owner_id,
+                    gain,
+                    flags,
+                } => Some((*sound_id, *object_id, *owner_id, *gain, *flags)),
+                _other => None,
+            })
+            .ok_or("expected an AttachedSound client event")?;
+        assert_eq!(attached.0, hum.uuid());
+        assert_eq!(attached.1, object);
+        assert_eq!(attached.2, owner.uuid());
+        assert!((attached.3 - 0.5).abs() < f32::EPSILON);
+        assert!(attached.4.is_loop(), "the LOOP flag survives the wire");
+
+        let change = events
+            .iter()
+            .find_map(|event| match event {
+                Event::AttachedSoundGainChange { object_id, gain } => Some((*object_id, *gain)),
+                _other => None,
+            })
+            .ok_or("expected an AttachedSoundGainChange client event")?;
+        assert_eq!(change.0, object);
+        assert!((change.1 - 0.25).abs() < f32::EPSILON);
+
+        let preloads = events
+            .iter()
+            .find_map(|event| match event {
+                Event::PreloadSound { sounds } => Some(sounds.clone()),
+                _other => None,
+            })
+            .ok_or("expected a PreloadSound client event")?;
+        assert_eq!(
+            preloads,
+            vec![sl_proto::SoundPreload {
+                sound_id: bell.uuid(),
+                object_id: object,
+                owner_id: owner.uuid(),
+            }]
+        );
+
+        // A nil sound with the STOP flag is how a looping attached sound ends.
+        sim.send_attached_sound(
+            object,
+            OwnerKey::Agent(owner),
+            AssetKey::from(uuid::Uuid::nil()),
+            0.0,
+            sl_proto::SoundFlags(sl_proto::SoundFlags::STOP),
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+        let stop = drain_client(&mut client)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::AttachedSound {
+                    sound_id, flags, ..
+                } => Some((sound_id, flags)),
+                _other => None,
+            })
+            .ok_or("expected the stopping AttachedSound client event")?;
+        assert!(stop.0.is_nil(), "a stop names no sound");
+        assert!(stop.1.is_stop());
+        Ok(())
+    }
+
     #[test]
     fn object_animation_and_rebake_reach_client() -> Result<(), TestError> {
         let now = Instant::now();

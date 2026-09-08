@@ -17,11 +17,23 @@ gesture, a scripted noise. The region tells the client about them over
   changes). A set of **sound flags** controls looping, master/slave
   synchronization, queueing, and stopping.
 - **Preload** — a hint to fetch a sound asset before it is needed, so playback
-  is not delayed (`Event::PreloadSound`).
+  is not delayed (`Event::PreloadSound`). This is `llPreloadSound` and nothing
+  else: no region sends one on arrival for the sounds its content carries.
 
 The sound *asset* itself is fetched like any other asset (by UUID, over the
 asset [capabilities](../comms/caps.md)); these messages only say *what* to play,
 *where*, and *how loud*.
+
+A **looping** sound does not arrive as a message at all. `llLoopSound` writes
+the sound onto the prim — the `sound` / `gain` / `sound_flags` / `sound_radius`
+fields of an [object update](world.md#objects) — and the region sends a full
+update, precisely so an avatar arriving after the loop started hears it too; an
+`AttachedSound` reaches only whoever was already there. Stopping one goes the
+same way: a nil `sound` with the `STOP` flag. So a viewer must read those
+fields, or it is silent in every region whose sounds started before it logged
+in. Both paths mean the same thing and are applied identically — restating the
+same looping sound (which a moving prim does on every update) must *not*
+restart it.
 
 The client can also **trigger** a one-shot sound itself:
 `Command::TriggerSound { sound, gain, region_handle, position }` plays a sound
@@ -96,6 +108,14 @@ its backend (login `voice-config`, `SimulatorFeatures.VoiceServerType`,
 >   reusing typed `AssetKey` / `RegionHandle` / `RegionCoordinates`) decodes on
 >   the simulator side as `ServerEvent::TriggerSound`
 >   (`sl-proto/src/sim_session.rs`); REPL token `trigger_sound`.
+> - The simulator side of the same four: `SimSession::send_sound_trigger`,
+>   `send_attached_sound`, `send_attached_sound_gain_change` and
+>   `send_preload_sound`; the looping half is the `sound` / `gain` /
+>   `sound_flags` / `sound_radius` fields of `Object`, which the fake grid's
+>   `PrimFixture::looping_sound` sets and its catalogue's `sound-box` carries.
+> - Playback: `sl-viewer-audio/src/world_sounds.rs`, where both the message and
+>   the object-update paths funnel into one `apply_attached_sound` (the
+>   reference viewer's `LLViewerObject::setAttachedSound`).
 > - Media: `ParcelMediaUpdateInfo`, `ParcelMediaCommand` in
 >   `sl-proto/src/types/parcel.rs`; `MediaEntry` / `ObjectMediaResponse` (and
 >   the navigation white-list check `MediaEntry::check_candidate_url`) in

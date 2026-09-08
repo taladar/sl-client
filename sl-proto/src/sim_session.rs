@@ -208,11 +208,11 @@ use crate::types::{
     PrimShape, PrimShapeParams, ProposalVoteId, RegionIdentity, RegionLimits, RegionStats,
     Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams,
     RezScriptParams, SaleType, ScriptControl, ScriptPermissionRequest, ScriptPermissions,
-    ServerError, SetDisplayNameReply, SimWideDeleteFlags, SimulatorTime, SkySettings,
-    StartLocationSlot, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo,
-    TerraformArea, TerrainLayerType, TerrainPatch, TextureEntry, Throttle, TransferStatus,
-    Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
-    WaterSettings, Wearable,
+    ServerError, SetDisplayNameReply, SimWideDeleteFlags, SimulatorTime, SkySettings, SoundFlags,
+    SoundPreload, StartLocationSlot, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply,
+    TelehubInfo, TerraformArea, TerrainLayerType, TerrainPatch, TextureEntry, Throttle,
+    TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
+    ViewerEffectType, WaterSettings, Wearable,
 };
 use crate::types::{Event, EventId};
 use sl_wire::AbuseReport;
@@ -223,6 +223,11 @@ use sl_wire::messages::{
     InitiateDownloadAgentDataBlock, InitiateDownloadFileDataBlock, RequestXfer,
     RequestXferXferIDBlock, SendXferPacket, SendXferPacketDataPacketBlock,
     SendXferPacketXferIDBlock,
+};
+use sl_wire::messages::{
+    AttachedSound, AttachedSoundDataBlockBlock, AttachedSoundGainChange,
+    AttachedSoundGainChangeDataBlockBlock, PreloadSound, PreloadSoundDataBlockBlock, SoundTrigger,
+    SoundTriggerSoundDataBlock,
 };
 use sl_wire::messages::{
     AvatarSitResponse, AvatarSitResponseSitObjectBlock, AvatarSitResponseSitTransformBlock,
@@ -7352,6 +7357,185 @@ impl SimSession {
                 .map(|animation| ObjectAnimationAnimationListBlock {
                     anim_id: animation.anim_id.uuid(),
                     anim_sequence_id: animation.sequence_id,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `SoundTrigger` — a one-shot spatial sound at a fixed place in
+    /// this region (the inverse of the client's
+    /// [`Event::SoundTrigger`](crate::Event::SoundTrigger)). This is what a
+    /// scripted `llTriggerSound`, a collision sound or a `llPlaySound` on a
+    /// prim nobody is tracking comes out as: the sound plays once at
+    /// `position` and is then forgotten, so it needs no object to follow.
+    ///
+    /// `owner` and `object` name the prim that triggered it — a viewer mutes a
+    /// sound by either — and `parent` is that prim's linkset root, or [`None`]
+    /// when the prim *is* the root (which is what the nil `ParentID` on the
+    /// wire means).
+    ///
+    /// The region handle is this session's own: a trigger from a neighbouring
+    /// region reaches a viewer over that region's **child** circuit, which is a
+    /// `SimSession` of its own with its own handle.
+    ///
+    /// Sent reliably, as OpenSim's `SendTriggeredSound` does. (The *client*
+    /// half of this message goes out unreliably — a viewer's own trigger is
+    /// best-effort — but a simulator's is the only copy anyone gets.)
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the `SoundData` block's own seven fields, less the region handle the session \
+                  already knows — grouping them into a struct nothing else would name would put \
+                  a type between the caller and the wire record"
+    )]
+    pub fn send_sound_trigger(
+        &mut self,
+        sound: AssetKey,
+        owner: OwnerKey,
+        object: ObjectKey,
+        parent: Option<ObjectKey>,
+        position: Vector,
+        gain: f32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::SoundTrigger(SoundTrigger {
+            sound_data: SoundTriggerSoundDataBlock {
+                sound_id: sound.uuid(),
+                owner_id: owner.uuid(),
+                object_id: object.uuid(),
+                parent_id: parent.as_ref().map_or_else(Uuid::nil, ObjectKey::uuid),
+                handle: self.region_handle.0,
+                position,
+                gain,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends an `AttachedSound` — a sound bound to an object, which follows it
+    /// as it moves (the inverse of the client's
+    /// [`Event::AttachedSound`](crate::Event::AttachedSound)). This is the
+    /// message a **non-looping** `llPlaySound` comes out as.
+    ///
+    /// A *looping* sound is not sent this way by OpenSim, and the reason is
+    /// worth knowing before reaching for this method: `llLoopSound` writes the
+    /// sound onto the prim ([`Object::sound`] and its gain / flags / radius) and
+    /// schedules a full object update, precisely so an avatar arriving later
+    /// hears it too — an `AttachedSound` only reaches whoever was already in
+    /// the region. Stopping a sound goes the same way: `Sound` nil and
+    /// [`SoundFlags::STOP`] set on the object update. So a fixture that wants a
+    /// prim that is *already* looping a clip states it on the prim, and this
+    /// method is for the sound that **starts** while the viewer is watching.
+    ///
+    /// Passing a nil `sound` (or [`SoundFlags::STOP`]) stops the object's
+    /// current attached sound rather than starting one.
+    ///
+    /// Sent reliably, as OpenSim's `SendPlayAttachedSound` does.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_attached_sound(
+        &mut self,
+        object: ObjectKey,
+        owner: OwnerKey,
+        sound: AssetKey,
+        gain: f32,
+        flags: SoundFlags,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::AttachedSound(AttachedSound {
+            data_block: AttachedSoundDataBlockBlock {
+                sound_id: sound.uuid(),
+                object_id: object.uuid(),
+                owner_id: owner.uuid(),
+                gain,
+                flags: flags.0,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends an `AttachedSoundGainChange` — a live volume change for the sound
+    /// already attached to `object` (the inverse of the client's
+    /// [`Event::AttachedSoundGainChange`](crate::Event::AttachedSoundGainChange)),
+    /// which is what `llSetSoundVolume` on a playing sound comes out as. The
+    /// loop keeps running: this changes its gain without restarting it.
+    ///
+    /// Sent reliably, as OpenSim's `SendAttachedSoundGainChange` does.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_attached_sound_gain_change(
+        &mut self,
+        object: ObjectKey,
+        gain: f32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::AttachedSoundGainChange(AttachedSoundGainChange {
+            data_block: AttachedSoundGainChangeDataBlockBlock {
+                object_id: object.uuid(),
+                gain,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `PreloadSound` — "fetch these clips now, they are about to
+    /// play" (the inverse of the client's
+    /// [`Event::PreloadSound`](crate::Event::PreloadSound)). A viewer that
+    /// warms its cache on one plays the trigger that follows on time instead of
+    /// a fetch later.
+    ///
+    /// This is `llPreloadSound` and nothing else: a region does **not** send
+    /// one on arrival for the sounds its content carries (OpenSim's
+    /// `SoundModule::PreloadSound` is only reached from the script call, and
+    /// sends to the avatars within the prim's sound radius). A viewer learns
+    /// about an already-looping sound from the object update instead — see
+    /// [`send_attached_sound`](Self::send_attached_sound).
+    ///
+    /// Sent reliably, as OpenSim's `SendPreLoadSound` does.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_preload_sound(
+        &mut self,
+        sounds: &[SoundPreload],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::PreloadSound(PreloadSound {
+            data_block: sounds
+                .iter()
+                .map(|preload| PreloadSoundDataBlockBlock {
+                    object_id: preload.object_id.uuid(),
+                    owner_id: preload.owner_id,
+                    sound_id: preload.sound_id,
                 })
                 .collect(),
         });

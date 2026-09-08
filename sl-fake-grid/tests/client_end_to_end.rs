@@ -3257,6 +3257,114 @@ mod test {
         Ok(())
     }
 
+    /// **The catalogue's `sound-box` loops a clip the client can fetch.**
+    ///
+    /// A looping in-world sound is a *field of the object*, not a message:
+    /// OpenSim's `SoundModule::LoopSound` writes it onto the prim and schedules
+    /// a full update precisely so an avatar arriving later hears it too, and
+    /// the reference viewer reads those fields back in
+    /// `LLViewerObject::processUpdateMessage`. So this asserts the arrival
+    /// burst — what an avatar walking in is told — carries the sound, its gain,
+    /// its `LOOP` flag, its radius and the owner id a mute would name, and that
+    /// the clip it names is really served.
+    ///
+    /// The `AttachedSound` **message** is the other half (a non-looping
+    /// `llPlaySound`), and it is driven from the grid side here because
+    /// nothing on arrival sends one.
+    #[tokio::test]
+    async fn the_catalogue_sound_box_loops_a_fetchable_clip() -> Result<(), TestError> {
+        use sl_fake_grid::fixtures::catalogue::{
+            SOUND_CLIP, SOUND_GAIN, SOUND_RADIUS_METRES, entry,
+        };
+
+        let sound_box = entry("sound-box").ok_or("the catalogue has no sound-box")?;
+        let region = sl_fake_grid::catalogue().into_region(RegionConfig::default());
+        let mut running = start_in(vec![region]).await?;
+
+        let object = running
+            .wait_for(|event| match event {
+                Event::ObjectAdded(object) | Event::ObjectUpdated(object)
+                    if object.full_id == sound_box.full_id =>
+                {
+                    Some(object.clone())
+                }
+                _ => None,
+            })
+            .await?;
+        assert_eq!(
+            object.sound, SOUND_CLIP,
+            "the arrival burst does not carry the looping sound"
+        );
+        assert!(
+            sl_proto::SoundFlags(object.sound_flags).is_loop(),
+            "the sound is not marked looping"
+        );
+        assert!((object.gain - SOUND_GAIN).abs() < f32::EPSILON);
+        assert!((object.sound_radius - SOUND_RADIUS_METRES).abs() < f32::EPSILON);
+        assert!(
+            !object.owner_id.is_nil(),
+            "a sounding prim must name its owner: it is one of the two ids a \
+             viewer mutes a noisy object by"
+        );
+
+        // The clip itself: the fixture tone, byte for byte.
+        running
+            .commands
+            .send(Command::FetchAsset {
+                asset_id: sl_client_tokio::AssetKey::from(SOUND_CLIP),
+                asset_type: sl_proto::AssetType::Sound,
+                byte_range: None,
+            })
+            .await?;
+        let clip = running
+            .wait_for(|event| match event {
+                Event::AssetReceived(fetched) if fetched.id == SOUND_CLIP => {
+                    Some(fetched.data.clone())
+                }
+                _ => None,
+            })
+            .await?;
+        assert_eq!(
+            clip,
+            sl_test_assets::sound::marker_tone(sl_test_assets::sound::tones::MID)?
+        );
+
+        // The message half: a non-looping `llPlaySound` on the same prim.
+        let owner = sl_types::key::OwnerKey::Agent(sl_types::key::AgentKey::from(object.owner_id));
+        running
+            .agent
+            .with_sim(|sim| {
+                sim.send_attached_sound(
+                    sound_box.full_id,
+                    owner,
+                    sl_proto::AssetKey::from(SOUND_CLIP),
+                    0.5,
+                    sl_proto::SoundFlags::default(),
+                    sim_now(),
+                )
+            })
+            .await?;
+        let attached = running
+            .wait_for(|event| match event {
+                Event::AttachedSound {
+                    sound_id,
+                    object_id,
+                    gain,
+                    flags,
+                    ..
+                } if *object_id == sound_box.full_id => Some((*sound_id, *gain, *flags)),
+                _ => None,
+            })
+            .await?;
+        assert_eq!(attached.0, SOUND_CLIP);
+        assert!((attached.1 - 0.5).abs() < f32::EPSILON);
+        assert!(
+            !attached.2.is_loop(),
+            "an `llPlaySound` one-shot must not arrive marked as a loop"
+        );
+        Ok(())
+    }
+
     /// The catalogue's assets are actually served: the checker texture comes
     /// back over `GetTexture` and the mesh over `GetMesh2`, so a prim naming
     /// one is not pointing at a 404.

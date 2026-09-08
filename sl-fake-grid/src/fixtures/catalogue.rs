@@ -122,6 +122,28 @@ pub const WATER_SETTINGS_ASSET: uuid::Uuid = uuid::Uuid::from_u128(0xCA7_000B);
 /// the kind an environment *inventory* item holds.
 pub const DAY_CYCLE_ASSET: uuid::Uuid = uuid::Uuid::from_u128(0xCA7_000C);
 
+/// The sound clip the `sound-box` prim loops —
+/// [`sl_test_assets::sound::marker_tone`] at [`sl_test_assets::sound::tones::MID`],
+/// a real Ogg Vorbis file a decoder can measure the pitch of.
+///
+/// The middle of the three fixture pitches, so a second sound added later can
+/// be told from this one by ear as well as by id.
+pub const SOUND_CLIP: uuid::Uuid = uuid::Uuid::from_u128(0xCA7_000D);
+
+/// The gain the `sound-box` loops [`SOUND_CLIP`] at: full scale, so a capture
+/// that measures a quiet voice is measuring the viewer's own attenuation and
+/// not the fixture's.
+pub const SOUND_GAIN: f32 = 1.0;
+
+/// The radius, in metres, within which the `sound-box`'s loop is audible.
+///
+/// OpenSim's own default (`SoundModule.MaxDistance`, 100 m), which is what a
+/// prim whose script never set a radius ends up with — so a viewer standing
+/// anywhere in the region hears it, and a viewer that honours the radius and
+/// one that ignores it agree here. A fixture that wants to *test* the cutoff
+/// wants its own prim with a small one.
+pub const SOUND_RADIUS_METRES: f32 = 100.0;
+
 /// The catalogue NPC's agent id.
 pub const NPC_AGENT: uuid::Uuid = uuid::Uuid::from_u128(0xCA7_0100);
 
@@ -253,7 +275,7 @@ fn slot_offset(local_id: RegionLocalObjectId) -> f32 {
 /// The names of the catalogue's prims, in the order they stand in the row.
 /// The index into this list is the prim's offset from the first catalogue
 /// local id, so the row order and the id order are the same thing.
-pub const NAMES: [&str; 18] = [
+pub const NAMES: [&str; 19] = [
     "plain-box",
     "checker-box",
     "sphere",
@@ -272,6 +294,7 @@ pub const NAMES: [&str; 18] = [
     "linkset-root",
     "rigged-mesh",
     "animesh-cylinder",
+    "sound-box",
 ];
 
 /// Every catalogue entry, in row order.
@@ -513,6 +536,11 @@ fn objects(owner: AgentKey) -> Vec<sl_proto::Object> {
                 prim.mesh(RIGGED_MESH_ASSET, 1)
                     .textured(CHECKER_TEXTURE)
                     .animated_mesh()
+                    .build(),
+            ),
+            "sound-box" => objects.push(
+                prim.textured(CHECKER_TEXTURE)
+                    .looping_sound(AssetKey::from(SOUND_CLIP), SOUND_GAIN, SOUND_RADIUS_METRES)
                     .build(),
             ),
             _unknown => objects.push(prim.build()),
@@ -929,6 +957,9 @@ fn assets() -> InMemoryAssetSource {
         AssetKey::from(NPC_ANIMATION),
         sl_test_assets::anim::chest_twist_animation_asset(),
     );
+    register(&mut assets, AssetKey::from(SOUND_CLIP), || {
+        sl_test_assets::sound::marker_tone(sl_test_assets::sound::tones::MID)
+    });
     for (id, bytes) in [
         (
             NOON_SKY_ASSET,

@@ -16,10 +16,11 @@
 //! of the client's decoders, so a test asserts the fields it seeded.
 
 use sl_proto::{
-    ExtendedMesh, FlexibleData, LightData, LightImage, Object, ObjectExtraParams, ParticleSystem,
-    PrimShapeParams, ReflectionProbe, RegionLocalObjectId, RenderMaterialRef, SculptData,
-    TextureAnimation, TextureEntry, TextureFace, attachment_state_from_point, encode_extra_params,
-    encode_particle_system, encode_texture_anim, encode_texture_entry,
+    AssetKey, ExtendedMesh, FlexibleData, LightData, LightImage, Object, ObjectExtraParams,
+    ParticleSystem, PrimShapeParams, ReflectionProbe, RegionLocalObjectId, RenderMaterialRef,
+    SculptData, SoundFlags, TextureAnimation, TextureEntry, TextureFace,
+    attachment_state_from_point, encode_extra_params, encode_particle_system, encode_texture_anim,
+    encode_texture_entry,
 };
 use sl_types::key::{AgentKey, InventoryKey, MeshKey, ObjectKey, SculptOrMeshKey, TextureKey};
 use sl_types::lsl::{Rotation, Vector};
@@ -365,6 +366,34 @@ impl PrimFixture {
     #[must_use]
     pub const fn texture_anim(mut self, animation: TextureAnimation) -> Self {
         self.texture_animation = Some(animation);
+        self
+    }
+
+    /// Loops `sound` on the prim at `gain`, audible within `radius` metres —
+    /// the prim state a running `llLoopSound` leaves behind.
+    ///
+    /// A looping sound is a **field of the object**, not a message: a
+    /// simulator writes it onto the prim and sends a full object update
+    /// (OpenSim's `SoundModule::LoopSound`, whose comment says why — "just
+    /// sending the sound out once doesn't work so well when other avatars come
+    /// in view later on"). An `AttachedSound` message reaches only the viewers
+    /// already in the region, so it is what a *non-looping* `llPlaySound`
+    /// comes out as
+    /// ([`SimSession::send_attached_sound`](sl_proto::SimSession::send_attached_sound));
+    /// this is how a fixture says "this prim has been looping this clip since
+    /// before you arrived", which is the case a viewer gets wrong far more
+    /// often.
+    ///
+    /// The prim's `owner_id` is already the owner it was built with, and that
+    /// is the id the viewer mutes a noisy object by — the update's owner field
+    /// only means anything when the prim carries a sound or a particle system,
+    /// which is exactly now.
+    #[must_use]
+    pub const fn looping_sound(mut self, sound: AssetKey, gain: f32, radius: f32) -> Self {
+        self.object.sound = sound.uuid();
+        self.object.gain = gain;
+        self.object.sound_flags = SoundFlags::LOOP;
+        self.object.sound_radius = radius;
         self
     }
 

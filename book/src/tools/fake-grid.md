@@ -1060,6 +1060,7 @@ PrimFixture::boxed(local_id, full_id, owner, position, scale)
     .pbr(face, material)    // ExtraParams RenderMaterial (GLTF)
     .light(..) .projector(..) .flexi(..) .reflection_probe(..)
     .particles(..) .texture_anim(..) .hover_text(..) .media_url(..)
+    .looping_sound(sound, gain, radius)  // an already-running llLoopSound
     .rotated(..) .child_of(parent, offset, rotation)     // a linkset child
     .attached_to(wearer, point, item, offset, rotation)
     .build()
@@ -1085,7 +1086,7 @@ which piece (objects and parcels over UDP, assets over
 media over `ObjectMedia`, the environment over `ExtEnvironment`, the
 ground as `LayerData` plus the estate RAW download).
 
-`fixtures::catalogue()` is the **named catalogue**: sixteen prims, one per
+`fixtures::catalogue()` is the **named catalogue**: nineteen prims, one per
 rendering feature, in a west-to-east row 8 m north of the arrival point at
 4 m spacing, with every texture, sculpt map, mesh and material they
 reference served. `catalogue::entries()` / `entry(name)` give a subject's
@@ -1094,12 +1095,41 @@ a hard-coded local id, and the same fixture backs the automated tiers and
 the binary's `--scenario catalogue` — which is what makes a Firestorm
 session and a full-stack capture look at the same objects.
 
+### A sounding prim says so twice
+
+The `sound-box` entry is the one prim whose feature is not visible, and it
+is worth knowing *why* it carries its sound the way it does. A simulator
+states an in-world sound in two unrelated places:
+
+- **On the object.** `llLoopSound` writes `Sound` / `Gain` / `Flags` /
+  `Radius` onto the prim and schedules a full update — OpenSim's
+  `SoundModule::LoopSound`, whose comment says it plainly: "just sending
+  the sound out once doesn't work so well when other avatars come in view
+  later on". Stopping it goes the same way (`Sound` nil, `STOP` set). This
+  is the only way an avatar arriving *after* the loop started ever hears
+  it, and the reference viewer reads the fields back in
+  `LLViewerObject::processUpdateMessage`, full and compressed updates
+  alike.
+- **In a message.** `AttachedSound` (a non-looping `llPlaySound`),
+  `AttachedSoundGainChange` (a live `llSetSoundVolume`), `SoundTrigger`
+  (a one-shot at a place — `llTriggerSound`, a collision) and
+  `PreloadSound` (`llPreloadSound`, and *only* that: no region sends one
+  on arrival). Each reaches only whoever is already there.
+
+So `looping_sound(..)` is a fixture for the first, and
+`SimSession::send_attached_sound` / `send_attached_sound_gain_change` /
+`send_sound_trigger` / `send_preload_sound` are the second. A viewer that
+implements only the message half is silent in every region whose sounds
+started before it logged in, which is nearly all of them.
+
 The procedural assets it needs come from `sl-test-assets`:
 `RgbaImage::checker` / `solid` (as JPEG2000), `sculpt_sphere` (a sculpt
 map — geometry stored as a texture), `mesh::unit_cube_mesh_asset` (the
-LLSD-binary header plus zlib-compressed LOD blocks `sl-mesh` decodes) and
+LLSD-binary header plus zlib-compressed LOD blocks `sl-mesh` decodes),
 `gltf_material_asset` (the `AT_MATERIAL` LLSD envelope around a glTF 2.0
-document).
+document) and `sound::marker_tone` (a real Ogg Vorbis tone, which the
+`sound-box` loops at concert pitch — a decoder can measure it, and an ear
+can tell two of them apart).
 
 ### Fixture textures: size it honestly, and mind the cache
 
