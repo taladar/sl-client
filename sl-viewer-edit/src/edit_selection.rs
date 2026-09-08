@@ -125,6 +125,18 @@ const DROP_FOREIGN_OUTLINE: Color = Color::srgba(1.0, 0.25, 0.2, 0.9);
 /// the reference's silhouette edge glow without porting its edge-walk.
 const OUTLINE_INFLATE: f32 = 1.035;
 
+/// The visibility every face overlay this module parents onto a face entity is
+/// spawned with — [`Visibility::Visible`], which in Bevy shows the entity
+/// **regardless of its ancestors**, rather than the inherited default.
+///
+/// A fully transparent face is built hidden (the reference's alpha-pool gate,
+/// `sl_viewer_world_objects::objects`), and an invisible root box is exactly the
+/// prim a builder selects. The reference draws its selection silhouette from the
+/// object's volume in `LLSelectMgr::renderSilhouettes`, entirely outside the draw
+/// pools the gate keeps it out of, so the outline shows there whether or not the
+/// face itself draws — inheriting the face's visibility here would lose it.
+const OUTLINE_VISIBILITY: Visibility = Visibility::Visible;
+
 /// The in-flight left-button gesture of the selection tool: where it pressed,
 /// what it pressed on, and whether it has grown past the click slop into a
 /// rubber-band sweep.
@@ -1059,6 +1071,7 @@ fn spawn_outline_overlay(
             marker,
             EditorOverlay,
             ChildOf(face),
+            OUTLINE_VISIBILITY,
         ));
         return;
     }
@@ -1088,6 +1101,7 @@ fn spawn_outline_overlay(
         marker,
         EditorOverlay,
         ChildOf(face),
+        OUTLINE_VISIBILITY,
     ));
     if let Some(skin) = skin {
         overlay.insert((skin.clone(), SkinPoseTwin { source: face }));
@@ -1555,6 +1569,7 @@ fn apply_face_cursor_highlight(
             FaceCursorOverlay,
             EditorOverlay,
             ChildOf(face),
+            OUTLINE_VISIBILITY,
         ));
         // A rigged face's cursor shares its **mesh**, which carries the skin
         // attributes — so Bevy specializes it into the skinned pipeline and would

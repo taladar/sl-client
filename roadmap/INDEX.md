@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 322 |
 | blocked | 46 |
 | in-progress | 20 |
-| bugs | 59 |
+| bugs | 60 |
 | done | 1032 |
 | deferred | 25 |
-| wont-do | 15 |
-| **total** | **1620** |
+| wont-do | 16 |
+| **total** | **1622** |
 
 ## ideas (101)
 
@@ -1193,7 +1193,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (59)
+## bugs (60)
 
 ### viewer
 
@@ -1201,8 +1201,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Add Friend sends the offer silently — no message dialog, no feedback
 - [`viewer-animesh-intermittent-render`](bugs/viewer-animesh-intermittent-render.md)
   — Animesh intermittently fails to render (timing race, not deterministic)
-- [`viewer-animesh-transparent-box-shell`](bugs/viewer-animesh-transparent-box-shell.md)
-  — Animesh surrounded by an almost-transparent box shell
 - [`viewer-arrival-orientation-snap`](bugs/viewer-arrival-orientation-snap.md) —
   Avatar arrives facing the wrong way then snaps to the correct orientation
   (rotates the whole minimap)
@@ -1291,12 +1289,18 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A nearby avatar stays a coarse sphere even as the camera closes in
 - [`viewer-notecard-preview-ignores-unsaved-text`](bugs/viewer-notecard-preview-ignores-unsaved-text.md)
   — The notecard's View Items preview shows the loaded text, not what you typed
+- [`viewer-outline-swallows-thin-hollow-prim`](bugs/viewer-outline-swallows-thin-hollow-prim.md)
+  — The selection outline fills a thin-walled hollow prim white instead of
+  outlining it
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
   — Own avatar looks broken after a teleport
 - [`viewer-own-avatar-facing-drifts-idle`](bugs/viewer-own-avatar-facing-drifts-idle.md)
   — Own avatar forward direction drifts every few seconds while idle
 - [`viewer-parcel-object-owners-uncorrelated`](bugs/viewer-parcel-object-owners-uncorrelated.md)
   — An object-owner tally says nothing about which parcel it counted
+- [`viewer-pbr-face-zero-alpha-not-culled`](bugs/viewer-pbr-face-zero-alpha-not-culled.md)
+  — A PBR face at zero base-colour alpha is still built (the glTF half of the
+  transparency cull)
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 - [`viewer-prim-attachment-worn-but-not-rendered`](bugs/viewer-prim-attachment-worn-but-not-rendered.md)
@@ -3657,7 +3661,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-recommit-conformance-records`](deferred/test-recommit-conformance-records.md)
   — Revisit committing sl-conformance records once implementation churn settles
 
-## wont-do (15)
+## wont-do (16)
 
 ### protocol
 
@@ -3668,6 +3672,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`viewer-ambient-occlusion`](wont-do/viewer-ambient-occlusion.md) —
   Screen-space ambient occlusion
+- [`viewer-animesh-transparent-box-shell`](wont-do/viewer-animesh-transparent-box-shell.md)
+  — Animesh surrounded by an almost-transparent box shell
 - [`viewer-discord-rich-presence`](wont-do/viewer-discord-rich-presence.md) —
   Discord rich-presence integration
 - [`viewer-perf-avatar-ground-probe`](wont-do/viewer-perf-avatar-ground-probe.md)

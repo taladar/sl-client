@@ -1353,7 +1353,12 @@ pub(crate) fn pick_object(
     tex_anims: Query<&ObjectTextureAnimation>,
     globals: Query<&GlobalTransform>,
     parents: Query<&ChildOf>,
-    face_debug: Query<(&PrimFaceEntity, &FaceTextureDebug)>,
+    // The face's own components, plus whether it is actually shown: the
+    // fully-transparent cull hides a face, and a probe that could not say so
+    // would read as a renderer bug rather than as the cull doing its job.
+    // Bundled into this query rather than taken as a seventeenth parameter,
+    // which is one past what a Bevy system accepts.
+    face_debug: Query<(&PrimFaceEntity, &FaceTextureDebug, &InheritedVisibility)>,
     face_materials: Query<&MeshMaterial3d<FaceMaterial>>,
     materials: Res<Assets<FaceMaterial>>,
     legacy: Res<LegacyMaterialManager>,
@@ -1372,7 +1377,26 @@ pub(crate) fn pick_object(
         }
     };
     let ray = Ray3d::new(camera.translation(), camera.forward());
-    let hits = ray_cast.cast_ray(ray, &MeshRayCastSettings::default());
+    // Skip the decorations another crate parents **onto** a face — the selection
+    // outline, the drag-drop highlight, the face cursor. Each is a child of the
+    // face it decorates and is drawn slightly proud of it, so on a *selected*
+    // object the ray struck the overlay every time: the probe then found no
+    // `PrimFaceEntity` on the hit and reported the object identity with none of
+    // the per-face lines, which are the whole point of aiming at a face.
+    // Recognised by shape rather than by a marker component, since the crates
+    // that spawn them depend on this one.
+    let not_a_face_decoration = |entity: Entity| {
+        !parents
+            .get(entity)
+            .is_ok_and(|child_of| face_debug.contains(child_of.parent()))
+    };
+    let settings = MeshRayCastSettings::default()
+        // Reach a face the fully-transparent cull hid, and say so below rather
+        // than silently reporting whatever stands behind it — "this face is
+        // hidden" is one of the answers the probe exists to give.
+        .with_visibility(bevy::picking::mesh_picking::ray_cast::RayCastVisibility::Any)
+        .with_filter(&not_a_face_decoration);
+    let hits = ray_cast.cast_ray(ray, &settings);
     let Some((entity, hit)) = hits.first() else {
         warn!("pick: nothing under the crosshair (aim at a surface and press P)");
         return;
@@ -1383,7 +1407,7 @@ pub(crate) fn pick_object(
     // object's texture animation (P28.1), reported below, can say whether it
     // targets this particular face.
     let mut picked_face: Option<PrimFaceId> = None;
-    if let Ok((face, FaceTextureDebug(tf))) = face_debug.get(*entity) {
+    if let Ok((face, FaceTextureDebug(tf), shown)) = face_debug.get(*entity) {
         picked_face = Some(face.face_id);
         warn!(
             "pick face {}: texture={} repeats=({:.3},{:.3}) offset=({:.3},{:.3}) \
@@ -1414,10 +1438,14 @@ pub(crate) fn pick_object(
             && let Some(standard) = materials.get(&material.0)
         {
             warn!(
-                "pick face render: alpha_mode={:?} base_color_alpha={:.3} unlit={}",
+                "pick face render: alpha_mode={:?} base_color_alpha={:.3} unlit={} \
+                 textured={} shown={} fully_transparent={}",
                 standard.base.alpha_mode,
                 standard.base.base_color.alpha(),
                 standard.base.unlit,
+                standard.base.base_color_texture.is_some(),
+                shown.get(),
+                is_fully_transparent(tf),
             );
         }
         if let Some(material_id) = tf.material_id {
@@ -2605,6 +2633,39 @@ fn face_commands<'a>(
     }
 }
 
+/// Whether this face is **fully transparent** and so must not be rendered at
+/// all — the port of the reference viewer's alpha-pool gate
+/// (`LLVOVolume::rebuildGeom`, `llvovolume.cpp`):
+///
+/// ```text
+/// if (alpha > 0.f || te->getGlow() > 0.f)
+/// { //only treat as alpha in the pipeline if < 100% transparent
+///     drawablep->setState(LLDrawable::HAS_ALPHA);
+///     add_face(sAlphaFaces, alpha_count, facep);
+/// }
+/// ```
+///
+/// A face at 100% transparency is added to **no** draw batch there: it is not
+/// drawn, and — because it is in no batch at all — it does not cast a shadow
+/// either. This viewer used to build such a face like any other. Its blend-pass
+/// draw contributes nothing (coverage zero), but its Bevy shadow caster does
+/// not consult coverage, so a fully transparent prim cast a solid shadow: the
+/// invisible root box a linkset is commonly built around (an animesh's control
+/// root, a vehicle's hull) darkened everything it enclosed.
+///
+/// `alpha` is the **tint** alpha, not the texture's: a face made invisible by a
+/// transparent *texture* still renders (and still masks / blends its texels).
+/// The glow term is why a zero-alpha face is kept when it glows — SL's glow is
+/// carried on a face that need not be visible itself.
+///
+/// The `LLMaterial` diffuse alpha mode cannot rescue such a face here: R25
+/// established that a non-opaque tint keeps its blend pass whatever the legacy
+/// material says (`legacy_materials::OPAQUE_TINT_ALPHA`), so a zero-alpha tint
+/// is decided once, at build, and never flips later.
+fn is_fully_transparent(texture_face: &TextureFace) -> bool {
+    texture_face.color[3] == 0 && texture_face.glow <= 0.0
+}
+
 /// Build one face child entity under `parent`, carrying `mesh` and the per-face
 /// diffuse material built from `texture_face` (via [`intern_face_material`],
 /// which requests the texture through `manager` and parks the material in
@@ -2665,6 +2726,15 @@ fn spawn_face_entity(
         PrimFaceEntity { face_id },
         FaceTextureDebug(*texture_face),
         ChildOf(parent),
+        // The reference's fully-transparent cull: a face whose tint alpha is zero
+        // is not drawn at all. Written on every build (not only the first) so a
+        // face that a re-texture turns transparent — or back — follows its entry,
+        // since `FaceReuse` re-describes the entity it already had.
+        if is_fully_transparent(texture_face) {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        },
     );
     let mut face = face_commands(face_id, reuse, commands);
     face.try_insert(built);
@@ -4252,6 +4322,10 @@ pub struct ObjectPicker<'w, 's> {
     scene: Query<'w, 's, &'static SceneObject>,
     /// Face markers + per-face texture placement, for the surface info.
     faces: Query<'w, 's, (&'static PrimFaceEntity, &'static FaceTextureDebug)>,
+    /// Inherited visibility, so [`pick`](Self::pick) can do its own visibility
+    /// test and admit exactly the fully-transparent faces the build tool must
+    /// still be able to click.
+    visible: Query<'w, 's, &'static InheritedVisibility>,
     /// Parent links, to walk from a face entity up to its object.
     parents: Query<'w, 's, &'static ChildOf>,
     /// Globals, to carry the world hit into the object's own frame.
@@ -4277,8 +4351,33 @@ impl ObjectPicker<'_, '_> {
         ray_cast: &mut MeshRayCast,
         exclude: &HashSet<Entity>,
     ) -> Option<ObjectRayHit> {
-        let world_filter = |entity: Entity| !exclude.contains(&entity);
-        let settings = MeshRayCastSettings::default().with_filter(&world_filter);
+        // Reach a **fully transparent** face too — and only that kind of hidden
+        // entity. The reference turns this pick transparent while the build
+        // floater is open (`LLViewerWindow::pickImmediate`'s `in_build_mode &&
+        // SelectInvisibleObjects`, on by default), and the edit tool's
+        // click-select is this method's only caller, so an invisible root box
+        // stays the clickable prim a builder needs. Everything else that is
+        // hidden — a derendered avatar's body, a suppressed attachment — must
+        // stay unpickable, so the visibility test moves into the filter rather
+        // than being switched off wholesale.
+        let world_filter = |entity: Entity| {
+            if exclude.contains(&entity) {
+                return false;
+            }
+            if self
+                .visible
+                .get(entity)
+                .is_ok_and(|inherited| inherited.get())
+            {
+                return true;
+            }
+            self.faces
+                .get(entity)
+                .is_ok_and(|(_face, debug)| is_fully_transparent(&debug.0))
+        };
+        let settings = MeshRayCastSettings::default()
+            .with_visibility(bevy::picking::mesh_picking::ray_cast::RayCastVisibility::Any)
+            .with_filter(&world_filter);
         let (entity, hit) = ray_cast.cast_ray(ray, &settings).first().cloned()?;
         self.resolve(entity, &hit)
     }
@@ -4451,7 +4550,7 @@ mod tests {
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_bevy::{
         AgentKey, MeshKey, Object, RegionHandle, RegionLocalObjectId, SculptData, SculptOrMeshKey,
-        TextureKey, Uuid, Vector, pcode,
+        TextureFace, TextureKey, Uuid, Vector, pcode,
     };
     use std::collections::{HashMap, VecDeque};
 
@@ -5763,6 +5862,154 @@ mod tests {
                 world.get_entity(face).is_ok(),
                 regrown.contains(&face),
                 "face {face} must be alive exactly if the new geometry claimed it"
+            );
+        }
+        Ok(())
+    }
+
+    /// The reference's alpha-pool gate ([`is_fully_transparent`](super::is_fully_transparent)):
+    /// only a tint alpha of exactly zero with no glow culls the face.
+    ///
+    /// Each case is one clause of `alpha > 0.f || te->getGlow() > 0.f`: an
+    /// opaque tint and the faintest non-zero alpha both draw; the glow term
+    /// keeps an invisible face that carries SL's glow; and it is the **tint**
+    /// alpha, so a face made invisible by its texture is unaffected (its
+    /// texture id does not enter the decision at all).
+    #[test]
+    fn only_a_zero_tint_alpha_without_glow_culls_a_face() {
+        let face = |alpha: u8, glow: f32| {
+            let mut face = TextureFace::new(TextureKey::from(Uuid::from_u128(3)));
+            face.color = [255, 255, 255, alpha];
+            face.glow = glow;
+            face
+        };
+        assert!(super::is_fully_transparent(&face(0, 0.0)));
+        assert!(!super::is_fully_transparent(&face(1, 0.0)));
+        assert!(!super::is_fully_transparent(&face(255, 0.0)));
+        assert!(!super::is_fully_transparent(&face(0, 0.25)));
+    }
+
+    /// A fully transparent face is built **hidden**, so it is in no draw batch
+    /// at all — neither the blend pass nor the shadow pass, which is what the
+    /// reference achieves by never adding it to a batch. A re-texture that
+    /// makes the same face opaque again shows it, on the very entity the
+    /// rebuild reused ([`a_rebuild_reuses_each_face_entity`]).
+    ///
+    /// The regression: an invisible root prim — the box an animesh linkset or a
+    /// vehicle is commonly built around — contributed nothing to the colour
+    /// buffer but still cast a solid shadow over everything it enclosed.
+    #[test]
+    fn a_fully_transparent_face_is_built_hidden() -> Result<(), Box<dyn core::error::Error>> {
+        use crate::face_material::FaceMaterial;
+        use crate::geometry_cache::GeometryCache;
+        use crate::material_cache::MaterialCache;
+        use crate::meshes::MeshManager;
+        use crate::textures::{PrimTextures, TextureManager};
+        use crate::world_api::DecodedTextures;
+        use bevy::ecs::system::SystemState;
+        use bevy::prelude::{Assets, Commands, Mesh, Res, ResMut, Visibility, World};
+        use sl_client_bevy::{TextureEntry, encode_texture_entry};
+
+        /// The resources `apply_object`(super::apply_object) takes, as one
+        /// `SystemState` tuple (named to satisfy `type_complexity`).
+        type ApplyParams<'w, 's> = (
+            Commands<'w, 's>,
+            super::FaceIds<'w, 's>,
+            ResMut<'w, Assets<Mesh>>,
+            ResMut<'w, Assets<FaceMaterial>>,
+            ResMut<'w, TextureManager>,
+            Res<'w, DecodedTextures>,
+            ResMut<'w, PrimTextures>,
+            ResMut<'w, MeshManager>,
+            ResMut<'w, GeometryCache>,
+            ResMut<'w, MaterialCache>,
+        );
+
+        let mut world = World::new();
+        world.init_resource::<Assets<Mesh>>();
+        world.init_resource::<Assets<FaceMaterial>>();
+        world.init_resource::<TextureManager>();
+        world.init_resource::<DecodedTextures>();
+        world.init_resource::<PrimTextures>();
+        world.init_resource::<MeshManager>();
+        world.init_resource::<GeometryCache>();
+        world.init_resource::<MaterialCache>();
+
+        let apply = |world: &mut World,
+                     state: &mut super::ObjectState,
+                     object: &Object|
+         -> Result<(), Box<dyn core::error::Error>> {
+            let mut params: SystemState<ApplyParams> = SystemState::new(world);
+            let (
+                mut commands,
+                faces,
+                mut meshes,
+                mut materials,
+                mut manager,
+                store,
+                mut prim_textures,
+                mut mesh_manager,
+                mut cache,
+                mut material_cache,
+            ) = params
+                .get_mut(world)
+                .map_err(|error| format!("system params: {error}"))?;
+            super::apply_object(
+                state,
+                object,
+                &faces,
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                &mut manager,
+                &store,
+                &mut prim_textures,
+                &mut mesh_manager,
+                &mut cache,
+                &mut material_cache,
+            );
+            params.apply(world);
+            Ok(())
+        };
+
+        // A prim whose whole texture entry is one face at `alpha` — the wire
+        // encoding applies a single face's value to every face as the default.
+        let tinted = |alpha: u8| {
+            let mut object = bare_object(pcode::PRIMITIVE);
+            let mut face = TextureFace::new(TextureKey::from(Uuid::from_u128(11)));
+            face.color = [255, 255, 255, alpha];
+            object.texture_entry = encode_texture_entry(&TextureEntry { faces: vec![face] });
+            object
+        };
+
+        let mut state = super::ObjectState::default();
+        let invisible = tinted(0);
+        let scoped = invisible.scoped_id();
+        apply(&mut world, &mut state, &invisible)?;
+        let faces = state
+            .objects
+            .get(&scoped)
+            .map(|tracked| tracked.face_entities.clone())
+            .unwrap_or_default();
+        assert!(
+            !faces.is_empty(),
+            "the fixture prim must tessellate some faces for this test to mean anything"
+        );
+        for &face in &faces {
+            assert_eq!(
+                world.get::<Visibility>(face).copied(),
+                Some(Visibility::Hidden),
+                "a fully transparent face must be built hidden"
+            );
+        }
+
+        // The same object re-textured opaque: every face is shown again.
+        apply(&mut world, &mut state, &tinted(255))?;
+        for &face in &faces {
+            assert_eq!(
+                world.get::<Visibility>(face).copied(),
+                Some(Visibility::Inherited),
+                "an opaque re-texture must show the face its rebuild reused"
             );
         }
         Ok(())
