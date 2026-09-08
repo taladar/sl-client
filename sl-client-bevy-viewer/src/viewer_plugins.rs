@@ -68,8 +68,8 @@ use crate::legacy_materials::{
     register_legacy_materials,
 };
 use crate::materials::{
-    MaterialManager, apply_blinn_phong_hide, apply_material_overrides, apply_pbr_textures,
-    poll_materials, register_changed_render_materials, register_pbr_materials,
+    MaterialManager, apply_blinn_phong_hide, apply_material_overrides, apply_pbr_face_visibility,
+    apply_pbr_textures, poll_materials, register_changed_render_materials, register_pbr_materials,
     revert_removed_render_materials, update_material_caps,
 };
 use crate::meshes::{MeshDecoded, MeshManager, poll_meshes, update_mesh_caps};
@@ -748,6 +748,16 @@ impl Plugin for ViewerWorldPlugins {
         // halves can disagree at all and why one bad entity takes a whole
         // batched draw down with it.
         app.add_systems(PostUpdate, crate::skin_agreement::assert_skin_agreement);
+        // The glTF half of the transparency cull: write each PBR face's composed
+        // verdict onto its `Visibility`. In `PostUpdate` rather than beside the
+        // material systems above, so it is unambiguously after both the systems
+        // that queue a verdict and the object build that re-describes a rebuilt
+        // face with the *legacy* one — and before Bevy propagates visibility, so
+        // the answer reaches this frame's draw.
+        app.add_systems(
+            PostUpdate,
+            apply_pbr_face_visibility.before(VisibilitySystems::VisibilityPropagate),
+        );
         // The crosshair pick tool (press `P`) to identify the object under the
         // centre of the screen. Separate calls to stay clear of Bevy's per-tuple
         // system limit. (The SL_VIEWER_LOG_OBJECTS diagnostic is registered

@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 322 |
 | blocked | 46 |
 | in-progress | 20 |
-| bugs | 60 |
-| done | 1032 |
+| bugs | 59 |
+| done | 1033 |
 | deferred | 25 |
 | wont-do | 16 |
 | **total** | **1622** |
@@ -1193,7 +1193,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (60)
+## bugs (59)
 
 ### viewer
 
@@ -1298,9 +1298,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Own avatar forward direction drifts every few seconds while idle
 - [`viewer-parcel-object-owners-uncorrelated`](bugs/viewer-parcel-object-owners-uncorrelated.md)
   — An object-owner tally says nothing about which parcel it counted
-- [`viewer-pbr-face-zero-alpha-not-culled`](bugs/viewer-pbr-face-zero-alpha-not-culled.md)
-  — A PBR face at zero base-colour alpha is still built (the glTF half of the
-  transparency cull)
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 - [`viewer-prim-attachment-worn-but-not-rendered`](bugs/viewer-prim-attachment-worn-but-not-rendered.md)
@@ -1341,7 +1338,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1032)
+## done (1033)
 
 ### protocol
 
@@ -2375,6 +2372,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-pbr-blinn-phong-build-preview`](done/viewer-pbr-blinn-phong-build-preview.md)
   — PBR supersedes Blinn-Phong on a face; build tool previews Blinn-Phong
   (FIRE-35138)
+- [`viewer-pbr-face-zero-alpha-not-culled`](done/viewer-pbr-face-zero-alpha-not-culled.md)
+  — A PBR face at zero base-colour alpha is still built (the glTF half of the
+  transparency cull)
 - [`viewer-pbr-material-editor`](done/viewer-pbr-material-editor.md) — PBR /
   GLTF material editor (blocked by `viewer-ui-texture-picker` (done),
   `viewer-ui-color-picker` (done))

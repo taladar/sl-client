@@ -50,7 +50,9 @@ use crate::face_material::{
     FaceMaterial, MAP_FLAG_EMISSIVE, MAP_FLAG_MR, MAP_FLAG_NORMAL, MAP_FLAG_SPEC, SL_FACE_MODE_PBR,
 };
 use crate::legacy_materials::{LegacyMaterialManager, preview_legacy_material};
-use crate::objects::{FaceTextureDebug, PrimFaceEntity, SceneObject};
+use crate::objects::{
+    FaceTextureDebug, PrimFaceEntity, SceneObject, TransparencyCulled, is_fully_transparent,
+};
 use crate::textures::{
     PrimTextures, TextureAlpha, TextureApplyBudget, TextureManager, compose_face_material,
 };
@@ -69,6 +71,15 @@ type FaceKey = (ScopedObjectId, u8);
 /// pixel-area LOD managed — the render-priority driver ranks a face's *diffuse*
 /// texture, not the material maps behind it.
 const MATERIAL_TEXTURE_PRIORITY: Priority = TERRAIN_BOOST_PRIORITY;
+
+/// The tracing target of the glTF transparency cull: one line per face the gate
+/// takes out of every draw pass.
+///
+/// Off by default; turn it on with
+/// `RUST_LOG=info,sl_viewer::transparency_cull=debug` to see what the gate hid on
+/// a region — a silent "stop drawing this" is otherwise indistinguishable from a
+/// fetch, a decode or a build that never produced the face at all.
+pub const TRANSPARENCY_CULL_LOG_TARGET: &str = "sl_viewer::transparency_cull";
 
 /// The GLTF override-null texture sentinel (all-`f`), treated like the nil id as
 /// "no texture" so it is neither fetched nor parked (mirrors the diffuse
@@ -189,6 +200,18 @@ struct PbrTexturePatch {
     slot: PbrSlot,
 }
 
+/// The two facts about the face *entity* a registration carries beside its
+/// material: which entity it is, and the texture-entry glow that can rescue it
+/// from the transparency cull. Passed as one value so registering a face does
+/// not grow two more positional arguments at every call site.
+#[derive(Debug, Clone, Copy)]
+struct FaceIdentity {
+    /// The face entity the composed material is worn by.
+    entity: Entity,
+    /// The face's texture-entry glow (`TextureFace::glow`).
+    glow: f32,
+}
+
 /// A registered PBR face material: which base material asset feeds it, the
 /// material handle to patch, and the face's own (texture-entry) UV placement to
 /// recompose each material's `KHR_texture_transform` onto.
@@ -202,6 +225,18 @@ struct FaceSlot {
     /// before any material composition, so recomposition never double-applies the
     /// base-colour `KHR_texture_transform`.
     base_uv: Affine2,
+    /// The face **entity**, so the fully-transparent verdict this face's composed
+    /// material implies can be written onto its `Visibility`
+    /// ([`apply_pbr_face_visibility`]). A material handle addresses a material,
+    /// not the thing wearing it, and an interned handle is shared by several
+    /// faces, so the entity has to be carried here.
+    entity: Entity,
+    /// The face's texture-entry glow, the one term of the transparency gate that
+    /// stays a *legacy* fact for a PBR face: the reference rescues a zero-alpha
+    /// face from the cull when it glows, whichever material decides its alpha.
+    /// Captured with the rest of the face's texture entry, and refreshed on every
+    /// (re)build, since a texture-entry change re-tessellates.
+    glow: f32,
 }
 
 /// The PBR material fetch/decode/apply pipeline: an [`AssetStore`] over the
@@ -252,6 +287,19 @@ pub struct MaterialManager {
     /// / texture map does not overwrite the Blinn-Phong preview; it is restored to
     /// PBR when it leaves the set. Maintained by [`apply_blinn_phong_hide`].
     hidden: HashSet<FaceKey>,
+    /// Faces whose **transparency verdict** changed and still need it written onto
+    /// their `Visibility`, drained by [`apply_pbr_face_visibility`]: the face key,
+    /// its entity, and whether it draws. The key rides along only so the cull can
+    /// name the object it hid — an entity id says nothing to someone looking at a
+    /// prim that vanished.
+    ///
+    /// A queue rather than a direct write because every path that can change the
+    /// verdict — a material decoding, an override arriving, a face reverting to
+    /// Blinn-Phong, the FIRE-35138 preview hiding one — is reached from a
+    /// `&mut MaterialManager` with no access to the world, and re-deriving the
+    /// verdict per frame from the composed materials instead would mean scanning
+    /// every face entity (a material recomposed in place marks nothing changed).
+    visibility: Vec<(FaceKey, Entity, bool)>,
 }
 
 impl Default for MaterialManager {
@@ -280,6 +328,7 @@ impl MaterialManager {
             texture_pending: HashMap::new(),
             local_recompose: Vec::new(),
             hidden: HashSet::new(),
+            visibility: Vec::new(),
         }
     }
 
@@ -312,6 +361,7 @@ impl MaterialManager {
         id: AssetKey,
         handle: Handle<FaceMaterial>,
         base_uv: Affine2,
+        face: FaceIdentity,
     ) {
         if id.uuid().is_nil() {
             return;
@@ -322,6 +372,8 @@ impl MaterialManager {
                 material_id: id,
                 handle,
                 base_uv,
+                entity: face.entity,
+                glow: face.glow,
             },
         );
         self.request(id);
@@ -343,6 +395,7 @@ impl MaterialManager {
         id: AssetKey,
         handle: &Handle<FaceMaterial>,
         base_uv: Affine2,
+        face: FaceIdentity,
     ) -> bool {
         if id.uuid().is_nil() {
             return false;
@@ -359,6 +412,8 @@ impl MaterialManager {
                     material_id: id,
                     handle: handle.clone(),
                     base_uv,
+                    entity: face.entity,
+                    glow: face.glow,
                 },
             );
         }
@@ -391,6 +446,7 @@ impl MaterialManager {
         id: AssetKey,
         handle: &Handle<FaceMaterial>,
         base_uv: Affine2,
+        entity: Entity,
         texture_face: &TextureFace,
         textures: &mut TextureManager,
         store: &DecodedTextures,
@@ -424,6 +480,8 @@ impl MaterialManager {
                         material_id: id,
                         handle: handle.clone(),
                         base_uv,
+                        entity,
+                        glow: texture_face.glow,
                     },
                 );
             }
@@ -459,9 +517,16 @@ impl MaterialManager {
     ) -> bool {
         let _hidden = self.hidden.remove(&key);
         let _over = self.overrides.remove(&key);
-        if self.face_slots.remove(&key).is_none() {
+        let Some(removed) = self.face_slots.remove(&key) else {
             return false;
-        }
+        };
+        // The face is a legacy face again, so its transparency verdict is the
+        // legacy one — the tint alpha it was built with. Handing it back
+        // explicitly matters: the PBR verdict may have hidden it (or, just as
+        // much, shown a face the tint would have culled), and nothing else
+        // rewrites the visibility of a face that is not re-tessellated.
+        self.visibility
+            .push((key, removed.entity, !is_fully_transparent(texture_face)));
         for slot in PbrSlot::ALL {
             drop_texture_patches(self, handle, slot);
         }
@@ -742,6 +807,24 @@ pub fn update_material_caps(
     manager.retry_pending();
 }
 
+/// The freshly-built faces [`register_pbr_materials`] registers: each one's
+/// entity, its material handle, its face index, the texture entry it was built
+/// from (for the glow term of the transparency gate) and the geometry holder to
+/// look its material id up in. Named because a query of five terms is past what
+/// `clippy::type_complexity` accepts inline.
+type NewFaces<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static MeshMaterial3d<FaceMaterial>,
+        &'static PrimFaceEntity,
+        &'static FaceTextureDebug,
+        &'static ChildOf,
+    ),
+    Changed<PrimFaceEntity>,
+>;
+
 /// Join each newly-built face entity to its object's [`ObjectRenderMaterials`]
 /// holder (its geometry-holder parent), and, when the face's index carries a PBR
 /// material, register the face with the [`MaterialManager`] (keyed by its scoped
@@ -758,13 +841,10 @@ pub fn register_pbr_materials(
     mut manager: ResMut<MaterialManager>,
     mut textures: ResMut<TextureManager>,
     mut materials: ResMut<Assets<FaceMaterial>>,
-    new_faces: Query<
-        (&MeshMaterial3d<FaceMaterial>, &PrimFaceEntity, &ChildOf),
-        Changed<PrimFaceEntity>,
-    >,
+    new_faces: NewFaces,
     holders: Query<&ObjectRenderMaterials>,
 ) {
-    for (material, face, child_of) in &new_faces {
+    for (entity, material, face, FaceTextureDebug(texture_face), child_of) in &new_faces {
         let Ok(holder) = holders.get(child_of.parent()) else {
             continue;
         };
@@ -787,6 +867,10 @@ pub fn register_pbr_materials(
             AssetKey::from(material_id),
             material.0.clone(),
             base_uv,
+            FaceIdentity {
+                entity,
+                glow: texture_face.glow,
+            },
         );
         recompose_face(&mut manager, &mut textures, &mut materials, key);
     }
@@ -807,11 +891,15 @@ pub fn register_changed_render_materials(
     mut textures: ResMut<TextureManager>,
     mut materials: ResMut<Assets<FaceMaterial>>,
     changed: Query<(&ObjectRenderMaterials, &Children), Changed<ObjectRenderMaterials>>,
-    faces: Query<(&MeshMaterial3d<FaceMaterial>, &PrimFaceEntity)>,
+    faces: Query<(
+        &MeshMaterial3d<FaceMaterial>,
+        &PrimFaceEntity,
+        &FaceTextureDebug,
+    )>,
 ) {
     for (holder, children) in &changed {
         for child in children.iter() {
-            let Ok((material, face)) = faces.get(child) else {
+            let Ok((material, face, FaceTextureDebug(texture_face))) = faces.get(child) else {
                 continue;
             };
             let face_index = face.face_id.as_usize();
@@ -826,8 +914,16 @@ pub fn register_changed_render_materials(
             let base_uv = materials
                 .get(&material.0)
                 .map_or(Affine2::IDENTITY, |standard| standard.base.uv_transform);
-            if manager.refresh_face_material(key, AssetKey::from(material_id), &material.0, base_uv)
-            {
+            if manager.refresh_face_material(
+                key,
+                AssetKey::from(material_id),
+                &material.0,
+                base_uv,
+                FaceIdentity {
+                    entity: child,
+                    glow: texture_face.glow,
+                },
+            ) {
                 recompose_face(&mut manager, &mut textures, &mut materials, key);
             }
         }
@@ -980,6 +1076,67 @@ pub fn poll_materials(
             .collect();
         for key in keys {
             recompose_face(&mut manager, &mut textures, &mut materials, key);
+        }
+    }
+}
+
+/// Write each queued transparency verdict onto its face entity: a face the glTF
+/// gate culled is hidden and marked [`TransparencyCulled`], one it clears is shown
+/// and unmarked.
+///
+/// The queue is filled wherever a verdict can change — a material composing
+/// (`recompose_face`, reached from registration, decode, override and preview
+/// alike) and a face handed back to its legacy tint verdict
+/// (`revert_face_to_diffuse`, [`apply_blinn_phong_hide`]) — so this is the one
+/// place a PBR face's visibility is written, and it costs nothing on a frame where
+/// no face was composed.
+///
+/// Runs in `PostUpdate`, before Bevy propagates visibility: that is after every
+/// filler *and* after the object build, which re-describes a rebuilt face entity
+/// with the legacy verdict (`objects::spawn_face_entity` cannot know a material is
+/// coming), so the PBR answer lands over it in the same frame it was overwritten.
+pub fn apply_pbr_face_visibility(
+    mut manager: ResMut<MaterialManager>,
+    mut commands: Commands,
+    mut faces: Query<(&mut Visibility, Has<TransparencyCulled>)>,
+) {
+    for ((scoped, face_index), entity, visible) in core::mem::take(&mut manager.visibility) {
+        let Ok((mut visibility, culled)) = faces.get_mut(entity) else {
+            // The face despawned between the composition and this drain.
+            continue;
+        };
+        // `set_if_neq`, not a plain write: `Visibility` is change-detected, and a
+        // face whose verdict did not move must not mark it changed — a write per
+        // composed face per frame would re-run every `Changed<Visibility>` reader
+        // for nothing.
+        let _changed = visibility.set_if_neq(if visible {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        });
+        // `visible == culled` is the mark disagreeing with the verdict — shown but
+        // marked culled, or hidden but unmarked. Only then is it touched:
+        // inserting a component marks it changed and shifts the entity's
+        // archetype, and a frame that recomposes a linkset's every face would
+        // otherwise pay both for each of them.
+        if visible == culled
+            && let Ok(mut face) = commands.get_entity(entity)
+        {
+            if visible {
+                face.try_remove::<TransparencyCulled>();
+            } else {
+                // Only the *transition* into the cull is logged, and only on this
+                // target: a gate that quietly stops drawing something has to be
+                // able to say what it stopped drawing, or a bug in it is
+                // indistinguishable from a bug anywhere else in the pipeline.
+                // Turn it on with
+                // `RUST_LOG=info,sl_viewer::transparency_cull=debug`.
+                debug!(
+                    target: TRANSPARENCY_CULL_LOG_TARGET,
+                    "glTF transparency cull hid {scoped} face {face_index}",
+                );
+                face.try_insert(TransparencyCulled);
+            }
         }
     }
 }
@@ -1165,6 +1322,14 @@ pub fn apply_blinn_phong_hide(
             continue;
         };
         let texture_face = *texture_face;
+        // The face renders its Blinn-Phong layer while it is hidden, so it is the
+        // *legacy* transparency verdict that applies to it — the glTF one belongs
+        // to a composition this face is not showing. Leaving the PBR answer
+        // standing would hide a face the preview exists to let the user judge.
+        // Leaving the set recomposes it, which queues the PBR verdict again.
+        manager
+            .visibility
+            .push((key, entity, !is_fully_transparent(&texture_face)));
         compose_face_material(
             &handle,
             &texture_face,
@@ -1262,6 +1427,8 @@ fn recompose_face(
     let material_id = slot.material_id;
     let handle = slot.handle.clone();
     let base_uv = slot.base_uv;
+    let entity = slot.entity;
+    let glow = slot.glow;
     let base = manager
         .decoded
         .get(&material_id)
@@ -1271,8 +1438,65 @@ fn recompose_face(
     if let Some(over) = manager.overrides.get(&key) {
         over.apply_to(&mut effective);
     }
+    // The glTF half of the reference's transparency gate, decided from the
+    // material this face actually renders — the base with its override folded on,
+    // which is what an override that zeroes (or restores) the base-colour alpha
+    // has to be judged by.
+    manager.visibility.push((
+        key,
+        entity,
+        !pbr_face_is_fully_transparent(&effective, glow),
+    ));
     apply_material_scalars(materials, &handle, &effective, base_uv);
     request_material_textures(manager, textures, materials, &handle, &effective);
+}
+
+/// Whether a face carrying this **composed** glTF render material is fully
+/// transparent, and so must not be drawn at all — the glTF half of the reference's
+/// transparency gate (`LLVOVolume::rebuildGeom`, `llvovolume.cpp`), the twin of
+/// `objects::is_fully_transparent` on a legacy face's tint.
+///
+/// The reference states it twice, once per pool a PBR face can land in. A blending
+/// PBR face goes to the alpha pool (`LLPipeline::getPoolTypeFromTE` returns
+/// `POOL_ALPHA` for *any* `ALPHA_MODE_BLEND` material), where the gate reads its
+/// alpha from the material rather than from the texture entry:
+///
+/// ```text
+/// F32 alpha;
+/// if (is_pbr) { alpha = gltf_mat ? gltf_mat->mBaseColor.mV[3] : 1.0f; }
+/// else        { alpha = te->getColor().mV[3]; }
+/// if (alpha > 0.f || te->getGlow() > 0.f) { add_face(sAlphaFaces, ...); }
+/// ```
+///
+/// and the same verdict again where a PBR face reaches the opaque pools —
+/// unreachable in theory, which is what the reference's own comment says, but kept
+/// because a rigged face was seen to get there:
+///
+/// ```text
+/// bool should_render = true;
+/// if (gltf_mat->mAlphaMode == LLGLTFMaterial::ALPHA_MODE_BLEND)
+/// {
+///     if (gltf_mat->mBaseColor.mV[3] == 0.0f && !LLDrawPoolAlpha::sShowDebugAlpha)
+///     { should_render = false; }
+/// }
+/// ```
+///
+/// Both cull the same face — a `BLEND` material at base-colour alpha exactly zero
+/// — and the alpha-pool one keeps it when the *texture entry* glows, so the glow
+/// term stays a legacy fact here. The alpha-mode test is what keeps the gate off
+/// an `OPAQUE` or `MASK` material whose base-colour factor happens to carry a zero
+/// alpha: such a material renders opaque, and its alpha is never read.
+///
+/// The two halves are **alternatives, not a conjunction**: a PBR face's tint is
+/// not what decides it, so a face whose texture entry is transparent but whose
+/// glTF base colour is opaque draws (and the legacy build-time verdict, which had
+/// no way to know a material was coming, is overwritten rather than and-ed).
+#[must_use]
+pub fn pbr_face_is_fully_transparent(material: &GltfMaterial, glow: f32) -> bool {
+    let Some(&alpha) = material.base_color.get(3) else {
+        return false;
+    };
+    matches!(material.alpha_mode, GltfAlphaMode::Blend) && alpha <= 0.0 && glow <= 0.0
 }
 
 /// Write a decoded [`GltfMaterial`]'s scalar / factor fields onto a face's base
@@ -1536,6 +1760,141 @@ mod tests {
         );
         assert_eq!(PbrSlot::Normal.fetchable_texture(&material), None);
         assert_eq!(PbrSlot::Emissive.fetchable_texture(&material), None);
+    }
+
+    /// The glTF half of the transparency gate, clause by clause: only a
+    /// **blending** material at base-colour alpha exactly zero culls the face, and
+    /// only when the face's texture entry does not glow.
+    ///
+    /// The alpha-mode clause is the one that keeps the gate off a material whose
+    /// base-colour factor happens to carry a zero alpha it never renders with; the
+    /// glow clause is the reference's alpha-pool `alpha > 0.f || te->getGlow() >
+    /// 0.f`, whose second term stays a texture-entry fact for a PBR face.
+    #[test]
+    fn only_a_blend_material_at_zero_base_alpha_culls_a_face() {
+        let material = |alpha_mode: GltfAlphaMode, alpha: f32| GltfMaterial {
+            alpha_mode,
+            base_color: [1.0, 1.0, 1.0, alpha],
+            ..GltfMaterial::default()
+        };
+        assert!(pbr_face_is_fully_transparent(
+            &material(GltfAlphaMode::Blend, 0.0),
+            0.0
+        ));
+        assert!(!pbr_face_is_fully_transparent(
+            &material(GltfAlphaMode::Blend, 0.004),
+            0.0
+        ));
+        assert!(!pbr_face_is_fully_transparent(
+            &material(GltfAlphaMode::Blend, 1.0),
+            0.0
+        ));
+        assert!(!pbr_face_is_fully_transparent(
+            &material(GltfAlphaMode::Opaque, 0.0),
+            0.0
+        ));
+        assert!(!pbr_face_is_fully_transparent(
+            &material(GltfAlphaMode::Mask, 0.0),
+            0.0
+        ));
+        assert!(!pbr_face_is_fully_transparent(
+            &material(GltfAlphaMode::Blend, 0.0),
+            0.25
+        ));
+    }
+
+    /// The two halves of the gate are **alternatives**, not a conjunction: a PBR
+    /// face's verdict comes from its composed glTF material and its texture-entry
+    /// tint says nothing about it, so composing one overwrites whichever answer
+    /// the build-time legacy verdict had written.
+    ///
+    /// Both directions, on the same drain: an opaque-tinted face whose material
+    /// blends at zero alpha is hidden (the shadow-casting half of the bug — the
+    /// legacy fix left this face drawn), and a zero-tinted face carrying an opaque
+    /// material is shown again (the reference renders it; hiding it would be this
+    /// gate applied where the reference does not apply it).
+    #[test]
+    fn a_pbr_face_takes_its_verdict_from_its_material_not_its_tint()
+    -> Result<(), Box<dyn core::error::Error>> {
+        use bevy::ecs::system::RunSystemOnce as _;
+
+        let mut world = World::new();
+        world.init_resource::<Assets<FaceMaterial>>();
+        world.init_resource::<TextureManager>();
+        world.init_resource::<MaterialManager>();
+
+        // Two faces, each built with the legacy verdict its tint implies.
+        let blending = world.spawn(Visibility::Inherited).id();
+        let tinted_out = world.spawn((Visibility::Hidden, TransparencyCulled)).id();
+
+        let scoped = ScopedObjectId::new(
+            sl_client_bevy::CircuitId::new(1),
+            sl_client_bevy::RegionLocalObjectId(42),
+        );
+        let cases = [
+            (
+                blending,
+                0_u8,
+                AssetKey::from(Uuid::from_u128(0xB1)),
+                GltfMaterial {
+                    alpha_mode: GltfAlphaMode::Blend,
+                    base_color: [1.0, 1.0, 1.0, 0.0],
+                    ..GltfMaterial::default()
+                },
+            ),
+            (
+                tinted_out,
+                1_u8,
+                AssetKey::from(Uuid::from_u128(0xB2)),
+                GltfMaterial::default(),
+            ),
+        ];
+        // Register each face against an already-decoded material and compose it,
+        // exactly as `register_pbr_materials` does for a freshly-built face.
+        world
+            .run_system_once(
+                move |mut manager: ResMut<MaterialManager>,
+                      mut textures: ResMut<TextureManager>,
+                      mut materials: ResMut<Assets<FaceMaterial>>| {
+                    for (entity, face, id, material) in cases {
+                        let _prev = manager.decoded.insert(id, material);
+                        manager.register(
+                            (scoped, face),
+                            id,
+                            Handle::default(),
+                            Affine2::IDENTITY,
+                            FaceIdentity { entity, glow: 0.0 },
+                        );
+                        recompose_face(&mut manager, &mut textures, &mut materials, (scoped, face));
+                    }
+                },
+            )
+            .map_err(|error| -> Box<dyn core::error::Error> {
+                format!("composing the faces: {error}").into()
+            })?;
+        world.run_system_once(apply_pbr_face_visibility).map_err(
+            |error| -> Box<dyn core::error::Error> { format!("draining: {error}").into() },
+        )?;
+
+        assert_eq!(
+            world.entity(blending).get::<Visibility>().copied(),
+            Some(Visibility::Hidden),
+            "a blending material at zero base alpha culls the face whatever its tint",
+        );
+        assert!(
+            world.entity(blending).contains::<TransparencyCulled>(),
+            "and marks it, so the build tool can still click the prim it hid",
+        );
+        assert_eq!(
+            world.entity(tinted_out).get::<Visibility>().copied(),
+            Some(Visibility::Inherited),
+            "an opaque material draws the face its transparent tint had hidden",
+        );
+        assert!(
+            !world.entity(tinted_out).contains::<TransparencyCulled>(),
+            "and clears the mark with it",
+        );
+        Ok(())
     }
 
     #[test]

@@ -2151,6 +2151,7 @@ fn preview_pbr_material_picked(
                     id,
                     &handle,
                     base_uv,
+                    entity,
                     &texture_face,
                     &mut textures,
                     &store,

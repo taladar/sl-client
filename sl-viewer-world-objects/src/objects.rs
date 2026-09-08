@@ -120,6 +120,27 @@ pub struct PrimFaceEntity {
 #[derive(Component, Debug, Clone, Copy)]
 pub struct FaceTextureDebug(pub TextureFace);
 
+/// A face hidden because a **transparency gate** excluded it from every draw
+/// batch, rather than because something above it in the hierarchy is hidden.
+///
+/// Two gates write it, one per material kind, both ports of
+/// `LLVOVolume::rebuildGeom`:
+///
+/// - the legacy one, `is_fully_transparent` on the face's `TextureEntry` tint,
+///   decided at face build (`spawn_face_entity`);
+/// - the glTF one, on a PBR face's composed base-colour alpha, decided whenever
+///   its render material is composed
+///   ([`materials::pbr_face_is_fully_transparent`](crate::materials::pbr_face_is_fully_transparent)).
+///
+/// The mark exists because "hidden" alone is ambiguous and two callers need to
+/// tell the two apart. A **click-select** in build mode must still reach an
+/// invisible prim (the reference's `SelectInvisibleObjects`) while staying off a
+/// derendered avatar, so [`ObjectPicker::pick`] admits a hidden entity only when
+/// it carries this. The `P` probe reports it, so a face that is deliberately not
+/// drawn does not read as a renderer bug.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct TransparencyCulled;
+
 /// The object's last-received Second Life transform, mirrored onto its entity
 /// for the object-editing surfaces (the selection set, the build floater's
 /// numeric fields, and the transform gizmos — `viewer-object-selection-core` /
@@ -1358,7 +1379,12 @@ pub(crate) fn pick_object(
     // would read as a renderer bug rather than as the cull doing its job.
     // Bundled into this query rather than taken as a seventeenth parameter,
     // which is one past what a Bevy system accepts.
-    face_debug: Query<(&PrimFaceEntity, &FaceTextureDebug, &InheritedVisibility)>,
+    face_debug: Query<(
+        &PrimFaceEntity,
+        &FaceTextureDebug,
+        &InheritedVisibility,
+        Has<TransparencyCulled>,
+    )>,
     face_materials: Query<&MeshMaterial3d<FaceMaterial>>,
     materials: Res<Assets<FaceMaterial>>,
     legacy: Res<LegacyMaterialManager>,
@@ -1407,7 +1433,7 @@ pub(crate) fn pick_object(
     // object's texture animation (P28.1), reported below, can say whether it
     // targets this particular face.
     let mut picked_face: Option<PrimFaceId> = None;
-    if let Ok((face, FaceTextureDebug(tf), shown)) = face_debug.get(*entity) {
+    if let Ok((face, FaceTextureDebug(tf), shown, culled)) = face_debug.get(*entity) {
         picked_face = Some(face.face_id);
         warn!(
             "pick face {}: texture={} repeats=({:.3},{:.3}) offset=({:.3},{:.3}) \
@@ -1434,12 +1460,17 @@ pub(crate) fn pick_object(
         // material's alpha fields (R25): together they pin an opaque-vs-blend
         // divergence to the TE tint, the legacy override, or a missing
         // `RenderMaterials` fetch.
+        //
+        // `culled` is why it is not drawn: the transparency gate hid it (the tint
+        // for a legacy face, the composed base colour for a PBR one). `shown`
+        // without `culled` means something *else* hid it — a derender, a hidden
+        // ancestor — which is a different bug entirely.
         if let Ok(material) = face_materials.get(*entity)
             && let Some(standard) = materials.get(&material.0)
         {
             warn!(
                 "pick face render: alpha_mode={:?} base_color_alpha={:.3} unlit={} \
-                 textured={} shown={} fully_transparent={}",
+                 textured={} shown={} culled={culled} fully_transparent={}",
                 standard.base.alpha_mode,
                 standard.base.base_color.alpha(),
                 standard.base.unlit,
@@ -2662,7 +2693,14 @@ fn face_commands<'a>(
 /// established that a non-opaque tint keeps its blend pass whatever the legacy
 /// material says (`legacy_materials::OPAQUE_TINT_ALPHA`), so a zero-alpha tint
 /// is decided once, at build, and never flips later.
-fn is_fully_transparent(texture_face: &TextureFace) -> bool {
+///
+/// This is the **legacy** (Blinn-Phong) half of the gate. A face carrying a glTF
+/// render material is decided from that material's base-colour alpha instead —
+/// the two are alternatives, not a conjunction, exactly as the reference reads
+/// `alpha = is_pbr ? gltf_mat->mBaseColor.mV[3] : te->getColor().mV[3]` — so the
+/// PBR pipeline overrides this verdict on the faces it owns
+/// ([`materials::pbr_face_is_fully_transparent`](crate::materials::pbr_face_is_fully_transparent)).
+pub(crate) fn is_fully_transparent(texture_face: &TextureFace) -> bool {
     texture_face.color[3] == 0 && texture_face.glow <= 0.0
 }
 
@@ -2720,17 +2758,25 @@ fn spawn_face_entity(
         texture_face.glow,
         texture_face.material_id.is_some_and(|id| !id.is_nil()),
     );
+    // The reference's fully-transparent cull: a face whose tint alpha is zero is
+    // not drawn at all. Written on every build (not only the first) so a face
+    // that a re-texture turns transparent — or back — follows its entry, since
+    // `FaceReuse` re-describes the entity it already had.
+    //
+    // This is the verdict for a face with **no** glTF render material. A PBR
+    // face's verdict comes from its base-colour alpha instead, so the material
+    // pipeline overwrites both of these the moment it composes the face
+    // (`crate::materials::apply_pbr_face_visibility`); until then a freshly-built
+    // PBR face wears the legacy verdict, which for the usual opaque tint is the
+    // same answer.
+    let culled = is_fully_transparent(texture_face);
     let built = (
         Mesh3d(mesh),
         MeshMaterial3d(material),
         PrimFaceEntity { face_id },
         FaceTextureDebug(*texture_face),
         ChildOf(parent),
-        // The reference's fully-transparent cull: a face whose tint alpha is zero
-        // is not drawn at all. Written on every build (not only the first) so a
-        // face that a re-texture turns transparent — or back — follows its entry,
-        // since `FaceReuse` re-describes the entity it already had.
-        if is_fully_transparent(texture_face) {
+        if culled {
             Visibility::Hidden
         } else {
             Visibility::Inherited
@@ -2738,6 +2784,11 @@ fn spawn_face_entity(
     );
     let mut face = face_commands(face_id, reuse, commands);
     face.try_insert(built);
+    if culled {
+        face.try_insert(TransparencyCulled);
+    } else {
+        face.try_remove::<TransparencyCulled>();
+    }
     // Interning is a per-build decision, so a face that shared a material and no
     // longer does must lose the marker as well as the handle.
     if shared {
@@ -4326,6 +4377,9 @@ pub struct ObjectPicker<'w, 's> {
     /// test and admit exactly the fully-transparent faces the build tool must
     /// still be able to click.
     visible: Query<'w, 's, &'static InheritedVisibility>,
+    /// The transparency-cull mark, which is what tells a face hidden because it
+    /// is invisible from one hidden because something derendered it.
+    culled: Query<'w, 's, &'static TransparencyCulled>,
     /// Parent links, to walk from a face entity up to its object.
     parents: Query<'w, 's, &'static ChildOf>,
     /// Globals, to carry the world hit into the object's own frame.
@@ -4360,6 +4414,11 @@ impl ObjectPicker<'_, '_> {
         // hidden — a derendered avatar's body, a suppressed attachment — must
         // stay unpickable, so the visibility test moves into the filter rather
         // than being switched off wholesale.
+        //
+        // The admission reads the `TransparencyCulled` mark rather than
+        // re-deriving the tint verdict, so a face the **glTF** half of the gate
+        // hid — a PBR material at base-colour alpha zero, whose texture-entry
+        // tint says nothing about it — is just as clickable as a legacy one.
         let world_filter = |entity: Entity| {
             if exclude.contains(&entity) {
                 return false;
@@ -4371,9 +4430,7 @@ impl ObjectPicker<'_, '_> {
             {
                 return true;
             }
-            self.faces
-                .get(entity)
-                .is_ok_and(|(_face, debug)| is_fully_transparent(&debug.0))
+            self.culled.contains(entity)
         };
         let settings = MeshRayCastSettings::default()
             .with_visibility(bevy::picking::mesh_picking::ray_cast::RayCastVisibility::Any)
@@ -6001,6 +6058,10 @@ mod tests {
                 Some(Visibility::Hidden),
                 "a fully transparent face must be built hidden"
             );
+            assert!(
+                world.get::<super::TransparencyCulled>(face).is_some(),
+                "and marked, which is what keeps it clickable in build mode"
+            );
         }
 
         // The same object re-textured opaque: every face is shown again.
@@ -6010,6 +6071,10 @@ mod tests {
                 world.get::<Visibility>(face).copied(),
                 Some(Visibility::Inherited),
                 "an opaque re-texture must show the face its rebuild reused"
+            );
+            assert!(
+                world.get::<super::TransparencyCulled>(face).is_none(),
+                "and clear the mark, so the pick admits it only while it is hidden"
             );
         }
         Ok(())
