@@ -735,18 +735,21 @@ arrives **after** the kills. A consumer that waits for the item and only
 then looks for the kills has already discarded them, which is how
 `a_taken_linkset_rezzes_back_whole` came to hang rather than fail.
 
-**An upload's announcement, which is not the same answer.**
-`UploadAnnouncement` says what follows a **capability upload** — a
-`NewFileAgentInventory` completion, or an asset saved in place over an
-`Update*AgentInventory`. Here Second Life sends the *legacy* UDP
+**An upload's announcement, which is not the same answer — and is two
+answers.** `UploadAnnouncements` says what follows a **capability upload**,
+once for each of the two paths. After an asset saved in place over an
+`Update*AgentInventory`, Second Life sends the *legacy* UDP
 `UpdateCreateInventoryItem` and OpenSim sends *nothing at all*: the two
-grids take the opposite sides from the ones they take on a take. One enum
-could not have said both, which is why there are two.
+grids take the opposite sides from the ones they take on a take. After a
+`NewFileAgentInventory` completion **neither grid sends anything**. One
+enum could not have said take and upload both, which is why there are two;
+one value could not have said creation and save both, which is why the
+upload knob is a pair.
 
-Both numbers are measurements, taken 2026-09-08 by the conformance cases
-that already did the uploads — `notecard-create-update` records
+Every cell is a measurement, taken 2026-09-08 by the conformance cases that
+already did the uploads — `notecard-create-update` records
 `save_announcement` (aditi: `update-create-inventory-item`; OpenSim:
-`none`) and `asset-upload` records `upload_announcement` (OpenSim: `none`).
+`none`) and `asset-upload` records `upload_announcement` (`none` on both).
 Taking them needed `support::observe_upload` rather than another
 `wait_for`: an announcement is a UDP push and a completion an HTTP
 response, so an announcement can arrive *first*, and a `wait_for` looking
@@ -755,8 +758,8 @@ grid as silent. The reference viewer wants no push anyway:
 `LLBufferedAssetUploadInfo::finishUpload` builds the item out of the
 response body.
 
-**The two announcement rows diverge for opposite reasons**, and reading the
-second as "Second Life does something extra" gets it backwards. The push is
+**The take and the save diverge for opposite reasons**, and reading the
+save as "Second Life does something extra" gets it backwards. The push is
 the older behaviour and OpenSim is the grid that omits it, which its own
 source says twice over: at the in-place save,
 `InventoryAccessModule.CapsUpdateInventoryItemAsset` ends on a
@@ -766,24 +769,30 @@ path was first written, and carried through the 2007-12 rename and the 2010
 move into the module still commented — and a `NewFileAgentInventory`
 completion reaches inventory through `Scene.AddUploadedInventoryItem`,
 which calls the *client-less* `AddInventoryItem` overload sitting right
-beside the one that announces. So the take's row is Second Life having
-**moved on** (inventory went behind AIS3 and the announcement went with
-it), and the upload's row is OpenSim having **never sent** what a Linden
-simulator sends — which is also why Second Life's side of it is the legacy
+beside the one that announces. So the take is Second Life having **moved
+on** (inventory went behind AIS3 and the announcement went with it), and
+the save is OpenSim having **never sent** what a Linden simulator sends —
+which is also why Second Life's side of it is the legacy
 `UpdateCreateInventoryItem` rather than anything newer.
 
-Second Life's `NewFileAgentInventory` completion is the one half that is
-extrapolated from the other rather than measured, and it cannot be measured
-the way the rest were: that capability accepts only the chargeable
-file-upload classes there — it answers a notecard with `Invalid asset
-type`, which is why `asset-upload` records `partial` on aditi — so reaching
-it costs an upload fee, and sending the right `expected_upload_cost` needed
-a price list. That list is now measured (L$ 10 an upload on aditi, above),
-so the run is unblocked rather than impossible. The extrapolation is
-a mild one: the message is the general-purpose legacy "here is an item you
-now have", the grid was measured sending exactly it for the neighbouring
-path, and Second Life keeping the push for a *rewritten* item while
-dropping it for a *created* one would be the surprising behaviour.
+**Second Life's `NewFileAgentInventory` row was extrapolated from the save,
+and it was extrapolated backwards.** Measuring it costs money: that
+capability accepts only the chargeable file-upload classes there — it
+answers a notecard with `Invalid asset type` — so reaching the completion
+needs an upload fee, and sending the right `expected_upload_cost` needed a
+price list. Once the account's benefits package made the fee nameable,
+`asset-upload` uploaded a 64×64 texture at the account's own price
+(L$ 10, charged, twice) and recorded `none` both times.
+
+The reasoning that got it wrong was not silly, which is why it is written
+down rather than quietly corrected: the message is the general-purpose
+legacy "here is an item you now have", and the grid was measured sending
+exactly it for the neighbouring path. What it missed is **what the client
+already holds**. A `NewFileAgentInventory` response body carries the whole
+new item, so a push would repeat it; an in-place save's response names only
+the new asset, and without the push the client's own copy of the item goes
+on naming the asset the save replaced. The push survives exactly where it
+still carries information.
 
 The legacy UDP transaction save follows neither knob and that is not a gap:
 `UpdateInventoryItem`'s `UpdateCreateInventoryItem` is the **reply** to a

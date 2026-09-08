@@ -61,6 +61,13 @@ which is why this ended in a second policy type rather than one more caller of
 | in-place save (`Update*AgentInventory`) | the legacy UDP `UpdateCreateInventoryItem` | nothing at all |
 | a `NewFileAgentInventory` completion | not measurable free (see below) | nothing at all |
 
+> **Corrected 2026-09-08 by
+> [[test-fake-grid-imitates-sl-new-file-upload-announcement]].** The paid run
+> was made and the second row's Second Life cell is **nothing at all** — the
+> extrapolation below reasoned from the message and should have reasoned from
+> what the client already holds. `UploadAnnouncement` was split into an
+> `UploadAnnouncements` pair as a result. Everything else here stands.
+
 So on a take Second Life pushes a `BulkUpdateInventory` and OpenSim sends the
 legacy message; after an upload it is Second Life that sends the legacy message
 and OpenSim that says nothing. The fake grid's unconditional legacy
@@ -88,7 +95,8 @@ transaction and callback ids the client sent, and a client's
 `Command::SaveInventoryAsset` has nothing else to complete on — OpenSim sends
 it there (`AssetXferUploader`) exactly where it stays quiet after a capability
 upload. `client_end_to_end`'s
-`only_a_second_life_flavoured_grid_announces_an_uploaded_item` asserts both
+`only_a_second_life_flavoured_grid_announces_an_uploaded_item` (renamed
+`…_an_item_an_upload_rewrote` by the correction above) asserts both
 sides from the client's end, the OpenSim half terminating on a task-inventory
 listing requested after the save so that "nothing arrived" is a bounded claim
 rather than a wait for a timeout.

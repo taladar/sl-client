@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 101 |
-| ready | 323 |
+| ready | 322 |
 | blocked | 46 |
 | in-progress | 20 |
 | bugs | 63 |
-| done | 1029 |
+| done | 1030 |
 | deferred | 26 |
 | wont-do | 14 |
 | **total** | **1622** |
@@ -240,7 +240,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (323)
+## ready (322)
 
 ### protocol
 
@@ -981,8 +981,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
 - [`test-fake-grid-builtin-sounds`](ready/test-fake-grid-builtin-sounds.md) —
   The built-in UI sounds the viewer plays on arrival 404
-- [`test-fake-grid-imitates-sl-new-file-upload-announcement`](ready/test-fake-grid-imitates-sl-new-file-upload-announcement.md)
-  — The one upload announcement Second Life would only tell us for money
 - [`test-fake-grid-login-matrix-and-timeouts`](ready/test-fake-grid-login-matrix-and-timeouts.md)
   — The login refusals and handover timeouts nothing tests
 - [`test-fake-grid-object-sounds`](ready/test-fake-grid-object-sounds.md) — The
@@ -1348,7 +1346,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1029)
+## done (1030)
 
 ### protocol
 
@@ -3290,6 +3288,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The fake grid runs a bake service on a grid that says it is OpenSim
 - [`test-fake-grid-imitates-simulator-features`](done/test-fake-grid-imitates-simulator-features.md)
   — A grid claiming to be Second Life still introduces itself as OpenSim
+- [`test-fake-grid-imitates-sl-new-file-upload-announcement`](done/test-fake-grid-imitates-sl-new-file-upload-announcement.md)
+  — The one upload announcement Second Life would only tell us for money
 - [`test-fake-grid-imitates-upload-announcements`](done/test-fake-grid-imitates-upload-announcements.md)
   — An uploaded item is announced the legacy way whichever grid this is
 - [`test-fake-grid-neighbours-crossing`](done/test-fake-grid-neighbours-crossing.md)

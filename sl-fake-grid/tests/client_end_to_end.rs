@@ -683,19 +683,23 @@ mod test {
         Ok(())
     }
 
-    /// A capability upload's item is pushed to the client on a
-    /// Second-Life-flavoured grid and on no other — the measurement
-    /// `sl_fake_grid::UploadAnnouncement` carries, asserted from the client's
-    /// side because that is the side it is visible from.
+    /// An item a capability upload **rewrote** is pushed to the client on a
+    /// Second-Life-flavoured grid and on no other — the divergent half of
+    /// `sl_fake_grid::UploadAnnouncements`, asserted from the client's side
+    /// because that is the side it is visible from. The other half, an item an
+    /// upload *created*, is
+    /// [`no_flavour_announces_an_item_a_capability_upload_created`].
     ///
-    /// Worth both halves rather than one: a viewer that waits for a push after
-    /// an upload works against the flavour that sends one and hangs against the
-    /// flavour that does not, and a viewer that ignores the push and reads the
-    /// capability's own response works against both. Only running the two shows
-    /// which kind this workspace's client is.
+    /// Worth both flavours rather than one: a viewer that waits for a push
+    /// after a save works against the flavour that sends one and hangs against
+    /// the flavour that does not, and a viewer that ignores the push and reads
+    /// the capability's own response works against both — but then keeps an
+    /// item naming the asset the save replaced, which is the trade this row
+    /// makes visible. Only running the two shows which kind this workspace's
+    /// client is.
     #[tokio::test]
-    async fn only_a_second_life_flavoured_grid_announces_an_uploaded_item() -> Result<(), TestError>
-    {
+    async fn only_a_second_life_flavoured_grid_announces_an_item_an_upload_rewrote()
+    -> Result<(), TestError> {
         let item = sl_fake_grid::scenario::fixture_item_id(sl_proto::AssetType::Notecard);
 
         // Second Life: the legacy UDP push follows the completion. In one wait,
@@ -762,6 +766,93 @@ mod test {
             !spoke,
             "an OpenSim-flavoured grid announced an item a capability upload rewrote"
         );
+        Ok(())
+    }
+
+    /// A `NewFileAgentInventory` upload's **new** item is announced by neither
+    /// flavour — the half of `sl_fake_grid::UploadAnnouncements` the two live
+    /// grids agree on.
+    ///
+    /// Both halves again, and for a sharper reason than the save's test has:
+    /// this is the half that was filled in by reasoning from the other and
+    /// filled in *wrong*, so the Second Life leg is not "the same as OpenSim,
+    /// obviously" — it is the leg that used to push and was measured (aditi,
+    /// 2026-09-08) not to. A client that reads the completion's response body,
+    /// as the reference viewer and this workspace's do, sees the created item
+    /// either way; one that waits for a push waits forever on every grid there
+    /// is.
+    #[tokio::test]
+    async fn no_flavour_announces_an_item_a_capability_upload_created() -> Result<(), TestError> {
+        for imitates in [ImitatedGrid::SecondLife, ImitatedGrid::OpenSim] {
+            let mut running =
+                start_configured(vec![RegionConfig::default()], None, imitates).await?;
+            running.commands.send(Command::QueryInventoryRoots).await?;
+            let root = running
+                .wait_for(|event| match event {
+                    Event::InventoryRoots { agent_root, .. } => *agent_root,
+                    _ => None,
+                })
+                .await?;
+            running
+                .commands
+                .send(Command::UploadAsset {
+                    folder_id: root,
+                    asset_type: sl_proto::AssetType::Notecard,
+                    inventory_type: sl_proto::InventoryType::Notecard,
+                    name: "created-by-upload".to_owned(),
+                    description: "the item whose announcement is under test".to_owned(),
+                    next_owner_mask: 0x0008_e000,
+                    group_mask: 0,
+                    everyone_mask: 0,
+                    expected_upload_cost: 0,
+                    data: b"Linden text version 2\n{\nLLEmbeddedItems version 1\n{\ncount 0\n}\nText length 0\n}\n".to_vec(),
+                })
+                .await?;
+            let mut created = None;
+            running
+                .wait_until("the upload's completion", |event| match event {
+                    Event::AssetUploaded {
+                        new_inventory_item, ..
+                    } => {
+                        created = *new_inventory_item;
+                        true
+                    }
+                    _other => false,
+                })
+                .await?;
+            let created = created.ok_or("the upload minted no inventory item")?;
+
+            // The same terminating condition the save's OpenSim leg uses: a
+            // listing requested *after* the completion and answered on the same
+            // circuit, so an announcement the upload was going to make would
+            // already have overtaken it.
+            running
+                .commands
+                .send(Command::FetchTaskInventory {
+                    target: sl_client_tokio::ScopedObjectId::new(
+                        running.circuit,
+                        sl_fake_grid::scenario::STOCK_SCRIPTED_OBJECT_LOCAL_ID,
+                    ),
+                })
+                .await?;
+            let mut spoke = false;
+            running
+                .wait_until("the listing that follows the upload", |event| match event {
+                    Event::InventoryItemCreated { item: got, .. }
+                        if got.item_id == sl_types::key::InventoryKey::from(created) =>
+                    {
+                        spoke = true;
+                        true
+                    }
+                    Event::TaskInventoryContents { .. } => true,
+                    _other => false,
+                })
+                .await?;
+            assert!(
+                !spoke,
+                "a {imitates:?}-flavoured grid announced an item a capability upload created"
+            );
+        }
         Ok(())
     }
 

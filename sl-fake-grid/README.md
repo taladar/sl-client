@@ -195,35 +195,42 @@ only one of the two hears nothing at all from the other grid, which is why the
 conformance cases that take something use one shared helper that accepts
 either and records which arrived.
 
-**An upload's announcement is a different question, and the grids swap sides
-on it.** After a capability upload — a `NewFileAgentInventory` completion or an
-asset saved in place over an `Update*AgentInventory` — Second Life pushes the
-legacy `UpdateCreateInventoryItem` and OpenSim sends *nothing at all*, the
-HTTP response having named both the asset and the new item. So
-`UploadAnnouncement` is its own knob
-(`FakeGridBuilder::upload_announcement`), and reusing the take's answer for it
-would be wrong about a live grid in both directions at once.
+**An upload's announcement is a different question, the grids swap sides on it,
+and it is two answers rather than one.** After an asset saved in place over an
+`Update*AgentInventory` capability, Second Life pushes the legacy
+`UpdateCreateInventoryItem` and OpenSim sends *nothing at all*. After a
+`NewFileAgentInventory` completion — the path that *creates* an item —
+**neither grid sends anything**: that response body carries the whole new item,
+so a push would repeat what the client is already holding, while a save's
+response names only the new asset and the push is what stops the client's copy
+of the item naming the one it replaced. So `UploadAnnouncements` is its own
+knob and carries a value per path
+(`FakeGridBuilder::upload_announcements`, `UploadAnnouncements::uniform` for a
+grid that should treat the two alike); reusing the take's answer for it would
+be wrong about a live grid in both directions at once, and reusing one upload
+answer for both paths was wrong about Second Life until it was measured.
 
 Measured 2026-09-08 by the conformance cases `notecard-create-update`
 (`save_announcement`: `update-create-inventory-item` on aditi, `none` on
-OpenSim) and `asset-upload` (`upload_announcement`: `none` on OpenSim).
+OpenSim) and `asset-upload` (`upload_announcement`: `none` on both).
 
-The two rows diverge for **opposite reasons**, which is worth knowing before
-reading the second as "Second Life does something extra". The push is the older
-behaviour and OpenSim is the grid that omits it: at the in-place save
+The take and the save diverge for **opposite reasons**, which is worth knowing
+before reading the save as "Second Life does something extra". The push is the
+older behaviour and OpenSim is the grid that omits it: at the in-place save
 `CapsUpdateInventoryItemAsset` ends on a commented-out
 `SendInventoryItemCreateUpdate` — commented since 2007-08, when that capability
 path was written — and answers with an `AlertMessage`, while the
 `NewFileAgentInventory` completion reaches inventory through the *client-less*
-`AddInventoryItem` overload. So the take's row is Second Life having moved on to
-AIS3, and the upload's row is OpenSim having never sent what a Linden simulator
-sends. The reference viewer wants neither push: it builds the item from the
-response body.
+`AddInventoryItem` overload. So the take is Second Life having moved on to
+AIS3, and the save is OpenSim having never sent what a Linden simulator sends.
+The reference viewer wants neither push: it builds the item from the response
+body.
 
-The one half that is extrapolated rather than measured is Second Life's
-`NewFileAgentInventory` completion, which that grid serves only for the
-chargeable upload classes; see `sl_fake_grid::inventory` for why, and for what
-would settle it.
+Reaching Second Life's `NewFileAgentInventory` completion at all costs money —
+that grid serves the capability only for the chargeable upload classes — so
+that half of the table was extrapolated from the save until 2026-09-08, and
+extrapolated the wrong way. The run that settled it uploaded a 64×64 texture at
+the account's own benefits price (L$ 10, charged) and recorded `none` twice.
 
 The legacy UDP transaction save (`UpdateInventoryItem`, how a wearable is
 saved) follows neither knob: its `UpdateCreateInventoryItem` is the **reply**

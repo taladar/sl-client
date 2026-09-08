@@ -24,7 +24,8 @@
 //! | the spatial-voice backend ([`VoiceBackend`]) | WebRTC, named three ways: `SimulatorFeatures.VoiceServerType`, the login `voice-config`, the `RequiredVoiceVersion` push | none: a stock region loads no voice module, and nothing is advertised |
 //! | the deprecated UDP inventory fetch ([`LegacyUdpInventory`]) | refused with a `FeatureDisabled` | served out of the session's inventory tree |
 //! | how a **taken** item is announced ([`InventoryAnnouncement`]) | a `BulkUpdateInventory` over the event queue | the legacy UDP `UpdateCreateInventoryItem` |
-//! | how an **uploaded** item is announced ([`UploadAnnouncement`]) | the legacy UDP `UpdateCreateInventoryItem` | nothing: the capability's HTTP response is the whole answer |
+//! | how an item a capability upload **rewrote** is announced ([`UploadAnnouncements::saved`]) | the legacy UDP `UpdateCreateInventoryItem` | nothing: the capability's HTTP response is the whole answer |
+//! | how an item a capability upload **created** is announced ([`UploadAnnouncements::created`]) | nothing | nothing |
 //! | who composites an avatar ([`BakePolicy`]) | the grid: an `agent_appearance_service`, the central-bake protocol bit, an `AppearanceData` block on every appearance, and the `UpdateAvatarAppearance` trigger | every viewer for itself: none of those four |
 //! | the rest of `RegionProtocols` ([`region_protocol_bits`](ImitatedGrid::region_protocol_bits)) | nothing else claimed | bit 63, "more than 6 baked textures" |
 //! | the `EconomyData` price list ([`prices`](ImitatedGrid::prices)) | measured on aditi: L$ 10 an upload, L$ 100 a group, a 20 000 LI region | its `SampleMoneyModule` defaults: most prices free, no group price stated, a 15 000 LI region |
@@ -107,7 +108,9 @@
 
 use crate::assets::ObjectAssetPolicy;
 use crate::bakes::{BakePolicy, REGION_PROTOCOL_BAKES_ON_MESH};
-use crate::inventory::{InventoryAnnouncement, LegacyUdpInventory, UploadAnnouncement};
+use crate::inventory::{
+    InventoryAnnouncement, LegacyUdpInventory, UploadAnnouncement, UploadAnnouncements,
+};
 use crate::voice::VoiceBackend;
 
 /// The live grid a [`FakeGrid`](crate::FakeGrid) imitates where the two real
@@ -212,20 +215,24 @@ impl ImitatedGrid {
     }
 
     /// How this grid announces an item a **capability upload** created or
-    /// rewrote — which is not how it announces a taken one.
+    /// rewrote — which is neither one answer nor how it announces a taken one.
     ///
-    /// Second Life pushes the legacy UDP `UpdateCreateInventoryItem`; OpenSim
-    /// sends nothing, the capability's HTTP response being the whole answer.
-    /// That is the opposite pairing to
-    /// [`inventory_announcement`](Self::inventory_announcement), and it is
-    /// measured rather than reasoned — see the
-    /// [`inventory`](crate::inventory) module docs for both numbers and for the
-    /// one half of the table that is extrapolated.
+    /// After a `NewFileAgentInventory` completion both grids say nothing: the
+    /// response body carries the whole new item. After an in-place save they
+    /// diverge, and it is Second Life that pushes the legacy UDP
+    /// `UpdateCreateInventoryItem` while OpenSim stays quiet — the opposite
+    /// pairing to [`inventory_announcement`](Self::inventory_announcement).
+    /// Every cell is measured rather than reasoned; see the
+    /// [`inventory`](crate::inventory) module docs for the table and for what
+    /// the push still carries where it survives.
     #[must_use]
-    pub const fn upload_announcement(self) -> UploadAnnouncement {
+    pub const fn upload_announcements(self) -> UploadAnnouncements {
         match self {
-            Self::SecondLife => UploadAnnouncement::Legacy,
-            Self::OpenSim => UploadAnnouncement::Silent,
+            Self::SecondLife => UploadAnnouncements {
+                created: UploadAnnouncement::Silent,
+                saved: UploadAnnouncement::Legacy,
+            },
+            Self::OpenSim => UploadAnnouncements::uniform(UploadAnnouncement::Silent),
         }
     }
 
@@ -371,7 +378,7 @@ mod test {
             sl.inventory_announcement(),
             opensim.inventory_announcement()
         );
-        assert_ne!(sl.upload_announcement(), opensim.upload_announcement());
+        assert_ne!(sl.upload_announcements(), opensim.upload_announcements());
         assert_ne!(sl.bakes(), opensim.bakes());
         assert_ne!(sl.region_protocol_bits(), opensim.region_protocol_bits());
         assert_ne!(sl.prices(), opensim.prices());
@@ -470,7 +477,7 @@ mod test {
         );
     }
 
-    /// A take and an upload are announced by **opposite** rules, and each
+    /// A take and a *save* are announced by **opposite** rules, and each
     /// flavour is on the other side of the two. Written as one test because
     /// the mistake it guards against is reusing one answer for both questions:
     /// every part of it is a measurement (`notecard-create-update`'s
@@ -478,13 +485,13 @@ mod test {
     /// `object-asset-format`'s take leg), so a "tidying" that collapsed the two
     /// enums would be wrong about a live grid in both directions at once.
     #[test]
-    fn a_take_and_an_upload_are_announced_by_opposite_rules() {
+    fn a_take_and_a_save_are_announced_by_opposite_rules() {
         assert_eq!(
             ImitatedGrid::SecondLife.inventory_announcement(),
             InventoryAnnouncement::BulkUpdate
         );
         assert_eq!(
-            ImitatedGrid::SecondLife.upload_announcement(),
+            ImitatedGrid::SecondLife.upload_announcements().saved,
             UploadAnnouncement::Legacy
         );
         assert_eq!(
@@ -492,9 +499,29 @@ mod test {
             InventoryAnnouncement::Legacy
         );
         assert_eq!(
-            ImitatedGrid::OpenSim.upload_announcement(),
+            ImitatedGrid::OpenSim.upload_announcements().saved,
             UploadAnnouncement::Silent
         );
+    }
+
+    /// The half of the upload table the two grids **agree** on, which is the
+    /// half that was got wrong by reasoning from the other half.
+    ///
+    /// It is asserted rather than left implicit because the wrong answer is the
+    /// tempting one: Second Life sends the legacy push after an in-place save,
+    /// and "so it must send it after a creation too" is what the fake grid
+    /// served until the aditi run (2026-09-08, `asset-upload`) recorded `none`
+    /// on both grids. A future flavour that starts announcing a creation should
+    /// have to delete this test on purpose.
+    #[test]
+    fn no_live_grid_announces_an_item_a_capability_upload_created() {
+        for grid in [ImitatedGrid::SecondLife, ImitatedGrid::OpenSim] {
+            assert_eq!(
+                grid.upload_announcements().created,
+                UploadAnnouncement::Silent,
+                "{grid:?} announced an item a NewFileAgentInventory upload created"
+            );
+        }
     }
 
     /// The fake grid's own default has to be the one Second Life actually is,

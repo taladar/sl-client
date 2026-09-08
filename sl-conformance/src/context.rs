@@ -11,8 +11,8 @@ use std::time::Duration;
 
 use sl_client_tokio::{
     AgentKey, CircuitId, Client, ClientDirectories, Command, Diagnostic, Event, ExperienceKey,
-    GroupKey, InventoryCacheConfig, LoginParams, LoginRejectKind, LoginRequest, MeshKey,
-    RegionHandle, StartLocation, Uuid,
+    GroupKey, InventoryCacheConfig, LoginAccount, LoginParams, LoginRejectKind, LoginRequest,
+    MeshKey, RegionHandle, StartLocation, Uuid,
 };
 use sl_repl::Avatar;
 use time::format_description::well_known::Rfc3339;
@@ -75,6 +75,13 @@ impl Commander {
 pub struct Session {
     /// The agent's own id, available after login.
     agent_id: Option<AgentKey>,
+    /// What the login response said the account is entitled to, available after
+    /// login. Captured here rather than read off [`Event::Account`] because a
+    /// case that waits for anything else first — a region handshake, say —
+    /// discards that event on the way past, and a case that has to know an
+    /// upload's price before it sends the upload cannot afford to have missed
+    /// it.
+    login_account: Option<LoginAccount>,
     /// The agent's login session id, available after login. Needed by a case
     /// that hand-builds a raw wire message for
     /// [`Command::Send`] (most messages carry an
@@ -164,6 +171,17 @@ impl Session {
     #[must_use]
     pub const fn agent_id(&self) -> Option<AgentKey> {
         self.agent_id
+    }
+
+    /// What the login response said the account is entitled to, if it said
+    /// anything: the maturity trio, the package name, and — on Second Life —
+    /// the benefits package holding the upload prices the grid charges.
+    ///
+    /// A stock OpenSim login carries no benefits package at all, so a case that
+    /// needs a price from it must have an answer for `None` beyond failing.
+    #[must_use]
+    pub const fn login_account(&self) -> Option<&LoginAccount> {
+        self.login_account.as_ref()
     }
 
     /// The agent's login session id, if login reported one. Pairs with
@@ -632,6 +650,7 @@ async fn connect_and_spawn(
     });
 
     let agent_id = client.agent_id();
+    let login_account = client.login_account().cloned();
     let login_session_id = client.session_id();
     let region_handle = client.region_handle();
     let circuit_id = client.root_circuit_id();
@@ -669,6 +688,7 @@ async fn connect_and_spawn(
     let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
     Ok(Session {
         agent_id,
+        login_account,
         login_session_id,
         region_handle,
         circuit_id,

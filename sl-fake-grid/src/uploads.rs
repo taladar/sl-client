@@ -33,12 +33,15 @@
 //! # Who is told, and how
 //!
 //! The two capability paths announce the item they bound according to
-//! [`UploadAnnouncement`], which the imitated grid decides: Second Life pushes
-//! the legacy UDP `UpdateCreateInventoryItem` and OpenSim sends nothing,
+//! [`UploadAnnouncements`], which the imitated grid decides — and they are two
+//! answers, not one. A `NewFileAgentInventory` completion is followed by
+//! nothing on either live grid; an in-place save is followed by the legacy UDP
+//! `UpdateCreateInventoryItem` on Second Life and by nothing on OpenSim. Both
 //! measured 2026-09-08 and written up in the [`inventory`](crate::inventory)
-//! module docs. Silence is a behaviour to serve, not a branch left unwritten —
-//! a viewer that waits for a push instead of reading the capability's own
-//! response hangs against half the grids there are.
+//! module docs, along with why the push survives where it does. Silence is a
+//! behaviour to serve, not a branch left unwritten — a viewer that waits for a
+//! push instead of reading the capability's own response hangs against every
+//! grid there is on the creation path, and against half of them on the save.
 //!
 //! The third path does not read the policy. `UpdateInventoryItem` is a UDP
 //! request, and its `UpdateCreateInventoryItem` is that request's **reply**,
@@ -70,7 +73,7 @@ use sl_proto::{
 use sl_types::key::ObjectKey;
 
 use crate::assets::GridAssets;
-use crate::inventory::UploadAnnouncement;
+use crate::inventory::{UploadAnnouncement, UploadAnnouncements};
 use crate::world::RegionWorld;
 
 /// Folds one drained [`ServerEvent`] into the grid's asset store and the
@@ -81,7 +84,7 @@ use crate::world::RegionWorld;
 pub(crate) fn answer_upload(
     assets: &GridAssets,
     world: &RegionWorld,
-    announcement: UploadAnnouncement,
+    announcements: UploadAnnouncements,
     sim: &mut SimSession,
     event: &ServerEvent,
     now: Instant,
@@ -96,7 +99,7 @@ pub(crate) fn answer_upload(
             store(assets, *new_asset, data.clone());
             apply_caps_upload(
                 world,
-                announcement,
+                announcements,
                 sim,
                 metadata,
                 *new_asset,
@@ -144,7 +147,7 @@ fn store(assets: &GridAssets, key: AssetKey, data: Vec<u8>) {
 /// task inventory); a baked texture names no item at all.
 fn apply_caps_upload(
     world: &RegionWorld,
-    announcement: UploadAnnouncement,
+    announcements: UploadAnnouncements,
     sim: &mut SimSession,
     metadata: &CapsUploadMetadata,
     new_asset: AssetKey,
@@ -160,13 +163,13 @@ fn apply_caps_upload(
             };
             let item = created_item(sim, request, item_id, new_asset);
             sim.agent_inventory_mut().insert_item(item.clone());
-            announce(announcement, sim, &item, now);
+            announce(announcements.created, sim, &item, now);
         }
         CapsUploadMetadata::UpdateAgentItem { item_id, .. } => {
-            repoint_agent_item(announcement, sim, *item_id, new_asset, now);
+            repoint_agent_item(announcements.saved, sim, *item_id, new_asset, now);
         }
         CapsUploadMetadata::UpdateScriptAgent(request) => {
-            repoint_agent_item(announcement, sim, request.item_id, new_asset, now);
+            repoint_agent_item(announcements.saved, sim, request.item_id, new_asset, now);
         }
         CapsUploadMetadata::UpdateTaskItem {
             task_id, item_id, ..
@@ -334,9 +337,10 @@ fn apply_item_updates(
 /// announces one at all.
 ///
 /// [`UploadAnnouncement::Silent`] is a real answer and not a missing branch:
-/// OpenSim was measured sending nothing after either capability upload, and
-/// the response body a client already has names both the asset and the item.
-/// See the [`inventory`](crate::inventory) module docs.
+/// OpenSim was measured sending nothing after either capability upload and
+/// Second Life sending nothing after a creation, the response body a client
+/// already has naming both the asset and the item. See the
+/// [`inventory`](crate::inventory) module docs.
 fn announce(
     announcement: UploadAnnouncement,
     sim: &mut SimSession,

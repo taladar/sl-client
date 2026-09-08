@@ -443,6 +443,23 @@ impl Client {
         self.session.agent_id()
     }
 
+    /// What the login response said about the account: its maturity trio, the
+    /// package it is on, and the benefits package a modern Second Life viewer
+    /// prices uploads from.
+    ///
+    /// The same values reach a driver as
+    /// [`Event::Account`] the moment the response is
+    /// parsed, but that event is easy to miss — a driver that waits for
+    /// anything else first discards it on the way past — and an upload has to
+    /// know what it will be charged *before* it sends the
+    /// [`Command::UploadAsset`] the grid checks the figure against. So this is
+    /// the accessor to reach for when the cost matters; the event is for a
+    /// driver that wants to react to the account as it arrives.
+    #[must_use]
+    pub const fn login_account(&self) -> Option<&LoginAccount> {
+        self.session.login_account()
+    }
+
     /// The region handle of the region the agent logged in to, available once
     /// logged in. Seeded from the login response, so a driver can issue an
     /// intra-region [`Command::Teleport`] before

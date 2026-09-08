@@ -30,7 +30,7 @@ use crate::driver::{SharedSim, SimState, new_shared_sim, run_timer, run_udp_pump
 use crate::economy_policy::{EconomyConfig, EconomyEvent};
 use crate::error::Error;
 use crate::imitates::ImitatedGrid;
-use crate::inventory::{InventoryAnnouncement, LegacyUdpInventory, UploadAnnouncement};
+use crate::inventory::{InventoryAnnouncement, LegacyUdpInventory, UploadAnnouncements};
 use crate::map_tiles::MapTileStore;
 use crate::neighbours::NeighbourPolicy;
 use crate::scenario::Scenario;
@@ -407,9 +407,10 @@ pub(crate) struct GridCore {
     /// ([`InventoryAnnouncement`]).
     pub(crate) inventory_announcement: InventoryAnnouncement,
     /// How a session announces an item a capability upload created or rewrote
-    /// ([`UploadAnnouncement`]) — a different question, with the two live grids
-    /// on the opposite sides of it.
-    pub(crate) upload_announcement: UploadAnnouncement,
+    /// ([`UploadAnnouncements`]) — a different question from a take, with the
+    /// two live grids on the opposite sides of one half of it and agreeing on
+    /// the other.
+    pub(crate) upload_announcements: UploadAnnouncements,
     /// Who composites this grid's avatars ([`BakePolicy`]): the appearance
     /// service, the central-bake protocol bit, the `AppearanceData` block and
     /// the `UpdateAvatarAppearance` capability all follow it.
@@ -733,7 +734,7 @@ impl GridCore {
             assets: self.assets.clone(),
             object_assets: self.object_assets,
             inventory_announcement: self.inventory_announcement,
-            upload_announcement: self.upload_announcement,
+            upload_announcements: self.upload_announcements,
             bakes: self.bakes,
             identity: {
                 let mut identity = region.identity(self.estate_owner, self.region_protocols);
@@ -1163,7 +1164,7 @@ pub struct FakeGridBuilder {
     inventory_announcement: Option<InventoryAnnouncement>,
     /// How an uploaded item is announced, or `None` to follow
     /// [`imitates`](Self::imitates).
-    upload_announcement: Option<UploadAnnouncement>,
+    upload_announcements: Option<UploadAnnouncements>,
     /// Who composites this grid's avatars, or `None` to follow
     /// [`imitates`](Self::imitates).
     bakes: Option<BakePolicy>,
@@ -1193,7 +1194,7 @@ impl std::fmt::Debug for FakeGridBuilder {
             .field("voice_backend", &self.voice_backend)
             .field("legacy_udp_inventory", &self.legacy_udp_inventory)
             .field("inventory_announcement", &self.inventory_announcement)
-            .field("upload_announcement", &self.upload_announcement)
+            .field("upload_announcements", &self.upload_announcements)
             .field("bakes", &self.bakes)
             .field("eq_hold", &self.eq_hold)
             .field("handover_timeout", &self.handover_timeout)
@@ -1261,7 +1262,7 @@ impl FakeGridBuilder {
             voice_backend: None,
             legacy_udp_inventory: None,
             inventory_announcement: None,
-            upload_announcement: None,
+            upload_announcements: None,
             bakes: None,
             map_tiles: MapTileStore::default(),
         }
@@ -1433,17 +1434,23 @@ impl FakeGridBuilder {
     }
 
     /// Overrides how an item a **capability upload** created or rewrote is
-    /// announced, which otherwise follows [`imitates`](Self::imitates): Second
-    /// Life pushes the legacy UDP `UpdateCreateInventoryItem`, OpenSim sends
-    /// nothing at all.
+    /// announced, which otherwise follows [`imitates`](Self::imitates): both
+    /// live grids say nothing after a creation, and after an in-place save
+    /// Second Life pushes the legacy UDP `UpdateCreateInventoryItem` while
+    /// OpenSim still says nothing.
+    ///
+    /// Two answers rather than one, because the paths are answered differently
+    /// on the same grid;
+    /// [`UploadAnnouncements::uniform`](crate::UploadAnnouncements::uniform) is
+    /// the shorthand for a grid that should treat them alike.
     ///
     /// Not the same knob as
     /// [`inventory_announcement`](Self::inventory_announcement), and not the
-    /// same answer: the two grids swap sides between a take and an upload — see
+    /// same answer: the two grids swap sides between a take and a save — see
     /// the [`inventory`](crate::inventory) module docs.
     #[must_use]
-    pub const fn upload_announcement(mut self, announcement: UploadAnnouncement) -> Self {
-        self.upload_announcement = Some(announcement);
+    pub const fn upload_announcements(mut self, announcements: UploadAnnouncements) -> Self {
+        self.upload_announcements = Some(announcements);
         self
     }
 
@@ -1604,9 +1611,9 @@ impl FakeGridBuilder {
             inventory_announcement: self
                 .inventory_announcement
                 .unwrap_or_else(|| self.imitates.inventory_announcement()),
-            upload_announcement: self
-                .upload_announcement
-                .unwrap_or_else(|| self.imitates.upload_announcement()),
+            upload_announcements: self
+                .upload_announcements
+                .unwrap_or_else(|| self.imitates.upload_announcements()),
             bakes,
             // The two halves of `RegionProtocols` compose: the bake policy
             // claims the central-bake bit (and an explicit `bakes` override

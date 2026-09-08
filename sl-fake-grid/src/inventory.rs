@@ -21,36 +21,61 @@
 //! the kills**, and a consumer that waits for the item before looking for the
 //! kills has already discarded them.
 //!
-//! # An upload is announced by a different rule ([`UploadAnnouncement`])
+//! # An upload is announced by a different rule ([`UploadAnnouncements`])
 //!
 //! [`InventoryAnnouncement`] is what a **take** reads, and it would be a
 //! reasonable guess that an upload reads it too. It does not, and the two grids
 //! are the reason: measured (2026-09-08) they take *opposite* sides here from
-//! the ones they take on a take.
+//! the ones they take on a take — and they only disagree about one of the two
+//! upload paths.
 //!
 //! | after a CAPS upload completes | Second Life | OpenSim |
 //! | --- | --- | --- |
 //! | in-place asset save (`Update*AgentInventory`) | the legacy UDP `UpdateCreateInventoryItem` | nothing at all |
-//! | a `NewFileAgentInventory` completion | not measurable with a free asset class | nothing at all |
+//! | a `NewFileAgentInventory` completion | nothing at all | nothing at all |
 //!
 //! So on a take Second Life is the grid that pushes a `BulkUpdateInventory` and
 //! OpenSim the one that sends the legacy message, while after a save it is
 //! Second Life that sends the legacy message and OpenSim that sends nothing.
 //! One enum could not have described both, which is why the uploads have
-//! [`UploadAnnouncement`] of their own.
+//! [`UploadAnnouncement`] of their own — and one *value* could not describe
+//! both rows of the table above, which is why a grid carries an
+//! [`UploadAnnouncements`] pair rather than a single answer.
 //!
 //! Where each number comes from: the conformance case `notecard-create-update`
 //! records `save_announcement` on both grids (aditi:
 //! `update-create-inventory-item`, OpenSim: `none`) and `asset-upload` records
-//! `upload_announcement` on OpenSim (`none`). The reference viewer needs
-//! neither: `LLBufferedAssetUploadInfo::finishUpload` builds the item from the
-//! HTTP response body and calls `gInventory.notifyObservers()`.
+//! `upload_announcement` on both (`none` either side). The reference viewer
+//! needs neither: `LLBufferedAssetUploadInfo::finishUpload` builds the item
+//! from the HTTP response body and calls `gInventory.notifyObservers()`.
 //!
-//! # The two rows diverge for opposite reasons
+//! # The second row was extrapolated the wrong way, and the measurement said so
 //!
-//! Reading the table as "the grids simply disagree twice" would get the second
-//! row backwards. **The push is the older behaviour and OpenSim is the grid
-//! that omits it** — it is not something Second Life added.
+//! Worth keeping, because the reasoning that produced the wrong answer is not
+//! obviously bad and someone will produce it again. When only the first row was
+//! affordable to measure — Second Life's `NewFileAgentInventory` takes only the
+//! chargeable upload classes, so reaching that completion costs an upload fee —
+//! the second row was filled in from the first: same grid, same capability
+//! family, and the message in question is the general-purpose legacy "here is
+//! an item you now have", so a grid that kept the push for a *rewritten* item
+//! and dropped it for a *created* one looked like the odd one.
+//!
+//! It is the odd one, and it is what Second Life does. Paying the fee (aditi,
+//! 2026-09-08, a 64×64 texture at the account's own L$ 10 benefits price)
+//! recorded `upload_announcement = none` on two runs. The distinction the
+//! extrapolation missed is **what the client already knows**: a
+//! `NewFileAgentInventory` response body carries the whole new item, so a push
+//! would tell the viewer nothing it is not holding, while an in-place save's
+//! response names only the new *asset* — the item's own copy in the viewer's
+//! model still points at the asset that was replaced, and the legacy push is
+//! what repoints it. Read that way the two rows stop being a contradiction: the
+//! push survives exactly where it still carries information.
+//!
+//! # The take and the save diverge for opposite reasons
+//!
+//! Reading the two disagreements as "the grids simply disagree twice" would get
+//! the save backwards. **The push is the older behaviour and OpenSim is the
+//! grid that omits it** — it is not something Second Life added.
 //!
 //! OpenSim's own source says so. At the in-place save,
 //! `InventoryAccessModule.CapsUpdateInventoryItemAsset` ends on a
@@ -64,27 +89,19 @@
 //! beside the one that does announce. Both sites had the announcing call
 //! available and neither uses it.
 //!
-//! So the first row is Second Life having **moved on** — inventory went behind
-//! AIS3 and the take's announcement went with it — and the second is OpenSim
-//! having **never sent** what a Linden simulator sends. That is also why the
-//! second row's Second Life side is the legacy message rather than a modern
-//! one: it is the same `UpdateCreateInventoryItem` that has always announced a
-//! created or rewritten item.
+//! So the take is Second Life having **moved on** — inventory went behind AIS3
+//! and the take's announcement went with it — and the save is OpenSim having
+//! **never sent** what a Linden simulator sends. That is also why the save's
+//! Second Life side is the legacy message rather than a modern one: it is the
+//! same `UpdateCreateInventoryItem` that has always announced a created or
+//! rewritten item.
 //!
-//! **The one half that is extrapolated rather than measured** is Second Life's
-//! `NewFileAgentInventory` completion, and it cannot be measured the way the
-//! others were: that capability accepts only the chargeable file-upload classes
-//! on Second Life (it answers a notecard with `Invalid asset type`, which is
-//! why `asset-upload` records `partial` there), so reaching it needs an upload
-//! fee and the price list `test-fake-grid-imitates-economy` has yet to measure.
-//! Until then the fake grid announces a Second-Life-flavoured upload the same
-//! way whichever of the two paths minted the item. That is a weaker claim than
-//! it looks: the message being extrapolated is the general-purpose legacy
-//! "here is an item you now have", the grid was measured sending exactly it for
-//! the neighbouring path, and the alternative — Second Life keeping the legacy
-//! push for a *rewritten* item but dropping it for a *created* one — would be
-//! the odd behaviour needing evidence. It still wants measuring; see
-//! `test-fake-grid-imitates-sl-new-file-upload-announcement`.
+//! Which means the two grids' agreement on the creation path is a **coincidence
+//! of two different omissions**, not a shared rule: OpenSim is quiet there
+//! because it is quiet after every capability upload, and Second Life because
+//! that one response already carries the item. So the pair is two values and
+//! not one shared answer, and an OpenSim that started announcing would not drag
+//! the other flavour with it.
 //!
 //! # What follows neither: the legacy UDP transaction
 //!
@@ -156,12 +173,14 @@ pub enum InventoryAnnouncement {
     BulkUpdate,
 }
 
-/// How the simulator tells a client about an item a **capability upload** just
-/// created or rewrote — a `NewFileAgentInventory` completion, or an asset saved
-/// in place over one of the `Update*AgentInventory` capabilities.
+/// How the simulator tells a client about an item **one** capability upload
+/// path just bound — a `NewFileAgentInventory` completion, or an asset saved in
+/// place over one of the `Update*AgentInventory` capabilities.
 ///
 /// Separate from [`InventoryAnnouncement`] because the two grids swap sides
-/// between the two questions: see the module docs for the measurements.
+/// between a take and an upload; a pair of these ([`UploadAnnouncements`])
+/// rather than one because the two upload paths are answered differently on the
+/// same grid. See the module docs for the measurements.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum UploadAnnouncement {
     /// Push the item over the legacy UDP `UpdateCreateInventoryItem`
@@ -174,11 +193,70 @@ pub enum UploadAnnouncement {
     Legacy,
     /// Say nothing: the capability's HTTP response named the asset and the item,
     /// and that is the whole of the answer — what OpenSim does after either
-    /// upload path.
+    /// upload path, and what Second Life does after a `NewFileAgentInventory`
+    /// completion (aditi, 2026-09-08).
     ///
     /// An omission on the *grid's* part, but not one on a client's: the
     /// reference viewer builds the item out of the response body and never
     /// wanted the push. A viewer that instead waits for one hangs against a
     /// grid set this way, which is the failure this side exists to reproduce.
     Silent,
+}
+
+/// How a grid answers **both** capability upload paths, which is two answers
+/// and not one.
+///
+/// The paths are not interchangeable and neither live grid treats them as such:
+/// see the module docs for the measured table, and for why the push survives
+/// exactly where it still tells the client something the HTTP response did not.
+///
+/// The [default](Self::default) is the Second Life pair, matching the default
+/// flavour: silent after a creation, the legacy push after a save.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UploadAnnouncements {
+    /// What follows a `NewFileAgentInventory` completion, which **created** the
+    /// item it names.
+    ///
+    /// [`UploadAnnouncement::Silent`] on both live grids: the completion's own
+    /// response body carries the whole item, so a push would repeat what the
+    /// client is already holding.
+    pub created: UploadAnnouncement,
+    /// What follows an in-place `Update*AgentInventory` save, which **rewrote**
+    /// an item that already existed.
+    ///
+    /// The divergent one — the legacy UDP push on Second Life, nothing on
+    /// OpenSim — and the one that still carries information: the response names
+    /// the new asset, not the item, so a client that does not hear this keeps an
+    /// item pointing at the asset the save replaced.
+    pub saved: UploadAnnouncement,
+}
+
+impl Default for UploadAnnouncements {
+    /// The Second Life pair, matching the default flavour — and **not** the
+    /// field-wise default of [`UploadAnnouncement`], whose own default is the
+    /// legacy push because that is what Second Life sends on the one path that
+    /// still sends anything.
+    fn default() -> Self {
+        Self {
+            created: UploadAnnouncement::Silent,
+            saved: UploadAnnouncement::Legacy,
+        }
+    }
+}
+
+impl UploadAnnouncements {
+    /// Both paths answered the same way — the shape a grid takes when it
+    /// announces every capability upload, or none of them.
+    ///
+    /// Neither live grid is one of these; it is here for a test that wants to
+    /// hold one path still while it varies the other, and for the
+    /// [`FakeGridBuilder`](crate::FakeGridBuilder) override to be expressible in
+    /// one call.
+    #[must_use]
+    pub const fn uniform(announcement: UploadAnnouncement) -> Self {
+        Self {
+            created: announcement,
+            saved: announcement,
+        }
+    }
 }

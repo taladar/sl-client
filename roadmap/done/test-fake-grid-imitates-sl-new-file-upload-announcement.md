@@ -2,11 +2,14 @@
 id: test-fake-grid-imitates-sl-new-file-upload-announcement
 title: The one upload announcement Second Life would only tell us for money
 topic: test
-status: ready
+status: done
 origin: the measured residue of test-fake-grid-imitates-upload-announcements (2026-09-08)
 points: 3
 refs: [test-fake-grid-imitates-upload-announcements, test-fake-grid-imitates-economy]
 ---
+
+Done 2026-09-08. See "What landed" below — the expected answer was
+wrong.
 
 Context: [context/testing.md](../context/testing.md).
 
@@ -80,3 +83,71 @@ Acceptance: `asset-upload` carries an aditi `upload_announcement` that is a
 measurement rather than a decline, and the extrapolation note in
 `sl_fake_grid::inventory` is either deleted as confirmed or replaced by the
 second policy the measurement demands.
+
+## What landed
+
+**The measurement, and it came back the way this item called "the interesting
+outcome".** Second Life announces **nothing** after a `NewFileAgentInventory`
+completion — the same silence OpenSim keeps there, and the opposite of the
+legacy push it was measured sending after an in-place save. Two paid runs
+(aditi, 2026-09-08) recorded `upload_announcement = none`, so
+`UploadAnnouncement` was split rather than confirmed.
+
+| after a capability upload | Second Life | OpenSim |
+| --- | --- | --- |
+| in-place save (`Update*AgentInventory`) | the legacy UDP `UpdateCreateInventoryItem` | nothing at all |
+| a `NewFileAgentInventory` completion | **nothing at all** | nothing at all |
+
+**Why the extrapolation was wrong, which is the part worth keeping.** It
+reasoned from the message: the push is the general-purpose legacy "here is an
+item you now have", the grid sends exactly it one path over, so dropping it for
+a *created* item would be the odd behaviour. What that misses is **what the
+client already holds**. A `NewFileAgentInventory` response body carries the
+whole new item, so a push would repeat it; an in-place save's response names
+only the new *asset*, and without the push the client's own copy of the item
+goes on naming the asset the save replaced. The push survives exactly where it
+still carries information — and the two grids' agreement on the creation path
+is a coincidence of two different omissions rather than a shared rule, which is
+why the knob is a pair of values and not one.
+
+**The split.** `UploadAnnouncements { created, saved }` in
+`sl-fake-grid/src/inventory.rs`, resolved by
+`ImitatedGrid::upload_announcements` and overridable with
+`FakeGridBuilder::upload_announcements` (`UploadAnnouncements::uniform` for a
+grid that should treat the paths alike). `uploads.rs` reads `.created` at the
+`NewFileInventory` arm and `.saved` at the two `Update*Agent*` arms;
+`Default` is hand-written, because the field-wise default of
+`UploadAnnouncement` is the legacy push and the Second Life pair is not that.
+`client_end_to_end`'s
+`no_flavour_announces_an_item_a_capability_upload_created` asserts the new half
+from the client's end on both flavours, terminating on a task-inventory listing
+requested after the completion so "nothing arrived" stays a bounded claim.
+
+**What the case does now.** `asset-upload` uploads a 64×64 checkerboard texture
+on Second Life (the notecard it uploads on OpenSim is refused there with
+`Invalid asset type`) and a notecard on OpenSim, each into the system folder for
+its class rather than the inventory root. The fee comes from the login
+response's benefits package via the new `Session::login_account` —
+`texture_upload_cost_for(64, 64)`, i.e. the flat rate, the texture being far
+below `MIN_2K_TEXTURE_AREA` where the price would be five times higher — and the
+case declines the run (`partial`) rather than spending money it does not have.
+Both aditi runs recorded `upload_charged = 10` against `upload_cost = 10`, which
+is the first *direct* confirmation that Second Life bills from the benefits
+package and not from `EconomyData::price_upload`:
+[[protocol-account-benefits-package]] established what the two fields say, and
+this establishes which one the grid takes money by. The record also carries
+`upload_asset_class` and
+`upload_cost_source`, so a reader can see the two grids were measured on
+different classes.
+
+**Two accessors it needed.** `Client::login_account` in `sl-client-tokio` and
+`Session::login_account` in the conformance harness, both because
+`Event::Account` is easy to lose: it arrives as the login response is parsed,
+and a case that waits for a region handshake first discards it on the way past —
+which a case that must know a price *before* it sends the upload cannot afford.
+
+**One incidental observation, not chased.** Both runs uploaded byte-identical
+J2C and both got asset id `4f83ed1c-…` back, with a fresh item id each time and
+a fresh L$ 10 charged each time. So Second Life appears to content-address an
+uploaded asset while still minting and billing a new item — worth knowing before
+anyone treats "the asset id changed" as proof an upload happened.
