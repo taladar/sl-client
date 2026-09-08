@@ -1280,10 +1280,7 @@ fn sync_chooser_options(
         ALL_SETS_LABEL.clone_into(&mut view.choice);
     }
     if view.built_options != wanted {
-        options.write(SetComboOptions {
-            combo: ui.chooser,
-            labels: wanted.clone(),
-        });
+        options.write(SetComboOptions::new(ui.chooser, wanted.clone()));
     }
     select_combo_option(&mut selections, ui.chooser, &wanted, &view.choice);
     view.built_options = wanted;
@@ -1772,10 +1769,7 @@ fn handle_open_add_to_set(
             .and_then(|from| labels.iter().position(|name| name == from))
             .unwrap_or_default();
         target.chosen = labels.get(active).cloned().unwrap_or_default();
-        options.write(SetComboOptions {
-            combo: ui.chooser,
-            labels: labels.clone(),
-        });
+        options.write(SetComboOptions::new(ui.chooser, labels.clone()));
         select_combo_option(&mut selections, ui.chooser, &labels, &target.chosen);
         ui.options = labels;
 

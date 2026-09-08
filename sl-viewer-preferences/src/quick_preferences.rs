@@ -88,15 +88,6 @@ const CHECK_SIZE: f32 = 16.0;
 /// The width of a setting row's trailing value readout, in logical pixels.
 const VALUE_WIDTH: f32 = 44.0;
 
-/// The extent [`anchor_quick_prefs`] assumes the window has when it places it
-/// against the bottom-right corner, in logical pixels.
-///
-/// **Not** the floater's `default_size`, which is deliberately `None` — see
-/// [`quick_prefs_floater_spec`]. The anchor needs *some* estimate of the
-/// window's size to subtract from the screen's, and a content-driven window has
-/// none until it has been laid out; this is that estimate, and being a little
-/// out only shifts the opening corner by a few pixels.
-const DEFAULT_SIZE: Vec2 = Vec2::new(300.0, 232.0);
 /// The floater's minimum content size, in logical pixels.
 const MIN_SIZE: Vec2 = Vec2::new(240.0, 160.0);
 /// The gap from the screen's bottom-right corner when the floater first anchors
@@ -110,6 +101,8 @@ const ANCHOR_MARGIN: f32 = 12.0;
 /// far-off-screen sentinel — and specifically the position
 /// [`anchor_quick_prefs`] itself computes for a window too small to fit the
 /// floater bottom-right, since both of its offsets floor at [`ANCHOR_MARGIN`].
+/// That matters more now that the anchor waits for a laid-out size: this is
+/// where the panel sits until it has one, so it has to be somewhere usable.
 /// The sentinel it replaces was `(-4096, -4096)`, which made the window's
 /// declared placement depend entirely on a second system having run: anything
 /// that opened it first — a headless sweep, the gallery, a `PrimaryWindow` that
@@ -467,13 +460,33 @@ fn write_template(settings: Option<Res<ViewerSettings>>, mut written: Local<bool
 
 /// The environment preset groups the group combo offers, in option order —
 /// mapping Firestorm's sky / day-cycle preset choices onto our
-/// [`FixedEnvironment`] model. The first is "shared" (un-pinned).
-const ENV_GROUP_KEYS: [&str; 4] = [
+/// [`FixedEnvironment`] model. The first is "shared" (un-pinned), and the last
+/// is [`ENV_GROUP_CUSTOM`].
+///
+/// **Custom is appended, not inserted**, so the four that existed before keep
+/// the indices [`fixed_for`] and [`combo_indices`] map them by — and that a
+/// user's hand has learned.
+const ENV_GROUP_KEYS: [&str; 5] = [
     "quick-prefs-env-shared",
     "quick-prefs-env-daycycle",
     "quick-prefs-env-legacy",
     "quick-prefs-env-modern",
+    "quick-prefs-env-custom",
 ];
+
+/// The group-combo index of the **Custom** row: the state the pair is in when
+/// the settings-asset combos below have installed something it cannot describe.
+///
+/// It is a state, not a choice, so it is a
+/// [`ComboRow::Disabled`](sl_viewer_ui_widgets::ui_combo::ComboRow::Disabled) row for the
+/// same reason the preset combos' sentinels are — and for a sharper one here.
+/// The pair used to show *Shared (region)* whenever no preset was pinned, which
+/// was a plain lie once a sky asset was in force, and it cost more than
+/// honesty: a combo only announces a pick when its index **moves**, so with the
+/// selection already parked on *Shared (region)* the user could not choose it,
+/// and the one control that empties the local layer did nothing. Showing the
+/// real state fixes the lie and the dead row together.
+const ENV_GROUP_CUSTOM: usize = 4;
 
 /// The times of day the time combo offers, in option order.
 const ENV_TIME_KEYS: [&str; 4] = [
@@ -527,16 +540,26 @@ const fn fixed_for(group_index: usize, time_index: usize) -> Option<FixedEnviron
         1 => Some(FixedEnvironment::DayCycle(sky)),
         2 => Some(FixedEnvironment::Legacy(sky)),
         3 => Some(FixedEnvironment::Modern(sky)),
-        // Index 0 (shared) and out-of-range: un-pin.
+        // Index 0 (shared) and out-of-range: un-pin. `ENV_GROUP_CUSTOM` never
+        // reaches here -- it is disabled, and `apply_env_combos` refuses it
+        // besides, because "un-pin" is emphatically not what it describes.
         _ => None,
     }
 }
 
-/// The (group index, time index) pair for the current fixed environment. A
-/// shared environment keeps `time` at midday so switching to a group starts
+/// The (group index, time index) pair for the current environment. A shared or
+/// custom environment keeps `time` at midday so switching to a group starts
 /// somewhere sensible.
-const fn combo_indices(fixed: Option<FixedEnvironment>) -> (usize, usize) {
+///
+/// `local_in_force` is whether the local layer holds a settings asset — a sky,
+/// water or day cycle the combos below installed, or a script's `@setenv_*`.
+/// With no preset pinned that is [`ENV_GROUP_CUSTOM`]: nothing the pair offers
+/// describes what is rendering. With one pinned the pair describes the **sky**,
+/// which is the track it controls, so a custom water alongside it does not make
+/// the pair's answer wrong.
+const fn combo_indices(fixed: Option<FixedEnvironment>, local_in_force: bool) -> (usize, usize) {
     match fixed {
+        None if local_in_force => (ENV_GROUP_CUSTOM, time_index_for_sky(FixedSky::Midday)),
         None => (0, time_index_for_sky(FixedSky::Midday)),
         Some(FixedEnvironment::DayCycle(sky)) => (1, time_index_for_sky(sky)),
         Some(FixedEnvironment::Legacy(sky)) => (2, time_index_for_sky(sky)),
@@ -650,6 +673,7 @@ fn build_quick_prefs_content(
     In(handle): In<FloaterHandle>,
     mut commands: Commands,
     settings: Option<Res<ViewerSettings>>,
+    translator: crate::i18n::Translator,
 ) {
     let content = commands
         .spawn((
@@ -668,6 +692,14 @@ fn build_quick_prefs_content(
     spawn_section(&mut commands, content, "quick-prefs-environment");
     let (group, time) = spawn_env_rows(&mut commands, content);
     commands.insert_resource(QuickPrefEnvCombos { group, time });
+    // The three settings-asset tracks, below the group / time pair that works
+    // before inventory has loaded — see `crate::quick_prefs_environment`.
+    crate::quick_prefs_environment::spawn_preset_rows(
+        &mut commands,
+        content,
+        3,
+        &translator.get(crate::quick_prefs_environment::KEY_REGION_DEFAULT),
+    );
 
     spawn_divider(&mut commands, content);
 
@@ -760,6 +792,15 @@ fn spawn_env_rows(commands: &mut Commands, parent: Entity) -> (Entity, Entity) {
         &ENV_GROUP_KEYS,
         1,
     );
+    // Every group but the last is a real choice; Custom is shown and refused.
+    // The list is fixed, so the states are set once here rather than republished.
+    let mut states = vec![crate::ui_combo::ComboRow::Selectable; ENV_GROUP_KEYS.len()];
+    if let Some(custom) = states.get_mut(ENV_GROUP_CUSTOM) {
+        *custom = crate::ui_combo::ComboRow::Disabled;
+    }
+    commands
+        .entity(group)
+        .insert(crate::ui_combo::ComboRowStates(states));
     let time = spawn_env_combo_row(
         commands,
         parent,
@@ -797,7 +838,8 @@ fn spawn_quality_row(commands: &mut Commands, parent: Entity) {
             element: "quick-prefs:quality",
             labels: &labels,
             active: 0,
-            tab_index: 3,
+            // After the three preset combos (3..=5), which sit above this row.
+            tab_index: 6,
             font_size: FONT,
             translate_labels: true,
         },
@@ -1090,35 +1132,64 @@ fn on_quick_prefs_button(
 
 /// Anchor the floater to the bottom-right corner the first time it is shown,
 /// unless a persisted position already moved it off the spawn sentinel (saved
-/// geometry wins). Runs once, latched.
+/// geometry wins). Runs once, latched — but only once the panel has a **size**.
+///
+/// # Measured, not estimated
+///
+/// The corner the floater is placed at is `window - size - margin`, so the size
+/// has to be the panel's real one. It used to be a constant measured once
+/// against the English strings at 15 px, and the panel is content-sized: every
+/// row added to it, every longer translation and every larger UI font made the
+/// estimate smaller than the truth, and the difference hung off the bottom of
+/// the screen. Three environment rows were enough to push a third of the panel
+/// past the edge.
+///
+/// So the latch waits for a laid-out size instead. Until the panel has one there
+/// is nothing to subtract and no reason to hurry: it sits at
+/// [`SPAWN_POSITION`], which is on screen and — since the floater clamp keeps
+/// every title bar below the menu bar — reachable.
 fn anchor_quick_prefs(
     mut done: Local<bool>,
     windows: Query<&Window, With<PrimaryWindow>>,
-    mut floaters: Query<(&mut Floater, &UiPanelShown), With<QuickPrefsFloaterRoot>>,
+    ui_scale: Res<bevy::ui::UiScale>,
+    mut floaters: Query<(&mut Floater, &UiPanelShown, &ComputedNode), With<QuickPrefsFloaterRoot>>,
 ) {
     if *done {
         return;
     }
-    let Ok((mut floater, shown)) = floaters.single_mut() else {
+    let Ok((mut floater, shown, computed)) = floaters.single_mut() else {
         return;
     };
     if !shown.0 {
         return;
     }
-    *done = true;
     // A saved position (seeded by floater persistence at login) has already moved
-    // the floater off the sentinel; respect it.
+    // the floater off the sentinel; respect it. Latched here rather than below,
+    // because this answer does not depend on the size and waiting for one would
+    // re-ask it every frame.
     if floater.geometry().position.distance(SPAWN_POSITION) > 1.0 {
+        *done = true;
         return;
     }
     let Ok(window) = windows.single() else {
         return;
     };
-    let width = window.width();
-    let height = window.height();
+    // `ComputedNode` is in physical pixels and `Floater::position` is in
+    // UI-logical ones, the units `UiScale` multiplies — the same mix-up the
+    // floater clamp was once caught making.
+    let inverse = computed.inverse_scale_factor();
+    let size = Vec2::new(computed.size().x * inverse, computed.size().y * inverse);
+    if size.x <= 0.0 || size.y <= 0.0 {
+        // Not laid out yet. Try again next frame rather than place it by guess.
+        return;
+    }
+    let scale = if ui_scale.0 > 0.0 { ui_scale.0 } else { 1.0 };
+    let width = window.width() / scale;
+    let height = window.height() / scale;
+    *done = true;
     let position = Vec2::new(
-        (width - DEFAULT_SIZE.x - ANCHOR_MARGIN).max(ANCHOR_MARGIN),
-        (height - DEFAULT_SIZE.y - ANCHOR_MARGIN).max(ANCHOR_MARGIN),
+        (width - size.x - ANCHOR_MARGIN).max(ANCHOR_MARGIN),
+        (height - size.y - ANCHOR_MARGIN).max(ANCHOR_MARGIN),
     );
     floater.set_position(position);
 }
@@ -1165,6 +1236,12 @@ fn apply_env_combos(
             .get(combos.time)
             .map_or_else(|_| time_index_for_sky(FixedSky::Midday), |s| s.active)
     });
+    // The Custom row reports a state the pair cannot install. The widget will
+    // not let it be picked, and if it somehow were, `fixed_for` would read it
+    // as "un-pin" and throw away the very environment it is describing.
+    if group == ENV_GROUP_CUSTOM {
+        return;
+    }
     environment.set_fixed(fixed_for(group, time));
 }
 
@@ -1184,7 +1261,8 @@ fn sync_env_combos(
     let Some(environment) = environment else {
         return;
     };
-    let (group_index, time_index) = combo_indices(environment.fixed());
+    let (group_index, time_index) =
+        combo_indices(environment.fixed(), !environment.local().is_empty());
     if let Ok(mut group) = selections.get_mut(combos.group)
         && group.active != group_index
     {
@@ -1195,9 +1273,10 @@ fn sync_env_combos(
     {
         time.active = time_index;
     }
-    // Disable the time combo while shared (group 0): a time only means something
-    // once a preset group pins the sky.
-    let want_disabled = group_index == 0;
+    // Disable the time combo while shared (group 0) or custom: a time only means
+    // something once a preset group pins the sky, and under Custom the sky comes
+    // from a settings asset that carries its own.
+    let want_disabled = group_index == 0 || group_index == ENV_GROUP_CUSTOM;
     if time_disabled.get(combos.time).unwrap_or(false) != want_disabled {
         if want_disabled {
             commands.entity(combos.time).insert(InteractionDisabled);
@@ -1334,6 +1413,12 @@ pub fn spawn_quick_prefs_specimen(
     ));
     spawn_specimen_combo_row(commands, card, &cx, "Preset", "Legacy WindLight");
     spawn_specimen_combo_row(commands, card, &cx, "Time of day", "Midday");
+    // The three settings-asset tracks. Stand-ins like the two above — the
+    // specimen carries no live combo — but present, so the sweep measures the
+    // panel at the height it actually opens at.
+    spawn_specimen_combo_row(commands, card, &cx, "Sky", "Region default");
+    spawn_specimen_combo_row(commands, card, &cx, "Water", "Region default");
+    spawn_specimen_combo_row(commands, card, &cx, "Day cycle", "No day cycle");
     spawn_divider(commands, card);
     spawn_specimen_slider_row(commands, card, &cx, "Draw distance", "512", 0.5);
     spawn_specimen_slider_row(commands, card, &cx, "Max particles", "4096", 0.5);
@@ -1450,10 +1535,10 @@ mod tests {
     use sl_settings::{Scope, SettingValue, SettingsStore};
 
     use super::{
-        ENV_GROUP_ELEMENT, ENV_TIME_ELEMENT, QuickPrefEntry, QuickPrefEnvCombos, QuickPrefKind,
-        QuickPrefLabel, QuickPrefValueLabel, apply_env_combos, binding_kind, combo_indices,
-        default_entries, fixed_for, sky_for_time_index, sync_env_combos, time_index_for_sky,
-        update_quick_pref_values,
+        ENV_GROUP_CUSTOM, ENV_GROUP_ELEMENT, ENV_TIME_ELEMENT, QuickPrefEntry, QuickPrefEnvCombos,
+        QuickPrefKind, QuickPrefLabel, QuickPrefValueLabel, apply_env_combos, binding_kind,
+        combo_indices, default_entries, fixed_for, sky_for_time_index, sync_env_combos,
+        time_index_for_sky, update_quick_pref_values,
     };
     use crate::environment::{EnvironmentState, FixedEnvironment};
     use crate::settings::ViewerSettings;
@@ -1482,15 +1567,96 @@ mod tests {
             Some(FixedEnvironment::Legacy(FixedSky::Sunset))
         );
         assert_eq!(
-            combo_indices(Some(FixedEnvironment::Modern(FixedSky::Sunrise))),
+            combo_indices(Some(FixedEnvironment::Modern(FixedSky::Sunrise)), false),
             (3, 0)
         );
         // A shared environment reports the shared group and a sensible default
         // time (midday), so switching to a group starts somewhere lit.
         assert_eq!(
-            combo_indices(None),
+            combo_indices(None, false),
             (0, time_index_for_sky(FixedSky::Midday))
         );
+    }
+
+    /// **A settings asset in force reads as Custom, not as Shared.**
+    ///
+    /// Two things were wrong with reporting the shared group here. It was
+    /// untrue -- the region's environment is precisely what is *not* rendering
+    /// -- and because a combo only announces a pick when its index moves, a
+    /// selection parked on *Shared (region)* could not be picked, so the one
+    /// control that empties the local layer was dead exactly when it was needed.
+    #[test]
+    fn a_local_settings_asset_reads_as_custom() {
+        assert_eq!(
+            combo_indices(None, true),
+            (ENV_GROUP_CUSTOM, time_index_for_sky(FixedSky::Midday)),
+        );
+        // A pinned preset still describes the sky it pins, whatever else the
+        // local layer holds -- the pair is the sky's control.
+        assert_eq!(
+            combo_indices(Some(FixedEnvironment::Legacy(FixedSky::Sunset)), true),
+            (2, time_index_for_sky(FixedSky::Sunset)),
+        );
+    }
+
+    /// **Custom installs nothing.** It is a state the pair cannot express, and
+    /// `fixed_for` would read its index as "un-pin" -- throwing away the
+    /// environment the row exists to describe.
+    #[test]
+    fn picking_custom_changes_nothing() -> Result<(), TestError> {
+        let (mut app, group, _time) = env_app(ENV_GROUP_CUSTOM, 1);
+        if let Some(mut state) = app.world_mut().get_resource_mut::<EnvironmentState>() {
+            state.set_local(
+                sl_client_bevy::EnvironmentAsset::Water(
+                    sl_client_bevy::WaterSettings::legacy_default("picked"),
+                ),
+                Some(sl_client_bevy::Uuid::from_u128(0xB1)),
+            );
+        }
+        app.world_mut().write_message(ComboChanged {
+            combo: group,
+            active: ENV_GROUP_CUSTOM,
+        });
+        app.update();
+        let state = app
+            .world()
+            .get_resource::<EnvironmentState>()
+            .ok_or("environment state present")?;
+        assert!(
+            state.local().water().is_some(),
+            "the local layer survives a Custom pick"
+        );
+        Ok(())
+    }
+
+    /// **Shared is pickable again once Custom is what is showing**, which is the
+    /// whole point of showing it: picking it empties the local layer.
+    #[test]
+    fn shared_empties_the_local_layer_from_custom() -> Result<(), TestError> {
+        let (mut app, group, _time) = env_app(0, 1);
+        if let Some(mut state) = app.world_mut().get_resource_mut::<EnvironmentState>() {
+            state.set_local(
+                sl_client_bevy::EnvironmentAsset::Water(
+                    sl_client_bevy::WaterSettings::legacy_default("picked"),
+                ),
+                Some(sl_client_bevy::Uuid::from_u128(0xB1)),
+            );
+        }
+        // The widget has moved the selection to Shared; the message is the pick.
+        app.world_mut().write_message(ComboChanged {
+            combo: group,
+            active: 0,
+        });
+        app.update();
+        let state = app
+            .world()
+            .get_resource::<EnvironmentState>()
+            .ok_or("environment state present")?;
+        assert!(
+            state.local().is_empty(),
+            "picking Shared is 'use the region's environment'"
+        );
+        Ok(())
     }
 
     /// The default entries surface the load-bearing render settings by their
@@ -1694,6 +1860,13 @@ mod tests {
 
         // Shared by default: time combo disabled, group index 0.
         app.update();
+        assert_eq!(
+            app.world()
+                .entity(group)
+                .get::<ComboSelection>()
+                .map(|s| s.active),
+            Some(0)
+        );
         assert!(
             app.world()
                 .entity(time)

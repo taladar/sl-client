@@ -749,6 +749,9 @@ fn spawn_top_menu_bar(mut commands: Commands, root: Res<UiRoot>, asset_server: R
         GlobalZIndex(TOP_BAR_Z),
         MenuConditions::default(),
         TopMenuBar,
+        // Permanent, opaque, and drawn over the floaters: the floater manager
+        // keeps every title bar out from under it (`ScreenChrome`).
+        crate::ui::ScreenChrome,
         // A lone `Alt` tap opens this bar into keyboard navigation (see
         // `crate::menu`'s `menu_alt_enter`).
         PrimaryMenuBar,
@@ -968,7 +971,7 @@ fn update_top_menu_conditions(
     // of the entries describes what is being rendered. The gallery has no
     // environment resource, so the submenu simply shows no check there.
     if let Some(environment) = &environment
-        && environment.local().is_none()
+        && environment.local().is_empty()
     {
         wanted.push(environment_condition(environment.fixed()));
     }

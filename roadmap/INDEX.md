@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 101 |
-| ready | 322 |
+| ready | 321 |
 | blocked | 46 |
 | in-progress | 20 |
-| bugs | 62 |
-| done | 1029 |
+| bugs | 63 |
+| done | 1030 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1619** |
+| **total** | **1620** |
 
 ## ideas (101)
 
@@ -240,7 +240,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (322)
+## ready (321)
 
 ### protocol
 
@@ -790,9 +790,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-quick-preferences-editor`](ready/viewer-quick-preferences-editor.md)
   — Quick-preferences in-viewer editor (blocked by `viewer-quick-preferences`
   (done))
-- [`viewer-quick-prefs-environment-presets`](ready/viewer-quick-prefs-environment-presets.md)
-  — Quick preferences — sky / water / day-cycle combos over inventory (blocked
-  by `viewer-environment-settings-index` (done))
 - [`viewer-r17a`](ready/viewer-r17a-verify-the-shoe-lift-on-a-shod-avatar.md) —
   Verify the shoe lift live on a shod avatar
 - [`viewer-region-debug-console`](ready/viewer-region-debug-console.md) — Region
@@ -1193,7 +1190,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (62)
+## bugs (63)
 
 ### viewer
 
@@ -1276,6 +1273,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-groups-pane-empty-on-opensim`](bugs/viewer-groups-pane-empty-on-opensim.md)
   — The Groups pane lists nothing while the profile's group list has the same
   groups
+- [`viewer-hair-dome-stays-grey`](bugs/viewer-hair-dome-stays-grey.md) — The
+  default hair dome intermittently stays grey for a whole session
 - [`viewer-hover-tooltip-202ms-frame-spike`](bugs/viewer-hover-tooltip-202ms-frame-spike.md)
   — update_hover_tooltip spikes to 202 ms on a single frame
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
@@ -1344,7 +1343,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1029)
+## done (1030)
 
 ### protocol
 
@@ -2534,6 +2533,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Custom tracing subscriber blocks Bevy's trace_tracy / trace_chrome profilers
 - [`viewer-quick-preferences`](done/viewer-quick-preferences.md) —
   Quick-preferences panel (blocked by `viewer-preferences-floater` (done))
+- [`viewer-quick-prefs-environment-presets`](done/viewer-quick-prefs-environment-presets.md)
+  — Quick preferences — sky / water / day-cycle combos over inventory (blocked
+  by `viewer-environment-settings-index` (done))
 - [`viewer-quit-graceful-logout`](done/viewer-quit-graceful-logout.md) —
   Graceful logout on menu Quit and window close (fix intermittent exit hang)
 - [`viewer-r1`](done/viewer-r1-rigged-mesh-skinning-distortion.md) — Rigged-mesh

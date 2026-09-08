@@ -447,6 +447,11 @@ fn spawn_bottom_toolbar(mut commands: Commands, root: Res<UiRoot>) {
                 should_block_lower: true,
                 is_hoverable: true,
             },
+            // The other permanent band, so a window cannot be dragged down
+            // until its title bar is behind the toolbar (`ScreenChrome`). The
+            // `area` above it is mostly empty and not opaque, so the strip is
+            // what reserves, not the column holding it.
+            crate::ui::ScreenChrome,
             Name::new("bottom-toolbar"),
             ChildOf(area),
         ))

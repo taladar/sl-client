@@ -247,6 +247,7 @@ pub(crate) use sl_viewer_preferences::preferences_general;
 pub(crate) use sl_viewer_preferences::preferences_graphics;
 pub(crate) use sl_viewer_preferences::preferences_network_cache;
 pub(crate) use sl_viewer_preferences::quick_preferences;
+pub(crate) use sl_viewer_preferences::quick_prefs_environment;
 pub(crate) use sl_viewer_ui_pie_menu::pie_menu;
 pub(crate) use sl_viewer_world_avatar::reach;
 pub(crate) use sl_viewer_world_objects::objects;
@@ -1557,6 +1558,7 @@ fn run_session(
     // area. After FloaterPlugin (its spawn_floater / deferred-content build) and
     // the bottom toolbar (its BottomArea host).
     .add_plugins(crate::quick_preferences::QuickPreferencesPlugin)
+    .add_plugins(crate::quick_prefs_environment::QuickPrefsEnvironmentPlugin)
     // The alerts tab's popup list (viewer-preferences-alerts-tab): the model
     // refresh, row pool and binding behind the panel build_alerts_tab plugs
     // into the shell's registry.

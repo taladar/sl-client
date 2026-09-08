@@ -492,6 +492,7 @@ impl Plugin for ViewerWorldPlugins {
         app.init_resource::<WearableAssetManager>();
         app.init_resource::<AnimationPlayback>();
         app.init_resource::<environment_assets::EnvironmentAssetManager>();
+        app.init_resource::<crate::environment::LocalEnvironmentPick>();
         app.add_message::<TextureDecoded>();
         app.add_message::<BoostTexture>();
         app.add_message::<MeshDecoded>();
@@ -521,6 +522,10 @@ impl Plugin for ViewerWorldPlugins {
                     // asset decodes; after `ingest_environment` so the shared
                     // environment (the Modern placeholder) is current.
                     crate::environment::resolve_modern_environment,
+                    // Install the settings asset a panel (quick preferences'
+                    // sky / water / day-cycle combos) has picked, once its
+                    // asset decodes.
+                    crate::environment::resolve_local_environment_pick,
                     // Install whatever the RLV `@setenv_*` family has queued and
                     // republish the rendered sky for the next `@getenv_*` read.
                     // Last of the four so the sky it publishes is the one this

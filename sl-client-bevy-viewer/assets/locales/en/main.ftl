@@ -3654,11 +3654,21 @@ quick-prefs-env-shared = Shared (region)
 quick-prefs-env-daycycle = Region day cycle
 quick-prefs-env-legacy = Legacy WindLight
 quick-prefs-env-modern = Modern (EEP)
+# Shown, never offered: a settings asset from the three combos below is in force.
+quick-prefs-env-custom = Custom
 # The times of day.
 quick-prefs-time-sunrise = Sunrise
 quick-prefs-time-midday = Midday
 quick-prefs-time-sunset = Sunset
 quick-prefs-time-midnight = Midnight
+# The three settings-asset preset combos, one per environment track.
+quick-prefs-env-sky = Sky
+quick-prefs-env-water = Water
+quick-prefs-env-day-cycle = Day cycle
+# Their two leading rows: shown as the current state, never offered as a choice.
+quick-prefs-env-region-default = Region default
+quick-prefs-env-day-cycle-based = Day-cycle based
+quick-prefs-env-no-day-cycle = No day cycle
 # The curated default setting rows.
 quick-prefs-draw-distance = Draw distance
 quick-prefs-max-particles = Max particles

@@ -17,8 +17,8 @@
 
 use bevy::prelude::*;
 use sl_client_bevy::{
-    AssetKey, Command, DayCycleFrame, EnvironmentAsset, EnvironmentSettings, SkySettings,
-    SlCommand, SlEvent, SlSessionEvent,
+    AssetKey, Command, DayCycle, DayCycleFrame, EnvironmentAsset, EnvironmentSettings, SkySettings,
+    SlCommand, SlEvent, SlSessionEvent, Uuid, WaterSettings,
 };
 
 use sl_viewer_world_api::rlv::{RlvEnvironmentRequest, RlvEnvironmentSlot};
@@ -47,6 +47,103 @@ impl FixedEnvironment {
     pub(crate) const fn time(self) -> FixedSky {
         match self {
             Self::DayCycle(time) | Self::Legacy(time) | Self::Modern(time) => time,
+        }
+    }
+}
+
+/// One track of the local environment layer: the settings in force, and the
+/// inventory settings **asset** they came from where there was one.
+///
+/// The asset id is not decoration. A surface that lists the settings assets in
+/// inventory has to show *which* of them is in force — that is the whole of
+/// `FloaterQuickPrefs::setSelectedEnvironment`, which reads
+/// `sky->getAssetId()` and selects the matching row — and a sky is not
+/// identifiable by its contents: two assets can hold the same frame, and a
+/// script's edited sky holds no asset at all. `None` is that last case, and it
+/// is what the reference's null asset id means too.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalTrack<T> {
+    /// The settings asset this track was loaded from, or `None` for settings
+    /// nothing in inventory names — a `@setenv_*` edit, or a sampled frame.
+    pub asset: Option<Uuid>,
+    /// The settings themselves.
+    pub settings: T,
+}
+
+/// The **local** environment layer: the reference's `ENV_LOCAL`, which holds a
+/// day cycle, a fixed sky and a fixed water *at the same time* and independently
+/// (`LLEnvironment::DayInstance` — `setSky` and `setWater` each replace one and
+/// leave the rest).
+///
+/// Three tracks rather than one asset because that is what the surfaces above it
+/// are: the quick-preferences panel has one combo per track, and picking a water
+/// preset there must not drop the sky the user picked a moment earlier. The one
+/// place the tracks are *not* independent is a day cycle: installing one clears
+/// the fixed sky and water, because `DayInstance::setDay` resets both and lets
+/// the cycle animate them — which is why the reference's sky and water combos
+/// fall back to showing "Day-cycle based" after a day is picked.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LocalEnvironment {
+    /// A whole day cycle, replacing the shared one.
+    day: Option<LocalTrack<Box<DayCycle>>>,
+    /// A fixed sky, pinned over whichever cycle is in force.
+    sky: Option<LocalTrack<Box<SkySettings>>>,
+    /// A fixed water frame, pinned over whichever cycle is in force.
+    water: Option<LocalTrack<WaterSettings>>,
+}
+
+impl LocalEnvironment {
+    /// Whether the layer holds nothing at all — the region's environment is
+    /// what renders.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.day.is_none() && self.sky.is_none() && self.water.is_none()
+    }
+
+    /// The fixed sky in force, if any.
+    #[must_use]
+    pub const fn sky(&self) -> Option<&LocalTrack<Box<SkySettings>>> {
+        self.sky.as_ref()
+    }
+
+    /// The fixed water in force, if any.
+    #[must_use]
+    pub const fn water(&self) -> Option<&LocalTrack<WaterSettings>> {
+        self.water.as_ref()
+    }
+
+    /// The day cycle in force, if any.
+    #[must_use]
+    pub const fn day(&self) -> Option<&LocalTrack<Box<DayCycle>>> {
+        self.day.as_ref()
+    }
+
+    /// Install one settings asset in the track it *is*, following
+    /// `LLEnvironment::setEnvironment(ENV_LOCAL, settings)`: a sky or a water
+    /// frame replaces only its own track, a day cycle replaces the cycle and
+    /// clears both fixed frames.
+    fn install(&mut self, asset: EnvironmentAsset, source: Option<Uuid>) {
+        match asset {
+            EnvironmentAsset::Sky(sky) => {
+                self.sky = Some(LocalTrack {
+                    asset: source,
+                    settings: sky,
+                });
+            }
+            EnvironmentAsset::Water(water) => {
+                self.water = Some(LocalTrack {
+                    asset: source,
+                    settings: water,
+                });
+            }
+            EnvironmentAsset::DayCycle(day) => {
+                self.day = Some(LocalTrack {
+                    asset: source,
+                    settings: day,
+                });
+                self.sky = None;
+                self.water = None;
+            }
         }
     }
 }
@@ -117,16 +214,18 @@ pub struct EnvironmentState {
     /// changes until "Use Shared Environment". One of three groups (Day Cycle,
     /// Legacy, Modern) at a time of day.
     fixed: Option<FixedEnvironment>,
-    /// The environment a **script** has installed through the RLV `@setenv_*`
-    /// family: an edited sky, a settings asset, or a day cycle.
+    /// The local environment layer: the settings assets a script (`@setenv_*`)
+    /// or a panel (the quick-preferences preset combos) has installed, one per
+    /// track.
     ///
-    /// This is the same `ENV_LOCAL` slot [`Self::fixed`] is — the reference has
-    /// one — so the two are mutually exclusive and the last writer wins:
-    /// [`set_fixed`](Self::set_fixed) drops a script's environment, and
-    /// [`set_local`](Self::set_local) drops the menu's pin. It is kept as a
-    /// separate field only because the menu's check marks ask which *preset* is
-    /// pinned, which a script's arbitrary sky is not an answer to.
-    local: Option<EnvironmentAsset>,
+    /// Its **sky** track is the same `ENV_LOCAL` sky [`Self::fixed`] is, so
+    /// those two are mutually exclusive and the last writer wins:
+    /// [`set_fixed`](Self::set_fixed) drops a local sky, and installing one
+    /// drops the menu's pin. The menu's pin is kept as its own field only
+    /// because the menu's check marks ask which *preset* is pinned, which an
+    /// arbitrary sky asset is not an answer to. The water and day tracks are
+    /// nobody else's, so a pinned preset leaves them alone.
+    local: LocalEnvironment,
     /// The decoded sky for a pinned **Modern** selection, once its `KNOWN_SKY_*`
     /// asset resolves (see [`resolve_modern_environment`]), keyed by the time so a
     /// stale one is ignored after the selection changes. Until it resolves, a
@@ -151,7 +250,7 @@ impl Default for EnvironmentState {
             shared: EnvironmentSettings::legacy_windlight_default(),
             shared_source: EnvironmentSource::Default,
             fixed: None,
-            local: None,
+            local: LocalEnvironment::default(),
             modern_sky: None,
             req_pending: false,
             req_attempts: 0,
@@ -183,9 +282,14 @@ impl EnvironmentState {
     /// local fixed sky (`setEnvironment(ENV_LOCAL, …)`).
     pub fn set_fixed(&mut self, fixed: Option<FixedEnvironment>) {
         self.fixed = fixed;
-        // One local slot: choosing from the menu — "Use Shared Environment"
-        // included — takes it back from whatever a script put there.
-        self.local = None;
+        // "Use Shared Environment" (`None`) is the reference's
+        // `setSharedEnvironment`: the whole local layer goes, tracks a script
+        // installed included. Pinning a preset takes only the *sky* track back —
+        // it is the one thing a pin and a local sky both are.
+        match fixed {
+            None => self.local = LocalEnvironment::default(),
+            Some(_) => self.local.sky = None,
+        }
         // A selection change invalidates any resolved Modern sky (a fresh Modern
         // selection re-resolves; a non-Modern selection drops it).
         if !matches!(fixed, Some(FixedEnvironment::Modern(_))) {
@@ -194,25 +298,36 @@ impl EnvironmentState {
         self.apply();
     }
 
-    /// The environment a script has installed in the local slot, if any.
+    /// The local environment layer — what a script and the preset combos have
+    /// installed, per track.
     #[must_use]
-    pub const fn local(&self) -> Option<&EnvironmentAsset> {
-        self.local.as_ref()
+    pub const fn local(&self) -> &LocalEnvironment {
+        &self.local
     }
 
-    /// Install `local` as the local environment — the RLV `@setenv_*` family's
-    /// write target — or drop it with `None`, which falls back to whatever the
-    /// menu has pinned (nothing, usually) and then to the shared environment.
+    /// Install one settings asset in the local layer's matching track — the RLV
+    /// `@setenv_*` family's write target and the quick-preferences preset
+    /// combos'. `source` is the inventory asset it came from, where a surface
+    /// knows one, so a list of presets can show which row is in force.
     ///
-    /// Installing takes the slot back from the menu, for the same reason
-    /// [`set_fixed`](Self::set_fixed) takes it back from a script: the reference
-    /// has one `ENV_LOCAL` layer, not two.
-    pub fn set_local(&mut self, local: Option<EnvironmentAsset>) {
-        if local.is_some() {
+    /// A **sky** takes the local sky track back from the menu's pin, for the
+    /// same reason [`set_fixed`](Self::set_fixed) takes it back from a script:
+    /// the reference has one `ENV_LOCAL` sky, not two. A day cycle does the
+    /// same, since it animates the sky it replaces. A water frame is nobody
+    /// else's track and leaves the pin standing.
+    pub fn set_local(&mut self, local: EnvironmentAsset, source: Option<Uuid>) {
+        if !matches!(local, EnvironmentAsset::Water(_)) {
             self.fixed = None;
             self.modern_sky = None;
         }
-        self.local = local;
+        self.local.install(local, source);
+        self.apply();
+    }
+
+    /// Empty the local layer, falling back to whatever the menu has pinned
+    /// (nothing, usually) and then to the shared environment.
+    pub fn clear_local(&mut self) {
+        self.local = LocalEnvironment::default();
         self.apply();
     }
 
@@ -225,7 +340,7 @@ impl EnvironmentState {
     /// `-1` for.
     #[must_use]
     pub const fn has_local_fixed_sky(&self) -> bool {
-        self.fixed.is_some() || matches!(self.local, Some(EnvironmentAsset::Sky(_)))
+        self.fixed.is_some() || self.local.sky.is_some()
     }
 
     /// The shared day cycle sampled at `position` (`0.0..=1.0`) — the sky
@@ -299,16 +414,22 @@ impl EnvironmentState {
     /// Recompute the active [`Self::settings`] from the shared environment and
     /// the pinned fixed sky.
     fn apply(&mut self) {
-        // A script's environment owns the local slot outright while it is there.
-        if let Some(local) = self.local.clone() {
-            self.settings = self.compose_local(&local);
-            self.source = self.shared_source;
-            return;
+        // Bottom-up, exactly as the layers stack: the shared environment, then
+        // a local day cycle replacing the whole schedule, then whichever of the
+        // menu's pin and a local sky holds the sky track (they are the same
+        // track and cannot both), then a local water frame.
+        self.settings = self.shared.clone();
+        self.source = self.shared_source;
+        if let Some(day) = &self.local.day {
+            self.settings.day_cycle = (*day.settings).clone();
         }
         match self.fixed {
             None => {
-                self.settings = self.shared.clone();
-                self.source = self.shared_source;
+                if let Some(sky) = &self.local.sky {
+                    let name = sky.settings.name.clone();
+                    let settings = (*sky.settings).clone();
+                    self.pin_sky(settings, name);
+                }
             }
             Some(selection) => {
                 let time = selection.time();
@@ -323,9 +444,17 @@ impl EnvironmentState {
                         _ => self.day_cycle_frame(time),
                     },
                 };
-                self.settings = self.pin_sky(sky, time.frame_name().to_owned());
-                self.source = self.shared_source;
+                self.pin_sky(sky, time.frame_name().to_owned());
             }
+        }
+        if let Some(water) = &self.local.water {
+            let name = water.settings.name.clone();
+            self.settings.day_cycle.water_track = vec![DayCycleFrame {
+                keyframe: 0.0,
+                name: name.clone(),
+            }];
+            self.settings.day_cycle.water_frames =
+                std::iter::once((name, water.settings.clone())).collect();
         }
 
         // Debug affordance: when a pinned day position (`SL_VIEWER_SKY_DAY_POSITION`)
@@ -346,56 +475,31 @@ impl EnvironmentState {
         }
     }
 
-    /// The shared environment with its sky schedule replaced by a single `sky`
-    /// frame pinned at keyframe 0 on the surface track (the upper altitude tracks
-    /// empty out, so every altitude falls back to it); the water keeps following
-    /// the shared cycle. Shared by all three fixed-environment groups.
-    /// The shared environment with the local layer laid over it: a settings
-    /// asset overrides exactly the track it is — a sky replaces the sky
-    /// schedule, a water frame the water schedule, a day cycle the whole cycle —
-    /// and everything it does not name keeps following the grid.
-    fn compose_local(&self, local: &EnvironmentAsset) -> EnvironmentSettings {
-        match *local {
-            EnvironmentAsset::Sky(ref sky) => self.pin_sky((**sky).clone(), sky.name.clone()),
-            EnvironmentAsset::Water(ref water) => {
-                let mut pinned = self.shared.clone();
-                pinned.day_cycle.water_track = vec![DayCycleFrame {
-                    keyframe: 0.0,
-                    name: water.name.clone(),
-                }];
-                pinned.day_cycle.water_frames =
-                    std::iter::once((water.name.clone(), water.clone())).collect();
-                pinned
-            }
-            EnvironmentAsset::DayCycle(ref cycle) => {
-                let mut pinned = self.shared.clone();
-                pinned.day_cycle = (**cycle).clone();
-                pinned
-            }
-        }
-    }
-
-    /// The shared environment with its sky schedule replaced by a single `sky`
-    /// frame pinned at keyframe 0 on the surface track (the upper altitude
+    /// Replace the sky schedule of the environment being composed with a single
+    /// `sky` frame pinned at keyframe 0 on the surface track (the upper altitude
     /// tracks empty out, so every altitude falls back to it); the water keeps
-    /// following the shared cycle. Shared by all three fixed-environment groups
-    /// and by a script's own sky.
-    fn pin_sky(&self, sky: SkySettings, name: String) -> EnvironmentSettings {
-        let mut pinned = self.shared.clone();
-        pinned.day_cycle.sky_tracks = vec![vec![DayCycleFrame {
+    /// following whichever cycle is in force. Shared by all three
+    /// fixed-environment groups and by a local sky asset.
+    fn pin_sky(&mut self, sky: SkySettings, name: String) {
+        self.settings.day_cycle.sky_tracks = vec![vec![DayCycleFrame {
             keyframe: 0.0,
             name: name.clone(),
         }]];
-        pinned.day_cycle.sky_frames = std::iter::once((name, sky)).collect();
-        pinned
+        self.settings.day_cycle.sky_frames = std::iter::once((name, sky)).collect();
     }
 
-    /// The region's *own* day cycle sampled (frozen) at `time`'s canonical
+    /// The day cycle **in force** sampled (frozen) at `time`'s canonical
     /// position — the Day Cycle group's sky, and the placeholder a Modern
-    /// selection shows until its asset loads. Falls back to the legacy preset when
-    /// the shared environment defines no sky.
+    /// selection shows until its asset loads. Falls back to the legacy preset
+    /// when that cycle defines no sky.
+    ///
+    /// Read off the environment being composed rather than off the shared one,
+    /// so a local day cycle is what "the day cycle, frozen" freezes: the two can
+    /// hold at once (pinning a preset takes only the sky track), and freezing
+    /// the region's cycle while a different one is rendering would show a sky
+    /// from an environment nobody selected.
     fn day_cycle_frame(&self, time: FixedSky) -> SkySettings {
-        self.shared
+        self.settings
             .blended_sky_settings(0.0, time.day_position())
             .unwrap_or_else(|| time.settings())
     }
@@ -422,6 +526,74 @@ pub fn resolve_modern_environment(
     {
         let sky = sky.as_ref().clone();
         state.set_modern_sky(time, sky);
+    }
+}
+
+/// A settings asset a **panel** has asked to install in the local environment
+/// layer, waiting for its asset to decode.
+///
+/// The asset is not in hand when the user picks it: a combo row carries an
+/// inventory item's asset id, and the settings behind it may never have been
+/// fetched. So a pick is a *request* — recorded here, satisfied by
+/// [`resolve_local_environment_pick`] whenever the fetch lands — rather than a
+/// call the panel could make directly. Only the latest pick is kept: a user
+/// clicking through a list of skies wants the last one, not all of them applied
+/// in fetch order.
+///
+/// The panel writes it, so the panel needs no dependency on the asset store, and
+/// two panels asking for the same thing is one fetch.
+#[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct LocalEnvironmentPick {
+    /// The settings asset waiting to be installed, if any.
+    wanted: Option<AssetKey>,
+}
+
+impl LocalEnvironmentPick {
+    /// Ask for `asset` to be installed in the local layer once it decodes,
+    /// replacing any pick still waiting.
+    pub const fn request(&mut self, asset: AssetKey) {
+        self.wanted = Some(asset);
+    }
+
+    /// The pick still waiting to be installed, if any — a panel's cue that a
+    /// row it has selected is not in force *yet*.
+    #[must_use]
+    pub const fn pending(&self) -> Option<AssetKey> {
+        self.wanted
+    }
+}
+
+/// Fetch the settings asset a panel has picked ([`LocalEnvironmentPick`]) and,
+/// once it decodes, install it in the local environment layer's matching track.
+///
+/// The same shape as [`resolve_modern_environment`] and the `@setenv_asset` half
+/// of [`apply_rlv_environment`]: request every frame the pick is outstanding
+/// (the store de-duplicates, and a deferred request retries once the cap is
+/// known), and clear the pick only when the decoded asset is actually in hand.
+pub fn resolve_local_environment_pick(
+    mut pick: ResMut<LocalEnvironmentPick>,
+    mut state: ResMut<EnvironmentState>,
+    mut assets: ResMut<EnvironmentAssetManager>,
+) {
+    let Some(key) = pick.wanted else {
+        return;
+    };
+    assets.request(key);
+    if let Some(asset) = assets.get(key) {
+        let asset = asset.as_ref().clone();
+        pick.wanted = None;
+        state.set_local(asset, Some(key.uuid()));
+    } else if assets.is_unavailable(key) {
+        // Give up rather than wait forever. The panel holds its selection while
+        // a pick is outstanding, so a settings asset that cannot be fetched or
+        // decoded would otherwise freeze the combos on a row that is not what is
+        // rendering — a wrong answer held indefinitely, where dropping the pick
+        // lets the next sync say what is actually in force.
+        warn!(
+            "settings asset {} could not be fetched or decoded; the environment is unchanged",
+            key.uuid()
+        );
+        pick.wanted = None;
     }
 }
 
@@ -536,7 +708,9 @@ pub fn apply_rlv_environment(
             RlvEnvironmentRequest::DayTime(position) => {
                 *pending = None;
                 let sky = state.shared_sky_at(position);
-                state.set_local(Some(EnvironmentAsset::Sky(Box::new(sky))));
+                // A sampled frame is nobody's asset: no inventory row names it,
+                // and a preset list must not claim one is in force.
+                state.set_local(EnvironmentAsset::Sky(Box::new(sky)), None);
             }
             RlvEnvironmentRequest::Asset(id) => *pending = Some(AssetKey::from(id)),
             // Never queued: the source resolves a preset or day-cycle *name* to
@@ -549,14 +723,14 @@ pub fn apply_rlv_environment(
     // and replaces the layer again, pending asset and all.
     if let Some(sky) = slot.edited.take() {
         *pending = None;
-        state.set_local(Some(EnvironmentAsset::Sky(Box::new(sky))));
+        state.set_local(EnvironmentAsset::Sky(Box::new(sky)), None);
     }
     if let Some(key) = *pending {
         assets.request(key);
         if let Some(asset) = assets.get(key) {
             let asset = asset.as_ref().clone();
             *pending = None;
-            state.set_local(Some(asset));
+            state.set_local(asset, Some(key.uuid()));
         }
     }
 
@@ -579,7 +753,7 @@ mod tests {
 
     use super::{
         EnvironmentAsset, EnvironmentSettings, EnvironmentSource, EnvironmentState,
-        FixedEnvironment, SkySettings,
+        FixedEnvironment, SkySettings, Uuid,
     };
     use crate::sky_presets::FixedSky;
     use sl_client_bevy::WaterSettings;
@@ -693,7 +867,7 @@ mod tests {
             EnvironmentSource::Region
         );
 
-        state.set_local(Some(EnvironmentAsset::Sky(Box::new(script_sky()))));
+        state.set_local(EnvironmentAsset::Sky(Box::new(script_sky())), None);
 
         assert_eq!(
             state
@@ -711,26 +885,118 @@ mod tests {
         assert!(state.has_local_fixed_sky());
     }
 
-    /// One local slot, not two: the menu takes it back from a script, and a
-    /// script takes it back from the menu.
+    /// One local **sky**, not two: the menu takes that track back from a
+    /// script, and a script takes it back from the menu.
     #[test]
-    fn the_menu_and_a_script_share_one_local_slot() {
+    fn the_menu_and_a_script_share_one_local_sky() {
         let mut state = EnvironmentState::default();
         state.set_fixed(Some(FixedEnvironment::Legacy(FixedSky::Midnight)));
-        state.set_local(Some(EnvironmentAsset::Sky(Box::new(script_sky()))));
-        assert_eq!(state.fixed(), None, "a script takes the slot from the menu");
+        state.set_local(EnvironmentAsset::Sky(Box::new(script_sky())), None);
+        assert_eq!(
+            state.fixed(),
+            None,
+            "a script takes the track from the menu"
+        );
 
         state.set_fixed(Some(FixedEnvironment::Legacy(FixedSky::Midday)));
         assert!(
-            state.local().is_none(),
-            "the menu takes the slot back from a script"
+            state.local().sky().is_none(),
+            "the menu takes the track back from a script"
         );
 
-        // And "Use Shared Environment" empties it whichever put it there.
-        state.set_local(Some(EnvironmentAsset::Sky(Box::new(script_sky()))));
+        // And "Use Shared Environment" empties the whole layer, whichever put
+        // what in it -- the reference's `setSharedEnvironment`.
+        state.set_local(EnvironmentAsset::Sky(Box::new(script_sky())), None);
+        state.set_local(
+            EnvironmentAsset::Water(WaterSettings::legacy_default("script-water")),
+            None,
+        );
         state.set_fixed(None);
-        assert!(state.local().is_none());
+        assert!(state.local().is_empty());
         assert!(!state.has_local_fixed_sky());
+    }
+
+    /// **A pinned preset leaves the other two tracks standing.** Only the sky
+    /// is a thing the menu and the local layer both claim; a water frame a
+    /// script (or the preset combos) installed is not the menu's to drop, and
+    /// the reference does not drop it either -- `setEnvironment(ENV_LOCAL,
+    /// fixedEnvironment_t)` writes the one track it was given.
+    #[test]
+    fn pinning_a_preset_keeps_the_local_water_and_day() {
+        let mut state = EnvironmentState::default();
+        let mut cycle = EnvironmentSettings::legacy_windlight_default().day_cycle;
+        cycle.name = "script-cycle".to_owned();
+        state.set_local(
+            EnvironmentAsset::DayCycle(Box::new(cycle)),
+            Some(Uuid::from_u128(0xD1)),
+        );
+        state.set_local(
+            EnvironmentAsset::Water(WaterSettings::legacy_default("script-water")),
+            Some(Uuid::from_u128(0xB1)),
+        );
+
+        state.set_fixed(Some(FixedEnvironment::Legacy(FixedSky::Midnight)));
+
+        assert_eq!(
+            state.local().day().and_then(|track| track.asset),
+            Some(Uuid::from_u128(0xD1)),
+            "the day cycle stands"
+        );
+        assert_eq!(
+            state.local().water().and_then(|track| track.asset),
+            Some(Uuid::from_u128(0xB1)),
+            "and so does the water"
+        );
+        assert_eq!(state.settings.day_cycle.name, "script-cycle");
+        assert_eq!(
+            state
+                .settings
+                .day_cycle
+                .water_frames
+                .keys()
+                .collect::<Vec<_>>(),
+            vec!["script-water"],
+        );
+    }
+
+    /// **The three tracks are independent, and a day cycle is the exception.**
+    ///
+    /// Picking a water preset must not drop the sky picked a moment earlier --
+    /// that is the whole reason the quick-preferences panel has three combos --
+    /// while a day cycle clears both fixed frames, because
+    /// `DayInstance::setDay` resets them and lets the cycle animate them.
+    #[test]
+    fn tracks_are_independent_except_a_day_cycle() {
+        let mut state = EnvironmentState::default();
+        state.set_local(
+            EnvironmentAsset::Sky(Box::new(script_sky())),
+            Some(Uuid::from_u128(0xA1)),
+        );
+        state.set_local(
+            EnvironmentAsset::Water(WaterSettings::legacy_default("script-water")),
+            Some(Uuid::from_u128(0xA2)),
+        );
+        assert_eq!(
+            state.local().sky().and_then(|track| track.asset),
+            Some(Uuid::from_u128(0xA1)),
+            "a water pick leaves the sky alone"
+        );
+        // Both are rendering, at once.
+        assert!(state.settings.day_cycle.sky_frames.contains_key("script"));
+        assert!(
+            state
+                .settings
+                .day_cycle
+                .water_frames
+                .contains_key("script-water")
+        );
+
+        let mut cycle = EnvironmentSettings::legacy_windlight_default().day_cycle;
+        cycle.name = "script-cycle".to_owned();
+        state.set_local(EnvironmentAsset::DayCycle(Box::new(cycle)), None);
+        assert!(state.local().sky().is_none(), "a day cycle clears the sky");
+        assert!(state.local().water().is_none(), "and the water");
+        assert!(state.local().day().is_some());
     }
 
     /// A water asset overrides the water track and leaves the sky alone; a day
@@ -748,7 +1014,7 @@ mod tests {
             name: "script-water".to_owned(),
             ..WaterSettings::legacy_default("script-water")
         };
-        state.set_local(Some(EnvironmentAsset::Water(water)));
+        state.set_local(EnvironmentAsset::Water(water), None);
         assert_eq!(state.settings.day_cycle.sky_frames, sky_frames);
         assert_eq!(
             state
@@ -762,7 +1028,7 @@ mod tests {
 
         let mut cycle = EnvironmentSettings::legacy_windlight_default().day_cycle;
         cycle.name = "script-cycle".to_owned();
-        state.set_local(Some(EnvironmentAsset::DayCycle(Box::new(cycle))));
+        state.set_local(EnvironmentAsset::DayCycle(Box::new(cycle)), None);
         assert_eq!(state.settings.day_cycle.name, "script-cycle");
         assert_eq!(
             state.settings.day_length, 1234,
@@ -777,17 +1043,18 @@ mod tests {
         let mut state = EnvironmentState::default();
         assert!(!state.has_local_fixed_sky());
 
-        state.set_local(Some(EnvironmentAsset::Sky(Box::new(script_sky()))));
+        state.set_local(EnvironmentAsset::Sky(Box::new(script_sky())), None);
         assert!(state.has_local_fixed_sky());
 
         let mut cycle = EnvironmentSettings::legacy_windlight_default().day_cycle;
         cycle.name = "script-cycle".to_owned();
-        state.set_local(Some(EnvironmentAsset::DayCycle(Box::new(cycle))));
+        state.set_local(EnvironmentAsset::DayCycle(Box::new(cycle)), None);
         assert!(!state.has_local_fixed_sky());
 
-        state.set_local(Some(EnvironmentAsset::Water(
-            WaterSettings::legacy_default("script-water"),
-        )));
+        state.set_local(
+            EnvironmentAsset::Water(WaterSettings::legacy_default("script-water")),
+            None,
+        );
         assert!(!state.has_local_fixed_sky());
 
         // The menu's own pin is a fixed sky whatever a script left behind.
@@ -804,7 +1071,7 @@ mod tests {
             state.ingest_reply(reply(-1, 1234)),
             EnvironmentSource::Region
         );
-        state.set_local(Some(EnvironmentAsset::Sky(Box::new(script_sky()))));
+        state.set_local(EnvironmentAsset::Sky(Box::new(script_sky())), None);
 
         let sampled = state.shared_sky_at(0.25);
 

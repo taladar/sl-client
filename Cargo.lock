@@ -9398,6 +9398,7 @@ dependencies = [
  "sl-rlv",
  "sl-settings",
  "sl-viewer-audio",
+ "sl-viewer-inventory",
  "sl-viewer-kit",
  "sl-viewer-notifications",
  "sl-viewer-platform",

@@ -32,6 +32,13 @@ pub(crate) use sl_viewer_audio::audio;
 pub(crate) use sl_viewer_audio::parcel_audio;
 pub(crate) use sl_viewer_audio::volume_panel;
 pub(crate) use sl_viewer_audio::world_sounds;
+// The inventory mirror's settings-asset index: the sky / water / day-cycle
+// lists the quick-preferences environment combos are a view of. A dependency on
+// the inventory crate rather than a projection resource below it because the
+// list *is* an inventory query — every settings item, grouped, name-ordered —
+// and there is nowhere lower to hold one that would not be the same query
+// written twice.
+pub(crate) use sl_viewer_inventory::settings_index;
 pub(crate) use sl_viewer_kit::minimap_math;
 pub(crate) use sl_viewer_kit::sky_presets;
 pub(crate) use sl_viewer_notifications as notifications;
@@ -91,3 +98,4 @@ pub mod preferences_general;
 pub mod preferences_graphics;
 pub mod preferences_network_cache;
 pub mod quick_preferences;
+pub mod quick_prefs_environment;
