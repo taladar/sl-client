@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 101 |
+| ideas | 102 |
 | ready | 322 |
 | blocked | 46 |
 | in-progress | 20 |
 | bugs | 59 |
-| done | 1033 |
+| done | 1034 |
 | deferred | 25 |
 | wont-do | 16 |
-| **total** | **1622** |
+| **total** | **1624** |
 
-## ideas (101)
+## ideas (102)
 
 ### protocol
 
@@ -162,6 +162,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Leftover per-family render scalability knobs
 - [`viewer-script-dialog-options`](ideas/viewer-script-dialog-options.md) —
   Script-dialog stacking, position & safety options
+- [`viewer-selection-hidden-silhouette`](ideas/viewer-selection-hidden-silhouette.md)
+  — The selection outline does not show through intervening geometry
 - [`viewer-settings-file-resilience`](ideas/viewer-settings-file-resilience.md)
   — Settings store — survive a broken settings file without data loss
 - [`viewer-settings-sanity-checks`](ideas/viewer-settings-sanity-checks.md) —
@@ -1289,9 +1291,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A nearby avatar stays a coarse sphere even as the camera closes in
 - [`viewer-notecard-preview-ignores-unsaved-text`](bugs/viewer-notecard-preview-ignores-unsaved-text.md)
   — The notecard's View Items preview shows the loaded text, not what you typed
-- [`viewer-outline-swallows-thin-hollow-prim`](bugs/viewer-outline-swallows-thin-hollow-prim.md)
-  — The selection outline fills a thin-walled hollow prim white instead of
-  outlining it
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
   — Own avatar looks broken after a teleport
 - [`viewer-own-avatar-facing-drifts-idle`](bugs/viewer-own-avatar-facing-drifts-idle.md)
@@ -1319,6 +1318,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-tree-species-all-rendered-as-trees`](bugs/viewer-tree-species-all-rendered-as-trees.md)
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)
+- [`viewer-underwater-fog-swallows-translucency`](bugs/viewer-underwater-fog-swallows-translucency.md)
+  — Underwater, the fog wipes out translucent geometry that has open water
+  behind it
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
@@ -1338,7 +1340,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1033)
+## done (1034)
 
 ### protocol
 
@@ -2172,6 +2174,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-opensim-trash-folder-not-resolved`](done/viewer-opensim-trash-folder-not-resolved.md)
   — OpenSim — object-pie Delete does nothing (Trash system folder never
   resolved)
+- [`viewer-outline-swallows-thin-hollow-prim`](done/viewer-outline-swallows-thin-hollow-prim.md)
+  — The selection outline fills a thin-walled hollow prim white instead of
+  outlining it
 - [`viewer-own-bake-not-refreshed-on-outfit-change`](done/viewer-own-bake-not-refreshed-on-outfit-change.md)
   — Own avatar bake not refreshed when worn layers change at runtime
 - [`viewer-p0-1`](done/viewer-p0-1-create-the-crate-skeletons.md) — Create the

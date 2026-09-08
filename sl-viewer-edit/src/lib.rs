@@ -51,6 +51,7 @@ pub(crate) use sl_viewer_world_objects::materials;
 pub(crate) use sl_viewer_world_objects::object_cost;
 pub(crate) use sl_viewer_world_objects::objects;
 pub(crate) use sl_viewer_world_objects::textures;
+pub(crate) use sl_viewer_world_scene::viewer_camera;
 pub(crate) use sl_viewer_world_view::camera;
 
 pub mod edit_contents;
@@ -65,4 +66,5 @@ pub mod edit_texture_align;
 pub mod edit_tool;
 pub mod edit_undo;
 pub mod gizmos;
+pub(crate) mod selection_silhouette;
 pub(crate) mod selection_wireframe;

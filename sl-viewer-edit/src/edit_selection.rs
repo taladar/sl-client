@@ -35,9 +35,10 @@
 //!   kind: a face of an uploaded **mesh** object (`isMesh()`, rigged or not)
 //!   wears a wireframe of its geometry — posed with it when it is rigged —
 //!   as `renderMeshSelection_f` draws, see the `selection_wireframe` module;
-//!   every other face (prim, sculpt, tree, grass) wears an inflated shell
-//!   sharing its mesh, a simpler stand-in for the reference's silhouette edge
-//!   rendering (`generateSilhouette`), deliberately not a port of it.
+//!   every other face (prim, sculpt, tree, grass) wears the **silhouette
+//!   ribbon** its view-dependent edges are widened into, the port of
+//!   `generateSilhouetteVertices` + `renderOneSilhouette` — see the
+//!   `selection_silhouette` module.
 //!
 //! Reference (Firestorm, read-only): `llselectmgr`, `lltoolselect`,
 //! `lltoolselectrect`.
@@ -120,10 +121,27 @@ const DROP_ACCEPT_OUTLINE: Color = Color::srgba(0.3, 1.0, 0.45, 0.85);
 /// is unmistakable.
 const DROP_FOREIGN_OUTLINE: Color = Color::srgba(1.0, 0.25, 0.2, 0.9);
 
-/// How far the outline shell is inflated past the face geometry: an
-/// inverted-hull outline (front faces culled, mesh slightly enlarged) reads as
-/// the reference's silhouette edge glow without porting its edge-walk.
-const OUTLINE_INFLATE: f32 = 1.035;
+/// The silhouette ribbon's width as a fraction of the **view distance** — the
+/// reference's `SelectionHighlightThickness` (`settings.xml` default `0.01`),
+/// which makes the outline a constant width on screen rather than in the world.
+const HIGHLIGHT_THICKNESS: f32 = 0.01;
+
+/// The largest turn (in radians, between the directions from the face to the
+/// camera) an existing silhouette is kept across before it is rebuilt. The edge
+/// set is view-dependent, so it goes stale as the camera swings around a curved
+/// surface; the reference regenerates only when the *object* moves, which is
+/// staler still.
+const SILHOUETTE_REBUILD_ANGLE: f32 = 0.05;
+
+/// The largest relative change in ribbon width kept without a rebuild — the
+/// thickness follows the view distance, so this is a rebuild on approach.
+const SILHOUETTE_REBUILD_WIDTH: f32 = 0.1;
+
+/// How many silhouettes may be rebuilt in one frame, the reference's
+/// `MAX_SILS_PER_FRAME`. A rubber-band sweep can select hundreds of faces at
+/// once; the stalest are rebuilt first and the rest keep last frame's edges for a
+/// frame or two, which is invisible next to rebuilding all of them at once.
+const MAX_SILHOUETTES_PER_FRAME: usize = 50;
 
 /// The visibility every face overlay this module parents onto a face entity is
 /// spawned with — [`Visibility::Visible`], which in Bevy shows the entity
@@ -194,13 +212,13 @@ enum HighlightKind {
 }
 
 /// Every editor overlay the selection core hangs off a face mesh — the
-/// silhouette shell, the drag-hover shell, the Select Face grid cursor.
+/// selection outline, the drag-hover outline, the Select Face grid cursor.
 ///
 /// It is a **pick exclusion**, and that is why the three share a marker. Each
-/// overlay reuses its face's own mesh: the shells are inflated (so they sit
-/// strictly in front of the face) and the grid cursor is exactly coplanar with
-/// it. A world ray therefore strikes an overlay before — or indistinguishably
-/// from — the surface it decorates, and an overlay carries no
+/// overlay sits on or just off the face it decorates: an outline stands a
+/// millimetre or two out along the surface normal and the grid cursor is exactly
+/// coplanar with it. A world ray therefore strikes an overlay before — or
+/// indistinguishably from — the surface it decorates, and an overlay carries no
 /// [`PrimFaceEntity`], so the resolved hit loses its **face index**. That is
 /// invisible to whole-object selection (the walk up to the [`SceneObject`]
 /// finds the same object either way) and fatal to the Select Face tool, whose
@@ -208,8 +226,8 @@ enum HighlightKind {
 #[derive(Component, Debug, Clone, Copy)]
 struct EditorOverlay;
 
-/// An outline-shell overlay child on one selected (or tentatively swept) face
-/// mesh — the selection highlight.
+/// An outline overlay child on one selected (or tentatively swept) face mesh —
+/// the selection highlight.
 #[derive(Component, Debug)]
 struct SelectionHighlightOverlay {
     /// Which outline this overlay carries, so a change swaps the material.
@@ -248,9 +266,9 @@ impl HighlightAssets {
 }
 
 impl FromWorld for HighlightAssets {
-    /// Build the inverted-hull outline materials once: unlit, front faces
-    /// culled, so only the inflated shell's back-facing rim shows — an edge
-    /// glow, not a fill.
+    /// Build the outline materials once: unlit, translucent and **double-sided**
+    /// — a silhouette ribbon stands out of the surface it outlines and is seen
+    /// from either side, and a wireframe's lines have no sides at all.
     fn from_world(world: &mut World) -> Self {
         let mut materials = world.resource_mut::<Assets<FaceMaterial>>();
         let mut outline = |color: Color| {
@@ -262,7 +280,7 @@ impl FromWorld for HighlightAssets {
                 base_color: color,
                 unlit: true,
                 alpha_mode: AlphaMode::Blend,
-                cull_mode: Some(bevy::render::render_resource::Face::Front),
+                cull_mode: None,
                 ..Default::default()
             }))
         };
@@ -340,7 +358,16 @@ impl Plugin for EditSelectionPlugin {
             // floater — so it stays ungated. It owns its own `DragHoverOverlay`
             // component, distinct from the selection outline, so dropping it out
             // of the chain above changes no behaviour.
-            .add_systems(Update, apply_drag_hover_highlight);
+            .add_systems(Update, apply_drag_hover_highlight)
+            // The silhouette derivation serves both outlines, so it is ungated
+            // like the hover one and merely ordered after both — a face outlined
+            // this frame is drawn outlined in the same frame.
+            .add_systems(
+                Update,
+                update_selection_silhouettes
+                    .after(apply_selection_highlight)
+                    .after(apply_drag_hover_highlight),
+            );
     }
 }
 
@@ -370,7 +397,7 @@ struct SelectPointer<'w, 's> {
     camera: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<ViewerCamera>>,
     /// Render layers, to exclude HUD / gizmo geometry from world picks.
     layers: Query<'w, 's, (Entity, &'static RenderLayers)>,
-    /// The editor's own overlay shells, to exclude them too — see
+    /// The editor's own overlays, to exclude them too — see
     /// [`EditorOverlay`].
     overlays: Query<'w, 's, Entity, With<EditorOverlay>>,
 }
@@ -378,7 +405,7 @@ struct SelectPointer<'w, 's> {
 impl SelectPointer<'_, '_> {
     /// The entities a world pick must not strike: HUD and gizmo geometry (by
     /// render layer, exactly as the touch pick excludes them) and the editor's
-    /// own overlay shells ([`EditorOverlay`]).
+    /// own overlays ([`EditorOverlay`]).
     fn pick_exclusions(&self) -> HashSet<Entity> {
         self.layers
             .iter()
@@ -976,7 +1003,7 @@ fn apply_selection_highlight(
         }
     }
     // Spawn the missing ones: a wireframe of the face's mesh for a mesh object (or
-    // a rigged face), an inflated shell sharing it otherwise — see
+    // a rigged face), a silhouette ribbon otherwise — see
     // [`spawn_outline_overlay`].
     for (face, outline) in desired {
         let Ok((mesh, skin)) = faces.get(face) else {
@@ -1033,16 +1060,21 @@ struct DesiredOutline {
 /// only prims, sculpts, trees and grass reach `renderOneSilhouette`. So a face of
 /// an [`ObjectCategory::Mesh`] object (`outline.mesh_object`) gets
 /// [`crate::selection_wireframe`]'s line-list derivation of its mesh, and every
-/// other face wears an **inverted-hull shell**: its own mesh again, front faces
-/// culled and pushed out by an entity-`Transform` scale, so only the rim shows.
+/// other face wears the **silhouette ribbon**
+/// ([`crate::selection_silhouette`]): its view-dependent silhouette edges,
+/// widened into quads standing off the surface.
 ///
-/// A **rigged** face takes the wireframe whatever its object says, because the
-/// shell is impossible for it: the shared mesh specializes into the skinned
-/// pipeline (a shell without the skin is the wgpu validation error that quits the
-/// viewer) and a skinned draw ignores the entity scale that would inflate it. It
-/// additionally carries the skin that poses it and the [`SkinPoseTwin`] that
-/// earns that skin the same GPU palette as the face. See that module for the
-/// details.
+/// A silhouette depends on where the camera is, which this spawn does not know —
+/// it is [`update_selection_silhouettes`] that derives the geometry and inserts
+/// the [`Mesh3d`], every frame the view has moved enough to matter. So the
+/// overlay is spawned here with the marker component alone; a face is outlined
+/// from the same frame, because that system runs after both reconcilers.
+///
+/// A **rigged** face takes the wireframe whatever its object says, because a
+/// silhouette derived from its mesh asset would be the *bind pose's* edge set:
+/// the drawn geometry exists only in the GPU joint palette. It additionally
+/// carries the skin that poses it and the [`SkinPoseTwin`] that earns that skin
+/// the same GPU palette as the face. See that module for the details.
 ///
 /// A face whose mesh is not loaded (or is not an indexed triangle list) gets no
 /// wireframe this frame; the reconciler runs every frame, so it gains one as soon
@@ -1064,12 +1096,14 @@ fn spawn_outline_overlay(
 ) {
     if skin.is_none() && !outline.mesh_object {
         commands.spawn((
-            Mesh3d(mesh.0.clone()),
             MeshMaterial3d(material),
-            Transform::from_scale(Vec3::splat(OUTLINE_INFLATE)),
+            // The ribbon is built in the face's own space, so the overlay adds no
+            // transform of its own — as the wireframe does not either.
+            Transform::IDENTITY,
             NotShadowCaster,
             marker,
             EditorOverlay,
+            SilhouetteOverlay::default(),
             ChildOf(face),
             OUTLINE_VISIBILITY,
         ));
@@ -1105,6 +1139,202 @@ fn spawn_outline_overlay(
     ));
     if let Some(skin) = skin {
         overlay.insert((skin.clone(), SkinPoseTwin { source: face }));
+    }
+}
+
+/// An outline overlay drawing a [`crate::selection_silhouette`] ribbon, and what
+/// the ribbon it currently holds was derived from — so the derivation is redone
+/// when, and only when, one of those inputs has moved enough to show.
+#[derive(Component, Debug, Default)]
+struct SilhouetteOverlay {
+    /// The face mesh the ribbon was derived from, or [`None`] before the first
+    /// build. A face whose mesh asset is swapped or rewritten in place (an LOD
+    /// change, a flexi's per-frame reshape) is rebuilt from the new geometry.
+    source: Option<AssetId<Mesh>>,
+    /// Where the camera stood, in the face's own space, when the edge set was
+    /// derived. The silhouette is view-dependent, so this is what goes stale.
+    view: Vec3,
+    /// The ribbon's width in metres at that build.
+    thickness: f32,
+    /// Metres per unit of the face mesh's own space at that build — a resized
+    /// object changes what a world distance is worth locally.
+    scale: Vec3,
+}
+
+/// Derive the silhouette ribbon of every outlined prim / sculpt / tree / grass
+/// face, and re-derive it as the view moves — the port of the reference's
+/// `LLSelectMgr::updateSilhouettes`, which regenerates a node's silhouette
+/// through `LLVOVolume::generateSilhouette(node, camera_origin)`.
+///
+/// The reference regenerates only when the **object** is flagged moved or its
+/// silhouette missing, which leaves the edge set stale while the camera swings
+/// around a stationary prim. This rebuilds on the camera's own movement too
+/// ([`SILHOUETTE_REBUILD_ANGLE`], [`SILHOUETTE_REBUILD_WIDTH`]), under the same
+/// per-frame budget the reference works to ([`MAX_SILHOUETTES_PER_FRAME`],
+/// its `MAX_SILS_PER_FRAME`), stalest first.
+///
+/// Runs after both highlight reconcilers, so a face outlined this frame is
+/// outlined *in* this frame rather than the next.
+fn update_selection_silhouettes(
+    camera: Query<(&GlobalTransform, &Projection), With<ViewerCamera>>,
+    faces: Query<(&Mesh3d, &GlobalTransform)>,
+    mut overlays: Query<(Entity, &ChildOf, &mut SilhouetteOverlay, Option<&Mesh3d>)>,
+    mut mesh_events: MessageReader<AssetEvent<Mesh>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut commands: Commands,
+) {
+    // A face mesh rewritten in place this frame (a flexi reshaping, an LOD block
+    // arriving into the same asset) has to be re-walked whatever the camera did.
+    let mut rewritten: HashSet<AssetId<Mesh>> = HashSet::new();
+    for event in mesh_events.read() {
+        if let AssetEvent::Modified { id } = *event {
+            rewritten.insert(id);
+        }
+    }
+    let Ok((eye, projection)) = camera.single() else {
+        return;
+    };
+    let fov = match projection {
+        Projection::Perspective(perspective) => perspective.fov,
+        _other => crate::viewer_camera::DEFAULT_FIELD_OF_VIEW,
+    };
+    let eye = eye.translation();
+    // The stale overlays and how stale each is, so a budget that cannot cover them
+    // all spends itself on the ones furthest from what they should be drawing.
+    let mut stale: Vec<(f32, Entity, SilhouetteInputs)> = Vec::new();
+    for (entity, child_of, overlay, mesh) in &overlays {
+        let Ok((face_mesh, face)) = faces.get(child_of.parent()) else {
+            continue;
+        };
+        let inputs = SilhouetteInputs::of(face_mesh, face, eye, fov);
+        // An overlay with no ribbon at all (just spawned), one whose face swapped
+        // mesh, and one whose mesh was rewritten under it are all outlining the
+        // wrong thing outright, so they outrank any amount of drift.
+        let unbuilt = mesh.is_none()
+            || overlay.source != Some(inputs.source)
+            || rewritten.contains(&inputs.source);
+        let staleness = if unbuilt {
+            f32::INFINITY
+        } else {
+            inputs.staleness(overlay)
+        };
+        if staleness > 0.0 {
+            stale.push((staleness, entity, inputs));
+        }
+    }
+    stale.sort_by(|(first, _, _), (second, _, _)| second.total_cmp(first));
+    stale.truncate(MAX_SILHOUETTES_PER_FRAME);
+    for (_staleness, entity, inputs) in stale {
+        let Ok((_entity, _child_of, mut overlay, mesh)) = overlays.get_mut(entity) else {
+            continue;
+        };
+        // Scoped so the borrow of the mesh store ends before the derived ribbon is
+        // written back into it.
+        let ribbon = {
+            let Some(source) = meshes.get(inputs.source) else {
+                continue;
+            };
+            crate::selection_silhouette::silhouette_mesh(
+                source,
+                inputs.scale,
+                inputs.view,
+                inputs.thickness,
+            )
+        };
+        let Some(ribbon) = ribbon else {
+            // No silhouette edges (a face whose geometry this frame is degenerate,
+            // or one that is not an indexed triangle list at all): leave whatever
+            // the overlay draws and try again next frame, as the reconciler does
+            // for a face whose mesh has not loaded.
+            continue;
+        };
+        match mesh {
+            // Written back into the mesh the overlay already draws, so a rebuild
+            // costs a vertex upload rather than an asset handle's whole lifecycle.
+            Some(handle) => {
+                if let Err(error) = meshes.insert(&handle.0, ribbon) {
+                    // Only reachable if the overlay's own handle has been
+                    // invalidated under it, which nothing here does; next frame's
+                    // "no mesh" test rebuilds it from scratch, so this state is
+                    // reported rather than silently carried.
+                    warn!("edit-selection: silhouette ribbon not stored: {error:?}");
+                    continue;
+                }
+            }
+            None => {
+                commands.entity(entity).insert(Mesh3d(meshes.add(ribbon)));
+            }
+        }
+        overlay.source = Some(inputs.source);
+        overlay.view = inputs.view;
+        overlay.thickness = inputs.thickness;
+        overlay.scale = inputs.scale;
+    }
+}
+
+/// What one face's silhouette is derived from this frame: the mesh it walks and
+/// the view it is walked for.
+#[derive(Clone, Copy, Debug)]
+struct SilhouetteInputs {
+    /// The face's mesh asset.
+    source: AssetId<Mesh>,
+    /// The camera, in the face mesh's own space.
+    view: Vec3,
+    /// The ribbon's width in metres — the reference's `silhouette_thickness`:
+    /// the view distance scaled by [`HIGHLIGHT_THICKNESS`] and by how far the
+    /// field of view is from the default, so it is a constant width on screen.
+    thickness: f32,
+    /// Metres per unit of the face mesh's own space, on each axis.
+    scale: Vec3,
+}
+
+impl SilhouetteInputs {
+    /// The inputs for `face` (drawing `mesh`) as seen from `eye` through a
+    /// vertical field of view of `fov` radians.
+    ///
+    /// The reference's matching special case for a **HUD** attachment — whose
+    /// geometry is drawn through an orthographic projection, so a view distance
+    /// means nothing for it and `renderOneSilhouette` substitutes the HUD zoom —
+    /// is not ported, because a HUD face cannot reach this: the world pick
+    /// excludes the HUD render layer outright ([`SelectPointer::pick_exclusions`]).
+    fn of(mesh: &Mesh3d, face: &GlobalTransform, eye: Vec3, fov: f32) -> Self {
+        let distance = eye.distance(face.translation());
+        Self {
+            source: mesh.0.id(),
+            view: face.affine().inverse().transform_point3(eye),
+            thickness: distance
+                * HIGHLIGHT_THICKNESS
+                * (fov / crate::viewer_camera::DEFAULT_FIELD_OF_VIEW),
+            scale: face.scale(),
+        }
+    }
+
+    /// How far past its rebuild thresholds the ribbon `overlay` holds has drifted
+    /// — `0.0` when it is still good, and larger the worse it is, so a budgeted
+    /// frame can spend itself on the worst first.
+    ///
+    /// The two drifts are measured against their own thresholds and the larger
+    /// wins, which is what makes them comparable: a turn of twice the angle
+    /// budget and an approach of twice the width budget are equally overdue.
+    fn staleness(&self, overlay: &SilhouetteOverlay) -> f32 {
+        let turn = overlay
+            .view
+            .normalize_or_zero()
+            .dot(self.view.normalize_or_zero());
+        let turn = turn.clamp(-1.0, 1.0).acos() / SILHOUETTE_REBUILD_ANGLE;
+        let widest = self.thickness.abs().max(overlay.thickness.abs());
+        let width = if widest <= f32::EPSILON {
+            0.0
+        } else {
+            ((self.thickness - overlay.thickness).abs() / widest) / SILHOUETTE_REBUILD_WIDTH
+        };
+        let resized = if overlay.scale.distance(self.scale) > f32::EPSILON {
+            f32::INFINITY
+        } else {
+            0.0
+        };
+        let drift = turn.max(width).max(resized);
+        if drift > 1.0 { drift } else { 0.0 }
     }
 }
 
@@ -1188,7 +1418,8 @@ fn apply_drag_hover_highlight(
         }
     }
     // Spawn the missing ones (the same overlay the selection outline draws —
-    // a shell on a prim face, a wireframe on a mesh object's or a rigged one).
+    // a silhouette ribbon on a prim face, a wireframe on a mesh object's or a
+    // rigged one).
     for (face, outline) in desired {
         let Ok((mesh, skin)) = faces.get(face) else {
             continue;
@@ -1356,7 +1587,7 @@ fn merge_kind(
 /// route a click on a worn mesh to the attachment pies.
 ///
 /// A rigged face always wears the wireframe, so the object-kind and scale fields
-/// the shell path reads are not consulted for it.
+/// the silhouette path reads are not consulted for it.
 fn collect_worn_faces(
     objects: &HashMap<ScopedObjectId, HighlightKind>,
     worn: &WornFaceQuery,
@@ -1700,6 +1931,11 @@ mod tests {
     /// round power of two so a dropped factor cannot pass by luck.
     const HOLDER_SCALE: Vec3 = Vec3::new(6.0, 6.0, 6.0);
 
+    /// How far the fixture camera stands from the face, in metres. The silhouette
+    /// ribbon's width is a fraction of this, so it is far enough that the ribbon
+    /// is not a rounding error and near enough that it stays a rim.
+    const CAMERA_DISTANCE: f32 = 5.0;
+
     /// A scoped id for tests.
     fn scoped(id: u32) -> ScopedObjectId {
         ScopedObjectId {
@@ -1815,7 +2051,7 @@ mod tests {
     /// highlight reconcilers need: the app, the object's root, and its face.
     /// `skinned` gives the face the skin (and skin vertex attributes) a rigged one
     /// carries; `category` is the object's render kind, which decides between the
-    /// shell and the wireframe for an unrigged face.
+    /// silhouette ribbon and the wireframe for an unrigged face.
     ///
     /// The face hangs under a geometry holder carrying the object's Second Life
     /// scale, as the object builder spawns it — the shape the outline's lift reads
@@ -1829,7 +2065,14 @@ mod tests {
         use crate::world_api::EditToolState;
 
         let mut app = App::new();
-        app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()));
+        app.add_plugins((
+            TaskPoolPlugin::default(),
+            AssetPlugin::default(),
+            // The silhouette derivation reads the face's `GlobalTransform` (for
+            // the camera in its own space) and the camera's, so the fixture has
+            // to propagate transforms like the viewer does.
+            bevy::transform::TransformPlugin,
+        ));
         app.init_asset::<FaceMaterial>();
         app.init_asset::<Mesh>();
         app.init_asset::<SkinnedMeshInverseBindposes>();
@@ -1838,6 +2081,15 @@ mod tests {
             active: true,
             ..EditToolState::default()
         });
+        app.world_mut().spawn((
+            crate::world_api::ViewerCamera,
+            Transform::from_xyz(0.0, 0.0, CAMERA_DISTANCE),
+            GlobalTransform::from_xyz(0.0, 0.0, CAMERA_DISTANCE),
+            Projection::Perspective(bevy::camera::PerspectiveProjection {
+                fov: crate::viewer_camera::DEFAULT_FIELD_OF_VIEW,
+                ..bevy::camera::PerspectiveProjection::default()
+            }),
+        ));
 
         let mesh = app
             .world_mut()
@@ -1883,12 +2135,25 @@ mod tests {
 
     /// [`face_app`] with the object **selected** and the selection reconciler
     /// running: the app and the face.
+    ///
+    /// Two frames, because the silhouette derivation reads a `GlobalTransform`
+    /// that `TransformPlugin` computes in `PostUpdate`: the first frame spawns the
+    /// overlay against an identity transform, the second derives its ribbon
+    /// against the propagated one — the viewer's own steady state, where the
+    /// transform was propagated by the previous frame.
     fn selected_face_app(skinned: bool, category: ObjectCategory) -> (App, Entity) {
         let (mut app, root, face) = face_app(skinned, category);
-        app.add_systems(bevy::app::Update, super::apply_selection_highlight);
+        app.add_systems(
+            bevy::app::Update,
+            (
+                super::apply_selection_highlight,
+                super::update_selection_silhouettes,
+            ),
+        );
         let mut selection = SelectionSet::default();
         selection.insert(scoped(1), full(1), root);
         app.insert_resource(selection);
+        app.update();
         app.update();
         (app, face)
     }
@@ -2122,11 +2387,22 @@ mod tests {
         );
     }
 
-    /// A prim face wears the inverted-hull shell instead: its own mesh again,
-    /// inflated by the entity transform. Prims, sculpts, trees and grass are what
-    /// the reference leaves on the silhouette path.
+    /// A prim face wears the **silhouette ribbon** instead — prims, sculpts,
+    /// trees and grass are what the reference leaves on the silhouette path — and
+    /// the overlay adds no transform of its own, because the ribbon is built in
+    /// the face's own space.
+    ///
+    /// It also pins the shape of the ribbon the outline used to be: an
+    /// inverted-hull shell scaled 3.5 % about the entity origin, which on a
+    /// thin-walled prim moved one surface further out than the next one stood and
+    /// painted the whole prim white
+    /// (`viewer-outline-swallows-thin-hollow-prim`). Every ribbon vertex here
+    /// lies on the fixture triangle's own plane offset along its `+Z` normal, and
+    /// none of them is displaced sideways at all — which is the property that
+    /// makes that failure impossible rather than merely unlikely.
     #[test]
-    fn an_unrigged_face_wears_the_inflated_shell() {
+    fn an_unrigged_face_wears_the_silhouette_ribbon() {
+        use bevy::mesh::{Mesh, PrimitiveTopology, VertexAttributeValues};
         use bevy::prelude::*;
 
         let (mut app, face) = selected_face_app(false, ObjectCategory::Prim);
@@ -2140,15 +2416,54 @@ mod tests {
         let world = app.world();
         assert_eq!(
             world.get::<Transform>(overlay).map(Transform::to_matrix),
-            Some(Transform::from_scale(Vec3::splat(super::OUTLINE_INFLATE)).to_matrix()),
-            "the shell is the face's mesh pushed out by an entity scale"
+            Some(Transform::IDENTITY.to_matrix()),
+            "the ribbon is built in the face's own space, so the overlay adds no \
+             transform — the entity-scale inflate is what this replaces"
         );
         assert!(
             world
                 .get::<bevy::mesh::skinning::SkinnedMesh>(overlay)
                 .is_none(),
-            "an unrigged shell carries no skin"
+            "an unrigged outline carries no skin"
         );
+        let handle = world
+            .get::<Mesh3d>(overlay)
+            .expect("the derivation gave the overlay its ribbon");
+        let asset = world
+            .resource::<Assets<Mesh>>()
+            .get(&handle.0)
+            .expect("its mesh is loaded");
+        assert_eq!(
+            asset.primitive_topology(),
+            PrimitiveTopology::TriangleList,
+            "a silhouette edge is drawn as a quad, not a line"
+        );
+        let Some(VertexAttributeValues::Float32x3(positions)) =
+            asset.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("the ribbon carries positions");
+        };
+        // The fixture face is the triangle `(0,0,0) (1,0,0) (0,1,0)` with `+Z`
+        // normals: every ribbon vertex stands over one of those three corners.
+        let corners = [[0.0_f32, 0.0], [1.0, 0.0], [0.0, 1.0]];
+        for position in positions {
+            let (Some(&x), Some(&y), Some(&z)) =
+                (position.first(), position.get(1), position.get(2))
+            else {
+                panic!("a three-component position");
+            };
+            assert!(
+                corners.iter().any(|corner| corner
+                    .first()
+                    .is_some_and(|&cx| (cx - x).abs() < 1e-6)
+                    && corner.get(1).is_some_and(|&cy| (cy - y).abs() < 1e-6)),
+                "the ribbon moves along the normal only, never sideways: {position:?}"
+            );
+            assert!(
+                z > 0.0,
+                "and stands off the surface it outlines, not in it: {position:?}"
+            );
+        }
     }
 
     /// A rigged face wears a **wireframe** of its posed geometry instead: the

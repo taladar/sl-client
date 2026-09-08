@@ -9182,6 +9182,7 @@ dependencies = [
  "sl-viewer-ui-widgets",
  "sl-viewer-world-api",
  "sl-viewer-world-objects",
+ "sl-viewer-world-scene",
  "sl-viewer-world-view",
 ]
 

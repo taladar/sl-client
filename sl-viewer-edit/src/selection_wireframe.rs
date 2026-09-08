@@ -1,23 +1,23 @@
 //! The selection highlight a **mesh object's** face wears: a wireframe of its
 //! own geometry, posed with it when it is skinned.
 //!
-//! # Why a rigged face cannot wear the shell
+//! # Why a rigged face cannot wear the silhouette
 //!
-//! [`crate::edit_selection`]'s other highlight is an **inverted-hull shell**: a
-//! second draw of the face's mesh, front faces culled and pushed out by an entity
-//! `Transform` scale, so only the rim shows. Skinning defeats both halves of
-//! that:
+//! [`crate::edit_selection`]'s other highlight is the **silhouette ribbon**
+//! ([`crate::selection_silhouette`]): the face's view-dependent silhouette edges,
+//! each widened into a quad standing off the surface along its own normals.
+//! Which edges those are is a property of the geometry **as drawn**, and a rigged
+//! face's drawn geometry exists only in the GPU joint palette: the mesh asset
+//! holds the bind pose, so a ribbon derived from it would trace the silhouette of
+//! a T-posed limb and then skin that stale edge set onto the posed one. The
+//! reference solves this by re-skinning the volume on the CPU first
+//! (`updateRiggedVolume(true)`) — and then wireframes it anyway, because the
+//! split is by object kind (below) and every rigged face in this viewer belongs
+//! to a mesh object.
 //!
-//! - the shell shares the face's mesh asset, so Bevy specializes it into the
-//!   **skinned** pipeline (`is_skinned(layout)` — the mesh carries
-//!   `JOINT_INDEX` + `JOINT_WEIGHT`) while taking the bind group from the
-//!   *entity*. A shell without the skin is handed a model-only bind group, which
-//!   is a wgpu validation error the render layer quits the viewer on — the same
-//!   defect the waterline split had (`viewer-skinned-bind-group-quits-on-rez`);
-//! - and the inflate is an entity `Transform` scale, which a skinned draw
-//!   **ignores**: the vertices are placed from the joint palette, not from the
-//!   entity's model matrix. Even a correctly skinned shell would sit exactly on
-//!   the face rather than around it.
+//! A wireframe has no such problem: **every** edge is drawn, so there is nothing
+//! view-dependent to go stale, and the lines skin with the face because the
+//! derived mesh keeps the face's own joint attributes.
 //!
 //! # What the reference does
 //!
@@ -36,7 +36,8 @@
 //! object is wireframed exactly like an animesh, while prims, sculpts, trees and
 //! grass keep the silhouette path. This viewer's equivalent predicate is
 //! [`ObjectCategory::Mesh`](crate::objects::ObjectCategory::Mesh), and a rigged
-//! face is wireframed on top of that because the shell is impossible for it.
+//! face is wireframed on top of that because a bind-pose silhouette is the wrong
+//! edge set for it (above).
 //!
 //! So the faithful highlight for a mesh face is a wireframe, and that is what
 //! [`wireframe_mesh`] builds: the face's own mesh re-indexed as a
@@ -44,7 +45,8 @@
 //! attribute of the source — the skin weights included, so a rigged overlay skins
 //! with the face — with the positions lifted along their normals to win the depth
 //! test against the surface they outline (the port of the reference's polygon
-//! offset, and the one thing the entity-scale inflate can no longer do).
+//! offset, done in the geometry because a skinned draw places its vertices from
+//! the joint palette and ignores the entity transform entirely).
 //!
 //! Line **thickness** is not portable: `wgpu` has no line-width state, so the
 //! rim is one pixel where the reference's is five. That is the whole visual
@@ -176,23 +178,8 @@ fn lift_positions(source: &Mesh, wireframe: &mut Mesh, scale: Vec3) {
         return;
     };
     let lift = lift_distance(positions, scale);
-    let axes = scale.to_array();
     for (position, normal) in positions.iter_mut().zip(normals.iter()) {
-        // How far a local step of one normal carries in metres. A normal along a
-        // flattened axis is shortened by that axis's scale and a normal across it
-        // is not, so this is per-vertex rather than one factor for the mesh. Using
-        // the normal as stored (rather than a normalized copy) makes the division
-        // exact for any normal length. Component-wise, because the glam `Vec3`
-        // operators trip the workspace `arithmetic_side_effects` lint.
-        let mut stretch = 0.0_f32;
-        for axis in 0..3_usize {
-            let (Some(direction), Some(factor)) = (normal.get(axis), axes.get(axis)) else {
-                continue;
-            };
-            let scaled = direction * factor;
-            stretch = scaled.mul_add(scaled, stretch);
-        }
-        let stretch = stretch.sqrt();
+        let stretch = normal_stretch(*normal, scale);
         if stretch <= f32::EPSILON {
             continue;
         }
@@ -207,10 +194,39 @@ fn lift_positions(source: &Mesh, wireframe: &mut Mesh, scale: Vec3) {
     }
 }
 
+/// How far a local step of one `normal` carries **in metres** under `scale`
+/// (metres per mesh unit, per axis) — the divisor that turns a world distance
+/// along a normal into the local offset that draws as that distance.
+///
+/// A normal along a flattened axis is shortened by that axis's scale and a normal
+/// across it is not, so this is per-vertex rather than one factor for the mesh.
+/// Using the normal as stored (rather than a normalized copy) makes the division
+/// exact for any normal length. Component-wise, because the glam [`Vec3`]
+/// operators trip the workspace `arithmetic_side_effects` lint.
+///
+/// Shared with [`crate::selection_silhouette`], whose ribbon stands off the
+/// surface by the same kind of world distance.
+pub(crate) fn normal_stretch(normal: [f32; 3], scale: Vec3) -> f32 {
+    let axes = scale.to_array();
+    let mut stretch = 0.0_f32;
+    for axis in 0..3_usize {
+        let (Some(direction), Some(factor)) = (normal.get(axis), axes.get(axis)) else {
+            continue;
+        };
+        let scaled = direction * factor;
+        stretch = scaled.mul_add(scaled, stretch);
+    }
+    stretch.sqrt()
+}
+
 /// How far to lift, in metres: [`LIFT_FRACTION`] of the bounding box's diagonal
 /// **as drawn** (the local extent stretched by `scale`), clamped to
 /// [`LIFT_MIN`]..=[`LIFT_MAX`].
-fn lift_distance(positions: &[[f32; 3]], scale: Vec3) -> f32 {
+///
+/// Shared with [`crate::selection_silhouette`]: a silhouette ribbon's inner edge
+/// lies on the surface it outlines and z-fights it for exactly the same reason a
+/// wireframe's lines do, so it starts at the same lift.
+pub(crate) fn lift_distance(positions: &[[f32; 3]], scale: Vec3) -> f32 {
     let mut min = [f32::MAX; 3];
     let mut max = [f32::MIN; 3];
     for position in positions {
