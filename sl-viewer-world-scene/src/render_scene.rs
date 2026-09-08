@@ -3946,6 +3946,13 @@ fn spawn_sea(
         // No water-exclusion mask in this offline scene: an all-white 1×1 placeholder
         // means "water everywhere" (the live viewer wires the real mask via a camera).
         exclusion_mask: assets.images.add(white_mask_image()),
+        // No scene-depth copy either: a fixture scene has no depth-copy pass to feed
+        // one. The 1×1 placeholder can never measure the same as the view being
+        // shaded, which is the shader's condition for reading it, so the refraction
+        // keeps every displaced sample here.
+        scene_depth: assets
+            .images
+            .add(crate::water_scene_depth::placeholder_scene_depth_image()),
     });
     // See `bevy_space`: `crate::water` builds in Bevy's frame at the world root.
     let space = commands

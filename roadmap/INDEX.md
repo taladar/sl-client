@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 322 |
 | blocked | 46 |
 | in-progress | 20 |
-| bugs | 62 |
-| done | 1026 |
+| bugs | 61 |
+| done | 1027 |
 | deferred | 25 |
 | wont-do | 14 |
 | **total** | **1616** |
@@ -1193,7 +1193,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (62)
+## bugs (61)
 
 ### viewer
 
@@ -1325,8 +1325,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   instead of the `Data` genome (fix landed, needs live verify)
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
-- [`viewer-water-refraction-smears-avatar-silhouette`](bugs/viewer-water-refraction-smears-avatar-silhouette.md)
-  — Water behind an avatar smears a skin-coloured fringe around its silhouette
 
 ### test
 
@@ -1344,7 +1342,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1026)
+## done (1027)
 
 ### protocol
 
@@ -2872,6 +2870,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-audio-backend` (done))
 - [`viewer-water-exclusion`](done/viewer-water-exclusion.md) — Water-exclusion
   surfaces (invisiprim successor)
+- [`viewer-water-refraction-smears-avatar-silhouette`](done/viewer-water-refraction-smears-avatar-silhouette.md)
+  — Water behind an avatar smears a skin-coloured fringe around its silhouette
 - [`viewer-water-surface-alpha-not-refraction`](done/viewer-water-surface-alpha-not-refraction.md)
   — The water surface fakes refraction with alpha, so the sea cannot match the
   reference

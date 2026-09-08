@@ -3,11 +3,13 @@
 // `LLDrawPoolWater`) onto a flat horizontal plane at the region water height.
 //
 // The reference is a deferred-pipeline shader that reads the screen colour /
-// depth buffers for real refraction and reflection probes for reflection; the
-// headless viewer has neither, so this evaluates the parts that do not need the
-// G-buffer — the scrolling wave normals, the fresnel term, a sky-tinted
-// reflection, the water fog (deep-water) tint, and a sun specular highlight —
-// exactly the P23.1 scope ("fresnel, reflection tint, scrolling wave normals").
+// depth buffers for real refraction and reflection probes for reflection. This
+// port has all three: Bevy's `view_transmission_texture` is the screen copy,
+// `scene_depth_texture` is the depth buffer that copy was taken with (so a
+// refraction sample lying in front of the surface can be rejected, as the
+// reference rejects it), and the reflection comes off the view's reflection probe
+// — on top of the parts that need no G-buffer at all: the scrolling wave normals,
+// the fresnel term, the water fog (deep-water) tint, and a sun specular highlight.
 //
 // The wave texcoords and normal-map blend follow `waterV.glsl` /
 // `generateWaveNormals`; the fresnel follows `calculateFresnelFactors`. The
@@ -21,8 +23,16 @@
 #import bevy_pbr::{
     mesh_functions,
     mesh_view_bindings as view_bindings,
+    view_transformations::depth_ndc_to_view_z,
     view_transformations::position_world_to_clip,
 }
+
+// How far *in front of* the water surface a refraction sample may sit before it is
+// rejected: the reference's `0.05` metre slack in
+// `if (pos.z < refPos.z - 0.05) distort2 = distort;`
+// (`class3/environment/waterF.glsl`). View-space metres, so the comparison is made
+// in linear view Z rather than in non-linear depth.
+const REFRACTION_REJECT_SLACK: f32 = 0.05;
 
 // Rotate a direction by a quaternion — the reflection-probe view rotation applied
 // to an environment-map sample direction (a local copy of the reference
@@ -83,6 +93,14 @@ struct WaterParams {
 // `exclusionTex`, `class3/environment/waterF.glsl`).
 @group(#{MATERIAL_BIND_GROUP}) @binding(5) var exclusion_texture: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(6) var exclusion_sampler: sampler;
+// The opaque scene depth the refraction rejects against (the reference's
+// `depthMap`): a copy of this view's depth buffer taken at the same point in the
+// frame as the screen copy `view_transmission_texture` holds. Multisampled to match
+// the main view's 4x depth texture, and read with `textureLoad` — a depth buffer has
+// no meaningful filtered sample. A material bind group is shared by every view, so
+// the fragment shader checks that this depth measures the same as the view it is
+// shading before believing a word of it.
+@group(#{MATERIAL_BIND_GROUP}) @binding(7) var scene_depth_texture: texture_depth_multisampled_2d;
 
 struct Vertex {
     @builtin(instance_index) instance_index: u32,
@@ -259,11 +277,48 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // horizontal pair is what displaces it, which in Bevy's frame is (x, z).
     let dmod = max(sqrt(distance(in.world_position, view_bindings::view.world_position)), 1.0);
     let waver = wavef * 3.0;
-    let distort = clamp(
+    var distort = clamp(
         screen_uv + vec2<f32>(waver.x, waver.z) * water.ref_scale / dmod * 2.0,
         vec2<f32>(0.0),
         vec2<f32>(0.999),
     );
+    // A screen-space refraction can displace the sample onto a texel that is not
+    // behind the water at all: the screen copy holds the whole opaque scene, so a
+    // fragment just outside an avatar's silhouette reaches *into* it and paints the
+    // avatar's colour onto the sea
+    // (`viewer-water-refraction-smears-avatar-silhouette`). The reference rejects
+    // that sample by depth and uses the undistorted one instead:
+    //
+    //     depth  = texture(depthMap, distort2).r;
+    //     refPos = getPositionWithNDC(vec3(distort2 * 2.0 - vec2(1.0), depth * 2.0 - 1.0));
+    //     if (pos.z < refPos.z - 0.05) { distort2 = distort; }
+    //
+    // Its view space has -Z forward, so `pos.z < refPos.z` reads "the surface is
+    // further away than what I sampled" — the sampled texel is in front of the
+    // water. `depth_ndc_to_view_z` gives the same signed view Z here.
+    //
+    // The bound depth is only *this* view's when it measures the same as this view
+    // does. It does not for a view the copy pass does not serve (a reflection-probe
+    // capture, an offline fixture scene wearing the 1x1 placeholder) or for a frame
+    // in the middle of a window resize — and reading a foreign or never-written
+    // depth buffer would reject samples at random. So the size is the gate, and
+    // failing it costs only the rejection, never a wrong pixel.
+    let depth_size = vec2<f32>(textureDimensions(scene_depth_texture));
+    if (all(depth_size == viewport.zw)) {
+        let depth_texel = vec2<i32>(distort * viewport.zw + viewport.xy);
+        let ref_ndc_depth = textureLoad(scene_depth_texture, depth_texel, 0);
+        // Reverse-Z, so a *greater* depth is nearer. Testing that first keeps the
+        // linearisation off the far plane, whose depth is 0 and whose view Z is
+        // therefore an infinity; and it costs nothing, since the metre comparison
+        // below is the strictly stronger one.
+        if (ref_ndc_depth > in.clip_position.z) {
+            let ref_view_z = depth_ndc_to_view_z(ref_ndc_depth);
+            let surface_view_z = depth_ndc_to_view_z(in.clip_position.z);
+            if (surface_view_z < ref_view_z - REFRACTION_REJECT_SLACK) {
+                distort = screen_uv;
+            }
+        }
+    }
     let fb = textureSampleLevel(
         view_bindings::view_transmission_texture,
         view_bindings::view_transmission_sampler,

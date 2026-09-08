@@ -353,6 +353,7 @@ pub(crate) use sl_viewer_world_scene::underwater_fog;
 pub(crate) use sl_viewer_world_scene::viewer_camera;
 pub(crate) use sl_viewer_world_scene::water;
 pub(crate) use sl_viewer_world_scene::water_exclusion;
+pub(crate) use sl_viewer_world_scene::water_scene_depth;
 mod web_floater;
 pub(crate) use sl_viewer_audio::world_sounds;
 pub(crate) use sl_viewer_map::world_map;

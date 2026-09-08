@@ -180,6 +180,21 @@ impl WaterState {
     pub(crate) const fn material(&self) -> &Handle<WaterMaterial> {
         &self.material
     }
+
+    /// A state carrying nothing but `material`, for a sibling module's tests: the
+    /// screen-space passes that bind into the shared water material reach it only
+    /// through [`WaterState`], and building a real one would need the whole
+    /// environment / mesh / region-height setup they have no use for.
+    #[cfg(test)]
+    pub(crate) fn material_only(material: Handle<WaterMaterial>) -> Self {
+        Self {
+            material,
+            cell_mesh: Handle::default(),
+            cells: HashMap::new(),
+            region_heights: HashMap::new(),
+            normal_key: None,
+        }
+    }
 }
 
 impl crate::world_api::world_scoped::WorldScoped for WaterState {
@@ -233,6 +248,11 @@ pub(crate) fn setup_water(
         // pass ([`crate::water_exclusion`]) swaps in its real screen-space mask, so
         // the sea is unaffected until an exclusion surface is in view.
         exclusion_mask: images.add(white_mask_image()),
+        // A 1×1 placeholder depth buffer until [`crate::water_scene_depth`] sizes
+        // the real one to the view. The shader reads the bound depth only when it
+        // measures the same as the view being shaded, so a 1×1 one rejects no
+        // refraction sample.
+        scene_depth: images.add(crate::water_scene_depth::placeholder_scene_depth_image()),
     });
 
     // No sea is spawned here: `drive_water` builds the grid on the first frame it

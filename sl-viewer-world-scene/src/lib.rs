@@ -66,3 +66,4 @@ pub mod viewer_camera;
 pub mod water;
 pub mod water_clip;
 pub mod water_exclusion;
+pub mod water_scene_depth;

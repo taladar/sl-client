@@ -253,11 +253,13 @@ impl Plugin for ViewerRenderPlugins {
             // The scene layer's own stacks, each scheduling itself against the world
             // phases rather than being wired system-by-system here: the sky dome with
             // its discs, clouds and stars; the endless ocean; the water-exclusion mask;
-            // the CPU particle simulation; and the local-light budget.
+            // the scene-depth copy the water's refraction rejects against; the CPU
+            // particle simulation; and the local-light budget.
             app.add_plugins((
                 crate::sky::SkyPlugin,
                 crate::water::WaterPlugin,
                 crate::water_exclusion::WaterExclusionPlugin,
+                crate::water_scene_depth::WaterSceneDepthPlugin,
                 crate::particles::ParticlesPlugin,
                 crate::lights::LocalLightsPlugin,
             ));

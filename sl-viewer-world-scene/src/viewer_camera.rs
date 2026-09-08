@@ -19,6 +19,7 @@ use crate::exposure::SlExposure;
 use crate::glow::SlGlow;
 use crate::tonemap::SlTonemap;
 use crate::underwater_fog::UnderwaterFog;
+use crate::water_scene_depth::WaterSceneDepthView;
 use sl_viewer_world_api::ViewerCamera;
 
 /// The reference viewer's default vertical field of view, in radians
@@ -99,12 +100,17 @@ pub fn viewer_projection() -> PerspectiveProjection {
 pub fn viewer_camera_bundle(transform: Transform) -> impl Bundle {
     (
         // The underwater-fog post-process (P23.1) samples the scene depth, so make
-        // the main-pass depth texture readable (`TEXTURE_BINDING`). MSAA is pinned
-        // to 4× (the default) so that depth texture is multisampled to match the
-        // fog pass's `texture_depth_2d_multisampled` binding.
+        // the main-pass depth texture readable (`TEXTURE_BINDING`), and the water's
+        // refraction reads a *copy* of it taken mid-frame
+        // ([`crate::water_scene_depth`]), so it must also be copyable (`COPY_SRC` —
+        // Bevy only adds that itself for a camera carrying a `DepthPrepass`, which
+        // this one deliberately does not). MSAA is pinned to 4× (the default) so
+        // that depth texture is multisampled to match the fog pass's
+        // `texture_depth_2d_multisampled` binding and the water's own.
         Camera3d {
             depth_texture_usages: (TextureUsages::RENDER_ATTACHMENT
-                | TextureUsages::TEXTURE_BINDING)
+                | TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_SRC)
                 .into(),
             ..default()
         },
@@ -177,6 +183,10 @@ pub fn viewer_camera_bundle(transform: Transform) -> impl Bundle {
         // The `UnderwaterFog` component both carries the per-frame fog parameters
         // and selects this camera for the fog pass.
         UnderwaterFog::default(),
+        // Selects this camera as the one whose depth the water's refraction reads:
+        // the copy pass serves exactly one view, and a reflection-probe capture
+        // (which renders water too) must not overwrite it.
+        WaterSceneDepthView,
     )
 }
 

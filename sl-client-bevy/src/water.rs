@@ -15,11 +15,17 @@
 //! specular per fragment.
 //!
 //! The reference is a deferred shader reading the screen colour / depth buffers
-//! for refraction and reflection probes for reflection; the headless viewer has
-//! neither, so the port covers exactly the P23.1 scope (fresnel, reflection tint,
-//! scrolling wave normals) and approximates refraction with the fog-tinted
-//! deep-water colour and reflection with a sky tint. Per the reference
-//! `LLDrawPoolWater::render`, the water **colour / waves / fresnel are region-wide**
+//! for refraction and reflection probes for reflection. This port has all three:
+//! Bevy's `view_transmission_texture` is the screen copy, the [`scene_depth`]
+//! field is the depth buffer that copy was taken with (which is what lets the
+//! refraction reject a sample lying *in front of* the surface), and the reflection
+//! comes off the view's reflection probe, falling back to a sky tint when none is
+//! bound.
+//!
+//! [`scene_depth`]: WaterMaterial::scene_depth
+//!
+//! Per the reference `LLDrawPoolWater::render`, the water **colour / waves /
+//! fresnel are region-wide**
 //! (a single `getCurrentWater()` binds the whole water pass); only the water
 //! **height** varies per region, which the viewer handles by placing each region's
 //! plane at its own height.
@@ -129,6 +135,27 @@ pub struct WaterMaterial {
     #[texture(5)]
     #[sampler(6)]
     pub exclusion_mask: Handle<Image>,
+    /// The **opaque scene depth** behind the water (the reference's `depthMap`): a
+    /// copy of the view's depth buffer taken at the same moment as the screen copy
+    /// the refraction samples, so the shader can tell whether the texel a wave
+    /// displaces it onto is actually *behind* the surface.
+    ///
+    /// Without it a water fragment beside an avatar's silhouette samples a texel
+    /// from *inside* it and paints the avatar's colour onto the sea — the
+    /// screen-space-refraction fringe of
+    /// `viewer-water-refraction-smears-avatar-silhouette`. The reference rejects it
+    /// (`class3/environment/waterF.glsl`: `if (pos.z < refPos.z - 0.05) distort2 =
+    /// distort;`) and falls back to the undistorted one.
+    ///
+    /// Multisampled `Depth32Float`, matching the main view's 4× depth texture, and
+    /// read with `textureLoad` (no sampler): a depth buffer has no meaningful
+    /// filtered sample. A `1×1` placeholder until the viewer's copy pass wires the
+    /// real one in — and since a material bind group is shared by every view, the
+    /// shader reads the depth only when it measures the same as the view being
+    /// shaded, so the placeholder (and a probe capture's foreign view) rejects
+    /// nothing and the sea looks exactly as it did before the depth existed.
+    #[texture(7, sample_type = "depth", multisampled = true)]
+    pub scene_depth: Handle<Image>,
 }
 
 impl Material for WaterMaterial {
