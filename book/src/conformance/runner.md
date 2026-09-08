@@ -175,11 +175,14 @@ two shapes worth copying:
   one and `item-created-with-asset` on the other, and both answers are worth
   having. `run_offline_case` runs such a case once per flavour, under its one
   name, and a failure says which flavour failed.
+- `economy-data` names both for a related reason: the two grids' price lists
+  differ in twelve of seventeen fields, so the case compares the whole reply
+  against the flavour's own list. That is what makes "a fake grid quotes the
+  grid it says it is" a test rather than a claim in a doc comment.
 
-What the flavour decides so far is a taken object's asset and whether the login
-response is trimmed to the request's `options`; what it does not yet decide, and
-why, is [audited in the fake grid's own
-docs](../tools/fake-grid.md#which-grid-the-fake-one-is).
+What the flavour decides — a taken object's asset, the login response's
+`options` handling, the price list, and six more — is [audited in the fake
+grid's own docs](../tools/fake-grid.md#which-grid-the-fake-one-is).
 
 ## The aditi cooldown
 

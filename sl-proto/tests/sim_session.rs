@@ -2112,7 +2112,7 @@ mod test {
             price_object_rent: 8.0,
             price_object_scale_factor: 10.0,
             price_parcel_rent: LindenAmount(9),
-            price_group_create: LindenAmount(100),
+            price_group_create: Some(LindenAmount(100)),
         };
         sim.send_economy_data(&economy, now)?;
         let (serial, worn) = sim.agent_wearables();

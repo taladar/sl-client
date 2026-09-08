@@ -1323,7 +1323,7 @@ pub(crate) fn economy_data(
         price_object_rent: info.price_object_rent,
         price_object_scale_factor: info.price_object_scale_factor,
         price_parcel_rent: linden_from_wire("PriceParcelRent", info.price_parcel_rent)?,
-        price_group_create: linden_from_wire("PriceGroupCreate", info.price_group_create)?,
+        price_group_create: crate::types::unpriced_linden_from_wire(info.price_group_create),
     })
 }
 

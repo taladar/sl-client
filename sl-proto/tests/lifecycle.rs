@@ -12849,6 +12849,65 @@ mod test {
         assert_eq!(economy.price_upload, LindenAmount(0));
         assert_eq!(economy.price_energy_unit, LindenAmount(100));
         assert_eq!(economy.teleport_min_price, LindenAmount(2));
+        assert_eq!(economy.price_group_create, Some(LindenAmount(0)));
+        Ok(())
+    }
+
+    /// A stock OpenSim region quotes no group-creation price, and says so by
+    /// sending `-1`. That is the one negative amount this reply is allowed to
+    /// carry: `PriceGroupCreate` is both initialised and config-defaulted to
+    /// `-1` by `SampleMoneyModule`, and the reference viewer's own
+    /// `LLBaseEconomy` uses the same sentinel.
+    ///
+    /// The check that matters is not the `None` — it is that **the other
+    /// sixteen fields still arrive**. Decoding this field as strictly as the
+    /// rest rejected the whole message, so a viewer against an unconfigured
+    /// OpenSim grid learned no price at all rather than fifteen prices and one
+    /// blank.
+    #[test]
+    fn a_grid_that_quotes_no_group_price_still_delivers_the_rest() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let data = AnyMessage::EconomyData(EconomyData {
+            info: EconomyDataInfoBlock {
+                object_capacity: 15000,
+                object_count: 0,
+                price_energy_unit: 0,
+                price_object_claim: 0,
+                price_public_object_decay: 4,
+                price_public_object_delete: 0,
+                price_parcel_claim: 0,
+                price_parcel_claim_factor: 1.0,
+                price_upload: 0,
+                price_rent_light: 0,
+                teleport_min_price: 0,
+                teleport_price_exponent: 2.0,
+                energy_efficiency: 1.0,
+                price_object_rent: 0.0,
+                price_object_scale_factor: 10.0,
+                price_parcel_rent: 0,
+                price_group_create: -1,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&data, 9, true)?, now)?;
+
+        let economy = drain_events(&mut session)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::EconomyData(data) => Some(data),
+                _ => None,
+            })
+            .ok_or("expected an EconomyData event")?;
+        assert_eq!(economy.price_group_create, None);
+        assert_eq!(economy.object_capacity, LandImpact(15000));
+        assert_eq!(economy.price_public_object_decay, LindenAmount(4));
+        assert_eq!(
+            economy.price_object_scale_factor.to_bits(),
+            10.0_f32.to_bits()
+        );
         Ok(())
     }
 

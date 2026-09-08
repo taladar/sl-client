@@ -565,7 +565,7 @@ impl GridCore {
                 .join(&format!("sim/{}/appearance/", prepared.seq))
                 .ok();
         }
-        success.currency = Some(self.economy.currency_symbol.clone());
+        success.currency.clone_from(&self.economy.currency_symbol);
         Ok((prepared, success))
     }
 
@@ -884,7 +884,11 @@ impl GridCore {
             mesh_upload_enabled: Some(true),
             open_sim_extras: self.open_sim_extras.then(|| OpenSimExtras {
                 map_server_url: Some(self.login_uri.clone()),
-                currency: Some(self.economy.currency_symbol.clone()),
+                // Stock OpenSim puts `currency-base-uri` in this block and no
+                // symbol beside it, so this follows the economy's own answer
+                // rather than forcing one: a grid that announces no symbol
+                // announces none here either.
+                currency: self.economy.currency_symbol.clone(),
                 currency_base_uri: Some(self.login_uri.clone()),
                 say_range: Some(20),
                 shout_range: Some(100),
@@ -1045,8 +1049,9 @@ pub struct FakeGridBuilder {
     http_port: u16,
     /// The grid's self-description.
     identity: GridIdentity,
-    /// The economy helper policy.
-    economy: EconomyConfig,
+    /// The economy helper policy and price list, or `None` to follow
+    /// [`imitates`](Self::imitates).
+    economy: Option<EconomyConfig>,
     /// The live grid this one imitates, which every knob below that is `None`
     /// takes its answer from ([`ImitatedGrid`]).
     imitates: ImitatedGrid,
@@ -1159,7 +1164,7 @@ impl FakeGridBuilder {
             handover_timeout: None,
             http_port: 0,
             identity: GridIdentity::default(),
-            economy: EconomyConfig::default(),
+            economy: None,
             imitates: ImitatedGrid::default(),
             object_assets: None,
             honor_options: None,
@@ -1287,11 +1292,21 @@ impl FakeGridBuilder {
         self
     }
 
-    /// Sets the economy helper policy (currency symbol, price, site state,
-    /// upgrade requirements, confirm token).
+    /// Overrides the economy helper policy (currency symbol, L$ rate, site
+    /// state, upgrade requirements, confirm token) **and the simulator's price
+    /// list**, which otherwise follows [`imitates`](Self::imitates).
+    ///
+    /// The two travel together because they are one
+    /// [`EconomyConfig`], so setting this replaces the
+    /// flavour's prices as well. To change only the helper half, build from
+    /// [`EconomyConfig::for_grid`](crate::EconomyConfig::for_grid) with the
+    /// same flavour rather than from
+    /// [`EconomyConfig::default`](crate::EconomyConfig::default) — the default
+    /// is Second Life's, so `..Default::default()` on an OpenSim-flavoured grid
+    /// would quietly hand it Second Life's prices.
     #[must_use]
     pub fn economy(mut self, economy: EconomyConfig) -> Self {
-        self.economy = economy;
+        self.economy = Some(economy);
         self
     }
 
@@ -1474,7 +1489,9 @@ impl FakeGridBuilder {
             login_uri,
             identity: self.identity,
             grid_info,
-            economy: self.economy,
+            economy: self
+                .economy
+                .unwrap_or_else(|| EconomyConfig::for_grid(self.imitates)),
             legacy_udp_inventory: self
                 .legacy_udp_inventory
                 .unwrap_or_else(|| self.imitates.legacy_udp_inventory()),

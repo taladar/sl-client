@@ -5879,9 +5879,9 @@ impl SimSession {
                 price_object_rent: economy.price_object_rent,
                 price_object_scale_factor: economy.price_object_scale_factor,
                 price_parcel_rent: linden_to_wire("PriceParcelRent", &economy.price_parcel_rent)?,
-                price_group_create: linden_to_wire(
+                price_group_create: crate::types::unpriced_linden_to_wire(
                     "PriceGroupCreate",
-                    &economy.price_group_create,
+                    economy.price_group_create.as_ref(),
                 )?,
             },
         });

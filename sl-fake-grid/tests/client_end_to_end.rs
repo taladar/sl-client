@@ -1079,7 +1079,15 @@ mod test {
             .ok_or("an OpenSim-flavoured grid sent no OpenSimExtras")?;
         assert_eq!(extras.map_server_url.as_ref(), Some(&login_uri));
         assert_eq!(extras.currency_base_uri.as_ref(), Some(&login_uri));
-        assert_eq!(extras.currency.as_deref(), Some("L$"));
+        // The helper *base* is here; the currency **symbol** is not, and that is
+        // the shape of a stock OpenSim region rather than an omission. Its
+        // extras block carries `currency-base-uri` alone, and its login service
+        // emits `currency` only `if (currency != String.Empty)` — the default
+        // being empty. So a viewer against a grid nobody configured falls back
+        // to its own symbol (`OS$` in Firestorm), and asserting `L$` here, as
+        // this test did until the flavour decided the symbol, was asserting a
+        // Second Life answer from an OpenSim-flavoured grid.
+        assert_eq!(extras.currency, None);
         assert_eq!(features.voice_server_type, None);
         assert!(!named_a_backend, "OpenSim sends no RequiredVoiceVersion");
 

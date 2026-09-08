@@ -218,6 +218,25 @@ pub struct EconomyData {
     pub price_object_scale_factor: f32,
     /// Weekly parcel-rent price.
     pub price_parcel_rent: LindenAmount,
-    /// Price to create a group.
-    pub price_group_create: LindenAmount,
+    /// Price to create a group, or `None` when the grid stated no price.
+    ///
+    /// The only field of this reply measured arriving negative: a stock OpenSim
+    /// region sends `-1` (its `SampleMoneyModule`'s default), so `None` is what
+    /// a viewer against an unconfigured OpenSim grid gets. Second Life sends
+    /// L$ 100 (aditi, measured 2026-09-08).
+    ///
+    /// **`None` is "unknown", not "free".** `-1` is the reference viewer's own
+    /// pre-reply initialiser for every price in `LLBaseEconomy`, and it reached
+    /// OpenSim's config default from there; a grid that genuinely charges
+    /// nothing has `0` to say so with, which is what all fourteen sibling
+    /// prices use. Treating `None` as free would be reading intent into a
+    /// leaked sentinel.
+    ///
+    /// Nothing spends this field on either side. OpenSim charges group creation
+    /// from `IMoneyModule.GroupCreationCharge` (hard-coded `0` in
+    /// `SampleMoneyModule`), and the reference viewer prices it from the
+    /// account's benefits package (`LLAgentBenefits::createGroupCost`, which
+    /// answers `0` off Second Life) rather than from here. This is what the
+    /// *simulator* still sends, not what anyone is billed.
+    pub price_group_create: Option<LindenAmount>,
 }

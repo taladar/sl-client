@@ -618,14 +618,16 @@ per-behaviour setters still win where they are called; the flavour is what
 an unset knob falls back to, not a lock, which is what a test wanting one
 deliberate deviation needs. Each resolves once, in `start`.
 
-Seven behaviours follow it today: a taken object's asset, whether the
+Eight behaviours follow it today: a taken object's asset, whether the
 login response is trimmed to the request's `options` list (Second Life
 honours it, OpenSim sends every field regardless), whether
 `SimulatorFeatures` carries the `OpenSimExtras` block, which spatial-voice
-backend the regions run, the two halves of how inventory works, and who
-composites an avatar. The `SimulatorFeatures` pair is covered under "How a
-region introduces itself" below, the inventory pair under "How this grid
-does inventory", and the bakes under "Who bakes an avatar".
+backend the regions run, the two halves of how inventory works, who
+composites an avatar, and what the grid charges. The `SimulatorFeatures`
+pair is covered under "How a region introduces itself" below, the inventory
+pair under "How this grid does inventory", the bakes under "Who bakes an
+avatar", and the price list under "Policy: what the grid charges, permits
+and refuses".
 
 That second one is small and it immediately earned its keep. Turning it on
 by default broke a fake-grid end-to-end test that expected
@@ -635,10 +637,11 @@ and consumed a seventh, so against Second Life the grid's map-tile server
 URL would simply never have arrived. That is the entire point of a fake
 grid that commits to being one real grid.
 
-The divergences the flavour does **not** yet decide are audited in
-`imitates.rs` rather than left to be rediscovered, each with a roadmap item:
-the economy price list, and how an *upload*-created inventory item is
-announced.
+There is no longer a list of divergences the flavour does *not* decide:
+every one this crate has measured is derived from it, the economy price
+list having been the last one outstanding. `imitates.rs` keeps that audit,
+so a divergence taken one-sidedly in future has somewhere to be written
+down rather than rediscovered.
 
 ### Who bakes an avatar
 
@@ -774,8 +777,9 @@ extrapolated from the other rather than measured, and it cannot be measured
 the way the rest were: that capability accepts only the chargeable
 file-upload classes there — it answers a notecard with `Invalid asset
 type`, which is why `asset-upload` records `partial` on aditi — so reaching
-it costs an upload fee and needs the price list
-`test-fake-grid-imitates-economy` has yet to measure. The extrapolation is
+it costs an upload fee, and sending the right `expected_upload_cost` needed
+a price list. That list is now measured (L$ 10 an upload on aditi, above),
+so the run is unblocked rather than impossible. The extrapolation is
 a mild one: the message is the general-purpose legacy "here is an item you
 now have", the grid was measured sending exactly it for the neighbouring
 path, and Second Life keeping the push for a *rewritten* item while
@@ -817,6 +821,25 @@ block removes a duplicate, not a surface — which is what the assertions in
 `http_misc.rs`'s `grid_info_is_served_as_xml_and_xml_rpc` are there to keep
 true.
 
+The currency **symbol** is the exception, and it is a real divergence rather
+than a hole: stock OpenSim puts no symbol in *either* place. Its login
+service defaults `currency` to the empty string and emits the key only
+`if (currency != String.Empty)`, and its extras block carries
+`currency-base-uri` with no symbol beside it. So a viewer against a stock
+OpenSim grid falls back to its own default — `OS$` in Firestorm — while
+Second Life sends `L$` in the login response and has no extras block to
+copy it into. `ImitatedGrid::currency_symbol` follows that: `Some("L$")`
+against `None`.
+
+Modelling it as presence rather than as a second symbol is the point. On
+OpenSim the symbol is a *deployment's* choice, not the software's —
+`StandaloneCommon.ini` ships `Currency = ""` under "Ask co-operative
+viewers to use a different currency name", real grids do set it, and
+Firestorm carries a multi-currency subsystem that re-renders its UI when a
+region's extras override the symbol mid-session. A fake grid that picked
+one symbol for "OpenSim" would be modelling one deployment instead of the
+software, and would hide the fallback path a viewer actually takes.
+
 **Voice** (`FakeGridBuilder::voice_backend`).
 
 | | Second Life | OpenSim |
@@ -831,8 +854,8 @@ The OpenSim column is one decision, not four: with no backend installed
 every advertisement falls away on its own, and the provision refuses
 itself. That is what a *stock* OpenSim region is — both its voice modules
 (`VivoxVoiceModule`, `FreeSwitchVoiceModule`) are optional and off by
-default — and modelling the stock region is the same choice `stock_prices`
-makes for money.
+default — and modelling the stock region is the same choice
+`open_sim_prices` makes for money.
 
 It is also the only honest option here. Both OpenSim modules answer with
 the Vivox SIP account shape, and this workspace implements Vivox-shaped
@@ -1538,14 +1561,88 @@ statements about a region.
 
 `EconomyConfig` carries the whole money policy, both halves of it: the L$
 rate its web helper quotes over `currency.php` and the price list its
-simulator answers an `EconomyDataRequest` with (`EconomyConfig::prices`,
-defaulting to `stock_prices()`). One config, because a grid whose helper
-quoted one rate while its simulator quoted another is a grid no viewer can
-reconcile. Every L$ amount in the stock list is a **different** number,
-which stock OpenSim's are not (its `SampleMoneyModule` defaults every price
-to `0` and group creation to `-1`): with seventeen fields on one message, a
-reply of equal amounts cannot tell a test that the encoder wrote a price
-into the wrong slot.
+simulator answers an `EconomyDataRequest` with (`EconomyConfig::prices`).
+One config, because a grid whose helper quoted one rate while its simulator
+quoted another is a grid no viewer can reconcile.
+
+The price list follows the flavour (`ImitatedGrid::prices`,
+`EconomyConfig::for_grid`), and both columns are the real grid's rather
+than this crate's invention:
+
+| field | Second Life | stock OpenSim |
+| --- | --- | --- |
+| `object_capacity` | 20 000 LI | 15 000 LI |
+| `object_count` | 0 | 0 |
+| `price_energy_unit` | 100 | 0 |
+| `price_object_claim` | 10 | 0 |
+| `price_public_object_decay` | 4 | 4 |
+| `price_public_object_delete` | 4 | 0 |
+| `price_parcel_claim` | 1 | 0 |
+| `price_parcel_claim_factor` | 1.0 | 1.0 |
+| `price_upload` | 10 | 0 |
+| `price_rent_light` | 5 | 0 |
+| `teleport_min_price` | 2 | 0 |
+| `teleport_price_exponent` | 2.0 | 2.0 |
+| `energy_efficiency` | 1.0 | 1.0 |
+| `price_object_rent` | 1.0 | 0.0 |
+| `price_object_scale_factor` | 10.0 | 10.0 |
+| `price_parcel_rent` | 1 | 0 |
+| `price_group_create` | 100 | none stated (`-1`) |
+
+The Second Life column is one aditi run of the `economy-data` conformance
+case (2026-09-08), which records all seventeen fields for exactly this
+purpose. The OpenSim column is read off `SampleMoneyModule` — its field
+initialisers and its `[Economy]` config defaults — rather than measured,
+because the local OpenSim grid deliberately overrides `PriceUpload` and
+`PriceGroupCreate` in `bin/OpenSim.ini` so a live round trip is observable;
+its `economy-data` record therefore confirms fifteen of the seventeen and
+differs from stock in exactly those two.
+
+**The OpenSim column is not a table of zeroes**, and the five fields where
+the two grids still agree are the residue of a copy. OpenSim's money module
+once shipped a near-verbatim copy of a Linden simulator's price list: its
+pre-2018 defaults were `100`, `10`, `4`, `4`, `1`, `1.0`, `5`, `2`, `2.0`,
+`1`, `1.0`, `10`, `1` — thirteen of fifteen identical to what aditi
+answered in 2026, the exceptions being the upload charge (`0` against
+Second Life's L$ 10) and the group price. A 2018 commit then zeroed most of
+them "to no cost values, since that is our default", and what survived is
+exactly `PricePublicObjectDecay`, `PriceParcelClaimFactor`,
+`TeleportPriceExponent`, `EnergyEfficiency` and `PriceObjectScaleFactor`.
+The agreement is history, not policy.
+
+**One field arrives negative**, and it cost a decoder fix to model: a stock
+OpenSim region sends `-1` for `PriceGroupCreate`, which this workspace used
+to reject as an out-of-range L$ amount — dropping the whole reply, so a
+viewer against an unconfigured OpenSim grid learned no price at all rather
+than sixteen prices and one blank. `EconomyData::price_group_create` is an
+`Option<LindenAmount>` now, `None` for any negative. The other price fields
+keep the strict decode: no simulator has been measured sending a negative
+for one, so a negative there is still a malformed message worth dropping.
+
+**Read that `None` as "unknown", not as "free"** — the `-1` is not a
+considered sentinel and semantically it is nonsense as a price, since `0`
+was available and says exactly that. Three things explain it and none of
+them is intent. It is the value the reference viewer's own `LLBaseEconomy`
+initialises *every* price to before a reply arrives, meaning "not received
+yet", and it reached OpenSim's config default from there. It sits in a
+display-only field: OpenSim charges group creation from
+`IMoneyModule.GroupCreationCharge`, hard-coded `0` in `SampleMoneyModule`
+and guarded with `if (charge > 0)`, and never consults this number — while
+the modern reference viewer prices group creation from the account's
+benefits package (`create_group_cost`) rather than from this reply. And the
+2018 commit that set the field initialiser to `-1` is the one quoted above
+as setting "no cost values": it moved all fourteen sibling prices *to* `0`
+in the same breath. So the author meant free, and this is the single field
+that spells free differently from its neighbours.
+
+Because the two lists differ in twelve of seventeen fields, the
+`economy-data` case asserts the whole table field-for-field on both fake
+flavours. What that catches is a grid quoting the wrong grid — the wiring,
+not the codec. It is deliberately *not* a replacement for the
+encoder-slot check the synthetic all-distinct table used to provide: both
+sides of the comparison come from the same constant, and neither real list
+is all-distinct. That check stayed where it belongs, in `sl-proto`'s own
+`send_economy_data` round trip.
 
 `AgentPolicy` is the per-session half — what *this* agent may do:
 

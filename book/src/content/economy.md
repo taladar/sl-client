@@ -48,6 +48,22 @@ echoed back, and a fresh `Event::MoneyBalance` reflects the new balance.
 >   negative wire value (one no conforming simulator ever sends) rather than
 >   masking it to `0`, so a malformed price drops the message instead of being
 >   silently misread.
+> - **One exception**, and it is a measured one: `EconomyData`'s
+>   `price_group_create` is an `Option<LindenAmount>`, decoded with
+>   `unpriced_linden_from_wire`, because a stock OpenSim region really does
+>   send `-1` there — its `SampleMoneyModule` both initialises the price and
+>   reads its config key with `-1`. Decoding it as strictly as the rest
+>   rejected the whole reply, leaving a viewer against an unconfigured OpenSim
+>   grid with no economy data at all rather than with sixteen prices and one
+>   blank. Second Life sends L$ 100 there (aditi, measured 2026-09-08).
+> - **`None` there means "no price stated", not "free".** As a price `-1` is
+>   nonsense — `0` says free and every sibling OpenSim price uses it — and it
+>   is not a considered sentinel: it is the reference viewer's own "no reply
+>   yet" initialiser for every price in `LLBaseEconomy`, which reached
+>   OpenSim's config default from there. Nothing spends the field on either
+>   side. OpenSim charges group creation from `IMoneyModule.GroupCreationCharge`
+>   (hard-coded `0`), and the modern reference viewer prices it from the
+>   account's benefits package (`create_group_cost`, `0` off Second Life).
 > - The genuinely *signed* L$ fields — a group's current `balance` and the
 >   signed `amount` of a group-accounting detail line or transaction (a credit
 >   is positive, a debit negative) — use the dedicated `LindenBalance` type: a

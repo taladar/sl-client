@@ -22,10 +22,33 @@ why `asset-upload` records `partial` there — so reaching the completion at all
 means uploading a texture (or a sound, or an animation) and paying the grid's
 upload fee out of the test avatar's aditi balance. That in turn means sending
 the *right* `expected_upload_cost`, which the grid checks, and the price list
-is [[test-fake-grid-imitates-economy]]'s measurement to take.
+was [[test-fake-grid-imitates-economy]]'s measurement to take.
 
-So this is blocked on nothing in code and everything in ordering: it wants the
-economy measurement first, then one aditi run.
+**That measurement is now taken** (2026-09-08), but it is the wrong number to
+spend. Second Life answers `price_upload = 10` on aditi and
+`ImitatedGrid::prices` carries it — and on Second Life the reference viewer does
+not price uploads from that field at all. `LLAgentBenefits` reads
+`texture_upload_cost` out of the login response's
+`account_level_benefits`, and falls back to `EconomyData`'s
+`price_upload` only off Second Life. Worse for this item, the benefits package
+prices large textures separately: `large_texture_upload_cost` applies above
+`MIN_2K_TEXTURE_AREA` (1024×1024), which a single `price_upload` cannot express.
+
+So the ordering is satisfied in the sense that the legacy field is measured, but
+the `expected_upload_cost` this run has to send is the *benefits* figure, and
+nothing in this workspace decodes that yet —
+[[protocol-account-benefits-package]]. Two ways out, and the first is cheaper:
+
+- upload a **small** texture (≤ 1024×1024, well under the tier) and read the
+  cost from the login response's `account_level_benefits.texture_upload_cost`
+  directly out of the `Llsd` blob `sl-wire` already keeps, without waiting for
+  the typed decode; or
+- do [[protocol-account-benefits-package]] first and take the cost from typed
+  accessors.
+
+Either way, do not take it from `Event::EconomyData` or from
+`second_life_prices()`: the grid checks the value it is sent, and the field this
+task's sibling measured is the one Second Life stopped charging from.
 
 **The expected answer is "the same legacy push", and that is why this is a
 confirmation rather than an open question.** The message Second Life was

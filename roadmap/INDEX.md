@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 46 |
 | in-progress | 20 |
 | bugs | 63 |
-| done | 1027 |
+| done | 1028 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1618** |
+| **total** | **1619** |
 
 ## ideas (101)
 
@@ -244,6 +244,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### protocol
 
+- [`protocol-account-benefits-package`](ready/protocol-account-benefits-package.md)
+  — What an upload actually costs is in the benefits package nothing decodes
 - [`protocol-ais3-library-cap`](ready/protocol-ais3-library-cap.md) — An AIS3
   request for a library folder goes to the wrong capability
 - [`protocol-ais3-nested-embedded`](ready/protocol-ais3-nested-embedded.md) — An
@@ -977,8 +979,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
 - [`test-fake-grid-builtin-sounds`](ready/test-fake-grid-builtin-sounds.md) —
   The built-in UI sounds the viewer plays on arrival 404
-- [`test-fake-grid-imitates-economy`](ready/test-fake-grid-imitates-economy.md)
-  — The fake grid's money is a stock OpenSim region's on either flavour
 - [`test-fake-grid-imitates-sl-new-file-upload-announcement`](ready/test-fake-grid-imitates-sl-new-file-upload-announcement.md)
   — The one upload announcement Second Life would only tell us for money
 - [`test-fake-grid-login-matrix-and-timeouts`](ready/test-fake-grid-login-matrix-and-timeouts.md)
@@ -1346,7 +1346,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1027)
+## done (1028)
 
 ### protocol
 
@@ -3278,6 +3278,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Named scenarios and a fixed-port launcher for the fake grid
 - [`test-fake-grid-imitates-audit`](done/test-fake-grid-imitates-audit.md) — The
   fake grid was nobody in particular
+- [`test-fake-grid-imitates-economy`](done/test-fake-grid-imitates-economy.md) —
+  The fake grid's money is a stock OpenSim region's on either flavour
 - [`test-fake-grid-imitates-inventory-api`](done/test-fake-grid-imitates-inventory-api.md)
   — The fake grid is OpenSim about inventory whichever grid it says it is
 - [`test-fake-grid-imitates-server-bakes`](done/test-fake-grid-imitates-server-bakes.md)

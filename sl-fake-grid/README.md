@@ -240,7 +240,7 @@ default, and both answer with the Vivox SIP account shape — which this
 workspace implements nowhere, Second Life having moved to WebRTC. So there
 is no Vivox flavour to pick: a grid defaulting to one would be serving a
 path nothing here speaks. Modelling the stock region is the same choice
-`stock_prices` makes for money.
+`open_sim_prices` makes for money.
 
 ## A taken object's asset
 

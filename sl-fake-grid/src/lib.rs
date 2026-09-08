@@ -38,7 +38,7 @@ pub use agent_requests::AgentPolicy;
 pub use assets::ObjectAssetPolicy;
 pub use bakes::{BakePolicy, REGION_PROTOCOL_BAKES_ON_MESH, REGION_PROTOCOL_SERVER_BAKES};
 pub use crossing::CROSSING_ARRIVAL_TIMEOUT;
-pub use economy_policy::{EconomyConfig, EconomyEvent, stock_prices};
+pub use economy_policy::{EconomyConfig, EconomyEvent, open_sim_prices, second_life_prices};
 pub use error::Error;
 pub use estate::EstateFixture;
 pub use fixtures::{
