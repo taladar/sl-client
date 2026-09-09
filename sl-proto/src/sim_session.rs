@@ -1223,13 +1223,6 @@ pub enum ServerEvent {
     DetachObjects(Vec<RegionLocalObjectId>),
     /// The client dropped attachments onto the ground (`ObjectDrop`).
     DropAttachments(Vec<RegionLocalObjectId>),
-    /// The client took off a worn item by inventory id (`RemoveAttachment`).
-    RemoveAttachment {
-        /// The point the item was worn on.
-        attachment_point: AttachmentPoint,
-        /// The worn item's inventory item id.
-        item_id: Uuid,
-    },
     /// The client wore an inventory item as an attachment
     /// (`RezSingleAttachmentFromInv`).
     RezAttachment(Box<RezAttachment>),
@@ -9995,14 +9988,6 @@ impl SimSession {
                     .map(|object| RegionLocalObjectId(object.object_local_id))
                     .collect();
                 self.events.push_back(ServerEvent::DropAttachments(ids));
-            }
-            AnyMessage::RemoveAttachment(remove) => {
-                let (attachment_point, _add) =
-                    AttachmentPoint::split_code(remove.attachment_block.attachment_point);
-                self.events.push_back(ServerEvent::RemoveAttachment {
-                    attachment_point,
-                    item_id: remove.attachment_block.item_id,
-                });
             }
             AnyMessage::RezSingleAttachmentFromInv(rez) => {
                 let object = &rez.object_data;

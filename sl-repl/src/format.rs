@@ -709,7 +709,6 @@ const fn command_name(command: &Command) -> &'static str {
         Command::AttachObject { .. } => "attach_object",
         Command::DetachObjects { .. } => "detach_objects",
         Command::DropAttachments { .. } => "drop_attachments",
-        Command::RemoveAttachment { .. } => "remove_attachment",
         Command::RezAttachment(..) => "rez_attachment",
         Command::RezAttachments { .. } => "rez_attachments",
         Command::ViewerEffect(..) => "viewer_effect",

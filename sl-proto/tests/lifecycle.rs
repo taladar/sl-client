@@ -7343,27 +7343,6 @@ mod test {
     }
 
     #[test]
-    fn remove_attachment_encodes_item_and_point() -> Result<(), TestError> {
-        let now = Instant::now();
-        let mut session = established(now)?;
-        drain(&mut session)?;
-
-        let item = uuid::Uuid::from_u128(0xAA);
-        session.remove_attachment(AttachmentPoint::Skull, InventoryKey::from(item), now)?;
-        let sent = drain(&mut session)?;
-        let remove = sent
-            .iter()
-            .find_map(|m| match m {
-                AnyMessage::RemoveAttachment(remove) => Some(remove),
-                _ => None,
-            })
-            .ok_or("expected a RemoveAttachment")?;
-        assert_eq!(remove.attachment_block.attachment_point, 2); // Skull, no add flag
-        assert_eq!(remove.attachment_block.item_id, item);
-        Ok(())
-    }
-
-    #[test]
     fn rez_attachment_encodes_rez_single() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;

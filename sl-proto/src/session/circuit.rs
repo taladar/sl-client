@@ -180,7 +180,6 @@ use sl_wire::messages::{
     PlacesQueryQueryDataBlock, PlacesQueryTransactionDataBlock, PurgeInventoryDescendents,
     PurgeInventoryDescendentsAgentDataBlock, PurgeInventoryDescendentsInventoryDataBlock,
     RegionHandshakeReply, RegionHandshakeReplyAgentDataBlock, RegionHandshakeReplyRegionInfoBlock,
-    RemoveAttachment, RemoveAttachmentAgentDataBlock, RemoveAttachmentAttachmentBlockBlock,
     RemoveInventoryFolder, RemoveInventoryFolderAgentDataBlock,
     RemoveInventoryFolderFolderDataBlock, RemoveInventoryItem, RemoveInventoryItemAgentDataBlock,
     RemoveInventoryItemInventoryDataBlock, RemoveInventoryObjects,
@@ -2446,27 +2445,6 @@ impl Circuit {
                     object_local_id: object_local_id.0,
                 })
                 .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)
-    }
-
-    /// Queues a `RemoveAttachment` reliably, taking off the worn item `item_id`
-    /// (worn on `attachment_point`).
-    pub(crate) fn send_remove_attachment(
-        &mut self,
-        attachment_point: AttachmentPoint,
-        item_id: Uuid,
-        now: Instant,
-    ) -> Result<(), WireError> {
-        let message = AnyMessage::RemoveAttachment(RemoveAttachment {
-            agent_data: RemoveAttachmentAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-            },
-            attachment_block: RemoveAttachmentAttachmentBlockBlock {
-                attachment_point: attachment_point.to_code(),
-                item_id,
-            },
         });
         self.send(&message, Reliability::Reliable, now)
     }
@@ -5706,6 +5684,13 @@ impl Circuit {
 
     /// Queues a `DetachAttachmentIntoInv` reliably (detach the worn attachment
     /// `item_id` back into inventory).
+    ///
+    /// This is the *only* by-item-id detach a viewer may send. The template's
+    /// `RemoveAttachment` (Low 332) carries the same point-and-item pair, but
+    /// travels simulator → dataserver ("Simulator informs Dataserver that
+    /// attachment has been taken off", the counterpart of the `Trusted`
+    /// `UpdateAttachment` above it): no simulator handles it from a client, and
+    /// the reference viewer never sends it. It has no encoder here on purpose.
     pub(crate) fn send_detach_attachment_into_inv(
         &mut self,
         item_id: InventoryKey,

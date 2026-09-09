@@ -3017,12 +3017,6 @@ fn apply_command(
         Command::DropAttachments { local_ids } => {
             session.drop_attachments(local_ids, now)?;
         }
-        Command::RemoveAttachment {
-            attachment_point,
-            item_id,
-        } => {
-            session.remove_attachment(*attachment_point, *item_id, now)?;
-        }
         Command::RezAttachment(rez) => {
             session.rez_attachment(rez, now)?;
         }

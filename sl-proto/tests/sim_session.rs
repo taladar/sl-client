@@ -601,31 +601,6 @@ mod test {
     }
 
     #[test]
-    fn client_remove_attachment_reaches_simulator() -> Result<(), TestError> {
-        let now = Instant::now();
-        let (mut client, mut sim) = setup(now)?;
-        drain_server(&mut sim);
-
-        let item = uuid::Uuid::from_u128(0x5151);
-        client.remove_attachment(AttachmentPoint::Skull, InventoryKey::from(item), now)?;
-        pump(&mut client, &mut sim, now)?;
-
-        let events = drain_server(&mut sim);
-        let removed = events
-            .iter()
-            .find_map(|e| match e {
-                ServerEvent::RemoveAttachment {
-                    attachment_point,
-                    item_id,
-                } => Some((*attachment_point, *item_id)),
-                _ => None,
-            })
-            .ok_or("expected a RemoveAttachment server event")?;
-        assert_eq!(removed, (AttachmentPoint::Skull, item));
-        Ok(())
-    }
-
-    #[test]
     fn client_rez_attachments_round_trips() -> Result<(), TestError> {
         let now = Instant::now();
         let (mut client, mut sim) = setup(now)?;

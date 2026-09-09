@@ -5051,22 +5051,6 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
-            name: "remove_attachment",
-            usage: "<attachment_point> <item_id>",
-            build: |args, ctx| {
-                Ok(Command::RemoveAttachment {
-                    attachment_point: enum_arg(
-                        args,
-                        ctx,
-                        "attachment_point",
-                        0,
-                        parse_attachment_point,
-                    )?,
-                    item_id: InventoryKey::from(args.req_uuid(ctx, "item_id", 1)?),
-                })
-            },
-        },
-        CommandSpec {
             name: "rez_attachment",
             usage: "<item_id> <attachment_point> [owner_id=] [mode=add|replace] [name=] \
                     [description=]",

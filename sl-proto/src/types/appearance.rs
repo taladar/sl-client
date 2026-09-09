@@ -753,9 +753,8 @@ pub struct AvatarAttachment {
 /// hangs from (LL's attachment-point enumeration, mirroring the viewer's
 /// `avatar_lad.xml`). Carried by the attachment commands
 /// ([`Command::AttachObject`](crate::Command::AttachObject),
-/// [`Command::RezAttachment`](crate::Command::RezAttachment),
-/// [`Command::RemoveAttachment`](crate::Command::RemoveAttachment)) and the
-/// matching server events.
+/// [`Command::RezAttachment`](crate::Command::RezAttachment)) and the matching
+/// server events.
 ///
 /// On the wire the point shares a byte with an "add" flag (`ATTACHMENT_ADD`,
 /// `0x80`): when set, the object is *added* to the point alongside anything

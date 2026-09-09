@@ -1969,16 +1969,6 @@ pub enum Command {
         /// The attachments' region-local ids.
         local_ids: Vec<ScopedObjectId>,
     },
-    /// Remove (take off) an attachment by its inventory item id
-    /// (`RemoveAttachment`). Unlike [`Command::DetachObjects`] this names the
-    /// inventory item rather than the rezzed object's region-local id.
-    RemoveAttachment {
-        /// The attachment point the item is worn on (the simulator resolves the
-        /// item by id; [`AttachmentPoint::Default`] is accepted).
-        attachment_point: AttachmentPoint,
-        /// The worn item's inventory item id.
-        item_id: InventoryKey,
-    },
     /// Wear an inventory item as an attachment (`RezSingleAttachmentFromInv`):
     /// rez it directly onto the avatar from inventory. To attach an object that
     /// is already rezzed in-world, use [`Command::AttachObject`].
@@ -3107,7 +3097,6 @@ impl Command {
             Self::AttachObject { .. } => "AttachObject",
             Self::DetachObjects { .. } => "DetachObjects",
             Self::DropAttachments { .. } => "DropAttachments",
-            Self::RemoveAttachment { .. } => "RemoveAttachment",
             Self::RezAttachment(..) => "RezAttachment",
             Self::RezAttachments { .. } => "RezAttachments",
             Self::ViewerEffect(..) => "ViewerEffect",

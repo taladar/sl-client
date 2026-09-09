@@ -38,11 +38,8 @@ The client can:
   it). Both take a `RezAttachment` describing the item, owner, point and
   attachment mode.
 - **Detach back to inventory** by region-local id (`Command::DetachObjects`,
-  `ObjectDetach`) or by inventory item id (`Command::RemoveAttachment`,
-  `RemoveAttachment`, or the equivalent
-  `Command::DetachAttachmentIntoInventory`, `DetachAttachmentIntoInv` — a
-  distinct wire message the viewer also uses to detach a worn attachment into
-  inventory by its item id).
+  `ObjectDetach`) or by inventory item id
+  (`Command::DetachAttachmentIntoInventory`, `DetachAttachmentIntoInv`).
 - **Drop onto the ground** by region-local id (`Command::DropAttachments`,
   `ObjectDrop`): the object becomes an ordinary in-world prim at the avatar's
   location.
@@ -53,9 +50,32 @@ see, the attachment list inside `Event::AvatarAppearance`). When an object is
 attached the region also kills its in-world copy.
 
 The server side mirrors every inbound attachment message as a `ServerEvent`
-(`AttachObject`, `DetachObjects`, `DropAttachments`, `RemoveAttachment`,
-`RezAttachment`, `RezAttachments`, `DetachAttachmentIntoInventory`), so a
-simulator built on `SimSession` observes exactly what a client wears.
+(`AttachObject`, `DetachObjects`, `DropAttachments`, `RezAttachment`,
+`RezAttachments`, `DetachAttachmentIntoInventory`), so a simulator built on
+`SimSession` observes exactly what a client wears.
+
+## `RemoveAttachment` is not a viewer message
+
+`message_template.msg` carries a `RemoveAttachment` (Low 332) that takes an
+attachment point and an inventory item id, and it looks like the by-item-id
+detach — but it is **not one a viewer may send**. Its template comment reads
+"Simulator informs Dataserver that attachment has been taken off", the
+counterpart of the `UpdateAttachment` (Low 331) directly above it, which spells
+the direction out as "DO NOT ALLOW THIS FROM THE VIEWER". It travels
+simulator → dataserver, not viewer → simulator.
+
+Everything downstream agrees. OpenSim's `LLClientView` registers no handler for
+it (`RemoveAttachment` in that tree is an internal `ScenePresence` method, not a
+packet); the reference viewer never sends it — the name occurs only in the
+generated prehash table. Sending it live is silently dropped: four such packets
+were acknowledged with no error and all four attachments were still worn on the
+next login, while `DetachAttachmentIntoInv` detached the same four at once.
+
+So there is no client command, `Session` method or wire encoder for it here, and
+`SimSession` does not decode it either. To take off a worn item by its item id,
+use `Command::DetachAttachmentIntoInventory`; by region-local id, use
+`Command::DetachObjects`. The message stays in `sl-wire`, which mirrors the
+whole template.
 
 ---
 
@@ -67,16 +87,15 @@ simulator built on `SimSession` observes exactly what a client wears.
 >   `Keep`, the `RezAttachments` `FirstDetachAll` flag), and `RezAttachment`.
 >   The attachment list on `AvatarAppearance` uses `AvatarAttachment`.
 > - Commands `AttachObject`, `DetachObjects`, `DropAttachments`,
->   `RemoveAttachment`, `RezAttachment`, `RezAttachments`,
->   `DetachAttachmentIntoInventory`; the `Session` methods are `attach_object`,
->   `detach_objects`, `drop_attachments`, `remove_attachment`, `rez_attachment`,
->   `rez_attachments`, `detach_attachment_into_inventory` (the last takes the
->   attachment's `InventoryKey`); the wire encoders are `send_object_attach` /
->   `send_object_detach` / `send_object_drop` / `send_remove_attachment` /
->   `send_rez_single_attachment` / `send_rez_multiple_attachments` in
->   `sl-proto/src/session/circuit.rs`.
+>   `RezAttachment`, `RezAttachments`, `DetachAttachmentIntoInventory`; the
+>   `Session` methods are `attach_object`, `detach_objects`,
+>   `drop_attachments`, `rez_attachment`, `rez_attachments`,
+>   `detach_attachment_into_inventory` (the last takes the attachment's
+>   `InventoryKey`); the wire encoders are `send_object_attach` /
+>   `send_object_detach` / `send_object_drop` / `send_rez_single_attachment` /
+>   `send_rez_multiple_attachments` in `sl-proto/src/session/circuit.rs`.
 > - Server events of the same names are decoded in
 >   `sl-proto/src/sim_session.rs`.
 > - REPL commands `attach_object`, `detach_objects`, `drop_attachments`,
->   `remove_attachment`, `rez_attachment`, `rez_attachments` (attachment points
->   accept a name such as `righthand` or `hudtopright`, or a numeric code).
+>   `rez_attachment`, `rez_attachments` (attachment points accept a name such as
+>   `righthand` or `hudtopright`, or a numeric code).

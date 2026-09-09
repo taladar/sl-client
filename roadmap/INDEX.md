@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 323 |
 | blocked | 46 |
 | in-progress | 20 |
-| bugs | 58 |
-| done | 1037 |
+| bugs | 57 |
+| done | 1038 |
 | deferred | 25 |
 | wont-do | 16 |
 | **total** | **1627** |
@@ -1197,7 +1197,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (58)
+## bugs (57)
 
 ### viewer
 
@@ -1305,8 +1305,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A region push throws away the estate manager's unapplied edits
 - [`viewer-remote-parcel-id-uncorrelated`](bugs/viewer-remote-parcel-id-uncorrelated.md)
   — A resolved parcel id names no question, so two askers cannot be told apart
-- [`viewer-remove-attachment-message-is-a-no-op`](bugs/viewer-remove-attachment-message-is-a-no-op.md)
-  — '`Command::RemoveAttachment` sends a message no grid handles'
 - [`viewer-rigged-attachments-wearer-not-resolved`](bugs/viewer-rigged-attachments-wearer-not-resolved.md)
   — Worn rigged attachments (e.g. own shoes) don't render — wearer never
   resolved / too many rigged-pending objects
@@ -1339,7 +1337,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1037)
+## done (1038)
 
 ### protocol
 
@@ -2615,6 +2613,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-region-options-general`](done/viewer-region-options-general.md) —
   Region / Estate floater — region (general) tab (blocked by
   `viewer-region-options-debug` (done))
+- [`viewer-remove-attachment-message-is-a-no-op`](done/viewer-remove-attachment-message-is-a-no-op.md)
+  — '`Command::RemoveAttachment` sends a message no grid handles'
 - [`viewer-render-fixtures-vendored-assets`](done/viewer-render-fixtures-vendored-assets.md)
   — Render-tier avatar fixtures default to the vendored character assets
 - [`viewer-render-friends-only`](done/viewer-render-friends-only.md) — Show

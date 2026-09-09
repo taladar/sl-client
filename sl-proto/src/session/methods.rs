@@ -8823,25 +8823,6 @@ impl Session {
         Ok(())
     }
 
-    /// Removes (takes off) the worn item `item_id` via `RemoveAttachment`. Unlike
-    /// [`Session::detach_objects`] this names the inventory item, not the rezzed
-    /// object's region-local id.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
-    /// [`Error::Wire`] if the request fails to encode.
-    pub fn remove_attachment(
-        &mut self,
-        attachment_point: AttachmentPoint,
-        item_id: InventoryKey,
-        now: Instant,
-    ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_remove_attachment(attachment_point, item_id.uuid(), now)?;
-        Ok(())
-    }
-
     /// Wears the inventory item described by `rez` as an attachment via
     /// `RezSingleAttachmentFromInv`. To attach an object already rezzed in-world,
     /// use [`Session::attach_object`].

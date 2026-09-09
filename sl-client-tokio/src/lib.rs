@@ -1771,9 +1771,6 @@ impl Client {
                         Some(Command::DropAttachments { local_ids }) => {
                             self.session.drop_attachments(&local_ids, Instant::now())?;
                         }
-                        Some(Command::RemoveAttachment { attachment_point, item_id }) => {
-                            self.session.remove_attachment(attachment_point, item_id, Instant::now())?;
-                        }
                         Some(Command::RezAttachment(rez)) => {
                             self.session.rez_attachment(&rez, Instant::now())?;
                         }
