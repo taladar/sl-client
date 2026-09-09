@@ -282,6 +282,7 @@ const fn event_name(event: &Event) -> &'static str {
         Event::TeleportFailed { .. } => "teleport_failed",
         Event::TeleportFinished { .. } => "teleport_finished",
         Event::RegionChanged { .. } => "region_changed",
+        Event::AgentArrived { .. } => "agent_arrived",
         Event::ChatReceived(..) => "chat_received",
         Event::ChatTyping { .. } => "chat_typing",
         Event::InstantMessageReceived(..) => "instant_message_received",

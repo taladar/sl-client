@@ -36,6 +36,7 @@ pub(crate) use sl_viewer_world_objects::meshes;
 pub(crate) use sl_viewer_world_objects::objects;
 pub(crate) use sl_viewer_world_scene::water;
 
+pub mod arrival;
 pub mod camera;
 pub mod gpu_pick;
 pub mod harness_status;

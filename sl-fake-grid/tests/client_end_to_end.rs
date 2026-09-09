@@ -2365,13 +2365,21 @@ mod test {
                 },
             })
             .await?;
-        let position = running
+        let (position, look_at) = running
             .wait_for(|event| match event {
-                Event::TeleportLocal { position } => Some(*position),
+                Event::TeleportLocal { position, look_at } => Some((*position, look_at.clone())),
                 _ => None,
             })
             .await?;
         assert_eq!(position, RegionCoordinates::new(10.0, 20.0, 30.0));
+        // The arrival facing rides out with the landing position: a viewer applies
+        // it at once rather than waiting for the simulator to echo it back as an
+        // object update (viewer-arrival-orientation-snap).
+        assert_eq!(
+            (look_at.x, look_at.y, look_at.z),
+            (1.0, 0.0, 0.0),
+            "the requested look-at reaches the client's TeleportLocal event"
+        );
         assert!(!running.agent.is_closed());
         Ok(())
     }

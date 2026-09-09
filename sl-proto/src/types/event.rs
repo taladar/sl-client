@@ -373,6 +373,14 @@ pub enum Event {
     TeleportLocal {
         /// The region-local position the agent actually landed at.
         position: RegionCoordinates,
+        /// The horizontal direction the simulator turned the agent to face on
+        /// arrival (the `TeleportLocal` `Info.LookAt`), in the region frame. A
+        /// consumer that renders the avatar should apply this **at once** rather
+        /// than waiting for the simulator's echoing `ObjectUpdate`, exactly as
+        /// the reference viewer's `process_teleport_local` slams it
+        /// (`gAgentCamera.slamLookAt`). May be degenerate (all-zero, or purely
+        /// vertical) when the simulator had no facing to state.
+        look_at: Vector,
     },
     /// A teleport failed (`TeleportFailed` or a teleport timeout); the session
     /// remains connected to the current region.
@@ -423,6 +431,35 @@ pub enum Event {
         /// is `true` (the cache clearing emits no per-object removals), and keep +
         /// re-base it when `false`.
         world_reset: bool,
+    },
+    /// The simulator confirmed the agent's arrival in a region
+    /// (`AgentMovementComplete`) and stated the **pose it placed the agent at**:
+    /// where the avatar stands and which way it faces, before any `ObjectUpdate`
+    /// echoes either back.
+    ///
+    /// Emitted at login, after a region crossing, and after a teleport handover
+    /// (`teleport`). A consumer that renders the avatar should apply the arrival
+    /// facing **immediately** on a teleport — the reference viewer slams its agent
+    /// frame to it (`process_agent_movement_complete` → `gAgentCamera.slamLookAt`)
+    /// rather than letting the avatar stand at its pre-teleport facing until the
+    /// destination's first `ObjectUpdate` turns it.
+    AgentArrived {
+        /// The region the agent arrived in (`Data.RegionHandle`).
+        region_handle: RegionHandle,
+        /// The region-local position the simulator placed the agent at.
+        position: RegionCoordinates,
+        /// The horizontal direction the simulator says the agent faces on arrival
+        /// (`Data.LookAt`), in the region frame. May be degenerate (all-zero, or
+        /// purely vertical): OpenSim substitutes the agent's velocity and then a
+        /// fixed east-ish default when it has no facing to state, and a simulator
+        /// that never tracked one sends zero.
+        look_at: Vector,
+        /// Whether this arrival completed a **teleport** (the destination
+        /// confirmed on its own child circuit), rather than the initial login or a
+        /// region *crossing*. Only a teleport re-places the agent: a crossing
+        /// carries the facing over the border, so the reference viewer applies the
+        /// stated `look_at` on a teleport alone.
+        teleport: bool,
     },
     /// Local chat was received (`ChatFromSimulator`): a nearby agent or object
     /// spoke, or the region/system sent a message. Sent in response to nearby

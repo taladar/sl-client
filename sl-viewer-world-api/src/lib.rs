@@ -6231,7 +6231,8 @@ pub struct AvatarControls {
     pub tap_run_backward: DoubleTapRun,
     /// A heading (radians about the Second Life up axis) something has *told*
     /// the avatar to face rather than turned it towards: RLV's
-    /// `@setrot:<radians>=force`. Taken by the movement driver on the next
+    /// `@setrot:<radians>=force`, or the facing a teleport's arrival placed the
+    /// agent at (the arrival slam). Taken by the movement driver on the next
     /// frame it runs, which replaces the tracked heading with it and advertises
     /// it at once.
     pub forced_heading: Option<f32>,

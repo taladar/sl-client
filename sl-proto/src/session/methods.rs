@@ -28,17 +28,18 @@ use super::conversions::{
     windlight_refresh_from_llsd,
 };
 use super::{
-    AGENT_UPDATE_INTERVAL, ASSET_TRANSFER_TIMEOUT, AVATAR_PICKER_SEARCH_TAG, CAP_AGENT_EXPERIENCES,
-    CAP_AGENT_PREFERENCES, CAP_ATTACHMENT_RESOURCES, CAP_CHAT_SESSION_REQUEST,
-    CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT,
-    CAP_FETCH_INVENTORY, CAP_FETCH_INVENTORY_ITEM, CAP_FETCH_LIBRARY, CAP_FETCH_LIBRARY_ITEM,
-    CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES,
-    CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST,
-    CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_LAND_RESOURCES,
-    CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA,
-    CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
-    CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED,
-    CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_USER_INFO,
+    AGENT_UPDATE_INTERVAL, ASSET_TRANSFER_TIMEOUT, AVATAR_PICKER_SEARCH_TAG, ArrivalPose,
+    CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES, CAP_ATTACHMENT_RESOURCES,
+    CAP_CHAT_SESSION_REQUEST, CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES,
+    CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_INVENTORY_ITEM, CAP_FETCH_LIBRARY,
+    CAP_FETCH_LIBRARY_ITEM, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
+    CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
+    CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_MEMBER_DATA,
+    CAP_INVENTORY_API_V3, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX,
+    CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO,
+    CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
+    CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES,
+    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_USER_INFO,
     CHAT_SESSION_FETCH_HISTORY_TAG, ChatLifecycleView, ChatSession, ChatSessionInfo,
     ChatSessionKind, ChatSessionLifecycle, Circuit, DEFAULT_DRAW_DISTANCE, FolderState,
     FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION, INVENTORY_FETCH_MAX_ATTEMPTS,
@@ -1272,8 +1273,13 @@ impl Session {
     /// handover to exactly `dest` is pending. `arrival` is the destination's own
     /// `AgentMovementComplete` `Data.RegionHandle` — preferred (when non-zero)
     /// over the pending handover's requested handle, which for a lure teleport
-    /// on Second Life is an opaque-id guess, not a real handle.
-    fn commit_handover(&mut self, dest: SocketAddr, arrival: RegionHandle, now: Instant) {
+    /// on Second Life is an opaque-id guess, not a real handle. The rest of
+    /// `pose` (the position and facing the destination placed the agent at) rides
+    /// out with the [`Event::AgentArrived`] this pushes after the
+    /// [`Event::RegionChanged`], so a viewer can apply the arrival facing at once
+    /// instead of waiting for the destination's first object update.
+    fn commit_handover(&mut self, dest: SocketAddr, pose: ArrivalPose, now: Instant) {
+        let arrival = pose.region_handle;
         let Some(pending) = self.pending_handover.take() else {
             return;
         };
@@ -1366,6 +1372,16 @@ impl Session {
                 world_reset: pending.world_reset,
             });
         }
+        // The destination's own statement of where it put us, pushed **after** the
+        // region change so a consumer has already switched regions when it reads
+        // the arrival pose. A teleport re-places the agent (the simulator turns it
+        // to the requested facing), so this is the facing to apply at once.
+        self.events.push_back(Event::AgentArrived {
+            region_handle,
+            position: pose.position,
+            look_at: pose.look_at,
+            teleport: true,
+        });
     }
 
     /// Drop an in-flight teleport handover, leaving the session in its **source**
@@ -1994,8 +2010,8 @@ impl Session {
                 // destination is unknowable up front: OpenSim encodes the handle
                 // in the lure id, but Second Life's lure id is opaque, so the
                 // parsed value is garbage there).
-                let arrival = RegionHandle(complete.data.region_handle);
-                self.commit_handover(from, arrival, now);
+                let pose = ArrivalPose::from_movement_complete(&complete.data);
+                self.commit_handover(from, pose, now);
             }
             AnyMessage::PacketAck(ack) => {
                 if let Some(circuit) = self.children.get_mut(&from) {
@@ -2880,6 +2896,18 @@ impl Session {
                 // and confirms with AgentMovementComplete; it may not re-send a
                 // RegionHandshake, so complete the arrival here too (idempotent).
                 self.complete_arrival(now);
+                // Where the simulator says it placed us. This path is the initial
+                // login or a **crossing** — a teleport is confirmed on the
+                // destination's child circuit and commits there — so the arrival
+                // is not a re-placement: the agent carried its facing over the
+                // border, and `teleport` says so.
+                let pose = ArrivalPose::from_movement_complete(&complete.data);
+                self.events.push_back(Event::AgentArrived {
+                    region_handle: pose.region_handle,
+                    position: pose.position,
+                    look_at: pose.look_at,
+                    teleport: false,
+                });
                 // Surface the root region simulator's version/channel string
                 // (About-window data).
                 self.events.push_back(Event::SimulatorVersion(
@@ -3547,6 +3575,7 @@ impl Session {
                             local.info.position.y,
                             local.info.position.z,
                         ),
+                        look_at: local.info.look_at.clone(),
                     });
                 }
             }

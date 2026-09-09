@@ -235,7 +235,7 @@ async fn teleport_within(
         .await?;
     let landing = session
         .wait_for(REGION_TIMEOUT, |event| match event {
-            Event::TeleportLocal { position } => Some(Some(*position)),
+            Event::TeleportLocal { position, .. } => Some(Some(*position)),
             Event::RegionChanged { .. } => Some(None),
             _ => None,
         })

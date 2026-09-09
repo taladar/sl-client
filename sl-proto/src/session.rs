@@ -10,7 +10,9 @@ use crate::types::{
 use sl_types::key::{AgentKey, ExperienceKey, FriendKey, InventoryKey, ObjectKey};
 use sl_types::lsl::Rotation;
 use sl_types::lsl::ScriptPermissions;
+use sl_types::lsl::Vector;
 use sl_types::map::Distance;
+use sl_types::map::RegionCoordinates;
 use sl_wire::CircuitCode;
 use sl_wire::ControlFlags;
 use sl_wire::RegionHandle;
@@ -1476,6 +1478,37 @@ struct PendingHandover {
     /// child a failed teleport dropped, and a catch of a still-held child several
     /// regions away, as neighbour teleports.
     world_reset: bool,
+}
+
+/// The pose an `AgentMovementComplete` states the simulator placed the agent at
+/// on arrival: where it stands and which way it faces, before any `ObjectUpdate`
+/// echoes either back.
+///
+/// Carried from the message handler to the arrival paths so the
+/// [`Event::AgentArrived`](crate::Event::AgentArrived) they emit states the
+/// simulator's own placement — the facing a viewer must apply at once on a
+/// teleport rather than leaving the avatar at its pre-teleport heading until the
+/// destination's first object update turns it.
+#[derive(Debug, Clone)]
+struct ArrivalPose {
+    /// The region the simulator says the agent arrived in (`Data.RegionHandle`).
+    region_handle: RegionHandle,
+    /// The region-local position it placed the agent at (`Data.Position`).
+    position: RegionCoordinates,
+    /// The direction it says the agent faces (`Data.LookAt`), in the region
+    /// frame. Possibly degenerate — see [`Event::AgentArrived`](crate::Event::AgentArrived).
+    look_at: Vector,
+}
+
+impl ArrivalPose {
+    /// The arrival pose an `AgentMovementComplete` `Data` block states.
+    fn from_movement_complete(data: &sl_wire::messages::AgentMovementCompleteDataBlock) -> Self {
+        Self {
+            region_handle: RegionHandle(data.region_handle),
+            position: RegionCoordinates::new(data.position.x, data.position.y, data.position.z),
+            look_at: data.look_at.clone(),
+        }
+    }
 }
 
 /// Where the agent is in an object-sit sequence.

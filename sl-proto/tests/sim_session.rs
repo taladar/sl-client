@@ -7132,9 +7132,14 @@ mod test {
         assert!(
             client_events.iter().any(|e| matches!(
                 e,
-                Event::TeleportLocal { position: got } if *got == position
+                Event::TeleportLocal {
+                    position: got,
+                    look_at,
+                } if *got == position
+                    && (look_at.x - 1.0).abs() < f32::EPSILON
+                    && look_at.y.abs() < f32::EPSILON
             )),
-            "expected TeleportLocal, got {client_events:?}"
+            "expected TeleportLocal carrying the arrival facing, got {client_events:?}"
         );
         Ok(())
     }
@@ -7211,6 +7216,18 @@ mod test {
         let (mut client, mut source) = setup(now)?;
         drain_server(&mut source);
         let mut dest = SimSession::new(RegionHandle(DEST_HANDLE), now);
+        // Where the destination will say it placed the agent: a facing distinct
+        // from the requested one, so the arrival event is checked against the
+        // simulator's own statement rather than the client's request.
+        let arrival_look_at = sl_types::lsl::Vector {
+            x: 0.0,
+            y: 1.0,
+            z: 0.0,
+        };
+        dest.set_arrival_position(
+            RegionCoordinates::new(64.0, 96.0, 30.0),
+            arrival_look_at.clone(),
+        );
 
         let position = RegionCoordinates::new(128.0, 128.0, 25.0);
         let look_at = sl_types::lsl::Vector {
@@ -7302,6 +7319,25 @@ mod test {
                     if *region_handle == RegionHandle(DEST_HANDLE) && *sim == dest_sim_addr()
             )),
             "expected RegionChanged, got {client_events:?}"
+        );
+        // …and, after it, the pose the destination says it placed the agent at.
+        // A viewer applies that facing at once rather than leaving the avatar at
+        // its pre-teleport heading until the destination's first object update
+        // turns it (viewer-arrival-orientation-snap).
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::AgentArrived {
+                    region_handle,
+                    position,
+                    look_at,
+                    teleport: true,
+                } if *region_handle == RegionHandle(DEST_HANDLE)
+                    && *position == RegionCoordinates::new(64.0, 96.0, 30.0)
+                    && (look_at.x - arrival_look_at.x).abs() < f32::EPSILON
+                    && (look_at.y - arrival_look_at.y).abs() < f32::EPSILON
+            )),
+            "expected AgentArrived carrying the destination's placement, got {client_events:?}"
         );
 
         // The source retires the now-child circuit; the client tears it down

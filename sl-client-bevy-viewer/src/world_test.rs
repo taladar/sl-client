@@ -3995,13 +3995,13 @@ mod movement_tests {
     use pretty_assertions::assert_eq;
 
     use sl_client_bevy::{
-        AgentKey, Command, ControlFlags, ObjectKey, Rotation, SlAgentParcel, SlIdentity, Uuid,
-        Vector,
+        AgentKey, Command, ControlFlags, ObjectKey, RegionCoordinates, RegionHandle, Rotation,
+        SlAgentParcel, SlEvent, SlIdentity, SlSessionEvent as SessionEvent, Uuid, Vector,
     };
     use sl_viewer_testkit::interact;
 
     use super::{seed_avatar, seed_terrain, settle, world_app_with_input};
-    use crate::world_api::{AvatarControls, CameraMode, PresenceState};
+    use crate::world_api::{AvatarControls, AvatarMotion, AvatarState, CameraMode, PresenceState};
 
     /// A boxed error so tests can use `?` instead of the disallowed
     /// `unwrap` / `expect`.
@@ -4182,6 +4182,80 @@ mod movement_tests {
             Vec::new(),
             "…and a standing avatar says nothing at all"
         );
+    }
+
+    /// **A teleport arrival turns the body the frame the simulator states it**,
+    /// without waiting for the destination region to stream an `ObjectUpdate`
+    /// back (viewer-arrival-orientation-snap).
+    ///
+    /// The avatar's facing is otherwise read only off that stream, so until it
+    /// arrives the body stands at the heading it teleported *from* — and since
+    /// the rear-view camera is computed from the facing, and the minimap is
+    /// oriented to the camera, the correction swings both when it lands. Here the
+    /// simulator says "you arrived facing north" and the body is already facing
+    /// north on the next frame, advertised back as a body rotation exactly as the
+    /// reference re-states it after its own slam.
+    #[test]
+    fn a_teleport_arrival_turns_the_body_before_any_object_update() -> Result<(), TestError> {
+        let mut app = movement_app(false);
+        let own = AgentKey::from(Uuid::from_u128(OWN));
+        assert!(
+            heading(&app).abs() < 1.0e-3,
+            "the fixture avatar starts facing east, got {}",
+            heading(&app)
+        );
+
+        let north = core::f32::consts::FRAC_PI_2;
+        app.world_mut()
+            .write_message(SlEvent(SessionEvent::AgentArrived {
+                region_handle: RegionHandle(0),
+                position: RegionCoordinates::new(8.0, 8.0, GROUND_M),
+                look_at: Vector {
+                    x: 0.0,
+                    y: 1.0,
+                    z: 0.0,
+                },
+                teleport: true,
+            }));
+
+        // One frame — the claim under test is that the *authoritative* facing is
+        // the arrival's before any object update, and the slam writes it in the
+        // frame it reads the arrival.
+        settle(&mut app, 1);
+        let anchor = app
+            .world()
+            .resource::<AvatarState>()
+            .body_root_of(own)
+            .ok_or("the fixture avatar has no body root")?;
+        let facing = app
+            .world()
+            .get::<AvatarMotion>(anchor)
+            .ok_or("the fixture avatar has no motion")?
+            .yaw();
+        assert!(
+            (facing - north).abs() < 1.0e-3,
+            "the avatar's authoritative facing is the arrival's, got {facing}"
+        );
+
+        // The walk heading and its `SetRotation` follow within a frame or two
+        // rather than in this one: the movement driver takes the forced heading
+        // the next time it runs, and which side of the slam it runs on is not
+        // ordered (both hold `AvatarControls`). A few frames of headroom, so the
+        // test pins *that it is stated*, not which frame states it.
+        settle(&mut app, 4);
+        assert!(
+            (heading(&app) - north).abs() < 1.0e-3,
+            "…the walk heading follows it, got {}",
+            heading(&app)
+        );
+        let (_controls, rotations) = drain_movement(&mut app);
+        let last = rotations.last().ok_or("no body rotation was advertised")?;
+        assert!(
+            last.z > 0.0 && last.s > 0.0,
+            "…and it is re-stated to the simulator as a turn about the Second \
+             Life up axis, got {last:?}"
+        );
+        Ok(())
     }
 
     /// **Run needs a walk key, and a double tap latches one**: `Shift` on its own

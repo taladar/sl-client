@@ -67,6 +67,21 @@ impl Plugin for AvatarMovementPlugin {
         app.add_systems(
             Update,
             drive_avatar_controls.in_set(WorldPhase::AvatarControlsDriven),
+        )
+        // The arrival slam (`crate::arrival`) belongs to the same concern — which
+        // way the own avatar faces — and feeds this driver's heading, so it is
+        // wired here rather than by the viewer. It sits between the avatar object
+        // fold and the dead-reckoner that poses the anchor from what it finds,
+        // and **before this driver**: both hold `AvatarControls`, so without that
+        // edge the frame the forced heading is taken in — and therefore the frame
+        // the arrival facing is stated to the simulator — would be whichever way
+        // the scheduler happened to resolve the ambiguity.
+        .add_systems(
+            Update,
+            crate::arrival::slam_arrival_facing
+                .after(crate::avatars::update_avatar_objects)
+                .before(crate::physics::drive_avatar_motion)
+                .before(drive_avatar_controls),
         );
     }
 }
@@ -156,7 +171,7 @@ fn double_tap_run(state: &mut DoubleTapRun, just_pressed: bool, held: bool, dt: 
 /// A Second Life body [`Rotation`] for a heading `yaw` (radians about the up axis):
 /// a unit quaternion turning about Second Life's Z.
 #[must_use]
-fn rotation_from_yaw(yaw: f32) -> Rotation {
+pub(crate) fn rotation_from_yaw(yaw: f32) -> Rotation {
     let (sin, cos) = (yaw * 0.5).sin_cos();
     Rotation {
         x: 0.0,
@@ -423,7 +438,8 @@ pub(crate) fn drive_avatar_controls(
             turning = true;
         }
     }
-    // A heading something *told* the avatar to face — RLV's `@setrot` — replaces
+    // A heading something *told* the avatar to face — RLV's `@setrot`, or the
+    // facing a teleport arrival placed the agent at (`crate::arrival`) — replaces
     // whatever this frame's input turned it to, and is advertised at once rather
     // than waiting out the turning throttle. Taken here, after the per-mode turn
     // above, so it wins over the mouselook aim; a seated avatar is left alone for

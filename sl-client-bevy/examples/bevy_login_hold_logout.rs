@@ -357,6 +357,7 @@ fn on_events(
             | SlSessionEvent::TeleportProgress { .. }
             | SlSessionEvent::TeleportFinished { .. }
             | SlSessionEvent::TeleportLocal { .. }
+            | SlSessionEvent::AgentArrived { .. }
             | SlSessionEvent::TeleportFailed { .. }
             | SlSessionEvent::VoiceAccountProvisioned(_)
             | SlSessionEvent::ParcelVoiceInfo(_)

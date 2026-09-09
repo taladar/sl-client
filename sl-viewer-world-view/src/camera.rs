@@ -327,7 +327,7 @@ const fn vlerp(a: Vec3, b: Vec3, t: f32) -> Vec3 {
 /// The avatar's flattened Bevy-space facing (horizontal forward) from its Second
 /// Life heading `sl_yaw`. A Second Life avatar faces its region `+X` turned by the
 /// heading; the axis map `(x, y, z) -> (x, z, -y)` carries that into Bevy.
-fn facing_from_yaw(sl_yaw: f32) -> Vec3 {
+pub(crate) fn facing_from_yaw(sl_yaw: f32) -> Vec3 {
     let (sin, cos) = sl_yaw.sin_cos();
     sl_to_bevy_vec(&Vector {
         x: cos,
