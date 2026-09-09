@@ -4,7 +4,7 @@ version = { workspace = true }
 authors = { workspace = true }
 edition = { workspace = true }
 rust-version = { workspace = true }
-description = "Pure decoder/encoder for the Second Life / OpenSim inventory object asset — the nested-block text a simulator writes when an object is taken, and reads when it is rezzed"
+description = "Pure decoders/encoders for the inventory object asset a simulator writes when an object is taken — Second Life's nested-block text and OpenSim's SceneObjectGroup XML, the two formats of the same asset class"
 readme = { workspace = true }
 license = { workspace = true }
 
@@ -16,10 +16,14 @@ publish = { workspace = true }
 exclude = { workspace = true }
 
 [dependencies]
+base64 = { workspace = true }
+roxmltree = { workspace = true }
+sl-llsd = { workspace = true }
 sl-prim = { workspace = true }
 sl-proto = { workspace = true }
 sl-types = { workspace = true }
 thiserror = { workspace = true }
+url = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]

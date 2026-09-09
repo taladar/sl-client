@@ -36,27 +36,40 @@
 //! item's body by the **item's** id rather than by an asset id the viewer was
 //! never told. See [`ObjectAssetPolicy`] for why.
 //!
-//! # And a third, because the object asset cannot hold a whole prim
+//! # The body is whichever format the item's own grid writes
 //!
-//! The published body is the Linden text form (`sl-object-asset`), which is
-//! the format Second Life is known to have written — and which has no keyword
-//! for a face's glow or material id, for the `ExtraParams` block (flexi,
-//! light, sculpt, **mesh**, light image, extended mesh, render material,
-//! reflection probe), for floating text, a media URL, a texture animation or a
-//! particle system. `sl_object_asset::bridge`'s own
+//! `AssetType::Object` is **two formats on the two grids**, so the store that
+//! took the body decides which one it holds:
+//!
+//! - a **withheld** body is the Linden text (`sl_object_asset`), the format
+//!   Second Life is known to have written;
+//! - a **served** body is the `<SceneObjectGroup>` XML
+//!   (`sl_object_asset::opensim`), which is what OpenSim stores under this
+//!   class and the only thing a viewer fetching it there could be handed.
+//!
+//! Writing the text under [`ObjectAssetPolicy::Served`] would name OpenSim and
+//! serve bytes no OpenSim ever wrote, which is the one thing about that policy
+//! that was not faithful.
+//!
+//! # And a third store, because the *text* cannot hold a whole prim
+//!
+//! The Linden text has no keyword for a face's glow or material id, for the
+//! `ExtraParams` block (flexi, light, sculpt, **mesh**, light image, extended
+//! mesh, render material, reflection probe), for floating text, a media URL, a
+//! texture animation or a particle system. `sl_object_asset::bridge`'s own
 //! `the_text_carries_none_of_the_modern_prim` is the record of that. A grid
 //! that rezzed out of those bytes would hand a resident who took a light back
 //! a plain box.
 //!
-//! Neither live grid does that. OpenSim's body is `SceneObjectSerializer` XML,
-//! which carries all of it; Second Life's simulator has the object itself and
-//! never has to read an asset at all. So the third store is the fake grid
-//! having the same thing they have: **the linkset a take removed**, kept under
-//! the item that stands for it, and rezzed from in preference to the text.
+//! Neither live grid does that. OpenSim's XML carries all of it; Second Life's
+//! simulator has the object itself and never has to read an asset at all. So
+//! the third store is the fake grid having the same thing they have: **the
+//! linkset a take removed**, kept under the item that stands for it, and
+//! rezzed from in preference to either body.
 //!
-//! The two do not compete. The body is what a viewer may *fetch* — under
-//! [`ObjectAssetPolicy::Served`], the only configuration where it crosses the
-//! wire — and stays exactly the bytes the format says. The linkset is what the
+//! The stores do not compete. A body is what a viewer may *fetch* — under
+//! [`ObjectAssetPolicy::Served`], the only configuration where one crosses the
+//! wire — and stays exactly the bytes its format says. The linkset is what the
 //! *simulator* rezzes from, and is nobody else's business. An item with no
 //! linkset behind it (the seeded `Fixture Object`, which no take ever made)
 //! still rezzes from its body, which is the whole reason that fixture exists.
@@ -105,11 +118,13 @@ use sl_types::key::InventoryKey;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ObjectAssetPolicy {
     /// Second Life: a take files an item with a **nil** asset id, and the
-    /// object's body goes where no capability can reach it.
+    /// object's body — the Linden text — goes where no capability can reach it.
     #[default]
     Withheld,
     /// OpenSim: a take mints an asset id, names it in the item, and the grid
-    /// serves the body under it like any other asset.
+    /// serves the body under it like any other asset — as the
+    /// `<SceneObjectGroup>` XML OpenSim itself writes for this class, not as
+    /// the text the other side files.
     Served,
 }
 

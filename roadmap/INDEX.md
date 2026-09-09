@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 319 |
+| ready | 318 |
 | blocked | 46 |
 | in-progress | 20 |
 | bugs | 58 |
-| done | 1042 |
+| done | 1043 |
 | deferred | 26 |
 | wont-do | 14 |
 | **total** | **1625** |
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (319)
+## ready (318)
 
 ### protocol
 
@@ -979,8 +979,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Factor the repeated session/id acquisition out of the conformance cases
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
-- [`test-fake-grid-served-object-asset-xml`](ready/test-fake-grid-served-object-asset-xml.md)
-  — The OpenSim-flavoured grid serves an object body OpenSim never wrote
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
@@ -1321,7 +1319,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-water-refraction-smears-avatar-silhouette`](bugs/viewer-water-refraction-smears-avatar-silhouette.md)
   — Water behind an avatar smears a skin-coloured fringe around its silhouette
 
-## done (1042)
+## done (1043)
 
 ### protocol
 
@@ -3311,6 +3309,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-self-avatar-baked-textures-rejected`](done/test-fake-grid-self-avatar-baked-textures-rejected.md)
   — The agent's own head, upper and lower bakes are fetched, served, and then
   discarded
+- [`test-fake-grid-served-object-asset-xml`](done/test-fake-grid-served-object-asset-xml.md)
+  — The OpenSim-flavoured grid serves an object body OpenSim never wrote
 - [`test-fake-grid-simulator-request-surfaces`](done/test-fake-grid-simulator-request-surfaces.md)
   — Four client requests no simulator half answers
 - [`test-fake-grid-teleport-phase-order-flake`](done/test-fake-grid-teleport-phase-order-flake.md)

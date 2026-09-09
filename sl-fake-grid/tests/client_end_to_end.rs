@@ -4667,18 +4667,20 @@ mod test {
     /// **A take gives back the prim it took**, not the part of it the asset
     /// format can spell.
     ///
-    /// The published object body is the Linden text form, and that format has
-    /// no keyword for a face's glow, for `ExtraParams` (a light, a flexi path,
-    /// a sculpt, a **mesh**), for floating text, media, a texture animation or
-    /// a particle system —
+    /// This grid imitates Second Life by default, so the published object body
+    /// is the Linden text form, and that format has no keyword for a face's
+    /// glow, for `ExtraParams` (a light, a flexi path, a sculpt, a **mesh**),
+    /// for floating text, media, a texture animation or a particle system —
     /// `sl_object_asset`'s `the_text_carries_none_of_the_modern_prim` is the
     /// record of it. A grid that rezzed out of those bytes would answer a
     /// resident who took a lamp with a plain white box.
     ///
     /// Neither live grid does: OpenSim's body is `SceneObjectSerializer` XML,
-    /// which carries all of it, and Second Life's simulator has the object
-    /// itself and reads no asset at all. So this one keeps the linkset a take
-    /// removed and rezzes from that.
+    /// which carries all of it (and which this grid writes under
+    /// [`sl_fake_grid::ObjectAssetPolicy::Served`]), and Second Life's
+    /// simulator has the object itself and reads no asset at all. So this one
+    /// keeps the linkset a take removed and rezzes from that, whichever body
+    /// it published.
     ///
     /// The catalogue's `light-box` is the fixture because it carries three of
     /// the missing things at once — a light, glow, and full-bright faces — so a
@@ -4797,6 +4799,11 @@ mod test {
     /// other way: an id nothing serves is the failure the whole asset-id family
     /// exists to catch, and bytes that describe some *other* prim would be a
     /// take that filed the wrong object.
+    ///
+    /// The bytes are decoded as **OpenSim's** format, which is the third thing
+    /// this asserts: `AssetType::Object` is `<SceneObjectGroup>` XML on that
+    /// grid and the Linden text on the other, and a grid that named OpenSim
+    /// while serving the text would serve bytes no OpenSim ever wrote.
     #[tokio::test]
     async fn an_opensim_flavoured_take_names_a_fetchable_object_asset() -> Result<(), TestError> {
         let grid = FakeGridBuilder::new()
@@ -4862,14 +4869,13 @@ mod test {
             _ => None,
         })
         .await?;
-        let asset = sl_object_asset::ObjectAsset::decode(&bytes)?;
-        let prim = asset.root().ok_or("the taken object's asset has no prim")?;
+        let group = sl_object_asset::opensim::SceneObjectGroup::decode(&bytes)?;
         assert_eq!(
-            prim.task_id,
+            group.root.uuid,
             taken.full_id.uuid(),
             "the asset names a different prim than the one taken"
         );
-        assert_eq!(prim.name, item.name);
+        assert_eq!(group.root.name, item.name);
         Ok(())
     }
 

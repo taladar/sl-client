@@ -8875,11 +8875,15 @@ dependencies = [
 name = "sl-object-asset"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "pretty_assertions",
+ "roxmltree 0.20.0",
+ "sl-llsd",
  "sl-prim",
  "sl-proto",
  "sl-types",
  "thiserror 2.0.19",
+ "url",
  "uuid",
 ]
 

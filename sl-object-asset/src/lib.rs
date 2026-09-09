@@ -1,14 +1,22 @@
-//! Pure decoder / encoder for the Second Life / OpenSim **inventory object
-//! asset** — the nested-block text a simulator writes when an object is taken
-//! into inventory, and reads back when it is rezzed.
+//! Pure decoders / encoders for the Second Life and OpenSim **inventory object
+//! asset** — what a simulator writes when an object is taken into inventory,
+//! and reads back when it is rezzed.
 //!
-//! It mirrors `sl-notecard`, `sl-prim` and the other format crates: **Bevy-free
-//! and I/O-free**, so it can be tested, fuzzed and reused with no session and
-//! no grid. Beyond the format itself its only ties are `sl-proto` and `sl-prim`
-//! for the wire types the [`bridge`] converts to and from.
+//! **The class is two formats, one per grid**, and the crate is one module tree
+//! per format. Everything here is Second Life's: the nested-block text below.
+//! [`opensim`] is OpenSim's: the `<SceneObjectGroup>` XML, which carries the
+//! whole prim where the text carries a 2005 subset of it. The section
+//! "What a viewer can actually see" is the measurement that says which grid
+//! writes which.
 //!
-//! An object asset is *not* the `ObjectUpdate` wire form. It is one text block
-//! per prim, children first and the root last:
+//! Both mirror `sl-notecard`, `sl-prim` and the other format crates:
+//! **Bevy-free and I/O-free**, so they can be tested, fuzzed and reused with no
+//! session and no grid. Beyond the formats themselves the only ties are
+//! `sl-proto` and `sl-prim` for the wire types each [`bridge`] converts to and
+//! from.
+//!
+//! An object asset is *not* the `ObjectUpdate` wire form. Second Life's is one
+//! text block per prim, children first and the root last:
 //!
 //! ```text
 //! {'task_id':u1fd77b79-a8e7-25a5-9454-02a4d948ba1c}
@@ -90,7 +98,9 @@
 //! `CoalescedSceneObjectsSerializer.ToXml` for a multi-object take) as its
 //! `AssetType.Object` body (`InventoryAccessModule.cs`), which is XML and
 //! shares nothing with this. So `AssetType::Object` is **two different formats
-//! on the two grids**, and this crate is the Second Life one.
+//! on the two grids**, and the crate carries both: everything outside
+//! [`opensim`] is the Second Life text, and that module is OpenSim's
+//! `<SceneObjectGroup>` XML.
 //!
 //! The grammar is therefore reconstructed from three sources, and the crate
 //! says which parts rest on which:
@@ -133,32 +143,36 @@
 //! object asset there at all, whatever the bytes would have been. That is
 //! consistent with neither reference viewer ever having carried a reader.
 //!
-//! So this crate is **not** on any viewer's critical path, and its fidelity to
-//! the 2005 text buys nothing a viewer can observe. What it is for is below.
+//! So neither format is on a *viewer's* critical path, and this one's fidelity
+//! to the 2005 text buys nothing a viewer can observe. What they are for is
+//! below.
 //!
 //! # What it is for
 //!
 //! `AssetType::Object` was the one inventory class the workspace could neither
-//! read nor write. Two uses survive the measurement above:
+//! read nor write. Three uses survive the measurement above:
 //!
-//! - **the fake grid needs a serialisation.** Its take has to write the object
-//!   down somewhere. **Only the grid reads these bytes back** — which is now
-//!   true by construction rather than by convention: since
-//!   [[test-fake-grid-object-asset-id-divergence]]
-//!   the fake grid imitates Second Life by default
-//!   (`sl_fake_grid::ObjectAssetPolicy::Withheld`), files a take under a nil
-//!   asset id and keeps the body where no capability reaches it. A grid asked
-//!   for OpenSim's side (`Served`) names the asset and serves it, and that is
-//!   the one configuration where these bytes cross the wire. The choice of
-//!   format is therefore free; this one is chosen because it is the format
-//!   Second Life is known to have written.
+//! - **the fake grid needs a serialisation, and it needs the right one per
+//!   flavour.** Its take has to write the object down somewhere. Since
+//!   [[test-fake-grid-object-asset-id-divergence]] the fake grid imitates
+//!   Second Life by default (`sl_fake_grid::ObjectAssetPolicy::Withheld`),
+//!   files a take under a nil asset id and keeps **this** body where no
+//!   capability reaches it — so only the grid ever reads it back. A grid asked
+//!   for OpenSim's side (`Served`) names the asset and serves it, which is the
+//!   one configuration where a body crosses the wire, and there it writes
+//!   [`opensim`]'s XML: the bytes OpenSim would have written, rather than a
+//!   format OpenSim has never written for anything.
 //!
-//!   It is **not** what that grid rezzes from, and nothing should be: see the
-//!   next section.
+//!   Neither is what that grid rezzes from, and nothing should be for this
+//!   one: see the next section.
 //! - **the two reference captures are readable.** They are the only public
-//!   examples of the format, and a decoder that reads them field by field is
-//!   how the workspace can say what it is at all, rather than repeating
+//!   examples of the text format, and a decoder that reads them field by field
+//!   is how the workspace can say what it is at all, rather than repeating
 //!   folklore about it.
+//! - **an OpenSim body can be read.** Anything that fetches a taken object's
+//!   asset from a live OpenSim — a conformance case cross-checking a take, a
+//!   viewer that grows an object-asset reader — gets `<SceneObjectGroup>` XML,
+//!   and [`opensim::decode`] is what turns it back into prims.
 //!
 //! # Do not rez out of these bytes (settled 2026-09-09)
 //!
@@ -181,18 +195,24 @@
 //! whose whole value is that every field in it comes from a source that can be
 //! named.
 //!
-//! What follows for a grid is that this format is a **publication**, not a
+//! What follows for a grid is that **this** format is a publication, not a
 //! store. A simulator that rezzed out of it would answer a resident who took a
-//! lamp with a plain box, and neither live grid does: OpenSim's body is
-//! `SceneObjectSerializer` XML, which carries all of it, and Second Life's
-//! simulator has the object itself and reads no asset. The fake grid does the
-//! same — it keeps the linkset a take removed and rezzes from that, publishing
-//! these bytes beside it (`sl_fake_grid`'s `assets` module).
+//! lamp with a plain box, and neither live grid does: OpenSim's body is the
+//! `<SceneObjectGroup>` XML of [`opensim`], which carries all of it, and Second
+//! Life's simulator has the object itself and reads no asset. The fake grid
+//! does the same — it keeps the linkset a take removed and rezzes from that,
+//! publishing a body beside it (`sl_fake_grid`'s `assets` module).
+//!
+//! None of that paragraph is a limit of [`opensim`], which loses none of the
+//! list above; its own
+//! `the_xml_carries_the_whole_modern_prim` is that test read the other way
+//! round.
 
 pub mod bridge;
 pub mod decode;
 pub mod encode;
 pub mod model;
+pub mod opensim;
 #[cfg(test)]
 pub(crate) mod test_support;
 

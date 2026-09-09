@@ -13,6 +13,7 @@
 use sl_types::key::TextureKey;
 use sl_types::lsl::Vector;
 use sl_wire::{Reader, ReflectionProbeFlags, Writer};
+use uuid::Uuid;
 
 use crate::types::{
     ExtendedMesh, FlexibleData, LightData, LightImage, MeshKey, ObjectExtraParams, ReflectionProbe,
@@ -451,21 +452,35 @@ fn decode_light(reader: &mut Reader<'_>) -> Option<LightData> {
     })
 }
 
+impl SculptData {
+    /// A sculpt block from the two things the wire carries: the asset id and
+    /// the type byte.
+    ///
+    /// The byte is what decides which asset the id names — the low bits select
+    /// the shape kind, and `LL_SCULPT_TYPE_MESH` there means the id is a mesh
+    /// rather than a sculpt texture — so the two cannot be chosen
+    /// independently, and anything building a sculpt block from raw parts (a
+    /// serialiser reading a stored prim, not just the wire decoder) has to
+    /// apply the same rule. It lives here so there is only one copy of it.
+    #[must_use]
+    pub const fn new(texture: Uuid, sculpt_type: u8) -> Self {
+        let texture = if sculpt_type & LL_SCULPT_TYPE_MASK == LL_SCULPT_TYPE_MESH {
+            SculptOrMeshKey::Mesh(MeshKey(sl_types::key::Key(texture)))
+        } else {
+            SculptOrMeshKey::Sculpt(TextureKey(sl_types::key::Key(texture)))
+        };
+        Self {
+            texture,
+            sculpt_type,
+        }
+    }
+}
+
 /// Decodes `LLSculptParams`: a sculpt/mesh asset id and a type byte.
 fn decode_sculpt(reader: &mut Reader<'_>) -> Option<SculptData> {
     let texture = reader.uuid().ok()?;
     let sculpt_type = reader.u8().ok()?;
-    // The low bits of the type byte select the shape kind: a mesh asset when
-    // they equal `LL_SCULPT_TYPE_MESH`, a sculpt texture otherwise.
-    let texture = if sculpt_type & LL_SCULPT_TYPE_MASK == LL_SCULPT_TYPE_MESH {
-        SculptOrMeshKey::Mesh(MeshKey::from(texture))
-    } else {
-        SculptOrMeshKey::Sculpt(TextureKey::from(texture))
-    };
-    Some(SculptData {
-        texture,
-        sculpt_type,
-    })
+    Some(SculptData::new(texture, sculpt_type))
 }
 
 /// Decodes `LLLightImageParams`: a projected texture id and its parameters.

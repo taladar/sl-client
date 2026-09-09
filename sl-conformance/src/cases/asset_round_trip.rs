@@ -33,8 +33,8 @@
 //! than storing one somebody uploaded, so for it "the id resolves" is only half
 //! the question. The other half is whether what it resolves to describes the
 //! object that was taken, which is asserted field by field — the prim key, the
-//! name the item carries, the scale, the face count, and the shape block
-//! re-quantizing to the object's own `PrimShapeParams`.
+//! name the item carries, the scale, the packed texture entry, and the shape
+//! block re-quantizing to the object's own `PrimShapeParams`.
 //!
 //! That fourth leg only exists on one of the two live grids, which is why this
 //! case declares [`Grid::FakeOpensim`] rather than the plain fake grid: on
@@ -42,6 +42,12 @@
 //! Second Life — the flavour everything else here runs on — hands a viewer a nil
 //! asset id and nothing to fetch, and `object-asset-format` is where that half
 //! is recorded.
+//!
+//! Because the leg is OpenSim's, the body it reads is **OpenSim's format**:
+//! `<SceneObjectGroup>` XML (`sl_object_asset::opensim`), not the Linden text
+//! the other flavour files. The class is two formats on the two grids, and a
+//! case that decoded the wrong one would fail against a real OpenSim for a
+//! reason that has nothing to do with what it is testing.
 //!
 //! Fake-grid only, and deliberately so. The fixtures are the fake grid's seeded
 //! inventory, which no live grid has; the live-grid question this case's shape
@@ -61,7 +67,7 @@ use sl_client_tokio::{
     ScriptUploadLocation, TaskInventoryKey, Throttle, TransactionId, TransferId,
     UpdatableAssetType, Uuid, Vector,
 };
-use sl_object_asset::ObjectAsset;
+use sl_object_asset::opensim::SceneObjectGroup;
 use sl_test_assets::inventory::{SavePath, SeededAsset};
 
 use crate::context::{Session, TestContext, TestFailure};
@@ -568,43 +574,44 @@ async fn taken_object_round_trip(
     )?;
 
     let body = fetch(cap, AssetKey::from(item.asset_id), AssetType::Object).await?;
-    let asset = ObjectAsset::decode(&body).map_err(|error| {
+    let group = SceneObjectGroup::decode(&body).map_err(|error| {
         TestFailure::Assertion(format!("the taken object's asset does not decode: {error}"))
     })?;
-    let prim = asset
-        .root()
-        .ok_or_else(|| TestFailure::Assertion("the taken object's asset has no prim".to_owned()))?;
+    let part = &group.root;
     check(
-        prim.task_id == rezzed.full_id.uuid(),
+        part.uuid == rezzed.full_id.uuid(),
         &format!(
             "the asset names prim {} but the object taken was {}",
-            prim.task_id, rezzed.full_id
+            part.uuid, rezzed.full_id
         ),
     )?;
     check(
-        prim.name == item.name,
+        part.name == item.name,
         &format!(
             "the asset names the object {:?} but the item filed is {:?}",
-            prim.name, item.name
+            part.name, item.name
         ),
     )?;
     check(
-        prim.shape.to_params() == rezzed.shape,
+        part.shape.to_params() == rezzed.shape,
         "the asset's shape block does not re-quantize to the shape of the object taken",
     )?;
     check(
-        prim.scale == rezzed.scale,
+        part.scale == rezzed.scale,
         &format!(
             "the asset states scale {:?}, the object taken was {:?}",
-            prim.scale, rezzed.scale
+            part.scale, rezzed.scale
         ),
     )?;
+    // The packed blob rather than a face count: this format carries the wire's
+    // `TextureEntry` byte for byte, so "the same bytes the region streamed" is
+    // both a stronger claim than counting faces and the one the format makes.
     check(
-        prim.faces.len() == sl_object_asset::rendered_face_count(&rezzed.shape),
+        part.shape.texture_entry == rezzed.texture_entry,
         &format!(
-            "the asset carries {} faces; the shape renders {}",
-            prim.faces.len(),
-            sl_object_asset::rendered_face_count(&rezzed.shape)
+            "the asset carries a {}-byte texture entry; the object streamed {}",
+            part.shape.texture_entry.len(),
+            rezzed.texture_entry.len()
         ),
     )?;
     Ok(body.len())

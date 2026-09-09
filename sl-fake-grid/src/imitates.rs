@@ -18,7 +18,7 @@
 //!
 //! | behaviour | Second Life | OpenSim |
 //! | --- | --- | --- |
-//! | a taken object's asset ([`ObjectAssetPolicy`]) | withheld: nil id, unfetchable body | served: minted id, body under it |
+//! | a taken object's asset ([`ObjectAssetPolicy`]) | withheld: nil id, an unfetchable Linden-text body | served: minted id, a `<SceneObjectGroup>` XML body under it |
 //! | the login response's `options` list ([`honor_options`](crate::FakeGridBuilder::honor_options)) | honoured: the response is trimmed to what was asked for | ignored: every field is sent |
 //! | the `OpenSimExtras` block in `SimulatorFeatures` ([`advertises_open_sim_extras`](ImitatedGrid::advertises_open_sim_extras)) | absent | sent, carrying the grid's map-tile and currency-helper URLs |
 //! | the spatial-voice backend ([`VoiceBackend`]) | WebRTC, named three ways: `SimulatorFeatures.VoiceServerType`, the login `voice-config`, the `RequiredVoiceVersion` push | none: a stock region loads no voice module, and nothing is advertised |
@@ -135,6 +135,10 @@ impl ImitatedGrid {
     /// Second Life gives a viewer a nil asset id and no way to reach the body;
     /// OpenSim names a minted id and serves the body under it. Measured on
     /// aditi 2026-09-06 — see [`ObjectAssetPolicy`] for the numbers.
+    ///
+    /// The **format** follows from the same choice, because the class is two
+    /// formats on the two grids: a withheld body is the Linden text and a
+    /// served one is OpenSim's `<SceneObjectGroup>` XML.
     #[must_use]
     pub const fn object_assets(self) -> ObjectAssetPolicy {
         match self {
