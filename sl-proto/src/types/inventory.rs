@@ -26,6 +26,75 @@ pub struct InventoryFolder {
     pub version: i32,
 }
 
+/// One folder of an **AIS3 children listing**: the folder itself, and its
+/// contents when this listing enumerated them.
+///
+/// The nesting is not decoration. A viewer learns a folder's *descendent
+/// count* only from a listing that names every kind of child it can hold —
+/// the reference's `AISUpdate::parseDescendentCount` requires all three of
+/// `categories`, `links` and `items` to be present before it will believe a
+/// count — and it refuses to record a folder's `version` until it has that
+/// count ("don't set version unless correct children count is present"). A
+/// flattened listing therefore leaves every folder in it at version and count
+/// *unknown*, which in turn makes every later inventory update fail its
+/// accounting.
+///
+/// So [`children`](Self::children) carries the distinction that matters: it is
+/// `Some` for a folder whose children this listing lists in full (even when
+/// that is none of them), and `None` for one the listing reached at its depth
+/// limit and did not open. A folder with no children and a folder whose
+/// children were not fetched are different answers, and only the first may be
+/// served as an empty listing.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct InventoryListing {
+    /// The folder this listing is of.
+    pub folder: InventoryFolder,
+    /// Its children, when this listing enumerated them; `None` at the depth
+    /// limit (see the type's own documentation).
+    pub children: Option<InventoryListingChildren>,
+}
+
+impl InventoryListing {
+    /// A folder whose contents this answer does not claim to state — a rename
+    /// or a move reply, where the folder is named because it changed, not
+    /// because it was listed.
+    #[must_use]
+    pub const fn unlisted(folder: InventoryFolder) -> Self {
+        Self {
+            folder,
+            children: None,
+        }
+    }
+
+    /// A folder stated to hold nothing.
+    ///
+    /// This is the right answer for a folder the grid has just **created**:
+    /// that it is empty is knowledge, not ignorance, and saying so is what
+    /// lets a viewer record its version instead of holding it at "unknown"
+    /// until something fetches it.
+    #[must_use]
+    pub const fn empty(folder: InventoryFolder) -> Self {
+        Self {
+            folder,
+            children: Some(InventoryListingChildren {
+                folders: Vec::new(),
+                items: Vec::new(),
+            }),
+        }
+    }
+}
+
+/// The enumerated contents of one [`InventoryListing`] level: its sub-folders
+/// (each a listing of its own, so the nesting carries on) and its items (link
+/// items included — the serializer files those under `_embedded.links`).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct InventoryListingChildren {
+    /// The sub-folders, each with its own children when they were enumerated.
+    pub folders: Vec<InventoryListing>,
+    /// The items directly in this folder, links included.
+    pub items: Vec<InventoryItem>,
+}
+
 /// An inventory item, from an `InventoryDescendents` item entry.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct InventoryItem {

@@ -228,6 +228,11 @@ const AGENT_SYSTEM_FOLDERS: &[(i8, &str)] = &[
     (23, "Favorites"),
     (46, "Current Outfit"),
     (48, "My Outfits"),
+    // `FT_MESH`. Seeded because the stock account holds a mesh, and without a
+    // folder of its class it falls back to the agent root -- which leaves the
+    // root holding one child the reference viewer's model does not, and its
+    // descendent count disagreeing with the grid's for the whole session.
+    (49, "Meshes"),
     (50, "Received Items"),
     (56, "Settings"),
     (57, "Materials"),

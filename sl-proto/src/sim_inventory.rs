@@ -22,6 +22,7 @@ use sl_wire::AisUpdate;
 
 use crate::types::{
     ASSET_CODE_LINK, ASSET_CODE_LINK_FOLDER, Event, InventoryFolder, InventoryItem,
+    InventoryListing, InventoryListingChildren,
 };
 
 /// Why an inventory-tree mutation was rejected; the dispatch layer maps the
@@ -179,34 +180,70 @@ impl SimInventoryTree {
         })
     }
 
-    /// The descendants of `folder_id` down to `depth` levels, flattened
-    /// (folders and items separately; a folder's items count as level-1
-    /// children alongside its sub-folders, so `depth == 0` lists nothing).
+    /// The AIS3 children listing of `folder_id`: its direct children, and
+    /// `depth` further levels of sub-folders opened below them.
+    ///
+    /// **`depth == 0` is the folder's own children, not nothing.** The
+    /// parameter is the reference viewer's `?depth=`, which counts levels of
+    /// *recursion beneath* the listing rather than levels of it: its ordinary
+    /// non-recursive folder fetch (`LLInventoryModelBackgroundFetch` →
+    /// `AISAPI::FetchCategoryChildren(cat_id, …, recursive = false, cb, 0)`)
+    /// asks with `depth=0` and means "list this folder". Reading it as a level
+    /// count answers that request with an empty listing, and an empty listing
+    /// is how a viewer is told a folder holds nothing.
+    ///
+    /// `only`, when given, restricts the **direct** sub-folders to the named
+    /// set and omits this folder's own items: that is the `&children=<ids>`
+    /// subset fetch, which asks for named children rather than for the folder,
+    /// and which the reference deliberately does not read as a complete
+    /// listing of the parent.
+    ///
     /// `None` when the folder is unknown.
-    pub(crate) fn children_to_depth(
+    pub(crate) fn listing_to_depth(
         &self,
         folder_id: InventoryFolderKey,
         depth: i32,
-    ) -> Option<(Vec<InventoryFolder>, Vec<InventoryItem>)> {
-        if !self.folders.contains_key(&folder_id) {
-            return None;
+        only: Option<&[InventoryFolderKey]>,
+    ) -> Option<InventoryListing> {
+        let folder = self.folders.get(&folder_id)?.clone();
+        Some(self.listing_of(folder, depth, only))
+    }
+
+    /// One level of [`listing_to_depth`](Self::listing_to_depth): this folder
+    /// listed in full, with each sub-folder opened in turn while `remaining`
+    /// levels are left and left closed (`children: None`) once they are not —
+    /// so a folder the listing stopped at is never reported as an empty one.
+    fn listing_of(
+        &self,
+        folder: InventoryFolder,
+        remaining: i32,
+        only: Option<&[InventoryFolderKey]>,
+    ) -> InventoryListing {
+        let folder_id = folder.folder_id;
+        let folders = self
+            .child_folders(folder_id)
+            .into_iter()
+            .filter(|child| only.is_none_or(|wanted| wanted.contains(&child.folder_id)))
+            .map(|child| {
+                if remaining > 0 {
+                    self.listing_of(child, remaining.saturating_sub(1), None)
+                } else {
+                    InventoryListing {
+                        folder: child,
+                        children: None,
+                    }
+                }
+            })
+            .collect();
+        let items = if only.is_some() {
+            Vec::new()
+        } else {
+            self.child_items(folder_id, 0)
+        };
+        InventoryListing {
+            folder,
+            children: Some(InventoryListingChildren { folders, items }),
         }
-        let mut folders = Vec::new();
-        let mut items = Vec::new();
-        let mut frontier = vec![folder_id];
-        let mut remaining = depth;
-        while remaining > 0 && !frontier.is_empty() {
-            let mut next_frontier = Vec::new();
-            for parent in frontier {
-                let child_folders = self.child_folders(parent);
-                next_frontier.extend(child_folders.iter().map(|folder| folder.folder_id));
-                folders.extend(child_folders);
-                items.extend(self.child_items(parent, 0));
-            }
-            frontier = next_frontier;
-            remaining = remaining.saturating_sub(1);
-        }
-        Some((folders, items))
     }
 
     /// Whether `candidate` is `ancestor` itself or lies anywhere under it —

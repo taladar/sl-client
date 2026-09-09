@@ -436,11 +436,18 @@ driver persisting inventory.
   `_updated_category_versions`, …) with the affected objects under
   `_embedded` (`ais_mutation_reply_to_llsd`); deletes answer meta only.
   `LibraryAPIv3` is read-only: its `GET`s serve the Library tree and every
-  mutating verb answers `405`. One deliberate divergence: the real AIS
-  nests `_embedded` recursively per depth level, but our client parser
-  reads only the top level, so a children fetch serves the subtree
-  **flattened** into the top-level `_embedded` — information-equivalent
-  (uuid-keyed maps, every entry carries its `parent_id`).
+  mutating verb answers `405`. A children fetch nests `_embedded` one
+  level per level of the listing, as the real AIS service does, and two
+  details of that shape are load-bearing rather than cosmetic: a listed
+  folder always names all three of `categories`, `links` and `items` —
+  empty or not, because the reference believes a descendent count only
+  from a listing that names all three, and records a folder's `version`
+  only once it has that count — and a folder the listing did not open
+  carries no `_embedded` at all, since "holds nothing" and "was not
+  fetched" are different answers. `?depth=` counts levels **below** the
+  listing, so `depth=0` is the folder's own children (the reference's
+  ordinary non-recursive fetch), and `&children=<ids>` narrows it to a
+  subset fetch of the named children.
 - **`CreateInventoryCategory`** (served by OpenSim too, unlike AIS3)
   applies the client-chosen folder id and echoes the request fields via
   `build_create_inventory_category_response`.

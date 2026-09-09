@@ -511,8 +511,9 @@ pub use group::{
 };
 pub use inventory::{
     Child, FolderInfo, FolderType, GestureActivation, InventoryCursor, InventoryFolder,
-    InventoryItem, InventoryItemMove, ItemInfo, NewInventoryItem, NewInventoryLink, SaleInfo,
-    global_to_handle, grid_to_handle, handle_to_global, handle_to_grid,
+    InventoryItem, InventoryItemMove, InventoryListing, InventoryListingChildren, ItemInfo,
+    NewInventoryItem, NewInventoryLink, SaleInfo, global_to_handle, grid_to_handle,
+    handle_to_global, handle_to_grid,
 };
 pub use land::{LandBrushAction, LandBrushSize, LandEdit, TerraformArea};
 pub use map::{

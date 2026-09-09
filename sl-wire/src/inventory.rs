@@ -60,10 +60,40 @@ pub fn ais_category_children_url(category_id: InventoryFolderKey) -> String {
 
 /// The URL suffix for fetching a folder's children to `depth`
 /// (`GET /category/<id>/children?depth=<n>`).
+///
+/// **`depth` counts levels *below* the listing, so `0` asks for the folder's
+/// own children** — it is the reference viewer's own parameter, and its
+/// ordinary non-recursive folder fetch
+/// (`AISAPI::FetchCategoryChildren(id, …, recursive = false, cb, 0)`) sends
+/// exactly that. A server that reads it as a count of levels to list answers
+/// the commonest fetch there is with an empty listing.
 #[must_use]
 pub fn ais_category_children_fetch_url(category_id: InventoryFolderKey, depth: i32) -> String {
     let depth = depth.clamp(0, AIS_MAX_FOLDER_DEPTH);
     format!("/category/{category_id}/children?depth={depth}")
+}
+
+/// The URL suffix for fetching **named children** of a folder to `depth`
+/// (`GET /category/<id>/children?depth=<n>&children=<id>,<id>,…`), the
+/// reference viewer's `AISAPI::FetchCategorySubset`.
+///
+/// A subset fetch asks for those children, not for the folder: the reference
+/// deliberately does not read the reply's top-level category as a complete
+/// listing of it (`AISUpdate::parseContent`'s `FETCHCATEGORYSUBSET` arm skips
+/// straight to `_embedded`), because it is not one.
+#[must_use]
+pub fn ais_category_children_subset_url(
+    category_id: InventoryFolderKey,
+    depth: i32,
+    children: &[InventoryFolderKey],
+) -> String {
+    let depth = depth.clamp(0, AIS_MAX_FOLDER_DEPTH);
+    let ids = children
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("/category/{category_id}/children?depth={depth}&children={ids}")
 }
 
 /// The URL suffix for a folder's **link items only**
@@ -143,15 +173,31 @@ pub fn build_ais_create_link_body(
     out
 }
 
-/// The AIS3 body for creating a new folder: `{ name, type }` (the `type` is the
-/// folder's preferred `FolderType`, or `-1` for none).
+/// The AIS3 body for creating a new folder:
+/// `{ categories: [ { category_id, parent_id, type_default, name } ] }`, the
+/// shape the reference viewer sends (`LLInventoryModel::createNewCategory`
+/// wrapping `LLInventoryCategory::asAISCreateCatLLSD`).
+///
+/// The array and its `category_id` are not ceremony. A create body's outer
+/// shape is what tells the service a folder is being created rather than a
+/// link (`{ links: [ … ] }` on the same URL), and `category_id` is sent
+/// **nil**: the service mints the id, and a viewer that sent one of its own
+/// would be asserting an id the grid never agreed to.
 #[must_use]
-pub fn build_ais_create_category_body(folder_type: i32, name: &str) -> String {
-    let mut out = String::from("<llsd><map><key>name</key><string>");
-    push_escaped(&mut out, name);
-    out.push_str("</string><key>type</key><integer>");
+pub fn build_ais_create_category_body(
+    parent_id: InventoryFolderKey,
+    folder_type: i32,
+    name: &str,
+) -> String {
+    let mut out = String::from(
+        "<llsd><map><key>categories</key><array><map><key>category_id</key><uuid /><key>parent_id</key><uuid>",
+    );
+    out.push_str(&parent_id.to_string());
+    out.push_str("</uuid><key>type_default</key><integer>");
     out.push_str(&folder_type.to_string());
-    out.push_str("</integer></map></llsd>");
+    out.push_str("</integer><key>name</key><string>");
+    push_escaped(&mut out, name);
+    out.push_str("</string></map></array></map></llsd>");
     out
 }
 
@@ -291,6 +337,24 @@ pub fn parse_ais_category_children_fetch_url(suffix: &str) -> Option<(InventoryF
     Some((category, depth.clamp(0, AIS_MAX_FOLDER_DEPTH)))
 }
 
+/// The `&children=<id>,<id>,…` list of an
+/// [`ais_category_children_subset_url`] suffix, or `None` when the request
+/// names no subset (an ordinary children fetch, which asks for the folder
+/// entire). Unparsable ids are dropped; an empty or all-unparsable list reads
+/// as no subset rather than as "none of them", since a request for nothing is
+/// not a request anyone makes.
+#[must_use]
+pub fn parse_ais_category_children_subset(suffix: &str) -> Option<Vec<InventoryFolderKey>> {
+    let (_path, query) = split_url_suffix(suffix);
+    let listed = query_param(query?, "children")?;
+    let ids: Vec<InventoryFolderKey> = listed
+        .split(',')
+        .filter_map(|id| Uuid::parse_str(id.trim()).ok())
+        .map(InventoryFolderKey::from)
+        .collect();
+    (!ids.is_empty()).then_some(ids)
+}
+
 /// Parses the [`ais_item_url`] suffix back into its item id (`/item/<id>`, the
 /// `PATCH`/`DELETE`/`GET` target), or `None` if it does not match.
 #[must_use]
@@ -314,9 +378,20 @@ pub struct AisCategoryCreate {
     pub name: String,
 }
 
-/// Parses an AIS3 create-folder body (`{ name, type }`) into its fields, the
-/// inverse of [`build_ais_create_category_body`]. Missing fields default to an
-/// empty name and `-1` type, mirroring the lenient scalar parsing elsewhere.
+/// Parses an AIS3 create-folder body into its fields, the inverse of
+/// [`build_ais_create_category_body`]. Missing fields default to an empty name
+/// and `-1` type, mirroring the lenient scalar parsing elsewhere.
+///
+/// **Both shapes are accepted**: the reference viewer's
+/// `{ categories: [ { name, type_default, … } ] }`, and the flat
+/// `{ name, type }` this crate used to build. A server that understands only
+/// the second files every folder a real viewer creates under an **empty name**
+/// — and a viewer that cannot find the folder it just made makes it again, and
+/// again, which is exactly how this was found.
+///
+/// Only the first entry of a `categories` array is read: a create is one
+/// folder, and the array is how the service tells a folder create from a link
+/// create (`{ links: [ … ] }`) on the same URL.
 ///
 /// # Errors
 ///
@@ -327,9 +402,19 @@ pub fn parse_ais_create_category_body(xml: &str) -> Result<AisCategoryCreate, Wi
         field: "AisCreateCategory",
         value: error.to_string(),
     })?;
+    let entry = root
+        .get("categories")
+        .and_then(Llsd::as_array)
+        .and_then(<[Llsd]>::first)
+        .unwrap_or(&root);
     Ok(AisCategoryCreate {
-        folder_type: root.field_i32("type", "type")?.unwrap_or(-1),
-        name: llsd_string(&root, "name")?,
+        // `type_default` is the reference's key for it; `type` is this crate's
+        // older one. Neither present is a folder of no preferred type.
+        folder_type: entry
+            .field_i32("type_default", "type_default")?
+            .or(entry.field_i32("type", "type")?)
+            .unwrap_or(-1),
+        name: llsd_string(entry, "name")?,
     })
 }
 
@@ -669,9 +754,13 @@ mod test {
 
     #[test]
     fn create_category_body_escapes_name() {
+        let parent = InventoryFolderKey::from(uuid!("44444444-4444-4444-4444-444444444444"));
         assert_eq!(
-            build_ais_create_category_body(8, "A & B"),
-            "<llsd><map><key>name</key><string>A &amp; B</string><key>type</key><integer>8</integer></map></llsd>"
+            build_ais_create_category_body(parent, 8, "A & B"),
+            "<llsd><map><key>categories</key><array><map><key>category_id</key><uuid />\
+<key>parent_id</key><uuid>44444444-4444-4444-4444-444444444444</uuid>\
+<key>type_default</key><integer>8</integer>\
+<key>name</key><string>A &amp; B</string></map></array></map></llsd>"
         );
     }
 
@@ -765,7 +854,8 @@ mod test {
 
     #[test]
     fn create_category_body_round_trips() -> Result<(), String> {
-        let body = build_ais_create_category_body(8, "A & B");
+        let parent = InventoryFolderKey::from(uuid!("44444444-4444-4444-4444-444444444444"));
+        let body = build_ais_create_category_body(parent, 8, "A & B");
         assert_eq!(
             parse_ais_create_category_body(&body).map_err(|error| format!("{error:?}"))?,
             AisCategoryCreate {

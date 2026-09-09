@@ -1994,7 +1994,7 @@ mod test {
 
         // Create under the root.
         let suffix = ais_create_category_url(folder_key(AGENT_ROOT), uuid::Uuid::from_u128(0x71d));
-        let body = build_ais_create_category_body(5, "Sub");
+        let body = build_ais_create_category_body(folder_key(AGENT_ROOT), 5, "Sub");
         let (status, reply) = respond_ais(&mut caps, &mut sim, "POST", &cap_path, &suffix, &body)?;
         assert_eq!(status, 200);
         let tree = parse_llsd_xml(&reply)?;
@@ -2214,8 +2214,13 @@ mod test {
         Ok(())
     }
 
-    /// The AIS3 children fetch honours the depth parameter, flattening the
-    /// subtree into the top-level `_embedded` block.
+    /// The AIS3 children fetch honours the depth parameter, nesting each
+    /// opened folder's contents inside its own `_embedded` block.
+    ///
+    /// Depth counts levels of recursion **below** the listing, so `depth=0` is
+    /// the fetched folder's own children — the reference viewer's ordinary
+    /// non-recursive folder fetch sends exactly that, and answering it with an
+    /// empty listing tells a viewer the folder is empty.
     #[test]
     fn ais3_children_fetch_honours_depth() -> Result<(), TestError> {
         let mut caps = new_caps()?;
@@ -2248,7 +2253,9 @@ mod test {
             Ok((categories, items))
         };
 
-        // Depth 0: the category alone, no children.
+        // Depth 0: the root's own children -- Clothing, and none of the root's
+        // own items -- with all three keys present, which is what lets a
+        // viewer believe the count.
         let suffix = ais_category_children_fetch_url(folder_key(AGENT_ROOT), 0);
         let (status, reply) = respond_ais(&mut caps, &mut sim, "GET", &cap_path, &suffix, "")?;
         assert_eq!(status, 200);
@@ -2257,18 +2264,84 @@ mod test {
             tree.get("category_id").and_then(Llsd::as_uuid),
             Some(folder_key(AGENT_ROOT).uuid())
         );
-        assert!(tree.get("_embedded").is_none());
+        assert_eq!(embedded_counts(&reply)?, (1, 0));
+        for key in ["categories", "items", "links"] {
+            assert!(
+                tree.get("_embedded")
+                    .and_then(|embedded| embedded.get(key))
+                    .is_some(),
+                "a listed folder must name its {key}, empty or not"
+            );
+        }
+        // Clothing was reached but not opened, so it carries no listing of its
+        // own: "not fetched" and "empty" are different answers.
+        let clothing = tree
+            .get("_embedded")
+            .and_then(|embedded| embedded.get("categories"))
+            .and_then(|categories| categories.get(&folder_key(AGENT_CLOTHING).to_string()))
+            .ok_or("Clothing missing from the root listing")?;
+        assert!(clothing.get("_embedded").is_none());
 
-        // Depth 1: only Clothing.
+        // Depth 1: Clothing is opened, so its own contents ride inside it --
+        // nested, not flattened beside the root's.
         let suffix = ais_category_children_fetch_url(folder_key(AGENT_ROOT), 1);
         let (_, reply) = respond_ais(&mut caps, &mut sim, "GET", &cap_path, &suffix, "")?;
         assert_eq!(embedded_counts(&reply)?, (1, 0));
+        let tree = parse_llsd_xml(&reply)?;
+        let clothing = tree
+            .get("_embedded")
+            .and_then(|embedded| embedded.get("categories"))
+            .and_then(|categories| categories.get(&folder_key(AGENT_CLOTHING).to_string()))
+            .ok_or("Clothing missing from the root listing")?;
+        let clothing_embedded = clothing.get("_embedded").ok_or("Clothing was not opened")?;
+        assert_eq!(
+            clothing_embedded
+                .get("items")
+                .and_then(Llsd::as_map)
+                .map_or(0, std::collections::HashMap::len),
+            1,
+            "the Hat belongs inside Clothing, not beside it"
+        );
+        assert_eq!(
+            clothing_embedded
+                .get("categories")
+                .and_then(Llsd::as_map)
+                .map_or(0, std::collections::HashMap::len),
+            1,
+            "Formal belongs inside Clothing"
+        );
 
-        // Depth 50: the whole flattened subtree (Clothing + Formal, Hat +
-        // Tuxedo).
+        // Depth 50: the whole subtree, still nested one folder inside another.
         let suffix = ais_category_children_fetch_url(folder_key(AGENT_ROOT), 50);
         let (_, reply) = respond_ais(&mut caps, &mut sim, "GET", &cap_path, &suffix, "")?;
-        assert_eq!(embedded_counts(&reply)?, (2, 2));
+        assert_eq!(embedded_counts(&reply)?, (1, 0));
+        let tree = parse_llsd_xml(&reply)?;
+        let tuxedo = tree
+            .get("_embedded")
+            .and_then(|embedded| embedded.get("categories"))
+            .and_then(|categories| categories.get(&folder_key(AGENT_CLOTHING).to_string()))
+            .and_then(|clothing| clothing.get("_embedded"))
+            .and_then(|embedded| embedded.get("categories"))
+            .and_then(|categories| categories.get(&formal.to_string()))
+            .and_then(|formal| formal.get("_embedded"))
+            .and_then(|embedded| embedded.get("items"))
+            .and_then(Llsd::as_map)
+            .map_or(0, std::collections::HashMap::len);
+        assert_eq!(
+            tuxedo, 1,
+            "the Tuxedo belongs two levels down, inside Formal"
+        );
+
+        // A subset fetch answers the named children and nothing else: it is a
+        // request for those folders, not a listing of the parent.
+        let suffix = sl_wire::ais_category_children_subset_url(
+            folder_key(AGENT_ROOT),
+            50,
+            &[folder_key(AGENT_CLOTHING)],
+        );
+        let (status, reply) = respond_ais(&mut caps, &mut sim, "GET", &cap_path, &suffix, "")?;
+        assert_eq!(status, 200);
+        assert_eq!(embedded_counts(&reply)?, (1, 0));
         Ok(())
     }
 
@@ -2301,7 +2374,7 @@ mod test {
         assert_eq!(status, 405);
         let create_suffix =
             ais_create_category_url(folder_key(LIB_ROOT), uuid::Uuid::from_u128(0x71d));
-        let create = build_ais_create_category_body(-1, "Nope");
+        let create = build_ais_create_category_body(folder_key(LIB_ROOT), -1, "Nope");
         let (status, _) = respond_ais(
             &mut caps,
             &mut sim,

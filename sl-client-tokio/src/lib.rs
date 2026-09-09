@@ -1160,7 +1160,7 @@ impl Client {
                         Some(Command::Ais3CreateFolder { parent_id, folder_type, name }) => {
                             if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
                                 let url = format!("{base}{}", ais_create_category_url(parent_id, Uuid::new_v4()));
-                                let body = build_ais_create_category_body(folder_type, &name);
+                                let body = build_ais_create_category_body(parent_id, folder_type, &name);
                                 tokio::spawn(post_voice_cap(url, body, CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
                             }
                         }

@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 319 |
 | blocked | 46 |
 | in-progress | 20 |
-| bugs | 63 |
-| done | 1033 |
+| bugs | 62 |
+| done | 1034 |
 | deferred | 26 |
 | wont-do | 14 |
 | **total** | **1622** |
@@ -1187,7 +1187,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (63)
+## bugs (62)
 
 ### viewer
 
@@ -1331,16 +1331,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-circuit-code-as-i4-crashes-viewers`](bugs/test-fake-grid-circuit-code-as-i4-crashes-viewers.md)
   — Login response sends circuit_code as <i4>, which overflows S32 and kills
   Firestorm
-- [`test-fake-grid-inventory-skeleton-version-mismatch`](bugs/test-fake-grid-inventory-skeleton-version-mismatch.md)
-  — Login skeleton reports folder version -1 while AIS reports 8, crashing the
-  viewer
 - [`test-fake-grid-map-server-url-not-honoured`](bugs/test-fake-grid-map-server-url-not-honoured.md)
   — The viewer falls back to map.secondlife.com instead of the grid's
   map-server-url
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1033)
+## done (1034)
 
 ### protocol
 
@@ -3288,6 +3285,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The one upload announcement Second Life would only tell us for money
 - [`test-fake-grid-imitates-upload-announcements`](done/test-fake-grid-imitates-upload-announcements.md)
   — An uploaded item is announced the legacy way whichever grid this is
+- [`test-fake-grid-inventory-skeleton-version-mismatch`](done/test-fake-grid-inventory-skeleton-version-mismatch.md)
+  — Login skeleton reports folder version -1 while AIS reports 8, crashing the
+  viewer
 - [`test-fake-grid-login-matrix-and-timeouts`](done/test-fake-grid-login-matrix-and-timeouts.md)
   — The login refusals and handover timeouts nothing tests
 - [`test-fake-grid-neighbours-crossing`](done/test-fake-grid-neighbours-crossing.md)

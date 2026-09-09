@@ -3621,6 +3621,95 @@ mod test {
         Ok(())
     }
 
+    /// **The login skeleton and the AIS surface report the same folder
+    /// versions**, and an AIS children fetch of a folder lists it.
+    ///
+    /// A folder version is not a property of either surface: it is a
+    /// *relationship between them*. The reference viewer builds its inventory
+    /// model from the login skeleton and then reconciles it against AIS, and
+    /// when the two disagree it warns, adjusts, and re-fetches — and if the AIS
+    /// side never states a usable version at all, it holds the folder at
+    /// "unknown" for the whole session and every later update to it fails its
+    /// accounting. So a round trip through either surface alone proves nothing
+    /// here; this asks both and compares.
+    ///
+    /// The fetch is `depth = 0`, the reference viewer's ordinary non-recursive
+    /// folder fetch, and it must come back as a *listing* — the folder plus its
+    /// children — rather than as the folder alone.
+    #[tokio::test]
+    async fn the_login_skeleton_and_ais_agree_about_folder_versions() -> Result<(), TestError> {
+        let (_grid, client, _agent) = connect().await?;
+        let (event_tx, mut events) = mpsc::channel::<Event>(256);
+        let (commands, command_rx) = mpsc::channel::<Command>(8);
+        let (diag_tx, _diag_rx) = mpsc::channel(16);
+        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+
+        let skeleton = wait_on(&mut events, |event| match event {
+            Event::InventorySkeleton(folders) => Some(folders.clone()),
+            _ => None,
+        })
+        .await?;
+        assert!(
+            skeleton.len() > 1,
+            "the stock account's skeleton is only {} folder(s)",
+            skeleton.len()
+        );
+
+        for folder in &skeleton {
+            commands
+                .send(Command::Ais3FetchFolderChildren {
+                    folder_id: folder.folder_id,
+                    depth: 0,
+                })
+                .await?;
+            let fetched = wait_on(&mut events, |event| match event {
+                Event::InventoryBulkUpdate { folders, .. } => folders
+                    .iter()
+                    .find(|candidate| candidate.folder_id == folder.folder_id)
+                    .cloned(),
+                _ => None,
+            })
+            .await?;
+            assert_eq!(
+                fetched.version, folder.version,
+                "the login skeleton and AIS disagree about {}'s version",
+                folder.name
+            );
+        }
+
+        // The listing is a listing: fetching the root brings its children back
+        // with it, not the root on its own.
+        let root = skeleton
+            .iter()
+            .find(|folder| folder.parent_id.is_none())
+            .ok_or("the skeleton names no root")?;
+        commands
+            .send(Command::Ais3FetchFolderChildren {
+                folder_id: root.folder_id,
+                depth: 0,
+            })
+            .await?;
+        let children = wait_on(&mut events, |event| match event {
+            Event::InventoryBulkUpdate { folders, .. } => {
+                let listed: Vec<_> = folders
+                    .iter()
+                    .filter(|candidate| candidate.parent_id == Some(root.folder_id))
+                    .cloned()
+                    .collect();
+                (!listed.is_empty()).then_some(listed)
+            }
+            _ => None,
+        })
+        .await?;
+        assert!(
+            children.len() > 1,
+            "a depth-0 fetch of the root listed only {} child folder(s)",
+            children.len()
+        );
+        run.abort();
+        Ok(())
+    }
+
     /// Every **built-in UI sound** — the typing chirp, the money chime, the
     /// teleport whoosh, the snapshot shutter — is served under its real Linden
     /// id from the stock library, and what comes back is the tone that id was

@@ -40,8 +40,11 @@ already bidirectional (Tier-F #61); the genuinely new inverses are
 and the reply serializers `fetch_inventory_items_to_llsd` (+ client
 `_from_llsd` fold and the two new CAP constants folded into
 `Event::InventoryBulkUpdate`), `ais_mutation_reply_to_llsd`,
-`ais_category_children_reply_to_llsd` (subtree deliberately flattened
-into top-level `_embedded` — our client parser reads only that level),
+`ais_category_children_reply_to_llsd` (which flattened the subtree into
+the top-level `_embedded` here, on the grounds that our own client parser
+read only that level — undone by
+[[test-fake-grid-inventory-skeleton-version-mismatch]], which found that
+the reference viewer's descendent accounting depends on the nesting),
 `ais_item_reply_to_llsd`. Verified by ten loopback tests driving the
 real client builders/parsers (and `Session` folds) against
 `SimCaps::dispatch` (`sl-proto/tests/sim_caps.rs`) plus sl-wire codec

@@ -1967,7 +1967,7 @@ fn apply_command(
                     "{base}{}",
                     ais_create_category_url(*parent_id, Uuid::new_v4())
                 );
-                let body = build_ais_create_category_body(*folder_type, name);
+                let body = build_ais_create_category_body(*parent_id, *folder_type, name);
                 std::thread::spawn(move || {
                     run_voice_cap(&url, body, CAP_INVENTORY_API_V3, &events_tx);
                 });
