@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 46 |
 | in-progress | 20 |
 | bugs | 58 |
-| done | 1038 |
+| done | 1040 |
 | deferred | 26 |
 | wont-do | 14 |
-| **total** | **1622** |
+| **total** | **1624** |
 
 ## ideas (101)
 
@@ -268,6 +268,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Session and SimSession are god objects with 12k-line impl blocks
 - [`protocol-audit-wire-error-contract`](ready/protocol-audit-wire-error-contract.md)
   — sl-wire's public parse surface has five different failure disciplines
+- [`protocol-experience-environment-push`](ready/protocol-experience-environment-push.md)
+  — An experience can set the sky, and nothing in this stack can say so
 - [`protocol-sl-llsd-serde`](ready/protocol-sl-llsd-serde.md) — serde
   Serialize/Deserialize derives for sl-llsd (Llsd) types
 - [`protocol-sl-lsl-serde`](ready/protocol-sl-lsl-serde.md) — serde support for
@@ -979,9 +981,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Factor the repeated session/id acquisition out of the conformance cases
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
-- [`test-fake-grid-timeline`](ready/test-fake-grid-timeline.md) — Scripted
-  scenario timelines with markers (blocked by `test-fake-grid-determinism`
-  (done), `viewer-fake-grid-render-harness` (done))
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
@@ -1324,7 +1323,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-water-refraction-smears-avatar-silhouette`](bugs/viewer-water-refraction-smears-avatar-silhouette.md)
   — Water behind an avatar smears a skin-coloured fringe around its silhouette
 
-## done (1038)
+## done (1040)
 
 ### protocol
 
@@ -1807,6 +1806,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-emoji-picker-floater`](done/viewer-emoji-picker-floater.md) — Emoji
   picker floater (blocked by `viewer-emoji-data` (done),
   `viewer-ui-floater-basic` (done))
+- [`viewer-environment-not-refetched-on-region-info`](done/viewer-environment-not-refetched-on-region-info.md)
+  — An estate's sky change never reaches a viewer that is already standing there
 - [`viewer-experience-permission-body-links`](done/viewer-experience-permission-body-links.md)
   — Experience card name — clickable experience-profile SLURL (blocked by
   `viewer-url-linkification` (done))
@@ -3319,6 +3320,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-terrain-layerdata`](done/test-fake-grid-terrain-layerdata.md)
   — The fake grid sends terrain — LayerData patches, wind, clouds (blocked by
   `test-fake-grid-determinism` (done))
+- [`test-fake-grid-timeline`](done/test-fake-grid-timeline.md) — Scripted
+  scenario timelines with markers
 - [`test-fake-grid-xmlrpc-int-width`](done/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 - [`test-firestorm-crosscheck-report`](done/test-firestorm-crosscheck-report.md)

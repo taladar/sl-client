@@ -14,7 +14,8 @@
 //! terrain RAW file); the [`SceneFixtures`] are the parcels and
 //! objects pushed at an arriving agent and replayed on request; the
 //! `on_event` hook sees every drained [`ServerEvent`] for behaviour the
-//! stock fixtures do not cover.
+//! stock fixtures do not cover; and the [`Timeline`] is the one part that acts
+//! on its own, running scripted steps once the agent has arrived.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -27,6 +28,7 @@ use sl_proto::{
 };
 use sl_types::key::{AgentKey, InventoryFolderKey, InventoryKey, ObjectKey, OwnerKey, ParcelKey};
 
+use crate::timeline::Timeline;
 use crate::udp_assets::UdpAssetFixtures;
 use crate::world::{SceneFixtures, TaskInventory, box_prim, region_wide_parcel};
 
@@ -63,6 +65,12 @@ pub struct Scenario {
     /// The parcels and objects of the region (pushed on arrival, replayed on
     /// request).
     pub world: SceneFixtures,
+    /// What happens to a session here because **time passed**: the scripted
+    /// steps run from the moment the agent arrives ([`crate::timeline`]).
+    ///
+    /// Empty by default. Everything else in a scenario answers something a
+    /// client asked for; this is the only part that acts on its own.
+    pub timeline: Timeline,
 }
 
 impl std::fmt::Debug for Scenario {
@@ -76,6 +84,7 @@ impl std::fmt::Debug for Scenario {
             .field("on_event", &self.on_event.as_ref().map(|_| "<closure>"))
             .field("udp_assets", &self.udp_assets)
             .field("world", &self.world)
+            .field("timeline", &self.timeline)
             .finish_non_exhaustive()
     }
 }
@@ -91,6 +100,7 @@ impl Scenario {
             assets: sl_proto::InMemoryAssetSource::new(),
             udp_assets: UdpAssetFixtures::new(),
             world: SceneFixtures::new(),
+            timeline: Timeline::new(),
         }
     }
 }
@@ -109,6 +119,7 @@ impl Default for Scenario {
             assets: default_assets(),
             udp_assets: default_udp_assets(),
             world: default_world(),
+            timeline: Timeline::new(),
         }
     }
 }

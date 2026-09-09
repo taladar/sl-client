@@ -130,6 +130,47 @@ at).
 scenario and prints, once the grid answers `get_grid_info`, the login URI
 as an IPv4 literal plus the `--grid` argument Firestorm wants.
 
+## Scripted timelines
+
+Everything above answers something the client asked for. A `Timeline` is
+the other half: what happens to a session because **time passed**.
+
+```rust,ignore
+let timeline = Timeline::new()
+    .then(At::AfterArrival(Duration::from_secs(2)),
+          Action::MoveObject { local_id, to })
+    .after(Duration::ZERO, Action::Marker("moved".to_owned()))
+    .then(At::OnMarkerAck, Action::KillObject(local_id));
+```
+
+A step's `At` is a duration from the arrival or from the previous step, a
+`ServerEvent` the session drains (`OnEvent`), or the client's own
+acknowledgement of the last `Marker` (`OnMarkerAck`) — the one wait that
+is a happens-before rather than a guess, because a client acknowledges a
+packet it has already decoded and handled. Its `Action` is anything a
+simulator does unprompted: rez, move, edit or kill an object, attach or
+detach one, animate the avatar, push an appearance, chat, IM, change the
+environment, save the region's own settings, change a parcel, teleport or
+walk over a border, report stats or the simulator's clock, send a marker,
+or a `Custom` hook.
+
+`SetEnvironment` needs `ConfigureRegion` beside it to reach a viewer that
+is already in the region: nothing carries new environment settings to one,
+so the viewer re-reads `ExtEnvironment` when a `RegionInfo` arrives — which
+is what `ConfigureRegion` sends, and what the reference viewer re-reads on
+unconditionally.
+
+The waits are `tokio` sleeps and the stamps come from the grid's injected
+clock, so a paused-time test runs a scripted minute in no wall-clock time
+at all.
+
+A script belongs to the **avatar**, not to the region it started in: when
+the client arrives in a teleport destination or across a border, the steps
+that have not run yet are handed to that session and the one left behind
+keeps only the prefix it ran. That happens for a client-initiated hop as
+much as for a scripted one. A script that has already finished hands over
+nothing, which is what leaves a destination region's own timeline alone.
+
 ## Which grid this one is
 
 The fake grid exists to fail a viewer the way a real grid would, and there are

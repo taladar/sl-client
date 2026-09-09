@@ -28,6 +28,7 @@ pub mod scenario;
 mod teleport;
 pub mod terrain;
 pub mod time;
+pub mod timeline;
 pub mod udp_assets;
 mod uploads;
 pub mod voice;
@@ -65,6 +66,9 @@ pub use scenario::{Scenario, SimEventHook, SimHook};
 pub use teleport::TELEPORT_ARRIVAL_TIMEOUT;
 pub use terrain::{Heightfield, TerrainFixture};
 pub use time::{Now, system_clock, tokio_clock};
+pub use timeline::{
+    Action, At, EventPredicate, ObjectEdit, ParcelEdit, RegionEdit, Step, Timeline,
+};
 pub use udp_assets::{UdpAssetFixtures, flat_terrain_raw};
 pub use voice::VoiceBackend;
 pub use world::{

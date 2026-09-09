@@ -1561,6 +1561,95 @@ one border, same full id and different local ids. `FakeAgent::with_world`
 (mutate a session's fixtures *and* send, under one lock) and
 `FakeAgent::seat_on` are what a test drives the handover with.
 
+## Scripted timelines
+
+Every surface above answers something the client asked for. A
+`Scenario::timeline` is the other half: what happens to a session because
+**time passed**, which is what a test of anything *moving* needs — a prim
+that moves, an avatar that starts an animation, a region whose sky
+changes, an agent walked over a border.
+
+```rust,ignore
+let timeline = Timeline::new()
+    .then(At::AfterArrival(Duration::from_secs(2)),
+          Action::MoveObject { local_id, to })
+    .after(Duration::ZERO, Action::Marker("moved".to_owned()))
+    .then(At::OnMarkerAck, Action::KillObject(local_id));
+```
+
+A step is an `At` and an `Action`. The `At` is a duration from the
+session's arrival (`AfterArrival`), a duration from the previous step
+(`AfterPrevious`), a `ServerEvent` the session drains (`OnEvent`, tested
+against every event since the script started, so a step waiting for
+something that already happened runs at once), or the client's own
+acknowledgement of the last marker (`OnMarkerAck`).
+
+`OnMarkerAck` is the one wait with a happens-before behind it rather than
+a guessed number of milliseconds. A client acknowledges a packet it has
+decoded and handled, so once the marker's ack is in, everything sent
+before it has already reached the viewer's own event stream — which is
+exactly what a test wants before it takes a second screenshot. It is also
+the one wait that does **not** stop the script when it times out: an
+ordering nicety that could strand a run would be worse than the
+reordering it prevents, which is the call `teleport.rs` already makes
+about its own `TeleportStart`. An `OnEvent` that times out *does* stop the
+script, because there the wait is the whole point of the step and the rest
+of the script was not written for a world where it never happened.
+
+The `Action` is anything a simulator does unprompted: `RezObject`,
+`MoveObject`, `UpdateObject`, `KillObject`, `Attach` / `Detach`,
+`AnimateAvatar`, `SetAppearance`, `Chat`, `Im`, `SetEnvironment`,
+`ConfigureRegion`, `ChangeParcel`, `Teleport`, `CrossRegion`, `SimStats`,
+`SimulatorTime`, `Marker`, and `Custom` for a hook.
+
+`SetEnvironment` and `ConfigureRegion` go together, and the pairing is a
+protocol fact rather than an inconvenience. Nothing carries new environment
+settings *to* a viewer that is already standing in the region: `SetEnvironment`
+changes what the `ExtEnvironment` capability answers, and the viewer's reason to
+ask again is a `RegionInfo` — which is what `ConfigureRegion` sends. The
+reference viewer re-reads on every one of those without comparing a field
+(`LLViewerRegion::processRegionInfo` runs `LLRegionInfoModel`'s update signal,
+which `LLEnvironment` has hooked to `requestRegion()`), and it could not do
+otherwise: a `RegionInfo` carries no environment fields at all. So an estate
+that changes only the sky saves the Region tab without moving a limit, and a
+script says the same thing with an empty `ConfigureRegion` edit.
+
+The one environment change that really is *pushed* is a different feature —
+`PushExpEnvironment`, an experience's `llSetEnvironment`, which travels as a
+`GenericMessage` and layers over the region's settings. Neither end of it exists
+in this workspace yet. The world-changing ones go through the
+region's shared store and publish to its change stream, so a second avatar
+standing there is told as well — a scripted rez is a rez, not a picture
+painted on one circuit.
+
+Every wait is a `tokio` sleep and every stamp comes from the grid's
+injected clock, so a test that pauses tokio's timer pauses the script with
+it: a scripted minute costs no wall-clock time.
+
+### The script belongs to the avatar
+
+A script that says "teleport, then move the prim you find there" has to
+outlive the session it started in — a teleport destination is always a
+*second* `SimSession`, and a crossing promotes a circuit the client
+already held. So once the client has actually arrived, the steps that have
+not run yet are handed to the destination's session and the one left
+behind keeps only the prefix it ran. That happens for a
+**client-initiated** teleport too, which is the point: the script belongs
+to the avatar, not to the patch of land.
+
+A destination whose own region declared a timeline loses it to the
+incoming one; a script that has already finished hands over nothing, which
+is what leaves the destination's own script alone. The runner parks on a
+notification rather than exiting when it runs out of steps, so it does not
+matter whether the script arrives before or after that session's arrival,
+and it carries a generation alongside its cursor so a runner waiting on
+step *n* of one script can never execute step *n* of the script that
+replaced it.
+
+A runner stops when its session closes, when the grid shuts down, or when
+the agent stops being the root agent there — which is what a crossing
+makes of the region left behind.
+
 ## The Bevy smoke tier
 
 `sl-client-bevy/tests/fake_grid_login_smoke.rs` logs the real

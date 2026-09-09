@@ -771,6 +771,9 @@ impl GridCore {
             seed_url: seed_url.clone(),
             udp_addr,
             map: Arc::clone(&self.map),
+            timeline: region.scenario.timeline.steps.clone(),
+            timeline_cursor: 0,
+            timeline_generation: 0,
         };
         let shared = new_shared_sim(
             state,
@@ -803,6 +806,14 @@ impl GridCore {
             prepared.shared.clone(),
         ));
         tokio::spawn(crate::neighbours::run_neighbour_announcer(
+            Arc::clone(self),
+            prepared.shared.clone(),
+        ));
+        // Spawned for every session, script or none: a session that arrives
+        // with an empty timeline parks on its hand-over notification, which is
+        // what lets a teleport or a crossing walk a script into a region whose
+        // own scenario declared one.
+        tokio::spawn(crate::timeline::run_timeline(
             Arc::clone(self),
             prepared.shared.clone(),
         ));

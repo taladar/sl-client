@@ -128,6 +128,25 @@ pub(crate) struct SimState {
     /// on the grid ([`crate::world_map`]). Shared, because it is the same
     /// answer for every session and never changes after start-up.
     pub(crate) map: Arc<[sl_proto::MapRegionInfo]>,
+    /// The scripted steps this session runs once its agent has arrived
+    /// ([`crate::timeline`]), starting as the region scenario's own.
+    ///
+    /// Owned per session rather than shared with the region, because a script
+    /// belongs to the avatar running it: a teleport or a crossing moves the
+    /// steps that have not run yet onto the destination's session
+    /// ([`crate::timeline::hand_over`]), leaving the prefix behind here.
+    pub(crate) timeline: Vec<crate::timeline::Step>,
+    /// The index into [`timeline`](Self::timeline) of the next step to run.
+    /// A cursor at the end of the steps is a script that is over — which is
+    /// what a hand-over leaves behind.
+    pub(crate) timeline_cursor: usize,
+    /// Bumped every time a hand-over replaces [`timeline`](Self::timeline).
+    ///
+    /// Without it a runner that started waiting for step *n* of one script
+    /// could execute step *n* of the script that replaced it — the two indices
+    /// are the same number and name different steps. The runner reads this
+    /// alongside the cursor and treats a change as "look again".
+    pub(crate) timeline_generation: u64,
 }
 
 /// One live session's shared handle: the lockable state plus its I/O anchors
@@ -154,6 +173,10 @@ pub(crate) struct SharedSim {
     pub(crate) closed_tx: watch::Sender<bool>,
     /// The grid's clock: every instant this session stamps its machine with.
     pub(crate) clock: Now,
+    /// Wakes this session's parked timeline runner when a teleport or a
+    /// crossing hands it a script ([`crate::timeline::hand_over`]). A permit is
+    /// stored, so a hand-over that lands before the runner parks is not lost.
+    pub(crate) timeline_notify: Arc<Notify>,
 }
 
 /// What a locked flush gathered; applied after the state lock is released so
@@ -183,6 +206,49 @@ impl SharedSim {
     /// `enqueue_*` on the live session.
     pub(crate) async fn with_sim<R>(&self, f: impl FnOnce(&mut SimSession) -> R) -> R {
         self.with_state(|state| f(&mut state.sim)).await
+    }
+
+    /// [`with_sim`](Self::with_sim) for a caller that needs the session's
+    /// **region world** alongside its machine, and has changes to publish.
+    ///
+    /// The same pairing [`FakeAgent::with_world`](crate::FakeAgent::with_world)
+    /// offers, plus the half a scripted change owes the rest of the region: the
+    /// [`RegionChange`]es the closure returns go onto the region's change
+    /// stream while the region lock is still held, so a watcher that wakes on
+    /// one cannot re-read a world the change has not landed in yet. The lock
+    /// order is the crate's own — session lock, then region lock, never the
+    /// reverse.
+    pub(crate) async fn with_region<R>(
+        &self,
+        f: impl FnOnce(
+            &mut crate::world::SceneFixtures,
+            &mut SimSession,
+            Instant,
+        ) -> (R, Vec<RegionChange>),
+    ) -> R {
+        let mut guard = self.state.lock().await;
+        let now = self.now();
+        // The region lock lives in its own scope: it is a synchronous lock, and
+        // the flush below awaits.
+        let result = {
+            let state = &mut *guard;
+            let mut world = state.world.lock();
+            let (result, changes) = f(&mut world, &mut state.sim, now);
+            for change in changes {
+                // A region whose other sessions have all gone has no
+                // subscribers; that is not a failure.
+                drop(state.changes.send(RegionUpdate {
+                    source: state.seq,
+                    change,
+                }));
+            }
+            drop(world);
+            result
+        };
+        let outcome = self.flush_locked(&mut guard);
+        drop(guard);
+        self.finish_flush(outcome).await;
+        result
     }
 
     /// [`with_sim`](Self::with_sim) for the callers that need more of the
@@ -425,6 +491,7 @@ pub(crate) fn new_shared_sim(
         shutdown_rx,
         closed_tx,
         clock,
+        timeline_notify: Arc::new(Notify::new()),
     }
 }
 

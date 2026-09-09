@@ -316,16 +316,33 @@ pub fn resolve_modern_environment(
     }
 }
 
-/// Request the region environment after each region handshake, retrying until the
-/// grid's EEP reply is ingested (or `MAX_ENV_ATTEMPTS` is reached). A single
-/// one-shot request is fragile: on a slower / remote grid the `ExtEnvironment`
-/// capability may not be seeded yet when the handshake completes, so the runtime
-/// silently drops the request and the sky / cloud / water stack is left on the
-/// legacy WindLight defaults forever (observed on aditi). Retrying until
-/// [`ingest_environment`] clears the pending flag closes that race — the same
-/// cap-not-ready-yet class of bug the terrain fetch hit. Parcels can override the
-/// region environment; the viewer asks for the whole-region settings here
-/// (`parcel_id: None`).
+/// Request the region environment after each region handshake **and after every
+/// `RegionInfo`**, retrying until the grid's EEP reply is ingested (or
+/// `MAX_ENV_ATTEMPTS` is reached).
+///
+/// A single one-shot request is fragile: on a slower / remote grid the
+/// `ExtEnvironment` capability may not be seeded yet when the handshake
+/// completes, so the runtime silently drops the request and the sky / cloud /
+/// water stack is left on the legacy WindLight defaults forever (observed on
+/// aditi). Retrying until [`ingest_environment`] clears the pending flag closes
+/// that race — the same cap-not-ready-yet class of bug the terrain fetch hit.
+/// Parcels can override the region environment; the viewer asks for the
+/// whole-region settings here (`parcel_id: None`).
+///
+/// The handshake alone was not enough, and that was a bug rather than a
+/// simplification. A handshake happens at login and at a border crossing, so an
+/// estate that changed its sky under an avatar **already standing in the
+/// region** never reached that viewer: it kept drawing whatever it fetched on
+/// arrival for the rest of the session. The reference viewer re-reads on the
+/// message a simulator sends when those settings are saved — `RegionInfo`,
+/// routed through `LLViewerRegion::processRegionInfo` into
+/// `LLRegionInfoModel`'s update signal, which `LLEnvironment` has hooked to
+/// `requestRegion()`. It is **unconditional** there: the signal fires at the end
+/// of every `LLRegionInfoModel::update` without comparing a single field
+/// against what it held, so no "did the environment part change" test is owed
+/// here either — and there could not be one, since `RegionInfo` carries no
+/// environment fields at all. It is a hint that the region's settings were
+/// written, not a copy of them.
 pub fn request_environment(
     time: Res<Time>,
     mut events: MessageReader<SlEvent>,
@@ -333,14 +350,18 @@ pub fn request_environment(
     mut state: ResMut<EnvironmentState>,
 ) {
     // A handshake (initial login or a border crossing) starts a fresh request
-    // cycle for the new region's environment.
+    // cycle for the new region's environment, and so does a `RegionInfo` —
+    // which is how a change made while the avatar stands here arrives.
     for event in events.read() {
-        if matches!(event.0, SlSessionEvent::RegionHandshakeComplete) {
-            info!("region handshake complete; requesting environment (EEP) settings");
-            state.req_pending = true;
-            state.req_attempts = 0;
-            state.req_next_retry_at = 0.0;
-        }
+        let reason = match event.0 {
+            SlSessionEvent::RegionHandshakeComplete => "region handshake complete",
+            SlSessionEvent::RegionLimits(_) => "region info received",
+            _ => continue,
+        };
+        info!("{reason}; requesting environment (EEP) settings");
+        state.req_pending = true;
+        state.req_attempts = 0;
+        state.req_next_retry_at = 0.0;
     }
 
     if !state.req_pending {
@@ -398,6 +419,9 @@ pub fn ingest_environment(mut events: MessageReader<SlEvent>, mut state: ResMut<
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
+
+    use bevy::prelude::*;
+    use sl_client_bevy::{Command, SlCommand, SlEvent, SlSessionEvent};
 
     use super::{EnvironmentSettings, EnvironmentSource, EnvironmentState, FixedEnvironment};
     use crate::sky_presets::FixedSky;
@@ -489,5 +513,114 @@ mod tests {
         state.set_fixed(None);
 
         assert_eq!(state.settings.day_length, 1234);
+    }
+
+    /// A `RegionInfo`'s decoded limits.
+    ///
+    /// Spelled out rather than defaulted because [`RegionLimits`] has no
+    /// `Default` — and should not: every field of it is something a grid
+    /// actually said. Nothing here reads the contents; what is under test is
+    /// that the *arrival* of one re-reads the environment, which is also why
+    /// the reference viewer compares no field either.
+    fn region_info() -> sl_client_bevy::RegionLimits {
+        sl_client_bevy::RegionLimits {
+            sim_name: None,
+            max_agents: 40,
+            hard_max_agents: 0,
+            hard_max_objects: 0,
+            region_flags: 0,
+            region_flags_extended: 0,
+            maturity: sl_client_bevy::Maturity::Pg,
+            estate_id: 1,
+            parent_estate_id: 1,
+            water_height: 20.0,
+            billable_factor: 1.0,
+            object_bonus_factor: 1.0,
+            terrain_raise_limit: 4.0,
+            terrain_lower_limit: -4.0,
+            price_per_meter: sl_client_bevy::LindenAmount(1),
+            redirect_grid_x: 0,
+            redirect_grid_y: 0,
+            use_estate_sun: true,
+            sun_hour: 0.0,
+            chat_settings: None,
+            combat_settings: None,
+        }
+    }
+
+    /// Every request the system wrote in one run.
+    /// Drained rather than read through a cursor: Bevy keeps a message alive
+    /// for two frames, so a fresh cursor per call would report the *previous*
+    /// call's request again and every "and then nothing happened" assertion
+    /// would be answered by the request that already had.
+    fn requests(app: &mut App) -> Vec<i32> {
+        app.update();
+        app.world_mut()
+            .resource_mut::<Messages<SlCommand>>()
+            .drain()
+            .filter_map(|command| match command.0 {
+                Command::RequestEnvironment { parcel_id } => Some(parcel_id.unwrap_or(-1)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// An app running [`request_environment`] with nothing else in it.
+    fn env_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin);
+        app.add_message::<SlEvent>();
+        app.add_message::<SlCommand>();
+        app.init_resource::<EnvironmentState>();
+        app.add_systems(Update, super::request_environment);
+        app
+    }
+
+    /// **A `RegionInfo` re-reads the region's environment.**
+    ///
+    /// The estate saved its sky while the avatar was standing here, so no
+    /// handshake is coming: `RegionInfo` is the only notice the viewer gets,
+    /// and the reference viewer re-reads on it unconditionally. Before this the
+    /// viewer kept drawing the sky it fetched on arrival for the rest of the
+    /// session.
+    #[test]
+    fn a_region_info_re_reads_the_environment() {
+        let mut app = env_app();
+        app.world_mut()
+            .write_message(SlEvent(SlSessionEvent::RegionLimits(region_info())));
+        assert_eq!(
+            requests(&mut app),
+            vec![-1],
+            "a RegionInfo must start a fresh whole-region environment request"
+        );
+    }
+
+    /// The handshake still does what it always did — the `RegionInfo` trigger is
+    /// an addition, not a replacement.
+    #[test]
+    fn a_handshake_still_re_reads_the_environment() {
+        let mut app = env_app();
+        app.world_mut()
+            .write_message(SlEvent(SlSessionEvent::RegionHandshakeComplete));
+        assert_eq!(requests(&mut app), vec![-1]);
+    }
+
+    /// An unrelated event starts nothing: the retry loop is armed by the two
+    /// region notices and by nothing else, so a chatty session does not turn
+    /// into a stream of environment fetches.
+    #[test]
+    fn an_unrelated_event_asks_for_nothing() {
+        let mut app = env_app();
+        app.world_mut()
+            .write_message(SlEvent(SlSessionEvent::RegionHandshakeComplete));
+        assert_eq!(requests(&mut app), vec![-1]);
+        // The reply lands, ending the cycle; an unrelated event must not
+        // restart it.
+        app.world_mut()
+            .resource_mut::<EnvironmentState>()
+            .ingest_reply(reply(-1, 1234));
+        app.world_mut()
+            .write_message(SlEvent(SlSessionEvent::SimulatorVersion("test".to_owned())));
+        assert_eq!(requests(&mut app), Vec::<i32>::new());
     }
 }

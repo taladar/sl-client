@@ -32,6 +32,7 @@ use sl_wire::LegacyMaterial;
 use crate::runtime::RegionConfig;
 use crate::scenario::Scenario;
 use crate::terrain::TerrainFixture;
+use crate::timeline::Timeline;
 use crate::world::SceneFixtures;
 
 pub use arrival::arrival;
@@ -46,9 +47,10 @@ pub use scenarios::{Landmark, NamedScenario};
 /// Each field is served by a different surface — objects and parcels over UDP,
 /// assets over `GetTexture`/`GetMesh2`/`ViewerAsset`, materials over
 /// `RenderMaterials`, media over `ObjectMedia`, the environment over
-/// `ExtEnvironment`, the ground as `LayerData` and the estate RAW download —
-/// and [`into_region`](Self::into_region) is the one place that knows which
-/// goes where. A fixture therefore describes content, not plumbing.
+/// `ExtEnvironment`, the ground as `LayerData` and the estate RAW download, the
+/// timeline by its own per-session runner — and
+/// [`into_region`](Self::into_region) is the one place that knows which goes
+/// where. A fixture therefore describes content, not plumbing.
 #[derive(Debug, Clone, Default)]
 pub struct RegionFixture {
     /// The parcels and objects pushed at an arriving agent and replayed on
@@ -70,6 +72,13 @@ pub struct RegionFixture {
     pub environment: Option<EnvironmentSettings>,
     /// The region's ground.
     pub terrain: TerrainFixture,
+    /// What happens to a session in this region because **time passed**
+    /// ([`crate::timeline`]). Empty for a fixture that is only a scene.
+    ///
+    /// A fixture describes a region's content, and a script is content: "the
+    /// prim over there moves two seconds after you arrive" is as much a
+    /// property of the scene as where the prim is.
+    pub timeline: Timeline,
 }
 
 impl RegionFixture {
@@ -158,6 +167,7 @@ impl RegionFixture {
             }),
             assets,
             world: self.world,
+            timeline: self.timeline,
             ..Scenario::empty()
         }
     }

@@ -180,6 +180,11 @@ pub(crate) async fn cross_session(
         return Err(Error::CrossingTimedOut);
     }
 
+    // The script walks over the border with the avatar, before the source is
+    // demoted: a child session runs no timeline, so a hand-over after the
+    // demotion would be a hand-over from a runner that had already stopped.
+    crate::timeline::hand_over(source, &destination).await;
+
     source
         .with_sim(sl_proto::SimSession::make_child_agent)
         .await;

@@ -353,6 +353,9 @@ pub fn catalogue() -> RegionFixture {
         media: vec![(media_object(), media_state())],
         environment: None::<EnvironmentSettings>,
         terrain: crate::TerrainFixture::default(),
+        // The catalogue is a still life: it states where everything is, and a
+        // test that wants one of them to move states that itself.
+        timeline: crate::Timeline::new(),
     }
 }
 
