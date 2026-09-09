@@ -580,7 +580,12 @@ impl InventoryModel {
 
     /// Store a fetched page of a folder's items (replacing any earlier page),
     /// sorted by name.
-    pub(crate) fn set_items(&mut self, folder: InventoryFolderKey, items: &[ItemInfo]) {
+    ///
+    /// `pub` beside [`merge_folders`](Self::merge_folders) for the same reason:
+    /// a surface that projects the mirror (the My Environments library, the
+    /// settings index) is tested against a model stood up by hand, and the two
+    /// halves of standing one up should not have different visibility.
+    pub fn set_items(&mut self, folder: InventoryFolderKey, items: &[ItemInfo]) {
         let mut owned: Vec<ItemInfo> = items.to_vec();
         owned.sort_by_key(|item| item.name.to_lowercase());
         self.items.insert(folder, owned);

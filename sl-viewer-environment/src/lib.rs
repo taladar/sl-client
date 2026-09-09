@@ -12,6 +12,15 @@
 //! - [`settings_editor`] — the fixed sky and water editors, over a settings
 //!   **asset** in inventory: the same knobs on tabs, plus a name and
 //!   Save / Save As / Revert.
+//! - [`my_environments`] — the My Environments library: every settings asset in
+//!   inventory, filterable by kind and name, with apply-to-self, edit, rename
+//!   and delete, and the two creators that mint a fresh sky or water.
+//! - [`settings_picker`] — the chooser another panel summons for one settings
+//!   field, over the same list narrowed to one kind.
+//!
+//! The rows those last two draw are one projection ([`settings_list`]): the
+//! library and the picker differ in their chrome and in what a pick does, and
+//! not at all in what a row is.
 //!
 //! The knobs themselves are one table ([`knobs`]) and the controls that draw
 //! them one set of spawners ([`rows`]), so a value cannot be labelled or scaled
@@ -40,9 +49,12 @@
 )]
 
 pub mod knobs;
+pub mod my_environments;
 pub mod personal_lighting;
 pub mod rows;
 pub mod settings_editor;
+pub mod settings_list;
+pub mod settings_picker;
 
 use bevy::prelude::*;
 
@@ -75,6 +87,15 @@ pub(crate) mod style {
 
     /// An action button's background.
     pub(crate) const ACTION_BACKGROUND: Color = Color::srgb(0.24, 0.29, 0.38);
+
+    /// A list row's height, logical px.
+    pub(crate) const ROW_HEIGHT: f32 = 20.0;
+
+    /// A scrolling list's backdrop.
+    pub(crate) const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
+
+    /// A selected row's background.
+    pub(crate) const SELECTED_BACKGROUND: Color = Color::srgba(0.24, 0.34, 0.52, 0.55);
 }
 
 /// Every environment editor at once, for a host that wants the whole family.
@@ -88,6 +109,66 @@ pub struct EnvironmentUiPlugins;
 impl Plugin for EnvironmentUiPlugins {
     fn build(&self, app: &mut App) {
         app.add_plugins(personal_lighting::PersonalLightingPlugin)
-            .add_plugins(settings_editor::SettingsEditorPlugin);
+            .add_plugins(settings_editor::SettingsEditorPlugin)
+            .add_plugins(my_environments::MyEnvironmentsPlugin)
+            .add_plugins(settings_picker::SettingsPickerPlugin);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EnvironmentUiPlugins;
+    use bevy::prelude::*;
+    use sl_viewer_ui_core::i18n::install_untranslated;
+    use sl_viewer_ui_core::ui::UiRoot;
+    use sl_viewer_ui_widgets::floater::FloaterPlugin;
+    use sl_viewer_ui_widgets::ui_color_picker::ColorPicked;
+    use sl_viewer_world_api::TexturePicked;
+
+    /// **Every window in this crate can actually be scheduled.**
+    ///
+    /// This is not a layout check — the floater sweep already measures the
+    /// chrome. It is the check that the *systems* run at all, and it exists
+    /// because a system whose two queries overlap
+    /// (`Query<&mut Text>` beside `Query<(&mut Text, &mut TextColor)>`, which is
+    /// easy to reach for once a window writes both cells and a label) panics
+    /// with Bevy's `B0001` **the first time it runs** — and takes the whole
+    /// viewer down with it, on the first frame, before a person can see
+    /// anything. Every other test in this crate is over pure functions, and the
+    /// viewer's own floater sweep builds chrome from the specs without adding
+    /// these plugins, so nothing here had ever scheduled them.
+    ///
+    /// It catches a second failure of the same shape, and that one is why the
+    /// world below is stood up rather than left bare: a `MessageReader` or
+    /// `MessageWriter` for a message **nothing registered** fails validation the
+    /// same way, and Bevy's default handler turns that into a panic too. So a
+    /// window that writes a message its plugin forgot to `add_message` is not a
+    /// button that quietly does nothing — it is the viewer falling over. The
+    /// seams here are the ones the *host* owns (the two picker replies, the
+    /// session channels, the locale); everything a window in this crate speaks
+    /// over itself must be registered by its own plugin, and is.
+    #[test]
+    fn every_environment_window_schedules_without_conflicting() {
+        let mut app = App::new();
+        app.init_resource::<UiScale>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<bevy::input_focus::InputFocus>()
+            // The seams the host brings: the two picker replies the swatches are
+            // answered on, and the session's command / event channels.
+            .add_message::<ColorPicked>()
+            .add_message::<TexturePicked>()
+            .add_message::<sl_client_bevy::SlCommand>()
+            .add_message::<sl_client_bevy::SlEvent>()
+            .add_plugins((FloaterPlugin, EnvironmentUiPlugins));
+        // Every key resolves to itself, which is all a scheduling check needs —
+        // and without it `Translator` has no `Localization` to read.
+        install_untranslated(&mut app);
+        let root = app.world_mut().spawn(Node::default()).id();
+        app.insert_resource(UiRoot(root));
+        // Two frames rather than one: the windows defer their content to the
+        // first open, and the systems that bind it only exist to run on a later
+        // frame than the one that spawned the chrome.
+        app.update();
+        app.update();
     }
 }

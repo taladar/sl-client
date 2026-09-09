@@ -429,6 +429,16 @@ static ENVIRONMENT_MENU: MenuDef = MenuDef {
             MenuCommand::new("Personal Lighting…", "toggle-personal-lighting")
                 .enabled_when(CAN_CHANGE_ENVIRONMENT),
         ),
+        // The settings-asset library. Deliberately *not* gated on `@setenv`:
+        // most of what it does is inventory work — rename, delete, open the
+        // editor — and a collar holding the sky has nothing to say about those.
+        // The one entry that does change the environment, Apply Only To Myself,
+        // carries the restriction itself, so the window stays usable while the
+        // sky stays taken.
+        MenuItemDef::Command(MenuCommand::new(
+            "My Environments…",
+            "toggle-my-environments",
+        )),
     ],
 };
 
@@ -1313,6 +1323,13 @@ fn handle_top_menu_actions(
                     crate::personal_lighting::PERSONAL_LIGHTING_FLOATER_ID,
                 );
             }
+            "toggle-my-environments" => {
+                toggle_floater(
+                    &floaters,
+                    &mut panels,
+                    crate::my_environments::MY_ENVIRONMENTS_FLOATER_ID,
+                );
+            }
             "toggle-rlv-console" => {
                 toggle_floater(
                     &floaters,
@@ -1527,6 +1544,7 @@ mod tests {
             ),
             ("World > Environment".to_owned(), "env-shared"),
             ("World > Environment".to_owned(), "toggle-personal-lighting"),
+            ("World > Environment".to_owned(), "toggle-my-environments"),
             ("Build".to_owned(), "toggle-build-tools"),
             ("Build".to_owned(), "undo-objects"),
             ("Build".to_owned(), "redo-objects"),

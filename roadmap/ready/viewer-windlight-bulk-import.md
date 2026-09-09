@@ -2,7 +2,7 @@
 id: viewer-windlight-bulk-import
 title: Legacy Windlight bulk import
 topic: viewer
-status: blocked
+status: ready
 origin: main-menu survey (2026-07-23)
 blocked_by: [viewer-environment-fixed-editor]
 refs: [viewer-environment-day-cycle-editor]

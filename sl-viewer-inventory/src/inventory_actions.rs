@@ -46,11 +46,10 @@ use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use sl_client_bevy::{
     AgentKey, AssetKey, AssetType, AttachmentMode, AttachmentPoint, Command, DetachOrder,
-    EnvironmentAsset, FolderInfo, FolderType, GestureActivation, InventoryFolderKey,
-    InventoryItemOrFolderKey, InventoryKey, InventoryType, ItemInfo, NewInventoryItem,
-    NewInventoryLink, Permissions, RezAttachment, ScriptLanguage, SettingsKind, SkySettings,
-    SlCommand, SlEvent, SlIdentity, SlSessionEvent, TransactionId, Uuid, VisualParams,
-    WaterSettings, Wearable, WearableType, environment_asset_to_bytes,
+    FolderInfo, FolderType, GestureActivation, InventoryFolderKey, InventoryItemOrFolderKey,
+    InventoryKey, InventoryType, ItemInfo, NewInventoryItem, NewInventoryLink, Permissions,
+    RezAttachment, ScriptLanguage, SettingsKind, SlCommand, SlEvent, SlIdentity, SlSessionEvent,
+    TransactionId, Uuid, VisualParams, Wearable, WearableType,
 };
 use std::collections::HashSet;
 
@@ -2593,6 +2592,58 @@ fn handle_item_creations(
     }
 }
 
+/// The `CreateInventoryItem` that mints a fresh **settings** item of `kind`
+/// named `name` in `dest`.
+///
+/// The **simulator** creates the item and supplies the default asset for the
+/// kind. That is the reference's `LLSettingsVOBase::createNewInventoryItem`,
+/// which calls `create_inventory_settings` and nothing else; its
+/// `onInventoryItemCreated` then says so outright — *"The item was created as
+/// new with no settings passed in. Simulator should have given it the default
+/// for the type… no need to upload asset."*
+///
+/// # Why not an upload
+///
+/// This was an `UploadAsset` (`NewFileAgentInventory`) until it was driven
+/// against a grid, and that cap has **no settings arm on either grid**:
+///
+/// - OpenSim's `UploadCompleteHandler` declares `sbyte assType = 0; sbyte inType
+///   = 0;` and then matches the type string against *sound, snapshot, animation,
+///   animset, wearable, object* — nothing sets them for `"settings"`, so the
+///   item is filed as a **Texture** and no settings surface can see it again.
+/// - Second Life creates nothing at all.
+///
+/// Both failures are silent, which is what made this take a live run to find.
+///
+/// # The subtype rides the wearable-type field
+///
+/// `wearable_type` is the wire's generic **subtype byte**, not specifically a
+/// wearable slot: `create_inventory_settings` puts `static_cast<U8>(settype)`
+/// there. Because the simulator stamps the item's `flags` from it, a settings
+/// item needs no follow-up `ChangeInventoryItemFlags` — unlike the wearable
+/// creators above, which mint their item through an upload and must stamp it
+/// afterwards on [`PendingItemCreations`].
+///
+/// A function rather than a branch of the private `dispatch_create` because two
+/// surfaces mint these — the inventory's create menus and the My Environments
+/// library window's add row — and two copies would be two places for the
+/// permission mask or the subtype byte to drift.
+#[must_use]
+pub fn new_settings_item(kind: SettingsKind, name: &str, dest: InventoryFolderKey) -> Command {
+    Command::CreateInventoryItem(NewInventoryItem {
+        folder_id: dest,
+        // Nil: no asset of ours is being associated with the item, which is the
+        // whole point — the simulator authors the default one.
+        transaction_id: Uuid::nil(),
+        next_owner_mask: NEXT_OWNER_DEFAULT,
+        asset_type: AssetType::Settings,
+        inv_type: InventoryType::Settings,
+        wearable_type: WearableType::from_code(kind.subtype()),
+        name: name.to_owned(),
+        description: String::new(),
+    })
+}
+
 /// Issue the create commands for a New Folder / Script / Notecard / Gesture
 /// action into `dest` — shared by the folder context menu and the toolbar's
 /// **+** menu. Returns whether the action was one of the creators.
@@ -2636,36 +2687,13 @@ fn dispatch_create(
         pending_creations.enqueue(u32::from(slot.to_code()), dest);
         return true;
     }
-    // The settings creators, the same shape: a settings item's kind is its
-    // flags byte, so a fresh sky or water frame is uploaded (which mints the
-    // item) and the kind stamped when the reply lands. The reference does the
-    // same rather than asking the simulator to create the item, because the
-    // simulator has no default settings asset to put behind one
-    // (`LLSettingsVOBase::createNewInventoryItem`).
+    // The settings creators. Shared with the My Environments library window,
+    // which mints the same items from its own add row — see
+    // [`new_settings_item`]. No `pending_creations` entry: the simulator stamps
+    // a settings item's subtype from the create itself.
     if let Some((kind, name)) = settings_kind_of(action) {
-        let asset = match kind {
-            SettingsKind::Sky => {
-                EnvironmentAsset::Sky(Box::new(SkySettings::legacy_windlight_default(name)))
-            }
-            SettingsKind::Water => EnvironmentAsset::Water(WaterSettings::legacy_default(name)),
-            // No default day cycle is authored here: the day-cycle editor is
-            // its own task, and an item nothing can open is worse than a menu
-            // entry that stays greyed out.
-            SettingsKind::DayCycle => return false,
-        };
-        commands.write(SlCommand(Command::UploadAsset {
-            folder_id: dest,
-            asset_type: AssetType::Settings,
-            inventory_type: InventoryType::Settings,
-            name: name.to_owned(),
-            description: String::new(),
-            next_owner_mask: NEXT_OWNER_DEFAULT,
-            group_mask: 0,
-            everyone_mask: 0,
-            expected_upload_cost: 0,
-            data: environment_asset_to_bytes(&asset),
-        }));
-        pending_creations.enqueue(u32::from(kind.subtype()), dest);
+        commands.write(SlCommand(new_settings_item(kind, name, dest)));
+        query_folder_page(dest, commands);
         return true;
     }
     match action {
@@ -2952,17 +2980,58 @@ mod tests {
         FOLDER_HAS_WORN, FolderMenuFacts, GESTURE_ACTIVE, GESTURE_INACTIVE, IN_TRASH,
         INVENTORY_FOLDER_MENU, INVENTORY_ITEM_MENU, IS_CLOTHING, IS_LANDMARK, IS_OBJECT,
         IS_TRASH_FOLDER, IS_WEARABLE, ItemMenuFacts, MenuTarget, NOT_IN_TRASH, NOT_WORN, WORN,
-        folder_conditions, is_worn, item_conditions, outfit_add_commands, outfit_remove_commands,
-        paste_commands, take_off_set, wear_set,
+        folder_conditions, is_worn, item_conditions, new_settings_item, outfit_add_commands,
+        outfit_remove_commands, paste_commands, take_off_set, wear_set,
     };
     use crate::menu::{MenuDef, MenuItemDef};
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{
         AgentKey, AssetType, Command, FolderInfo, FolderState, FolderType, InventoryFolderKey,
-        InventoryKey, InventoryType, ItemInfo, Permissions, Permissions5, Uuid, Wearable,
-        WearableType,
+        InventoryKey, InventoryType, ItemInfo, Permissions, Permissions5, SettingsKind, Uuid,
+        Wearable, WearableType,
     };
     use std::collections::HashSet;
+
+    /// **A settings item is created by the simulator, and its kind rides the
+    /// subtype byte.**
+    ///
+    /// This is pinned because getting it wrong fails *silently on every grid*:
+    /// the previous implementation uploaded through `NewFileAgentInventory`,
+    /// which has no settings arm — OpenSim filed the item as a **Texture** (its
+    /// `UploadCompleteHandler` leaves `assType`/`inType` at `0`) and Second Life
+    /// created nothing at all. Neither said so, and no test noticed, because
+    /// nothing here had ever asserted what goes on the wire.
+    ///
+    /// The subtype byte is the whole of how the simulator learns a settings
+    /// item's kind — it stamps the item's `flags` from it — so a wrong byte is a
+    /// sky filed as a water, and a `WearableType` that does not round-trip
+    /// through `to_code` would be a kind lost on the way to the encoder.
+    #[test]
+    fn a_new_settings_item_asks_the_simulator_and_carries_its_subtype() {
+        let dest = InventoryFolderKey::from(Uuid::from_u128(0x5E));
+        for kind in [
+            SettingsKind::Sky,
+            SettingsKind::Water,
+            SettingsKind::DayCycle,
+        ] {
+            let Command::CreateInventoryItem(new) = new_settings_item(kind, "New Thing", dest)
+            else {
+                unreachable!("a settings item is minted by CreateInventoryItem");
+            };
+            assert_eq!(new.folder_id, dest);
+            assert_eq!(new.asset_type, AssetType::Settings);
+            assert_eq!(new.inv_type, InventoryType::Settings);
+            assert_eq!(
+                new.wearable_type.to_code(),
+                kind.subtype(),
+                "{kind:?} lost its subtype byte"
+            );
+            // Nil: no asset of ours is associated, which is what tells the
+            // simulator to author the default one for the kind.
+            assert_eq!(new.transaction_id, Uuid::nil());
+            assert_eq!(new.name, "New Thing");
+        }
+    }
 
     /// A minimal item of the given types, owned with the given owner mask.
     fn item(id: u128, inv_type: InventoryType, asset_type: AssetType, owner_mask: u32) -> ItemInfo {

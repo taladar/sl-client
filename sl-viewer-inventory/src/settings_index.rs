@@ -15,9 +15,10 @@
 //!
 //! - `FSSettingsCollector` (`quickprefs.cpp`) is the **list**: every settings
 //!   item in the whole inventory — agent tree *and* Library — outside the Trash
-//!   and outside Marketplace Listings, de-duplicated by **asset** id rather
-//!   than item id, kept in name order with duplicate names intact (it is a
-//!   `std::multimap`, and two skies really can share a name).
+//!   and outside Marketplace Listings, kept in name order with duplicate names
+//!   intact (it is a `std::multimap`, and two skies really can share a name).
+//!   It also de-duplicates by **asset** id — but that is *its* rule, not this
+//!   index's: see below.
 //! - `RlvIsOfSettingsType` (`rlvenvironment.cpp`) is the **name lookup**: only
 //!   the Library `Environments` folder, only items that are *actually* settings
 //!   (a link is not), matched case-insensitively, first match winning.
@@ -26,6 +27,19 @@
 //! oversight on either side: the list is showing the user what they have, and a
 //! link is a thing they have; the lookup is answering a script, and a link's own
 //! flags are not the target's.
+//!
+//! # Every item, and who de-duplicates
+//!
+//! This index holds **one entry per item**, and the asset-id de-duplication the
+//! reference's collector performs is left to the consumer that wants it.
+//!
+//! The two consumers genuinely disagree. The quick-preferences combos are
+//! picking an *environment*, so two items of one asset are one choice and the
+//! combo de-duplicates. The My Environments library and the settings picker are
+//! showing *inventory*, as the reference's own windows do — both embed an
+//! inventory panel — and there de-duplication loses things: the simulator gives
+//! every freshly created sky the same default asset, so two New Skies collapse
+//! into one row, and the item without a row cannot be renamed or deleted.
 //!
 //! # Links
 //!
@@ -44,7 +58,7 @@
 //! `RlvIsOfSettingsType`), `indra/llinventory/llinventorysettings.cpp`
 //! (`LLSettingsType::fromInventoryFlags`).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use bevy::prelude::*;
 use sl_client_bevy::{
@@ -180,7 +194,6 @@ pub fn build(model: &InventoryModel) -> SettingsIndex {
         .map(|item| (item.item_id, item))
         .collect();
 
-    let mut seen: HashSet<Uuid> = HashSet::new();
     for root in model.roots().iter().copied() {
         let library = model.is_library(root);
         for folder in model.subtree_folders(root) {
@@ -201,9 +214,6 @@ pub fn build(model: &InventoryModel) -> SettingsIndex {
                     // whose subtype byte names no kind is not one we can offer.
                     continue;
                 };
-                if !seen.insert(target.asset_id) {
-                    continue;
-                }
                 let entry = SettingsAsset {
                     item: item.item_id,
                     asset_id: target.asset_id,
@@ -259,16 +269,38 @@ fn rebuild_settings_index(model: Res<InventoryModel>, mut index: ResMut<Settings
     }
 }
 
-/// Ask for the contents of the Library `Environments` folder and everything
-/// under it.
+/// Ask for the contents of the two subtrees settings assets live in: the
+/// Library's `Environments` folder, and the agent's own `Settings` folder.
 ///
-/// The Library is fetched lazily — `request_all_agent_folders` deliberately
-/// skips it, because a user who never opens the Library should not pay for it —
-/// but a script's `@setenv_preset:<name>` cannot wait for the user to expand a
-/// folder. This is the same targeted eager fetch the Current Outfit Folder gets,
-/// scoped to one subtree: each folder is requested at most once, and a page
-/// arriving adds its child folders to the next pass.
-fn prefetch_library_environments(
+/// **This index reports what is *fetched*.** `QueryInventoryFolder` is answered
+/// from the session's held model and only schedules a server fetch for a folder
+/// it has never seen, so an unfetched folder contributes nothing here however
+/// many settings items it holds.
+///
+/// The viewer runs the background inventory crawl, so every folder is fetched
+/// *eventually* and this is about **latency**, not correctness: these two
+/// subtrees are the ones a settings surface is opened to look at, and waiting
+/// for a breadth-first crawl to reach them is waiting for no reason. A host that
+/// leaves the crawl off (the default — see
+/// `background_inventory_fetch`) gets these two subtrees and nothing else, which
+/// is the difference between the combos working and the combos being empty.
+///
+/// Two subtrees, for two reasons that are both about not waiting:
+///
+/// - The **Library** is skipped by `request_all_agent_folders` on purpose (a
+///   user who never opens it should not pay for it), but a script's
+///   `@setenv_preset:<name>` cannot wait for a folder to be expanded.
+/// - The agent's **Settings** folder is where this viewer's own creators put a
+///   new sky or water, and where Second Life files them by default. Fetching it
+///   is also what makes a creation *visible*: once the folder is held, the
+///   session's cache of the freshly created item is something a page query can
+///   return.
+///
+/// Same targeted eager fetch the Current Outfit Folder gets, scoped to these
+/// subtrees: each folder is requested at most once, and a page arriving adds its
+/// child folders to the next pass. A settings item filed somewhere else waits
+/// for the crawl to reach its folder.
+fn prefetch_settings_folders(
     index: Res<SettingsIndex>,
     mut model: ResMut<InventoryModel>,
     mut commands: MessageWriter<SlCommand>,
@@ -276,12 +308,14 @@ fn prefetch_library_environments(
     if !index.is_changed() && !model.is_changed() {
         return;
     }
-    let Some(environments) = index.environments_folder else {
-        return;
-    };
-    let wanted: Vec<InventoryFolderKey> = model
-        .subtree_folders(environments)
+    let roots = [
+        index.environments_folder,
+        model.folder_by_type(FolderType::Settings),
+    ];
+    let wanted: Vec<InventoryFolderKey> = roots
         .into_iter()
+        .flatten()
+        .flat_map(|root| model.subtree_folders(root))
         .filter(|folder| model.needs_fetch(*folder))
         .collect();
     for folder in wanted {
@@ -318,7 +352,7 @@ impl Plugin for SettingsIndexPlugin {
             Update,
             (
                 rebuild_settings_index,
-                prefetch_library_environments,
+                prefetch_settings_folders,
                 publish_rlv_library_environments,
             )
                 .chain(),
@@ -458,12 +492,16 @@ mod tests {
         assert_eq!(names(&index, SettingsKind::Sky), ["Kept"]);
     }
 
-    /// **De-duplication is by asset id, not item id.**
+    /// **Two items of one asset are two entries.**
     ///
-    /// Two separate items of the same asset — a copy, the ordinary way an
-    /// inventory ends up with two — are one entry, and the first met wins.
+    /// The index is a list of *items*; the asset-id de-duplication the
+    /// reference's collector performs belongs to the consumer that is choosing
+    /// an environment rather than showing inventory. Collapsing them here would
+    /// hide a real item: the simulator hands every freshly created sky the same
+    /// default asset, and the copy left without a row could not be renamed or
+    /// deleted.
     #[test]
-    fn two_items_of_one_asset_are_one_entry() {
+    fn two_items_of_one_asset_are_two_entries() {
         let mut model = tree();
         model.set_items(
             key(2),
@@ -476,7 +514,7 @@ mod tests {
         let index = build(&model);
         assert_eq!(
             names(&index, SettingsKind::Sky),
-            ["A copy", "A different sky"]
+            ["A copy", "A different sky", "Another copy"]
         );
     }
 
@@ -515,18 +553,36 @@ mod tests {
         model.set_items(key(102), &[item(20, 102, "Library day", 0xB1, 2)]);
         model.set_items(key(2), &[link(10, 2, "shortcut", 20)]);
         let index = build(&model);
-        // Filed by the *target*'s kind (day cycle), under the target's name.
-        assert_eq!(names(&index, SettingsKind::DayCycle), ["Library day"]);
-        assert!(names(&index, SettingsKind::Sky).is_empty());
-        let entry = index.of_kind(SettingsKind::DayCycle).first();
+        // Both are listed — the Library's item and the agent's link to it — and
+        // both are filed by the *target*'s kind (day cycle) under its name. The
+        // link is a thing the user has and can delete, so it is a row.
         assert_eq!(
-            entry.map(|found| (found.asset_id, found.item)),
-            // The asset is the target's; the row addresses the link the user
-            // can see, not the target.
-            Some((
+            names(&index, SettingsKind::DayCycle),
+            ["Library day", "Library day"]
+        );
+        assert!(names(&index, SettingsKind::Sky).is_empty());
+        // Each row addresses the item it was met through, and both carry the
+        // *target*'s asset — which is what an apply installs either way.
+        let addressed: Vec<(InventoryKey, Uuid, bool)> = index
+            .of_kind(SettingsKind::DayCycle)
+            .iter()
+            .map(|found| (found.item, found.asset_id, found.library))
+            .collect();
+        assert!(
+            addressed.contains(&(
+                InventoryKey::from(Uuid::from_u128(10)),
                 Uuid::from_u128(0xB1),
-                InventoryKey::from(Uuid::from_u128(10))
-            ))
+                false
+            )),
+            "{addressed:?}"
+        );
+        assert!(
+            addressed.contains(&(
+                InventoryKey::from(Uuid::from_u128(20)),
+                Uuid::from_u128(0xB1),
+                true
+            )),
+            "{addressed:?}"
         );
     }
 
@@ -623,8 +679,9 @@ mod tests {
         model.set_items(key(2), &[item(10, 2, "Owned sky", 0xC1, 0)]);
         model.set_items(key(102), &[link(20, 102, "Owned sky", 10)]);
         let index = build(&model);
-        // The list met the agent's copy first, so the link de-duplicated away.
-        assert_eq!(names(&index, SettingsKind::Sky), ["Owned sky"]);
+        // Both are listed — the item and the link that resolves to it — because
+        // both are things the user has and can act on.
+        assert_eq!(names(&index, SettingsKind::Sky), ["Owned sky", "Owned sky"]);
         assert_eq!(
             index
                 .library_named()

@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 101 |
-| ready | 322 |
-| blocked | 46 |
-| in-progress | 22 |
-| bugs | 63 |
-| done | 1030 |
+| ready | 326 |
+| blocked | 42 |
+| in-progress | 21 |
+| bugs | 64 |
+| done | 1032 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1623** |
+| **total** | **1625** |
 
 ## ideas (101)
 
@@ -240,7 +240,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (322)
+## ready (326)
 
 ### protocol
 
@@ -481,12 +481,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-edit-permission-gating`](ready/viewer-edit-permission-gating.md) —
   Permission-aware editing (grey out what perms forbid) (blocked by
   `viewer-object-selection-core` (done))
+- [`viewer-environment-day-cycle-editor`](ready/viewer-environment-day-cycle-editor.md)
+  — Day-cycle editor (blocked by `viewer-environment-fixed-editor` (done))
 - [`viewer-environment-density-profiles`](ready/viewer-environment-density-profiles.md)
   — Render the atmospheric density profiles
 - [`viewer-environment-import-legacy-presets`](ready/viewer-environment-import-legacy-presets.md)
   — Import a legacy WindLight preset from disk
 - [`viewer-environment-pause-clouds`](ready/viewer-environment-pause-clouds.md)
   — Pause cloud animation toggle
+- [`viewer-environment-settings-unsupported-gate`](ready/viewer-environment-settings-unsupported-gate.md)
+  — Grey the settings creators on a grid that cannot store settings
 - [`viewer-event-details`](ready/viewer-event-details.md) — Event details
   floater + reminders (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-experience-event-stream`](ready/viewer-experience-event-stream.md) —
@@ -792,6 +796,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Verify the shoe lift live on a shod avatar
 - [`viewer-region-debug-console`](ready/viewer-region-debug-console.md) — Region
   (sim) debug console (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-region-environment-panel`](ready/viewer-region-environment-panel.md)
+  — Region / parcel environment settings panel (blocked by
+  `viewer-region-options-general` (done), `viewer-environment-my-environments`
+  (done))
 - [`viewer-region-estate-group-picker`](ready/viewer-region-estate-group-picker.md)
   — Group picker for the Region/Estate Access → Allowed Groups list
 - [`viewer-region-estate-object-return`](ready/viewer-region-estate-object-return.md)
@@ -942,6 +950,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wearable-favorites`](ready/viewer-wearable-favorites.md) — Wearable
   favorites floater (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-ui-virtualized-list` (done))
+- [`viewer-windlight-bulk-import`](ready/viewer-windlight-bulk-import.md) —
+  Legacy Windlight bulk import (blocked by `viewer-environment-fixed-editor`
+  (done))
 - [`viewer-window-title-unread-count`](ready/viewer-window-title-unread-count.md)
   — Unread IM/chat count in the window title
 - [`viewer-world-map-tracking-teleport`](ready/viewer-world-map-tracking-teleport.md)
@@ -997,17 +1008,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-binary-duplication`](ready/repl-audit-binary-duplication.md) —
   The two REPL binaries share ~400 near-verbatim lines and have already drifted
 
-## blocked (46)
+## blocked (42)
 
 ### viewer
 
 - [`viewer-avatar-moderation-actions`](blocked/viewer-avatar-moderation-actions.md)
   — Per-avatar parcel / estate moderation — the shared action layer (blocked by
   `viewer-region-options-estate`)
-- [`viewer-environment-day-cycle-editor`](blocked/viewer-environment-day-cycle-editor.md)
-  — Day-cycle editor (blocked by `viewer-environment-fixed-editor`)
-- [`viewer-environment-my-environments`](blocked/viewer-environment-my-environments.md)
-  — My Environments library (blocked by `viewer-environment-fixed-editor`)
 - [`viewer-fs-bridge-protocol`](blocked/viewer-fs-bridge-protocol.md) —
   Firestorm LSL bridge — the viewer↔script protocol and what it exposes (blocked
   by `viewer-fs-bridge-lifecycle`)
@@ -1061,9 +1068,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (blocked by `viewer-voice-audio`)
 - [`viewer-projector-lights-spot-shadows`](blocked/viewer-projector-lights-spot-shadows.md)
   — Projector spot-shadow tier (blocked by `viewer-projector-lights-textured`)
-- [`viewer-region-environment-panel`](blocked/viewer-region-environment-panel.md)
-  — Region / parcel environment settings panel (blocked by
-  `viewer-region-options-general` (done), `viewer-environment-my-environments`)
 - [`viewer-render-hud-and-actor-axes`](blocked/viewer-render-hud-and-actor-axes.md)
   — HUD screen axis and the name-tag, particle and avatar actors (blocked by
   `viewer-render-context-matrix`)
@@ -1120,8 +1124,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-voice-controls`](blocked/viewer-voice-controls.md) — Voice controls —
   talk button, PTT, participants, per-speaker volume (blocked by
   `viewer-voice-audio`)
-- [`viewer-windlight-bulk-import`](blocked/viewer-windlight-bulk-import.md) —
-  Legacy Windlight bulk import (blocked by `viewer-environment-fixed-editor`)
 - [`viewer-world-map-script-destination`](blocked/viewer-world-map-script-destination.md)
   — Script-requested map destination (llMapDestination) (blocked by
   `viewer-world-map-tracking-teleport`)
@@ -1136,7 +1138,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (22)
+## in-progress (21)
 
 ### viewer
 
@@ -1150,9 +1152,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Avatar ground probe from the simulator's collision plane (drop the raycast)
 - [`viewer-conference-start-ui`](in-progress/viewer-conference-start-ui.md) —
   Start an ad-hoc conference from a multi-selection
-- [`viewer-environment-fixed-editor`](in-progress/viewer-environment-fixed-editor.md)
-  — Environment editors — sky & water settings assets (blocked by
-  `viewer-ui-widget-scaffold` (done))
 - [`viewer-environment-personal-lighting`](in-progress/viewer-environment-personal-lighting.md)
   — Personal lighting — local environment override (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -1197,7 +1196,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (63)
+## bugs (64)
 
 ### viewer
 
@@ -1316,6 +1315,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rigged-attachments-wearer-not-resolved`](bugs/viewer-rigged-attachments-wearer-not-resolved.md)
   — Worn rigged attachments (e.g. own shoes) don't render — wearer never
   resolved / too many rigged-pending objects
+- [`viewer-settings-save-as-create-then-put`](bugs/viewer-settings-save-as-create-then-put.md)
+  — A settings Save As uploads through a cap that does not take settings
 - [`viewer-sunlit-face-clips-two-channels`](bugs/viewer-sunlit-face-clips-two-channels.md)
   — A sunlit opaque face pins red and green rather than showing its texture
 - [`viewer-takeoff-hold-jumps-instead-of-flying`](bugs/viewer-takeoff-hold-jumps-instead-of-flying.md)
@@ -1350,7 +1351,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1030)
+## done (1032)
 
 ### protocol
 
@@ -1831,6 +1832,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-emoji-picker-floater`](done/viewer-emoji-picker-floater.md) — Emoji
   picker floater (blocked by `viewer-emoji-data` (done),
   `viewer-ui-floater-basic` (done))
+- [`viewer-environment-fixed-editor`](done/viewer-environment-fixed-editor.md) —
+  Environment editors — sky & water settings assets (blocked by
+  `viewer-ui-widget-scaffold` (done))
+- [`viewer-environment-my-environments`](done/viewer-environment-my-environments.md)
+  — My Environments library (blocked by `viewer-environment-fixed-editor`
+  (done))
 - [`viewer-environment-settings-index`](done/viewer-environment-settings-index.md)
   — Settings assets by name — the inventory index the Library Environments
   folder needs

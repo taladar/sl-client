@@ -1999,6 +1999,63 @@ pub struct OpenSettingsEditor {
     pub editable: bool,
 }
 
+/// Open the **settings picker** on one field: a chooser over the settings assets
+/// in inventory of one [`SettingsKind`], answering with [`SettingsPicked`].
+///
+/// The reference's `LLFloaterSettingsPicker`, which the region / parcel
+/// environment panel and the day-cycle editor summon. The kind is fixed by the
+/// opener (`setSettingsFilter`), because a water field being handed a day cycle
+/// is not a choice the user should be able to make.
+#[derive(Message, Debug, Clone)]
+pub struct OpenSettingsPicker {
+    /// The widget (or panel) the reply is tagged back to.
+    pub requester: Entity,
+    /// Which field is being picked for — shown in the window's subtitle, so two
+    /// consecutive picks say which one is being answered.
+    ///
+    /// Owned rather than `&'static str` for the same reason
+    /// [`OpenTexturePicker::field`] is: a table-driven panel names its controls
+    /// at spawn time.
+    pub field: Box<str>,
+    /// Which kind of settings asset may be chosen.
+    pub kind: SettingsKind,
+    /// The settings **asset** the field currently holds, opened on and restored
+    /// by Cancel; `None` for a field holding nothing yet.
+    pub current: Option<Uuid>,
+}
+
+/// One settings asset a picker can answer with — the item the user sees and the
+/// asset behind it, which are two different ids.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PickedSettings {
+    /// The inventory item chosen (a link, when a link is what the list held).
+    pub item: InventoryKey,
+    /// The settings asset behind it — what a panel publishes or applies.
+    pub asset_id: Uuid,
+    /// Its name, which the reference carries alongside the asset id in every
+    /// environment update so a panel can show what it is holding.
+    pub name: String,
+}
+
+/// The settings asset a picker returned, tagged back to the
+/// [`requester`](Self::requester).
+///
+/// Emitted **non-final** on each selection so a consumer can live-preview it,
+/// once on **OK** with [`final_pick`](Self::final_pick) true, and on **Cancel**
+/// as the asset the picker opened on (a revert) — the same protocol
+/// [`TexturePicked`] follows.
+#[derive(Message, Debug, Clone)]
+pub struct SettingsPicked {
+    /// The widget that opened the picker.
+    pub requester: Entity,
+    /// The chosen asset, or `None` when the picker opened on nothing and a
+    /// Cancel put that back.
+    pub chosen: Option<PickedSettings>,
+    /// Whether this is the committed choice (**OK**) rather than a live-preview
+    /// or revert update.
+    pub final_pick: bool,
+}
+
 /// Marks the notecard editor floater as an **inventory drop target**: dropping
 /// an inventory item on it while [`editable`](Self::editable) adds the item as
 /// an embedded item. `crate::inventory_drag` walks up from the hovered node to

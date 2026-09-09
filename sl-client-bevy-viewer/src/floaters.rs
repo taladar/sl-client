@@ -257,6 +257,16 @@ pub(crate) const FLOATERS: &[FloaterElement] = &[
         content: FloaterContent::Specimen(crate::minimap::spawn_minimap_specimen),
     },
     FloaterElement {
+        id: "my-environments",
+        summary: "My Environments: every settings asset in inventory over the three kind \
+                  checkboxes and the name filter, with the creators and the trash under it.",
+        spec: crate::my_environments::my_environments_floater_spec,
+        content: FloaterContent::Stub(
+            "The kind checkboxes and name filter over the settings-asset list, the rename row \
+             and the New Sky / New Water / Delete actions.",
+        ),
+    },
+    FloaterElement {
         id: "notecard-editor",
         summary: "Notecard: the view toggle over the editable body and the Save button — the \
                   notecard asset editor. One window per notecard, so a second one cannot \
@@ -397,6 +407,17 @@ pub(crate) const FLOATERS: &[FloaterElement] = &[
         content: FloaterContent::Stub(
             "The knobs of a water settings asset, previewing live in the environment's edit \
              layer.",
+        ),
+    },
+    FloaterElement {
+        id: "settings-picker",
+        summary: "Pick: Sky / Water / Day Cycle — the settings assets of one kind over a name \
+                  filter, and the OK / Cancel reply protocol an environment panel is written \
+                  against.",
+        spec: crate::settings_picker::settings_picker_floater_spec,
+        content: FloaterContent::Stub(
+            "The field line, the name filter, the one-kind settings list and the OK / Cancel \
+             reply row.",
         ),
     },
     FloaterElement {

@@ -2,7 +2,7 @@
 id: viewer-environment-fixed-editor
 title: Environment editors — sky & water settings assets
 topic: viewer
-status: in-progress
+status: done
 origin: Vintage-parity coverage audit (2026-07-22)
 blocked_by: [viewer-ui-widget-scaffold]
 refs: [viewer-environment-personal-lighting, viewer-environment-day-cycle-editor, viewer-environment-my-environments, test-assets-settings-encoder]

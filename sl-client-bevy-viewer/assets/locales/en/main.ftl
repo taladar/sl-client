@@ -3681,6 +3681,51 @@ personal-lighting-water = Water
 # Drops the whole personal environment, after a confirmation.
 personal-lighting-reset = Reset
 
+## The My Environments library — every settings asset in inventory.
+
+my-environments-title = My Environments
+# The three kind checkboxes of the filter row double as the Kind column's
+# values, so a row and the checkbox that hides it read the same.
+my-environments-kind-sky = Skies
+my-environments-kind-water = Water
+my-environments-kind-day-cycle = Days
+my-environments-filter-placeholder = Filter Environments
+# The list's columns. "Where" is the folder the item lives in.
+my-environments-col-kind = Kind
+my-environments-col-name = Name
+my-environments-col-where = Where
+# Prefixes the Where cell of an item from the shared read-only Library.
+my-environments-library = Library
+my-environments-count = { $shown } of { $total } environments
+# The rename row, and the bottom action row.
+my-environments-name = Name
+my-environments-rename = Rename
+my-environments-delete = Delete
+my-environments-new-sky = New Sky
+my-environments-new-water = New Water
+my-environments-new-day-cycle = New Day Cycle
+# The question the delete confirmation asks.
+my-environments-delete-question = delete the selected environment
+# Status-line replies.
+my-environments-applied = Applied to you.
+my-environments-not-modifiable = That item may not be changed.
+my-environments-no-editor = A day cycle has no editor yet.
+my-environments-no-folder = There is nowhere to put a new environment yet.
+my-environments-setenv = An object is holding the environment.
+
+## The settings picker — the chooser a panel summons for one settings field.
+
+# One title per kind, so two consecutive picks say which is being answered.
+settings-picker-title-sky = Pick: Sky
+settings-picker-title-water = Pick: Water
+settings-picker-title-day-cycle = Pick: Day Cycle
+# The line under the title, naming the field being picked for.
+settings-picker-field = For: { $field }
+settings-picker-filter-placeholder = Filter Settings
+settings-picker-count = { $shown } settings
+settings-picker-ok = OK
+settings-picker-cancel = Cancel
+
 ## The sky and water settings editors, over an inventory settings asset.
 
 settings-editor-sky-title = Sky Settings

@@ -74,7 +74,8 @@ use sl_viewer_ui_core::i18n::Translated;
 use sl_viewer_ui_core::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
 use sl_viewer_ui_widgets::floater::{
-    DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater,
+    DeferredFloaterContent, FloaterCaps, FloaterCommand, FloaterHandle, FloaterOp, FloaterSpec,
+    FloaterSystems, spawn_floater,
 };
 use sl_viewer_ui_widgets::ui_color_picker::{ColorPicked, ColorSwatchValue};
 use sl_viewer_ui_widgets::ui_tab::{
@@ -533,7 +534,10 @@ impl Plugin for SettingsEditorPlugin {
                 // the frame it happened, or the window's first frame shows the
                 // last asset's values.
                 (
-                    open_settings_editor,
+                    // After the manager's command pass, so the raise this open
+                    // performs outlives the raise the opening press performed on
+                    // the window the row was clicked in.
+                    open_settings_editor.after(FloaterSystems::Commands),
                     poll_pending_open,
                     apply_editor_color_picks,
                     apply_editor_texture_picks,
@@ -917,6 +921,7 @@ fn open_settings_editor(
     mut editors: ResMut<SettingsEditors>,
     mut assets: Option<ResMut<EnvironmentAssetManager>>,
     mut panels: Query<&mut UiPanelShown>,
+    mut raises: MessageWriter<FloaterCommand>,
     mut texts: Query<&mut Text>,
 ) {
     for open in opens.read() {
@@ -936,10 +941,18 @@ fn open_settings_editor(
             assets.request(asset);
         }
         set_status(&mut texts, state.ui.status, "Loading…");
-        if let Some(panel) = state.ui.panel
-            && let Ok(mut shown) = panels.get_mut(panel)
-        {
-            shown.0 = true;
+        if let Some(panel) = state.ui.panel {
+            if let Ok(mut shown) = panels.get_mut(panel) {
+                shown.0 = true;
+            }
+            // Showing a window that is already open leaves it wherever it was in
+            // the z-order — which, opened from the My Environments list, is
+            // *behind* the window that asked for it. The press that picked the
+            // row raised that one, so the editor has to be raised after it.
+            raises.write(FloaterCommand {
+                floater: panel,
+                op: FloaterOp::BringToFront,
+            });
         }
     }
 }
@@ -1091,6 +1104,15 @@ fn apply_editor_texture_picks(
 /// Read out of the field rather than written into the session on every
 /// keystroke: the field owns its own text (it is a `bevy_text` editor), and a
 /// session that mirrored it per key would be a second copy to keep in step.
+///
+/// **Not while a reseed is outstanding.** The window's content is built the
+/// first time it opens, which is a *later* frame than the open that asked for
+/// it and can be the very frame the fetched asset installs the session. A
+/// freshly spawned `EditableText` counts as `Changed`, so without this guard the
+/// first pass reads the empty widget back over the name the asset arrived with,
+/// and the reseed a moment later then writes that emptiness into the field —
+/// leaving every opened item nameless. Until the reseed has pushed the session's
+/// name *into* the field, what the field holds is not the user's typing.
 fn read_editor_names(
     fields: Query<(&EditorNameField, &EditableText), Changed<EditableText>>,
     mut editors: ResMut<SettingsEditors>,
@@ -1098,6 +1120,9 @@ fn read_editor_names(
     for (field, editable) in &fields {
         let state = editors.get_mut(field.0);
         if let Some(session) = state.session.as_mut() {
+            if session.reseed {
+                continue;
+            }
             let value = editable.value().to_string();
             if session.name != value {
                 session.name = value;

@@ -257,8 +257,10 @@ pub(crate) use sl_viewer_world_scene::particles;
 pub(crate) use sl_viewer_world_scene::probes;
 pub(crate) use sl_viewer_world_view::physics;
 pub mod render_gallery;
+pub(crate) use sl_viewer_environment::my_environments;
 pub(crate) use sl_viewer_environment::personal_lighting;
 pub(crate) use sl_viewer_environment::settings_editor;
+pub(crate) use sl_viewer_environment::settings_picker;
 pub(crate) use sl_viewer_rlv::rlv_behaviours;
 pub(crate) use sl_viewer_rlv::rlv_console;
 pub(crate) use sl_viewer_rlv::rlv_locks;
@@ -1155,7 +1157,25 @@ fn run_session(
             enabled: true,
             cache_library: true,
         },
-        background_inventory_fetch: false,
+        // **On**, which the default is not. The flag defaults off so a *library*
+        // consumer that ignores inventory pays nothing for it; a viewer is the
+        // other case entirely, and leaving it off meant caching a tree we never
+        // fetched — the persistence paid for, the completeness not.
+        //
+        // Everything that asks a question of the whole inventory is wrong
+        // without it, and wrong *silently*, because a folder nobody has expanded
+        // simply contributes nothing: inventory search matches only what has
+        // been browsed to, and the settings surfaces (the quick-preferences
+        // combos, the My Environments library, the settings picker) listed only
+        // the folders the user happened to have opened — which is how a freshly
+        // created sky came to be invisible until its folder was clicked.
+        //
+        // The cost is bounded and paid once per account: the crawl is
+        // breadth-first with a bounded number of folder-contents requests in
+        // flight, and the on-disk cache above reconciles against the login
+        // skeleton so version-matching folders skip the refetch on every later
+        // login.
+        background_inventory_fetch: true,
         fetch_server_chat_history,
         offline,
     })

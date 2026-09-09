@@ -54,6 +54,7 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui_widgets::{Activate, Button};
 use sl_client_bevy::{AssetKey, SettingsKind, Uuid};
+use std::collections::HashSet;
 
 use crate::environment::{EnvironmentState, FixedEnvironment, LocalEnvironmentPick};
 use crate::i18n::Translator;
@@ -444,10 +445,19 @@ pub fn build_rows(kind: SettingsKind, assets: &[SettingsAsset]) -> Vec<PresetRow
     ];
     // An unnamed item is skipped, as `if (!preset_name.empty())` does: a row
     // with no label is one the user cannot tell from the separator above it.
+    //
+    // **De-duplicated by asset id**, which is `FSSettingsCollector`'s own rule
+    // and belongs here rather than in the index: a combo is choosing an
+    // *environment*, so two inventory items of one asset are one choice, and
+    // offering both would be two rows that do exactly the same thing. The
+    // windows that show *inventory* — the My Environments library, the settings
+    // picker — want every item and so read the index undeduplicated.
+    let mut seen: HashSet<Uuid> = HashSet::new();
     rows.extend(
         assets
             .iter()
             .filter(|asset| !asset.name.is_empty())
+            .filter(|asset| seen.insert(asset.asset_id))
             .map(|asset| PresetRow::Asset {
                 asset: asset.asset_id,
                 name: asset.name.clone(),
@@ -780,6 +790,41 @@ mod tests {
             kind,
             library: false,
         }
+    }
+
+    /// **Two inventory items of one asset are one combo row.**
+    ///
+    /// `FSSettingsCollector` de-duplicates by asset id, and since the index
+    /// stopped doing it (the library window needs every *item*, or an item with
+    /// no row cannot be renamed or deleted) this is where that rule lives. A
+    /// combo picks an environment, so two rows installing the identical asset
+    /// would be two ways to do one thing — and every freshly created sky shares
+    /// the simulator's default asset, so it is not a rare case.
+    #[test]
+    fn one_asset_held_twice_is_one_row() {
+        let twice = [
+            asset("A copy", 0xA1, SettingsKind::Sky),
+            asset("Another copy", 0xA1, SettingsKind::Sky),
+            asset("A different sky", 0xA2, SettingsKind::Sky),
+        ];
+        let rows = build_rows(SettingsKind::Sky, &twice);
+        let assets: Vec<Uuid> = rows
+            .iter()
+            .filter_map(|row| match row {
+                PresetRow::Asset { asset, .. } => Some(*asset),
+                _other => None,
+            })
+            .collect();
+        assert_eq!(assets, [Uuid::from_u128(0xA1), Uuid::from_u128(0xA2)]);
+        // The first met wins its name, as the collector's insertion order does.
+        let names: Vec<&str> = rows
+            .iter()
+            .filter_map(|row| match row {
+                PresetRow::Asset { name, .. } => Some(name.as_str()),
+                _other => None,
+            })
+            .collect();
+        assert_eq!(names, ["A copy", "A different sky"]);
     }
 
     /// **The sky list is the reference's**: two sentinels, a separator, the
