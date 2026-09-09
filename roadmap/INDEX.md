@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 319 |
 | blocked | 46 |
 | in-progress | 20 |
-| bugs | 62 |
-| done | 1034 |
+| bugs | 58 |
+| done | 1038 |
 | deferred | 26 |
 | wont-do | 14 |
 | **total** | **1622** |
@@ -1187,7 +1187,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (62)
+## bugs (58)
 
 ### viewer
 
@@ -1324,20 +1324,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-water-refraction-smears-avatar-silhouette`](bugs/viewer-water-refraction-smears-avatar-silhouette.md)
   — Water behind an avatar smears a skin-coloured fringe around its silhouette
 
-### test
-
-- [`test-fake-grid-catalogue-clears-inventory-root`](bugs/test-fake-grid-catalogue-clears-inventory-root.md)
-  — --catalogue clears the account inventory, so no SL-derived viewer can log in
-- [`test-fake-grid-circuit-code-as-i4-crashes-viewers`](bugs/test-fake-grid-circuit-code-as-i4-crashes-viewers.md)
-  — Login response sends circuit_code as <i4>, which overflows S32 and kills
-  Firestorm
-- [`test-fake-grid-map-server-url-not-honoured`](bugs/test-fake-grid-map-server-url-not-honoured.md)
-  — The viewer falls back to map.secondlife.com instead of the grid's
-  map-server-url
-- [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
-  Audit every login field emitted as <i4> for values that do not fit S32
-
-## done (1034)
+## done (1038)
 
 ### protocol
 
@@ -3263,6 +3250,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   built-in UI sounds the viewer plays on arrival 404
 - [`test-fake-grid-builtin-textures`](done/test-fake-grid-builtin-textures.md) —
   Serve the built-in sky, water and prim textures the viewer asks for
+- [`test-fake-grid-catalogue-clears-inventory-root`](done/test-fake-grid-catalogue-clears-inventory-root.md)
+  — --catalogue clears the account inventory, so no SL-derived viewer can log in
+- [`test-fake-grid-circuit-code-as-i4-crashes-viewers`](done/test-fake-grid-circuit-code-as-i4-crashes-viewers.md)
+  — Login response sends circuit_code as <i4>, which overflows S32 and kills
+  Firestorm
 - [`test-fake-grid-concurrent-edits`](done/test-fake-grid-concurrent-edits.md) —
   Somebody else changed it and nobody was told
 - [`test-fake-grid-determinism`](done/test-fake-grid-determinism.md) — An
@@ -3290,6 +3282,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   viewer
 - [`test-fake-grid-login-matrix-and-timeouts`](done/test-fake-grid-login-matrix-and-timeouts.md)
   — The login refusals and handover timeouts nothing tests
+- [`test-fake-grid-map-server-url-not-honoured`](done/test-fake-grid-map-server-url-not-honoured.md)
+  — The reference viewer builds its first map-tile URL before it knows the map
+  server
 - [`test-fake-grid-neighbours-crossing`](done/test-fake-grid-neighbours-crossing.md)
   — Neighbour child agents and a scripted region crossing (blocked by
   `test-fake-grid-npc-avatars` (done))
@@ -3324,6 +3319,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-terrain-layerdata`](done/test-fake-grid-terrain-layerdata.md)
   — The fake grid sends terrain — LayerData patches, wind, clouds (blocked by
   `test-fake-grid-determinism` (done))
+- [`test-fake-grid-xmlrpc-int-width`](done/test-fake-grid-xmlrpc-int-width.md) —
+  Audit every login field emitted as <i4> for values that do not fit S32
 - [`test-firestorm-crosscheck-report`](done/test-firestorm-crosscheck-report.md)
   — Report the divergences — contact sheet, image diff, scene-dump diff (blocked
   by `test-firestorm-crosscheck-runner` (done), `viewer-scene-dump` (done))

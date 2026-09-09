@@ -117,6 +117,30 @@ async fn respond(core: &Arc<GridCore>, parsed: &ParsedLoginRequest) -> LoginResp
             ));
         }
     };
+    // Refuse rather than answer `login: true` without a field the reference
+    // viewer requires. Such a response is accepted by the login machinery,
+    // opens the circuit, and only then fails the viewer's own success check —
+    // reported to the user as a bare "Login failed." with the cause a whole
+    // startup state behind it. A grid that refuses says which field, here.
+    //
+    // Checked on the response the grid *built*, before `filter_options`
+    // trims it: `inventory-root` is both mandatory to the viewer and
+    // omittable when the client did not ask for it, and a client that did not
+    // ask is not one this can be wrong for.
+    let missing = success.missing_required_fields();
+    if !missing.is_empty() {
+        let missing = missing.join(", ");
+        tracing::error!(
+            "login: {} {} refused: the grid built a success response without {missing}, \
+             which the reference viewer requires",
+            account.config.first_name,
+            account.config.last_name,
+        );
+        return LoginResponse::Failure(LoginFailure::new(
+            "key",
+            format!("The grid built a login response without {missing}."),
+        ));
+    }
     if core.honor_options {
         success.filter_options(&parsed.options);
     }

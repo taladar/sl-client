@@ -2,7 +2,7 @@
 id: test-fake-grid-catalogue-clears-inventory-root
 title: --catalogue clears the account inventory, so no SL-derived viewer can log in
 topic: test
-status: bugs
+status: done
 origin: first Firestorm cross-check harness run (2026-09-01)
 points: 2
 refs: [test-firestorm-crosscheck-runner, test-fake-grid-fixed-port-scenario, test-fake-grid-render-fixtures]
@@ -51,3 +51,15 @@ a field the reference viewer treats as mandatory is worse than one that
 refuses, because the failure surfaces far from its cause. Assert in
 `sl-fake-grid` that a successful response carries every field the reference
 viewer's success check requires.
+
+Done (2026-09-01): `RegionFixture::into_scenario` layers over the stock
+scenario instead of building from `Scenario::empty()`. A fixture describes
+a region's objects; the account's inventory and the library are not region
+content, and went with them. The same commit seeded all nineteen system
+folders, ten of which the reference viewer treats as fatal when absent.
+
+Closed as a record-keeping catch-up (2026-09-09): shipped the evening it
+was filed, never moved. Re-verified by probing a `--scenario catalogue`
+grid directly — the login response carries `inventory-root`,
+`inventory-lib-root` and a 22-entry `inventory-skeleton`, which is the
+comparison in the report above, now the other way round.

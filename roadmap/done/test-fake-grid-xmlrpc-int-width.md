@@ -2,7 +2,7 @@
 id: test-fake-grid-xmlrpc-int-width
 title: Audit every login field emitted as <i4> for values that do not fit S32
 topic: test
-status: bugs
+status: done
 origin: first Firestorm cross-check harness run (2026-09-01)
 points: 2
 refs: [test-fake-grid-circuit-code-as-i4-crashes-viewers]
@@ -44,3 +44,19 @@ Two things worth doing:
 The general lesson for the fake grid: its reader accepts more shapes than its
 writer emits, so a round-trip test proves nothing about interop. Where a field
 has a known on-the-wire shape, assert the shape, not just the round trip.
+
+Done (2026-09-01), the explicit-type route rather than the runtime
+fallback, as the task argued for: `push_int_member` takes an `i32`, so a
+`u32` field cannot reach it without a conversion written at the call site,
+and the four fields that do not fit — `circuit_code`, `region_x`,
+`region_y`, `seconds_since_epoch` — go through `push_numeric_string_member`
+instead. That is the shape real grids send and the shape the reference
+viewer reads (`asString()`, then `strtoul` for the unsigned one), so it is
+not a lossy fallback.
+
+Closed as a record-keeping catch-up (2026-09-09): shipped the evening it
+was filed, never moved. Re-verified against a live grid — every remaining
+`<i4>` member of a login response is a bounded count or a cost
+(`sim_port`, `region_size_x/y`, `type_default`, `version`, and the benefit
+limits and upload costs added since), and none of them is a `u32` in
+disguise.

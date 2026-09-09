@@ -2,7 +2,7 @@
 id: test-fake-grid-circuit-code-as-i4-crashes-viewers
 title: Login response sends circuit_code as <i4>, which overflows S32 and kills Firestorm
 topic: test
-status: bugs
+status: done
 origin: first Firestorm cross-check harness run (2026-09-01)
 points: 1
 refs: [test-firestorm-crosscheck-runner, test-fake-grid-xmlrpc-int-width]
@@ -42,3 +42,14 @@ A round-trip test cannot catch this class of bug on its own; add a case that
 mints a `circuit_code` above `S32_MAX` and asserts the serialised form is not
 `<i4>`. See [[test-fake-grid-xmlrpc-int-width]] for the other fields with the
 same shape.
+
+Done (2026-09-01) in [[test-fake-grid-xmlrpc-int-width]]'s commit, which
+fixed the whole class at once: `circuit_code` goes out through
+`push_numeric_string_member`, and a writer test asserts the *shape* rather
+than a round trip, because our reader accepts `<i4>` and `<string>` alike
+and so a round trip proved nothing.
+
+Closed as a record-keeping catch-up (2026-09-09): the fix shipped the same
+evening this was filed and the item was never moved. Re-verified by probing
+a live grid — a login response minted `circuit_code = 2902385670`, above
+`S32_MAX`, and carried it as `<string>`.
