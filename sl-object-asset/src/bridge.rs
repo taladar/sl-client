@@ -11,11 +11,16 @@
 //! light, sculpt, mesh, reflection probe), none for floating text
 //! (`llSetText` — only its *colour* is written), none for a media URL and none
 //! for a texture animation or particle system. A prim carrying any of those
-//! does not survive the trip through the text. That is the format's limit, not
-//! this crate's: inventing keywords for them would produce an asset no grid
-//! could read. The wire form is likewise missing everything the simulator keeps
-//! for itself (`task_valid`, `gpw_bias`, the birth and rez stamps), so a
-//! round trip the other way leaves those at their defaults.
+//! does not survive the trip through the text — which this module's own
+//! `the_text_carries_none_of_the_modern_prim` asserts field by field rather
+//! than leaving to this paragraph. That is the format's limit, not this
+//! crate's: inventing keywords for them would produce an asset no grid could
+//! read, and there is no grid left to check a guess against (see the crate
+//! docs, "Do not rez out of these bytes"). A grid that needs a lossless take →
+//! rez must keep the object, not these bytes. The wire form is likewise missing
+//! everything the simulator keeps for itself (`task_valid`, `gpw_bias`, the
+//! birth and rez stamps), so a round trip the other way leaves those at their
+//! defaults.
 
 use sl_prim::PrimShape;
 use sl_proto::{
@@ -494,9 +499,9 @@ const FULLBRIGHT_BIT: u8 = 0x20;
 mod test {
     use pretty_assertions::assert_eq;
     use sl_proto::{
-        AgentKey, InventoryKey, LindenAmount, ObjectKey, ObjectProperties, OwnerKey, Permissions,
-        Permissions5, PrimShapeParams, RegionLocalObjectId, TextureEntry, TextureFace, TextureKey,
-        decode_texture_entry, encode_texture_entry,
+        AgentKey, InventoryKey, LindenAmount, ObjectExtraParams, ObjectKey, ObjectProperties,
+        OwnerKey, Permissions, Permissions5, PrimShapeParams, RegionLocalObjectId, TextureEntry,
+        TextureFace, TextureKey, decode_texture_entry, encode_texture_entry,
     };
     use sl_types::lsl::Vector;
     use uuid::Uuid;
@@ -581,6 +586,102 @@ mod test {
             encode_texture_entry(&entry),
             encode_texture_entry(&decode_texture_entry(&taken.texture_entry, 6))
         );
+    }
+
+    /// **The record of what this format cannot carry**, asserted rather than
+    /// described.
+    ///
+    /// Every field named in the module docs is set on a live object, taken to
+    /// the text, encoded, decoded and rezzed back — and every one of them comes
+    /// back empty. That is the format, not a defect here: there is no keyword
+    /// for any of them in either reference capture, in any surviving
+    /// `exportLegacyStream`, or anywhere in the reference viewer's history, and
+    /// inventing one would write an asset no grid could read.
+    ///
+    /// It is a test rather than a comment because the list is load-bearing: a
+    /// grid that routes its own take → rez through this format loses exactly
+    /// this much of a prim, which is why the fake grid does not
+    /// (`sl_fake_grid`'s take keeps the linkset it removed). The day a keyword
+    /// for one of these is found, this test is what says which line of the
+    /// bridge to change.
+    #[test]
+    fn the_text_carries_none_of_the_modern_prim() {
+        let glowing = TextureFace {
+            glow: 0.5,
+            material_id: Some(Uuid::from_u128(0x0A7E_21A1)),
+            ..TextureFace::new(TextureKey::from(Uuid::from_u128(1)))
+        };
+        let entry = TextureEntry {
+            faces: vec![glowing; 6],
+        };
+        let mut taken = crate::test_support::box_object(Uuid::from_u128(0x0DD), &entry);
+        taken.text = "hover text".to_owned();
+        taken.media_url = "http://example.invalid/".parse().ok();
+        taken.click_action = 3;
+        taken.extra = ObjectExtraParams {
+            light: Some(sl_proto::LightData {
+                color: [255, 200, 100, 255],
+                radius: 10.0,
+                cutoff: 0.0,
+                falloff: 0.75,
+            }),
+            ..ObjectExtraParams::default()
+        };
+        taken.extra_params = sl_proto::encode_extra_params(&taken.extra);
+        taken.particle_system = vec![1, 2, 3];
+
+        let prim = PrimBlock::from_object(&taken, 6);
+        let text = crate::model::ObjectAsset::linkset(prim, Vec::new()).encode();
+        let decoded = crate::model::ObjectAsset::decode(&text);
+        let reread = decoded
+            .as_ref()
+            .ok()
+            .and_then(|asset| asset.root())
+            .cloned()
+            .unwrap_or_else(|| PrimBlock::from_object(&taken, 6));
+        assert!(decoded.is_ok(), "the asset this take wrote does not decode");
+        let rezzed = reread.to_object(RezTarget {
+            region_handle: taken.region_handle,
+            local_id: taken.local_id,
+            full_id: Uuid::from_u128(0x0DD),
+            parent_id: taken.parent_id,
+        });
+
+        // The face keeps its texture and its tint, and loses its glow and its
+        // legacy material: the `faces` block ends at `media_flags`.
+        let faces = decode_texture_entry(&rezzed.texture_entry, 6);
+        let face = faces.faces.first().unwrap_or(&glowing);
+        assert_eq!(
+            face.texture_id, glowing.texture_id,
+            "the texture is carried"
+        );
+        assert!(face.glow.abs() < f32::EPSILON, "glow is not in the text");
+        assert_eq!(face.material_id, None, "a material id is not in the text");
+
+        // The whole of the rest of the list.
+        assert_eq!(rezzed.text, "", "floating text is not in the text");
+        assert_eq!(rezzed.media_url, None, "a media URL is not in the text");
+        assert_eq!(rezzed.click_action, 0, "a click action is not in the text");
+        assert_eq!(
+            rezzed.extra,
+            ObjectExtraParams::default(),
+            "the ExtraParams block -- flexi, light, sculpt, mesh, light image, \
+             extended mesh, render material, reflection probe -- is not in the text"
+        );
+        assert!(rezzed.extra_params.is_empty());
+        assert!(
+            rezzed.particle_system.is_empty(),
+            "a particle system is not in the text"
+        );
+        assert!(
+            rezzed.texture_anim.is_empty(),
+            "a texture animation is not in the text"
+        );
+
+        // What it *does* carry, so the test cannot pass by rezzing nothing.
+        assert_eq!(rezzed.shape, taken.shape);
+        assert_eq!(rezzed.scale, taken.scale);
+        assert_eq!(rezzed.text_color, taken.text_color, "the colour is written");
     }
 
     /// A **child** prim is serialised as one: its wire motion block holds its

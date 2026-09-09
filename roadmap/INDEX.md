@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 46 |
 | in-progress | 20 |
 | bugs | 58 |
-| done | 1041 |
+| done | 1042 |
 | deferred | 26 |
 | wont-do | 14 |
-| **total** | **1624** |
+| **total** | **1625** |
 
 ## ideas (100)
 
@@ -979,11 +979,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Factor the repeated session/id acquisition out of the conformance cases
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
+- [`test-fake-grid-served-object-asset-xml`](ready/test-fake-grid-served-object-asset-xml.md)
+  — The OpenSim-flavoured grid serves an object body OpenSim never wrote
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
-- [`test-object-asset-missing-fields`](ready/test-object-asset-missing-fields.md)
-  — A take through the object asset drops half a prim
 
 ### repl
 
@@ -1321,7 +1321,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-water-refraction-smears-avatar-silhouette`](bugs/viewer-water-refraction-smears-avatar-silhouette.md)
   — Water behind an avatar smears a skin-coloured fringe around its silhouette
 
-## done (1041)
+## done (1042)
 
 ### protocol
 
@@ -3409,6 +3409,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — mute / unmute and fetch the mute list
 - [`test-notecard-create-update`](done/test-notecard-create-update-create-an-empty-notecard-createinventoryitem-then-set-its-bo.md)
   — create an empty notecard (CreateInventoryItem), then set its body over
+- [`test-object-asset-missing-fields`](done/test-object-asset-missing-fields.md)
+  — A take through the object asset drops half a prim
 - [`test-object-edit`](done/test-object-edit-set-name-desc-flags-shape-material-permissions-for-sale.md)
   — set name / desc / flags / shape / material / permissions / for-sale
 - [`test-object-link-delink`](done/test-object-link-delink-link-and-delink-a-set.md)

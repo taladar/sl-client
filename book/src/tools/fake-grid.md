@@ -594,6 +594,35 @@ asset id and stays fetchable either way. It is the fake grid's own fixture,
 seeded so `asset-round-trip` has an authored object body to read back, and
 no live grid has an item like it at all.
 
+### The body is a publication, not a store
+
+The body is the Linden text form (`sl-object-asset`), which is what Second
+Life is known to have written and which has **no keyword** for a face's glow
+or material id, for `ExtraParams` (flexi, light, sculpt, mesh, light image,
+extended mesh, render material, reflection probe), for floating text, a media
+URL, a texture animation or a particle system. That list is asserted, not
+described: `sl_object_asset::bridge`'s
+`the_text_carries_none_of_the_modern_prim` sets every one on a live object and
+watches it come back empty. No keyword for them will be invented, because
+there is nothing left to check a guess against — Second Life exposes no
+object asset to capture, and OpenSim writes XML instead — so a guess would be
+both unfalsifiable and unreadable.
+
+So a grid must not *rez* out of those bytes, and neither live grid does:
+OpenSim's XML carries the whole prim, and Second Life's simulator has the
+object and reads no asset. The fake grid keeps **the linkset a take removed**
+— a third store in `GridAssets`, keyed by item under both policies — and
+`rez_from_inventory` puts that back, minting fresh ids for it exactly as the
+body path does. The published body is written beside it and stays exactly what
+the format says. An item this grid did not take, which means the seeded
+`Fixture Object`, has no linkset behind it and still rezzes from its body.
+
+The one thing left over is that `Served` names OpenSim and does not write
+OpenSim's bytes: a real one would serve `<SceneObjectGroup>` XML. Nothing in
+the workspace reads or writes that format, and no viewer has a reader for
+either, so it is its own task rather than a footnote —
+`test-fake-grid-served-object-asset-xml`.
+
 A conformance case names the flavour it needs by naming the *grid*:
 `asset-round-trip` declares `Grid::FakeOpensim`, because its fourth leg
 reads a taken object's asset back and only OpenSim ever lets a viewer do

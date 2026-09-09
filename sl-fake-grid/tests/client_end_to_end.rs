@@ -4664,6 +4664,130 @@ mod test {
         Ok(())
     }
 
+    /// **A take gives back the prim it took**, not the part of it the asset
+    /// format can spell.
+    ///
+    /// The published object body is the Linden text form, and that format has
+    /// no keyword for a face's glow, for `ExtraParams` (a light, a flexi path,
+    /// a sculpt, a **mesh**), for floating text, media, a texture animation or
+    /// a particle system —
+    /// `sl_object_asset`'s `the_text_carries_none_of_the_modern_prim` is the
+    /// record of it. A grid that rezzed out of those bytes would answer a
+    /// resident who took a lamp with a plain white box.
+    ///
+    /// Neither live grid does: OpenSim's body is `SceneObjectSerializer` XML,
+    /// which carries all of it, and Second Life's simulator has the object
+    /// itself and reads no asset at all. So this one keeps the linkset a take
+    /// removed and rezzes from that.
+    ///
+    /// The catalogue's `light-box` is the fixture because it carries three of
+    /// the missing things at once — a light, glow, and full-bright faces — so a
+    /// rez that went back through the text fails on all three rather than
+    /// looking merely dim.
+    #[tokio::test]
+    async fn a_taken_prim_comes_back_with_the_light_the_text_cannot_carry() -> Result<(), TestError>
+    {
+        let light_box = sl_fake_grid::fixtures::catalogue::entry("light-box")
+            .ok_or("the catalogue has no light-box")?;
+        let grid = FakeGridBuilder::new()
+            .account(AccountConfig::new("First", "User", "password"))
+            .event_queue_hold(Duration::from_secs(2))
+            .region(sl_fake_grid::catalogue().into_region(RegionConfig::default()))
+            .start()
+            .await?;
+        let mut avatar = join(&grid, "First").await?;
+
+        // What the region streamed, so "came back the same" is measured against
+        // the prim that was actually standing there.
+        let before = wait_on(&mut avatar.events, |event| match event {
+            Event::ObjectAdded(object) | Event::ObjectUpdated(object)
+                if object.full_id == light_box.full_id =>
+            {
+                Some((**object).clone())
+            }
+            _ => None,
+        })
+        .await?;
+        let before_extra = sl_proto::decode_extra_params(&before.extra_params);
+        assert!(
+            before_extra.light.is_some(),
+            "the catalogue's light-box has no light to lose"
+        );
+
+        let objects_folder = avatar
+            .agent
+            .with_sim(|sim| {
+                sim.agent_inventory()
+                    .folders()
+                    .find(|folder| {
+                        folder.folder_type == sl_client_tokio::FolderType::Object.to_code()
+                    })
+                    .map(|folder| folder.folder_id)
+            })
+            .await
+            .ok_or("the seeded account has no Objects folder")?;
+        avatar
+            .commands
+            .send(Command::DerezObjects {
+                local_ids: vec![sl_client_tokio::ScopedObjectId::new(
+                    avatar.circuit,
+                    before.local_id,
+                )],
+                destination: sl_client_tokio::DeRezDestination::TakeIntoAgentInventory(
+                    objects_folder,
+                ),
+                transaction_id: sl_client_tokio::TransactionId::from(uuid::Uuid::from_u128(
+                    0x11_6B,
+                )),
+                group_id: None,
+            })
+            .await?;
+        let item = wait_for_taken_item(&mut avatar.events).await?;
+
+        let landing = Vector {
+            x: 150.0,
+            y: 150.0,
+            z: 27.0,
+        };
+        avatar
+            .commands
+            .send(Command::RezObjectFromInventory {
+                params: Box::new(rez_params(&item, &landing)),
+            })
+            .await?;
+        let rezzed = wait_on(&mut avatar.events, |event| match event {
+            Event::ObjectAdded(object) if object.motion.position == landing => {
+                Some((**object).clone())
+            }
+            _ => None,
+        })
+        .await?;
+
+        let extra = sl_proto::decode_extra_params(&rezzed.extra_params);
+        assert_eq!(
+            extra.light, before_extra.light,
+            "the rezzed prim lost the light it was taken with"
+        );
+        let faces = sl_proto::decode_texture_entry(&rezzed.texture_entry, 6);
+        let face = faces.face(0).ok_or("the rezzed prim has no first face")?;
+        assert!(
+            face.glow > 0.0,
+            "the rezzed prim lost the glow it was taken with"
+        );
+        assert!(
+            face.fullbright(),
+            "the rezzed prim lost the full-bright bit it was taken with"
+        );
+        assert_eq!(
+            rezzed.shape, before.shape,
+            "the rezzed prim is not the shape that was taken"
+        );
+        // A fresh key, because the object rezzed is a new one: the asset names
+        // the prim it was taken from, and something else may hold that id now.
+        assert_ne!(rezzed.full_id, before.full_id);
+        Ok(())
+    }
+
     /// The other grid: a take **names** the object's asset, and it is fetchable
     /// and describes the object that was taken.
     ///

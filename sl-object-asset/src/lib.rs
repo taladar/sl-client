@@ -142,9 +142,9 @@
 //! read nor write. Two uses survive the measurement above:
 //!
 //! - **the fake grid needs a serialisation.** Its take has to write the object
-//!   down somewhere, or nothing can drag it back out of inventory. **Only the
-//!   grid reads these bytes back** — which is now true by construction rather
-//!   than by convention: since [[test-fake-grid-object-asset-id-divergence]]
+//!   down somewhere. **Only the grid reads these bytes back** — which is now
+//!   true by construction rather than by convention: since
+//!   [[test-fake-grid-object-asset-id-divergence]]
 //!   the fake grid imitates Second Life by default
 //!   (`sl_fake_grid::ObjectAssetPolicy::Withheld`), files a take under a nil
 //!   asset id and keeps the body where no capability reaches it. A grid asked
@@ -152,10 +152,42 @@
 //!   the one configuration where these bytes cross the wire. The choice of
 //!   format is therefore free; this one is chosen because it is the format
 //!   Second Life is known to have written.
+//!
+//!   It is **not** what that grid rezzes from, and nothing should be: see the
+//!   next section.
 //! - **the two reference captures are readable.** They are the only public
 //!   examples of the format, and a decoder that reads them field by field is
 //!   how the workspace can say what it is at all, rather than repeating
 //!   folklore about it.
+//!
+//! # Do not rez out of these bytes (settled 2026-09-09)
+//!
+//! The text has no keyword for a face's `glow` or legacy material id, none for
+//! the `ExtraParams` block (flexi, light, sculpt, **mesh**, light image,
+//! extended mesh, render material, reflection probe), none for floating text
+//! (only its *colour* is written), and none for a media URL, a texture
+//! animation or a particle system. [`bridge`]'s
+//! `the_text_carries_none_of_the_modern_prim` asserts every one of those, so
+//! the list is a test rather than a claim.
+//!
+//! **No keyword for any of them will be invented here.** The question was open
+//! while it looked answerable — the two captures are from 2005, before flexi
+//! prims, sculpties, mesh and materials existed, so their silence might have
+//! been their age rather than the format's limit. It is not answerable: Second
+//! Life hands a viewer a **nil** asset id for every object item (measured, see
+//! the table above), so no capture of a modern one can be taken, and OpenSim
+//! never writes this format at all. A keyword added here would therefore be
+//! unfalsifiable *and* unreadable — an asset no grid could load, in a crate
+//! whose whole value is that every field in it comes from a source that can be
+//! named.
+//!
+//! What follows for a grid is that this format is a **publication**, not a
+//! store. A simulator that rezzed out of it would answer a resident who took a
+//! lamp with a plain box, and neither live grid does: OpenSim's body is
+//! `SceneObjectSerializer` XML, which carries all of it, and Second Life's
+//! simulator has the object itself and reads no asset. The fake grid does the
+//! same — it keeps the linkset a take removed and rezzes from that, publishing
+//! these bytes beside it (`sl_fake_grid`'s `assets` module).
 
 pub mod bridge;
 pub mod decode;

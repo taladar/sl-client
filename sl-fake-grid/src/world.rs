@@ -2047,10 +2047,16 @@ pub fn default_object_properties(object: &Object) -> ObjectProperties {
 /// and invented masks is honoured there); a fake grid that validated them would
 /// fail a viewer for something no real grid fails it for.
 ///
-/// A **linkset** comes back whole. The asset states which prim is the root and
-/// carries each child's offset from it, so the region mints an id per prim and
-/// parents the children to the root's region-local id — the same `ParentID` a
-/// link would have set.
+/// A **linkset** comes back whole, and so does the prim: what a rez puts back
+/// is the linkset the take removed, kept beside the published body because the
+/// body's format cannot carry a light, a flexi path, a mesh, a glowing face,
+/// floating text, media, a texture animation or a particle system (see
+/// [`store_taken_asset`] and the [`crate::assets`] module docs). An item this
+/// grid did not take — a fixture's seeded object item — has no linkset behind
+/// it and is read out of its body instead, which states which prim is the root
+/// and carries each child's offset from it. Either way the region mints an id
+/// per prim and parents the children to the root's region-local id — the same
+/// `ParentID` a link would have set.
 ///
 /// Where it lands is the ray's end point: the fake grid casts no rays, and
 /// every viewer sets `bypass_raycast` on a drag-out anyway, so `ray_end` is
@@ -2087,42 +2093,40 @@ fn rez_from_inventory(
         tracing::debug!("a rez named item {item_id}, which this agent does not hold");
         return Vec::new();
     };
-    let Some(bytes) = taken_object_body(assets, &item) else {
-        tracing::debug!("a rez named item {item_id}, whose object body nothing holds");
-        return Vec::new();
-    };
-    let asset = match sl_object_asset::ObjectAsset::decode(&bytes) {
-        Ok(asset) => asset,
-        Err(error) => {
-            tracing::warn!("the object body item {item_id} names does not decode: {error}");
-            return Vec::new();
+    // A linkset this grid took is put back as it was taken. Anything else --
+    // a fixture's seeded object item, which no take ever made -- is read out of
+    // the published body, which is all there is for it. `store_taken_asset` and
+    // the `assets` module docs say why the two sources exist.
+    let rezzed = match assets
+        .taken_linkset(item_id)
+        .filter(|linkset| !linkset.is_empty())
+    {
+        Some(linkset) => rez_taken_linkset(
+            world,
+            sim.region_handle(),
+            mint,
+            &linkset,
+            &item,
+            &params.ray_end,
+        ),
+        None => {
+            let Some(bytes) = taken_object_body(assets, &item) else {
+                tracing::debug!("a rez named item {item_id}, whose object body nothing holds");
+                return Vec::new();
+            };
+            match rez_asset_body(
+                world,
+                sim.region_handle(),
+                mint,
+                &bytes,
+                &item,
+                &params.ray_end,
+            ) {
+                Some(rezzed) => rezzed,
+                None => return Vec::new(),
+            }
         }
     };
-    let Some(root_prim) = asset.root() else {
-        tracing::warn!("the object body item {item_id} names has no root prim");
-        return Vec::new();
-    };
-    let region_handle = sim.region_handle();
-    let root_local_id = world.mint_local_id();
-    let mut root = root_prim.to_object(sl_object_asset::RezTarget {
-        region_handle,
-        local_id: root_local_id,
-        full_id: mint(),
-        parent_id: RegionLocalObjectId(0),
-    });
-    root.motion.position = params.ray_end.clone();
-    root.properties = Some(rezzed_properties(root_prim, root.full_id, &item));
-    let mut rezzed = vec![root];
-    for child_prim in asset.children() {
-        let mut child = child_prim.to_object(sl_object_asset::RezTarget {
-            region_handle,
-            local_id: world.mint_local_id(),
-            full_id: mint(),
-            parent_id: root_local_id,
-        });
-        child.properties = Some(rezzed_properties(child_prim, child.full_id, &item));
-        rezzed.push(child);
-    }
     world.objects.extend(rezzed.iter().cloned());
     if let Err(error) = sim.send_object_update(&rezzed, REAL_TIME_DILATION, now) {
         tracing::warn!("streaming an object rezzed from inventory failed: {error}");
@@ -2137,6 +2141,115 @@ fn rez_from_inventory(
         .into_iter()
         .map(|object| RegionChange::Rezzed(Box::new(object)))
         .collect()
+}
+
+/// The objects a rez puts back when this grid is the one that **took** them:
+/// the linkset it removed, under the ids this region mints for it.
+///
+/// Everything the object carried comes back, which is the point — a light, a
+/// flexi path, a mesh, a glowing face, floating text, media, a texture
+/// animation, a particle system. None of that is in the published body, and
+/// both live grids rez from something that holds it
+/// ([`crate::assets`]).
+///
+/// Three things are *not* carried over, because they name the object where it
+/// was taken from rather than the one being made: its region-local id, its
+/// object key and its parent — all minted here, exactly as
+/// [`sl_object_asset::RezTarget`] does for the body path. The permission flags
+/// **are** kept: they say what this resident may do with the object, which a
+/// take does not change.
+fn rez_taken_linkset(
+    world: &mut SceneFixtures,
+    region_handle: sl_wire::RegionHandle,
+    mint: &dyn Fn() -> uuid::Uuid,
+    linkset: &[Object],
+    item: &InventoryItem,
+    at: &Vector,
+) -> Vec<Object> {
+    let Some((root_object, children)) = linkset.split_first() else {
+        return Vec::new();
+    };
+    let root_local_id = world.mint_local_id();
+    let mut rezzed = Vec::with_capacity(linkset.len());
+    let mut root = root_object.clone();
+    root.region_handle = region_handle;
+    root.local_id = root_local_id;
+    root.parent_id = RegionLocalObjectId(0);
+    root.full_id = ObjectKey::from(mint());
+    root.motion.position = at.clone();
+    root.properties = Some(rezzed_properties(
+        &filed_prim(root_object, item, true),
+        root.full_id,
+        item,
+    ));
+    rezzed.push(root);
+    for child_object in children {
+        let mut child = child_object.clone();
+        child.region_handle = region_handle;
+        child.local_id = world.mint_local_id();
+        child.parent_id = root_local_id;
+        child.full_id = ObjectKey::from(mint());
+        child.properties = Some(rezzed_properties(
+            &filed_prim(child_object, item, false),
+            child.full_id,
+            item,
+        ));
+        rezzed.push(child);
+    }
+    rezzed
+}
+
+/// The objects a rez puts back out of a published **body** — the path for an
+/// item this grid did not take, which is a fixture's seeded object item.
+///
+/// [`None`] when the bytes do not decode or hold no prim; the caller has
+/// already logged which item they belong to.
+fn rez_asset_body(
+    world: &mut SceneFixtures,
+    region_handle: sl_wire::RegionHandle,
+    mint: &dyn Fn() -> uuid::Uuid,
+    bytes: &[u8],
+    item: &InventoryItem,
+    at: &Vector,
+) -> Option<Vec<Object>> {
+    let asset = match sl_object_asset::ObjectAsset::decode(bytes) {
+        Ok(asset) => asset,
+        Err(error) => {
+            tracing::warn!(
+                "the object body item {} names does not decode: {error}",
+                item.item_id
+            );
+            return None;
+        }
+    };
+    let Some(root_prim) = asset.root() else {
+        tracing::warn!(
+            "the object body item {} names has no root prim",
+            item.item_id
+        );
+        return None;
+    };
+    let root_local_id = world.mint_local_id();
+    let mut root = root_prim.to_object(sl_object_asset::RezTarget {
+        region_handle,
+        local_id: root_local_id,
+        full_id: mint(),
+        parent_id: RegionLocalObjectId(0),
+    });
+    root.motion.position = at.clone();
+    root.properties = Some(rezzed_properties(root_prim, root.full_id, item));
+    let mut rezzed = vec![root];
+    for child_prim in asset.children() {
+        let mut child = child_prim.to_object(sl_object_asset::RezTarget {
+            region_handle,
+            local_id: world.mint_local_id(),
+            full_id: mint(),
+            parent_id: root_local_id,
+        });
+        child.properties = Some(rezzed_properties(child_prim, child.full_id, item));
+        rezzed.push(child);
+    }
+    Some(rezzed)
 }
 
 /// The object body `item` stands for, from whichever of the grid's two stores
@@ -2206,18 +2319,48 @@ fn rezzed_properties(
 /// agent's bakes under the same two locks). Nothing anywhere takes the region
 /// lock while holding the asset one, so the pair cannot invert.
 fn store_taken_asset(assets: &crate::assets::GridAssets, item: &InventoryItem, linkset: &[Object]) {
-    let mut prims = linkset.iter().map(taken_prim);
-    let Some(mut root) = prims.next() else {
+    let Some((root_object, children)) = linkset.split_first() else {
         return;
     };
-    item.name.clone_into(&mut root.name);
-    root.description = Some(item.description.clone());
-    let body = sl_object_asset::ObjectAsset::linkset(root, prims.collect()).encode();
+    // The objects themselves, beside the body: the text cannot carry a light, a
+    // flexi path, a mesh, a glowing face, floating text, media, a texture
+    // animation or a particle system, and a rez out of it alone would hand back
+    // a plain box. Both live grids rez from something that *can* say all of it
+    // -- OpenSim's XML body, Second Life's simulator-side object -- so this one
+    // keeps the linkset too. See `crate::assets`.
+    assets.insert_taken_linkset(item.item_id, linkset.to_vec());
+    let root = filed_prim(root_object, item, true);
+    let prims = children
+        .iter()
+        .map(|child| filed_prim(child, item, false))
+        .collect();
+    let body = sl_object_asset::ObjectAsset::linkset(root, prims).encode();
     if item.asset_id.is_nil() {
         assets.insert_withheld_object(item.item_id, body);
         return;
     }
     let _previous = assets.write().insert(AssetKey::from(item.asset_id), body);
+}
+
+/// One object as the asset prim block a take **files** it as: [`taken_prim`],
+/// with the linkset root wearing the item's own name and description.
+///
+/// A take is not a round trip — the item is what a viewer shows, and an object
+/// rezzed by `ObjectAdd` has no `ObjectProperties` of its own yet — so the name
+/// the asset states is the item's. Only the root's: a child prim keeps whatever
+/// it was called.
+///
+/// Both halves of a take read this. The body is encoded from it, and a rez that
+/// puts the *stored linkset* back derives the same properties record through it
+/// ([`rezzed_properties`]), so the object a resident gets back cannot be named
+/// one thing by the asset and another by the region.
+fn filed_prim(object: &Object, item: &InventoryItem, root: bool) -> sl_object_asset::PrimBlock {
+    let mut prim = taken_prim(object);
+    if root {
+        item.name.clone_into(&mut prim.name);
+        prim.description = Some(item.description.clone());
+    }
+    prim
 }
 
 /// One object as the asset prim a take serialises it into.
@@ -2417,7 +2560,7 @@ fn send_parcel_or_no_data(
 
 #[cfg(test)]
 mod test {
-    use pretty_assertions::assert_eq;
+    use pretty_assertions::{assert_eq, assert_ne};
 
     use super::*;
 
@@ -2827,6 +2970,101 @@ mod test {
                 .all(|face| face.image_id == sl_proto::DEFAULT_PRIM_TEXTURE),
             "a taken prim's faces are not the default texture"
         );
+    }
+
+    /// The two halves of a take, side by side: the **published body** loses the
+    /// prim's light, and the **rez** does not.
+    ///
+    /// Both are asserted in one test on purpose. Either alone is passable by a
+    /// grid that is wrong in the other direction — a body that invented
+    /// keywords no grid could read, or a rez that quietly handed back a box —
+    /// and the whole decision this pair encodes is that the format stays what
+    /// Second Life wrote while the resident still gets their lamp back.
+    #[test]
+    fn a_take_publishes_a_lossy_body_and_rezzes_the_prim_it_took()
+    -> Result<(), Box<dyn core::error::Error>> {
+        let owner = agent(0x1);
+        let mut world = SceneFixtures::new();
+        let mut taken = box_prim(
+            RegionLocalObjectId(5),
+            ObjectKey::from(uuid::Uuid::from_u128(5)),
+            owner,
+            ZERO,
+            ZERO,
+        );
+        taken.extra = ObjectExtraParams {
+            light: Some(sl_proto::LightData {
+                color: [255, 220, 160, 255],
+                radius: 10.0,
+                cutoff: 1.2,
+                falloff: 0.5,
+            }),
+            ..ObjectExtraParams::default()
+        };
+        taken.extra_params = sl_proto::encode_extra_params(&taken.extra);
+        taken.text = "a lamp".to_owned();
+
+        let assets = crate::assets::GridAssets::default();
+        let item = InventoryItem {
+            name: "Lamp".to_owned(),
+            ..taken_item(
+                std::slice::from_ref(&taken),
+                InventoryFolderKey::from(uuid::Uuid::from_u128(0xF0)),
+                owner,
+                &|| uuid::Uuid::from_u128(0xA55E7),
+                crate::assets::ObjectAssetPolicy::Served,
+            )
+        };
+        store_taken_asset(&assets, &item, std::slice::from_ref(&taken));
+
+        // The body a viewer may fetch: the format, faithfully, light and all
+        // gone.
+        let body = assets
+            .read()
+            .get(AssetKey::from(item.asset_id))
+            .map(<[u8]>::to_vec)
+            .ok_or("the take published no body")?;
+        let published = sl_object_asset::ObjectAsset::decode(&body)?
+            .root()
+            .cloned()
+            .ok_or("the published body holds no prim")?;
+        let from_body = published.to_object(sl_object_asset::RezTarget {
+            region_handle: sl_wire::RegionHandle(0),
+            local_id: RegionLocalObjectId(9),
+            full_id: uuid::Uuid::from_u128(9),
+            parent_id: RegionLocalObjectId(0),
+        });
+        assert_eq!(
+            from_body.extra,
+            ObjectExtraParams::default(),
+            "the text carries no ExtraParams; if it now does, this is the wrong test"
+        );
+        assert_eq!(from_body.text, "");
+        assert_eq!(published.name, "Lamp", "the body is named after the item");
+
+        // The rez: the prim that was taken, under new ids.
+        let rezzed = rez_taken_linkset(
+            &mut world,
+            sl_wire::RegionHandle(0),
+            &|| uuid::Uuid::from_u128(0x9E7),
+            &[taken.clone()],
+            &item,
+            &ZERO,
+        );
+        let root = rezzed.first().ok_or("the rez put nothing back")?;
+        assert_eq!(root.extra, taken.extra, "the rez lost the light");
+        assert_eq!(root.text, taken.text, "the rez lost the floating text");
+        assert_ne!(root.full_id, taken.full_id, "a rez mints a fresh key");
+        assert_ne!(
+            root.local_id, taken.local_id,
+            "a rez mints a fresh local id"
+        );
+        assert_eq!(
+            root.properties.as_ref().map(|record| record.name.as_str()),
+            Some("Lamp"),
+            "the rezzed object is not named after the item it came out of"
+        );
+        Ok(())
     }
 
     /// An object nobody has named reports the record a freshly rezzed prim has,
