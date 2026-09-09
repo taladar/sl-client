@@ -7,8 +7,10 @@
 //! definitions the tracks reference.
 //!
 //! The deep atmospheric-scattering profiles (`rayleigh_config`, `mie_config`,
-//! `absorption_config`) that the renderer uses are intentionally not parsed here;
-//! every other documented sky/water parameter is.
+//! `absorption_config`) are carried through as [`DensityLayer`] stacks rather
+//! than interpreted: nothing here renders from them, but an editor that saves a
+//! sky asset back to the grid must not silently drop them. Every other
+//! documented sky/water parameter is parsed.
 
 use std::collections::BTreeMap;
 
@@ -119,6 +121,101 @@ pub struct DayCycleFrame {
     pub name: String,
 }
 
+/// One layer of an atmospheric-scattering density profile — a term of the
+/// reference's `createDensityProfileLayer(width, exp_term, exp_scale,
+/// linear_term, constant_term[, anisotropy])`, as the `rayleigh_config`,
+/// `mie_config` and `absorption_config` arrays of a sky asset hold them.
+///
+/// Carried, not interpreted: the viewer's sky is the legacy WindLight formula
+/// (`blue_density`, the haze scalars, the multipliers), which is where every
+/// rendered value comes from. These layers exist so that a sky asset **decoded
+/// and re-encoded keeps the atmosphere its author gave it** — the editors save
+/// a whole asset back over the item it came from, and a field this type does
+/// not model is a field the save destroys. The reference falls back to
+/// `LLSettingsSky::defaults()` for an absent profile, so dropping one is not a
+/// missing knob but a *different sky*, silently, for everyone who opens it in a
+/// viewer that does read them.
+///
+/// (Not `Eq`: holds `f32` fields.)
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct DensityLayer {
+    /// The altitude band this layer covers, metres (`width`); `0.0` for a layer
+    /// that runs to the top of the atmosphere.
+    pub width: f32,
+    /// The exponential term's coefficient (`exp_term`).
+    pub exp_term: f32,
+    /// The exponential term's scale factor (`exp_scale`), in inverse metres.
+    pub exp_scale: f32,
+    /// The linear term's coefficient (`linear_term`).
+    pub linear_term: f32,
+    /// The constant term (`constant_term`).
+    pub constant_term: f32,
+    /// The Mie phase function's anisotropy (`anisotropy`), which only a Mie
+    /// layer carries — `None` on a Rayleigh or absorption layer, and on a Mie
+    /// layer whose asset left it out.
+    pub anisotropy: Option<f32>,
+}
+
+impl DensityLayer {
+    /// The reference's default **Rayleigh** profile: one layer over the whole
+    /// atmosphere (`LLSettingsSky::rayleighConfigDefault`).
+    ///
+    /// What an editor materialises before writing a Rayleigh term into a frame
+    /// that carries no profile at all: the terms are a set, and storing one of
+    /// them beside four zeroes would be an atmosphere nobody chose. The
+    /// reference never faces this because its own defaults are merged into
+    /// every sky it loads.
+    #[must_use]
+    pub fn rayleigh_default() -> Vec<Self> {
+        vec![Self {
+            width: 0.0,
+            exp_term: 1.0,
+            exp_scale: -1.0 / 8000.0,
+            linear_term: 0.0,
+            constant_term: 0.0,
+            anisotropy: None,
+        }]
+    }
+
+    /// The reference's default **Mie** profile — the one layer that carries an
+    /// anisotropy (`LLSettingsSky::mieConfigDefault`).
+    #[must_use]
+    pub fn mie_default() -> Vec<Self> {
+        vec![Self {
+            width: 0.0,
+            exp_term: 1.0,
+            exp_scale: -1.0 / 1200.0,
+            linear_term: 0.0,
+            constant_term: 0.0,
+            anisotropy: Some(0.8),
+        }]
+    }
+
+    /// The reference's default **absorption** profile: ozone's two linear
+    /// ramping zones (`LLSettingsSky::absorptionConfigDefault`).
+    #[must_use]
+    pub fn absorption_default() -> Vec<Self> {
+        vec![
+            Self {
+                width: 25000.0,
+                exp_term: 0.0,
+                exp_scale: 0.0,
+                linear_term: -1.0 / 25000.0,
+                constant_term: -2.0 / 3.0,
+                anisotropy: None,
+            },
+            Self {
+                width: 0.0,
+                exp_term: 0.0,
+                exp_scale: 0.0,
+                linear_term: -1.0 / 15000.0,
+                constant_term: 8.0 / 3.0,
+                anisotropy: None,
+            },
+        ]
+    }
+}
+
 /// A single sky frame (`LLSettingsSky`): the atmosphere, sun, moon, and cloud
 /// state at one keyframe. The legacy haze colours/scalars (`ambient`,
 /// `blue_horizon`, `blue_density`, `haze_*`, the multipliers) are read from the
@@ -209,6 +306,28 @@ pub struct SkySettings {
     pub halo_texture: Option<TextureKey>,
     /// The rainbow texture (`None` for the viewer default).
     pub rainbow_texture: Option<TextureKey>,
+    /// The sky dome's offset (`dome_offset`), carried and never read.
+    ///
+    /// The reference stopped reading it — `getSkyDomeOffset` is commented out
+    /// and the dome is a constant now — but it is still in
+    /// `LLSettingsSky::defaults()`, so every sky it saves carries one. `None`
+    /// when the asset holds none, so a frame that never had one does not gain
+    /// one by passing through here.
+    pub dome_offset: Option<f32>,
+    /// The sky dome's radius (`dome_radius`), carried and never read, for the
+    /// same reason as [`dome_offset`](Self::dome_offset).
+    pub dome_radius: Option<f32>,
+    /// The Rayleigh scattering density profile (`rayleigh_config`), carried
+    /// verbatim — see [`DensityLayer`]. Empty when the asset holds none, which
+    /// is how it is re-encoded: an emitted empty array is not the same document
+    /// as an absent key.
+    pub rayleigh_config: Vec<DensityLayer>,
+    /// The Mie scattering density profile (`mie_config`), the one whose layers
+    /// carry an [`anisotropy`](DensityLayer::anisotropy).
+    pub mie_config: Vec<DensityLayer>,
+    /// The ozone absorption density profile (`absorption_config`), two ramping
+    /// layers in the reference's own default.
+    pub absorption_config: Vec<DensityLayer>,
 }
 
 /// A decoded EEP settings asset (`AT_SETTINGS`) — a sky frame, a water frame, or
@@ -788,6 +907,42 @@ fn lerp_array2(a: [f32; 2], b: [f32; 2], factor: f32) -> [f32; 2] {
     [lerp_f32(ax, bx, factor), lerp_f32(ay, by, factor)]
 }
 
+/// Layer-wise lerp of two density profiles.
+///
+/// Two profiles of the **same shape** interpolate term by term, which is what
+/// the reference's own map interpolation does when it walks two settings LLSDs
+/// of matching structure. Two of *different* shapes have no term-wise
+/// correspondence at all — a two-layer ozone ramp against a one-layer one — so
+/// they switch at the halfway point rather than producing a stack that is
+/// neither. Two absent profiles stay absent.
+fn lerp_density_profile(a: &[DensityLayer], b: &[DensityLayer], factor: f32) -> Vec<DensityLayer> {
+    if a.len() != b.len() {
+        return if factor > 0.5 { b.to_vec() } else { a.to_vec() };
+    }
+    a.iter()
+        .zip(b)
+        .map(|(lower, upper)| DensityLayer {
+            width: lerp_f32(lower.width, upper.width, factor),
+            exp_term: lerp_f32(lower.exp_term, upper.exp_term, factor),
+            exp_scale: lerp_f32(lower.exp_scale, upper.exp_scale, factor),
+            linear_term: lerp_f32(lower.linear_term, upper.linear_term, factor),
+            constant_term: lerp_f32(lower.constant_term, upper.constant_term, factor),
+            // An anisotropy only one side carries is not a number to blend
+            // toward from nothing: take whichever side is in force.
+            anisotropy: match (lower.anisotropy, upper.anisotropy) {
+                (Some(lower), Some(upper)) => Some(lerp_f32(lower, upper, factor)),
+                (lower, upper) => {
+                    if factor > 0.5 {
+                        upper
+                    } else {
+                        lower
+                    }
+                }
+            },
+        })
+        .collect()
+}
+
 /// Per-axis lerp of two [`Scale`]s (e.g. the water `normal_scale`).
 fn lerp_scale(a: Scale, b: Scale, factor: f32) -> Scale {
     Scale::new(
@@ -1009,6 +1164,19 @@ impl SkySettings {
             bloom_texture: pick_at_half(&self.bloom_texture, &other.bloom_texture, factor),
             halo_texture: pick_at_half(&self.halo_texture, &other.halo_texture, factor),
             rainbow_texture: pick_at_half(&self.rainbow_texture, &other.rainbow_texture, factor),
+            dome_offset: pick_at_half(&self.dome_offset, &other.dome_offset, factor),
+            dome_radius: pick_at_half(&self.dome_radius, &other.dome_radius, factor),
+            rayleigh_config: lerp_density_profile(
+                &self.rayleigh_config,
+                &other.rayleigh_config,
+                factor,
+            ),
+            mie_config: lerp_density_profile(&self.mie_config, &other.mie_config, factor),
+            absorption_config: lerp_density_profile(
+                &self.absorption_config,
+                &other.absorption_config,
+                factor,
+            ),
         }
     }
 
@@ -1097,6 +1265,19 @@ impl SkySettings {
             bloom_texture: None,
             halo_texture: None,
             rainbow_texture: None,
+            // Absent, not the reference's 0.96 / 15000: this default stands in
+            // for a sky *document*, and the two are carried rather than read,
+            // so inventing them would put keys in a frame that never had any.
+            dome_offset: None,
+            dome_radius: None,
+            // Empty, not the reference's `rayleighConfigDefault()` and friends:
+            // this default stands in for a sky *document* — a legacy WindLight
+            // preset, or a frame nothing was decoded into — and inventing
+            // profiles here would make a round trip through the encoder emit
+            // three arrays the original never carried.
+            rayleigh_config: Vec::new(),
+            mie_config: Vec::new(),
+            absorption_config: Vec::new(),
         }
     }
 }

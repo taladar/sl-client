@@ -56,7 +56,7 @@ use crate::avatars::OwnLocalBake;
 use crate::bake_inputs::{OwnBakeInputs, shape_is_male};
 use crate::floater::{FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater};
 use crate::inventory::OpenWearableEditor;
-use crate::inventory_actions::{PendingWearableUploads, wearable_param_group, wearable_type_of};
+use crate::inventory_actions::{wearable_param_group, wearable_type_of};
 use crate::inventory_properties::to_wire_item;
 use crate::textures::{TextureDecoded, TextureManager};
 use crate::ui::{LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
@@ -65,6 +65,7 @@ use crate::ui_font::UiFont;
 use crate::ui_radio::{RadioLayout, RadioSelection, RadioSpec, spawn_radio_group};
 use crate::ui_texture_picker::{TextureSwatchValue, spawn_texture_swatch};
 use crate::world_api::DecodedTextures;
+use crate::world_api::PendingItemCreations;
 use crate::world_api::TexturePicked;
 
 /// The Shape gender radio group's element id.
@@ -966,7 +967,7 @@ fn on_wear_button(
     store: Res<DecodedTextures>,
     library: Option<Res<AvatarAssetLibrary>>,
     mut local_bake: ResMut<OwnLocalBake>,
-    mut pending: ResMut<PendingWearableUploads>,
+    mut pending: ResMut<PendingItemCreations>,
     mut commands: MessageWriter<SlCommand>,
     mut texts: Query<&mut Text>,
 ) {
@@ -1009,7 +1010,7 @@ fn on_wear_button(
                 expected_upload_cost: 0,
                 data,
             }));
-            pending.enqueue(edit.wearable_type, edit.item.folder_id);
+            pending.enqueue(u32::from(edit.wearable_type.to_code()), edit.item.folder_id);
             set_status(&mut texts, edit.status, "Saved a copy to inventory.");
         }
         WearButton::Revert => {

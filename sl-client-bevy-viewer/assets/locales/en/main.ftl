@@ -3678,49 +3678,115 @@ personal-lighting-colours = Colours & images
 personal-lighting-atmosphere = Atmosphere
 personal-lighting-sun-moon = Sun & moon
 personal-lighting-water = Water
-# The colour swatches.
-personal-lighting-ambient = Ambient
-personal-lighting-blue-horizon = Blue horizon
-personal-lighting-blue-density = Blue density
-personal-lighting-sun-color = Sun colour
-personal-lighting-cloud-color = Cloud colour
-# The texture swatches.
-personal-lighting-cloud-image = Cloud image
-personal-lighting-water-image = Water image
-# The atmosphere sliders.
-personal-lighting-haze-horizon = Haze horizon
-personal-lighting-haze-density = Haze density
-personal-lighting-cloud-coverage = Cloud coverage
-personal-lighting-cloud-scale = Cloud scale
-personal-lighting-probe-ambiance = Probe ambiance
-personal-lighting-brightness = Brightness
-# Where the sun and the moon sit, and how they glow.
-personal-lighting-sun-azimuth = Sun azimuth
-personal-lighting-sun-elevation = Sun elevation
-personal-lighting-sun-scale = Sun scale
-personal-lighting-glow-focus = Glow focus
-personal-lighting-glow-size = Glow size
-personal-lighting-star-brightness = Star brightness
-personal-lighting-moon-azimuth = Moon azimuth
-personal-lighting-moon-elevation = Moon elevation
-# The water knobs.
-personal-lighting-water-fog-color = Fog colour
-personal-lighting-water-fog-density = Fog density
-personal-lighting-water-underwater-mod = Underwater fog
-personal-lighting-water-fresnel-scale = Fresnel scale
-personal-lighting-water-fresnel-offset = Fresnel offset
-personal-lighting-water-normal-scale-x = Wavelet X
-personal-lighting-water-normal-scale-y = Wavelet Y
-personal-lighting-water-normal-scale-z = Wavelet Z
-personal-lighting-water-scale-above = Refract above
-personal-lighting-water-scale-below = Refract below
-personal-lighting-water-blur = Blur multiplier
-personal-lighting-water-large-wave-x = Large wave X
-personal-lighting-water-large-wave-y = Large wave Y
-personal-lighting-water-small-wave-x = Small wave X
-personal-lighting-water-small-wave-y = Small wave Y
 # Drops the whole personal environment, after a confirmation.
 personal-lighting-reset = Reset
+
+## The sky and water settings editors, over an inventory settings asset.
+
+settings-editor-sky-title = Sky Settings
+settings-editor-water-title = Water Settings
+settings-editor-name = Name
+settings-editor-save = Save
+settings-editor-save-as = Save As
+settings-editor-revert = Revert
+# The sky editor's tabs, and the water editor's one.
+settings-editor-tab-atmosphere = Atmosphere
+settings-editor-tab-clouds = Clouds
+settings-editor-tab-sun-moon = Sun & Moon
+settings-editor-tab-density = Density
+settings-editor-tab-water = Water
+
+## The environment knobs, shared by every window that shows them: the Personal
+## Lighting floater and the sky / water settings editors.
+
+# The colour swatches.
+env-knob-ambient = Ambient
+env-knob-blue-horizon = Blue horizon
+env-knob-blue-density = Blue density
+env-knob-sun-color = Sun colour
+env-knob-cloud-color = Cloud colour
+env-knob-water-fog-color = Fog colour
+# The texture swatches.
+env-knob-cloud-image = Cloud image
+env-knob-sun-image = Sun image
+env-knob-moon-image = Moon image
+env-knob-bloom-image = Bloom image
+env-knob-halo-image = Halo image
+env-knob-rainbow-image = Rainbow image
+env-knob-water-image = Water image
+env-knob-water-transparent-image = Transparent image
+# The atmosphere.
+env-knob-haze-horizon = Haze horizon
+env-knob-haze-density = Haze density
+env-knob-moisture-level = Moisture level
+env-knob-droplet-radius = Droplet radius
+env-knob-ice-level = Ice level
+env-knob-density-multiplier = Density multiplier
+env-knob-distance-multiplier = Distance multiplier
+env-knob-max-altitude = Maximum altitude
+env-knob-probe-ambiance = Probe ambiance
+env-knob-brightness = Brightness
+# The clouds.
+env-knob-cloud-coverage = Cloud coverage
+env-knob-cloud-scale = Cloud scale
+env-knob-cloud-variance = Cloud variance
+env-knob-cloud-scroll-x = Cloud scroll X
+env-knob-cloud-scroll-y = Cloud scroll Y
+env-knob-cloud-density-x = Cloud density X
+env-knob-cloud-density-y = Cloud density Y
+env-knob-cloud-density-d = Cloud density
+env-knob-cloud-detail-x = Cloud detail X
+env-knob-cloud-detail-y = Cloud detail Y
+env-knob-cloud-detail-d = Cloud detail
+# Where the sun and the moon sit, and how they glow.
+env-knob-sun-azimuth = Sun azimuth
+env-knob-sun-elevation = Sun elevation
+env-knob-sun-scale = Sun scale
+env-knob-glow-focus = Glow focus
+env-knob-glow-size = Glow size
+env-knob-star-brightness = Star brightness
+env-knob-moon-azimuth = Moon azimuth
+env-knob-moon-elevation = Moon elevation
+env-knob-moon-scale = Moon scale
+env-knob-moon-brightness = Moon brightness
+env-knob-sun-arc-radians = Sun disc radius
+# The atmospheric-density profiles: the same terms for each of the three, so
+# the profile's name leads.
+env-knob-rayleigh-exp-term = Rayleigh exponential
+env-knob-rayleigh-exp-scale = Rayleigh exp. scale
+env-knob-rayleigh-linear = Rayleigh linear
+env-knob-rayleigh-constant = Rayleigh constant
+env-knob-rayleigh-width = Rayleigh max altitude
+env-knob-mie-exp-term = Mie exponential
+env-knob-mie-exp-scale = Mie exp. scale
+env-knob-mie-linear = Mie linear
+env-knob-mie-constant = Mie constant
+env-knob-mie-anisotropy = Mie anisotropy
+env-knob-mie-width = Mie max altitude
+env-knob-absorption-exp-term = Absorption exponential
+env-knob-absorption-exp-scale = Absorption exp. scale
+env-knob-absorption-linear = Absorption linear
+env-knob-absorption-constant = Absorption constant
+env-knob-absorption-width = Absorption max altitude
+env-knob-planet-radius = Planet radius
+env-knob-sky-bottom-radius = Atmosphere inner radius
+env-knob-sky-top-radius = Atmosphere outer radius
+# The water.
+env-knob-water-fog-density = Fog density
+env-knob-water-underwater-mod = Underwater fog
+env-knob-water-fresnel-scale = Fresnel scale
+env-knob-water-fresnel-offset = Fresnel offset
+env-knob-water-normal-scale-x = Wavelet X
+env-knob-water-normal-scale-y = Wavelet Y
+env-knob-water-normal-scale-z = Wavelet Z
+env-knob-water-scale-above = Refract above
+env-knob-water-scale-below = Refract below
+env-knob-water-blur = Blur multiplier
+env-knob-water-large-wave-x = Large wave X
+env-knob-water-large-wave-y = Large wave Y
+env-knob-water-small-wave-x = Small wave X
+env-knob-water-small-wave-y = Small wave Y
+
 # The curated default setting rows.
 quick-prefs-draw-distance = Draw distance
 quick-prefs-max-particles = Max particles

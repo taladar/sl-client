@@ -258,6 +258,7 @@ pub(crate) use sl_viewer_world_scene::probes;
 pub(crate) use sl_viewer_world_view::physics;
 pub mod render_gallery;
 pub(crate) use sl_viewer_environment::personal_lighting;
+pub(crate) use sl_viewer_environment::settings_editor;
 pub(crate) use sl_viewer_rlv::rlv_behaviours;
 pub(crate) use sl_viewer_rlv::rlv_console;
 pub(crate) use sl_viewer_rlv::rlv_locks;

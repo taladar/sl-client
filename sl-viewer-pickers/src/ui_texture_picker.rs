@@ -143,8 +143,8 @@ pub struct TextureSwatchValue(pub TextureKey);
 /// so the press that opens the picker can name the window it wants
 /// ([`OpenTexturePicker::field`]). Previously the element id only reached the
 /// swatch's `Name`, which is not something a system should be parsing.
-#[derive(Component, Debug, Clone, Copy)]
-pub struct TextureSwatchField(pub &'static str);
+#[derive(Component, Debug, Clone)]
+pub struct TextureSwatchField(pub Box<str>);
 
 /// Marks a swatch as a **material** picker and carries its current material
 /// asset id. A swatch with this component opens the picker in
@@ -160,7 +160,7 @@ pub struct MaterialSwatchValue(pub Uuid);
 pub fn spawn_texture_swatch(
     commands: &mut Commands,
     parent: Entity,
-    element: &'static str,
+    element: &str,
     tab_index: i32,
     initial: TextureKey,
 ) -> Entity {
@@ -177,7 +177,7 @@ pub fn spawn_texture_swatch(
             BorderColor::all(CONTROL_BORDER),
             BackgroundColor(EMPTY_FILL),
             TextureSwatchValue(initial),
-            TextureSwatchField(element),
+            TextureSwatchField(Box::from(element)),
             Pickable::default(),
             Name::new(format!("{element}:texture-swatch")),
             ChildOf(parent),
@@ -195,7 +195,7 @@ pub fn spawn_texture_swatch(
 pub fn spawn_material_swatch(
     commands: &mut Commands,
     parent: Entity,
-    element: &'static str,
+    element: &str,
     tab_index: i32,
     initial_texture: TextureKey,
     initial_material: Uuid,
@@ -234,7 +234,7 @@ fn open_picker_from_swatch(
         };
         opens.write(OpenTexturePicker {
             requester: press.entity,
-            field: field.0,
+            field: field.0.clone(),
             current,
             kind,
         });
@@ -669,7 +669,7 @@ fn handle_open_texture_picker(
     mut nodes: Query<&mut Node>,
     mut commands: Commands,
 ) {
-    for open in opens.read().copied() {
+    for open in opens.read().cloned() {
         let mut spec = texture_picker_floater_spec();
         // Retitle for the active kind. Blank / Default are texture UUIDs —
         // meaningless as a material — so they are hidden in material mode
@@ -686,7 +686,7 @@ fn handle_open_texture_picker(
             PickerKind::Texture => "Pick: Texture",
             PickerKind::Material => "Pick: Material",
         });
-        let opened = floaters.open(spec, FloaterKey::named(open.field));
+        let opened = floaters.open(spec, FloaterKey::named(open.field.clone()));
         let window = opened.root();
         if let KeyedFloaterOpen::Spawned(handle) = opened {
             build_picker_content(&mut commands, handle, &open);

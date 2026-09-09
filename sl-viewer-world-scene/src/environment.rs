@@ -17,8 +17,8 @@
 
 use bevy::prelude::*;
 use sl_client_bevy::{
-    AssetKey, Command, DayCycle, DayCycleFrame, EnvironmentAsset, EnvironmentSettings, SkySettings,
-    SlCommand, SlEvent, SlSessionEvent, Uuid, WaterSettings,
+    AssetKey, Command, DayCycle, DayCycleFrame, EnvironmentAsset, EnvironmentSettings,
+    SettingsKind, SkySettings, SlCommand, SlEvent, SlSessionEvent, Uuid, WaterSettings,
 };
 use sl_settings::SettingValue;
 use sl_viewer_settings::ViewerSettings;
@@ -389,6 +389,23 @@ pub struct EnvironmentState {
     pub manual_transition_seconds: f32,
     /// The cross-fade in flight, if any.
     transition: Option<EnvironmentTransition>,
+    /// The **edit** layer: what an open settings editor is previewing, over
+    /// every other layer — the reference's `ENV_EDIT`
+    /// (`LLFloaterFixedEnvironment::onOpen` installs the settings it is editing
+    /// there and `onClose` clears them again).
+    ///
+    /// Its own layer rather than a write into [`Self::local`] because an editor
+    /// is a *preview*: whatever personal environment the user had before they
+    /// opened one has to still be there when they close it, unsaved and
+    /// untouched. Snapshotting the local layer on open and putting it back on
+    /// close reaches the same place only while nothing else writes that layer
+    /// in between — a script's `@setenv_*`, or the Personal Lighting window
+    /// left open beside the editor, both do.
+    ///
+    /// Never persisted: [`saved_environment`](Self::saved_environment) ignores
+    /// it, because a frame somebody was looking at in an editor is not a
+    /// personal environment they chose.
+    edit: LocalEnvironment,
     /// Whether the account's saved personal environment has been restored yet
     /// (once per session, after the account settings load — see
     /// [`restore_saved_environment`]).
@@ -420,6 +437,7 @@ impl Default for EnvironmentState {
             parcel_req: None,
             manual_transition_seconds: 0.0,
             transition: None,
+            edit: LocalEnvironment::default(),
             restored: false,
             req_pending: false,
             req_attempts: 0,
@@ -550,6 +568,40 @@ impl EnvironmentState {
         }
         self.local.install(local, source);
         self.apply();
+    }
+
+    /// Install one settings asset in the **edit** layer — the frame an open
+    /// settings editor is previewing, over every other layer (the reference's
+    /// `ENV_EDIT`).
+    ///
+    /// Never fades. An editor writes this on every drag of every slider, and a
+    /// fade restarted per pixel would run the preview a beat behind the hand
+    /// moving it — the same reason [`set_local_instant`](Self::set_local_instant)
+    /// exists.
+    pub fn set_edit(&mut self, edit: EnvironmentAsset) {
+        self.transition = None;
+        self.edit.install(edit, None);
+        self.apply();
+    }
+
+    /// Take one track out of the edit layer — an editor closing, putting back
+    /// whatever the layers underneath were holding all along.
+    ///
+    /// Per track, not the whole layer: the sky editor and the water editor are
+    /// separate windows and either can be open without the other.
+    pub fn clear_edit(&mut self, kind: SettingsKind) {
+        match kind {
+            SettingsKind::Sky => self.edit.sky = None,
+            SettingsKind::Water => self.edit.water = None,
+            SettingsKind::DayCycle => self.edit.day = None,
+        }
+        self.apply();
+    }
+
+    /// The edit layer — what an open editor is previewing, if anything.
+    #[must_use]
+    pub const fn editing(&self) -> &LocalEnvironment {
+        &self.edit
     }
 
     /// Empty the local layer, falling back to whatever the menu has pinned
@@ -821,6 +873,23 @@ impl EnvironmentState {
             }
         }
         if let Some(water) = &self.local.water {
+            let name = water.settings.name.clone();
+            let settings = water.settings.clone();
+            pin_water_into(&mut self.settings, settings, name);
+        }
+        // The **edit** layer, over everything else: the frame an open settings
+        // editor is previewing. Its sky wins over the menu's pin as well as over
+        // a local sky, which is why it is applied after both rather than folded
+        // into either.
+        if let Some(day) = &self.edit.day {
+            self.settings.day_cycle = (*day.settings).clone();
+        }
+        if let Some(sky) = &self.edit.sky {
+            let name = sky.settings.name.clone();
+            let settings = (*sky.settings).clone();
+            self.pin_sky(settings, name);
+        }
+        if let Some(water) = &self.edit.water {
             let name = water.settings.name.clone();
             let settings = water.settings.clone();
             pin_water_into(&mut self.settings, settings, name);
@@ -1695,6 +1764,77 @@ mod tests {
         assert_eq!(state.settings.day_length, 1234);
         assert_eq!(state.shared.day_length, 1234);
         assert!(state.has_local_fixed_sky());
+    }
+
+    /// **An editor's preview renders over the personal environment, and gives
+    /// it back.** The whole point of the edit layer being a layer: a settings
+    /// editor is opened over whatever sky the user had built, and closing it —
+    /// saved or not — has to leave that sky exactly as it was. A window that
+    /// wrote the local layer instead would have to snapshot and restore it, and
+    /// a script's `@setenv_*` landing in between would make the restore put
+    /// back something the user never chose.
+    #[test]
+    fn an_edited_frame_renders_over_the_local_one_and_gives_it_back() {
+        let mut state = EnvironmentState::default();
+        let _source = state.ingest_reply(reply(-1, 1234));
+        state.set_local(EnvironmentAsset::Sky(Box::new(script_sky())), None);
+
+        let mut edited = SkySettings::legacy_windlight_default("edited");
+        edited.gamma = 9.5;
+        state.set_edit(EnvironmentAsset::Sky(Box::new(edited)));
+
+        assert_eq!(
+            state.sky_at(0.0, 0.0).map(|sky| sky.gamma),
+            Some(9.5),
+            "the frame being edited is the one that renders"
+        );
+        assert!(
+            state.local().sky().is_some(),
+            "the personal environment is still underneath, untouched"
+        );
+
+        state.clear_edit(sl_client_bevy::SettingsKind::Sky);
+        assert_eq!(
+            state.sky_at(0.0, 0.0).map(|sky| sky.gamma),
+            Some(3.5),
+            "closing the editor puts the personal sky back"
+        );
+    }
+
+    /// The two editors own separate tracks, so closing one does not take the
+    /// other's preview away — both windows can be open at once.
+    #[test]
+    fn closing_one_editor_leaves_the_other_s_preview() {
+        let mut state = EnvironmentState::default();
+        let _source = state.ingest_reply(reply(-1, 1234));
+
+        let mut water = WaterSettings::legacy_default("edited-water");
+        water.fresnel_scale = 0.125;
+        state.set_edit(EnvironmentAsset::Water(water));
+        let mut sky = SkySettings::legacy_windlight_default("edited-sky");
+        sky.gamma = 9.5;
+        state.set_edit(EnvironmentAsset::Sky(Box::new(sky)));
+
+        state.clear_edit(sl_client_bevy::SettingsKind::Sky);
+
+        assert_eq!(
+            state.water_at(0.0).map(|water| water.fresnel_scale),
+            Some(0.125),
+            "the water editor's preview outlives the sky editor's window"
+        );
+    }
+
+    /// **A preview is not a personal environment.** What an editor is showing
+    /// must not be written to the account and come back at the next login: the
+    /// user was looking at it, not living in it.
+    #[test]
+    fn an_edited_frame_is_not_saved_as_the_personal_environment() {
+        let mut state = EnvironmentState::default();
+        state.set_edit(EnvironmentAsset::Sky(Box::new(script_sky())));
+        assert!(
+            state.saved_environment().is_none(),
+            "an open editor alone is nothing to persist"
+        );
     }
 
     /// One local **sky**, not two: the menu takes that track back from a

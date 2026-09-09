@@ -15,13 +15,13 @@ mod test {
         ChatSessionKind, ChatSessionLifecycle, ChatSource, ChatType, Child, ClassifiedCategory,
         ClassifiedKey, ClassifiedUpdate, ClickAction, CloudPosDensity, CoarseLocation, Color,
         ColorAlpha, ControlFlags, CreateGroupParams, DayCycle, DayCycleFrame, DeRezDestination,
-        DetachOrder, Diagnostic, DirFindFlags, Direction, DirectoryVisibility, DisconnectReason,
-        DisplayName, DisplayNameUpdate, Distance, EjectAction, EnvironmentSettings,
-        EstateAccessDelta, EstateAccessKind, Event, EventId, FolderInfo, FolderState, FolderType,
-        FollowCamProperty, FreezeAction, FriendKey, FriendPresence, FriendRights,
-        GestureActivation, GlobalCoordinates, Glow, GodRegionUpdate, GridCoordinates, GroupKey,
-        GroupNoticeAttachment, GroupRequestId, GroupRoleChange, GroupRoleEdit, GroupRoleKey,
-        GroupRoleMemberChange, GroupRoleUpdateType, INVENTORY_FETCH_MAX_IN_FLIGHT,
+        DensityLayer, DetachOrder, Diagnostic, DirFindFlags, Direction, DirectoryVisibility,
+        DisconnectReason, DisplayName, DisplayNameUpdate, Distance, EjectAction,
+        EnvironmentSettings, EstateAccessDelta, EstateAccessKind, Event, EventId, FolderInfo,
+        FolderState, FolderType, FollowCamProperty, FreezeAction, FriendKey, FriendPresence,
+        FriendRights, GestureActivation, GlobalCoordinates, Glow, GodRegionUpdate, GridCoordinates,
+        GroupKey, GroupNoticeAttachment, GroupRequestId, GroupRoleChange, GroupRoleEdit,
+        GroupRoleKey, GroupRoleMemberChange, GroupRoleUpdateType, INVENTORY_FETCH_MAX_IN_FLIGHT,
         INVENTORY_FETCH_TIMEOUT, ImDialog, ImSessionId, ImageCodec, InterestsUpdate,
         InventoryCallbackId, InventoryFolder, InventoryFolderKey, InventoryItem, InventoryItemMove,
         InventoryItemOrFolderKey, InventoryKey, InventoryOwner, InventoryType, InviteChannel,
@@ -11632,7 +11632,128 @@ mod test {
             bloom_texture: Some(TextureKey::from(uuid::Uuid::from_u128(0xb1))),
             halo_texture: Some(TextureKey::from(uuid::Uuid::from_u128(0xa10))),
             rainbow_texture: Some(TextureKey::from(uuid::Uuid::from_u128(0x4a1))),
+            // The two dome values the viewer carries and never reads: present
+            // here so the round trip covers them, since the reference ships
+            // them in every sky it saves.
+            dome_offset: Some(0.96),
+            dome_radius: Some(15000.0),
+            // The scattering profiles the viewer carries but never reads: one
+            // Rayleigh layer, a Mie layer with the anisotropy only Mie carries,
+            // and the reference's own two-layer ozone ramp — so the round trip
+            // covers a single layer, a stack, and the optional member.
+            rayleigh_config: vec![DensityLayer {
+                width: 0.0,
+                exp_term: 1.0,
+                exp_scale: -0.125,
+                linear_term: 0.0,
+                constant_term: 0.0,
+                anisotropy: None,
+            }],
+            mie_config: vec![DensityLayer {
+                width: 0.0,
+                exp_term: 1.0,
+                exp_scale: -0.25,
+                linear_term: 0.0,
+                constant_term: 0.0,
+                anisotropy: Some(0.8),
+            }],
+            absorption_config: vec![
+                DensityLayer {
+                    width: 25000.0,
+                    exp_term: 0.0,
+                    exp_scale: 0.0,
+                    linear_term: -0.5,
+                    constant_term: -0.25,
+                    anisotropy: None,
+                },
+                DensityLayer {
+                    width: 0.0,
+                    exp_term: 0.0,
+                    exp_scale: 0.0,
+                    linear_term: -0.125,
+                    constant_term: 2.5,
+                    anisotropy: None,
+                },
+            ],
         }
+    }
+
+    /// **The legacy-haze values are read from either place the reference puts
+    /// them, and default to its defaults.**
+    ///
+    /// `get_float` / `get_color` (`llsettingssky.cpp`) look in the `legacy_haze`
+    /// sub-map, then at the top level, then fall back to the viewer's own
+    /// default — and `set_legacy` writes each value back to whichever of the two
+    /// places it came from, so an asset in the wild holds them either way. A
+    /// decoder that reads only the sub-map and falls back to zero turns a sky
+    /// with top-level haze into a black, hazeless one.
+    #[test]
+    fn legacy_haze_is_read_from_either_place_or_defaulted() -> Result<(), TestError> {
+        use sl_proto::{EnvironmentAsset, SkySettings, environment_asset_from_bytes};
+
+        let decode = |body: &str| -> Result<Box<SkySettings>, TestError> {
+            let bytes = format!("<? llsd/notation ?>\n{body}").into_bytes();
+            match environment_asset_from_bytes("Probe", &bytes) {
+                Some(EnvironmentAsset::Sky(sky)) => Ok(sky),
+                _other => Err("expected a sky".into()),
+            }
+        };
+
+        // At the top level, as a sky the reference last read from there saves it.
+        let top_level = decode(
+            "{'type':'sky','name':'Probe','haze_horizon':r0.5,'haze_density':r1.5,\
+             'ambient':[r0.25,r0.5,r0.75]}",
+        )?;
+        assert!((top_level.haze_horizon - 0.5).abs() < 1e-6);
+        assert!((top_level.haze_density - 1.5).abs() < 1e-6);
+        assert!((top_level.ambient.green() - 0.5).abs() < 1e-6);
+
+        // In the sub-map, which wins when both are present.
+        let both = decode(
+            "{'type':'sky','name':'Probe','haze_horizon':r0.5,\
+             'legacy_haze':{'haze_horizon':r2.5}}",
+        )?;
+        assert!((both.haze_horizon - 2.5).abs() < 1e-6);
+
+        // In neither: the reference's own defaults, not zero and not black.
+        let defaults = decode("{'type':'sky','name':'Probe'}")?;
+        let reference = SkySettings::legacy_windlight_default("Probe");
+        assert!((defaults.haze_horizon - reference.haze_horizon).abs() < 1e-6);
+        assert!((defaults.haze_density - reference.haze_density).abs() < 1e-6);
+        assert!((defaults.density_multiplier - reference.density_multiplier).abs() < 1e-9);
+        assert!((defaults.distance_multiplier - reference.distance_multiplier).abs() < 1e-6);
+        assert!((defaults.ambient.red() - reference.ambient.red()).abs() < 1e-6);
+        assert!((defaults.blue_horizon.blue() - reference.blue_horizon.blue()).abs() < 1e-6);
+        assert!((defaults.blue_density.blue() - reference.blue_density.blue()).abs() < 1e-6);
+        Ok(())
+    }
+
+    /// **A sky that carries no scattering profiles is written without them.**
+    /// The reference substitutes `LLSettingsSky::defaults()` for an absent
+    /// profile, so an emitted empty array is a third state neither side means —
+    /// and a legacy WindLight sky, which is what every ported preset is, has
+    /// none.
+    #[test]
+    fn a_sky_without_scattering_profiles_stays_without_them() -> Result<(), TestError> {
+        use sl_proto::{
+            EnvironmentAsset, SkySettings, environment_asset_from_bytes, environment_asset_to_bytes,
+        };
+
+        let sky = SkySettings::legacy_windlight_default("Plain");
+        assert!(sky.rayleigh_config.is_empty());
+        let bytes = environment_asset_to_bytes(&EnvironmentAsset::Sky(Box::new(sky.clone())));
+        let text = String::from_utf8(bytes.clone())?;
+        for key in ["rayleigh_config", "mie_config", "absorption_config"] {
+            assert!(
+                !text.contains(key),
+                "a sky with no {key} must not be written with one"
+            );
+        }
+        assert_eq!(
+            environment_asset_from_bytes("Plain", &bytes),
+            Some(EnvironmentAsset::Sky(Box::new(sky)))
+        );
+        Ok(())
     }
 
     /// A fully-populated water frame with exactly-representable `f32` values.

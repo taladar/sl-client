@@ -9195,6 +9195,7 @@ dependencies = [
  "sl-client-bevy",
  "sl-viewer-notifications",
  "sl-viewer-pickers",
+ "sl-viewer-platform",
  "sl-viewer-ui-core",
  "sl-viewer-ui-widgets",
  "sl-viewer-world-api",

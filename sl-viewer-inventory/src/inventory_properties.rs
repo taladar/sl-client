@@ -45,7 +45,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use sl_client_bevy::{
     AnimationKey, AssetKey, Command, InventoryItem, InventoryKey, InventoryType, ItemInfo,
-    LindenAmount, Permissions, SaleInfo, SaleType, SlCommand, SlIdentity, TextureKey,
+    LindenAmount, Permissions, SaleInfo, SaleType, SettingsKind, SlCommand, SlIdentity, TextureKey,
     TransactionId, Uuid, to_bevy_image,
 };
 
@@ -124,6 +124,7 @@ pub(crate) const fn previewable(inv_type: InventoryType) -> bool {
             | InventoryType::Snapshot
             | InventoryType::Landmark
             | InventoryType::Animation
+            | InventoryType::Settings
     )
 }
 
@@ -1090,6 +1091,7 @@ fn open_previews(
     mut notecard_opens: MessageWriter<crate::world_api::OpenNotecard>,
     mut script_opens: MessageWriter<crate::world_api::OpenScript>,
     mut landmark_opens: MessageWriter<crate::inventory::OpenAboutLandmark>,
+    mut settings_opens: MessageWriter<crate::world_api::OpenSettingsEditor>,
 ) {
     let Some(ui) = ui else {
         return;
@@ -1160,6 +1162,27 @@ fn open_previews(
             InventoryType::Landmark => {
                 // The full About Landmark floater owns this type.
                 landmark_opens.write(crate::inventory::OpenAboutLandmark { item: item.clone() });
+            }
+            InventoryType::Settings => {
+                // The settings editors own this type (sky / water; a day cycle
+                // gets its own editor and is dropped here until it exists). The
+                // *kind* is the item's own flag byte, which is the only way to
+                // tell one settings item from another without fetching it.
+                let Some(kind) = SettingsKind::from_item_flags(item.flags) else {
+                    warn!(
+                        "settings item {} has no recognisable kind flag; not opening",
+                        item.item_id
+                    );
+                    continue;
+                };
+                settings_opens.write(crate::world_api::OpenSettingsEditor {
+                    name: item.name.clone(),
+                    asset_id: item.asset_id,
+                    item_id: item.item_id,
+                    folder_id: item.folder_id,
+                    kind,
+                    editable: item.permissions.owner.contains(Permissions::MODIFY),
+                });
             }
             InventoryType::Animation => {
                 reset_preview(
@@ -1442,6 +1465,7 @@ mod tests {
                 .add_message::<crate::world_api::OpenNotecard>()
                 .add_message::<crate::world_api::OpenScript>()
                 .add_message::<crate::inventory::OpenAboutLandmark>()
+                .add_message::<crate::world_api::OpenSettingsEditor>()
                 .init_resource::<crate::world_api::DecodedTextures>()
                 .init_resource::<Assets<Image>>()
                 .add_plugins((FloaterPlugin, InventoryPropertiesPlugin));

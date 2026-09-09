@@ -46,12 +46,13 @@ use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use sl_client_bevy::{
     AgentKey, AssetKey, AssetType, AttachmentMode, AttachmentPoint, Command, DetachOrder,
-    FolderInfo, FolderType, GestureActivation, InventoryFolderKey, InventoryItemOrFolderKey,
-    InventoryKey, InventoryType, ItemInfo, NewInventoryItem, NewInventoryLink, Permissions,
-    RezAttachment, ScriptLanguage, SlCommand, SlEvent, SlIdentity, SlSessionEvent, TransactionId,
-    Uuid, VisualParams, Wearable, WearableType,
+    EnvironmentAsset, FolderInfo, FolderType, GestureActivation, InventoryFolderKey,
+    InventoryItemOrFolderKey, InventoryKey, InventoryType, ItemInfo, NewInventoryItem,
+    NewInventoryLink, Permissions, RezAttachment, ScriptLanguage, SettingsKind, SkySettings,
+    SlCommand, SlEvent, SlIdentity, SlSessionEvent, TransactionId, Uuid, VisualParams,
+    WaterSettings, Wearable, WearableType, environment_asset_to_bytes,
 };
-use std::collections::{HashSet, VecDeque};
+use std::collections::HashSet;
 
 use crate::inventory::{
     InlineRename, InventoryModel, InventorySelection, InventoryUi, InventoryView, RowKey,
@@ -63,6 +64,7 @@ use crate::ui::focus_within;
 use crate::ui_element::UiAction;
 use crate::virtual_list::VirtualRow;
 use crate::world_api::InputContext;
+use crate::world_api::PendingItemCreations;
 use crate::world_api::StartConference;
 use crate::world_api::{ConversationKey, OpenConversation};
 
@@ -272,10 +274,8 @@ static UPLOAD_MENU: MenuDef = MenuDef {
 static NEW_SETTINGS_MENU: MenuDef = MenuDef {
     label: "New Settings",
     items: &[
-        MenuItemDef::Command(MenuCommand::new("New Sky", "new-sky").enabled_when(UNIMPLEMENTED)),
-        MenuItemDef::Command(
-            MenuCommand::new("New Water", "new-water").enabled_when(UNIMPLEMENTED),
-        ),
+        MenuItemDef::Command(MenuCommand::new("New Sky", "new-sky")),
+        MenuItemDef::Command(MenuCommand::new("New Water", "new-water")),
         MenuItemDef::Command(
             MenuCommand::new("New Day Cycle", "new-daycycle").enabled_when(UNIMPLEMENTED),
         ),
@@ -592,6 +592,7 @@ pub(crate) static INVENTORY_ITEM_MENU: MenuDef = MenuDef {
                 .enabled_when(WORN),
         ),
         // Settings.
+        MenuItemDef::Command(MenuCommand::new("Edit", "edit-settings").visible_when(IS_SETTINGS)),
         MenuItemDef::Command(
             MenuCommand::new("Apply Only To Myself", "settings-apply-local")
                 .visible_when(IS_SETTINGS)
@@ -1682,7 +1683,7 @@ fn handle_inventory_menu_actions(
         ResMut<ActiveGestures>,
         ResMut<crate::inventory::InlineRename>,
         ResMut<PendingShare>,
-        ResMut<PendingWearableUploads>,
+        ResMut<PendingItemCreations>,
         ResMut<crate::inventory::PendingReveal>,
     ),
     library: Option<Res<crate::avatar_assets::AvatarAssetLibrary>>,
@@ -1707,7 +1708,7 @@ fn handle_inventory_menu_actions(
         mut gestures,
         mut rename,
         mut pending_share,
-        mut pending_wearables,
+        mut pending_creations,
         mut pending_reveal,
     ) = stashes;
     let (
@@ -1775,6 +1776,14 @@ fn handle_inventory_menu_actions(
                 if let MenuTarget::Item(item) = &menu_target {
                     wearable_editor
                         .write(crate::inventory::OpenWearableEditor { item: item.clone() });
+                }
+            }
+            "edit-settings" => {
+                // The same route the Open action takes for a settings item —
+                // the editor is the preview.
+                if let MenuTarget::Item(item) = &menu_target {
+                    previews
+                        .write(crate::inventory_properties::OpenItemPreview { item: item.clone() });
                 }
             }
             "edit-material" => {
@@ -2001,13 +2010,13 @@ fn handle_inventory_menu_actions(
             | "new-pants" | "new-shoes" | "new-socks" | "new-jacket" | "new-skirt"
             | "new-gloves" | "new-undershirt" | "new-underpants" | "new-alpha" | "new-tattoo"
             | "new-universal" | "new-physics" | "new-shape" | "new-skin" | "new-hair"
-            | "new-eyes" => {
+            | "new-eyes" | "new-sky" | "new-water" => {
                 dispatch_create(
                     action.action,
                     dest,
                     identity.agent_id,
                     library.as_ref().map(|library| library.params()),
-                    &mut pending_wearables,
+                    &mut pending_creations,
                     &mut commands,
                     &mut ui_actions,
                     &mut rename,
@@ -2435,23 +2444,13 @@ fn deep_copy_folder(
 // New-wearable creation (viewer-inventory-new-wearables).
 // ---------------------------------------------------------------------------
 
-/// The wearable creations whose upload reply has not arrived yet, oldest
-/// first. `NewFileAgentInventory` creates the item server-side but leaves its
-/// flags empty, so the reply is followed with a `ChangeInventoryItemFlags`
-/// carrying the slot — matched FIFO (the reply carries no correlation id).
-#[derive(Resource, Debug, Default)]
-pub struct PendingWearableUploads {
-    /// The in-flight creations: the slot to stamp and the folder to refresh.
-    queue: VecDeque<(WearableType, InventoryFolderKey)>,
-}
-
-impl PendingWearableUploads {
-    /// Enqueue a wearable-item creation so its flags are stamped (with `slot`)
-    /// and its `folder` refreshed when the upload reply lands. Shared by the
-    /// New-Clothes / New-Body-Parts creators and the appearance editor's
-    /// Save-As, which both mint a fresh wearable item via `UploadAsset`.
-    pub fn enqueue(&mut self, slot: WearableType, folder: InventoryFolderKey) {
-        self.queue.push_back((slot, folder));
+/// The settings kind (and default item name) a create action names.
+pub(crate) fn settings_kind_of(action: &str) -> Option<(SettingsKind, &'static str)> {
+    match action {
+        "new-sky" => Some((SettingsKind::Sky, "New Sky")),
+        "new-water" => Some((SettingsKind::Water, "New Water")),
+        "new-daycycle" => Some((SettingsKind::DayCycle, "New Day Cycle")),
+        _other => None,
     }
 }
 
@@ -2558,14 +2557,18 @@ pub(crate) fn default_wearable_asset(
     text
 }
 
-/// Finish an in-flight wearable creation when its upload reply lands: stamp
-/// the fresh item's flags with the wearable slot (the uploader path leaves
-/// them empty, which would read as a Shape) and refresh its folder. Matched
-/// FIFO against [`PendingWearableUploads`]; an upload failure drops the
-/// oldest pending entry.
-fn handle_wearable_uploads(
+/// Finish an in-flight item creation when its upload reply lands: stamp the
+/// fresh item's flags with its subtype (the uploader path leaves them empty,
+/// which reads as a Shape for a wearable and as no kind at all for a settings
+/// item) and refresh its folder. Matched FIFO against
+/// [`PendingItemCreations`]; an upload failure drops the oldest pending entry.
+///
+/// The consumer lives here, in the inventory, because finishing a creation is
+/// half an inventory refresh — the producers are wherever the uploads are
+/// started (the creators below, the appearance editor, the settings editors).
+fn handle_item_creations(
     mut events: MessageReader<SlEvent>,
-    mut pending: ResMut<PendingWearableUploads>,
+    mut pending: ResMut<PendingItemCreations>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     for event in events.read() {
@@ -2574,16 +2577,16 @@ fn handle_wearable_uploads(
                 new_inventory_item: Some(item),
                 ..
             } => {
-                if let Some((slot, folder)) = pending.queue.pop_front() {
+                if let Some(creation) = pending.take_next() {
                     commands.write(SlCommand(Command::ChangeInventoryItemFlags {
                         item_id: InventoryKey::from(*item),
-                        flags: u32::from(slot.to_code()),
+                        flags: creation.flags,
                     }));
-                    query_folder_page(folder, &mut commands);
+                    query_folder_page(creation.folder, &mut commands);
                 }
             }
             SlSessionEvent::AssetUploadFailed { .. } => {
-                let _dropped = pending.queue.pop_front();
+                let _dropped = pending.take_next();
             }
             _other => {}
         }
@@ -2604,7 +2607,7 @@ fn dispatch_create(
     dest: InventoryFolderKey,
     own_agent: Option<AgentKey>,
     params: Option<&VisualParams>,
-    pending_wearables: &mut PendingWearableUploads,
+    pending_creations: &mut PendingItemCreations,
     commands: &mut MessageWriter<SlCommand>,
     ui_actions: &mut MessageWriter<crate::inventory::InventoryUiAction>,
     rename: &mut crate::inventory::InlineRename,
@@ -2630,7 +2633,39 @@ fn dispatch_create(
             expected_upload_cost: 0,
             data: text.into_bytes(),
         }));
-        pending_wearables.enqueue(slot, dest);
+        pending_creations.enqueue(u32::from(slot.to_code()), dest);
+        return true;
+    }
+    // The settings creators, the same shape: a settings item's kind is its
+    // flags byte, so a fresh sky or water frame is uploaded (which mints the
+    // item) and the kind stamped when the reply lands. The reference does the
+    // same rather than asking the simulator to create the item, because the
+    // simulator has no default settings asset to put behind one
+    // (`LLSettingsVOBase::createNewInventoryItem`).
+    if let Some((kind, name)) = settings_kind_of(action) {
+        let asset = match kind {
+            SettingsKind::Sky => {
+                EnvironmentAsset::Sky(Box::new(SkySettings::legacy_windlight_default(name)))
+            }
+            SettingsKind::Water => EnvironmentAsset::Water(WaterSettings::legacy_default(name)),
+            // No default day cycle is authored here: the day-cycle editor is
+            // its own task, and an item nothing can open is worse than a menu
+            // entry that stays greyed out.
+            SettingsKind::DayCycle => return false,
+        };
+        commands.write(SlCommand(Command::UploadAsset {
+            folder_id: dest,
+            asset_type: AssetType::Settings,
+            inventory_type: InventoryType::Settings,
+            name: name.to_owned(),
+            description: String::new(),
+            next_owner_mask: NEXT_OWNER_DEFAULT,
+            group_mask: 0,
+            everyone_mask: 0,
+            expected_upload_cost: 0,
+            data: environment_asset_to_bytes(&asset),
+        }));
+        pending_creations.enqueue(u32::from(kind.subtype()), dest);
         return true;
     }
     match action {
@@ -2703,7 +2738,7 @@ fn handle_inventory_add_actions(
     selection: Res<InventorySelection>,
     identity: Res<SlIdentity>,
     library: Option<Res<crate::avatar_assets::AvatarAssetLibrary>>,
-    mut pending_wearables: ResMut<PendingWearableUploads>,
+    mut pending_creations: ResMut<PendingItemCreations>,
     mut rename: ResMut<crate::inventory::InlineRename>,
     mut ui_actions: MessageWriter<crate::inventory::InventoryUiAction>,
     mut commands: MessageWriter<SlCommand>,
@@ -2728,7 +2763,7 @@ fn handle_inventory_add_actions(
             dest,
             identity.agent_id,
             library.as_ref().map(|lib| lib.params()),
-            &mut pending_wearables,
+            &mut pending_creations,
             &mut commands,
             &mut ui_actions,
             &mut rename,
@@ -2805,7 +2840,7 @@ impl Plugin for InventoryActionsPlugin {
             .init_resource::<WornAttachments>()
             .init_resource::<ActiveGestures>()
             .init_resource::<PendingShare>()
-            .init_resource::<PendingWearableUploads>()
+            .init_resource::<PendingItemCreations>()
             .add_systems(
                 Update,
                 (
@@ -2813,7 +2848,7 @@ impl Plugin for InventoryActionsPlugin {
                     handle_inventory_menu_actions,
                     handle_inventory_add_actions,
                     handle_share_picks,
-                    handle_wearable_uploads,
+                    handle_item_creations,
                     seed_worn_from_cof,
                 )
                     .chain(),
@@ -3084,6 +3119,7 @@ mod tests {
             ("Bottom Right", "attach-point-38"),
             ("Touch", "touch"),
             ("Detach From Yourself", "detach"),
+            ("Edit", "edit-settings"),
             ("Apply Only To Myself", "settings-apply-local"),
             ("Apply To Parcel", "settings-apply-parcel"),
         ];

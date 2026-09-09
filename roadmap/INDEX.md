@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 101 |
-| ready | 321 |
+| ready | 322 |
 | blocked | 46 |
-| in-progress | 21 |
+| in-progress | 22 |
 | bugs | 63 |
 | done | 1030 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1621** |
+| **total** | **1623** |
 
 ## ideas (101)
 
@@ -240,7 +240,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (321)
+## ready (322)
 
 ### protocol
 
@@ -481,9 +481,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-edit-permission-gating`](ready/viewer-edit-permission-gating.md) —
   Permission-aware editing (grey out what perms forbid) (blocked by
   `viewer-object-selection-core` (done))
-- [`viewer-environment-fixed-editor`](ready/viewer-environment-fixed-editor.md)
-  — Environment editors — sky & water settings assets (blocked by
-  `viewer-ui-widget-scaffold` (done))
+- [`viewer-environment-density-profiles`](ready/viewer-environment-density-profiles.md)
+  — Render the atmospheric density profiles
+- [`viewer-environment-import-legacy-presets`](ready/viewer-environment-import-legacy-presets.md)
+  — Import a legacy WindLight preset from disk
 - [`viewer-environment-pause-clouds`](ready/viewer-environment-pause-clouds.md)
   — Pause cloud animation toggle
 - [`viewer-event-details`](ready/viewer-event-details.md) — Event details
@@ -1135,7 +1136,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (21)
+## in-progress (22)
 
 ### viewer
 
@@ -1149,6 +1150,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Avatar ground probe from the simulator's collision plane (drop the raycast)
 - [`viewer-conference-start-ui`](in-progress/viewer-conference-start-ui.md) —
   Start an ad-hoc conference from a multi-selection
+- [`viewer-environment-fixed-editor`](in-progress/viewer-environment-fixed-editor.md)
+  — Environment editors — sky & water settings assets (blocked by
+  `viewer-ui-widget-scaffold` (done))
 - [`viewer-environment-personal-lighting`](in-progress/viewer-environment-personal-lighting.md)
   — Personal lighting — local environment override (blocked by
   `viewer-ui-widget-scaffold` (done))

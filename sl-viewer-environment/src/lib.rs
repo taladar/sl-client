@@ -9,14 +9,25 @@
 //! - [`personal_lighting`] — the Personal Lighting floater. Sliders and swatches
 //!   over the sky and water in force, applied **locally**: the region's own
 //!   settings are untouched, nothing is published, and Reset gives them back.
+//! - [`settings_editor`] — the fixed sky and water editors, over a settings
+//!   **asset** in inventory: the same knobs on tabs, plus a name and
+//!   Save / Save As / Revert.
 //!
-//! # Why an editor writes the local layer and nothing else
+//! The knobs themselves are one table ([`knobs`]) and the controls that draw
+//! them one set of spawners ([`rows`]), so a value cannot be labelled or scaled
+//! one way in one window and another way in the next.
+//!
+//! # Which layer an editor writes
 //!
 //! The reference viewer's Personal Lighting floater edits its `ENV_LOCAL` layer
 //! and only that, which is what makes it safe to leave open while walking
 //! around: a region change replaces the *shared* environment underneath, and
-//! whatever the user is holding on top of it survives. The same arrangement
-//! here — every control writes
+//! whatever the user is holding on top of it survives. The settings editors
+//! write the layer **above** it, `ENV_EDIT`, which is what makes *their*
+//! preview non-destructive: it is taken away again when the window closes, and
+//! the personal environment underneath is still whatever it was.
+//!
+//! For the local layer — every control writes
 //! [`EnvironmentState::set_local_instant`](sl_viewer_world_scene::environment::EnvironmentState::set_local_instant),
 //! and the sky, water, terrain and fog drivers pick it up on the next frame with
 //! no editor-specific path through the renderer at all.
@@ -28,7 +39,10 @@
               find it — so the repetition is the protocol, not an accident of naming"
 )]
 
+pub mod knobs;
 pub mod personal_lighting;
+pub mod rows;
+pub mod settings_editor;
 
 use bevy::prelude::*;
 
@@ -73,6 +87,7 @@ pub struct EnvironmentUiPlugins;
 
 impl Plugin for EnvironmentUiPlugins {
     fn build(&self, app: &mut App) {
-        app.add_plugins(personal_lighting::PersonalLightingPlugin);
+        app.add_plugins(personal_lighting::PersonalLightingPlugin)
+            .add_plugins(settings_editor::SettingsEditorPlugin);
     }
 }

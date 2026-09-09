@@ -19,7 +19,7 @@
 pub mod rlv;
 pub mod world_scoped;
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -31,14 +31,15 @@ use serde::{Deserialize, Serialize};
 use sl_client_bevy::{
     AgentKey, AssetUpdateLocation, AttachmentPoint, AvatarName, BodyPhysics, ChatSessionKind,
     Command, ControlFlags, DecodedTexture, DisplayName, Friend, FriendKey, FriendPresence,
-    FriendRights, GroupKey, GroupMembership, ImSessionId, InventoryKey, JointOverrides, LightData,
-    MAX_FACES, MeshKey, MuteEntry, MuteFlags, MuteType, Object, ObjectExtraParams, ObjectKey,
-    ObjectProperties, ParticleSystem, PrimFaceId, PrimLod, PrimShapeParams, Priority,
-    ReflectionProbe, ReflectionProbeFlags, RegionCoordinates, RegionHandle, RestoreItem, Rotation,
-    ScopedObjectId, ScriptLanguage, ScriptTarget, ScriptUploadLocation, SculptOrMeshKey,
-    SkeletalDeformations, SlCommand, SurfaceInfo, TaskInventoryKey, TerrainPatch, TextureAnimation,
-    TextureFace, TextureKey, TreeLod, Uuid, Vector, VolumeDeformations, avatar_texture,
-    decode_texture_entry, pcode, texture_face_uv_transform, to_bevy_image,
+    FriendRights, GroupKey, GroupMembership, ImSessionId, InventoryFolderKey, InventoryKey,
+    JointOverrides, LightData, MAX_FACES, MeshKey, MuteEntry, MuteFlags, MuteType, Object,
+    ObjectExtraParams, ObjectKey, ObjectProperties, ParticleSystem, PrimFaceId, PrimLod,
+    PrimShapeParams, Priority, ReflectionProbe, ReflectionProbeFlags, RegionCoordinates,
+    RegionHandle, RestoreItem, Rotation, ScopedObjectId, ScriptLanguage, ScriptTarget,
+    ScriptUploadLocation, SculptOrMeshKey, SettingsKind, SkeletalDeformations, SlCommand,
+    SurfaceInfo, TaskInventoryKey, TerrainPatch, TextureAnimation, TextureFace, TextureKey,
+    TreeLod, Uuid, Vector, VolumeDeformations, avatar_texture, decode_texture_entry, pcode,
+    texture_face_uv_transform, to_bevy_image,
 };
 use sl_terrain::TerrainComposition;
 use sl_viewer_kit::coords::{sl_rotation_to_quat, sl_to_bevy_rotation};
@@ -1605,7 +1606,7 @@ pub enum PickerKind {
 }
 
 /// Open the texture picker for `requester`, seeded with `current`.
-#[derive(Message, Debug, Clone, Copy)]
+#[derive(Message, Debug, Clone)]
 pub struct OpenTexturePicker {
     /// The swatch (or other widget) the reply is tagged back to.
     pub requester: Entity,
@@ -1617,7 +1618,11 @@ pub struct OpenTexturePicker {
     ///
     /// Two swatches declared with the same element id share one window, since
     /// they are the same field as far as the UI is concerned.
-    pub field: &'static str,
+    ///
+    /// Owned rather than `&'static str` because a field id is not always a
+    /// literal: a table-driven panel (the environment editors) names its
+    /// controls `{window}-{knob}`, which is a name computed at spawn time.
+    pub field: Box<str>,
     /// The texture (or, in material mode, material id) to open on.
     pub current: TextureKey,
     /// Whether to browse textures or materials.
@@ -1920,6 +1925,78 @@ pub struct OpenNotecard {
     pub editable: bool,
     /// Where the notecard lives, so Save writes back to the right place.
     pub source: NotecardSource,
+}
+
+/// The item-minting uploads whose reply has not arrived yet, oldest first.
+///
+/// `NewFileAgentInventory` creates the item server-side but leaves its **flags**
+/// empty, and for several classes that byte is the item's subtype: a wearable's
+/// slot, a settings item's sky / water / day-cycle kind. So every such upload is
+/// followed by a `ChangeInventoryItemFlags` carrying it — matched FIFO, because
+/// the reply carries no correlation id.
+///
+/// One queue for the whole viewer rather than one per feature, and that is the
+/// point: two queues watching the same untagged reply stream would each pop on
+/// the other's upload, and stamp an item with the wrong subtype. The producers
+/// (the inventory's New-Clothes / New-Body-Parts / New-Settings creators, the
+/// appearance editor's Save As, the settings editors' Save As) only enqueue;
+/// the inventory owns the single consumer, since finishing a creation also
+/// means refreshing the folder it landed in.
+#[derive(Resource, Debug, Default)]
+pub struct PendingItemCreations {
+    /// The in-flight creations, oldest first.
+    queue: VecDeque<PendingItemCreation>,
+}
+
+/// One in-flight item-minting upload.
+#[derive(Debug, Clone, Copy)]
+pub struct PendingItemCreation {
+    /// The `flags` byte to stamp on the fresh item — a wearable's slot code, a
+    /// settings kind's subtype.
+    pub flags: u32,
+    /// The folder to refresh once it lands.
+    pub folder: InventoryFolderKey,
+}
+
+impl PendingItemCreations {
+    /// Enqueue a creation so the fresh item's flags are stamped and its folder
+    /// refreshed when the upload reply lands.
+    pub fn enqueue(&mut self, flags: u32, folder: InventoryFolderKey) {
+        self.queue.push_back(PendingItemCreation { flags, folder });
+    }
+
+    /// Take the oldest in-flight creation — the reply that just landed is its
+    /// own, since replies arrive in the order the uploads were made.
+    pub fn take_next(&mut self) -> Option<PendingItemCreation> {
+        self.queue.pop_front()
+    }
+}
+
+/// Open the settings editor on an EEP **settings** inventory item — the sky
+/// editor or the water editor, chosen by the item's own
+/// [`SettingsKind`] flag. Written by the
+/// inventory's Open / Edit actions.
+///
+/// Flat fields rather than an inventory `ItemInfo` because the editor lives
+/// below the inventory in the crate graph, and because a *freshly created*
+/// settings item is opened straight from its upload reply, which carries the
+/// ids and nothing else.
+#[derive(Message, Debug, Clone)]
+pub struct OpenSettingsEditor {
+    /// The item's name, shown in the editor's name field and saved with the
+    /// asset.
+    pub name: String,
+    /// The settings asset to fetch and edit.
+    pub asset_id: Uuid,
+    /// The inventory item the asset belongs to, so Save writes back onto it.
+    pub item_id: InventoryKey,
+    /// The folder it lives in, where a Save As puts the copy.
+    pub folder_id: InventoryFolderKey,
+    /// Which editor this is — a sky item opens the sky editor, a water item the
+    /// water editor.
+    pub kind: SettingsKind,
+    /// Whether the item may be saved back onto (its owner modify bit).
+    pub editable: bool,
 }
 
 /// Marks the notecard editor floater as an **inventory drop target**: dropping

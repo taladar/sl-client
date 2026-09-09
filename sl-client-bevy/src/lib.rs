@@ -66,10 +66,10 @@ pub use sl_proto::{
     ControlFlags, ConversationKind, CreateGroupParams, CreateListing, DEFAULT_BLOOM_TEXTURE,
     DEFAULT_CLOUD_TEXTURE, DEFAULT_HALO_TEXTURE, DEFAULT_MOON_TEXTURE, DEFAULT_PRIM_TEXTURE,
     DEFAULT_RAINBOW_TEXTURE, DEFAULT_SUN_TEXTURE, DEFAULT_WATER_NORMAL_TEXTURE, DayCycle,
-    DayCycleFrame, DeRezDestination, DetachOrder, Diagnostic, DirClassifiedResult, DirEventResult,
-    DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, Direction,
-    DirectoryVisibility, DisconnectReason, DisplayName, DisplayNameUpdate, Distance, EconomyData,
-    EnvironmentAsset, EnvironmentSettings, Error as SessionError, EstateAccessDelta,
+    DayCycleFrame, DeRezDestination, DensityLayer, DetachOrder, Diagnostic, DirClassifiedResult,
+    DirEventResult, DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult,
+    Direction, DirectoryVisibility, DisconnectReason, DisplayName, DisplayNameUpdate, Distance,
+    EconomyData, EnvironmentAsset, EnvironmentSettings, Error as SessionError, EstateAccessDelta,
     EstateAccessKind, EstateCovenant, EstateFlags, EstateInfo, EstateInfoUpdate, EventId,
     EventInfo, ExperienceInfo, ExperienceKey, ExperiencePermission, ExperienceProperties,
     ExperienceUpdate, ExtendedMesh, FaceMaterialPut, FlexibleData, FolderInfo, FolderState,
@@ -118,8 +118,9 @@ pub use sl_proto::{
     ViewerEffectData, ViewerEffectType, VoiceAccountInfo, VoiceProvisionRequest, WaterSettings,
     Wearable, WearableType, WireError, XferId, avatar_texture, azimuth_altitude_to_rotation,
     decode_particle_system, decode_texture_anim, decode_texture_entry, encode_texture_entry,
-    environment_asset_from_bytes, grid_to_handle, group_powers, handle_to_global, handle_to_grid,
-    particle_pattern, pcode, rotation_to_azimuth_altitude, sim_access, texture_anim_mode,
+    environment_asset_from_bytes, environment_asset_to_bytes, grid_to_handle, group_powers,
+    handle_to_global, handle_to_grid, particle_pattern, pcode, rotation_to_azimuth_altitude,
+    sim_access, texture_anim_mode,
 };
 #[doc(no_inline)]
 pub use sl_proto::{Asset, AssetType, ImageCodec, Texture, TransferStatus};

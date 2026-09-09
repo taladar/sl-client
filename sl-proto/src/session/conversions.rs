@@ -9,14 +9,14 @@ use crate::types::{
     ActiveGroup, AssetType, AvatarAppearance, AvatarAttachment, AvatarGroupMembership,
     AvatarInterests, AvatarName, AvatarPickerResult, AvatarProperties, ChatAudible, ChatMessage,
     ChatSource, ChatType, ClassifiedCategory, ClassifiedInfo, CloudPosDensity, Color, ColorAlpha,
-    DayCycle, DayCycleFrame, DisplayNameUpdate, EconomyData, EnvironmentAsset, EnvironmentSettings,
-    EnvironmentUpdate, EstateAccessKind, EstateInfo, Event, Friend, FriendRights, Glow,
-    GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
-    GroupAccountTransactions, GroupActiveProposalItem, GroupMember, GroupMembership, GroupName,
-    GroupNotice, GroupNoticeKey, GroupProfile, GroupRole, GroupTitle, GroupVote,
-    GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem, InventoryType,
-    LandingType, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity,
-    MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags, MuteType, NavMeshBuildStatus,
+    DayCycle, DayCycleFrame, DensityLayer, DisplayNameUpdate, EconomyData, EnvironmentAsset,
+    EnvironmentSettings, EnvironmentUpdate, EstateAccessKind, EstateInfo, Event, Friend,
+    FriendRights, Glow, GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary,
+    GroupAccountTransaction, GroupAccountTransactions, GroupActiveProposalItem, GroupMember,
+    GroupMembership, GroupName, GroupNotice, GroupNoticeKey, GroupProfile, GroupRole, GroupTitle,
+    GroupVote, GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
+    InventoryType, LandingType, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags,
+    Maturity, MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags, MuteType, NavMeshBuildStatus,
     NavMeshStatus, NeighborInfo, Object, ObjectProperties, ObjectTransform, OpenRegionInfo,
     ParcelCategory, ParcelInfo, ParcelRequestResult, ParcelStatus, PickInfo, PickKey,
     PlayingAnimation, PrimShapeParams, ProductType, ProposalCandidateId, ProposalVoteId,
@@ -1044,24 +1044,46 @@ fn track_from_llsd(track: &Llsd) -> Vec<DayCycleFrame> {
         .unwrap_or_default()
 }
 
-/// Parses a sky frame `OSDMap` into [`SkySettings`]. The legacy haze colours and
-/// scalars come from the frame's `legacy_haze` sub-map.
+/// Parses a sky frame `OSDMap` into [`SkySettings`].
+///
+/// The seven legacy-haze values are looked up in **three** places, in the
+/// reference's own order (`get_float` / `get_color`,
+/// `indra/llinventory/llsettingssky.cpp`): the frame's `legacy_haze` sub-map,
+/// then the frame itself, then the viewer's built-in default. All three are
+/// real: a sky the reference saved writes each value into whichever of the two
+/// places it was read from (`set_legacy`), so an asset in the wild can hold
+/// them either way — and one that holds them at the top level used to decode
+/// here as a black, hazeless sky, because only the sub-map was read and the
+/// fallback was zero rather than the default.
 fn sky_settings_from_llsd(name: &str, sky: &Llsd) -> SkySettings {
     let haze = sky.get("legacy_haze");
-    let haze_f32 = |key: &str| haze.map_or(0.0, |block| f32_member(block, key));
-    let haze_color = |key: &str| color_from_llsd(haze.and_then(|block| block.get(key)));
+    // The built-in defaults, stated once: the same frame `legacy_windlight_default`
+    // builds, which is the reference's `LLSettingsSky::defaults()` plus the haze
+    // fallbacks `get_float` / `get_color` carry.
+    let fallback = SkySettings::legacy_windlight_default(name);
+    let haze_f32 = |key: &str, default: f32| {
+        haze.and_then(|block| block.get(key))
+            .or_else(|| sky.get(key))
+            .and_then(Llsd::as_f32)
+            .unwrap_or(default)
+    };
+    let haze_color = |key: &str, default: Color| {
+        haze.and_then(|block| block.get(key))
+            .or_else(|| sky.get(key))
+            .map_or(default, |value| color_from_llsd(Some(value)))
+    };
     SkySettings {
         name: name.to_owned(),
         sun_rotation: rotation_from_llsd(sky.get("sun_rotation")),
         moon_rotation: rotation_from_llsd(sky.get("moon_rotation")),
         sunlight_color: color_alpha_from_llsd(sky.get("sunlight_color")),
-        ambient: haze_color("ambient"),
-        blue_horizon: haze_color("blue_horizon"),
-        blue_density: haze_color("blue_density"),
-        haze_horizon: haze_f32("haze_horizon"),
-        haze_density: haze_f32("haze_density"),
-        density_multiplier: haze_f32("density_multiplier"),
-        distance_multiplier: haze_f32("distance_multiplier"),
+        ambient: haze_color("ambient", fallback.ambient),
+        blue_horizon: haze_color("blue_horizon", fallback.blue_horizon),
+        blue_density: haze_color("blue_density", fallback.blue_density),
+        haze_horizon: haze_f32("haze_horizon", fallback.haze_horizon),
+        haze_density: haze_f32("haze_density", fallback.haze_density),
+        density_multiplier: haze_f32("density_multiplier", fallback.density_multiplier),
+        distance_multiplier: haze_f32("distance_multiplier", fallback.distance_multiplier),
         max_y: f32_member(sky, "max_y"),
         gamma: f32_member(sky, "gamma"),
         // Top-level EEP-only setting; absent on a legacy sky, so `0.0` there.
@@ -1091,7 +1113,41 @@ fn sky_settings_from_llsd(name: &str, sky: &Llsd) -> SkySettings {
         bloom_texture: optional_texture_member(sky, "bloom_id"),
         halo_texture: optional_texture_member(sky, "halo_id"),
         rainbow_texture: optional_texture_member(sky, "rainbow_id"),
+        // Carried, never read: the reference no longer reads the two dome
+        // values either, but it still writes them, so an asset that has them
+        // keeps them.
+        dome_offset: sky.get("dome_offset").and_then(Llsd::as_f32),
+        dome_radius: sky.get("dome_radius").and_then(Llsd::as_f32),
+        // Carried, not read: see `DensityLayer`. An absent profile stays empty
+        // so re-encoding the frame emits the document that was decoded.
+        rayleigh_config: density_profile_from_llsd(sky.get("rayleigh_config")),
+        mie_config: density_profile_from_llsd(sky.get("mie_config")),
+        absorption_config: density_profile_from_llsd(sky.get("absorption_config")),
     }
+}
+
+/// Parses one atmospheric-density profile — an LLSD **array** of layer maps
+/// (`LLSettingsSky::createDensityProfileLayer`) — into [`DensityLayer`]s. An
+/// absent or non-array value is an empty profile.
+fn density_profile_from_llsd(value: Option<&Llsd>) -> Vec<DensityLayer> {
+    let Some(layers) = value.and_then(Llsd::as_array) else {
+        return Vec::new();
+    };
+    layers
+        .iter()
+        .map(|layer| DensityLayer {
+            width: f32_member(layer, "width"),
+            exp_term: f32_member(layer, "exp_term"),
+            exp_scale: f32_member(layer, "exp_scale"),
+            linear_term: f32_member(layer, "linear_term"),
+            constant_term: f32_member(layer, "constant_term"),
+            // Only a Mie layer carries one, so its *absence* is meaningful and
+            // `f32_member`'s zero default would not do: a Rayleigh layer
+            // re-encoded with `anisotropy: 0.0` is a document the original was
+            // not.
+            anisotropy: layer.get("anisotropy").and_then(Llsd::as_f32),
+        })
+        .collect()
 }
 
 /// Parses a water frame `OSDMap` into [`WaterSettings`].
@@ -4864,7 +4920,53 @@ fn sky_settings_to_llsd(sky: &SkySettings) -> Llsd {
             real(sky.reflection_probe_ambiance),
         ));
     }
+    // The two dome values the viewer carries but does not read, and only when
+    // the frame had them.
+    for (key, value) in [
+        ("dome_offset", sky.dome_offset),
+        ("dome_radius", sky.dome_radius),
+    ] {
+        if let Some(value) = value {
+            entries.push((key, real(value)));
+        }
+    }
+    // The scattering profiles the viewer carries but does not read, written back
+    // exactly as they arrived. An empty profile emits no key at all: the
+    // reference substitutes its own defaults for an *absent* one, so an emitted
+    // empty array would be a third state neither side means.
+    for (key, profile) in [
+        ("rayleigh_config", &sky.rayleigh_config),
+        ("mie_config", &sky.mie_config),
+        ("absorption_config", &sky.absorption_config),
+    ] {
+        if !profile.is_empty() {
+            entries.push((key, density_profile_to_llsd(profile)));
+        }
+    }
     llsd_map(entries)
+}
+
+/// Encodes a density profile as the LLSD array of layer maps a sky asset holds
+/// (the inverse of `density_profile_from_llsd`).
+fn density_profile_to_llsd(layers: &[DensityLayer]) -> Llsd {
+    Llsd::Array(
+        layers
+            .iter()
+            .map(|layer| {
+                let mut entries = vec![
+                    ("width", real(layer.width)),
+                    ("exp_term", real(layer.exp_term)),
+                    ("exp_scale", real(layer.exp_scale)),
+                    ("linear_term", real(layer.linear_term)),
+                    ("constant_term", real(layer.constant_term)),
+                ];
+                if let Some(anisotropy) = layer.anisotropy {
+                    entries.push(("anisotropy", real(anisotropy)));
+                }
+                llsd_map(entries)
+            })
+            .collect(),
+    )
 }
 
 /// Encodes [`WaterSettings`] into a water-frame `OSDMap` (the inverse of

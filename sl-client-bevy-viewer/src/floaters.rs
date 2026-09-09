@@ -380,6 +380,26 @@ pub(crate) const FLOATERS: &[FloaterElement] = &[
         ),
     },
     FloaterElement {
+        id: "settings-editor-sky",
+        summary: "Sky Settings: the name field over the atmosphere / clouds / sun & moon tabs of \
+                  an inventory sky asset, with Save, Save As and Revert.",
+        spec: crate::settings_editor::sky_settings_editor_floater_spec,
+        content: FloaterContent::Stub(
+            "The knobs of a sky settings asset on three tabs, previewing live in the \
+             environment's edit layer.",
+        ),
+    },
+    FloaterElement {
+        id: "settings-editor-water",
+        summary: "Water Settings: the name field over the water knobs of an inventory water \
+                  asset, with Save, Save As and Revert.",
+        spec: crate::settings_editor::water_settings_editor_floater_spec,
+        content: FloaterContent::Stub(
+            "The knobs of a water settings asset, previewing live in the environment's edit \
+             layer.",
+        ),
+    },
+    FloaterElement {
         id: "snapshot",
         summary: "Snapshot: the preview frame, the include toggles, Refresh, the format picker and \
                   the destination tabs.",

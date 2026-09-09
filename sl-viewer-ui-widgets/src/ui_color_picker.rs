@@ -84,7 +84,7 @@ pub struct ColorSwatchValue(pub Color);
 pub fn spawn_color_swatch(
     commands: &mut Commands,
     parent: Entity,
-    element: &'static str,
+    element: &str,
     tab_index: i32,
     initial: Color,
 ) -> Entity {
