@@ -46,6 +46,11 @@
 //! - `pre_water_transparent_pass_3d` runs in the `Core3d` main pass after the
 //!   opaque pass and before the transmissive one, and renders the far-side head
 //!   of each view's phase — the reference's `POOL_ALPHA_PRE_WATER`.
+//! - `sky_backdrop_pass_3d` runs just before it (and before the water haze, which
+//!   orders itself between the two) and renders the backdrop bucket, for the same
+//!   reason the reference draws its WL sky pool in the deferred stage: the haze
+//!   fogs a backdrop by the *empty depth* it leaves behind, which is what makes
+//!   the clouds disappear under the sea.
 //! - `suppress_pre_water_items` then empties those items' batch ranges **for that
 //!   view**, which is what
 //!   [`SortedRenderPhase::render_range`](bevy::render::render_phase::SortedRenderPhase::render_range)
@@ -91,12 +96,18 @@ use bevy::render::{Extract, Render, RenderApp, RenderSystems};
 use crate::water::{DEFAULT_WATER_HEIGHT, WaterLevel};
 use crate::water_clip::WaterClipSide;
 
-/// The system set the pre-water translucency pass runs in, so the above-water water
-/// haze ([`crate::underwater_fog`]) can order itself before it without reaching for
-/// the (private) system — the reference fogs the opaque scene first and draws its
+/// The system set the pre-water translucency pass runs in, so the water haze
+/// ([`crate::underwater_fog`]) can order itself before it without reaching for the
+/// (private) system — the reference fogs the opaque scene first and draws its
 /// pre-water alpha pool over the fogged result.
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct PreWaterPass;
+
+/// The system set the sky-backdrop pass runs in, so the water haze can order itself
+/// **after** it: a backdrop writes no depth, and it is the haze reading that empty
+/// depth as the camera's far clip that fogs the clouds away under the sea.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct SkyBackdropPass;
 
 /// The sort bucket for translucent content on the **far side of the water surface
 /// from the eye**: drawn first, in [`pre_water_transparent_pass_3d`], before the
@@ -197,17 +208,36 @@ fn extract_sky_backdrops(
     );
 }
 
-/// How many items at the head of each view's [`Transparent3d`] phase are on the far
-/// side of the water surface from that view's eye — the split point between the
-/// reference's `POOL_ALPHA_PRE_WATER` and everything after the water.
+/// Where each view's sorted [`Transparent3d`] phase divides into the two prefixes
+/// the viewer draws in passes of its own: the items on the far side of the water
+/// surface from that view's eye (the reference's `POOL_ALPHA_PRE_WATER`), and the
+/// sky backdrops behind them.
+///
+/// Counts rather than lists of items because the phase is a sorted `IndexMap`: each
+/// prefix is addressable as a range, which is exactly what `render_range` takes.
+#[derive(Clone, Copy, Debug, Default)]
+struct PhasePrefixes {
+    /// How many items lead the phase in the pre-water bucket.
+    pre_water: usize,
+    /// How many sky backdrops follow them.
+    backdrops: usize,
+}
+
+impl PhasePrefixes {
+    /// One past the last item drawn ahead of Bevy's own transparent pass — the end
+    /// of the backdrop range, and the range the suppression empties.
+    const fn drawn_early(self) -> usize {
+        self.pre_water.saturating_add(self.backdrops)
+    }
+}
+
+/// Each view's [`PhasePrefixes`].
 ///
 /// Written by [`sort_transparent_by_water`], which has just put those items in front
-/// by sorting on the bucket, and read by the two systems that draw and then suppress
-/// them. A count rather than a list of items because the phase is a sorted
-/// `IndexMap`: the head is addressable as a range, which is exactly what
-/// `render_range` takes.
+/// by sorting on the bucket, and read by the systems that draw and then suppress
+/// them.
 #[derive(Resource, Default, Debug)]
-pub(crate) struct PreWaterSplit(HashMap<RetainedViewEntity, usize>);
+pub(crate) struct PreWaterSplit(HashMap<RetainedViewEntity, PhasePrefixes>);
 
 /// Re-sort each view's [`Transparent3d`] phase by `(bucket, backdrop order,
 /// distance)` so the translucency on the far side of the water surface leads the
@@ -265,27 +295,50 @@ fn sort_transparent_by_water(
         });
         if overrides.pre_water_pass_disabled {
             // The A/B knob: leave the whole phase to Bevy's transparent pass, so a
-            // suspected pre-water artifact can be told from one in the item itself.
+            // suspected pre-water (or backdrop) artifact can be told from one in the
+            // item itself.
             continue;
         }
-        let pre_water = phase
-            .items
-            .values()
-            .take_while(|item| {
-                classify_bucket(
-                    item.sorting_info,
-                    level,
-                    submerged,
-                    backdrops.0.get(&item.entity.1).copied(),
-                    clips.get(item.entity.1),
-                )
-                .0 == PRE_WATER_BUCKET
-            })
-            .count();
-        if pre_water > 0 {
-            split.0.insert(*view, pre_water);
+        let prefixes = count_prefixes(phase.items.values().map(|item| {
+            classify_bucket(
+                item.sorting_info,
+                level,
+                submerged,
+                backdrops.0.get(&item.entity.1).copied(),
+                clips.get(item.entity.1),
+            )
+            .0
+        }));
+        if prefixes.drawn_early() > 0 {
+            split.0.insert(*view, prefixes);
         }
     }
+}
+
+/// Count the two prefixes at the head of a sorted phase: the far-side translucency
+/// (the [`PRE_WATER_BUCKET`] items), and the sky backdrops behind it.
+///
+/// Takes the buckets in phase order, which the sort has just put in ascending order,
+/// so each prefix is a run and the second starts where the first stops. Split out of
+/// [`sort_transparent_by_water`] so it can be tested without a render world — the
+/// counts decide which items each early pass draws, and an off-by-one there either
+/// drops a draw or draws one twice.
+fn count_prefixes(buckets: impl Iterator<Item = u8>) -> PhasePrefixes {
+    let mut prefixes = PhasePrefixes::default();
+    let mut buckets = buckets.peekable();
+    while buckets
+        .next_if(|&bucket| bucket == PRE_WATER_BUCKET)
+        .is_some()
+    {
+        prefixes.pre_water = prefixes.pre_water.saturating_add(1);
+    }
+    while buckets
+        .next_if(|&bucket| bucket == BACKDROP_BUCKET)
+        .is_some()
+    {
+        prefixes.backdrops = prefixes.backdrops.saturating_add(1);
+    }
+    prefixes
 }
 
 /// Whether an eye at height `eye` is under the water surface at `level` — the
@@ -375,16 +428,84 @@ const fn classify_bucket(
 /// pool does too).
 fn pre_water_transparent_pass_3d(
     world: &World,
-    view: ViewQuery<(
-        &ExtractedCamera,
-        &ExtractedView,
-        &ViewTarget,
-        &ViewDepthTexture,
-        Option<&MainPassResolutionOverride>,
-    )>,
+    view: EarlyPassView,
     phases: Res<ViewSortedRenderPhases<Transparent3d>>,
     split: Res<PreWaterSplit>,
     mut ctx: RenderContext,
+) {
+    draw_early_phase_range(
+        "pre_water_transparent_pass_3d",
+        |prefixes| 0..prefixes.pre_water,
+        world,
+        view,
+        &phases,
+        &split,
+        &mut ctx,
+    );
+}
+
+/// Draw each view's **sky backdrops** — the cloud dome, the star field, the sun and
+/// moon discs — between the opaque pass and the water haze.
+///
+/// They are in the [`Transparent3d`] phase (they are alpha-blended), but they are not
+/// alpha *content*: the reference draws its whole WL sky pool in the deferred stage,
+/// before `doWaterHaze()` and before its alpha pools, and this is the same place.
+/// It has to be, and the reason is the haze: a backdrop writes no depth, so the pixel
+/// it paints still reads as *empty* depth, which the haze pass measures out to the
+/// camera's far clip — four kilometres of water, submerged, which is exactly how the
+/// reference makes clouds disappear when you are under the sea. Drawn after the haze
+/// instead, they hang over the fog as bright wisps at the horizon, which is what a
+/// submerged screenshot pair showed when the haze first moved ahead of the alpha
+/// pools.
+///
+/// Above water nothing changes: a backdrop pixel's far-clip point is above the
+/// surface (the eye is), so the haze's water-plane clip leaves it alone.
+fn sky_backdrop_pass_3d(
+    world: &World,
+    view: EarlyPassView,
+    phases: Res<ViewSortedRenderPhases<Transparent3d>>,
+    split: Res<PreWaterSplit>,
+    mut ctx: RenderContext,
+) {
+    draw_early_phase_range(
+        "sky_backdrop_pass_3d",
+        |prefixes| prefixes.pre_water..prefixes.drawn_early(),
+        world,
+        view,
+        &phases,
+        &split,
+        &mut ctx,
+    );
+}
+
+/// What both early passes query of their view: the camera and its attachments.
+type EarlyPassView<'w, 's> = ViewQuery<
+    'w,
+    's,
+    (
+        &'static ExtractedCamera,
+        &'static ExtractedView,
+        &'static ViewTarget,
+        &'static ViewDepthTexture,
+        Option<&'static MainPassResolutionOverride>,
+    ),
+>;
+
+/// Draw one range of a view's sorted [`Transparent3d`] phase in a pass of its own,
+/// with the same attachments Bevy's `main_transparent_pass_3d` uses: the colour
+/// attachment loaded, and the depth attachment loaded and stored (Bevy's own comment
+/// cites bevy#3776 — storing keeps wgpu from clearing the depth buffer).
+///
+/// `range` picks the range out of the view's [`PhasePrefixes`]; it is clamped to the
+/// phase, since `render_range` panics on a range that is not.
+fn draw_early_phase_range(
+    label: &'static str,
+    range: impl Fn(PhasePrefixes) -> core::ops::Range<usize>,
+    world: &World,
+    view: EarlyPassView,
+    phases: &ViewSortedRenderPhases<Transparent3d>,
+    split: &PreWaterSplit,
+    ctx: &mut RenderContext,
 ) {
     let view_entity = view.entity();
     let (camera, extracted_view, target, depth, resolution_override) = view.into_inner();
@@ -392,29 +513,29 @@ fn pre_water_transparent_pass_3d(
     let Some(phase) = phases.get(&extracted_view.retained_view_entity) else {
         return;
     };
-    let Some(&below) = split.0.get(&extracted_view.retained_view_entity) else {
+    let Some(&prefixes) = split.0.get(&extracted_view.retained_view_entity) else {
         return;
     };
     // Defensive: the split is recorded from this same phase in `PhaseSort`, but the
     // range must be in bounds or `render_range` panics.
-    let below = below.min(phase.items.len());
-    if below == 0 {
+    let items = phase.items.len();
+    let range = range(prefixes);
+    let range = range.start.min(items)..range.end.min(items);
+    if range.is_empty() {
         return;
     }
 
     let diagnostics = ctx.diagnostic_recorder();
     let diagnostics = diagnostics.as_deref();
     let mut render_pass = ctx.begin_tracked_render_pass(RenderPassDescriptor {
-        label: Some("pre_water_transparent_pass_3d"),
+        label: Some(label),
         color_attachments: &[Some(target.get_color_attachment())],
-        // Loaded, and stored as Bevy's transparent pass stores it (its own comment
-        // cites bevy#3776: storing keeps wgpu from clearing the depth buffer).
         depth_stencil_attachment: Some(depth.get_attachment(StoreOp::Store)),
         timestamp_writes: None,
         occlusion_query_set: None,
         multiview_mask: None,
     });
-    let pass_span = diagnostics.pass_span(&mut render_pass, "pre_water_transparent_pass_3d");
+    let pass_span = diagnostics.pass_span(&mut render_pass, label);
 
     if let Some(viewport) = bevy::camera::Viewport::from_viewport_and_override(
         camera.viewport.as_ref(),
@@ -423,15 +544,16 @@ fn pre_water_transparent_pass_3d(
         render_pass.set_camera_viewport(&viewport);
     }
 
-    if let Err(err) = phase.render_range(&mut render_pass, world, view_entity, ..below) {
-        error!("error rendering the pre-water transparent phase: {err:?}");
+    if let Err(err) = phase.render_range(&mut render_pass, world, view_entity, range) {
+        error!("error rendering the {label} range of the transparent phase: {err:?}");
     }
 
     pass_span.end(&mut render_pass);
 }
 
-/// Empty the batch range of every item [`pre_water_transparent_pass_3d`] has just
-/// drawn **for this view**, so Bevy's transparent pass skips them rather than
+/// Empty the batch range of every item the two early passes
+/// ([`sky_backdrop_pass_3d`] and [`pre_water_transparent_pass_3d`]) have just drawn
+/// **for this view**, so Bevy's transparent pass skips them rather than
 /// drawing them a second time (translucent content drawn twice is blended twice,
 /// and reads as too dense).
 ///
@@ -463,7 +585,7 @@ fn suppress_pre_water_items(
     suppress_view_pre_water_items(&mut phases, &retained_view_entity, &split);
 }
 
-/// Empty the batch ranges of one view's far-side prefix — the body of
+/// Empty the batch ranges of one view's two early prefixes — the body of
 /// [`suppress_pre_water_items`], split out so a test can drive it for a chosen view
 /// without a render app.
 fn suppress_view_pre_water_items(
@@ -471,13 +593,13 @@ fn suppress_view_pre_water_items(
     view: &RetainedViewEntity,
     split: &PreWaterSplit,
 ) {
-    let Some(&below) = split.0.get(view) else {
+    let Some(&prefixes) = split.0.get(view) else {
         return;
     };
     let Some(phase) = phases.get_mut(view) else {
         return;
     };
-    for item in phase.items.values_mut().take(below) {
+    for item in phase.items.values_mut().take(prefixes.drawn_early()) {
         *item.batch_range_mut() = 0..0;
     }
 }
@@ -516,9 +638,22 @@ impl Plugin for TransparencyOrderPlugin {
             )
             .add_systems(
                 Core3d,
-                (pre_water_transparent_pass_3d, suppress_pre_water_items)
+                (
+                    // The sky backdrops first, and before the water haze
+                    // ([`crate::underwater_fog`], which orders itself between the
+                    // two sets): the reference draws its WL sky pool in the deferred
+                    // stage, ahead of `doWaterHaze()` and of its alpha pools, and a
+                    // backdrop only vanishes under the sea because the haze fogs the
+                    // empty depth it leaves behind.
+                    sky_backdrop_pass_3d.in_set(SkyBackdropPass),
+                    // Then the far-side translucency, after the haze and before the
+                    // water — the reference's `POOL_ALPHA_PRE_WATER`, which its haze
+                    // likewise precedes.
+                    (pre_water_transparent_pass_3d, suppress_pre_water_items)
+                        .chain()
+                        .in_set(PreWaterPass),
+                )
                     .chain()
-                    .in_set(PreWaterPass)
                     .in_set(Core3dSystems::MainPass)
                     .after(bevy::core_pipeline::core_3d::main_opaque_pass_3d)
                     .before(bevy::pbr::main_transmissive_pass_3d),
@@ -538,8 +673,9 @@ mod tests {
     )]
 
     use super::{
-        ALWAYS_ON_TOP_BUCKET, BACKDROP_BUCKET, POST_WATER_BUCKET, PRE_WATER_BUCKET, PreWaterSplit,
-        SkyBackdrop, WaterClipSide, classify_bucket, eye_submerged, suppress_view_pre_water_items,
+        ALWAYS_ON_TOP_BUCKET, BACKDROP_BUCKET, POST_WATER_BUCKET, PRE_WATER_BUCKET, PhasePrefixes,
+        PreWaterSplit, SkyBackdrop, WaterClipSide, classify_bucket, count_prefixes, eye_submerged,
+        suppress_view_pre_water_items,
     };
     use bevy::core_pipeline::core_3d::{Transparent3d, TransparentSortingInfo3d};
     use bevy::ecs::entity::Entity;
@@ -612,7 +748,13 @@ mod tests {
                 // Distinct entities per view, so the two phases do not share keys.
                 phase.add_retained(phase_item(which * items + index));
             }
-            split.0.insert(key, below);
+            split.0.insert(
+                key,
+                PhasePrefixes {
+                    pre_water: below,
+                    backdrops: 0,
+                },
+            );
         }
         (phases, split)
     }
@@ -629,6 +771,66 @@ mod tests {
             .values()
             .map(|item| item.batch_range().clone())
             .collect()
+    }
+
+    /// The two early prefixes are the two leading runs of the sorted phase, and
+    /// nothing after them — the counts the backdrop pass and the pre-water pass draw
+    /// their ranges from.
+    #[test]
+    fn the_prefixes_are_the_two_leading_runs() {
+        let prefixes = count_prefixes(
+            [
+                PRE_WATER_BUCKET,
+                PRE_WATER_BUCKET,
+                BACKDROP_BUCKET,
+                POST_WATER_BUCKET,
+                ALWAYS_ON_TOP_BUCKET,
+            ]
+            .into_iter(),
+        );
+        assert_eq!((prefixes.pre_water, prefixes.backdrops), (2, 1));
+        assert_eq!(prefixes.drawn_early(), 3);
+    }
+
+    /// A phase that leads with backdrops (nothing on the far side of the surface —
+    /// the ordinary case above water with no translucency below it) still counts
+    /// them: the backdrop run does not have to be preceded by anything.
+    #[test]
+    fn backdrops_count_without_a_pre_water_run() {
+        let prefixes = count_prefixes([BACKDROP_BUCKET, POST_WATER_BUCKET].into_iter());
+        assert_eq!((prefixes.pre_water, prefixes.backdrops), (0, 1));
+    }
+
+    /// A phase with neither leaves nothing to draw early, which is what keeps both
+    /// early passes out of an ordinary frame.
+    #[test]
+    fn a_phase_with_no_early_content_draws_nothing_early() {
+        let prefixes = count_prefixes([POST_WATER_BUCKET, ALWAYS_ON_TOP_BUCKET].into_iter());
+        assert_eq!(prefixes.drawn_early(), 0);
+    }
+
+    /// The suppression covers **both** early prefixes: an item drawn by either early
+    /// pass and left drawable would be blended a second time by Bevy's transparent
+    /// pass.
+    #[test]
+    fn suppression_covers_the_backdrops_too() {
+        let mut phases = ViewSortedRenderPhases::<Transparent3d>::default();
+        let mut split = PreWaterSplit::default();
+        let key = view(0);
+        phases.prepare_for_new_frame(key);
+        let phase = phases.get_mut(&key).expect("the phase was just prepared");
+        for index in 0..4 {
+            phase.add_retained(phase_item(index));
+        }
+        split.0.insert(
+            key,
+            PhasePrefixes {
+                pre_water: 1,
+                backdrops: 2,
+            },
+        );
+        suppress_view_pre_water_items(&mut phases, &key, &split);
+        assert_eq!(ranges(&phases, &key), vec![0..0, 0..0, 0..0, 0..1]);
     }
 
     /// Suppressing one view's pre-water prefix must leave **every other view's**

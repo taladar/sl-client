@@ -58,6 +58,7 @@ use crate::environment::EnvironmentState;
 use crate::probe_layers::environment_render_layers;
 use crate::sky::day_position;
 use crate::textures::{TextureDecoded, TextureManager};
+use crate::water_fog::WaterFogSettings;
 use crate::world_api::world_scoped::WorldScopedAppExt as _;
 use crate::world_api::{DecodedTextures, SKY_BOOST_PRIORITY, ViewerCamera, WorldPhase};
 
@@ -238,7 +239,8 @@ pub(crate) fn setup_water(
         .settings
         .blended_water_settings(day_position(&environment));
     let params = water.map_or_else(default_water_params, |water| {
-        water_params(&water, Vec3::Y, default_reflection(), Vec3::ONE, false)
+        let fog = WaterFogSettings::from_water(&water, DEFAULT_WATER_HEIGHT);
+        water_params(&water, Vec3::Y, default_reflection(), Vec3::ONE, false, fog)
     });
     let material = materials.add(WaterMaterial {
         params,
@@ -296,6 +298,7 @@ pub(crate) fn update_water(mut events: MessageReader<SlEvent>, mut state: ResMut
 )]
 pub(crate) fn drive_water(
     identity: Res<SlIdentity>,
+    fog_settings: Res<WaterFogSettings>,
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
     environment: Res<EnvironmentState>,
     mut state: ResMut<WaterState>,
@@ -384,7 +387,21 @@ pub(crate) fn drive_water(
     // eyedepth <= 0`), and measures it against the *environment's* water height —
     // here the agent region's, the same level `WaterLevel` publishes.
     let submerged = camera_pos.y <= root_height;
-    let params = water_params(&water, light_dir, reflection, sunlight, submerged);
+    // The fog the surface applies to its own underside. Read from the resource
+    // rather than resolved from `water` here, so the surface, the haze pass and the
+    // face materials are fogging with one set of values — including when the
+    // `SL_VIEWER_DISABLE_UNDERWATER_FOG` knob has zeroed them. It is a frame old
+    // (`update_water_fog_settings` runs after this, since the level it publishes is
+    // this system's own output), which costs nothing: what it carries changes when
+    // the region or its environment does, not while anyone is looking.
+    let params = water_params(
+        &water,
+        light_dir,
+        reflection,
+        sunlight,
+        submerged,
+        *fog_settings,
+    );
     if materials
         .get(&state.material)
         .is_some_and(|material| material.params != params)
@@ -651,6 +668,7 @@ pub(crate) const fn water_params(
     reflection_color: Vec3,
     sunlight_color: Vec3,
     submerged: bool,
+    fog: WaterFogSettings,
 ) -> WaterParams {
     WaterParams {
         light_dir,
@@ -675,6 +693,16 @@ pub(crate) const fn water_params(
         } else {
             water.scale_above
         },
+        // The fog the surface applies to its own underside — from the scene's
+        // resolved [`WaterFogSettings`] rather than from `water` directly, so that
+        // it is the same fog the haze pass and the face materials use (and so that
+        // `SL_VIEWER_DISABLE_UNDERWATER_FOG` turns this half off too).
+        water_fog_color: fog.color,
+        water_fog_density: if submerged {
+            fog.density_submerged
+        } else {
+            fog.density_above
+        },
     }
 }
 
@@ -685,7 +713,8 @@ pub(crate) const fn water_params(
 /// `drive_water` replaces this from the real camera on the first frame anyway.
 pub(crate) fn default_water_params() -> WaterParams {
     let water = WaterSettings::legacy_default("Default");
-    water_params(&water, Vec3::Y, default_reflection(), Vec3::ONE, false)
+    let fog = WaterFogSettings::from_water(&water, DEFAULT_WATER_HEIGHT);
+    water_params(&water, Vec3::Y, default_reflection(), Vec3::ONE, false, fog)
 }
 
 /// A neutral sky-reflection tint used before a sky frame is selected (a pale
@@ -906,8 +935,10 @@ mod tests {
     #[test]
     fn the_eye_state_picks_the_refraction_scale() {
         let water = sl_client_bevy::WaterSettings::legacy_default("Default");
-        let above = water_params(&water, Vec3::Y, default_reflection(), Vec3::ONE, false);
-        let below = water_params(&water, Vec3::Y, default_reflection(), Vec3::ONE, true);
+        let fog =
+            crate::water_fog::WaterFogSettings::from_water(&water, super::DEFAULT_WATER_HEIGHT);
+        let above = water_params(&water, Vec3::Y, default_reflection(), Vec3::ONE, false, fog);
+        let below = water_params(&water, Vec3::Y, default_reflection(), Vec3::ONE, true, fog);
 
         assert!(
             (above.ref_scale - water.scale_above).abs() <= 1e-6,

@@ -295,6 +295,8 @@ pub use crate::textures::{
 pub use crate::tree::to_bevy_tree_mesh;
 #[cfg(feature = "bevy_pbr")]
 pub use crate::water::{WaterMaterial, WaterMaterialPlugin, WaterParams};
+#[cfg(feature = "bevy_pbr")]
+pub use crate::water_fog::{WATER_FOG_SHADER_HANDLE, load_water_fog_shader};
 
 pub mod animations;
 pub mod assets;
@@ -333,6 +335,8 @@ mod upload;
 mod voice;
 #[cfg(feature = "bevy_pbr")]
 pub mod water;
+#[cfg(feature = "bevy_pbr")]
+pub mod water_fog;
 mod world;
 
 /// Override a material pipeline's **alpha** blend component to keep the destination

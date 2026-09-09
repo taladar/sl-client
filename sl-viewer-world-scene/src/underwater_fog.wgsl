@@ -1,23 +1,25 @@
-// Underwater fog post-process: a port of the Second Life / Firestorm water fog
-// (`class1/environment/waterFogF.glsl` `getWaterFogViewNoClip` /
-// `applyWaterFogViewLinear`), applied as a fullscreen pass so it fogs *all*
-// underwater geometry (terrain, objects, avatars, the water underside) uniformly
-// — not just one material.
+// The water-haze pass: the Second Life / Firestorm water fog applied across the
+// **opaque** scene, from the depth buffer — a port of
+// `class3/deferred/waterHazeF.glsl`, which the reference likewise runs over its
+// deferred (opaque) render, before its water pool and before its alpha pools.
 //
-// The scene colour and the depth buffer are the inputs. Each pixel's depth is
-// reconstructed into a world position, the reference's per-fragment water-plane
-// clip is applied (a fragment above the surface passes through, so the waterline
-// splits cleanly), and everything below runs the reference's
-// `getWaterFogViewNoClip` transmittance / in-scatter, re-derived for a horizontal
-// plane (Bevy +Y up).
+// The fog arithmetic itself is not here: it is the shared
+// `sl_client_bevy::water_fog` module, because the alpha-blended materials apply the
+// *same* fog per fragment (a translucent draw writes no depth, so it is nowhere in
+// the buffer this pass reads). This shader is only the part that is peculiar to a
+// fullscreen pass — turning a depth sample back into a world position, and deciding
+// what an *empty* depth stands for.
 //
-// It is compiled twice, once per eye state (`WATER_HAZE_ABOVE`), because the two
-// run at different points in the frame — see the branch in `fragment` below. Above
-// water this is not a tint over an already-finished sea: it runs *before* the water
-// surface, and what it leaves behind is what the surface refracts, so it is where
-// the colour of deep water comes from.
+// One pipeline covers both eye states, as the reference's one shader does: which
+// side of the surface the eye is on changes only where the view ray enters the
+// water, which `water_fog_no_clip` works out per fragment.
 
 #import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput
+#import sl_client_bevy::water_fog::{
+    WaterFogParams,
+    WATER_FOG_NONE,
+    water_fog_no_clip,
+}
 
 struct UnderwaterFog {
     // World-from-clip matrix, to reconstruct a fragment's world position from its
@@ -43,15 +45,6 @@ struct UnderwaterFog {
 @group(0) @binding(0) var<uniform> fog: UnderwaterFog;
 @group(0) @binding(1) var depth_texture: texture_depth_multisampled_2d;
 
-// The reference `srgb_to_linear` (`class1/environment/srgbF.glsl`), as ported in
-// `sky.wgsl` / `clouds.wgsl` / `water.wgsl`. `getWaterFogViewNoClip` decodes the
-// authored (sRGB) water fog colour with it before mixing it into a linear frame.
-fn srgb_to_linear(cs: vec3<f32>) -> vec3<f32> {
-    let low = cs / 12.92;
-    let high = pow((cs + 0.055) / 1.055, vec3<f32>(2.4));
-    return select(high, low, cs <= vec3<f32>(0.04045));
-}
-
 @fragment
 fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     // This pass **blends** over the scene rather than reading and rewriting it, which
@@ -63,31 +56,8 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     // would read is a frame's worth of stale, so blending into the attachment is the
     // only way to fog what is actually being drawn.
     //
-    // "Leave this pixel alone" is therefore `vec4(0, 0, 0, 1)`: add nothing, keep all
+    // "Leave this pixel alone" is therefore `WATER_FOG_NONE`: add nothing, keep all
     // of the destination.
-    let unchanged = vec4<f32>(0.0, 0.0, 0.0, 1.0);
-
-    // Which eye state this pipeline is for. The two run at different points in the
-    // frame and each does nothing in the other's state, so exactly one fogs any given
-    // frame. The reference likewise carries an `above_water` uniform through one
-    // shader (`class3/deferred/waterHazeF.glsl`).
-    //
-    // Above water this pass runs **before** the water surface, because the surface
-    // refracts a copy of what this leaves behind — that is where the sea's colour
-    // comes from. Submerged it runs **after everything**, because then the fog is not
-    // a backdrop but the medium the whole picture is seen through, including the
-    // translucent content drawn after the water (the cloud dome above all, which
-    // would otherwise hang unfogged in the distance) and the surface itself, whose
-    // underside the reference fogs by exactly this distance.
-#ifdef WATER_HAZE_ABOVE
-    if (fog.camera_pos.y <= fog.water_height) {
-        return unchanged;
-    }
-#else
-    if (fog.camera_pos.y > fog.water_height) {
-        return unchanged;
-    }
-#endif
 
     // Read the (multisampled) depth for this pixel. Reverse-Z: the far plane — empty
     // sky, or the void past a region edge — is depth 0.0.
@@ -130,54 +100,26 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     // (at the shore, or a half-submerged object) sees the part above unfogged.
     //
     // With a tolerance that grows with distance, which the reference does not need and
-    // this does: the position is reconstructed from a depth buffer, and the further
-    // the fragment the coarser that reconstruction, while the thing most often sitting
-    // *exactly* on the plane is the water surface itself. Without the tolerance its
-    // far pixels fall on either side of the test from one to the next and the fog
-    // breaks up along the horizon. A fragment this admits is at most a thousandth of
-    // its own distance above the surface, where the fog it gets is imperceptible
-    // anyway.
+    // this does — and which is why the clip is the caller's here and not part of the
+    // shared module: the position is reconstructed from a depth buffer, and the
+    // further the fragment the coarser that reconstruction, while the thing most
+    // often sitting *exactly* on the plane is the water surface itself. Without the
+    // tolerance its far pixels fall on either side of the test from one to the next
+    // and the fog breaks up along the horizon. A fragment this admits is at most a
+    // thousandth of its own distance above the surface, where the fog it gets is
+    // imperceptible anyway.
     if (world_pos.y > fog.water_height + length(world_pos - fog.camera_pos.xyz) * 1.0e-3) {
-        return unchanged;
+        return WATER_FOG_NONE;
     }
 
-    // --- getWaterFogViewNoClip, re-derived for a horizontal plane (+Y up). ---
-    let eye = fog.camera_pos.xyz;
-    let view = normalize(world_pos - eye);
-    // es = -dot(view, plane_normal) with the plane normal pointing up.
-    let es = -view.y;
-    // e0 = eye depth below the surface (0 when the eye is above water).
-    let e0 = max(fog.water_height - eye.y, 0.0);
-
-    // The water ray "entry": the eye itself when submerged, else where the view ray
-    // crosses the surface plane (so `l` is the thickness of water actually traversed).
-    var entry = eye;
-    if (eye.y > fog.water_height && abs(view.y) > 1.0e-5) {
-        let t = (fog.water_height - eye.y) / view.y;
-        entry = eye + view * t;
-    }
-    let l = max(length(world_pos - entry), 0.1);
-
-    let kd = fog.fog_density;
-    let ks = fog.fog_ks;
-    let f = 0.98;
-    let t1 = -kd * pow(f, ks * e0);
-    // Guard the denominator away from zero (the reference divides by `t2` unguarded,
-    // but a grazing view can make it vanish and produce a NaN).
-    var t2 = kd + ks * es;
-    if (abs(t2) < 1.0e-3) {
-        t2 = 1.0e-3;
-    }
-    let t3 = pow(f, t2 * l) - 1.0;
-    // The reference clamps this only from above (`min(_, 1.0)`); clamped from below
-    // as well because `pow` of a negative base is not a real number, and a negative
-    // density can drive the product there even after `getModifiedWaterFogDensity`
-    // has rescued the density itself — a NaN pixel rather than a dark one.
-    let scatter = pow(clamp(t1 / t2 * t3, 0.0, 1.0), 1.0 / 1.7);
-    let transmittance = pow(0.98, l * kd);
+    var params: WaterFogParams;
+    params.color = fog.fog_color.rgb;
+    params.density = fog.fog_density;
+    params.ks = fog.fog_ks;
+    params.level = fog.water_height;
 
     // The in-scatter as colour, the transmittance as alpha: the blender then computes
     // `dst * D + srgb_to_linear(fogColor) * L`, which is
     // `applyWaterFogViewLinearNoClip`.
-    return vec4<f32>(srgb_to_linear(fog.fog_color.rgb) * scatter, transmittance);
+    return water_fog_no_clip(fog.camera_pos.xyz, world_pos, params);
 }

@@ -28,6 +28,13 @@
     forward_io::{VertexOutput, FragmentOutput},
 }
 #import bevy_render::bindless::{bindless_samplers_filtering, bindless_textures_2d}
+#import sl_client_bevy::water_fog::{
+    WaterFogParams,
+    apply_water_fog,
+    water_fog_density,
+    water_fog_ks,
+    water_fog_no_clip,
+}
 
 // Mirrors `SlFaceParams` (face_material.rs): only vec4 / vec2 / u32 / f32, so the
 // `encase` std140 layout matches this field-for-field.
@@ -58,10 +65,19 @@ struct SlFaceParams {
     // straddles the surface is drawn twice, once with each sign, so each half lands
     // in the pass that orders it correctly against the sea.
     water_clip: f32,
-    // The water surface height in world metres, the plane `water_clip` cuts at.
-    // A height rather than the reference's `vec4` plane because this viewer's sea is
-    // always horizontal (`crate::water`), so the plane normal is always +Y.
+    // The water surface height in world metres, the plane `water_clip` cuts at and
+    // the surface the water fog below measures from. A height rather than the
+    // reference's `vec4` plane because this viewer's sea is always horizontal
+    // (`crate::water`), so the plane normal is always +Y.
     water_level: f32,
+    // The water fog this face applies to itself when it is drawn translucent: the
+    // authored (sRGB) fog colour in rgb, the water frame's own density (the eye
+    // above the surface) in w.
+    water_fog_color: vec4<f32>,
+    // The water fog density while the eye is submerged
+    // (`getModifiedWaterFogDensity`). Both densities are carried so that a camera
+    // crossing the waterline changes nothing about the material.
+    water_fog_submerged_density: f32,
 }
 
 // Must match the `MAP_FLAG_*` constants in face_material.rs.
@@ -536,6 +552,65 @@ fn fragment(
 
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
 
+    let alpha_mode = pbr_input.material.flags
+        & pbr_types::STANDARD_MATERIAL_FLAGS_ALPHA_MODE_RESERVED_BITS;
+    let opaque_pass = alpha_mode == pbr_types::STANDARD_MATERIAL_FLAGS_ALPHA_MODE_OPAQUE
+        || alpha_mode == pbr_types::STANDARD_MATERIAL_FLAGS_ALPHA_MODE_MASK;
+
+    // The water fog, for a **translucent** face only (`viewer-underwater-fog-swallows-translucency`).
+    //
+    // An opaque or alpha-masked face is drawn in the opaque pass, which the
+    // fullscreen haze pass (`sl_viewer_world_scene::underwater_fog`) fogs from the
+    // depth buffer straight afterwards — fogging it here as well would fog it
+    // twice. A **blended** face writes no depth, so it is nowhere in that buffer:
+    // fogged from it, it would be measured by the distance of whatever stands
+    // behind it, and where that is the void the pixel is four kilometres of water
+    // deep and the face is erased outright. The reference splits the work exactly
+    // here too — the deferred haze over the opaque scene, `alphaF.glsl`'s
+    // `WATER_FOG` branch per fragment in the alpha pools.
+    //
+    // Three things gate it, and each is load-bearing:
+    //
+    // - a fragment **above** the surface is not in the water at all (the
+    //   reference's `getWaterFogView` clip). Exactly, with no tolerance: unlike the
+    //   haze pass this has the fragment's real position, not one reconstructed from
+    //   a depth buffer;
+    // - a zero density is a scene with no water fog (the gallery, a test app, or
+    //   `SL_VIEWER_DISABLE_UNDERWATER_FOG=1`, which zeroes what the viewer writes
+    //   here), and skipping it keeps the arithmetic off every ordinary frame;
+    // - **no directional light means no fog.** The `KS` term is the up component of
+    //   the direction toward the active heavenly body, which is what the viewer aims
+    //   its one directional light at — and a view with no directional light at all
+    //   is the HUD layer, whose faces sit in their own patch of world space near the
+    //   origin and are not in the sea however low it happens to be.
+    let fog_density = water_fog_density(
+        view.world_position.xyz,
+        sl.water_level,
+        sl.water_fog_color.w,
+        sl.water_fog_submerged_density,
+    );
+    if !opaque_pass
+        && fog_density != 0.0
+        && lights.n_directional_lights != 0u
+        && in.world_position.y <= sl.water_level {
+        var fog_params: WaterFogParams;
+        fog_params.color = sl.water_fog_color.rgb;
+        fog_params.density = fog_density;
+        fog_params.ks = water_fog_ks(normalize(lights.directional_lights[0].direction_to_light).y);
+        fog_params.level = sl.water_level;
+        let fog = water_fog_no_clip(
+            view.world_position.xyz,
+            in.world_position.xyz,
+            fog_params,
+        );
+        // The face's own radiance through the fog; its coverage (alpha) is left
+        // alone, so the blender still composites `a * fogged + (1 - a) * behind`
+        // and the scene behind keeps the fog the haze pass gave it. That is the
+        // reference's own arrangement: each contribution is fogged by the distance
+        // it actually travelled through the water.
+        out.color = vec4<f32>(apply_water_fog(out.color.rgb, fog), out.color.a);
+    }
+
     // The faithful SL glow mask (`glow.rs`): write the face's glow scalar (`0` for a
     // non-glowing face) into alpha, which the glow pass reads as the per-face glow
     // mask — but only for an **opaque / mask** face, whose alpha is free after
@@ -545,10 +620,7 @@ fn fragment(
     // content is opaque). Gating in the shader means every opaque face writes the
     // mask correctly without each CPU build site having to. Inert until the glow
     // pass is enabled — nothing else reads the scene alpha.
-    let alpha_mode = pbr_input.material.flags
-        & pbr_types::STANDARD_MATERIAL_FLAGS_ALPHA_MODE_RESERVED_BITS;
-    if alpha_mode == pbr_types::STANDARD_MATERIAL_FLAGS_ALPHA_MODE_OPAQUE
-        || alpha_mode == pbr_types::STANDARD_MATERIAL_FLAGS_ALPHA_MODE_MASK {
+    if opaque_pass {
         out.color.a = sl.glow;
     }
     return out;

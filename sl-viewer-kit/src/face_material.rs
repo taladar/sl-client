@@ -28,7 +28,7 @@
 
 use bevy::asset::{Asset, Handle, load_internal_asset, uuid_handle};
 use bevy::image::Image;
-use bevy::math::{Affine2, Vec4};
+use bevy::math::{Affine2, Vec3, Vec4};
 use bevy::mesh::MeshVertexBufferLayoutRef;
 use bevy::pbr::{
     ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline,
@@ -141,9 +141,43 @@ pub struct SlFaceParams {
     /// by rendering its alpha pool twice with this uniform flipped.
     pub water_clip: f32,
     /// The water surface height in world metres, the plane [`water_clip`](Self::water_clip)
-    /// cuts at. A height rather than the reference's `vec4` plane because this
-    /// viewer's sea is always horizontal, so the plane normal is always `+Y`.
+    /// cuts at — and the surface the water fog below measures from. A height rather
+    /// than the reference's `vec4` plane because this viewer's sea is always
+    /// horizontal, so the plane normal is always `+Y`.
+    ///
+    /// Written for **every** face by
+    /// `sl_viewer_world_scene::water_fog::apply_water_fog_to_face_materials`, and
+    /// again by the straddling-face split (`sl_viewer_world_scene::water_clip`) as
+    /// it composes a clipped copy — both from the same `WaterLevel`, so they cannot
+    /// disagree.
     pub water_level: f32,
+    /// The **water fog** the face applies to itself when it is drawn translucent:
+    /// the authored (sRGB) fog colour in `rgb`, and in `.w` the water frame's own
+    /// fog density — the one in force while the eye is *above* the surface.
+    ///
+    /// A translucent face has to fog itself because it writes no depth, so the
+    /// fullscreen haze pass (`sl_viewer_world_scene::underwater_fog`)
+    /// cannot see it: fogged from the depth buffer it would be measured by whatever
+    /// stands *behind* it (`viewer-underwater-fog-swallows-translucency`). The
+    /// reference has the same split — its haze runs over the deferred (opaque)
+    /// scene and its alpha shaders carry the fog per fragment
+    /// (`alphaF.glsl`'s `WATER_FOG` branch).
+    ///
+    /// Zero density (the [`inert`](Self::inert) default) is no fog at all, so a face
+    /// renders unfogged until the viewer fills this in — and a viewer with no water
+    /// at all (the gallery, a test app) never fills it.
+    pub water_fog_color: Vec4,
+    /// The water fog density while the eye is **submerged**
+    /// (`getModifiedWaterFogDensity`, the frame's density raised to its underwater
+    /// modifier).
+    ///
+    /// Carried alongside the above-water density in
+    /// [`water_fog_color`](Self::water_fog_color) rather than resolved on the CPU,
+    /// because which one applies is a property of *the camera*, not of the face:
+    /// resolving it here would mean rewriting — and re-preparing — every face
+    /// material each time the eye crossed the waterline. The shader picks by
+    /// comparing the view position against [`water_level`](Self::water_level).
+    pub water_fog_submerged_density: f32,
 }
 
 impl SlFaceParams {
@@ -174,7 +208,59 @@ impl SlFaceParams {
             // No water clip: the ordinary face is drawn once, whole.
             water_clip: 0.0,
             water_level: 0.0,
+            // No water fog: a zero density is the identity of the fog arithmetic,
+            // so a face renders unfogged until the viewer fills these in.
+            water_fog_color: Vec4::ZERO,
+            water_fog_submerged_density: 0.0,
         }
+    }
+
+    /// Set the scene's water fog — the authored (sRGB) fog colour, the water
+    /// frame's density, the density in force while the eye is submerged, and the
+    /// surface height they measure from.
+    ///
+    /// Called for every face material (not only translucent ones: whether a face is
+    /// drawn blended is a property of the material's alpha mode, which the shader
+    /// reads, and a face can flip between the two without this having to be
+    /// rewritten).
+    pub fn set_water_fog(
+        &mut self,
+        color: Vec3,
+        density_above: f32,
+        density_submerged: f32,
+        level: f32,
+    ) {
+        self.water_fog_color = color.extend(density_above);
+        self.water_fog_submerged_density = density_submerged;
+        self.water_level = level;
+    }
+
+    /// Whether this material's water fog already is the given one — so a caller
+    /// sweeping the material assets can skip the write, and with it the
+    /// re-preparation of the material's bind group, for the (usual) case where
+    /// nothing about the water has changed.
+    #[must_use]
+    pub fn has_water_fog(
+        &self,
+        color: Vec3,
+        density_above: f32,
+        density_submerged: f32,
+        level: f32,
+    ) -> bool {
+        /// Bit-exact equality: the question here is "has this already been
+        /// written", not "are these two numbers near each other", and an
+        /// approximate answer would either rewrite a material forever or leave one
+        /// stale.
+        const fn same(a: f32, b: f32) -> bool {
+            a.to_bits() == b.to_bits()
+        }
+        let wanted = color.extend(density_above);
+        same(self.water_fog_color.x, wanted.x)
+            && same(self.water_fog_color.y, wanted.y)
+            && same(self.water_fog_color.z, wanted.z)
+            && same(self.water_fog_color.w, wanted.w)
+            && same(self.water_fog_submerged_density, density_submerged)
+            && same(self.water_level, level)
     }
 
     /// Pack an [`Affine2`]'s 2×2 linear part into a `Vec4` (`col0.xy, col1.xy`), the
@@ -383,6 +469,10 @@ impl Plugin for SlFaceMaterialPlugin {
     /// Compile `face_material.wgsl` under `FACE_SHADER_HANDLE` and add the
     /// [`MaterialPlugin`] for the extended face material.
     fn build(&self, app: &mut App) {
+        // The face shader imports the shared water-fog module, which a translucent
+        // face applies to itself (the fullscreen haze pass cannot see a draw that
+        // writes no depth).
+        sl_client_bevy::load_water_fog_shader(app);
         load_internal_asset!(
             app,
             FACE_SHADER_HANDLE,

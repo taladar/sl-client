@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 102 |
-| ready | 322 |
+| ready | 323 |
 | blocked | 46 |
 | in-progress | 20 |
-| bugs | 59 |
-| done | 1034 |
+| bugs | 58 |
+| done | 1035 |
 | deferred | 25 |
 | wont-do | 16 |
-| **total** | **1624** |
+| **total** | **1625** |
 
 ## ideas (102)
 
@@ -242,7 +242,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (322)
+## ready (323)
 
 ### protocol
 
@@ -933,6 +933,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-styling-interaction-tests`](ready/viewer-ui-styling-interaction-tests.md)
   — bevy_flair state styling under synthetic hover and focus (blocked by
   `viewer-ui-interaction-harness` (done))
+- [`viewer-underwater-alpha-fog-remaining-materials`](ready/viewer-underwater-alpha-fog-remaining-materials.md)
+  — The particle billboards do not carry the water fog
 - [`viewer-url-context-menus`](ready/viewer-url-context-menus.md) — Right-click
   context menus on linkified text and names
 - [`viewer-usb-route-map-display`](ready/viewer-usb-route-map-display.md) — USB
@@ -1195,7 +1197,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (59)
+## bugs (58)
 
 ### viewer
 
@@ -1318,9 +1320,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-tree-species-all-rendered-as-trees`](bugs/viewer-tree-species-all-rendered-as-trees.md)
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)
-- [`viewer-underwater-fog-swallows-translucency`](bugs/viewer-underwater-fog-swallows-translucency.md)
-  — Underwater, the fog wipes out translucent geometry that has open water
-  behind it
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
@@ -1340,7 +1339,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1034)
+## done (1035)
 
 ### protocol
 
@@ -2869,6 +2868,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-underwater-fog-background-flicker`](done/viewer-underwater-fog-background-flicker.md)
   — Background flickers behind the underwater fog while walking underwater
+- [`viewer-underwater-fog-swallows-translucency`](done/viewer-underwater-fog-swallows-translucency.md)
+  — Underwater, the fog wipes out translucent geometry that has open water
+  behind it
 - [`viewer-underwater-name-tags-not-drawn`](done/viewer-underwater-name-tags-not-drawn.md)
   — Name tags are not drawn at all while submerged
 - [`viewer-underwater-translucent-drawn-behind-surface`](done/viewer-underwater-translucent-drawn-behind-surface.md)

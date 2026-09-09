@@ -98,6 +98,18 @@ pub struct WaterParams {
     /// (`lldrawpoolwater.cpp:299`), so the eye state is resolved before this is
     /// filled.
     pub ref_scale: f32,
+    /// The **authored** (sRGB) water fog colour (`waterFogColor`), for the surface's
+    /// own underside: seen from below, the surface shows the world *above* the
+    /// water, which the haze pass leaves alone (it fogs only what is under the
+    /// surface), so the water column between the eye and the surface has to be
+    /// applied here — `underWaterF.glsl`'s
+    /// `fb = applyWaterFogViewLinearNoClip(vary_position, fb)`.
+    pub water_fog_color: Vec3,
+    /// The water fog density for the current eye state
+    /// (`getModifiedWaterFogDensity`), resolved on the CPU like
+    /// [`ref_scale`](Self::ref_scale) above — there is one water material, so a
+    /// per-frame write costs nothing.
+    pub water_fog_density: f32,
 }
 
 /// The water-surface material: one [`WaterParams`] uniform block plus the current
@@ -247,6 +259,8 @@ pub struct WaterMaterialPlugin;
 
 impl Plugin for WaterMaterialPlugin {
     fn build(&self, app: &mut App) {
+        // The surface fogs its own underside, so it imports the shared module.
+        crate::water_fog::load_water_fog_shader(app);
         load_internal_asset!(app, WATER_SHADER_HANDLE, "water.wgsl", Shader::from_wgsl);
         app.add_plugins(MaterialPlugin::<WaterMaterial>::default());
     }

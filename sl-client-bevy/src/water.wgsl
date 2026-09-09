@@ -26,6 +26,12 @@
     view_transformations::depth_ndc_to_view_z,
     view_transformations::position_world_to_clip,
 }
+#import sl_client_bevy::water_fog::{
+    WaterFogParams,
+    apply_water_fog,
+    water_fog_ks,
+    water_fog_no_clip,
+}
 
 // How far *in front of* the water surface a refraction sample may sit before it is
 // rejected: the reference's `0.05` metre slack in
@@ -79,6 +85,12 @@ struct WaterParams {
     // (`refScale`): the water frame's `scaleAbove` above the surface, `scaleBelow`
     // under it, picked CPU-side as the reference picks it.
     ref_scale: f32,
+    // The authored (sRGB) water fog colour, for the surface's own underside — see
+    // the underwater branch in `fragment` below.
+    water_fog_color: vec3<f32>,
+    // The water fog density for the current eye state
+    // (`getModifiedWaterFogDensity`), resolved CPU-side like `ref_scale`.
+    water_fog_density: f32,
 };
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> water: WaterParams;
@@ -227,11 +239,28 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
             0.0,
         ).rgb;
         // The reference finishes with `fb = applyWaterFogViewLinearNoClip(
-        // vary_position, fb)` — the water between the eye and this piece of surface.
-        // Here the haze pass does that instead: submerged, it runs *after* the water
-        // and fogs these pixels by the depth the surface wrote, which is the same
-        // distance the reference measures.
-        return vec4<f32>(clamp(under_fb, vec3<f32>(0.0), vec3<f32>(1.0)), 0.0);
+        // vary_position, fb)` — the water between the eye and this piece of surface
+        // — and so does this.
+        //
+        // The haze pass cannot do it: it runs before the water is drawn (as the
+        // reference's does, "water haze against depth buffer before rendering
+        // alpha"), and what it fogs is what lies *under* the surface, while what
+        // this sample shows is the world **above** the water, which that pass
+        // deliberately leaves alone. So the water column between a submerged eye and
+        // this piece of surface is applied here, once, and nowhere else.
+        //
+        // `KS` from the frame's own light direction rather than a uniform of its
+        // own: `light_dir` is already the direction toward the active heavenly body,
+        // which is exactly what the reference's `waterFogKS` is built from. The
+        // water plane is this fragment's own height — the surface *is* the plane.
+        var fog_params: WaterFogParams;
+        fog_params.color = water.water_fog_color;
+        fog_params.density = water.water_fog_density;
+        fog_params.ks = water_fog_ks(water.light_dir.y);
+        fog_params.level = in.world_position.y;
+        let fog = water_fog_no_clip(eye, in.world_position, fog_params);
+        let fogged = apply_water_fog(under_fb, fog);
+        return vec4<f32>(clamp(fogged, vec3<f32>(0.0), vec3<f32>(1.0)), 0.0);
     }
 
     // --- waterF.glsl calculateFresnelFactors. ---

@@ -3938,6 +3938,17 @@ fn spawn_sea(
             // Not submerged: both water scenes look at the sea from above it, where
             // the fog fallback that density feeds is what colours it.
             false,
+            // **No** water fog, deliberately, though the frame carries one. The
+            // readback rig runs the render stack's `Bare` subset — materials,
+            // probes, transparency ordering and the waterline split — and none of
+            // the fog: no haze pass over the opaque scene, and no
+            // `water_fog::WaterFogPlugin` to give the face materials their own. A
+            // sea that fogged its underside would be the only fogged thing in the
+            // picture, and it is the backdrop these scenes read their subjects
+            // against: submerged, it darkens toward the horizon until a translucent
+            // box composited over it stops carrying its own colour, and the walk
+            // starts measuring the fog rather than the ordering it is there to pin.
+            crate::water_fog::WaterFogSettings::default(),
         ),
         // Both slots share the map, as `apply_water_textures` does until a day
         // cycle drives a separate next frame and a blend between them.

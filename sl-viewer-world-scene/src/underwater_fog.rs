@@ -5,18 +5,31 @@
 //! The reference applies the water fog per fragment in the deferred stage, tinting
 //! every underwater surface by the water body colour with a distance-based
 //! transmittance and in-scatter, and clipping per fragment against the water plane
-//! so a camera straddling the surface splits cleanly along the waterline. A
-//! per-material fog would miss objects / avatars, so this runs as one fullscreen
-//! pass over the composited image plus the depth buffer — fogging terrain, objects,
-//! avatars, and the water underside uniformly, exactly where they are underwater.
+//! so a camera straddling the surface splits cleanly along the waterline. Its
+//! deferred stage is the **opaque** scene, so this is one fullscreen pass over the
+//! composited image plus the depth buffer — fogging terrain, objects, avatars and
+//! the sky dome uniformly, exactly where they are underwater — and it runs at the
+//! same point in the frame the reference's does: after the opaque pass, and before
+//! the water surface and every translucent draw.
 //!
-//! The shader is compiled once per **eye state**, and each pipeline runs at its own
-//! point in the frame: submerged, the fog is the medium the whole picture is seen
-//! through, so it runs after everything; above water it runs *before* the water
-//! surface, because the surface refracts a copy of what it leaves behind — which is
-//! where the colour of deep water comes from, exactly as the reference's deferred
-//! haze pass precedes its water pool. `SL_VIEWER_DISABLE_UNDERWATER_FOG=1` forces
-//! the whole thing off (a debug A/B knob).
+//! **What this pass deliberately does not fog, and who does.** A translucent draw
+//! writes no depth, so it is nowhere in the buffer this reads: fogging it here would
+//! measure it by the distance of whatever is *behind* it — four kilometres of water
+//! where that is the void, which erased it outright
+//! (`viewer-underwater-fog-swallows-translucency`). The reference does not fog its
+//! alpha pools here either; each alpha shader carries the same fog per fragment
+//! (`alphaF.glsl`'s `WATER_FOG` branch), at the fragment's own position. So does
+//! this viewer, through the shared [`sl_client_bevy::water_fog`] module: the face
+//! material and the water surface's own underside each apply it themselves. (The
+//! particle billboards do not yet —
+//! `viewer-underwater-alpha-fog-remaining-materials`.) The **sky backdrops** need no
+//! shader of their own: they are drawn *before* this pass
+//! ([`crate::transparency`]'s backdrop pass, as the reference draws its WL sky pool
+//! in the deferred stage), so the empty depth they leave is fogged here — which is
+//! what makes the clouds disappear under the sea.
+//! `SL_VIEWER_DISABLE_UNDERWATER_FOG=1` forces the whole thing off (a debug A/B
+//! knob) — including the material-side fog, since it zeroes the density every
+//! consumer reads.
 //!
 //! Bevy 0.19 replaced the render graph with a **system-based** renderer, so this is
 //! not a render-graph `ViewNode`: the pass is a system in the [`Core3d`] schedule
@@ -72,7 +85,8 @@ use bevy::render::{GpuResourceAppExt as _, Render, RenderApp, RenderStartup, Ren
 use crate::coords::sl_to_bevy_object_rotation;
 use crate::environment::EnvironmentState;
 use crate::sky::day_position;
-use crate::water::{WaterLevel, drive_water};
+use crate::water::drive_water;
+use crate::water_fog::WaterFogSettings;
 use crate::world_api::{ViewerCamera, WorldPhase};
 
 /// The internal handle the fog shader (`underwater_fog.wgsl`) is loaded under.
@@ -136,42 +150,11 @@ impl ExtractComponent for UnderwaterFog {
     }
 }
 
-/// The water fog density the shader should use, given the water frame's density and
-/// underwater fog modifier and whether the eye is submerged — the reference
-/// `LLSettingsWater::getModifiedWaterFogDensity` (`llsettingswater.cpp:377`).
-///
-/// Submerged, the density is raised to the modifier (clamped to the reference's
-/// `[0, 10]`); above water it is the frame's density unchanged.
-///
-/// The guard on a **negative** density is the reference's fix for
-/// BUG-233797 / BUG-233798: a negative base raised to a non-integral power is not a
-/// real number, so `powf` returns `NaN`, and a `NaN` density reaches the uniform and
-/// takes the whole screen with it — the reference's comment calls it an
-/// *unrecoverable blackout*. Both are values a region may legitimately send: the
-/// density is a free `f32` off the wire, and the modifier is authored per water
-/// frame. Of the two remedies the reference weighed, it chose (and this follows)
-/// forcing the density to `1.0` in that case, which keeps some notion of fog rather
-/// than rounding the modifier and inverting the water's colour.
-///
-/// Integrality is tested on the *clamped* modifier, as in the reference — a modifier
-/// of `10.5` clamps to `10.0`, which is integral, and needs no rescue.
-pub(crate) fn modified_water_fog_density(density: f32, fog_mod: f32, submerged: bool) -> f32 {
-    if !(submerged && fog_mod > 0.0) {
-        return density;
-    }
-    let fog_mod = fog_mod.clamp(0.0, 10.0);
-    let density = if density < 0.0 && fog_mod.fract() > 0.0 {
-        1.0
-    } else {
-        density
-    };
-    density.powf(fog_mod)
-}
-
-/// Fill the camera's [`UnderwaterFog`] from the region's EEP water settings, the
-/// sky sun direction, the camera pose, and the current water level — the reference
-/// `LLSettingsVOWater` uniform prep (`waterFogKS = 1 / max(lightDir.z, 0.3)`,
-/// `getModifiedWaterFogDensity` — `pow(density, fogMod)` when the eye is submerged).
+/// Fill the camera's [`UnderwaterFog`] from the scene's [`WaterFogSettings`], the
+/// sky sun direction and the camera pose — the reference `LLSettingsVOWater`
+/// uniform prep (`waterFogKS = 1 / max(lightDir.z, 0.3)`, and
+/// `getModifiedWaterFogDensity`, which [`WaterFogSettings`] has already resolved
+/// for both eye states).
 ///
 /// Reads the camera's **`Transform`**, not its `GlobalTransform`: the fog pass
 /// reconstructs a fragment's world position from a depth buffer rendered from
@@ -184,15 +167,12 @@ pub(crate) fn modified_water_fog_density(density: f32, fog_mod: f32, submerged: 
 /// pose.
 pub(crate) fn update_underwater_fog(
     environment: Res<EnvironmentState>,
-    level: Res<WaterLevel>,
-    overrides: Res<RenderOverrides>,
+    settings: Res<WaterFogSettings>,
     mut cameras: Query<(&Transform, &Projection, &mut UnderwaterFog), With<ViewerCamera>>,
 ) {
-    let disabled = overrides.underwater_fog_disabled;
     for (camera_transform, projection, mut fog) in &mut cameras {
         let camera_pos = camera_transform.translation;
         let position = day_position(&environment);
-        let water = environment.settings.blended_water_settings(position);
         let sky = environment
             .settings
             .blended_sky_settings(camera_pos.y, position);
@@ -205,7 +185,7 @@ pub(crate) fn update_underwater_fog(
         // `arithmetic_side_effects` lint.
         let world_from_clip = clip_from_view.mul_mat4(&view_from_world).inverse();
 
-        let water_height = level.0;
+        let water_height = settings.level;
         let submerged = camera_pos.y < water_height;
 
         // The active light's up component drives `KS` (the reference clamps it to
@@ -227,24 +207,15 @@ pub(crate) fn update_underwater_fog(
         });
         let fog_ks = 1.0 / light_up.max(0.3);
 
-        let (fog_color, fog_density) = match water {
-            Some(water) => {
-                let density = modified_water_fog_density(
-                    water.water_fog_density,
-                    water.underwater_fog_mod,
-                    submerged,
-                );
-                let color = Vec3::new(
-                    water.water_fog_color.red(),
-                    water.water_fog_color.green(),
-                    water.water_fog_color.blue(),
-                );
-                (color, density)
-            }
-            None => (Vec3::ZERO, 0.0),
+        // The eye's own side of the surface picks the density, exactly as the
+        // reference's `getModifiedWaterFogDensity` does — [`WaterFogSettings`] has
+        // resolved both, and zeroed them if `SL_VIEWER_DISABLE_UNDERWATER_FOG` is
+        // set (a zero density makes this shader a pass-through).
+        let fog_density = if submerged {
+            settings.density_submerged
+        } else {
+            settings.density_above
         };
-        // Debug override: a zero density makes the fog shader a pass-through.
-        let fog_density = if disabled { 0.0 } else { fog_density };
 
         // Write-on-change: with a parked camera and stable water settings the
         // recomputed params are bit-identical, and an unconditional write would
@@ -252,7 +223,7 @@ pub(crate) fn update_underwater_fog(
         fog.set_if_neq(UnderwaterFog {
             world_from_clip,
             camera_pos: camera_pos.extend(0.0),
-            fog_color: fog_color.extend(0.0),
+            fog_color: settings.color.extend(0.0),
             water_height,
             fog_density,
             fog_ks,
@@ -276,6 +247,12 @@ pub struct UnderwaterFogPlugin;
 impl Plugin for UnderwaterFogPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RenderOverrides>();
+        // The other half of the same effect: the fog parameters, and their delivery
+        // to the materials that fog themselves. Added here so the two halves are
+        // always registered together — a viewer with the haze but no material fog
+        // would erase its own translucency again.
+        app.add_plugins(crate::water_fog::WaterFogPlugin);
+        sl_client_bevy::load_water_fog_shader(app);
         load_internal_asset!(
             app,
             FOG_SHADER_HANDLE,
@@ -294,7 +271,11 @@ impl Plugin for UnderwaterFogPlugin {
             Update,
             update_underwater_fog
                 .after(WorldPhase::CameraPositioned)
-                .after(drive_water),
+                .after(drive_water)
+                // …and after the fog parameters themselves, so the pass and the
+                // materials that fog themselves are working from one resolution of
+                // the region's water and not from two frames of it.
+                .after(crate::water_fog::update_water_fog_settings),
         );
 
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
@@ -306,19 +287,29 @@ impl Plugin for UnderwaterFogPlugin {
             .add_systems(Render, prepare_fog_pipelines.in_set(RenderSystems::Prepare))
             .add_systems(
                 Core3d,
-                (
-                    // Above water: after the opaque geometry and the below-water
-                    // translucency it fogs, and before the water surface, whose
-                    // refraction sample is a copy of what this pass has just fogged.
-                    // That is where the sea's colour comes from.
-                    water_haze_above_system
-                        .after(crate::transparency::PreWaterPass)
-                        .before(bevy::pbr::main_transmissive_pass_3d),
-                    // Submerged: after everything, so the fog covers the translucent
-                    // content drawn after the water as well as the water itself.
-                    water_haze_submerged_system
-                        .after(bevy::core_pipeline::core_3d::main_transparent_pass_3d),
-                )
+                // Straight after the opaque geometry it fogs, and before everything
+                // that is drawn over it: the pre-water translucency, the water
+                // surface — whose refraction sample is a copy of what this pass has
+                // just fogged, which is where the sea's colour comes from — and the
+                // transparent phase. That is where the reference runs it too, over
+                // its deferred render and ahead of its water and alpha pools, and it
+                // is what leaves each translucent surface to fog itself by its own
+                // distance rather than by the distance of whatever stands behind it
+                // (`viewer-underwater-fog-swallows-translucency`).
+                //
+                // One pass for both eye states: which side of the surface the eye is
+                // on changes only where the view ray enters the water, which the
+                // shader works out per fragment.
+                water_haze_system
+                    .after(bevy::core_pipeline::core_3d::main_opaque_pass_3d)
+                    // …and after the sky backdrops, which are drawn early exactly so
+                    // that this pass fogs them: a backdrop writes no depth, so the
+                    // pixel it paints still reads empty, which this measures out to
+                    // the camera's far clip — how the reference makes clouds
+                    // disappear under the sea.
+                    .after(crate::transparency::SkyBackdropPass)
+                    .before(crate::transparency::PreWaterPass)
+                    .before(bevy::pbr::main_transmissive_pass_3d)
                     .in_set(Core3dSystems::MainPass)
                     .in_set(UnderwaterFogPass),
             );
@@ -367,21 +358,6 @@ struct FogPipelineKey {
     format: TextureFormat,
     /// The colour attachment's MSAA sample count.
     samples: u32,
-    /// Which eye state this pipeline fogs for.
-    half: HazeHalf,
-}
-
-/// Which eye state a haze pipeline is specialized for. One shader with an `#ifdef`,
-/// as the reference is one shader with an `above_water` uniform, but the two run at
-/// different points in the frame and so need pipelines of their own.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-enum HazeHalf {
-    /// The eye is **above** the surface: fog before the water is drawn, so the water
-    /// refracts a fogged scene.
-    Above,
-    /// The eye is **submerged**: fog after everything, so the fog is the medium the
-    /// whole picture is seen through.
-    Submerged,
 }
 
 impl SpecializedRenderPipeline for UnderwaterFogPipeline {
@@ -389,21 +365,11 @@ impl SpecializedRenderPipeline for UnderwaterFogPipeline {
 
     fn specialize(&self, key: Self::Key) -> RenderPipelineDescriptor {
         RenderPipelineDescriptor {
-            label: Some(
-                match key.half {
-                    HazeHalf::Above => "water_haze_above_pipeline",
-                    HazeHalf::Submerged => "water_haze_submerged_pipeline",
-                }
-                .into(),
-            ),
+            label: Some("water_haze_pipeline".into()),
             layout: vec![self.layout.clone()],
             vertex: self.fullscreen_shader.to_vertex_state(),
             fragment: Some(FragmentState {
                 shader: FOG_SHADER_HANDLE,
-                shader_defs: match key.half {
-                    HazeHalf::Above => vec!["WATER_HAZE_ABOVE".into()],
-                    HazeHalf::Submerged => vec![],
-                },
                 targets: vec![Some(ColorTargetState {
                     format: key.format,
                     // The reference's own blend for this pass: `(ONE, SOURCE_ALPHA)`,
@@ -436,14 +402,9 @@ impl SpecializedRenderPipeline for UnderwaterFogPipeline {
     }
 }
 
-/// The specialized pipeline ids for a view — one per eye state.
+/// The specialized pipeline id for a view.
 #[derive(Component)]
-struct UnderwaterFogPipelineId {
-    /// Runs before the water, and fogs only when the eye is above the surface.
-    above: CachedRenderPipelineId,
-    /// Runs after everything, and fogs only when the eye is under the surface.
-    submerged: CachedRenderPipelineId,
-}
+struct UnderwaterFogPipelineId(CachedRenderPipelineId);
 
 /// Specialize the haze pipeline for each view's target format.
 fn prepare_fog_pipelines(
@@ -454,71 +415,45 @@ fn prepare_fog_pipelines(
     views: Query<(Entity, &ExtractedView, &Msaa), With<ExtractedCamera>>,
 ) {
     for (entity, view, msaa) in &views {
-        let key = |half| FogPipelineKey {
+        let key = FogPipelineKey {
             format: view.target_format,
             samples: msaa.samples(),
-            half,
         };
-        commands.entity(entity).insert(UnderwaterFogPipelineId {
-            above: pipelines.specialize(&pipeline_cache, &pipeline, key(HazeHalf::Above)),
-            submerged: pipelines.specialize(&pipeline_cache, &pipeline, key(HazeHalf::Submerged)),
-        });
+        commands
+            .entity(entity)
+            .insert(UnderwaterFogPipelineId(pipelines.specialize(
+                &pipeline_cache,
+                &pipeline,
+                key,
+            )));
     }
 }
 
-/// The water-haze pass: fog every pixel that lies under the water surface, before
-/// the water itself is drawn.
+/// The water-haze pass: fog every pixel of the **opaque** scene that lies under the
+/// water surface, straight after that scene is drawn and before anything is drawn
+/// over it.
 ///
 /// This is the reference's `class3/deferred/waterHazeF.glsl`, which likewise runs
-/// before its water pool: it is what gives the sea its colour, because the surface
-/// shows a *sample of this fogged scene* rather than a tint of its own. It fogs from
-/// either side of the surface — an eye above the water sees a fogged sea floor
-/// through the surface, an eye under it sees the fogged world around it — the
-/// difference being only where the ray enters the water, which the shader works out
-/// per fragment.
+/// over its deferred render and before its water pool: it is what gives the sea its
+/// colour, because the surface shows a *sample of this fogged scene* rather than a
+/// tint of its own. It fogs from either side of the surface — an eye above the water
+/// sees a fogged sea floor through the surface, an eye under it sees the fogged world
+/// around it — the difference being only where the ray enters the water, which the
+/// shader works out per fragment.
 ///
-/// What it deliberately does not fog: anything drawn after it. Above water that is
-/// the water surface (which shows the fogged scene through the refraction sample
-/// instead) and above-water translucency (correctly unfogged); submerged it is the
-/// surface (which fogs itself, as the reference's underwater surface shader does)
-/// and the pre-water translucency, which the reference fogs in its alpha shaders and
-/// we do not yet.
-fn water_haze_above_system(
-    view: ViewQuery<(
-        &ViewTarget,
-        &DynamicUniformIndex<UnderwaterFog>,
-        &UnderwaterFogPipelineId,
-        &ViewDepthTexture,
-    )>,
-    pipeline_cache: Res<PipelineCache>,
-    pipeline_res: Res<UnderwaterFogPipeline>,
-    uniforms: Res<ComponentUniforms<UnderwaterFog>>,
-    mut ctx: RenderContext,
-) {
-    let (view_target, fog_index, pipeline_id, view_depth) = view.into_inner();
-    draw_haze(
-        "water_haze_above",
-        pipeline_id.above,
-        view_target,
-        fog_index,
-        view_depth,
-        &pipeline_cache,
-        &pipeline_res,
-        &uniforms,
-        &mut ctx,
-    );
-}
-
-/// The **submerged** haze pass: after every other pass of the main pass, so the fog
-/// is applied to the whole picture — the terrain and objects, the translucent content
-/// drawn after the water (the cloud dome most visibly), and the water surface itself,
-/// whose underside the reference fogs by exactly the distance the depth buffer here
-/// gives.
+/// What it deliberately does not fog: anything drawn after it, which is everything
+/// translucent, plus the water surface. Each of those fogs **itself**, per fragment,
+/// through the shared [`sl_client_bevy::water_fog`] module — because none of them
+/// writes depth, so none of them is in the buffer this pass reads, and fogging them
+/// from it would measure each by the distance of whatever stands behind it. Where
+/// that is the void the shader substitutes the camera's far clip, four kilometres of
+/// water, and the surface was erased outright
+/// (`viewer-underwater-fog-swallows-translucency`).
 ///
-/// Still inside the main pass rather than a post-process, because under MSAA the
+/// Runs inside the main pass rather than as a post-process, because under MSAA the
 /// resolved texture a post-process would read and rewrite is discarded by the next
 /// resolve; blending into the attachment is what actually reaches the frame.
-fn water_haze_submerged_system(
+fn water_haze_system(
     view: ViewQuery<(
         &ViewTarget,
         &DynamicUniformIndex<UnderwaterFog>,
@@ -532,8 +467,7 @@ fn water_haze_submerged_system(
 ) {
     let (view_target, fog_index, pipeline_id, view_depth) = view.into_inner();
     draw_haze(
-        "water_haze_submerged",
-        pipeline_id.submerged,
+        pipeline_id.0,
         view_target,
         fog_index,
         view_depth,
@@ -544,15 +478,13 @@ fn water_haze_submerged_system(
     );
 }
 
-/// Draw one haze pass: bind the fog uniform and the main-pass depth, and blend a
-/// fullscreen triangle over the scene. Shared by both eye states, which differ only
-/// in the pipeline (and so the shader branch) and in where in the frame they run.
+/// Draw the haze pass: bind the fog uniform and the main-pass depth, and blend a
+/// fullscreen triangle over the scene.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the two callers are render systems whose params this simply forwards"
+    reason = "the caller is a render system whose params this simply forwards"
 )]
 fn draw_haze(
-    label: &str,
     pipeline_id: CachedRenderPipelineId,
     view_target: &ViewTarget,
     fog_index: &DynamicUniformIndex<UnderwaterFog>,
@@ -562,6 +494,8 @@ fn draw_haze(
     uniforms: &ComponentUniforms<UnderwaterFog>,
     ctx: &mut RenderContext,
 ) {
+    /// The debug label the pass, its bind group and its pipeline share.
+    const LABEL: &str = "water_haze";
     let Some(pipeline) = pipeline_cache.get_render_pipeline(pipeline_id) else {
         return;
     };
@@ -570,7 +504,7 @@ fn draw_haze(
     };
 
     let bind_group = ctx.render_device().create_bind_group(
-        Some(label),
+        Some(LABEL),
         &pipeline_cache.get_bind_group_layout(&pipeline_res.layout),
         &BindGroupEntries::sequential((
             uniform_binding.clone(),
@@ -583,7 +517,7 @@ fn draw_haze(
     );
 
     let pass_descriptor = RenderPassDescriptor {
-        label: Some(label),
+        label: Some(LABEL),
         // The main pass's own colour attachment, loaded: this blends into the scene
         // being drawn (and, under MSAA, into the multisampled texture that *is* the
         // scene until it resolves), rather than reading and rewriting a resolved copy
@@ -605,10 +539,11 @@ mod tests {
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
 
-    use super::{UnderwaterFog, modified_water_fog_density, update_underwater_fog};
+    use super::{UnderwaterFog, update_underwater_fog};
     use crate::environment::EnvironmentState;
     use crate::render_overrides::RenderOverrides;
     use crate::water::WaterLevel;
+    use crate::water_fog::{WaterFogSettings, update_water_fog_settings};
     use crate::world_api::ViewerCamera;
 
     /// A fog density is the expected one, to within a relative tolerance that leaves
@@ -636,6 +571,7 @@ mod tests {
         app.init_resource::<EnvironmentState>()
             .init_resource::<WaterLevel>()
             .init_resource::<RenderOverrides>()
+            .init_resource::<WaterFogSettings>()
             .add_systems(Update, update_underwater_fog);
 
         // This frame's pose, as `position_camera` just wrote it.
@@ -699,6 +635,7 @@ mod tests {
         app.init_resource::<EnvironmentState>()
             .init_resource::<WaterLevel>()
             .init_resource::<RenderOverrides>()
+            .init_resource::<WaterFogSettings>()
             .add_systems(Update, update_underwater_fog);
 
         let far = 4096.0;
@@ -731,48 +668,6 @@ mod tests {
         Ok(())
     }
 
-    /// Above water the frame's density is the density, whatever the modifier says —
-    /// the modifier only applies to a submerged eye.
-    #[test]
-    fn above_water_the_density_is_untouched() {
-        assert_density(modified_water_fog_density(2.0, 0.25, false), 2.0);
-        // Including the value that would otherwise need the negative-base rescue:
-        // out of the water there is no `powf` to go non-real.
-        assert_density(modified_water_fog_density(-2.0, 0.25, false), -2.0);
-    }
-
-    /// A non-positive modifier is the reference's own "no modification" case
-    /// (`underwater && underwater_fog_mod > 0.0f`), submerged or not.
-    #[test]
-    fn a_non_positive_modifier_is_untouched() {
-        assert_density(modified_water_fog_density(2.0, 0.0, true), 2.0);
-        assert_density(modified_water_fog_density(2.0, -1.0, true), 2.0);
-    }
-
-    /// The ordinary submerged case: the density raised to the modifier, with the
-    /// modifier clamped to the reference's `[0, 10]`.
-    #[test]
-    fn submerged_the_density_is_raised_to_the_modifier() {
-        assert_density(modified_water_fog_density(4.0, 0.5, true), 2.0);
-        // 16 clamps to 10, not 16 — `2^10`, not `2^16`.
-        assert_density(modified_water_fog_density(2.0, 16.0, true), 1024.0);
-    }
-
-    /// BUG-233797 / BUG-233798: a negative density raised to a non-integral power is
-    /// not a real number, and the `NaN` `powf` returns would reach the uniform and
-    /// black out the whole screen. The reference forces the density to `1.0` in that
-    /// case; so does this.
-    #[test]
-    fn a_negative_density_never_yields_a_non_real_result() {
-        assert_density(modified_water_fog_density(-2.0, 0.25, true), 1.0);
-        // An *integral* modifier needs no rescue — the power is real, and the
-        // reference lets it through.
-        assert_density(modified_water_fog_density(-2.0, 2.0, true), 4.0);
-        // Integrality is tested after the clamp, as in the reference: 10.5 clamps to
-        // 10, which is integral, so this is a plain (real) power, not a rescue.
-        assert_density(modified_water_fog_density(-2.0, 10.5, true), 1024.0);
-    }
-
     /// The end-to-end shape of that bug: a region whose water frame carries a
     /// negative density and a fractional modifier, with the eye under the surface.
     /// The uniform the fog shader reads must be a real number.
@@ -793,7 +688,14 @@ mod tests {
         app.insert_resource(environment)
             .init_resource::<WaterLevel>()
             .init_resource::<RenderOverrides>()
-            .add_systems(Update, update_underwater_fog);
+            .init_resource::<WaterFogSettings>()
+            // The whole chain, because what this pins is that a hostile water frame
+            // cannot reach the shader: the settings resolve the density, and the
+            // camera's uniform takes the one its eye state calls for.
+            .add_systems(
+                Update,
+                (update_water_fog_settings, update_underwater_fog).chain(),
+            );
 
         // Below the default water level: the eye is submerged, so the modifier
         // applies.
