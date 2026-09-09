@@ -19,7 +19,10 @@ use sl_client_bevy::{
 
 /// One of the four fixed times of day the World ▸ Environment menu offers —
 /// the reference viewer's Sunrise / Midday / Sunset / Midnight presets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// Serialisable because the menu's pin is part of the personal environment the
+/// account keeps across a relog (`EnvironmentPersistAcrossLogin`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum FixedSky {
     /// Linden's `A-6AM` (Sunrise).
     Sunrise,

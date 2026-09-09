@@ -106,7 +106,7 @@ pub use sl_proto::{
     RegionInfoUpdate, RegionLimits, RegionLocalObjectId, RegionLocalParcelId, RegionName,
     RegionTerrainComposition, RegionTerrainUpdate, Reliability, RenderMaterialEntry,
     RenderMaterialRef, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation,
-    SaleInfo, SaleType, ScopedObjectId, ScopedParcelId, ScriptCompileError, ScriptControl,
+    SaleInfo, SaleType, Scale, ScopedObjectId, ScopedParcelId, ScriptCompileError, ScriptControl,
     ScriptControlAction, ScriptDialog, ScriptLanguage, ScriptPermissionRequest, ScriptPermissions,
     ScriptTarget, ScriptTeleportRequest, ScriptUploadLocation, SculptData, SculptOrMeshKey,
     SequenceNumber, ServerHistoryMessage, SetDisplayNameReply, SettingsKind, SimulatorFeatures,
@@ -119,7 +119,7 @@ pub use sl_proto::{
     Wearable, WearableType, WireError, XferId, avatar_texture, azimuth_altitude_to_rotation,
     decode_particle_system, decode_texture_anim, decode_texture_entry, encode_texture_entry,
     environment_asset_from_bytes, grid_to_handle, group_powers, handle_to_global, handle_to_grid,
-    particle_pattern, pcode, sim_access, texture_anim_mode,
+    particle_pattern, pcode, rotation_to_azimuth_altitude, sim_access, texture_anim_mode,
 };
 #[doc(no_inline)]
 pub use sl_proto::{Asset, AssetType, ImageCodec, Texture, TransferStatus};

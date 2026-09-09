@@ -516,7 +516,18 @@ impl Plugin for ViewerWorldPlugins {
                 // shadow phases render from it. Nested into one tuple to stay within
                 // Bevy's per-tuple system limit.
                 (
+                    // Mirror the manual transition time into the state, and
+                    // bring back the personal environment this account saved,
+                    // before anything can change either.
+                    crate::environment::sync_environment_settings,
+                    crate::environment::restore_saved_environment,
                     request_environment,
+                    // The parcel the agent stands on, and its own environment
+                    // (the reference's ENV_PARCEL). Before the ingest, so a
+                    // reply that lands this frame is matched against the parcel
+                    // the agent is on now.
+                    crate::environment::track_agent_parcel,
+                    crate::environment::request_parcel_environment,
                     ingest_environment,
                     // Fetch + swap in a pinned Modern (`KNOWN_SKY_*`) sky once its
                     // asset decodes; after `ingest_environment` so the shared
@@ -531,6 +542,11 @@ impl Plugin for ViewerWorldPlugins {
                     // Last of the four so the sky it publishes is the one this
                     // frame settled on.
                     crate::environment::apply_rlv_environment,
+                    // Advance whichever manual cross-fade is running, and save
+                    // the personal environment whenever it settles on something
+                    // new. Last, so both see the frame's final environment.
+                    crate::environment::advance_environment_transition,
+                    crate::environment::persist_saved_environment,
                 ),
                 // Trigger our own avatar's server-side bake so P14 has bakes to fetch.
                 drive_server_bake,

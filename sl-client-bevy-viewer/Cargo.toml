@@ -191,6 +191,7 @@ sl-viewer-asset-editors = { workspace = true }
 sl-viewer-audio = { workspace = true }
 sl-viewer-chat = { workspace = true }
 sl-viewer-edit = { workspace = true }
+sl-viewer-environment = { workspace = true }
 sl-viewer-inventory = { workspace = true }
 sl-viewer-kit = { workspace = true }
 sl-viewer-map = { workspace = true }

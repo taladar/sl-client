@@ -422,6 +422,13 @@ static ENVIRONMENT_MENU: MenuDef = MenuDef {
                 .checked_when(ENV_SHARED_ACTIVE)
                 .enabled_when(CAN_CHANGE_ENVIRONMENT),
         ),
+        MenuItemDef::Separator,
+        // The window that edits the same local layer the presets above pin, so
+        // it is gated on the same `@setenv` restriction they are.
+        MenuItemDef::Command(
+            MenuCommand::new("Personal Lighting…", "toggle-personal-lighting")
+                .enabled_when(CAN_CHANGE_ENVIRONMENT),
+        ),
     ],
 };
 
@@ -1045,11 +1052,24 @@ fn handle_top_menu_actions(
 ) {
     use crate::environment::FixedEnvironment;
     use crate::sky_presets::FixedSky;
+    // Whether picking the environment already pinned reverts to the shared one
+    // (`EnvironmentRepeatedTogglesShared`). Read once, before the loop, because
+    // it is the same answer for every action in the batch.
+    let toggles_shared = crate::environment::repeated_toggles_shared(Some(&settings));
     // The World ▸ Environment picks share one shape: pin a fixed environment (or
     // restore the shared environment) on the environment state.
     let set_fixed = |environment: &mut Option<ResMut<crate::environment::EnvironmentState>>,
                      fixed: Option<FixedEnvironment>| {
         if let Some(environment) = environment {
+            // Picking what is already pinned un-pins it, so each entry — and the
+            // shortcut on it — is a toggle rather than a one-way switch. Off by
+            // default, as in the reference: a menu that does the opposite of
+            // what it says when clicked twice has to be asked for.
+            let fixed = if toggles_shared && fixed.is_some() && environment.fixed() == fixed {
+                None
+            } else {
+                fixed
+            };
             environment.set_fixed(fixed);
         }
     };
@@ -1286,6 +1306,13 @@ fn handle_top_menu_actions(
                 );
             }
             "env-shared" => set_fixed(&mut environment, None),
+            "toggle-personal-lighting" => {
+                toggle_floater(
+                    &floaters,
+                    &mut panels,
+                    crate::personal_lighting::PERSONAL_LIGHTING_FLOATER_ID,
+                );
+            }
             "toggle-rlv-console" => {
                 toggle_floater(
                     &floaters,
@@ -1499,6 +1526,7 @@ mod tests {
                 "env-modern-midnight",
             ),
             ("World > Environment".to_owned(), "env-shared"),
+            ("World > Environment".to_owned(), "toggle-personal-lighting"),
             ("Build".to_owned(), "toggle-build-tools"),
             ("Build".to_owned(), "undo-objects"),
             ("Build".to_owned(), "redo-objects"),

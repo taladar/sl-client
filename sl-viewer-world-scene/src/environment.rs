@@ -20,6 +20,8 @@ use sl_client_bevy::{
     AssetKey, Command, DayCycle, DayCycleFrame, EnvironmentAsset, EnvironmentSettings, SkySettings,
     SlCommand, SlEvent, SlSessionEvent, Uuid, WaterSettings,
 };
+use sl_settings::SettingValue;
+use sl_viewer_settings::ViewerSettings;
 
 use sl_viewer_world_api::rlv::{RlvEnvironmentRequest, RlvEnvironmentSlot};
 
@@ -29,7 +31,7 @@ use crate::sky_presets::FixedSky;
 /// A World ▸ Environment menu selection: a time of day
 /// ([`FixedSky`]) within one of three groups.
 /// `None` on [`EnvironmentState`] means the region's shared environment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum FixedEnvironment {
     /// The region / parcel's *own* EEP day cycle, frozen at this time (fixed sun,
     /// the region's palette) — [`FixedSky::day_position`].
@@ -61,7 +63,7 @@ impl FixedEnvironment {
 /// identifiable by its contents: two assets can hold the same frame, and a
 /// script's edited sky holds no asset at all. `None` is that last case, and it
 /// is what the reference's null asset id means too.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LocalTrack<T> {
     /// The settings asset this track was loaded from, or `None` for settings
     /// nothing in inventory names — a `@setenv_*` edit, or a sampled frame.
@@ -82,7 +84,7 @@ pub struct LocalTrack<T> {
 /// the fixed sky and water, because `DayInstance::setDay` resets both and lets
 /// the cycle animate them — which is why the reference's sky and water combos
 /// fall back to showing "Day-cycle based" after a day is picked.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct LocalEnvironment {
     /// A whole day cycle, replacing the shared one.
     day: Option<LocalTrack<Box<DayCycle>>>,
@@ -157,9 +159,9 @@ pub(crate) enum EnvironmentSource {
     /// The whole-region environment (a `parcel_id` of `-1`).
     Region,
     /// A specific parcel's environment override. Never the source of
-    /// [`EnvironmentState::shared`]: the reference viewer keeps a parcel
-    /// override in its own `ENV_PARCEL` layer, above (not instead of) the
-    /// region's `ENV_REGION` — see [`EnvironmentState::ingest_reply`].
+    /// [`EnvironmentState::shared`]: a parcel override lives in its own layer,
+    /// above (not instead of) the region's — see
+    /// [`EnvironmentState::ingest_parcel`].
     Parcel,
 }
 
@@ -183,6 +185,130 @@ const MAX_ENV_ATTEMPTS: u32 = 12;
 
 /// Seconds between environment-request retries while a request is outstanding.
 const ENV_RETRY_INTERVAL: f32 = 3.0;
+
+/// The settings section the environment's own knobs live under.
+pub const ENVIRONMENT_SECTION: &[&str] = &["environment"];
+
+/// How long a *manual* environment change cross-fades for, in seconds — the
+/// reference's `FSEnvironmentManualTransitionTime`. `0.0` (the default) is an
+/// instant cut, which is what the viewer did before there was a knob.
+pub const SETTING_TRANSITION_TIME: &str = "EnvironmentManualTransitionTime";
+
+/// Whether the personal (local) environment is restored at the next login —
+/// the reference's `EnvironmentPersistAcrossLogin`.
+pub const SETTING_PERSIST_ACROSS_LOGIN: &str = "EnvironmentPersistAcrossLogin";
+
+/// Whether picking the environment preset that is *already* pinned reverts to
+/// the shared environment — the reference's `FSRepeatedEnvTogglesShared`, which
+/// makes each World ▸ Environment entry (and its shortcut) a toggle rather than
+/// a one-way pin.
+pub const SETTING_REPEATED_TOGGLES_SHARED: &str = "EnvironmentRepeatedTogglesShared";
+
+/// Where the saved personal environment is kept: one account-scoped setting
+/// holding [`SavedEnvironment`] as JSON.
+///
+/// Hidden from the raw debug-settings editor because it is a serialised blob,
+/// not a knob — the same treatment window geometry and table sort orders get.
+const SETTING_SAVED_ENVIRONMENT: &str = "SavedPersonalEnvironment";
+
+/// Declare the environment's own settings: the two lifecycle toggles, the
+/// manual transition time, and the hidden slot the personal environment is
+/// saved in.
+pub fn register_settings(settings: &mut ViewerSettings) {
+    settings.register_in(
+        ENVIRONMENT_SECTION,
+        SETTING_TRANSITION_TIME,
+        SettingValue::F32(0.0),
+        "Seconds to blend between sky/water settings when the environment is changed by hand. \
+         0 is immediate.",
+    );
+    settings.register_in(
+        ENVIRONMENT_SECTION,
+        SETTING_PERSIST_ACROSS_LOGIN,
+        SettingValue::Bool(true),
+        "Restore the personal (local) environment at the next login.",
+    );
+    settings.register_in(
+        ENVIRONMENT_SECTION,
+        SETTING_REPEATED_TOGGLES_SHARED,
+        SettingValue::Bool(false),
+        "Picking the environment preset that is already pinned reverts to the shared \
+         (region) environment.",
+    );
+    settings.register_hidden_in(
+        ENVIRONMENT_SECTION,
+        SETTING_SAVED_ENVIRONMENT,
+        SettingValue::String(String::new()),
+        "The personal environment saved for this account, as JSON. Written by the viewer.",
+    );
+}
+
+/// Whether the environment preset that is already pinned reverts to the shared
+/// environment when picked again ([`SETTING_REPEATED_TOGGLES_SHARED`]).
+#[must_use]
+pub fn repeated_toggles_shared(settings: Option<&ViewerSettings>) -> bool {
+    settings.is_some_and(|settings| {
+        settings
+            .store()
+            .get_bool(SETTING_REPEATED_TOGGLES_SHARED)
+            .unwrap_or(false)
+    })
+}
+
+/// The personal environment as it is written to the account: the menu's pin and
+/// the three local tracks, which together are everything "Use Shared
+/// Environment" would throw away.
+///
+/// The *shared* environment is deliberately not part of it — that is the grid's
+/// to send, and a region may well have changed its own since the last session.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+struct SavedEnvironment {
+    /// The World ▸ Environment pin, if one was in force.
+    fixed: Option<FixedEnvironment>,
+    /// The local layer's three tracks.
+    local: LocalEnvironment,
+}
+
+/// A parcel-environment request in flight: which parcel it asks about, and the
+/// retry clock that keeps asking until the grid answers.
+///
+/// Separate from the region's request because both can be outstanding at once —
+/// walking across a parcel line during a region handshake does exactly that —
+/// and a reply to one must not be taken for a reply to the other.
+#[derive(Debug, Clone, Copy)]
+struct ParcelRequest {
+    /// The parcel being asked about, as the grid numbers them in this region.
+    parcel_id: i32,
+    /// How many attempts have gone out for this parcel.
+    attempts: u32,
+    /// The earliest time (`Time::elapsed_secs`) the next retry may fire.
+    next_retry_at: f32,
+}
+
+/// A cross-fade from the environment that was rendering to the one just
+/// selected — the reference's `LLSettingsBlender`, driven by
+/// [`SETTING_TRANSITION_TIME`].
+///
+/// Only *manual* changes start one. A grid reply is not a transition: the
+/// region's own environment arriving (or changing under the agent) is not
+/// something the user did, and the reference blends those on its own schedule.
+#[derive(Debug, Clone)]
+struct EnvironmentTransition {
+    /// The environment that was on screen when the change was made.
+    from: Box<EnvironmentSettings>,
+    /// Seconds elapsed since the change.
+    elapsed: f32,
+    /// Seconds the fade runs for; always `> 0.0` (a zero-length fade is no
+    /// transition at all and is never recorded).
+    duration: f32,
+}
+
+impl EnvironmentTransition {
+    /// How far along the fade is, `0.0..=1.0`.
+    fn fraction(&self) -> f32 {
+        (self.elapsed / self.duration).clamp(0.0, 1.0)
+    }
+}
 
 /// The viewer's current environment: the sky / water / day-cycle settings the
 /// later rendering phases draw from, plus where they came from.
@@ -231,6 +357,42 @@ pub struct EnvironmentState {
     /// stale one is ignored after the selection changes. Until it resolves, a
     /// Modern selection renders the region's cycle at that time as a placeholder.
     modern_sky: Option<(FixedSky, SkySettings)>,
+    /// The **parcel** the agent stands on has its own environment — the
+    /// reference's `ENV_PARCEL`, which sits above the region's and below the
+    /// local one (`LLEnvironment::recordEnvironment`, the `mParcelId !=
+    /// INVALID_PARCEL_ID` branch). `None` when the parcel has no override, which
+    /// is the common case and what most of a region is.
+    ///
+    /// Only the day cycle and its length / offset come from here. Track
+    /// altitudes stay the region's: the reference assigns `mTrackAltitudes` in
+    /// the *region* branch only, so a parcel cannot move the sky-track bands.
+    parcel: Option<Box<EnvironmentSettings>>,
+    /// The parcel the agent is standing on, as the grid numbers them within this
+    /// region, or `None` before one is known. What an arriving parcel reply is
+    /// matched against — a reply for a parcel the agent has since walked off is
+    /// not this parcel's environment.
+    parcel_id: Option<i32>,
+    /// The environment version last seen for [`Self::parcel_id`] — the parcel's
+    /// `parcel_environment_version`. A change to it means somebody edited that
+    /// parcel's environment while the agent stood on it, which the reference
+    /// re-requests on.
+    parcel_env_version: i32,
+    /// The parcel-environment request outstanding, if any.
+    parcel_req: Option<ParcelRequest>,
+    /// Seconds a *manual* environment change cross-fades over, mirrored from
+    /// [`SETTING_TRANSITION_TIME`] by [`sync_environment_settings`]. Zero — the
+    /// declared default — is an instant cut.
+    ///
+    /// Held here rather than read at the point of use because the transition has
+    /// to start in [`set_fixed`](Self::set_fixed) and friends, which a floater or
+    /// a menu calls with nothing but `&mut EnvironmentState` in hand.
+    pub manual_transition_seconds: f32,
+    /// The cross-fade in flight, if any.
+    transition: Option<EnvironmentTransition>,
+    /// Whether the account's saved personal environment has been restored yet
+    /// (once per session, after the account settings load — see
+    /// [`restore_saved_environment`]).
+    restored: bool,
     /// Whether a region-environment request is still outstanding — the retry loop
     /// keeps re-requesting until the reply is ingested or `MAX_ENV_ATTEMPTS` is
     /// reached.
@@ -252,6 +414,13 @@ impl Default for EnvironmentState {
             fixed: None,
             local: LocalEnvironment::default(),
             modern_sky: None,
+            parcel: None,
+            parcel_id: None,
+            parcel_env_version: -1,
+            parcel_req: None,
+            manual_transition_seconds: 0.0,
+            transition: None,
+            restored: false,
             req_pending: false,
             req_attempts: 0,
             req_next_retry_at: 0.0,
@@ -281,6 +450,7 @@ impl EnvironmentState {
     /// shared (grid) environment with `None`. The reference's World ▸ Environment
     /// local fixed sky (`setEnvironment(ENV_LOCAL, …)`).
     pub fn set_fixed(&mut self, fixed: Option<FixedEnvironment>) {
+        self.begin_transition();
         self.fixed = fixed;
         // "Use Shared Environment" (`None`) is the reference's
         // `setSharedEnvironment`: the whole local layer goes, tracks a script
@@ -296,6 +466,45 @@ impl EnvironmentState {
             self.modern_sky = None;
         }
         self.apply();
+    }
+
+    /// Tell the environment which parcel the agent is standing on, and what that
+    /// parcel's environment version is — the reference's
+    /// `LLEnvironment::onParcelChange` plus the `environment_changed` re-request
+    /// `LLViewerParcelMgr` makes when a parcel's own version moves under a
+    /// standing agent.
+    ///
+    /// Stepping over a parcel line **drops the old parcel's override at once**
+    /// rather than keeping it until the new parcel answers. The alternative is a
+    /// sky belonging to the parcel behind you for as long as the round trip
+    /// takes, which is the one wrong answer available here: the region's
+    /// environment is always a defensible thing to draw, and another parcel's
+    /// never is.
+    pub fn set_agent_parcel(&mut self, parcel_id: Option<i32>, env_version: i32) {
+        if self.parcel_id == parcel_id && self.parcel_env_version == env_version {
+            return;
+        }
+        let moved = self.parcel_id != parcel_id;
+        self.parcel_id = parcel_id;
+        self.parcel_env_version = env_version;
+        if moved {
+            self.parcel = None;
+        }
+        self.parcel_req = parcel_id.map(|parcel_id| ParcelRequest {
+            parcel_id,
+            attempts: 0,
+            next_retry_at: 0.0,
+        });
+        if moved {
+            self.apply();
+        }
+    }
+
+    /// The parcel environment in force, if the parcel the agent stands on has
+    /// one — what a surface asking "is this parcel's sky its own" reads.
+    #[must_use]
+    pub fn parcel_environment(&self) -> Option<&EnvironmentSettings> {
+        self.parcel.as_deref()
     }
 
     /// The local environment layer — what a script and the preset combos have
@@ -316,6 +525,25 @@ impl EnvironmentState {
     /// same, since it animates the sky it replaces. A water frame is nobody
     /// else's track and leaves the pin standing.
     pub fn set_local(&mut self, local: EnvironmentAsset, source: Option<Uuid>) {
+        self.begin_transition();
+        self.install_local(local, source);
+    }
+
+    /// [`set_local`](Self::set_local) with **no** cross-fade, whatever the manual
+    /// transition time says — the reference's `TRANSITION_INSTANT`.
+    ///
+    /// This is what a live editor writes through. A fade is for *arriving* at an
+    /// environment somebody chose; a dragged slider is not an arrival, and
+    /// starting a fresh fade on every pixel of a drag would smear the preview a
+    /// frame or two behind the hand moving it, which is precisely the feedback
+    /// the editor exists to give.
+    pub fn set_local_instant(&mut self, local: EnvironmentAsset, source: Option<Uuid>) {
+        self.transition = None;
+        self.install_local(local, source);
+    }
+
+    /// The shared body of the two: install the asset in its track and recompose.
+    fn install_local(&mut self, local: EnvironmentAsset, source: Option<Uuid>) {
         if !matches!(local, EnvironmentAsset::Water(_)) {
             self.fixed = None;
             self.modern_sky = None;
@@ -327,8 +555,106 @@ impl EnvironmentState {
     /// Empty the local layer, falling back to whatever the menu has pinned
     /// (nothing, usually) and then to the shared environment.
     pub fn clear_local(&mut self) {
+        self.begin_transition();
         self.local = LocalEnvironment::default();
         self.apply();
+    }
+
+    /// The sky to render at `altitude` and day `position` — [`Self::settings`]
+    /// sampled, cross-faded with whatever was on screen while a manual change is
+    /// still fading in ([`SETTING_TRANSITION_TIME`]).
+    ///
+    /// Every renderer asks this rather than sampling `settings` itself, because
+    /// the fade is exactly the difference between "the settings in force" and
+    /// "what the frame should draw", and only one of those is a field.
+    #[must_use]
+    pub fn sky_at(&self, altitude: f32, position: f32) -> Option<SkySettings> {
+        let target = self.settings.blended_sky_settings(altitude, position);
+        let Some(transition) = &self.transition else {
+            return target;
+        };
+        match (
+            transition.from.blended_sky_settings(altitude, position),
+            target,
+        ) {
+            (Some(from), Some(target)) => Some(from.blend(&target, transition.fraction())),
+            // Nothing to fade from (or to): the destination is the answer.
+            (_, target) => target,
+        }
+    }
+
+    /// The water to render at day `position`, cross-faded like [`Self::sky_at`].
+    #[must_use]
+    pub fn water_at(&self, position: f32) -> Option<WaterSettings> {
+        let target = self.settings.blended_water_settings(position);
+        let Some(transition) = &self.transition else {
+            return target;
+        };
+        match (transition.from.blended_water_settings(position), target) {
+            (Some(from), Some(target)) => Some(from.blend(&target, transition.fraction())),
+            (_, target) => target,
+        }
+    }
+
+    /// Whether a manual cross-fade is still running — what
+    /// [`advance_environment_transition`] ticks, and what a test asserts on.
+    #[must_use]
+    pub const fn is_transitioning(&self) -> bool {
+        self.transition.is_some()
+    }
+
+    /// Start a cross-fade from what is on screen now, to be completed by
+    /// whichever change is about to be applied. A no-op while the transition
+    /// time is zero, which is the declared default.
+    fn begin_transition(&mut self) {
+        if self.manual_transition_seconds <= 0.0 {
+            self.transition = None;
+            return;
+        }
+        let from = Box::new(self.displayed_environment());
+        self.transition = Some(EnvironmentTransition {
+            from,
+            elapsed: 0.0,
+            duration: self.manual_transition_seconds,
+        });
+    }
+
+    /// Advance a running fade by `delta` seconds, ending it once it is done.
+    fn advance_transition(&mut self, delta: f32) {
+        let Some(transition) = &mut self.transition else {
+            return;
+        };
+        transition.elapsed += delta;
+        if transition.elapsed >= transition.duration {
+            self.transition = None;
+        }
+    }
+
+    /// What is being drawn right now: [`Self::settings`] as it stands, or — when
+    /// a fade is still running — a single-frame environment holding the frames
+    /// that fade has *reached*.
+    ///
+    /// Changing the environment twice in quick succession is the case this
+    /// exists for: taking `settings` as the new starting point would snap the
+    /// sky to the first change's destination before fading away from it, which
+    /// is a visible jump in the one place a fade was asked for. Pinning the
+    /// reached frames costs the altitude tracks for the length of the second
+    /// fade, which is the cheaper of the two artefacts by a wide margin.
+    fn displayed_environment(&self) -> EnvironmentSettings {
+        let mut displayed = self.settings.clone();
+        if self.transition.is_none() {
+            return displayed;
+        }
+        let position = crate::sky::day_position(self);
+        if let Some(sky) = self.sky_at(0.0, position) {
+            let name = sky.name.clone();
+            pin_sky_into(&mut displayed, sky, name);
+        }
+        if let Some(water) = self.water_at(position) {
+            let name = water.name.clone();
+            pin_water_into(&mut displayed, water, name);
+        }
+        displayed
     }
 
     /// Whether a **fixed sky** is in force locally rather than a running cycle —
@@ -391,24 +717,56 @@ impl EnvironmentState {
     /// ending the retry loop.
     ///
     /// A **parcel**-scoped reply is an override of the region's settings for one
-    /// parcel, not the region's settings; the reference viewer records it in a
-    /// separate `ENV_PARCEL` layer that sits *above* `ENV_REGION`
-    /// (`LLEnvironment::recordEnvironment`, `llenvironment.cpp:1874`) and never
-    /// touches the region layer with it. Treating one as the shared environment
-    /// would make a parcel override what "Use Shared Environment" restores, and
-    /// would cancel the region retry loop before the region's own settings ever
-    /// arrived. The viewer therefore leaves the shared environment (and the
-    /// request cycle) alone here; rendering the parcel layer belongs to the
-    /// environment-override work (`viewer-environment-personal-lighting`), which
-    /// is also what will first ask for a parcel-scoped environment.
+    /// parcel, not the region's settings, and goes to its own layer
+    /// ([`Self::ingest_parcel`]) — the reference's `ENV_PARCEL`, which sits
+    /// *above* `ENV_REGION` and never touches it
+    /// (`LLEnvironment::recordEnvironment`). Treating one as the shared
+    /// environment would make a parcel override what "Use Shared Environment"
+    /// restores, and would cancel the region retry loop before the region's own
+    /// settings ever arrived.
     fn ingest_reply(&mut self, settings: EnvironmentSettings) -> EnvironmentSource {
         let source = EnvironmentSource::of_reply(settings.parcel_id);
-        if matches!(source, EnvironmentSource::Region) {
-            self.ingest_shared(settings, source);
-            // The region's reply landed — stop the request/retry loop.
-            self.req_pending = false;
+        match source {
+            EnvironmentSource::Region | EnvironmentSource::Default => {
+                self.ingest_shared(settings, EnvironmentSource::Region);
+                // The region's reply landed — stop the request/retry loop.
+                self.req_pending = false;
+            }
+            EnvironmentSource::Parcel => self.ingest_parcel(settings),
         }
         source
+    }
+
+    /// Fold a **parcel**-scoped reply into the parcel layer.
+    ///
+    /// Two ways a reply is not an environment. It may be for a parcel the agent
+    /// has since walked off — the reference drops those too
+    /// (`parcel->getLocalID() != parcel_id`), and taking one would paint a
+    /// neighbour's sky over this parcel. Or it may be the grid's way of saying
+    /// *this parcel has no override*: the reference tests `!mDayCycle` and then
+    /// an empty water or ground-level track, and both arrive here as a day cycle
+    /// with empty tracks, because an absent `day_cycle` decodes to an empty one.
+    /// OpenSim sends exactly that (`ViewerEnvironment.DefaultToOSD` — an
+    /// `is_default` map with no `day_cycle`) for every parcel that has not set
+    /// its own.
+    fn ingest_parcel(&mut self, settings: EnvironmentSettings) {
+        if self.parcel_id != Some(settings.parcel_id) {
+            debug!(
+                "environment reply for parcel {} ignored: the agent is on {:?}",
+                settings.parcel_id, self.parcel_id
+            );
+            return;
+        }
+        // Answered, whichever way it went.
+        self.parcel_req = None;
+        let usable = !settings.day_cycle.water_track.is_empty()
+            && settings
+                .day_cycle
+                .sky_tracks
+                .first()
+                .is_some_and(|ground| !ground.is_empty());
+        self.parcel = usable.then(|| Box::new(settings));
+        self.apply();
     }
 
     /// Recompute the active [`Self::settings`] from the shared environment and
@@ -420,6 +778,21 @@ impl EnvironmentState {
         // track and cannot both), then a local water frame.
         self.settings = self.shared.clone();
         self.source = self.shared_source;
+        // The parcel's own environment, over the region's and under everything
+        // the user or a script has said. It supplies the day cycle and its
+        // length / offset and nothing else — the reference's
+        // `setEnvironment(ENV_PARCEL, dayCycle, dayLength, dayOffset, version)`
+        // — so the region keeps its track altitudes, which is what stops a
+        // parcel from moving the sky-track bands out from under an agent
+        // climbing through them.
+        if let Some(parcel) = &self.parcel {
+            self.settings.day_cycle = parcel.day_cycle.clone();
+            self.settings.day_length = parcel.day_length;
+            self.settings.day_offset = parcel.day_offset;
+            self.settings.parcel_id = parcel.parcel_id;
+            self.settings.env_version = parcel.env_version;
+            self.source = EnvironmentSource::Parcel;
+        }
         if let Some(day) = &self.local.day {
             self.settings.day_cycle = (*day.settings).clone();
         }
@@ -449,12 +822,8 @@ impl EnvironmentState {
         }
         if let Some(water) = &self.local.water {
             let name = water.settings.name.clone();
-            self.settings.day_cycle.water_track = vec![DayCycleFrame {
-                keyframe: 0.0,
-                name: name.clone(),
-            }];
-            self.settings.day_cycle.water_frames =
-                std::iter::once((name, water.settings.clone())).collect();
+            let settings = water.settings.clone();
+            pin_water_into(&mut self.settings, settings, name);
         }
 
         // Debug affordance: when a pinned day position (`SL_VIEWER_SKY_DAY_POSITION`)
@@ -481,11 +850,7 @@ impl EnvironmentState {
     /// following whichever cycle is in force. Shared by all three
     /// fixed-environment groups and by a local sky asset.
     fn pin_sky(&mut self, sky: SkySettings, name: String) {
-        self.settings.day_cycle.sky_tracks = vec![vec![DayCycleFrame {
-            keyframe: 0.0,
-            name: name.clone(),
-        }]];
-        self.settings.day_cycle.sky_frames = std::iter::once((name, sky)).collect();
+        pin_sky_into(&mut self.settings, sky, name);
     }
 
     /// The day cycle **in force** sampled (frozen) at `time`'s canonical
@@ -503,6 +868,179 @@ impl EnvironmentState {
             .blended_sky_settings(0.0, time.day_position())
             .unwrap_or_else(|| time.settings())
     }
+
+    /// The personal environment worth saving, or `None` when there is none —
+    /// nothing pinned and an empty local layer, which is what "Use Shared
+    /// Environment" leaves behind and must *not* come back at the next login.
+    fn saved_environment(&self) -> Option<SavedEnvironment> {
+        (self.fixed.is_some() || !self.local.is_empty()).then(|| SavedEnvironment {
+            fixed: self.fixed,
+            local: self.local.clone(),
+        })
+    }
+
+    /// Install a personal environment read back from the account, without a
+    /// cross-fade: there is nothing on screen yet to fade away from.
+    fn restore_environment(&mut self, saved: SavedEnvironment) {
+        self.fixed = saved.fixed;
+        self.local = saved.local;
+        // A pinned Modern sky has to be re-fetched; the placeholder stands
+        // until `resolve_modern_environment` gets its asset.
+        self.modern_sky = None;
+        self.transition = None;
+        self.apply();
+    }
+}
+
+/// Replace `settings`' sky schedule with a single `sky` frame pinned at
+/// keyframe 0 on the surface track — the upper altitude tracks empty out, so
+/// every altitude falls back to it, and the water keeps following whichever
+/// cycle is in force.
+fn pin_sky_into(settings: &mut EnvironmentSettings, sky: SkySettings, name: String) {
+    settings.day_cycle.sky_tracks = vec![vec![DayCycleFrame {
+        keyframe: 0.0,
+        name: name.clone(),
+    }]];
+    settings.day_cycle.sky_frames = std::iter::once((name, sky)).collect();
+}
+
+/// [`pin_sky_into`] for the water track.
+fn pin_water_into(settings: &mut EnvironmentSettings, water: WaterSettings, name: String) {
+    settings.day_cycle.water_track = vec![DayCycleFrame {
+        keyframe: 0.0,
+        name: name.clone(),
+    }];
+    settings.day_cycle.water_frames = std::iter::once((name, water)).collect();
+}
+
+/// Advance whichever manual cross-fade is running, and end it when it is done.
+///
+/// Reads before it writes on purpose: [`EnvironmentState`] is a change-detected
+/// resource, and a viewer that is not fading anything must not look to anything
+/// downstream as though its environment changed every frame.
+pub fn advance_environment_transition(time: Res<Time>, mut state: ResMut<EnvironmentState>) {
+    if state.transition.is_none() {
+        return;
+    }
+    state.advance_transition(time.delta_secs());
+}
+
+/// Mirror the environment's own settings into [`EnvironmentState`]: today the
+/// manual transition time, which has to be in hand at the moment a menu or a
+/// floater changes the environment.
+pub fn sync_environment_settings(
+    settings: Option<Res<ViewerSettings>>,
+    mut state: ResMut<EnvironmentState>,
+) {
+    let seconds = settings
+        .and_then(|settings| settings.store().get_f32(SETTING_TRANSITION_TIME).ok())
+        // A negative time is not a fade run backwards; it is a typo in a hand-
+        // edited settings file, and an instant cut is what it meant.
+        .map_or(0.0, |seconds| seconds.max(0.0));
+    // By bits: this is a write-on-change guard over a value copied verbatim from
+    // the settings store, not a measurement, so "the same float" is exactly what
+    // is being asked and a tolerance would be the wrong question.
+    if state.manual_transition_seconds.to_bits() != seconds.to_bits() {
+        state.manual_transition_seconds = seconds;
+    }
+}
+
+/// Restore the account's saved personal environment, once, after the account
+/// settings have loaded ([`SETTING_PERSIST_ACROSS_LOGIN`]).
+///
+/// The restore is marked done even when the setting is off or the slot is
+/// empty: the question "has this session restored yet" is about the session, not
+/// about whether anything was found, and re-asking it every frame would let a
+/// personal environment the user has since cleared come back.
+pub fn restore_saved_environment(
+    settings: Option<Res<ViewerSettings>>,
+    mut state: ResMut<EnvironmentState>,
+) {
+    if state.restored {
+        return;
+    }
+    let Some(settings) = settings else {
+        return;
+    };
+    if !settings.account_loaded() {
+        return;
+    }
+    state.restored = true;
+    if !settings
+        .store()
+        .get_bool(SETTING_PERSIST_ACROSS_LOGIN)
+        .unwrap_or(false)
+    {
+        return;
+    }
+    let saved = settings
+        .store()
+        .get_str(SETTING_SAVED_ENVIRONMENT)
+        .unwrap_or_default();
+    if saved.is_empty() {
+        return;
+    }
+    match serde_json::from_str::<SavedEnvironment>(saved) {
+        Ok(saved) => {
+            info!("restoring the personal environment saved for this account");
+            state.restore_environment(saved);
+        }
+        // A blob this viewer cannot read is a settings file from another
+        // version, not a reason to fail a login: the region's environment is a
+        // perfectly good fallback and the next save overwrites it.
+        Err(error) => warn!("saved personal environment could not be read: {error}"),
+    }
+}
+
+/// Write the personal environment to the account whenever it changes, so the
+/// next login can restore it ([`SETTING_PERSIST_ACROSS_LOGIN`]).
+///
+/// Gated on the resource's own change detection, so a still environment costs
+/// nothing; `Local` then remembers the last blob written, so a change that does
+/// not alter the *saved* part (a fade advancing, say) writes nothing either.
+pub fn persist_saved_environment(
+    state: Res<EnvironmentState>,
+    settings: Option<ResMut<ViewerSettings>>,
+    mut written: Local<Option<String>>,
+) {
+    if !state.is_changed() {
+        return;
+    }
+    let Some(mut settings) = settings else {
+        return;
+    };
+    // Before the account scope is loaded there is nowhere to write, and the
+    // restore has not run yet — saving now would persist the pre-restore state
+    // over the very environment about to come back.
+    if !settings.account_loaded() || !state.restored {
+        return;
+    }
+    if !settings
+        .store()
+        .get_bool(SETTING_PERSIST_ACROSS_LOGIN)
+        .unwrap_or(false)
+    {
+        return;
+    }
+    let encoded = match state
+        .saved_environment()
+        .as_ref()
+        .map(serde_json::to_string)
+    {
+        Some(Ok(encoded)) => encoded,
+        Some(Err(error)) => {
+            warn!("personal environment could not be saved: {error}");
+            return;
+        }
+        // Nothing personal in force: clear the slot rather than leave the last
+        // one behind, or "Use Shared Environment" would not survive a relog.
+        None => String::new(),
+    };
+    if written.as_ref() == Some(&encoded) {
+        return;
+    }
+    *written = Some(encoded.clone());
+    settings.set_account(SETTING_SAVED_ENVIRONMENT, SettingValue::String(encoded));
 }
 
 /// Resolve a pinned **Modern** environment selection: request its `KNOWN_SKY_*`
@@ -604,9 +1142,9 @@ pub fn resolve_local_environment_pick(
 /// silently drops the request and the sky / cloud / water stack is left on the
 /// legacy WindLight defaults forever (observed on aditi). Retrying until
 /// [`ingest_environment`] clears the pending flag closes that race — the same
-/// cap-not-ready-yet class of bug the terrain fetch hit. Parcels can override the
-/// region environment; the viewer asks for the whole-region settings here
-/// (`parcel_id: None`).
+/// cap-not-ready-yet class of bug the terrain fetch hit. This asks for the
+/// whole-region settings (`parcel_id: None`); the parcel the agent is standing
+/// on is asked about separately, by [`request_parcel_environment`].
 pub fn request_environment(
     time: Res<Time>,
     mut events: MessageReader<SlEvent>,
@@ -621,6 +1159,14 @@ pub fn request_environment(
             state.req_pending = true;
             state.req_attempts = 0;
             state.req_next_retry_at = 0.0;
+            // Parcel ids are region-local, so the one being stood on means
+            // nothing here any more — and neither does its environment. The
+            // next `SlAgentParcel` mirror re-asks for the new region's.
+            state.parcel = None;
+            state.parcel_id = None;
+            state.parcel_env_version = -1;
+            state.parcel_req = None;
+            state.apply();
         }
     }
 
@@ -648,22 +1194,99 @@ pub fn request_environment(
     commands.write(SlCommand(Command::RequestEnvironment { parcel_id: None }));
 }
 
+/// Mirror the parcel the agent is standing on into [`EnvironmentState`], so a
+/// step across a parcel line asks the grid for that parcel's environment.
+///
+/// The version is carried along with the id because a parcel's environment can
+/// change under a standing agent: the reference re-requests when
+/// `ParcelProperties` reports a different `parcel_environment_version`, and this
+/// is the same signal. A region that has switched per-parcel overrides *off*
+/// reports `-1` and no parcel is asked about at all, which saves a round trip
+/// per parcel line on most of OpenSim.
+pub fn track_agent_parcel(
+    agent: Option<Res<sl_client_bevy::SlAgentParcel>>,
+    mut state: ResMut<EnvironmentState>,
+) {
+    let Some(agent) = agent else {
+        // No session mirror (a headless world fold without the session plugin):
+        // there is no parcel to be standing on, and the region's environment is
+        // the whole of the answer.
+        return;
+    };
+    let parcel = agent.current.as_ref().filter(|parcel| {
+        parcel.region_allow_environment_override && parcel.parcel_environment_version >= 0
+    });
+    let version = parcel.map_or(-1, |parcel| parcel.parcel_environment_version);
+    let parcel_id = parcel.map(|parcel| parcel.local_id.get());
+    // Read before writing: this runs every frame and the parcel under an agent
+    // almost never changes, so touching the resource unconditionally would mark
+    // the environment changed on every one of them — and everything downstream
+    // that guards on `is_changed` (the personal-environment save, for one) would
+    // do its work forever.
+    if state.parcel_id == parcel_id && state.parcel_env_version == version {
+        return;
+    }
+    state.set_agent_parcel(parcel_id, version);
+}
+
+/// Request the environment of the parcel the agent is standing on, retrying on
+/// the same clock the region's request uses.
+///
+/// Its own system rather than an arm of [`request_environment`] because the two
+/// answer different questions and can be outstanding at once: the region's is
+/// started by a handshake and satisfied by a region-scoped reply, this one is
+/// started by a step across a parcel line and satisfied by a reply for *that*
+/// parcel.
+pub fn request_parcel_environment(
+    time: Res<Time>,
+    mut commands: MessageWriter<SlCommand>,
+    mut state: ResMut<EnvironmentState>,
+) {
+    let Some(request) = state.parcel_req else {
+        return;
+    };
+    let now = time.elapsed_secs();
+    if now < request.next_retry_at {
+        return;
+    }
+    if request.attempts >= MAX_ENV_ATTEMPTS {
+        warn!(
+            "parcel {} environment not received after {MAX_ENV_ATTEMPTS} attempts;              rendering the region's",
+            request.parcel_id
+        );
+        state.parcel_req = None;
+        return;
+    }
+    state.parcel_req = Some(ParcelRequest {
+        attempts: request.attempts.saturating_add(1),
+        next_retry_at: now + ENV_RETRY_INTERVAL,
+        ..request
+    });
+    debug!(
+        "requesting environment (EEP) settings for parcel {} (attempt {}/{MAX_ENV_ATTEMPTS})",
+        request.parcel_id,
+        request.attempts.saturating_add(1),
+    );
+    commands.write(SlCommand(Command::RequestEnvironment {
+        parcel_id: Some(request.parcel_id),
+    }));
+}
+
 /// Fold an incoming [`SlSessionEvent::Environment`] into [`EnvironmentState`],
 /// replacing the legacy default (or the previously ingested region environment)
-/// with the grid's settings. A parcel-scoped reply is logged and dropped rather
-/// than mistaken for the region's — see `EnvironmentState::ingest_reply`.
+/// with the grid's settings. A parcel-scoped reply goes to the parcel layer
+/// instead of the region's — see `EnvironmentState::ingest_reply`.
 pub fn ingest_environment(mut events: MessageReader<SlEvent>, mut state: ResMut<EnvironmentState>) {
     for event in events.read() {
         if let SlSessionEvent::Environment(settings) = &event.0 {
             let sky_count = settings.day_cycle.sky_frames.len();
             let water_count = settings.day_cycle.water_frames.len();
             match state.ingest_reply((**settings).clone()) {
-                // Kept out of the shared environment on purpose — see
-                // `EnvironmentState::ingest_reply`.
+                // Its own layer, above the region's — see
+                // `EnvironmentState::ingest_parcel`.
                 EnvironmentSource::Parcel => info!(
-                    "environment reply for parcel {} ignored: a parcel override is not the \
-                     region's shared environment ({sky_count} sky frame(s), \
-                     {water_count} water frame(s), cycle {:?})",
+                    "environment ingested (parcel {}): {sky_count} sky frame(s), \
+                     {water_count} water frame(s), cycle {:?}",
                     settings.parcel_id, settings.day_cycle.name,
                 ),
                 EnvironmentSource::Region | EnvironmentSource::Default => info!(
@@ -753,7 +1376,7 @@ mod tests {
 
     use super::{
         EnvironmentAsset, EnvironmentSettings, EnvironmentSource, EnvironmentState,
-        FixedEnvironment, SkySettings, Uuid,
+        FixedEnvironment, SavedEnvironment, SkySettings, Uuid,
     };
     use crate::sky_presets::FixedSky;
     use sl_client_bevy::WaterSettings;
@@ -798,6 +1421,9 @@ mod tests {
         );
     }
 
+    /// A parcel reply never becomes [`EnvironmentState::shared`], whatever else
+    /// it does — that field is the *grid region's* environment, and it is what
+    /// the parcel layer and the local layer are stacked on top of.
     #[test]
     fn a_parcel_reply_does_not_replace_the_region_environment() {
         let mut state = EnvironmentState::default();
@@ -830,8 +1456,194 @@ mod tests {
         assert_eq!(state.source, EnvironmentSource::Default);
     }
 
-    /// The other half of the bug: "Use Shared Environment" restores the region's
-    /// settings, never a parcel's override.
+    /// A parcel reply carrying a real environment: one sky frame on the ground
+    /// track and one water frame, which is the shape a parcel that has set its
+    /// own environment sends.
+    fn parcel_reply(parcel_id: i32, day_length: i32, frame: &str) -> EnvironmentSettings {
+        let mut settings = reply(parcel_id, day_length);
+        settings.day_cycle.name = frame.to_owned();
+        settings.day_cycle.sky_tracks = vec![vec![super::DayCycleFrame {
+            keyframe: 0.0,
+            name: frame.to_owned(),
+        }]];
+        settings.day_cycle.sky_frames = std::iter::once((
+            frame.to_owned(),
+            SkySettings::legacy_windlight_default(frame),
+        ))
+        .collect();
+        settings.day_cycle.water_track = vec![super::DayCycleFrame {
+            keyframe: 0.0,
+            name: frame.to_owned(),
+        }];
+        settings.day_cycle.water_frames =
+            std::iter::once((frame.to_owned(), WaterSettings::legacy_default(frame))).collect();
+        settings
+    }
+
+    /// **A parcel's own environment is what renders while the agent stands on
+    /// it** — the reference's `setEnvironment(ENV_PARCEL, …)`, above the region
+    /// and below anything the user has said.
+    #[test]
+    fn a_parcel_override_renders_over_the_region() {
+        let mut state = EnvironmentState::default();
+        assert_eq!(
+            state.ingest_reply(reply(-1, 1234)),
+            EnvironmentSource::Region
+        );
+        state.set_agent_parcel(Some(7), 3);
+
+        assert_eq!(
+            state.ingest_reply(parcel_reply(7, 900, "parcel-sky")),
+            EnvironmentSource::Parcel
+        );
+
+        assert!(
+            state
+                .settings
+                .day_cycle
+                .sky_frames
+                .contains_key("parcel-sky")
+        );
+        assert_eq!(
+            state.settings.day_length, 900,
+            "the parcel's own day length"
+        );
+        assert_eq!(state.source, EnvironmentSource::Parcel);
+        // And the region underneath it is untouched, so "Use Shared
+        // Environment" and a later region reply still mean the region.
+        assert_eq!(state.shared.day_length, 1234);
+    }
+
+    /// **A parcel with no override is not an environment.** OpenSim answers
+    /// every such parcel with an `is_default` map carrying no `day_cycle`, which
+    /// decodes to empty tracks — the reference's `!mDayCycle` and
+    /// `isTrackEmpty` arms, both of which clear the layer rather than render it.
+    /// Rendering it would paint an empty sky over most of a region.
+    #[test]
+    fn a_parcel_without_an_override_keeps_the_region_sky() {
+        let mut state = EnvironmentState::default();
+        assert_eq!(
+            state.ingest_reply(reply(-1, 1234)),
+            EnvironmentSource::Region
+        );
+        state.set_agent_parcel(Some(7), 3);
+
+        // `reply` builds the legacy default, whose *tracks* are empty — exactly
+        // what an absent `day_cycle` decodes to.
+        let mut empty = reply(7, 900);
+        empty.day_cycle.sky_tracks = Vec::new();
+        empty.day_cycle.water_track = Vec::new();
+        assert_eq!(state.ingest_reply(empty), EnvironmentSource::Parcel);
+
+        assert!(state.parcel_environment().is_none());
+        assert_eq!(state.settings.day_length, 1234, "the region's day length");
+        assert_eq!(state.source, EnvironmentSource::Region);
+    }
+
+    /// **A reply for a parcel the agent has walked off is dropped**, as the
+    /// reference drops one whose id is not the agent parcel's. Taking it would
+    /// paint the neighbour's sky over the parcel actually being stood on.
+    #[test]
+    fn a_reply_for_another_parcel_is_dropped() {
+        let mut state = EnvironmentState::default();
+        state.set_agent_parcel(Some(7), 3);
+
+        assert_eq!(
+            state.ingest_reply(parcel_reply(8, 900, "next-door")),
+            EnvironmentSource::Parcel
+        );
+
+        assert!(state.parcel_environment().is_none());
+        assert!(
+            !state
+                .settings
+                .day_cycle
+                .sky_frames
+                .contains_key("next-door"),
+            "the neighbour's sky is not what renders"
+        );
+    }
+
+    /// **Stepping over a parcel line drops the old override at once**, without
+    /// waiting for the new parcel to answer. The region's environment is always
+    /// a defensible thing to draw; the parcel behind you never is.
+    #[test]
+    fn walking_off_a_parcel_drops_its_environment() {
+        let mut state = EnvironmentState::default();
+        let _region = state.ingest_reply(reply(-1, 1234));
+        state.set_agent_parcel(Some(7), 3);
+        let _parcel = state.ingest_reply(parcel_reply(7, 900, "parcel-sky"));
+        assert_eq!(state.settings.day_length, 900);
+
+        state.set_agent_parcel(Some(8), 1);
+
+        assert!(state.parcel_environment().is_none());
+        assert_eq!(state.settings.day_length, 1234, "back to the region's");
+    }
+
+    /// **A parcel cannot move the sky-track altitudes.** The reference assigns
+    /// `mTrackAltitudes` in the region branch only, so an agent climbing through
+    /// the bands crosses them where the *region* put them however many parcels
+    /// they fly over.
+    #[test]
+    fn a_parcel_does_not_move_the_track_altitudes() {
+        let mut state = EnvironmentState::default();
+        let mut region = reply(-1, 1234);
+        region.track_altitudes = [1000.0, 2000.0, 3000.0];
+        let _region: EnvironmentSource = state.ingest_reply(region);
+        state.set_agent_parcel(Some(7), 3);
+
+        let mut parcel = parcel_reply(7, 900, "parcel-sky");
+        parcel.track_altitudes = [10.0, 20.0, 30.0];
+        let _parcel: EnvironmentSource = state.ingest_reply(parcel);
+
+        // By bits: these are the region's own numbers copied through, not a
+        // computation, so anything but "the same floats" is a bug.
+        assert_eq!(
+            state.settings.track_altitudes.map(f32::to_bits),
+            [1000.0_f32, 2000.0, 3000.0].map(f32::to_bits),
+        );
+    }
+
+    /// **A personal environment still wins over the parcel's**, which is the
+    /// whole point of the layer order: a parcel may repaint the sky, and the
+    /// user may repaint it back for themselves.
+    #[test]
+    fn the_local_layer_still_wins_over_a_parcel() {
+        let mut state = EnvironmentState::default();
+        let _region = state.ingest_reply(reply(-1, 1234));
+        state.set_agent_parcel(Some(7), 3);
+        let _parcel = state.ingest_reply(parcel_reply(7, 900, "parcel-sky"));
+
+        state.set_local(EnvironmentAsset::Sky(Box::new(script_sky())), None);
+
+        assert_eq!(
+            state
+                .settings
+                .day_cycle
+                .sky_frames
+                .get("script")
+                .map(|sky| sky.gamma),
+            Some(3.5)
+        );
+        assert!(
+            state.parcel_environment().is_some(),
+            "the parcel's environment is still underneath, for when the local layer goes"
+        );
+        state.set_fixed(None);
+        assert!(
+            state
+                .settings
+                .day_cycle
+                .sky_frames
+                .contains_key("parcel-sky")
+        );
+    }
+
+    /// The other half of the bug: "Use Shared Environment" restores the *shared*
+    /// environment, and a parcel override is never part of that — it is its own
+    /// layer. Here no parcel is being stood on, so the reply is not this agent's
+    /// parcel's either, and the region's settings are what come back.
     #[test]
     fn unpinning_a_fixed_sky_restores_the_region_not_a_parcel() {
         let mut state = EnvironmentState::default();
@@ -1060,6 +1872,177 @@ mod tests {
         // The menu's own pin is a fixed sky whatever a script left behind.
         state.set_fixed(Some(FixedEnvironment::Legacy(FixedSky::Midnight)));
         assert!(state.has_local_fixed_sky());
+    }
+
+    /// **A manual change with no transition time set is a cut, as it always
+    /// was.** The declared default is zero, so the fade must cost nothing and
+    /// change nothing until somebody asks for one.
+    #[test]
+    fn without_a_transition_time_a_change_is_instant() {
+        let mut state = EnvironmentState::default();
+        assert_eq!(
+            state.ingest_reply(reply(-1, 1234)),
+            EnvironmentSource::Region
+        );
+
+        state.set_fixed(Some(FixedEnvironment::Legacy(FixedSky::Midnight)));
+
+        assert!(!state.is_transitioning());
+        assert_eq!(
+            state.sky_at(0.0, 0.5),
+            state.settings.blended_sky_settings(0.0, 0.5),
+            "with no fade, sampling the state is sampling the settings"
+        );
+    }
+
+    /// **A fade is a fade: half way through, half of it has happened.** The
+    /// midpoint is the assertion that matters — an unblended `sky_at` would
+    /// answer the destination from the first frame, and a fade running the wrong
+    /// way would answer the origin until the very end.
+    #[test]
+    fn a_manual_change_fades_from_what_was_rendering() {
+        let mut state = EnvironmentState {
+            manual_transition_seconds: 4.0,
+            ..Default::default()
+        };
+        let before = state
+            .settings
+            .blended_sky_settings(0.0, 0.5)
+            .map(|sky| sky.gamma);
+        state.set_local(EnvironmentAsset::Sky(Box::new(script_sky())), None);
+        assert!(state.is_transitioning());
+
+        // At the start the old sky is what is drawn, gamma and all.
+        let start = state.sky_at(0.0, 0.5).map(|sky| sky.gamma);
+        assert_eq!(start, before);
+
+        // Half way: between the two, and neither.
+        let middle = {
+            state.advance_transition(2.0);
+            state.sky_at(0.0, 0.5).map(|sky| sky.gamma)
+        };
+        let blended = match (before, middle) {
+            (Some(from), Some(middle)) => {
+                (middle - from).abs() > f32::EPSILON && (middle - 3.5_f32).abs() > f32::EPSILON
+            }
+            // No sky on one side or the other is not a blend either, and is the
+            // more interesting failure of the two.
+            _ => false,
+        };
+        assert!(
+            blended,
+            "the half-way gamma {middle:?} is an endpoint, not a blend of {before:?} and 3.5"
+        );
+
+        // And past the end the fade is gone and the destination stands.
+        state.advance_transition(2.0);
+        assert!(!state.is_transitioning());
+        assert_eq!(state.sky_at(0.0, 0.5).map(|sky| sky.gamma), Some(3.5));
+    }
+
+    /// **A live edit never starts a fade**, whatever the transition time says —
+    /// the path the Personal Lighting sliders write through.
+    #[test]
+    fn a_live_edit_is_never_faded() {
+        let mut state = EnvironmentState {
+            manual_transition_seconds: 4.0,
+            ..Default::default()
+        };
+        state.set_local(EnvironmentAsset::Sky(Box::new(script_sky())), None);
+        assert!(state.is_transitioning(), "a plain set_local does fade");
+
+        state.set_local_instant(EnvironmentAsset::Sky(Box::new(script_sky())), None);
+
+        assert!(!state.is_transitioning());
+        assert_eq!(state.sky_at(0.0, 0.5).map(|sky| sky.gamma), Some(3.5));
+    }
+
+    /// **A grid reply is not a manual change**, so the region's own environment
+    /// arriving (or changing under the agent) does not fade.
+    #[test]
+    fn a_grid_reply_does_not_start_a_fade() {
+        let mut state = EnvironmentState {
+            manual_transition_seconds: 4.0,
+            ..Default::default()
+        };
+        let _source = state.ingest_reply(reply(-1, 1234));
+        assert!(!state.is_transitioning());
+    }
+
+    /// **Only a personal environment is worth saving.** After "Use Shared
+    /// Environment" there is nothing to bring back, and a stale blob returning
+    /// at the next login would be the setting doing the opposite of its name.
+    #[test]
+    fn nothing_personal_is_saved_as_nothing() {
+        let mut state = EnvironmentState::default();
+        assert!(state.saved_environment().is_none());
+
+        state.set_fixed(Some(FixedEnvironment::Legacy(FixedSky::Midnight)));
+        assert!(state.saved_environment().is_some());
+
+        state.set_fixed(None);
+        assert!(state.saved_environment().is_none());
+    }
+
+    /// **The saved environment round-trips through its JSON**, pin and all —
+    /// the whole point of writing it is that the next session renders the same
+    /// sky.
+    #[test]
+    fn a_saved_environment_comes_back_as_it_went() {
+        let mut state = EnvironmentState::default();
+        state.set_local(EnvironmentAsset::Sky(Box::new(script_sky())), None);
+        state.set_local(
+            EnvironmentAsset::Water(WaterSettings::legacy_default("script-water")),
+            Some(Uuid::from_u128(0xB1)),
+        );
+        let decoded = state
+            .saved_environment()
+            .and_then(|saved| serde_json::to_string(&saved).ok())
+            .and_then(|encoded| serde_json::from_str::<SavedEnvironment>(&encoded).ok());
+        assert!(
+            decoded.is_some(),
+            "an edited environment is a personal one, and has to survive its JSON"
+        );
+
+        let mut restored = EnvironmentState::default();
+        if let Some(decoded) = decoded {
+            restored.restore_environment(decoded);
+        }
+
+        assert_eq!(restored.local(), state.local());
+        assert_eq!(
+            restored
+                .settings
+                .day_cycle
+                .sky_frames
+                .get("script")
+                .map(|sky| sky.gamma),
+            Some(3.5)
+        );
+        assert_eq!(
+            restored.local().water().and_then(|track| track.asset),
+            Some(Uuid::from_u128(0xB1))
+        );
+    }
+
+    /// A restored menu pin is the pin, not a sky asset — the check marks have to
+    /// come back ticked on the entry the user chose.
+    #[test]
+    fn a_restored_pin_is_still_a_pin() {
+        let mut state = EnvironmentState::default();
+        state.set_fixed(Some(FixedEnvironment::Modern(FixedSky::Sunset)));
+        let saved = state.saved_environment();
+        assert!(saved.is_some(), "a pin is a personal environment");
+
+        let mut restored = EnvironmentState::default();
+        if let Some(saved) = saved {
+            restored.restore_environment(saved);
+        }
+
+        assert_eq!(
+            restored.fixed(),
+            Some(FixedEnvironment::Modern(FixedSky::Sunset))
+        );
     }
 
     /// `@setenv_daytime` samples the **shared** cycle, not the local layer —

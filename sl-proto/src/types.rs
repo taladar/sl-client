@@ -445,6 +445,7 @@ pub use environment::{
     DEFAULT_SKY_FRAME, DEFAULT_SUN_TEXTURE, DEFAULT_WATER_FRAME, DEFAULT_WATER_NORMAL_TEXTURE,
     DayCycle, DayCycleFrame, EnvironmentAsset, EnvironmentSettings, EnvironmentUpdate, Glow, Scale,
     SettingsKind, SkySettings, WaterSettings, azimuth_altitude_to_rotation,
+    rotation_to_azimuth_altitude,
 };
 pub use event::Event;
 pub use generic::{GenericMessage, GenericStreamingMessage};

@@ -910,6 +910,35 @@ pub fn azimuth_altitude_to_rotation(azimuth: f32, altitude: f32) -> Rotation {
     }
 }
 
+/// The inverse of [`azimuth_altitude_to_rotation`]: where a sky's sun or moon
+/// *is*, as spherical angles in radians — the reference's
+/// `LLVirtualTrackball::getAzimuthAndElevation`.
+///
+/// Public for the same reason the forward conversion is: an environment editor
+/// has to show the sun's azimuth and elevation on two sliders, and
+/// [`SkySettings::sun_rotation`] is a quaternion with no other way to ask.
+/// Azimuth comes back normalised to `0.0..TAU` so a slider over `0°..360°` has a
+/// value for every rotation; altitude is `-FRAC_PI_2..=FRAC_PI_2`.
+#[must_use]
+pub fn rotation_to_azimuth_altitude(rotation: &Rotation) -> (f32, f32) {
+    // The rotation applied to the local `+X` axis — the first column of the
+    // rotation matrix, which is the direction the forward conversion encoded.
+    let (x, y, z, s) = (rotation.x, rotation.y, rotation.z, rotation.s);
+    let dir_x = 1.0 - 2.0 * z.mul_add(z, y * y);
+    let dir_y = 2.0 * s.mul_add(z, x * y);
+    let dir_z = 2.0 * s.mul_add(-y, x * z);
+    let altitude = dir_z.clamp(-1.0, 1.0).asin();
+    let azimuth = dir_y.atan2(dir_x);
+    (
+        if azimuth < 0.0 {
+            azimuth + std::f32::consts::TAU
+        } else {
+            azimuth
+        },
+        altitude,
+    )
+}
+
 impl SkySettings {
     /// Blend this sky frame toward `other` by `factor` (`0.0` → `self`, `1.0` →
     /// `other`), the reference day-cycle frame interpolation
@@ -1134,8 +1163,49 @@ impl WaterSettings {
 mod tests {
     use super::{
         CloudPosDensity, Color, ColorAlpha, EnvironmentSettings, Glow, Scale, SkySettings,
+        azimuth_altitude_to_rotation, rotation_to_azimuth_altitude,
     };
     use pretty_assertions::assert_eq;
+
+    /// Placing the sun at an angle and asking where it is gives the angle back.
+    ///
+    /// The two are used together by any environment editor: the sliders read
+    /// through the inverse and write through the forward conversion, so a sky
+    /// merely *opened* in one must not drift.
+    #[test]
+    fn sun_angles_round_trip_through_the_rotation() {
+        // Azimuths on both sides of the `atan2` branch cut, and altitudes at and
+        // near the poles the forward conversion special-cases.
+        for azimuth_deg in [0.0_f32, 45.0, 179.0, 181.0, 270.0, 359.0] {
+            for altitude_deg in [-89.0_f32, -45.0, -0.5, 0.0, 0.5, 45.0, 89.0] {
+                let (azimuth, altitude) = (azimuth_deg.to_radians(), altitude_deg.to_radians());
+                let (back_azimuth, back_altitude) =
+                    rotation_to_azimuth_altitude(&azimuth_altitude_to_rotation(azimuth, altitude));
+                assert!(
+                    (back_azimuth.to_degrees() - azimuth_deg).abs() < 0.01,
+                    "azimuth {azimuth_deg} came back as {}",
+                    back_azimuth.to_degrees()
+                );
+                assert!(
+                    (back_altitude.to_degrees() - altitude_deg).abs() < 0.01,
+                    "altitude {altitude_deg} came back as {}",
+                    back_altitude.to_degrees()
+                );
+            }
+        }
+    }
+
+    /// Azimuth comes back in `0..360°`, never negative — a slider over that
+    /// range has to have a value for a sun in the western half of the sky.
+    #[test]
+    fn a_western_azimuth_is_not_reported_negative() {
+        let rotation = azimuth_altitude_to_rotation(300.0_f32.to_radians(), 0.0);
+        let (azimuth, _altitude) = rotation_to_azimuth_altitude(&rotation);
+        assert!(
+            (0.0..std::f32::consts::TAU).contains(&azimuth),
+            "azimuth {azimuth} is outside 0..TAU"
+        );
+    }
 
     #[test]
     fn color_channels_round_trip() {

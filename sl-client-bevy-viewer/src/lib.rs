@@ -77,6 +77,7 @@ pub(crate) const REGISTRARS: &[fn(&mut crate::settings::ViewerSettings)] = &[
     crate::debug_settings::register_settings,
     crate::notification_host::register_settings,
     crate::rlv::register_settings,
+    crate::environment::register_settings,
 ];
 
 // The leaf toolkit (geometry math, render leaves, small models) is its own
@@ -256,6 +257,7 @@ pub(crate) use sl_viewer_world_scene::particles;
 pub(crate) use sl_viewer_world_scene::probes;
 pub(crate) use sl_viewer_world_view::physics;
 pub mod render_gallery;
+pub(crate) use sl_viewer_environment::personal_lighting;
 pub(crate) use sl_viewer_rlv::rlv_behaviours;
 pub(crate) use sl_viewer_rlv::rlv_console;
 pub(crate) use sl_viewer_rlv::rlv_locks;
@@ -1461,6 +1463,10 @@ fn run_session(
     // the restrictions / locks / strings windows, and the RLVa menu's toggles.
     // They read the one RlvSession the world-API tier holds, so they can go
     // anywhere after it is initialised.
+    // The environment editors (viewer-environment-personal-lighting): the
+    // Personal Lighting window and the local sky / water override it writes.
+    // After the environment state exists, which the scene tier initialises.
+    .add_plugins(sl_viewer_environment::EnvironmentUiPlugins)
     .add_plugins(sl_viewer_rlv::RlvUiPlugins)
     // The RLV command intake (viewer-rlv-command-intake): the owner-say gate a
     // worn collar speaks through, the one seam every `@get*` / `@notify` answer

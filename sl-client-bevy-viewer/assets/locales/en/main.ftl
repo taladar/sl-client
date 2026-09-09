@@ -3669,6 +3669,58 @@ quick-prefs-env-day-cycle = Day cycle
 quick-prefs-env-region-default = Region default
 quick-prefs-env-day-cycle-based = Day-cycle based
 quick-prefs-env-no-day-cycle = No day cycle
+
+## The Personal Lighting floater — the local sky and water override.
+
+personal-lighting-title = Personal Lighting
+# The four column headings.
+personal-lighting-colours = Colours & images
+personal-lighting-atmosphere = Atmosphere
+personal-lighting-sun-moon = Sun & moon
+personal-lighting-water = Water
+# The colour swatches.
+personal-lighting-ambient = Ambient
+personal-lighting-blue-horizon = Blue horizon
+personal-lighting-blue-density = Blue density
+personal-lighting-sun-color = Sun colour
+personal-lighting-cloud-color = Cloud colour
+# The texture swatches.
+personal-lighting-cloud-image = Cloud image
+personal-lighting-water-image = Water image
+# The atmosphere sliders.
+personal-lighting-haze-horizon = Haze horizon
+personal-lighting-haze-density = Haze density
+personal-lighting-cloud-coverage = Cloud coverage
+personal-lighting-cloud-scale = Cloud scale
+personal-lighting-probe-ambiance = Probe ambiance
+personal-lighting-brightness = Brightness
+# Where the sun and the moon sit, and how they glow.
+personal-lighting-sun-azimuth = Sun azimuth
+personal-lighting-sun-elevation = Sun elevation
+personal-lighting-sun-scale = Sun scale
+personal-lighting-glow-focus = Glow focus
+personal-lighting-glow-size = Glow size
+personal-lighting-star-brightness = Star brightness
+personal-lighting-moon-azimuth = Moon azimuth
+personal-lighting-moon-elevation = Moon elevation
+# The water knobs.
+personal-lighting-water-fog-color = Fog colour
+personal-lighting-water-fog-density = Fog density
+personal-lighting-water-underwater-mod = Underwater fog
+personal-lighting-water-fresnel-scale = Fresnel scale
+personal-lighting-water-fresnel-offset = Fresnel offset
+personal-lighting-water-normal-scale-x = Wavelet X
+personal-lighting-water-normal-scale-y = Wavelet Y
+personal-lighting-water-normal-scale-z = Wavelet Z
+personal-lighting-water-scale-above = Refract above
+personal-lighting-water-scale-below = Refract below
+personal-lighting-water-blur = Blur multiplier
+personal-lighting-water-large-wave-x = Large wave X
+personal-lighting-water-large-wave-y = Large wave Y
+personal-lighting-water-small-wave-x = Small wave X
+personal-lighting-water-small-wave-y = Small wave Y
+# Drops the whole personal environment, after a confirmation.
+personal-lighting-reset = Reset
 # The curated default setting rows.
 quick-prefs-draw-distance = Draw distance
 quick-prefs-max-particles = Max particles

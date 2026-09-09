@@ -14,12 +14,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ideas | 101 |
 | ready | 321 |
 | blocked | 46 |
-| in-progress | 20 |
+| in-progress | 21 |
 | bugs | 63 |
 | done | 1030 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1620** |
+| **total** | **1621** |
 
 ## ideas (101)
 
@@ -486,9 +486,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-environment-pause-clouds`](ready/viewer-environment-pause-clouds.md)
   — Pause cloud animation toggle
-- [`viewer-environment-personal-lighting`](ready/viewer-environment-personal-lighting.md)
-  — Personal lighting — local environment override (blocked by
-  `viewer-ui-widget-scaffold` (done))
 - [`viewer-event-details`](ready/viewer-event-details.md) — Event details
   floater + reminders (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-experience-event-stream`](ready/viewer-experience-event-stream.md) —
@@ -928,6 +925,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-styling-interaction-tests`](ready/viewer-ui-styling-interaction-tests.md)
   — bevy_flair state styling under synthetic hover and focus (blocked by
   `viewer-ui-interaction-harness` (done))
+- [`viewer-ui-virtual-trackball`](ready/viewer-ui-virtual-trackball.md) —
+  Virtual trackball widget (sun / moon direction) (blocked by
+  `viewer-ui-widget-scaffold` (done))
 - [`viewer-url-context-menus`](ready/viewer-url-context-menus.md) — Right-click
   context menus on linkified text and names
 - [`viewer-usb-route-map-display`](ready/viewer-usb-route-map-display.md) — USB
@@ -1135,7 +1135,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (20)
+## in-progress (21)
 
 ### viewer
 
@@ -1149,6 +1149,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Avatar ground probe from the simulator's collision plane (drop the raycast)
 - [`viewer-conference-start-ui`](in-progress/viewer-conference-start-ui.md) —
   Start an ad-hoc conference from a multi-selection
+- [`viewer-environment-personal-lighting`](in-progress/viewer-environment-personal-lighting.md)
+  — Personal lighting — local environment override (blocked by
+  `viewer-ui-widget-scaffold` (done))
 - [`viewer-keyed-floater-audit`](in-progress/viewer-keyed-floater-audit.md) —
   Audit the other per-subject singletons onto the keyed-floater scaffold
 - [`viewer-media-prim-browser`](in-progress/viewer-media-prim-browser.md) —

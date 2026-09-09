@@ -763,8 +763,8 @@ const FOCUS_DISTANCE_M: f32 = 10.0;
 /// The `environment` section.
 fn build_environment(environment: &EnvironmentState) -> EnvironmentDump {
     let position = sl_viewer_world_scene::sky::day_position(environment);
-    let sky = environment.settings.blended_sky_settings(0.0, position);
-    let water = environment.settings.blended_water_settings(position);
+    let sky = environment.sky_at(0.0, position);
+    let water = environment.water_at(position);
     // The reference's own derivation (`LLSettingsSky::getSunDirection`): the
     // body's orientation applied to the Second Life X axis.
     let direction = crate::coords::sky_body_direction;

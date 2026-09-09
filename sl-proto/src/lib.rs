@@ -188,7 +188,7 @@ pub use types::{
     ViewerEffectData, ViewerEffectType, WaterSettings, Wearable, WearableType,
     attachment_state_from_point, avatar_texture, azimuth_altitude_to_rotation, global_to_handle,
     grid_to_handle, group_powers, handle_to_global, handle_to_grid, hexdump, particle_pattern,
-    pcode, prim_flags, texture_anim_mode,
+    pcode, prim_flags, rotation_to_azimuth_altitude, texture_anim_mode,
 };
 
 // Re-export `Uuid`: it appears in public types (chat/IM ids) and command APIs,

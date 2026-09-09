@@ -275,6 +275,17 @@ pub(crate) const FLOATERS: &[FloaterElement] = &[
         ),
     },
     FloaterElement {
+        id: "personal-lighting",
+        summary: "Personal Lighting: the local sky and water override — colour swatches, cloud \
+                  and water images, the atmosphere sliders, where the sun and moon sit, the \
+                  water knobs, and Reset.",
+        spec: crate::personal_lighting::personal_lighting_floater_spec,
+        content: FloaterContent::Stub(
+            "Four columns of live controls over the captured sky and water, applied to the \
+             local environment layer.",
+        ),
+    },
+    FloaterElement {
         id: "preferences",
         summary: "Preferences: the search box over a leading tab strip, the labelled setting rows \
                   and the OK / Cancel footer.",
