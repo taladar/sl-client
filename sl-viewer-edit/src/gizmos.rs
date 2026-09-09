@@ -63,12 +63,13 @@
 use std::collections::HashSet;
 
 use bevy::app::Propagate;
-use bevy::camera::Hdr;
 use bevy::camera::visibility::RenderLayers;
+use bevy::camera::{CameraOutputMode, Hdr};
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::ecs::system::SystemParam;
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
+use bevy::render::render_resource::BlendState;
 use sl_client_bevy::{Command, ObjectTransform, Rotation, ScopedObjectId, SlCommand, Vector};
 
 use crate::coords::{
@@ -1231,6 +1232,19 @@ fn spawn_gizmo_camera(
             Camera {
                 order: 1,
                 clear_color: ClearColorConfig::None,
+                // The same rule the HUD camera states and for the same reason
+                // (`sl_viewer_world_view::hud`): a camera after the first on a
+                // target has its blit auto-switched to alpha blending, and a
+                // viewer frame's alpha is the glow mask rather than coverage.
+                // This camera shares the world camera's main texture and draws
+                // into the frame already in it, so its blit must *replace*.
+                // Gizmos happened to survive the default — their geometry writes
+                // a solid alpha where it draws — but that is an accident of what
+                // they draw, not a property of the arrangement.
+                output_mode: CameraOutputMode::Write {
+                    blend_state: Some(BlendState::REPLACE),
+                    clear_color: ClearColorConfig::None,
+                },
                 ..Default::default()
             },
             projection.clone(),

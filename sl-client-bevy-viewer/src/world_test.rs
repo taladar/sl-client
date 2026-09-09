@@ -2996,6 +2996,107 @@ mod tests {
         );
         Ok(())
     }
+
+    /// **A prim rezzed in-world and then worn moves onto its wearer**
+    /// ([[viewer-prim-attachment-worn-but-not-rendered]]).
+    ///
+    /// Wearing an object from inventory is two updates, not one: the simulator
+    /// rezzes it into the world as an ordinary root prim first and only then
+    /// re-parents it onto the avatar with the attachment point packed into its
+    /// `state` byte. So the viewer meets this object twice, and the second
+    /// meeting takes the *known-object* path — the one that must drop the
+    /// world-root re-base marker, leave the linkset reconciler alone (an
+    /// attachment has no linkset root to reconcile against) and hand the object
+    /// to the seating pass.
+    ///
+    /// Get any of that wrong and the object stays where it was rezzed —
+    /// parentless at the region origin, wearing an offset meant for a joint —
+    /// which is exactly the "it says (worn) and nothing appears on the avatar"
+    /// report. The fixture world has no avatar assets, so the seat here is the
+    /// wearer's own object entity (the sphere fallback); the rigged-body seat is
+    /// pinned by `sl_viewer_world_avatar::rigged_attachments`'s own tests.
+    #[test]
+    fn a_prim_rezzed_in_world_and_then_worn_moves_onto_its_wearer() -> Result<(), TestError> {
+        use pretty_assertions::assert_eq;
+
+        let mut app = world_app();
+        let wearer = sl_client_bevy::AgentKey::from(sl_client_bevy::Uuid::from_u128(0xC));
+        let wearer_scoped = super::seed_avatar(
+            &mut app,
+            wearer,
+            2,
+            Vector {
+                x: 120.0,
+                y: 120.0,
+                z: 30.0,
+            },
+        );
+        settle(&mut app, 3);
+        // The rez: an ordinary in-world root prim, parentless.
+        let mut rezzed = crate::objects::fixture_object(sl_client_bevy::pcode::PRIMITIVE);
+        rezzed.local_id = sl_client_bevy::RegionLocalObjectId(3);
+        rezzed.full_id = sl_client_bevy::ObjectKey::from(sl_client_bevy::Uuid::from_u128(3));
+        let worn = super::seed_object(&mut app, rezzed);
+        settle(&mut app, 3);
+        assert_eq!(
+            child_of_tracked(&app, worn),
+            None,
+            "a freshly rezzed root prim hangs off nothing"
+        );
+        // The attach: the same object, now worn on the right hand (point 6).
+        let attached = super::seed_attachment(
+            &mut app,
+            2,
+            3,
+            6,
+            Vector {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        );
+        assert_eq!(attached, worn, "the fixture must re-stream the same object");
+        settle(&mut app, 3);
+        let wearer_entity =
+            tracked_entity(&app, wearer_scoped).ok_or("the wearer must be tracked")?;
+        let worn_entity = tracked_entity(&app, worn).ok_or("the worn object must be tracked")?;
+        assert_eq!(
+            child_of_tracked(&app, worn),
+            Some(wearer_entity),
+            "a worn prim must be seated on its wearer, not left where it was rezzed"
+        );
+        assert!(
+            app.world()
+                .resource::<crate::world_api::ObjectState>()
+                .objects
+                .get(&worn)
+                .is_some_and(|tracked| tracked.parented),
+            "a seated attachment must be marked parented so it is not retried every frame"
+        );
+        assert!(
+            app.world()
+                .get::<crate::objects::WorldRootObject>(worn_entity)
+                .is_none(),
+            "an object that stopped being a root must lose the re-base marker, or the next \
+             origin shift moves it a region away from its wearer"
+        );
+        Ok(())
+    }
+
+    /// The entity the object mirror tracks for `scoped`, if any.
+    fn tracked_entity(app: &App, scoped: ScopedObjectId) -> Option<Entity> {
+        app.world()
+            .resource::<crate::world_api::ObjectState>()
+            .objects
+            .get(&scoped)
+            .map(|tracked| tracked.entity)
+    }
+
+    /// The Bevy parent of the entity the object mirror tracks for `scoped`.
+    fn child_of_tracked(app: &App, scoped: ScopedObjectId) -> Option<Entity> {
+        let entity = tracked_entity(app, scoped)?;
+        app.world().get::<ChildOf>(entity).map(ChildOf::parent)
+    }
 }
 
 /// The **camera and input tier** ([[viewer-camera-input-interaction-tests]]):

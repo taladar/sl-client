@@ -85,7 +85,7 @@ use crate::pie_menu::PieMenuPlugin;
 use crate::probes::ReflectionProbePlugin;
 use crate::render_priority::drive_render_priority;
 use crate::rigged_attachments::{
-    RiggedBindSkipLog, adopt_pending_attachments, apply_rigged_attachments,
+    AttachmentAdoptSkipLog, RiggedBindSkipLog, adopt_pending_attachments, apply_rigged_attachments,
 };
 use crate::sit_camera::SitCameraPlugin;
 use crate::spacenav::{DeviceRead, SpacenavPlugin};
@@ -463,6 +463,7 @@ impl Plugin for ViewerWorldPlugins {
         app.init_world_scoped::<ObjectState>();
         app.init_world_scoped::<PendingObjectEvents>();
         app.init_world_scoped::<RiggedBindSkipLog>();
+        app.init_world_scoped::<AttachmentAdoptSkipLog>();
         app.init_resource::<PendingDecodedMeshes>();
         app.init_resource::<PendingDecodedSculpts>();
         app.init_resource::<HudState>();

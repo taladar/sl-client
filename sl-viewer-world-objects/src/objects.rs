@@ -3744,6 +3744,19 @@ fn apply_object(
         "spawned object {scoped} ({category:?}); {} tracked",
         state.objects.len()
     );
+    // The object layer's leg of the `SL_VIEWER_LOG_ATTACHMENT_BIND=1` trace: a
+    // worn object that never appears is otherwise silent everywhere, and this
+    // line is what tells "the simulator never streamed it" apart from "it
+    // arrived and the avatar layer could not seat it" (roadmap
+    // viewer-prim-attachment-worn-but-not-rendered).
+    if let Some(point_id) = attachment_point
+        && crate::world_api::log_attachment_bind_enabled()
+    {
+        info!(
+            "worn object {scoped} arrived ({category:?}) on point {point_id}, worn by object \
+             {parent}"
+        );
+    }
     if is_root {
         adopt_pending_children(state, scoped, entity, commands);
     }

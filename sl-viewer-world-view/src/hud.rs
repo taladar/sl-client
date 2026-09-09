@@ -34,10 +34,11 @@
 //! if one arrives. [`sl_viewer_world_avatar::rigged_attachments::adopt_pending_attachments`] hides those.
 
 use bevy::app::Propagate;
-use bevy::camera::visibility::RenderLayers;
-use bevy::camera::{Hdr, ScalingMode};
+use bevy::camera::visibility::{RenderLayers, VisibilitySystems};
+use bevy::camera::{CameraOutputMode, Hdr, ScalingMode};
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::prelude::*;
+use bevy::render::render_resource::BlendState;
 
 use crate::avatar_assets::AvatarAssetLibrary;
 use crate::coords::{sl_euler_deg_to_quat, sl_to_bevy_rotation};
@@ -59,6 +60,208 @@ impl Plugin for HudScreenPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup_hud_screen)
             .add_systems(Update, (fit_hud_points, apply_hud_fullbright));
+        // The HUD census, gated by the shared worn-attachment trace: a HUD that
+        // is routed onto its screen node and still draws nothing is silent
+        // everywhere else (roadmap viewer-prim-attachment-worn-but-not-rendered).
+        if crate::world_api::log_attachment_bind_enabled() {
+            app.init_resource::<HudCensus>()
+                .add_systems(
+                    PostUpdate,
+                    log_hud_census.after(VisibilitySystems::CheckVisibility),
+                )
+                .add_systems(PostUpdate, log_camera_census);
+            if let Some(render_app) = app.get_sub_app_mut(bevy::render::RenderApp) {
+                render_app.add_systems(bevy::render::Render, log_view_targets);
+            }
+        }
+    }
+}
+
+/// How many drawable HUD entities the last [`log_hud_census`] reported, so the
+/// census logs when the HUD subtree's shape changes rather than every frame.
+#[derive(Debug, Resource, Default)]
+struct HudCensus {
+    /// The mesh count the last logged census covered.
+    meshes: usize,
+    /// How many of those were actually visible to a camera that frame.
+    visible: usize,
+}
+
+/// Log what the HUD subtree holds and whether any of it can be drawn
+/// (`SL_VIEWER_LOG_ATTACHMENT_BIND=1`), whenever that answer changes.
+///
+/// A worn HUD crosses four things before a pixel: the seating pass parents it to
+/// its screen node, the render-layer propagation carries the HUD layer down to
+/// its faces, the visibility pass decides the faces are in view of the HUD
+/// camera, and `apply_hud_fullbright` makes the material survive a layer with no
+/// light on it. Only the first of those says anything on its own, so a HUD that
+/// is correctly routed and still invisible looks exactly like one that never
+/// arrived. This names which of the remaining three failed.
+fn log_hud_census(
+    mut census: ResMut<HudCensus>,
+    screens: Query<Entity, With<HudScreen>>,
+    children: Query<&Children>,
+    drawn: Query<(
+        Entity,
+        Option<&RenderLayers>,
+        &InheritedVisibility,
+        &ViewVisibility,
+        &GlobalTransform,
+    )>,
+    meshes: Query<(), With<Mesh3d>>,
+) {
+    let mut reported = Vec::new();
+    for screen in &screens {
+        for descendant in children.iter_descendants(screen) {
+            if meshes.get(descendant).is_err() {
+                continue;
+            }
+            let Ok((entity, layers, inherited, view, global)) = drawn.get(descendant) else {
+                continue;
+            };
+            reported.push((
+                entity,
+                layers.cloned(),
+                inherited.get(),
+                view.get(),
+                global.translation(),
+            ));
+        }
+    }
+    let visible = reported.iter().filter(|(.., view, _pos)| *view).count();
+    if reported.len() == census.meshes && visible == census.visible {
+        return;
+    }
+    census.meshes = reported.len();
+    census.visible = visible;
+    info!(
+        "HUD census: {} drawable entit(y/ies) under the screen, {visible} visible to a camera",
+        reported.len()
+    );
+    for (entity, layers, inherited, view, position) in reported {
+        info!(
+            "  HUD mesh {entity}: layers={} inherited_visible={inherited} view_visible={view} at {position:?}",
+            layers.map_or_else(
+                || "(none — never propagated)".to_owned(),
+                |layers| format!("{:?}", layers.iter().collect::<Vec<_>>())
+            )
+        );
+    }
+}
+
+/// Everything [`log_camera_census`] reads off one camera. Aliased because a
+/// query this wide is what the census is *for* — the facts that decide whether
+/// a camera's pass reaches the frame are spread across six components.
+type CensusCameras<'world, 'state> = Query<
+    'world,
+    'state,
+    (
+        Entity,
+        &'static Camera,
+        Option<&'static Msaa>,
+        Option<&'static Hdr>,
+        Option<&'static RenderLayers>,
+        Option<&'static bevy::camera::RenderTarget>,
+        Option<&'static Camera3d>,
+    ),
+>;
+
+/// Log every camera once, with the facts that decide whether its pass reaches
+/// the frame (`SL_VIEWER_LOG_ATTACHMENT_BIND=1`).
+///
+/// Bevy keys a window's view target on the sample count and HDR-ness, so two
+/// window cameras that disagree get *separate* targets and the later one's blit
+/// to the swapchain discards the earlier one's work — silently, with no warning
+/// and nothing wrong in the scene. A HUD that is correctly built, correctly
+/// laid out and correctly visible, and still absent from the frame, is what that
+/// looks like from the outside, so the camera table is the last thing left to
+/// check and the hardest to reconstruct by reading code.
+fn log_camera_census(mut logged: Local<bool>, cameras: CensusCameras) {
+    if *logged || cameras.is_empty() {
+        return;
+    }
+    *logged = true;
+    let mut rows: Vec<(isize, String)> = Vec::new();
+    for (entity, camera, msaa, hdr, layers, target, three_d) in &cameras {
+        rows.push((
+            camera.order,
+            format!(
+                "camera {entity}: order={} active={} msaa={} hdr={} 3d={} target={} layers={}",
+                camera.order,
+                camera.is_active,
+                msaa.map_or(0, |msaa| msaa.samples()),
+                hdr.is_some(),
+                three_d.is_some(),
+                match target {
+                    Some(bevy::camera::RenderTarget::Window(_window)) => "window".to_owned(),
+                    Some(bevy::camera::RenderTarget::Image(_image)) => "image".to_owned(),
+                    Some(other) => format!("{other:?}"),
+                    None => "(default window)".to_owned(),
+                },
+                layers.map_or_else(
+                    || "(default)".to_owned(),
+                    |layers| format!("{:?}", layers.iter().collect::<Vec<_>>())
+                ),
+            ),
+        ));
+    }
+    rows.sort_by_key(|(order, _row)| *order);
+    info!("camera census: {} camera(s)", rows.len());
+    for (_order, row) in rows {
+        info!("  {row}");
+    }
+}
+
+/// Log each rendered view's target textures once, from the render world
+/// (`SL_VIEWER_LOG_ATTACHMENT_BIND=1`).
+///
+/// Bevy hands two cameras the *same* main-texture pair only when their target,
+/// texture usages, format and sample count all agree; otherwise each gets its
+/// own pair and the later camera's blit to the swapchain replaces the earlier
+/// one's work instead of adding to it. That single fact decides whether a
+/// camera meant to composite over another one's frame can work at all, and
+/// nothing in the main world can be asked about it.
+fn log_view_targets(
+    mut logged: Local<bool>,
+    views: Query<(
+        Entity,
+        &bevy::render::view::ViewTarget,
+        &bevy::render::camera::ExtractedCamera,
+        &bevy::render::view::ExtractedView,
+        Option<&bevy::render::view::ViewDepthTexture>,
+    )>,
+    opaque: Res<
+        bevy::render::render_phase::ViewBinnedRenderPhases<bevy::core_pipeline::core_3d::Opaque3d>,
+    >,
+) {
+    if *logged || views.is_empty() {
+        return;
+    }
+    *logged = true;
+    for (entity, target, camera, view, depth) in &views {
+        info!(
+            "  view {entity} phases: depth_texture={} opaque_phase={:?}",
+            depth.is_some(),
+            opaque
+                .get(&view.retained_view_entity)
+                .map(|phase| if phase.is_empty() {
+                    "empty"
+                } else {
+                    "has items"
+                }),
+        );
+        // A window view is the only one this question is about; the probe
+        // cameras render to images and are told apart by having no swapchain
+        // attachment of their own.
+        if !target.out_texture().is_some() {
+            continue;
+        }
+        info!(
+            "view {entity}: order={} main_texture={:?} output_mode={:?}",
+            camera.order,
+            target.main_texture_view().id(),
+            camera.output_mode,
+        );
     }
 }
 
@@ -163,6 +366,30 @@ pub(crate) fn setup_hud_screen(
                 // `render_ui`, *after* `renderFinalize`'s tonemap and post effects.
                 order: 2,
                 clear_color: ClearColorConfig::None,
+                // **Load-bearing**: the blit of this camera's finished texture to
+                // the window must *replace*, not blend.
+                //
+                // Bevy auto-selects the blend state of that blit from the camera's
+                // position on its target: the first camera replaces, and every
+                // later one gets `ALPHA_BLENDING` "so they don't accidentally
+                // overwrite earlier cameras' output"
+                // (`bevy_core_pipeline::upscaling::prepare_view_upscaling_pipelines`).
+                // That default is right for a camera with its own target and an
+                // alpha channel that means coverage. It is wrong twice over here:
+                // this camera *shares* the world camera's main texture (same
+                // window, sample count and HDR-ness), so what it blits is already
+                // the world's frame with the HUD drawn into it and there is
+                // nothing to blend against; and a viewer frame's alpha is the
+                // **glow mask**, not opacity, so blending by it composited every
+                // HUD pixel at roughly zero alpha and the HUD vanished from the
+                // frame entirely (viewer-hud-attachments-not-composited).
+                output_mode: CameraOutputMode::Write {
+                    blend_state: Some(BlendState::REPLACE),
+                    // The blit writes every pixel, so the window needs no clear
+                    // before it — and clearing would throw away the world frame
+                    // this camera is drawing on top of.
+                    clear_color: ClearColorConfig::None,
+                },
                 ..default()
             },
             // The reference's HUD projection (`get_hud_matrices`):
@@ -337,6 +564,78 @@ mod tests {
 
     /// A 16:9 viewport, the shape the layout is most often seen in.
     const WIDE_ASPECT: f32 = 16.0 / 9.0;
+
+    /// **The HUD camera's blit replaces rather than blends**
+    /// ([[viewer-hud-attachments-not-composited]]).
+    ///
+    /// Bevy picks the blend state of a camera's blit to its target from that
+    /// camera's position on the target: the first replaces, every later one
+    /// defaults to `ALPHA_BLENDING` so it cannot clobber what came before. This
+    /// camera is the *last* on the window and shares the world camera's main
+    /// texture, so what it blits is the finished frame with the HUD already
+    /// drawn into it — and the alpha that default would blend by is this
+    /// viewer's **glow mask**, not coverage. Left at the default, every HUD
+    /// pixel composited at roughly zero alpha and no HUD reached the screen at
+    /// all, with nothing logged and everything upstream correct.
+    ///
+    /// So the arrangement is pinned whole: the sharing preconditions (same
+    /// sample count and HDR-ness as the world camera, no clear of its own) and
+    /// the explicit replace that makes sharing pay off.
+    #[test]
+    fn the_hud_camera_replaces_the_frame_it_composites_into()
+    -> Result<(), Box<dyn core::error::Error>> {
+        use bevy::camera::{Camera, CameraOutputMode, ClearColorConfig, Hdr};
+        use bevy::ecs::system::RunSystemOnce as _;
+        use bevy::render::render_resource::BlendState;
+        use bevy::render::view::Msaa;
+        use pretty_assertions::assert_eq;
+
+        use crate::avatar_assets::AvatarAssetLibrary;
+        use crate::world_api::HudState;
+
+        let character = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("viewer-assets")
+            .join("character");
+        let mut world = bevy::ecs::world::World::new();
+        world.insert_resource(AvatarAssetLibrary::load(&character)?);
+        world.init_resource::<HudState>();
+        world
+            .run_system_once(super::setup_hud_screen)
+            .map_err(|error| format!("the HUD screen must spawn: {error}"))?;
+
+        let mut cameras = world.query::<(&Camera, &Msaa, Option<&Hdr>)>();
+        let (camera, msaa, hdr) = cameras
+            .iter(&world)
+            .next()
+            .ok_or("setup_hud_screen must spawn the HUD camera")?;
+        assert!(
+            matches!(
+                camera.output_mode,
+                CameraOutputMode::Write {
+                    blend_state: Some(BlendState::REPLACE),
+                    ..
+                }
+            ),
+            "the HUD camera's blit must replace, not blend by the glow mask: {:?}",
+            camera.output_mode
+        );
+        assert!(
+            matches!(camera.clear_color, ClearColorConfig::None),
+            "the HUD camera must not clear the frame it draws onto"
+        );
+        assert_eq!(
+            *msaa,
+            Msaa::Sample4,
+            "the HUD camera must match the world camera's sample count, or it gets a view \
+             target of its own and overwrites the world instead of drawing over it"
+        );
+        assert!(
+            hdr.is_some(),
+            "the HUD camera must match the world camera's HDR-ness, for the same reason"
+        );
+        Ok(())
+    }
 
     /// Only the eight screen slots (31–38) are HUD points; the body points on
     /// either side of the range are not.

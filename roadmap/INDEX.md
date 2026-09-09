@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 46 |
 | in-progress | 20 |
 | bugs | 58 |
-| done | 1035 |
+| done | 1037 |
 | deferred | 25 |
 | wont-do | 16 |
-| **total** | **1625** |
+| **total** | **1627** |
 
 ## ideas (102)
 
@@ -1301,12 +1301,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — An object-owner tally says nothing about which parcel it counted
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
-- [`viewer-prim-attachment-worn-but-not-rendered`](bugs/viewer-prim-attachment-worn-but-not-rendered.md)
-  — A plain prim attachment reads "(worn)" in inventory but never appears on
 - [`viewer-region-push-discards-pending-edits`](bugs/viewer-region-push-discards-pending-edits.md)
   — A region push throws away the estate manager's unapplied edits
 - [`viewer-remote-parcel-id-uncorrelated`](bugs/viewer-remote-parcel-id-uncorrelated.md)
   — A resolved parcel id names no question, so two askers cannot be told apart
+- [`viewer-remove-attachment-message-is-a-no-op`](bugs/viewer-remove-attachment-message-is-a-no-op.md)
+  — '`Command::RemoveAttachment` sends a message no grid handles'
 - [`viewer-rigged-attachments-wearer-not-resolved`](bugs/viewer-rigged-attachments-wearer-not-resolved.md)
   — Worn rigged attachments (e.g. own shoes) don't render — wearer never
   resolved / too many rigged-pending objects
@@ -1339,7 +1339,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1035)
+## done (1037)
 
 ### protocol
 
@@ -1890,6 +1890,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (llSetText floating text)
 - [`viewer-hover-tooltips`](done/viewer-hover-tooltips.md) — In-world hover
   tooltips (object / avatar / land inspectors)
+- [`viewer-hud-attachments-not-composited`](done/viewer-hud-attachments-not-composited.md)
+  — A HUD attachment is built, seated and visible, and never reaches the frame
 - [`viewer-hud-context-menu`](done/viewer-hud-context-menu.md) — HUD context /
   pie menu entries (blocked by `viewer-ui-radial-menu` (done))
 - [`viewer-i18n-fluent-scaffold`](done/viewer-i18n-fluent-scaffold.md) — i18n
@@ -2512,6 +2514,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-preferences-network-cache-tab`](done/viewer-preferences-network-cache-tab.md)
   — Preferences — network & cache tab (blocked by `viewer-preferences-floater`
   (done))
+- [`viewer-prim-attachment-worn-but-not-rendered`](done/viewer-prim-attachment-worn-but-not-rendered.md)
+  — A plain prim attachment reads "(worn)" in inventory but never appears on
 - [`viewer-prim-creation`](done/viewer-prim-creation.md) — Prim / Linden tree /
   grass creation (the Create tool) (blocked by
   `viewer-object-edit-floater-shell` (done))

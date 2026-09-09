@@ -593,6 +593,31 @@ pub struct AvatarBody {
 }
 
 impl AvatarBody {
+    /// An empty body for tests: no parts, no skeleton, no attachment points.
+    ///
+    /// Its only job is to *be present*, because the resource's presence is what
+    /// the rigged / sphere fork keys on — [`adopt_pending_attachments`]
+    /// (`crate::rigged_attachments`) seats a worn attachment on the wearer's
+    /// attachment-point node when a body is loaded and on the wearer's object
+    /// entity when it is not, and it never reads the body itself. Tests of that
+    /// fork want the fork, not a hundred megabytes of vendored `character/`.
+    #[cfg(test)]
+    pub(crate) fn empty_for_test(dummy_joint: Entity) -> Self {
+        Self {
+            material: Handle::default(),
+            parts: Vec::new(),
+            joint_locals: Vec::new(),
+            joint_parents: Vec::new(),
+            rest_world: Vec::new(),
+            rest_root_drop: 0.0,
+            rest_seat_drop: 0.0,
+            attachment_points: HashMap::new(),
+            joint_lookup: HashMap::new(),
+            joint_is_volume: Vec::new(),
+            dummy_joint,
+        }
+    }
+
     /// The single shared inert dummy joint every avatar / worn-rig `SkinnedMesh`
     /// binds its palette slots to (Phase 4; see [`Self::dummy_joint`]).
     pub(crate) const fn dummy_joint(&self) -> Entity {

@@ -85,8 +85,14 @@ pub fn adopt_pending_attachments(
     body: Option<Res<AvatarBody>>,
     hud: Res<HudState>,
     identity: Res<SlIdentity>,
+    mut skips: ResMut<AttachmentAdoptSkipLog>,
     mut commands: Commands,
 ) {
+    // The rigid half of the `SL_VIEWER_LOG_ATTACHMENT_BIND=1` trace: a worn
+    // prim that never reaches its wearer's joint is invisible in exactly the
+    // way a missing rigged mesh is (roadmap
+    // viewer-prim-attachment-worn-but-not-rendered), and nothing said why.
+    let trace = log_attachment_bind_enabled();
     // Snapshot the pending attachments first so the target lookup can read
     // `state.objects` immutably (for the sphere-mode fallback) before the
     // `parented` flag is set.
@@ -105,10 +111,16 @@ pub fn adopt_pending_attachments(
             // unresolved wearer is retried next frame rather than taken for a
             // stranger's (which would hide our own HUD for the whole session).
             let Some(agent) = avatars.agent_of(avatar) else {
+                if trace && skips.changed(scoped, "HUD: wearer avatar not tracked") {
+                    info!(
+                        "HUD attachment {scoped} (point {point_id}) not yet routed: no avatar \
+                         tracked under {avatar} — its object update has not arrived"
+                    );
+                }
                 continue;
             };
             let own = identity.agent_id == Some(agent);
-            route_hud_attachment(
+            let routed = route_hud_attachment(
                 &mut state,
                 scoped,
                 entity,
@@ -117,6 +129,23 @@ pub fn adopt_pending_attachments(
                 &hud,
                 &mut commands,
             );
+            skips.seated(scoped);
+            if trace {
+                match routed {
+                    Some(node) => info!(
+                        "HUD attachment {scoped} routed to HUD point {point_id} \
+                         (screen node {node})"
+                    ),
+                    None => info!(
+                        "HUD attachment {scoped} (point {point_id}) hidden: {}",
+                        if own {
+                            "no HUD screen node for this point"
+                        } else {
+                            "not the agent's own"
+                        }
+                    ),
+                }
+            }
             continue;
         }
         let target = match body.as_deref() {
@@ -133,8 +162,75 @@ pub fn adopt_pending_attachments(
             if let Some(tracked) = state.objects.get_mut(&scoped) {
                 tracked.parented = true;
             }
+            skips.seated(scoped);
+            if trace {
+                info!(
+                    "attachment {scoped} seated on point {point_id} of avatar {avatar} \
+                     (target {target})"
+                );
+            }
             debug!("parented attachment {scoped} (point {point_id}) to avatar {avatar} joint");
+        } else if trace {
+            note_unseated(
+                &mut skips,
+                &avatars,
+                body.is_some(),
+                scoped,
+                point_id,
+                avatar,
+            );
         }
+    }
+}
+
+/// Log, once per reason-change, why [`adopt_pending_attachments`] could not seat
+/// the worn attachment `scoped` (worn on `point_id`, hanging off the avatar
+/// object `avatar`) on its wearer's attachment-point node — the rigid
+/// counterpart of the rigged bind's stall trace, gated by the same
+/// `SL_VIEWER_LOG_ATTACHMENT_BIND=1`.
+///
+/// The three stalls it tells apart are the three ways the target lookup can come
+/// back empty: the wearer's avatar object is not tracked at all, it is tracked
+/// but has no body (so no point nodes), or it has a body whose point table does
+/// not carry this point — the last one names the points it *does* carry, since a
+/// point that resolves no skeleton joint is silently absent from that table.
+fn note_unseated(
+    skips: &mut AttachmentAdoptSkipLog,
+    avatars: &AvatarState,
+    has_body: bool,
+    scoped: ScopedObjectId,
+    point_id: u8,
+    avatar: ScopedObjectId,
+) {
+    let Some(agent) = avatars.agent_of(avatar) else {
+        if skips.changed(scoped, "wearer avatar not tracked") {
+            info!(
+                "attachment {scoped} (point {point_id}) not yet seated: no avatar tracked under \
+                 {avatar} — its object update has not arrived"
+            );
+        }
+        return;
+    };
+    if !has_body {
+        if skips.changed(scoped, "no avatar assets and no wearer object") {
+            info!(
+                "attachment {scoped} (point {point_id}) not yet seated: sphere-mode wearer \
+                 {agent} has no tracked object entity to follow"
+            );
+        }
+        return;
+    }
+    if skips.changed(scoped, "wearer body has no node for this point") {
+        let mut points: Vec<u8> = avatars
+            .attachment_nodes_of(agent)
+            .map(|(point, _node)| point)
+            .collect();
+        points.sort_unstable();
+        info!(
+            "attachment {scoped} not yet seated: wearer {agent}'s body has no attachment-point \
+             node for point {point_id}; it has {} node(s): {points:?}",
+            points.len()
+        );
     }
 }
 
@@ -146,6 +242,10 @@ pub fn adopt_pending_attachments(
 /// relative to the screen, so left in the world it would sit as loose geometry at
 /// the region origin, which is exactly what it did before this phase. Both
 /// outcomes are terminal, so the caller marks it routed and stops retrying.
+///
+/// Returns the screen node it was parented to, or `None` when it was hidden
+/// instead, so the caller can trace which of the two happened without this
+/// having to know whether the trace is on.
 fn route_hud_attachment(
     state: &mut ObjectState,
     scoped: ScopedObjectId,
@@ -154,8 +254,9 @@ fn route_hud_attachment(
     own: bool,
     hud: &HudState,
     commands: &mut Commands,
-) {
-    match hud.point_entity(point_id).filter(|_node| own) {
+) -> Option<Entity> {
+    let routed = hud.point_entity(point_id).filter(|_node| own);
+    match routed {
         Some(node) => {
             // Override the world-geometry probe layers this object got at spawn
             // with the HUD layer, so the HUD subtree renders on the HUD camera
@@ -182,7 +283,9 @@ fn route_hud_attachment(
     if let Some(tracked) = state.objects.get_mut(&scoped) {
         tracked.parented = true;
     }
+    routed
 }
+
 /// Whether worn rigged meshes' joint position overrides (R1) are applied to the
 /// avatar skeleton. On by default; `SL_VIEWER_JOINT_OVERRIDES=0` disables it, so
 /// the pre-override skeleton behaviour can be compared side by side in one
@@ -199,9 +302,11 @@ pub fn joint_overrides_enabled() -> bool {
 /// viewer-mesh-hair-not-rendering) reveals *which* stall it is stuck on — the
 /// mesh not decoding, an in-flight LOD upgrade, an unresolved wearer, or the
 /// wearer's body not spawned — instead of retrying silently every frame.
-pub(crate) fn log_attachment_bind_enabled() -> bool {
-    std::env::var("SL_VIEWER_LOG_ATTACHMENT_BIND").as_deref() == Ok("1")
-}
+///
+/// The same switch turns on the object layer's arrival line and this module's
+/// seating trace; it is read from the shared world crate so all three stages of
+/// a worn object's journey light up together.
+pub(crate) use crate::world_api::log_attachment_bind_enabled;
 
 /// Diagnostic state for `log_attachment_bind_enabled`: the last-logged
 /// not-yet-bound reason per worn rigged attachment, so [`apply_rigged_attachments`]
@@ -240,6 +345,46 @@ impl crate::world_api::world_scoped::WorldScoped for RiggedBindSkipLog {
     /// region's local-id space owns, and an attachment that never bound never
     /// reached `RiggedBindSkipLog::bound` to be removed — so without
     /// this the map only ever grew.
+    fn purge_world(
+        &mut self,
+        _purge: crate::world_api::world_scoped::WorldPurge,
+        _commands: &mut Commands,
+    ) {
+        self.0.clear();
+    }
+}
+
+/// Diagnostic state for the **rigid** half of the same trace
+/// (`log_attachment_bind_enabled`): the last-logged not-yet-seated reason per
+/// worn attachment [`adopt_pending_attachments`] could not parent to its
+/// wearer's attachment-point node. Separate from [`RiggedBindSkipLog`] on
+/// purpose — the two systems look at the *same* object from different stages
+/// (a worn rigged mesh is both parentless and unbound until it binds), so one
+/// shared map would thrash between their two reasons every frame instead of
+/// logging each once.
+#[derive(Debug, Resource, Default)]
+pub struct AttachmentAdoptSkipLog(HashMap<ScopedObjectId, &'static str>);
+
+impl AttachmentAdoptSkipLog {
+    /// Record `reason` as `scoped`'s current not-yet-seated reason, returning
+    /// `true` when it changed since last time — so a caller logging something
+    /// richer than the bare reason still fires exactly once per reason-change.
+    fn changed(&mut self, scoped: ScopedObjectId, reason: &'static str) -> bool {
+        self.0.insert(scoped, reason) != Some(reason)
+    }
+
+    /// Forget `scoped`'s stall reason — it was seated (or routed, or is gone),
+    /// so a later re-attach traces afresh.
+    fn seated(&mut self, scoped: ScopedObjectId) {
+        let _prev = self.0.remove(&scoped);
+    }
+}
+
+impl crate::world_api::world_scoped::WorldScoped for AttachmentAdoptSkipLog {
+    /// Forget every stall reason, for the same reason
+    /// [`RiggedBindSkipLog`] does: the keys belong to the departed region's
+    /// local-id space, and an attachment that never seated never reached
+    /// `AttachmentAdoptSkipLog::seated` to be removed.
     fn purge_world(
         &mut self,
         _purge: crate::world_api::world_scoped::WorldPurge,
@@ -918,4 +1063,154 @@ fn log_rigged_face(mesh_key: MeshKey, index: usize, face: &TextureFace, bom: Opt
          repeats=({:.3},{:.3}) offset=({:.3},{:.3}) rot={:.3}",
         face.scale_s, face.scale_t, face.offset_s, face.offset_t, face.rotation
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy::ecs::system::RunSystemOnce as _;
+    use bevy::prelude::{ChildOf, Entity, Vec3, World};
+    use pretty_assertions::assert_eq;
+    use sl_client_bevy::{
+        AgentKey, CircuitId, ObjectKey, PrimLod, RegionLocalObjectId, ScopedObjectId, SlIdentity,
+        Uuid, pcode,
+    };
+
+    use crate::avatars::AvatarBody;
+    use crate::objects::fixture_object;
+    use crate::world_api::{
+        AvatarState, HudState, INITIAL_TREE_TIER, ObjectState, ShapeFingerprint, TrackedObject,
+    };
+
+    use super::{AttachmentAdoptSkipLog, adopt_pending_attachments};
+
+    /// A boxed test error, so a test can use `?`.
+    type TestError = Box<dyn core::error::Error>;
+
+    /// The wearer's avatar object, as the object mirror scopes it.
+    const WEARER: ScopedObjectId = ScopedObjectId::new(CircuitId::new(1), RegionLocalObjectId(100));
+
+    /// The worn object's own scoped id.
+    const WORN: ScopedObjectId = ScopedObjectId::new(CircuitId::new(1), RegionLocalObjectId(101));
+
+    /// The wearer's agent id.
+    fn wearer_agent() -> AgentKey {
+        AgentKey::from(Uuid::from_u128(0xa1_7a_12))
+    }
+
+    /// A tracked worn object on `point_id`, hanging off [`WEARER`] and not yet
+    /// parented — exactly what the object ingest leaves for the seating pass.
+    fn worn_object(entity: Entity, geometry: Entity, point_id: u8) -> TrackedObject {
+        let object = fixture_object(pcode::PRIMITIVE);
+        TrackedObject {
+            entity,
+            full_key: ObjectKey::from(Uuid::from_u128(0x_0b_1e_c7)),
+            geometry,
+            shape: ShapeFingerprint::of(&object),
+            parent: WEARER,
+            is_root: false,
+            parented: false,
+            attachment_point: Some(point_id),
+            attachment_item: None,
+            owner_id: AgentKey::from(Uuid::nil()),
+            update_flags: 0,
+            material: 0,
+            extra: object.extra.clone(),
+            texture_animation: None,
+            text: String::new(),
+            text_color: [0; 4],
+            face_entities: Vec::new(),
+            prim_lod: PrimLod::Low,
+            tree_tier: INITIAL_TREE_TIER,
+            animated: false,
+            texture_entry: Vec::new(),
+            media_url: None,
+            scale: Vec3::ONE,
+        }
+    }
+
+    /// A world holding one worn object on `point_id` and a rigged wearer, with
+    /// `nodes` as the wearer body's attachment-point node table. Returns the
+    /// world and the worn object's entity.
+    fn world_with_worn_object(point_id: u8, nodes: &[u8]) -> (World, Entity) {
+        let mut world = World::new();
+        let dummy_joint = world.spawn_empty().id();
+        let entity = world.spawn_empty().id();
+        let geometry = world.spawn_empty().id();
+        let mut objects = ObjectState::default();
+        let _replaced = objects
+            .objects
+            .insert(WORN, worn_object(entity, geometry, point_id));
+        let mut avatars = AvatarState::default();
+        let agent = wearer_agent();
+        let _prior = avatars.by_scoped.insert(WEARER, agent);
+        let table = nodes
+            .iter()
+            .map(|&point| (point, world.spawn_empty().id()))
+            .collect();
+        let _prior_nodes = avatars.attachment_nodes.insert(agent, table);
+        world.insert_resource(objects);
+        world.insert_resource(avatars);
+        world.insert_resource(AvatarBody::empty_for_test(dummy_joint));
+        world.insert_resource(HudState::default());
+        world.insert_resource(SlIdentity::default());
+        world.insert_resource(AttachmentAdoptSkipLog::default());
+        (world, entity)
+    }
+
+    /// The seating pass parents a worn prim to its wearer's node for that point,
+    /// and marks it seated so it is not retried.
+    ///
+    /// This is the whole of what makes a worn prim visible: an object left at the
+    /// world root instead is drawn at the region origin with its wearer-relative
+    /// offset, which reads as "the attachment never appeared".
+    #[test]
+    fn a_worn_prim_is_parented_to_its_wearers_point_node() -> Result<(), TestError> {
+        let (mut world, entity) = world_with_worn_object(6, &[5, 6, 7]);
+        let node = world
+            .resource::<AvatarState>()
+            .attachment_point_entity(WEARER, 6)
+            .ok_or("the fixture must carry a node for point 6")?;
+        world
+            .run_system_once(adopt_pending_attachments)
+            .map_err(|error| format!("the seating pass must run: {error}"))?;
+        assert_eq!(
+            world.get::<ChildOf>(entity).map(ChildOf::parent),
+            Some(node),
+            "the worn prim must hang off its wearer's point-6 node"
+        );
+        assert!(
+            world
+                .resource::<ObjectState>()
+                .objects
+                .get(&WORN)
+                .is_some_and(|tracked| tracked.parented),
+            "a seated attachment must be marked parented so it is not retried"
+        );
+        Ok(())
+    }
+
+    /// A point the wearer's body carries no node for leaves the object parentless
+    /// and *unmarked*, so it is retried once the body that does carry the point is
+    /// spawned — rather than being dropped for the session.
+    #[test]
+    fn a_point_with_no_node_is_left_pending() -> Result<(), TestError> {
+        let (mut world, entity) = world_with_worn_object(6, &[5, 7]);
+        world
+            .run_system_once(adopt_pending_attachments)
+            .map_err(|error| format!("the seating pass must run: {error}"))?;
+        assert_eq!(
+            world.get::<ChildOf>(entity).map(ChildOf::parent),
+            None,
+            "with no node for its point the object must stay at the world root"
+        );
+        assert!(
+            world
+                .resource::<ObjectState>()
+                .objects
+                .get(&WORN)
+                .is_some_and(|tracked| !tracked.parented),
+            "an unseated attachment must stay pending for a later frame"
+        );
+        Ok(())
+    }
 }

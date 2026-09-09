@@ -3065,6 +3065,19 @@ pub const fn is_hud_point(point_id: u8) -> bool {
     AttachmentPoint::from_code(point_id).is_hud()
 }
 
+/// Whether the worn-attachment trace is enabled (`SL_VIEWER_LOG_ATTACHMENT_BIND=1`).
+///
+/// A worn object crosses three layers before it is drawn — the object ingest
+/// tracks it, the avatar layer seats it on its wearer's attachment-point node,
+/// and (for a rigged mesh) the skin bind builds it — and an attachment that
+/// never appears is silent in all three. The trace is read here, in the crate
+/// both layers share, so one environment variable turns on the whole chain
+/// rather than each layer inventing its own switch.
+#[must_use]
+pub fn log_attachment_bind_enabled() -> bool {
+    std::env::var("SL_VIEWER_LOG_ATTACHMENT_BIND").as_deref() == Ok("1")
+}
+
 // ---------------------------------------------------------------------------
 // Small world vocabulary the world's own layers share
 // ---------------------------------------------------------------------------
