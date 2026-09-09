@@ -1079,6 +1079,10 @@ pub const SIT_TARGET_OFFSET: Vector = Vector {
 /// The skeleton every fixture object shares: a root object with no sound,
 /// text, media, particles, or extra params; the caller sets the identity,
 /// geometry and motion.
+///
+/// The caller sets the **surface** too, because what an object wears depends
+/// on what it is: a prim gets the default texture ([`default_texture_entry`]),
+/// an avatar gets none at all (see [`avatar_prim`]).
 fn bare_object(
     local_id: RegionLocalObjectId,
     full_id: ObjectKey,
@@ -1128,8 +1132,36 @@ fn bare_object(
     }
 }
 
+/// The packed `TextureEntry` a simulator gives a prim nobody has textured:
+/// the default plywood ([`sl_proto::DEFAULT_PRIM_TEXTURE`]) on every face,
+/// which the stock asset store answers
+/// ([`default_assets`](crate::scenario::default_assets)).
+///
+/// It takes no face count on purpose. The entry is run-length packed — one
+/// default value, then `(face bitmask, value)` overrides — so an entry whose
+/// faces all agree is *one* default and no overrides, and the bytes are the
+/// same however many faces the prim's shape renders. A client that decodes
+/// this blob for six faces and one that decodes it for nine both read plywood
+/// everywhere, which is what "the whole prim wears the default texture" means
+/// on the wire.
+///
+/// The alternative — leaving the blob empty — is not "no texture set" but *no
+/// per-face data at all*: [`decode_texture_entry`](sl_proto::decode_texture_entry)
+/// of an empty blob is an entry with no faces, so everything downstream (a
+/// viewer's renderer, a take writing an object asset) has to invent what the
+/// prim's faces are.
+fn default_texture_entry() -> Vec<u8> {
+    sl_proto::encode_texture_entry(&sl_proto::TextureEntry {
+        faces: vec![sl_proto::TextureFace::new(sl_proto::TextureKey::from(
+            sl_proto::DEFAULT_PRIM_TEXTURE,
+        ))],
+    })
+}
+
 /// A plain box prim of `scale` metres resting at `position`, owned by
-/// `owner` — the simplest object a viewer can render.
+/// `owner` — the simplest object a viewer can render, wearing the default
+/// texture a fresh prim has ([`sl_proto::DEFAULT_PRIM_TEXTURE`]) on every
+/// face.
 #[must_use]
 pub fn box_prim(
     local_id: RegionLocalObjectId,
@@ -1139,6 +1171,7 @@ pub fn box_prim(
     scale: Vector,
 ) -> Object {
     let mut object = bare_object(local_id, full_id, owner, position);
+    object.texture_entry = default_texture_entry();
     object.scale = scale;
     object.shape = PrimShapeParams {
         // A straight-extruded square profile: the legacy "box".
@@ -1158,6 +1191,13 @@ pub fn box_prim(
 /// the same wire block a simulator would send back), so nothing here is
 /// converted — the numbers move across as they are, and the object a rez
 /// produces is the object the client described.
+///
+/// The one thing the client does *not* describe is the surface: a
+/// [`PrimShape`] carries no `TextureEntry`, because a real simulator is the
+/// one that decides what a new prim looks like, and it decides the default
+/// plywood ([`sl_proto::DEFAULT_PRIM_TEXTURE`]) on every face the shape
+/// renders. A viewer retextures it afterwards, with an `ObjectImage` naming
+/// faces that have to already exist.
 #[must_use]
 pub fn prim_from_shape(
     local_id: RegionLocalObjectId,
@@ -1166,6 +1206,7 @@ pub fn prim_from_shape(
     shape: &PrimShape,
 ) -> Object {
     let mut object = bare_object(local_id, full_id, owner, shape.position.clone());
+    object.texture_entry = default_texture_entry();
     object.pcode = shape.pcode;
     object.state = shape.state;
     object.material = shape.material.to_code();
@@ -1202,6 +1243,12 @@ pub fn prim_from_shape(
 /// This is the avatar body every fake-grid avatar is rezzed as — the arriving
 /// agent's own (from the login identity) and every
 /// [`NpcFixture`]'s.
+///
+/// Unlike a prim it carries **no** `TextureEntry`: an avatar's faces are its
+/// bake slots, and what fills them travels in the `AvatarAppearance` a
+/// simulator pushes separately
+/// ([`NpcAppearance::texture_entry`]) — not in the object update. Giving one
+/// the prim default here would put plywood in a bake slot.
 #[must_use]
 pub fn avatar_prim(
     local_id: RegionLocalObjectId,
@@ -2185,12 +2232,12 @@ fn taken_prim(object: &Object) -> sl_object_asset::PrimBlock {
         DEFAULT_OBJECT_NAME.clone_into(&mut prim.name);
     }
     if prim.faces.is_empty() {
-        // A prim rezzed here carries no `TextureEntry` at all (`bare_object`
-        // leaves it empty and nothing fills it in), while a real simulator
-        // gives a new prim the default texture. The asset still has to state
-        // the faces the shape renders -- an object asset with no faces rezzes
-        // an object nothing can texture -- so they are stated as untextured
-        // rather than omitted.
+        // An object with no `TextureEntry` at all -- which a prim this grid
+        // rezzed no longer is (`default_texture_entry`), but one rezzed from an
+        // asset that stated no faces still can be. The asset has to state
+        // the faces the shape renders either way -- an object asset with no
+        // faces rezzes an object nothing can texture -- so they are stated as
+        // untextured rather than omitted.
         prim.faces = vec![sl_object_asset::LegacyFace::default(); faces];
     }
     prim
@@ -2710,6 +2757,76 @@ mod test {
         assert_eq!(object.shape.path_curve, shape.path_curve);
         assert_eq!(object.shape.profile_curve, shape.profile_curve);
         assert_eq!(object.material, shape.material.to_code());
+    }
+
+    /// A prim a client rezzes wears the default plywood on every face the
+    /// shape renders — a real simulator textures a new prim, and a client that
+    /// received no per-face data at all would have nothing to retexture.
+    ///
+    /// The shape here is a hollow cut box, whose rendered face count is *not*
+    /// the six a plain box has; both are asserted from one blob, which is what
+    /// the run-length encoding buys ([`default_texture_entry`]).
+    #[test]
+    fn a_rezzed_prim_wears_the_default_texture() {
+        let mut shape = sl_proto::PrimShape::cube(ZERO);
+        shape.profile_hollow = 25_000;
+        shape.profile_begin = 2_000;
+        let object = prim_from_shape(
+            RegionLocalObjectId(9),
+            ObjectKey::from(uuid::Uuid::from_u128(0x9)),
+            agent(0x1),
+            &shape,
+        );
+
+        let faces = sl_object_asset::rendered_face_count(&object.shape);
+        assert!(
+            faces > 6,
+            "a hollow cut box renders more than a plain box's six faces; got {faces}"
+        );
+        let entry = sl_proto::decode_texture_entry(&object.texture_entry, faces);
+        assert_eq!(entry.faces.len(), faces);
+        for (index, face) in entry.faces.iter().enumerate() {
+            assert_eq!(
+                face.texture_id.uuid(),
+                sl_proto::DEFAULT_PRIM_TEXTURE,
+                "face {index} is not the default prim texture"
+            );
+        }
+
+        // The same blob read as a plain box's six faces is plywood too: the
+        // entry states one default and no overrides, so the face count is the
+        // reader's business.
+        let six = sl_proto::decode_texture_entry(&object.texture_entry, 6);
+        assert!(
+            six.faces
+                .iter()
+                .all(|face| face.texture_id.uuid() == sl_proto::DEFAULT_PRIM_TEXTURE),
+            "the entry is not face-count independent"
+        );
+    }
+
+    /// A take of a prim the grid rezzed writes the faces it actually wears
+    /// into the object asset, rather than the untextured stand-ins a prim with
+    /// no `TextureEntry` forced.
+    #[test]
+    fn a_taken_rezzed_prim_states_its_default_faces() {
+        let object = prim_from_shape(
+            RegionLocalObjectId(9),
+            ObjectKey::from(uuid::Uuid::from_u128(0x9)),
+            agent(0x1),
+            &sl_proto::PrimShape::cube(ZERO),
+        );
+        let prim = taken_prim(&object);
+        assert_eq!(
+            prim.faces.len(),
+            sl_object_asset::rendered_face_count(&object.shape)
+        );
+        assert!(
+            prim.faces
+                .iter()
+                .all(|face| face.image_id == sl_proto::DEFAULT_PRIM_TEXTURE),
+            "a taken prim's faces are not the default texture"
+        );
     }
 
     /// An object nobody has named reports the record a freshly rezzed prim has,

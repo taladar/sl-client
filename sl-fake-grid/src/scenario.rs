@@ -135,7 +135,9 @@ impl Default for Scenario {
 /// under its real UUID is honest — and not answering is expensive: each of the
 /// twelve is otherwise a fetch that burns its whole retry budget on every
 /// arrival, and the ground shades flat, the sky has no sun in it, and every
-/// untextured fixture prim is a hole. The sounds cost no retries (a sound is
+/// prim nobody textured is a hole — which is *every* prim this grid makes,
+/// since [`box_prim`] and the rez path both name the
+/// default prim texture. The sounds cost no retries (a sound is
 /// asked for once and then given up on) but cost every one of the viewer's own
 /// events its voice: no typing chirp, no money chime, no teleport whoosh.
 ///

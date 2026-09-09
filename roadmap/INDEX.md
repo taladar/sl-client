@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 101 |
+| ideas | 100 |
 | ready | 319 |
 | blocked | 46 |
 | in-progress | 20 |
 | bugs | 58 |
-| done | 1040 |
+| done | 1041 |
 | deferred | 26 |
 | wont-do | 14 |
 | **total** | **1624** |
 
-## ideas (101)
+## ideas (100)
 
 ### protocol
 
@@ -189,8 +189,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
-- [`test-fake-grid-rezzed-prim-texture`](ideas/test-fake-grid-rezzed-prim-texture.md)
-  — A prim the fake grid rezzes carries no TextureEntry
 - [`test-firestorm-fake-grid-crosscheck`](ideas/test-firestorm-fake-grid-crosscheck.md)
   — Point Firestorm at the fake grid to calibrate oracles
 - [`test-reference-cpp-oracles`](ideas/test-reference-cpp-oracles.md) —
@@ -1323,7 +1321,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-water-refraction-smears-avatar-silhouette`](bugs/viewer-water-refraction-smears-avatar-silhouette.md)
   — Water behind an avatar smears a skin-coloured fringe around its silhouette
 
-## done (1040)
+## done (1041)
 
 ### protocol
 
@@ -3306,6 +3304,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `test-shared-test-assets` (done))
 - [`test-fake-grid-rez-from-inventory`](done/test-fake-grid-rez-from-inventory.md)
   — The fake grid takes an object but cannot rez one back
+- [`test-fake-grid-rezzed-prim-texture`](done/test-fake-grid-rezzed-prim-texture.md)
+  — A prim the fake grid rezzes carries no TextureEntry
 - [`test-fake-grid-seated-crossing`](done/test-fake-grid-seated-crossing.md) —
   Crossing a border seated on a vehicle, alone and with other riders
 - [`test-fake-grid-self-avatar-baked-textures-rejected`](done/test-fake-grid-self-avatar-baked-textures-rejected.md)

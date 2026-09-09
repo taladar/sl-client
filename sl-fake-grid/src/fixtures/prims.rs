@@ -1,9 +1,11 @@
 //! Typed prim fixtures: a builder that produces the [`Object`] records the
 //! fake grid pushes at an arriving viewer.
 //!
-//! [`world::box_prim`](crate::world::box_prim) makes an untextured cube and
-//! nothing else, because `full_update_block` emits only the **raw byte
-//! fields** of an [`Object`] — its `texture_entry`, `extra_params`,
+//! [`world::box_prim`](crate::world::box_prim) makes a plywood cube and
+//! nothing else — the default texture is the one surface a fixture gets for
+//! free, because it is the one a simulator gives a prim itself. Everything
+//! past it has to be encoded, because `full_update_block` emits only the **raw
+//! byte fields** of an [`Object`] — its `texture_entry`, `extra_params`,
 //! `particle_system` and `texture_anim` travel as blobs, and the typed views
 //! beside them (`extra`, `texture_animation`, `particles`) are what a *decoder*
 //! filled in, never what an encoder reads. A fixture that wants a textured,

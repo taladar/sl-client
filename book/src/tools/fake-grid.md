@@ -1035,7 +1035,11 @@ the Bevy smoke tier's `SlRegionIdentity` assertion is what caught it.
 
 ## Typed prim fixtures and the catalogue
 
-`box_prim` makes an untextured cube and nothing else, because
+`box_prim` makes a plywood cube and nothing else. The default prim texture
+(`sl_proto::DEFAULT_PRIM_TEXTURE`) is the one surface a fixture gets for free,
+because it is the one a real simulator puts on a prim itself — `box_prim` and
+`prim_from_shape`, the object a `RezObject` produces, both wear it. Everything
+past that has to be encoded, because
 `full_update_block` emits only the **raw byte fields** of an `Object`: its
 `texture_entry`, `extra_params`, `particle_system` and `texture_anim`
 travel as blobs, and the typed views beside them (`extra`, `particles`,
