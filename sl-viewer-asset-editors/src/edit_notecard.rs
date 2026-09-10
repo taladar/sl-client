@@ -666,6 +666,9 @@ fn report_notecard_save(
                 SlSessionEvent::AssetUploaded {
                     new_asset,
                     new_inventory_item,
+                    // A save replaces the asset of an item that already
+                    // exists; only an upload that creates one carries it.
+                    created: _,
                 } => {
                     // Prefer the returned item id; a save reports the item it wrote,
                     // so a mismatching upload (a baked texture, another floater's

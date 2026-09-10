@@ -1,10 +1,10 @@
 //! The grid orchestrator: the builder, the running [`FakeGrid`], and the
 //! per-login session bring-up shared by the HTTP endpoints.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
@@ -30,7 +30,7 @@ use crate::driver::{SharedSim, SimState, new_shared_sim, run_timer, run_udp_pump
 use crate::economy_policy::{EconomyConfig, EconomyEvent};
 use crate::error::Error;
 use crate::imitates::ImitatedGrid;
-use crate::inventory::{InventoryAnnouncement, LegacyUdpInventory};
+use crate::inventory::{InventoryAnnouncement, LegacyUdpInventory, UploadAnnouncements};
 use crate::map_tiles::MapTileStore;
 use crate::neighbours::NeighbourPolicy;
 use crate::scenario::Scenario;
@@ -356,6 +356,11 @@ pub(crate) struct GridCore {
     regions: Vec<RegionEntry>,
     /// The login policy gates applied to every account.
     pub(crate) gates: LoginGates,
+    /// Whether a stale presence is waiting to be evicted: the next login that
+    /// would otherwise succeed is refused as already-logged-in, and the
+    /// refusal clears it (see
+    /// [`FakeGridBuilder::stale_presence`](crate::FakeGridBuilder::stale_presence)).
+    pub(crate) stale_presence: AtomicBool,
     /// Whether the login response is trimmed to the request's `options`.
     pub(crate) honor_options: bool,
     /// The identifier source every login and capability grant draws from.
@@ -370,6 +375,15 @@ pub(crate) struct GridCore {
     pub(crate) object_assets: ObjectAssetPolicy,
     /// Whether `SimulatorFeatures` carries the `OpenSimExtras` block.
     pub(crate) open_sim_extras: bool,
+    /// The subscription packages the login response describes, when this grid
+    /// describes any ([`account_entitlements`](Self::account_entitlements)).
+    pub(crate) packages: BTreeMap<String, sl_proto::AccountBenefits>,
+    /// Whether the login response describes what the account is entitled to:
+    /// the benefits package, its subscription name, and the maturity
+    /// preference. Also decides whether the two maturity fields both grids send
+    /// mean anything per account, or are OpenSim's hard-coded `M`/`A`
+    /// ([`ImitatedGrid::describes_account_entitlements`]).
+    pub(crate) account_entitlements: bool,
     /// The spatial-voice backend every region serves ([`VoiceBackend`]).
     pub(crate) voice_backend: VoiceBackend,
     /// The clock every session machine is stamped from.
@@ -397,6 +411,11 @@ pub(crate) struct GridCore {
     /// How a session announces an inventory item it just created
     /// ([`InventoryAnnouncement`]).
     pub(crate) inventory_announcement: InventoryAnnouncement,
+    /// How a session announces an item a capability upload created or rewrote
+    /// ([`UploadAnnouncements`]) — a different question from a take, with the
+    /// two live grids on the opposite sides of one half of it and agreeing on
+    /// the other.
+    pub(crate) upload_announcements: UploadAnnouncements,
     /// Who composites this grid's avatars ([`BakePolicy`]): the appearance
     /// service, the central-bake protocol bit, the `AppearanceData` block and
     /// the `UpdateAvatarAppearance` capability all follow it.
@@ -543,7 +562,14 @@ impl GridCore {
         {
             let mut state = prepared.shared.state.lock().await;
             register_account_display_name(&mut state.sim, account);
-            enrich_success(&mut success, account, region, &state.sim);
+            enrich_success(
+                &mut success,
+                account,
+                region,
+                &state.sim,
+                self.account_entitlements,
+                &self.packages,
+            );
         }
         success.message = Some(self.identity.message.clone());
         success.map_server_url = Some(self.login_uri.clone());
@@ -561,7 +587,7 @@ impl GridCore {
                 .join(&format!("sim/{}/appearance/", prepared.seq))
                 .ok();
         }
-        success.currency = Some(self.economy.currency_symbol.clone());
+        success.currency.clone_from(&self.economy.currency_symbol);
         Ok((prepared, success))
     }
 
@@ -713,6 +739,7 @@ impl GridCore {
             assets: self.assets.clone(),
             object_assets: self.object_assets,
             inventory_announcement: self.inventory_announcement,
+            upload_announcements: self.upload_announcements,
             bakes: self.bakes,
             identity: {
                 let mut identity = region.identity(self.estate_owner, self.region_protocols);
@@ -744,6 +771,9 @@ impl GridCore {
             seed_url: seed_url.clone(),
             udp_addr,
             map: Arc::clone(&self.map),
+            timeline: region.scenario.timeline.steps.clone(),
+            timeline_cursor: 0,
+            timeline_generation: 0,
         };
         let shared = new_shared_sim(
             state,
@@ -776,6 +806,14 @@ impl GridCore {
             prepared.shared.clone(),
         ));
         tokio::spawn(crate::neighbours::run_neighbour_announcer(
+            Arc::clone(self),
+            prepared.shared.clone(),
+        ));
+        // Spawned for every session, script or none: a session that arrives
+        // with an empty timeline parks on its hand-over notification, which is
+        // what lets a teleport or a crossing walk a script into a region whose
+        // own scenario declared one.
+        tokio::spawn(crate::timeline::run_timeline(
             Arc::clone(self),
             prepared.shared.clone(),
         ));
@@ -879,7 +917,11 @@ impl GridCore {
             mesh_upload_enabled: Some(true),
             open_sim_extras: self.open_sim_extras.then(|| OpenSimExtras {
                 map_server_url: Some(self.login_uri.clone()),
-                currency: Some(self.economy.currency_symbol.clone()),
+                // Stock OpenSim puts `currency-base-uri` in this block and no
+                // symbol beside it, so this follows the economy's own answer
+                // rather than forcing one: a grid that announces no symbol
+                // announces none here either.
+                currency: self.economy.currency_symbol.clone(),
                 currency_base_uri: Some(self.login_uri.clone()),
                 say_range: Some(20),
                 shout_range: Some(100),
@@ -963,6 +1005,8 @@ fn enrich_success(
     account: &Account,
     region: &RegionEntry,
     sim: &SimSession,
+    account_entitlements: bool,
+    packages: &BTreeMap<String, sl_proto::AccountBenefits>,
 ) {
     success.first_name = Some(account.config.first_name.clone());
     success.last_name = Some(account.config.last_name.clone());
@@ -970,8 +1014,75 @@ fn enrich_success(
     success.region_y = region.config.grid_y.checked_mul(256);
     success.region_size_x = Some(256);
     success.region_size_y = Some(256);
-    success.agent_access = Some("M".to_owned());
-    success.agent_access_max = Some("A".to_owned());
+    // `agent_access` is **not** the account's preference or its ceiling: aditi
+    // sent `M` on three runs whose ceiling *and* preference were both `A`
+    // (2026-09-08), and OpenSim's login service hard-codes the same `M` for
+    // every avatar. Sending the preference here, which is the reading its name
+    // invites, is what the first attempt did and it disagreed with every aditi
+    // run.
+    //
+    // Two readings survive the measurement, and `login-handshake` records the
+    // figure that separates them:
+    //
+    //   * a **clearance** rather than an entitlement — what the account is
+    //     cleared for, against what its type permits. A beta account that has
+    //     never been age-verified is cleared to Moderate and entitled to Adult,
+    //     exactly the measured `M`/`A`, and the same axis carried the pre-2010
+    //     Teen Grid restriction.
+    //   * the **start region's own rating**, nothing to do with the account.
+    //
+    // The aditi run cannot tell them apart, because that avatar's start region
+    // is itself Mature (`start_region_maturity`, recorded beside the account
+    // fields for exactly this reason). What it does rule out is "vestigial
+    // constant": the value coincides with something rather than sitting where it
+    // was left. A login at a differently-rated region, or an age-verified
+    // avatar, separates the two in one run.
+    //
+    // Under either reading neither grid derives it from the account config, so
+    // it is not per-account on either flavour — and if the region reading wins,
+    // this should follow `region` rather than the ceiling. Parked rather than
+    // chased: roadmap `protocol-agent-access-meaning` (deferred) says what would
+    // settle it, and nothing is blocked on the answer.
+    let ceiling = account.config.maturity_ceiling;
+    if account_entitlements {
+        // Second Life: the measured `M`, clamped down when the account could not
+        // hold it — `M` beneath a `PG` ceiling is the one pair no grid could
+        // produce, whichever rule generates the value.
+        let cleared = if Maturity::Mature.permitted_by(ceiling) {
+            Maturity::Mature
+        } else {
+            ceiling
+        };
+        success.agent_access = cleared.to_login_access().map(str::to_owned);
+        success.agent_access_max = ceiling.to_login_access().map(str::to_owned);
+        // The preference, which only this flavour sends. A preference above the
+        // ceiling is not a state a grid lets exist, so it is clamped rather than
+        // forwarded: a test that sets an impossible pair should meet the grid's
+        // answer to it, not have the impossible pair handed to the client as if
+        // a real grid had sent it.
+        let preference = match account.config.preferred_maturity {
+            Some(preference) if preference.permitted_by(ceiling) => preference,
+            _clamped_or_unset => ceiling,
+        };
+        success.agent_region_access = preference.to_login_access().map(str::to_owned);
+
+        // What this account may do, and what every other tier would grant. Both
+        // are sent: a viewer that got only the account's own package would warn
+        // at startup, because the reference parse insists on seeing at least
+        // `Base` and `Premium` described.
+        success.account_type = Some(account.config.package.clone());
+        success.account_level_benefits = packages
+            .get(&account.config.package)
+            .map(crate::benefits::to_llsd);
+        success.premium_packages = Some(crate::benefits::packages_to_llsd(packages));
+    } else {
+        // OpenSim: literally these two, for every avatar, whatever the account
+        // config says. Honouring a ceiling here would model a grid that does not
+        // exist and would make a restricted account *look* supported on the
+        // flavour that cannot express one.
+        success.agent_access = Some("M".to_owned());
+        success.agent_access_max = Some("A".to_owned());
+    }
     // The `voice-config` section mirrors the backend the region ended up
     // running; a silent region sends no section at all.
     success.voice_config = sim
@@ -1032,6 +1143,9 @@ pub struct FakeGridBuilder {
     scenario: Scenario,
     /// The login policy gates.
     gates: LoginGates,
+    /// Whether the grid starts holding a stale presence (see the builder
+    /// method).
+    stale_presence: bool,
     /// The `EventQueueGet` hold before the 502 re-poll answer.
     eq_hold: Duration,
     /// An override for the handover arrival budget (see the builder method).
@@ -1040,8 +1154,12 @@ pub struct FakeGridBuilder {
     http_port: u16,
     /// The grid's self-description.
     identity: GridIdentity,
-    /// The economy helper policy.
-    economy: EconomyConfig,
+    /// The economy helper policy and price list, or `None` to follow
+    /// [`imitates`](Self::imitates).
+    economy: Option<EconomyConfig>,
+    /// The subscription packages described at login, or `None` for the measured
+    /// Second Life table.
+    packages: Option<BTreeMap<String, sl_proto::AccountBenefits>>,
     /// The live grid this one imitates, which every knob below that is `None`
     /// takes its answer from ([`ImitatedGrid`]).
     imitates: ImitatedGrid,
@@ -1063,6 +1181,9 @@ pub struct FakeGridBuilder {
     /// How a created inventory item is announced, or `None` to follow
     /// [`imitates`](Self::imitates).
     inventory_announcement: Option<InventoryAnnouncement>,
+    /// How an uploaded item is announced, or `None` to follow
+    /// [`imitates`](Self::imitates).
+    upload_announcements: Option<UploadAnnouncements>,
     /// Who composites this grid's avatars, or `None` to follow
     /// [`imitates`](Self::imitates).
     bakes: Option<BakePolicy>,
@@ -1082,6 +1203,7 @@ impl std::fmt::Debug for FakeGridBuilder {
             .field("regions", &self.regions)
             .field("scenario", &self.scenario)
             .field("gates", &self.gates)
+            .field("stale_presence", &self.stale_presence)
             .field("imitates", &self.imitates)
             // The derived knobs print as `None` until something overrides one,
             // which is what to look at first when a grid behaves like the other
@@ -1092,6 +1214,7 @@ impl std::fmt::Debug for FakeGridBuilder {
             .field("voice_backend", &self.voice_backend)
             .field("legacy_udp_inventory", &self.legacy_udp_inventory)
             .field("inventory_announcement", &self.inventory_announcement)
+            .field("upload_announcements", &self.upload_announcements)
             .field("bakes", &self.bakes)
             .field("eq_hold", &self.eq_hold)
             .field("handover_timeout", &self.handover_timeout)
@@ -1146,11 +1269,13 @@ impl FakeGridBuilder {
             minter: IdMinter::default(),
             clock: system_clock(),
             gates: LoginGates::default(),
+            stale_presence: false,
             eq_hold: Duration::from_secs(30),
             handover_timeout: None,
             http_port: 0,
             identity: GridIdentity::default(),
-            economy: EconomyConfig::default(),
+            economy: None,
+            packages: None,
             imitates: ImitatedGrid::default(),
             object_assets: None,
             honor_options: None,
@@ -1158,6 +1283,7 @@ impl FakeGridBuilder {
             voice_backend: None,
             legacy_udp_inventory: None,
             inventory_announcement: None,
+            upload_announcements: None,
             bakes: None,
             map_tiles: MapTileStore::default(),
         }
@@ -1189,6 +1315,25 @@ impl FakeGridBuilder {
     #[must_use]
     pub fn gates(mut self, gates: LoginGates) -> Self {
         self.gates = gates;
+        self
+    }
+
+    /// Starts the grid holding **one stale presence**: the next login that
+    /// would otherwise succeed is refused as already-logged-in, and the
+    /// refusal itself clears it, so the attempt after that goes through.
+    ///
+    /// Distinct from [`LoginGates::already_logged_in`], which refuses *every*
+    /// login and is the genuinely-online duplicate. This is the ghost: a prior
+    /// session that did not log out cleanly leaves a presence record behind,
+    /// and OpenSim's login service marks the grid-user logged out on its way to
+    /// returning the rejection — so a client that retries gets in. That
+    /// self-clearing refusal is the whole reason a driver may retry an
+    /// [`AlreadyLoggedIn`](sl_wire::LoginRejectKind::AlreadyLoggedIn)
+    /// rejection at all, and a grid that only ever refuses or only ever accepts
+    /// cannot exercise the retry.
+    #[must_use]
+    pub const fn stale_presence(mut self) -> Self {
+        self.stale_presence = true;
         self
     }
 
@@ -1277,11 +1422,34 @@ impl FakeGridBuilder {
         self
     }
 
-    /// Sets the economy helper policy (currency symbol, price, site state,
-    /// upgrade requirements, confirm token).
+    /// Overrides the economy helper policy (currency symbol, L$ rate, site
+    /// state, upgrade requirements, confirm token) **and the simulator's price
+    /// list**, which otherwise follows [`imitates`](Self::imitates).
+    ///
+    /// The two travel together because they are one
+    /// [`EconomyConfig`], so setting this replaces the
+    /// flavour's prices as well. To change only the helper half, build from
+    /// [`EconomyConfig::for_grid`](crate::EconomyConfig::for_grid) with the
+    /// same flavour rather than from
+    /// [`EconomyConfig::default`](crate::EconomyConfig::default) — the default
+    /// is Second Life's, so `..Default::default()` on an OpenSim-flavoured grid
+    /// would quietly hand it Second Life's prices.
     #[must_use]
     pub fn economy(mut self, economy: EconomyConfig) -> Self {
-        self.economy = economy;
+        self.economy = Some(economy);
+        self
+    }
+
+    /// Overrides the subscription packages the login response describes, which
+    /// otherwise are the five `sl-conformance` measured on aditi
+    /// ([`second_life_packages`](crate::second_life_packages)).
+    ///
+    /// Ignored entirely on a grid whose flavour describes no entitlements: an
+    /// OpenSim-flavoured grid sends no packages however this is set, because no
+    /// OpenSim grid has ever sent any.
+    #[must_use]
+    pub fn packages(mut self, packages: BTreeMap<String, sl_proto::AccountBenefits>) -> Self {
+        self.packages = Some(packages);
         self
     }
 
@@ -1302,6 +1470,27 @@ impl FakeGridBuilder {
     #[must_use]
     pub const fn inventory_announcement(mut self, announcement: InventoryAnnouncement) -> Self {
         self.inventory_announcement = Some(announcement);
+        self
+    }
+
+    /// Overrides how an item a **capability upload** created or rewrote is
+    /// announced, which otherwise follows [`imitates`](Self::imitates): both
+    /// live grids say nothing after a creation, and after an in-place save
+    /// Second Life pushes the legacy UDP `UpdateCreateInventoryItem` while
+    /// OpenSim still says nothing.
+    ///
+    /// Two answers rather than one, because the paths are answered differently
+    /// on the same grid;
+    /// [`UploadAnnouncements::uniform`](crate::UploadAnnouncements::uniform) is
+    /// the shorthand for a grid that should treat them alike.
+    ///
+    /// Not the same knob as
+    /// [`inventory_announcement`](Self::inventory_announcement), and not the
+    /// same answer: the two grids swap sides between a take and a save — see
+    /// the [`inventory`](crate::inventory) module docs.
+    #[must_use]
+    pub const fn upload_announcements(mut self, announcements: UploadAnnouncements) -> Self {
+        self.upload_announcements = Some(announcements);
         self
     }
 
@@ -1426,6 +1615,7 @@ impl FakeGridBuilder {
             estate_owner,
             regions,
             gates: self.gates,
+            stale_presence: AtomicBool::new(self.stale_presence),
             // Each derived knob resolves here, once: an explicit setter wins,
             // and anything left unset is whatever the grid being imitated does.
             honor_options: self
@@ -1439,6 +1629,10 @@ impl FakeGridBuilder {
             open_sim_extras: self
                 .open_sim_extras
                 .unwrap_or_else(|| self.imitates.advertises_open_sim_extras()),
+            account_entitlements: self.imitates.describes_account_entitlements(),
+            packages: self
+                .packages
+                .unwrap_or_else(crate::benefits::second_life_packages),
             voice_backend: self
                 .voice_backend
                 .unwrap_or_else(|| self.imitates.voice_backend()),
@@ -1449,13 +1643,18 @@ impl FakeGridBuilder {
             login_uri,
             identity: self.identity,
             grid_info,
-            economy: self.economy,
+            economy: self
+                .economy
+                .unwrap_or_else(|| EconomyConfig::for_grid(self.imitates)),
             legacy_udp_inventory: self
                 .legacy_udp_inventory
                 .unwrap_or_else(|| self.imitates.legacy_udp_inventory()),
             inventory_announcement: self
                 .inventory_announcement
                 .unwrap_or_else(|| self.imitates.inventory_announcement()),
+            upload_announcements: self
+                .upload_announcements
+                .unwrap_or_else(|| self.imitates.upload_announcements()),
             bakes,
             // The two halves of `RegionProtocols` compose: the bake policy
             // claims the central-bake bit (and an explicit `bakes` override

@@ -4,6 +4,7 @@ pub mod accounts;
 pub mod agent_requests;
 pub mod assets;
 pub mod bakes;
+pub mod benefits;
 mod caps_endpoint;
 pub mod crossing;
 mod driver;
@@ -27,6 +28,7 @@ pub mod scenario;
 mod teleport;
 pub mod terrain;
 pub mod time;
+pub mod timeline;
 pub mod udp_assets;
 mod uploads;
 pub mod voice;
@@ -37,8 +39,9 @@ pub use accounts::AccountConfig;
 pub use agent_requests::AgentPolicy;
 pub use assets::ObjectAssetPolicy;
 pub use bakes::{BakePolicy, REGION_PROTOCOL_BAKES_ON_MESH, REGION_PROTOCOL_SERVER_BAKES};
+pub use benefits::{DEFAULT_PACKAGE, second_life_packages};
 pub use crossing::CROSSING_ARRIVAL_TIMEOUT;
-pub use economy_policy::{EconomyConfig, EconomyEvent, stock_prices};
+pub use economy_policy::{EconomyConfig, EconomyEvent, open_sim_prices, second_life_prices};
 pub use error::Error;
 pub use estate::EstateFixture;
 pub use fixtures::{
@@ -46,7 +49,9 @@ pub use fixtures::{
     PrimFixture, RegionFixture, SculptKind, catalogue, linkset,
 };
 pub use imitates::ImitatedGrid;
-pub use inventory::{InventoryAnnouncement, LegacyUdpInventory};
+pub use inventory::{
+    InventoryAnnouncement, LegacyUdpInventory, UploadAnnouncement, UploadAnnouncements,
+};
 pub use map_tiles::STOCK_TILE_JPEG;
 pub use marker::{
     MARKER_METHOD, NEIGHBOUR_MARKER_PREFIX, marker, marker_name, neighbour_marker,
@@ -61,10 +66,13 @@ pub use scenario::{Scenario, SimEventHook, SimHook};
 pub use teleport::TELEPORT_ARRIVAL_TIMEOUT;
 pub use terrain::{Heightfield, TerrainFixture};
 pub use time::{Now, system_clock, tokio_clock};
+pub use timeline::{
+    Action, At, EventPredicate, ObjectEdit, ParcelEdit, RegionEdit, Step, Timeline,
+};
 pub use udp_assets::{UdpAssetFixtures, flat_terrain_raw};
 pub use voice::VoiceBackend;
 pub use world::{
-    AvatarIdentity, ParcelAccessLists, ParcelListing, RegionChange, RegionUpdate, RegionWorld,
-    SceneFixtures, TaskInventory, avatar_prim, box_prim, default_object_properties,
-    prim_from_shape, region_limits, region_wide_parcel,
+    AVATAR_CENTRE_ABOVE_GROUND_M, AvatarIdentity, ParcelAccessLists, ParcelListing, RegionChange,
+    RegionUpdate, RegionWorld, SceneFixtures, TaskInventory, avatar_prim, box_prim,
+    default_object_properties, prim_from_shape, region_limits, region_wide_parcel,
 };

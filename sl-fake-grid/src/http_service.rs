@@ -232,6 +232,26 @@ async fn handle_request(
             &body,
         )
         .await;
+        // The one place every capability request passes through, and the only
+        // place a real viewer's side of a divergence can be read: at `debug`
+        // the exchange (which URL, what came back), at `trace` the bodies.
+        // Without it a viewer that quietly disagrees with this grid leaves
+        // nothing on this side to compare its own log against.
+        tracing::debug!(
+            "caps {method} {path}{} -> {}",
+            query
+                .as_deref()
+                .map_or_else(String::new, |query| format!("?{query}")),
+            caps_response.status
+        );
+        tracing::trace!(
+            "caps {method} {path} request body: {}",
+            String::from_utf8_lossy(&body)
+        );
+        tracing::trace!(
+            "caps {method} {path} response body: {}",
+            String::from_utf8_lossy(&caps_response.body)
+        );
         return Ok(caps_http_response(caps_response));
     }
 

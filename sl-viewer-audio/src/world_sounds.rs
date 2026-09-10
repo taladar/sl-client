@@ -16,6 +16,17 @@
 //! - [`SlSessionEvent::PreloadSound`] — a hint to fetch a clip before it is
 //!   triggered, so the trigger is not late.
 //!
+//! There is a **fifth** source, and it is the one that matters most: the
+//! `sound` / `gain` / `sound_flags` / `sound_radius` fields of an
+//! [`SlSessionEvent::ObjectAdded`] / [`SlSessionEvent::ObjectUpdated`]. A
+//! *looping* sound is not announced by a message at all — `llLoopSound` writes
+//! it onto the prim and the region sends a full object update, so an avatar
+//! arriving after the loop started hears it too (OpenSim's
+//! `SoundModule::LoopSound` says why in a comment; stopping one is the same
+//! update with a nil sound and the `STOP` flag). Both sources funnel into one
+//! `apply_attached_sound`, as the reference viewer funnels both into
+//! `LLViewerObject::setAttachedSound`.
+//!
 //! Everything plays through the one shared [`Mixer`] on its [`Bus::Sfx`], decoded
 //! once by the [`SoundCache`] and spatialised
 //! against the listener the camera drives. The mixer's own source cap and
@@ -154,6 +165,17 @@ struct PendingOneShot {
     enqueued: f32,
 }
 
+/// How long an attached sound waits for the object it is bound to before it is
+/// given up on (seconds).
+///
+/// The wait exists because the two halves arrive out of order: a looping sound
+/// rides in on the object's *own* update, and the entity that update spawns is
+/// not in [`ObjectState`] until its deferred build lands — so "no entity yet"
+/// is the normal state for the first frames of every attached sound, not a
+/// reason to forget it. An object that never turns up at all (a `KillObject`
+/// raced the sound, a neighbour region dropped it) frees its entry here.
+const ATTACHED_ORPHAN_SECONDS: f32 = 10.0;
+
 /// A sound attached to an object: it follows the object's world position and
 /// keeps playing (looped) until the object stops it or is removed.
 struct AttachedSoundVoice {
@@ -165,9 +187,20 @@ struct AttachedSoundVoice {
     /// Whether the sound loops (the `LOOP` flag); a non-looping attached sound is
     /// removed once it finishes.
     looped: bool,
+    /// The distance beyond which the sound is inaudible, in metres — the
+    /// object update's `Radius` (the reference's `mSoundCutOffRadius`). `None`
+    /// for a sound the simulator announced with an `AttachedSound` message,
+    /// which carries no radius, and for the `0.0` a prim whose script never set
+    /// one sends; both mean "no cutoff of its own".
+    cutoff_radius: Option<f32>,
     /// The playing voice in the mixer, or `None` while the clip is still being
     /// fetched / decoded.
     voice: Option<VoiceId>,
+    /// The wall-clock time ([`Time::elapsed_secs`]) the object this is bound to
+    /// was last seen in [`ObjectState`], or when the sound was announced if it
+    /// has not been seen yet — the start of the [`ATTACHED_ORPHAN_SECONDS`]
+    /// wait.
+    seen: f32,
 }
 
 /// The in-world sound state: one-shots waiting on their clip, the attached-sound
@@ -261,47 +294,53 @@ pub(crate) fn ingest_world_sound_events(
                 gain,
                 flags,
             } => {
-                // A STOP flag (or a null sound) removes the object's attached
-                // sound rather than starting one.
-                if flags.is_stop() || sound_id.is_nil() {
-                    if let Some(previous) = sounds.attached.remove(object_id)
-                        && let Some(voice) = previous.voice
-                    {
-                        sounds.stopping.push(voice);
-                    }
-                    continue;
+                if let Some(sound) = apply_attached_sound(
+                    &mut sounds,
+                    &mutes,
+                    &derender,
+                    AttachedSoundUpdate {
+                        object_id: *object_id,
+                        sound_id: *sound_id,
+                        owner_id: *owner_id,
+                        gain: *gain,
+                        flags: *flags,
+                        // The message carries no radius; whatever the object
+                        // update last said about the cutoff still holds.
+                        cutoff_radius: None,
+                        now,
+                    },
+                ) {
+                    cache.request(sound);
                 }
-                if muted(&mutes, *owner_id, object_id.uuid())
-                    || derender.blacklists(*sound_id, DerenderKind::Sound)
-                {
-                    continue;
-                }
-                let sound = AssetKey::from(*sound_id);
-                cache.request(sound);
-                let looped = flags.is_loop();
-                match sounds.attached.get_mut(object_id) {
-                    // Same sound on the same object: just adopt the new gain /
-                    // loop flag, keeping the running voice time-coherent.
-                    Some(existing) if existing.sound == sound => {
-                        existing.gain = *gain;
-                        existing.looped = looped;
-                    }
-                    // A different sound replaces the old one: stop the old voice
-                    // and start fresh.
-                    _replaced => {
-                        if let Some(previous) = sounds.attached.insert(
-                            *object_id,
-                            AttachedSoundVoice {
-                                sound,
-                                gain: *gain,
-                                looped,
-                                voice: None,
-                            },
-                        ) && let Some(voice) = previous.voice
-                        {
-                            sounds.stopping.push(voice);
-                        }
-                    }
+            }
+            // A looping sound is a **field of the object**, not a message: a
+            // simulator writes `Sound` / `Gain` / `Flags` / `Radius` onto the
+            // prim and sends a full object update, so an avatar arriving after
+            // the loop started hears it too (OpenSim's `SoundModule::LoopSound`
+            // says so in a comment; the reference viewer reads the same fields
+            // in `LLViewerObject::processUpdateMessage`, full and compressed
+            // alike). Stopping one comes the same way — `Sound` nil with the
+            // `STOP` flag. Without this arm every looped in-world sound is
+            // silent for everyone who was not already standing there when it
+            // started, which is nearly everyone.
+            SlSessionEvent::ObjectAdded(object) | SlSessionEvent::ObjectUpdated(object) => {
+                if let Some(sound) = apply_attached_sound(
+                    &mut sounds,
+                    &mutes,
+                    &derender,
+                    AttachedSoundUpdate {
+                        object_id: object.full_id,
+                        sound_id: object.sound,
+                        owner_id: object.owner_id,
+                        gain: object.gain,
+                        flags: sl_client_bevy::SoundFlags(object.sound_flags),
+                        // A prim whose script never set a radius sends zero,
+                        // which is "no cutoff", not "inaudible everywhere".
+                        cutoff_radius: (object.sound_radius > 0.0).then_some(object.sound_radius),
+                        now,
+                    },
+                ) {
+                    cache.request(sound);
                 }
             }
             SlSessionEvent::AttachedSoundGainChange { object_id, gain } => {
@@ -321,6 +360,112 @@ pub(crate) fn ingest_world_sound_events(
             _other => {}
         }
     }
+}
+
+/// One "this object's attached sound is now …" instruction, from either of the
+/// two places a simulator states it: an `AttachedSound` message, or the sound
+/// fields of an object update.
+struct AttachedSoundUpdate {
+    /// The object the sound is bound to.
+    object_id: ObjectKey,
+    /// The sound asset, or nil for "no sound".
+    sound_id: Uuid,
+    /// The object owner's id — one of the two ids a mute can name.
+    owner_id: Uuid,
+    /// The linear gain in `[0.0, 1.0]`.
+    gain: f32,
+    /// The playback flags (loop / sync / queue / stop).
+    flags: sl_client_bevy::SoundFlags,
+    /// The cutoff radius in metres, when the source states one.
+    cutoff_radius: Option<f32>,
+    /// The wall-clock time ([`Time::elapsed_secs`]) of the frame ingesting this.
+    now: f32,
+}
+
+/// Apply one [`AttachedSoundUpdate`] to the attached-sound state — the single
+/// place both sources funnel through, as the reference viewer funnels both into
+/// `LLViewerObject::setAttachedSound`.
+///
+/// A nil sound is *not* unconditionally a stop: the reference clears a looping
+/// source (it would otherwise run forever) and honours an explicit `STOP`, but
+/// leaves a one-shot that is still playing to finish, so an ordinary object
+/// update for a prim that has no looping sound does not cut off the
+/// `llPlaySound` it was just told to play. The one place this deliberately
+/// departs from the reference is a `STOP` arriving *with* a sound id: the
+/// reference's null check returns before it looks at the flag, so it would
+/// start the sound instead. Nothing sends that (OpenSim's `StopSound` nils the
+/// id), and starting a sound named by a message that says STOP is not a
+/// reading worth reproducing.
+/// Returns the clip the caller should warm in the [`SoundCache`], or [`None`]
+/// when this update starts nothing (a stop, a mute, a blacklist).
+fn apply_attached_sound(
+    sounds: &mut WorldSounds,
+    mutes: &MuteModel,
+    derender: &crate::world_api::DerenderList,
+    update: AttachedSoundUpdate,
+) -> Option<AssetKey> {
+    let AttachedSoundUpdate {
+        object_id,
+        sound_id,
+        owner_id,
+        gain,
+        flags,
+        cutoff_radius,
+        now,
+    } = update;
+    if sound_id.is_nil() || flags.is_stop() {
+        let stop = flags.is_stop()
+            || sounds
+                .attached
+                .get(&object_id)
+                .is_some_and(|attached| attached.looped);
+        if stop
+            && let Some(previous) = sounds.attached.remove(&object_id)
+            && let Some(voice) = previous.voice
+        {
+            sounds.stopping.push(voice);
+        }
+        return None;
+    }
+    if muted(mutes, owner_id, object_id.uuid())
+        || derender.blacklists(sound_id, DerenderKind::Sound)
+    {
+        return None;
+    }
+    let sound = AssetKey::from(sound_id);
+    let looped = flags.is_loop();
+    match sounds.attached.get_mut(&object_id) {
+        // Same sound on the same object: just adopt the new gain / loop flag /
+        // radius, keeping the running voice time-coherent. This is also what
+        // makes the object-update path cheap — a moving prim re-states its
+        // looping sound on every full update, and the loop must not restart.
+        Some(existing) if existing.sound == sound => {
+            existing.gain = gain;
+            existing.looped = looped;
+            if cutoff_radius.is_some() {
+                existing.cutoff_radius = cutoff_radius;
+            }
+        }
+        // A different sound replaces the old one: stop the old voice and start
+        // fresh.
+        _replaced => {
+            if let Some(previous) = sounds.attached.insert(
+                object_id,
+                AttachedSoundVoice {
+                    sound,
+                    gain,
+                    looped,
+                    cutoff_radius,
+                    voice: None,
+                    seen: now,
+                },
+            ) && let Some(voice) = previous.voice
+            {
+                sounds.stopping.push(voice);
+            }
+        }
+    }
+    Some(sound)
 }
 
 /// Turn the ingested intent into mixer voices each frame: stop the voices flagged
@@ -347,8 +492,17 @@ pub(crate) fn drive_world_sounds(
         mixer.stop_voice(voice);
     }
 
-    realize_oneshots(&mut mixer, &cache, &mut sounds, time.elapsed_secs());
-    drive_attached(&mut mixer, &cache, &mut sounds, &state, &globals, &parcel);
+    let now = time.elapsed_secs();
+    realize_oneshots(&mut mixer, &cache, &mut sounds, now);
+    drive_attached(
+        &mut mixer,
+        &cache,
+        &mut sounds,
+        &state,
+        &globals,
+        &parcel,
+        now,
+    );
 }
 
 /// Whether an attached sound on an object at Bevy scene position `scene` is
@@ -408,18 +562,26 @@ fn drive_attached(
     state: &ObjectState,
     globals: &Query<&GlobalTransform>,
     parcel: &ParcelAudibility,
+    now: f32,
 ) {
+    let listener = Vec3::from_array(mixer.listener().position());
     let mut finished: Vec<ObjectKey> = Vec::new();
     for (&object_id, attached) in &mut sounds.attached {
-        // Resolve the object's current world position; a missing entity means the
-        // object was removed, so stop and forget the sound.
+        // Resolve the object's current world position. A missing entity is not
+        // yet a removal: a looping sound arrives *on* the object's own update,
+        // and the entity that update spawns is not tracked until its deferred
+        // build lands. So silence the voice and keep waiting — until
+        // `ATTACHED_ORPHAN_SECONDS` say the object is never coming.
         let Some(entity) = state.entity_of(object_id) else {
             if let Some(voice) = attached.voice.take() {
                 mixer.stop_voice(voice);
             }
-            finished.push(object_id);
+            if now - attached.seen > ATTACHED_ORPHAN_SECONDS {
+                finished.push(object_id);
+            }
             continue;
         };
+        attached.seen = now;
         let position = globals
             .get(entity)
             .map(|transform| transform.translation())
@@ -427,8 +589,12 @@ fn drive_attached(
 
         // Parcel-local clamp: an inaudible attached sound is driven to silence
         // (gain 0) rather than stopped, so it stays time-coherent and comes back
-        // when the agent re-enters the parcel.
-        let effective_gain = if scene_audible(parcel, state, position) {
+        // when the agent re-enters the parcel. The object update's own cutoff
+        // radius (the reference's `mSoundCutOffRadius`) is the same kind of
+        // gate, and is applied the same way.
+        let effective_gain = if scene_audible(parcel, state, position)
+            && within_cutoff(attached.cutoff_radius, listener, position)
+        {
             attached.gain
         } else {
             0.0
@@ -469,6 +635,14 @@ fn drive_attached(
     for object_id in finished {
         let _removed = sounds.attached.remove(&object_id);
     }
+}
+
+/// Whether a source at `position` is inside its own cutoff radius, measured
+/// from the listener's ears — the reference viewer's
+/// `LLAudioSource::checkCutOffRadius`. A source that states no radius is
+/// audible at any distance the mixer's rolloff still resolves.
+fn within_cutoff(radius: Option<f32>, listener: Vec3, position: Vec3) -> bool {
+    radius.is_none_or(|radius| listener.distance(position) <= radius)
 }
 
 /// Whether a sound from `owner` on `object` is muted (either the owner or the
@@ -662,6 +836,9 @@ mod tests {
     use pretty_assertions::assert_eq;
     use sl_audio::MixerConfig;
 
+    /// The error a test bubbles a missing fixture entry out through.
+    type TestError = Box<dyn core::error::Error>;
+
     /// The collision-sound gate: on by default (including with no settings
     /// resource at all), off only when the stored setting says so.
     #[test]
@@ -788,7 +965,9 @@ mod tests {
                 sound: first,
                 gain: 1.0,
                 looped: true,
+                cutoff_radius: None,
                 voice: None,
+                seen: 0.0,
             },
         );
         let replaced = sounds.attached.insert(
@@ -797,7 +976,9 @@ mod tests {
                 sound: second,
                 gain: 0.5,
                 looped: true,
+                cutoff_radius: None,
                 voice: None,
+                seen: 0.0,
             },
         );
         assert_eq!(
@@ -810,5 +991,130 @@ mod tests {
             sounds.attached.is_empty(),
             "STOP forgets the object's sound"
         );
+    }
+
+    /// One `AttachedSoundUpdate` with the fixture ids, so a test states only
+    /// the fields it is about.
+    fn update(sound_id: Uuid, flags: u8, radius: Option<f32>) -> AttachedSoundUpdate {
+        AttachedSoundUpdate {
+            object_id: ObjectKey::from(Uuid::from_u128(1)),
+            sound_id,
+            owner_id: Uuid::from_u128(9),
+            gain: 1.0,
+            flags: sl_client_bevy::SoundFlags(flags),
+            cutoff_radius: radius,
+            now: 0.0,
+        }
+    }
+
+    /// Apply one update to `sounds` with no mutes and nothing blacklisted.
+    fn apply(sounds: &mut WorldSounds, update: AttachedSoundUpdate) -> Option<AssetKey> {
+        apply_attached_sound(
+            sounds,
+            &MuteModel::default(),
+            &crate::world_api::DerenderList::default(),
+            update,
+        )
+    }
+
+    /// The object-update path is what carries a **looping** sound, and it is
+    /// the only path an avatar arriving after the loop started has: the fields
+    /// start the sound, restating them does not restart it, and the nil-plus-
+    /// `STOP` an `llStopSound` sends ends it.
+    #[test]
+    fn object_update_fields_start_and_stop_a_loop() -> Result<(), TestError> {
+        let object = ObjectKey::from(Uuid::from_u128(1));
+        let clip = Uuid::from_u128(0x50);
+        let mut sounds = WorldSounds::default();
+
+        let warmed = apply(
+            &mut sounds,
+            update(clip, sl_client_bevy::SoundFlags::LOOP, Some(20.0)),
+        );
+        assert_eq!(warmed, Some(AssetKey::from(clip)), "the clip is warmed");
+        let started = sounds
+            .attached
+            .get(&object)
+            .ok_or("the loop is not tracked")?;
+        assert!(started.looped, "the LOOP flag survived");
+        assert_eq!(started.cutoff_radius, Some(20.0));
+
+        // A moving prim re-states its sound on every full update; that must
+        // adopt the new gain in place rather than replace the entry (a restart
+        // would stutter the loop every frame). A replacement would reset the
+        // entry's fields to the update's, so a marker in one of them shows
+        // which branch ran.
+        sounds
+            .attached
+            .get_mut(&object)
+            .ok_or("the loop stopped being tracked")?
+            .seen = 123.0;
+        let _warmed = apply(
+            &mut sounds,
+            update(clip, sl_client_bevy::SoundFlags::LOOP, Some(20.0)),
+        );
+        assert_eq!(
+            sounds.attached.get(&object).map(|attached| attached.seen),
+            Some(123.0),
+            "restating the same looping sound must keep the running voice"
+        );
+        assert!(sounds.stopping.is_empty(), "and must stop nothing");
+
+        // `llStopSound`: OpenSim nils the id and sets STOP on the object update.
+        let warmed = apply(
+            &mut sounds,
+            update(Uuid::nil(), sl_client_bevy::SoundFlags::STOP, None),
+        );
+        assert_eq!(warmed, None, "a stop warms nothing");
+        assert!(sounds.attached.is_empty(), "the loop is forgotten");
+        Ok(())
+    }
+
+    /// An ordinary object update for a prim with no sound must not cut off the
+    /// one-shot an `AttachedSound` just started — only a looping source (which
+    /// would otherwise run forever) is cleared by a nil sound, as the reference
+    /// viewer's `setAttachedSound` does.
+    #[test]
+    fn a_soundless_object_update_leaves_a_one_shot_alone() -> Result<(), TestError> {
+        let object = ObjectKey::from(Uuid::from_u128(1));
+        let clip = Uuid::from_u128(0x51);
+        let mut sounds = WorldSounds::default();
+
+        let _warmed = apply(&mut sounds, update(clip, 0, None));
+        assert_eq!(
+            sounds.attached.get(&object).map(|attached| attached.looped),
+            Some(false),
+            "no LOOP flag: a one-shot"
+        );
+
+        let _warmed = apply(&mut sounds, update(Uuid::nil(), 0, None));
+        assert!(
+            sounds.attached.contains_key(&object),
+            "a soundless update leaves a playing one-shot to finish"
+        );
+
+        // The same update against a *looping* source does clear it.
+        sounds
+            .attached
+            .get_mut(&object)
+            .ok_or("the one-shot stopped being tracked")?
+            .looped = true;
+        let _warmed = apply(&mut sounds, update(Uuid::nil(), 0, None));
+        assert!(
+            sounds.attached.is_empty(),
+            "a nil sound clears a loop, which would otherwise never end"
+        );
+        Ok(())
+    }
+
+    /// The object update's `Radius` gates by distance from the ears (the
+    /// reference's `checkCutOffRadius`); a source that states none is audible
+    /// wherever the rolloff still reaches.
+    #[test]
+    fn cutoff_radius_gates_by_listener_distance() {
+        let ears = Vec3::ZERO;
+        assert!(within_cutoff(None, ears, Vec3::new(500.0, 0.0, 0.0)));
+        assert!(within_cutoff(Some(20.0), ears, Vec3::new(19.0, 0.0, 0.0)));
+        assert!(!within_cutoff(Some(20.0), ears, Vec3::new(21.0, 0.0, 0.0)));
     }
 }

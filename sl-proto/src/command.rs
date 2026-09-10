@@ -390,7 +390,10 @@ pub enum Command {
     Ais3FetchFolderChildren {
         /// The folder whose children to fetch.
         folder_id: InventoryFolderKey,
-        /// The recursion depth (clamped to the AIS maximum).
+        /// How many levels of sub-folders to open **below** this folder's own
+        /// children, clamped to the AIS maximum — so `0` fetches the folder
+        /// itself (the reference viewer's ordinary non-recursive fetch) and is
+        /// not a request for nothing.
         depth: i32,
     },
     /// Update an item's name and description over AIS3 (`PATCH /item/<id>`).

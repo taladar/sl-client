@@ -25,11 +25,11 @@
 //! the crate cannot keep.
 //!
 //! Modelling *stock* OpenSim is also the choice made elsewhere in this crate
-//! for the same reason: [`stock_prices`](crate::stock_prices) is the zeroes a
-//! region with no money module answers with, not the numbers some deployment
-//! configured. So the OpenSim flavour is [`VoiceBackend::Silent`], and the
-//! divergence a viewer meets is the real one — a grid that offers voice and a
-//! grid that does not.
+//! for the same reason: [`open_sim_prices`](crate::open_sim_prices) is what a
+//! region running the money module nobody reconfigured answers with, not the
+//! numbers some deployment set. So the OpenSim flavour is
+//! [`VoiceBackend::Silent`], and the divergence a viewer meets is the real one
+//! — a grid that offers voice and a grid that does not.
 
 /// The spatial-voice backend a region's `ProvisionVoiceAccountRequest` serves.
 #[expect(

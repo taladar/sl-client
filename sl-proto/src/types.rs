@@ -8,6 +8,7 @@ mod alert;
 mod appearance;
 mod asset;
 mod avatar_profile;
+mod benefits;
 mod chat;
 mod diagnostic;
 pub(crate) mod directory;
@@ -32,6 +33,7 @@ mod report;
 mod script;
 mod server_error;
 mod session;
+mod sound;
 mod terrain;
 mod voice;
 
@@ -196,6 +198,56 @@ pub(crate) fn linden_from_wire(
             field,
             value: i64::from(value),
         }),
+    }
+}
+
+/// Decode an L$ wire field a grid may leave **unstated** by sending a negative
+/// value: `None` for any negative, `Some` otherwise.
+///
+/// The one field this is the boundary for is an `EconomyData` reply's
+/// `PriceGroupCreate`, where a stock OpenSim region sends `-1`. Decoding it as
+/// strictly as [`linden_from_wire`] does rejected the *whole reply*, leaving a
+/// viewer against a stock OpenSim grid with no economy data at all rather than
+/// with sixteen prices and one blank — which is the only reason this function
+/// exists.
+///
+/// **`None` means "the grid stated no price", not "the grid charges nothing".**
+/// That is the reference viewer's own vocabulary: `LLBaseEconomy` initialises
+/// every price to `-1` before any reply arrives, meaning *unknown*. Do not read
+/// it as free — a grid that charges nothing has `0` available and every other
+/// OpenSim price default uses it.
+///
+/// Which is worth saying plainly, because `-1` here is not a considered
+/// protocol sentinel; it is a viewer's "unset" that leaked into a simulator's
+/// config default and stayed. It sits in a display-only field: nothing spends
+/// it. OpenSim gates and charges group creation from a *different* member,
+/// `IMoneyModule.GroupCreationCharge`, which `SampleMoneyModule` hard-codes to
+/// `0` and `GroupsModule` guards with `if (charge > 0)`. And the 2018 commit
+/// that set the field initialiser to `-1` said it was changing defaults "to no
+/// cost values, since that is our default" — in the same commit that moved
+/// every one of the fourteen sibling prices *to* `0` for exactly that reason.
+/// So the value means free, was meant to mean free, and is the one field that
+/// spells free differently from its neighbours.
+///
+/// The **other** price fields deliberately keep [`linden_from_wire`]'s
+/// rejection: no simulator has been measured sending a negative for any of
+/// them, so a negative there is a malformed message worth dropping rather than
+/// anything worth decoding. The inverse on encode is
+/// [`unpriced_linden_to_wire`].
+pub(crate) fn unpriced_linden_from_wire(value: i32) -> Option<sl_types::money::LindenAmount> {
+    u64::try_from(value).ok().map(sl_types::money::LindenAmount)
+}
+
+/// Encode an optionally-stated L$ price back into its signed 32-bit wire field,
+/// the inverse of [`unpriced_linden_from_wire`]: `None` becomes `-1`, the value
+/// a stock OpenSim region sends.
+pub(crate) fn unpriced_linden_to_wire(
+    field: &'static str,
+    amount: Option<&sl_types::money::LindenAmount>,
+) -> Result<i32, sl_wire::WireError> {
+    match amount {
+        Some(amount) => linden_to_wire(field, amount),
+        None => Ok(-1),
     }
 }
 
@@ -421,6 +473,7 @@ pub use avatar_profile::{
     ClassifiedInfo, ClassifiedUpdate, DirectoryVisibility, Friend, FriendRights, InterestsUpdate,
     LoginAccount, PickInfo, PickKey, PickUpdate, ProfileUpdate, UserInfo,
 };
+pub use benefits::{AccountBenefits, MIN_2K_TEXTURE_AREA, packages_from_llsd};
 pub use chat::{
     ChatAudible, ChatMessage, ChatSource, ChatSourceType, ChatType, ChatTypeNotAVolume,
     GroupInvitationReceived, GroupNoticeItem, GroupNoticeReceived, ImDialog, InstantMessage,
@@ -443,8 +496,8 @@ pub use environment::{
     BUILTIN_WATER_PLANE_TEXTURES, CloudPosDensity, Color, ColorAlpha, DEFAULT_BLOOM_TEXTURE,
     DEFAULT_CLOUD_TEXTURE, DEFAULT_HALO_TEXTURE, DEFAULT_MOON_TEXTURE, DEFAULT_RAINBOW_TEXTURE,
     DEFAULT_SKY_FRAME, DEFAULT_SUN_TEXTURE, DEFAULT_WATER_FRAME, DEFAULT_WATER_NORMAL_TEXTURE,
-    DayCycle, DayCycleFrame, EnvironmentAsset, EnvironmentSettings, EnvironmentUpdate, Glow, Scale,
-    SkySettings, WaterSettings, azimuth_altitude_to_rotation,
+    DayCycle, DayCycleFrame, DensityLayer, EnvironmentAsset, EnvironmentSettings,
+    EnvironmentUpdate, Glow, Scale, SkySettings, WaterSettings, azimuth_altitude_to_rotation,
 };
 pub use event::{Arrival, Event};
 pub use generic::{GenericMessage, GenericStreamingMessage};
@@ -458,8 +511,9 @@ pub use group::{
 };
 pub use inventory::{
     Child, FolderInfo, FolderType, GestureActivation, InventoryCursor, InventoryFolder,
-    InventoryItem, InventoryItemMove, ItemInfo, NewInventoryItem, NewInventoryLink, SaleInfo,
-    global_to_handle, grid_to_handle, handle_to_global, handle_to_grid,
+    InventoryItem, InventoryItemMove, InventoryListing, InventoryListingChildren, ItemInfo,
+    NewInventoryItem, NewInventoryLink, SaleInfo, global_to_handle, grid_to_handle,
+    handle_to_global, handle_to_grid, uploaded_inventory_item,
 };
 pub use land::{LandBrushAction, LandBrushSize, LandEdit, TerraformArea};
 pub use map::{
@@ -504,6 +558,11 @@ pub use server_error::{FeatureDisabled, Kick, ServerError};
 pub use session::{
     Camera, CameraError, DisconnectReason, Kilobits, LoginHttpRequest, LoginParams, MovementMode,
     Reliability, StartLocationSlot, Throttle, ThrottleBuilder, ThrottleError, Transmit,
+};
+pub use sound::{
+    BUILTIN_UI_SOUNDS, UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER, UI_SOUND_INVALID_OP,
+    UI_SOUND_MONEY_DOWN, UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT, UI_SOUND_SNAPSHOT,
+    UI_SOUND_TELEPORT_OUT, UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE, UI_SOUND_WINDOW_OPEN,
 };
 pub use terrain::{TerrainLayerType, TerrainPatch};
 pub use voice::RequiredVoiceVersion;

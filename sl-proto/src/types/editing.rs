@@ -728,6 +728,53 @@ impl Maturity {
             _ => Self::Unknown,
         }
     }
+
+    /// The short login-response code for this maturity, the inverse of
+    /// [`from_login_access`](Self::from_login_access).
+    ///
+    /// [`Unknown`](Self::Unknown) has no code and yields `None`: it is what an
+    /// absent or unrecognised field decodes to, so encoding it as some rating
+    /// would invent an entitlement out of a grid's silence. A sender with
+    /// `Unknown` should omit the field, which is what `None` says.
+    #[must_use]
+    pub const fn to_login_access(self) -> Option<&'static str> {
+        match self {
+            Self::Pg => Some("PG"),
+            Self::Mature => Some("M"),
+            Self::Adult => Some("A"),
+            Self::Unknown => None,
+        }
+    }
+
+    /// Whether this rating is permitted to someone entitled up to `ceiling`.
+    ///
+    /// [`Unknown`](Self::Unknown) is permitted by nothing and permits nothing:
+    /// an unrated request against an unknown entitlement is not a decision this
+    /// type can make, and answering `true` would be the unsafe guess.
+    #[must_use]
+    pub const fn permitted_by(self, ceiling: Self) -> bool {
+        match (self.rank(), ceiling.rank()) {
+            (Some(wanted), Some(allowed)) => wanted <= allowed,
+            _either_is_unrated => false,
+        }
+    }
+
+    /// This rating's position in the ordered ladder PG &lt; Mature &lt; Adult,
+    /// or `None` for [`Unknown`](Self::Unknown), which has no position in it.
+    ///
+    /// Private because the numbers are an implementation detail of
+    /// [`permitted_by`](Self::permitted_by) and not a wire encoding — the wire
+    /// forms are [`to_sim_access`](Self::to_sim_access) and
+    /// [`to_login_access`](Self::to_login_access), and neither is ordered this
+    /// way.
+    const fn rank(self) -> Option<u8> {
+        match self {
+            Self::Pg => Some(0),
+            Self::Mature => Some(1),
+            Self::Adult => Some(2),
+            Self::Unknown => None,
+        }
+    }
 }
 
 // `TeleportFlags` (the `TeleportFinish`/`TeleportProgress` reason bitfield) now

@@ -465,6 +465,19 @@ pub struct LoginSuccess {
     /// The account's current maturity/content rating (`agent_access`), as the
     /// grid's short code: `"PG"`, `"M"` (mature), or `"A"` (adult). `None` if
     /// the grid did not provide it.
+    ///
+    /// **Not the preference and not the ceiling**, and the least understood of
+    /// the three. Aditi answered `"M"` on three runs whose
+    /// [`agent_access_max`](Self::agent_access_max) *and*
+    /// [`agent_region_access`](Self::agent_region_access) were both `"A"`, and
+    /// OpenSim hard-codes `"M"` for every avatar. Two readings fit: a
+    /// *clearance* (what the account is cleared for — an unverified account is
+    /// cleared to Moderate while entitled to Adult), or the start region's own
+    /// rating (that avatar's start region is also Mature, so the run cannot
+    /// separate them). The reference viewer reads the other two at login and
+    /// never this one, and nothing here reads it either — so the question is
+    /// parked rather than open work (roadmap `protocol-agent-access-meaning`,
+    /// which says what would settle it and why it is not worth going after).
     pub agent_access: Option<String>,
     /// The maximum maturity rating the account is entitled to
     /// (`agent_access_max`), in the same short-code form as
@@ -521,9 +534,19 @@ pub struct LoginSuccess {
     /// The real/owning agent id behind this login (`real_id`), used by grids
     /// that support aliased logins. Nil/absent on most grids.
     pub real_id: Option<AgentKey>,
-    /// The maturity rating of the *region* the avatar starts in
-    /// (`agent_region_access`), in the same `"PG"`/`"M"`/`"A"` short-code form
-    /// as [`agent_access`](Self::agent_access).
+    /// The account's maturity *preference* (`agent_region_access`) — the rating
+    /// it has chosen to see — in the same `"PG"`/`"M"`/`"A"` short-code form as
+    /// [`agent_access`](Self::agent_access).
+    ///
+    /// Despite the name this is not a property of a region. The reference viewer
+    /// reads it as *"the value of their preference setting for that content,
+    /// which will always be `<=` `agent_access_max`"* and seeds its
+    /// `PreferredMaturity` setting from it.
+    ///
+    /// `None` on every OpenSim grid: the field appears nowhere in OpenSim's
+    /// sources. A client should then fall back to
+    /// [`agent_access_max`](Self::agent_access_max), which is what the reference
+    /// viewer does deliberately (Firestorm's FIRE-8854).
     pub agent_region_access: Option<String>,
     /// The start location the grid actually granted (`start_location`):
     /// `"last"`, `"home"`, or `"url"` — the *granted* category, not the
@@ -757,6 +780,53 @@ impl LoginSuccess {
         if !wants(options, "max-agent-groups") {
             self.max_agent_groups = None;
         }
+    }
+
+    /// The names of the fields a viewer descended from the Linden client
+    /// treats as **mandatory** in a successful login and that this response
+    /// does not carry. Empty for a response such a viewer will accept.
+    ///
+    /// The list is Firestorm's own success check, at the end of
+    /// `process_login_success_response` (`indra/newview/llstartup.cpp`):
+    /// `gAgentID.notNull() && gAgentSessionID.notNull() &&
+    /// gMessageSystem->mOurCircuitCode && gFirstSim.isOk() &&
+    /// gInventory.getRootFolderID().notNull()`. Miss one and the viewer
+    /// returns `false` **after the login has otherwise succeeded** — the
+    /// circuit is already open and the response already processed — and
+    /// reports it to the user as a bare "Login failed."
+    ///
+    /// That is why this exists as a check a serving grid can run rather than
+    /// as documentation: a grid answering `login: true` while omitting one of
+    /// these is worse than a grid that refuses, because the failure surfaces
+    /// nowhere near its cause. See
+    /// [`Self::filter_options`] for the fields a grid may legitimately leave
+    /// out — the client did not ask for them — and note that
+    /// `inventory-root` is on **both** lists, so a grid checks the response it
+    /// built rather than the one it sent.
+    #[must_use]
+    pub fn missing_required_fields(&self) -> Vec<&'static str> {
+        let mut missing = Vec::new();
+        if self.agent_id.0.0.is_nil() {
+            missing.push("agent_id");
+        }
+        if self.session_id.is_nil() {
+            missing.push("session_id");
+        }
+        if self.circuit_code.get() == 0 {
+            missing.push("circuit_code");
+        }
+        // `gFirstSim.isOk()` is an `LLHost` with both halves set; a zero
+        // address or port is one the viewer cannot open a circuit to.
+        if self.sim_ip.is_unspecified() {
+            missing.push("sim_ip");
+        }
+        if self.sim_port == 0 {
+            missing.push("sim_port");
+        }
+        if self.inventory_root.is_none() {
+            missing.push("inventory-root");
+        }
+        missing
     }
 }
 
@@ -2582,5 +2652,85 @@ mod kind_tests {
             failure("connect", "Could not connect.").kind(),
             LoginRejectKind::Other
         );
+    }
+}
+
+#[cfg(test)]
+mod required_field_tests {
+    use super::{AgentKey, CircuitCode, InventoryFolderKey, LoginSuccess};
+    use pretty_assertions::assert_eq;
+    use sl_types::key::Key;
+    use std::net::Ipv4Addr;
+    use uuid::Uuid;
+
+    /// A success carrying everything the reference viewer's own check reads.
+    fn complete() -> Result<LoginSuccess, Box<dyn std::error::Error>> {
+        let mut success = LoginSuccess::minimal(
+            AgentKey(Key(Uuid::from_u128(1))),
+            Uuid::from_u128(2),
+            Uuid::from_u128(3),
+            CircuitCode(0xdead_beef),
+            Ipv4Addr::LOCALHOST,
+            13579,
+            "http://127.0.0.1:9100/sim/1/cap/seed".parse()?,
+        );
+        success.inventory_root = Some(InventoryFolderKey(Key(Uuid::from_u128(4))));
+        Ok(success)
+    }
+
+    /// Nothing is missing from a response the reference viewer accepts.
+    #[test]
+    fn complete_response_misses_nothing() -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(complete()?.missing_required_fields(), Vec::<&str>::new());
+        Ok(())
+    }
+
+    /// The catalogue scenario's own bug: an inventory with no root folder
+    /// yields a response the login machinery accepts and the reference viewer
+    /// refuses one startup state later.
+    #[test]
+    fn absent_inventory_root_is_reported() -> Result<(), Box<dyn std::error::Error>> {
+        let mut success = complete()?;
+        success.inventory_root = None;
+        assert_eq!(success.missing_required_fields(), vec!["inventory-root"]);
+        Ok(())
+    }
+
+    /// One field the reference viewer's check reads, and the way to take it
+    /// back out of an otherwise complete response.
+    type Case = (&'static str, fn(&mut LoginSuccess));
+
+    /// Every field the check reads, one at a time, and all of them at once —
+    /// so a field dropped from the list fails here rather than in a viewer.
+    #[test]
+    fn every_required_field_is_checked() -> Result<(), Box<dyn std::error::Error>> {
+        let cases: Vec<Case> = vec![
+            ("agent_id", |success| {
+                success.agent_id = AgentKey(Key(Uuid::nil()));
+            }),
+            ("session_id", |success| success.session_id = Uuid::nil()),
+            ("circuit_code", |success| {
+                success.circuit_code = CircuitCode(0);
+            }),
+            ("sim_ip", |success| {
+                success.sim_ip = Ipv4Addr::UNSPECIFIED;
+            }),
+            ("sim_port", |success| success.sim_port = 0),
+            ("inventory-root", |success| success.inventory_root = None),
+        ];
+        for (name, break_it) in &cases {
+            let mut success = complete()?;
+            break_it(&mut success);
+            assert_eq!(success.missing_required_fields(), vec![*name]);
+        }
+        let mut empty = complete()?;
+        for (_name, break_it) in &cases {
+            break_it(&mut empty);
+        }
+        assert_eq!(
+            empty.missing_required_fields(),
+            cases.iter().map(|(name, _)| *name).collect::<Vec<_>>()
+        );
+        Ok(())
     }
 }

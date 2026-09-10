@@ -284,6 +284,12 @@ pub(crate) async fn teleport_session(
         return Err(Error::TeleportTimedOut);
     }
 
+    // The avatar is in the destination, so its script is too: a timeline
+    // belongs to the avatar running it, not to the region it started in. Done
+    // before the source is retired, and for a client-initiated teleport as much
+    // as for a scripted one ([`crate::timeline::hand_over`]).
+    crate::timeline::hand_over(source, &dest).await;
+
     // The avatar is in the destination: retire the source, which the
     // client now holds as a child circuit.
     if let Err(error) = source

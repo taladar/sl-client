@@ -2,10 +2,77 @@
 id: test-object-asset-missing-fields
 title: A take through the object asset drops half a prim
 topic: test
-status: ready
+status: done
 origin: doing test-assets-object-asset-codec (2026-09-06)
 points: 2
-refs: [test-assets-object-asset-codec, test-fake-grid-object-write-path]
+refs:
+  [
+    test-assets-object-asset-codec,
+    test-fake-grid-object-write-path,
+    test-fake-grid-served-object-asset-xml,
+  ]
+---
+
+Done (2026-09-09). The decision this had narrowed to, both ways it could be
+taken, and the defect that turned out to be underneath it.
+
+**The keywords stay uninvented, and the question is closed rather than open.**
+It was worth asking while it looked answerable — both reference captures are
+from 2005, before flexi prims, sculpties, mesh and materials existed, so their
+silence might have been their age. It is not answerable. Second Life hands a
+viewer a nil asset id for every object item, so no modern capture can be taken;
+OpenSim never writes this format at all. A keyword added here would be
+unfalsifiable *and* unreadable — an asset no grid could load — in a crate whose
+whole value is that every field in it comes from a source that can be named.
+That is now written where it will be read: `sl-object-asset`'s crate docs grow
+a "Do not rez out of these bytes" section.
+
+**The list is a test now, not a paragraph.**
+`bridge::the_text_carries_none_of_the_modern_prim` sets a face's glow and
+legacy material id, an `ExtraParams` light, floating text, a media URL, a click
+action and a particle system on a live object, takes it, encodes, decodes and
+rezzes it back, and asserts every one of them comes back empty — with the
+shape, scale and text *colour* asserted alongside so it cannot pass by rezzing
+nothing. The day a keyword for one of these is found, that test names the line
+of the bridge to change.
+
+**What was underneath: the fake grid really did drop half a prim.** The task
+said this was latent because "the fake grid takes only the prims it rezzes (a
+box)". That was no longer true — the derez arm files whatever object a viewer
+names, and the catalogue region is a row of prims with lights, flexi paths,
+meshes, sculpts, glow, hover text, media and particles standing in it. Taking
+the catalogue's `light-box` and rezzing it gave back a plain white box, which
+the new end-to-end test
+`a_taken_prim_comes_back_with_the_light_the_text_cannot_carry` fails on without
+the fix (verified by disabling it).
+
+**The fix is what both live grids do.** Neither rezzes out of this format:
+OpenSim's body is `SceneObjectSerializer` XML, which carries the whole prim,
+and Second Life's simulator has the object itself and reads no asset. So the
+fake grid keeps **the linkset a take removed** — a third store in `GridAssets`,
+keyed by item under both policies — and rezzes from that, minting fresh ids
+exactly as the body path does. The published body is written beside it and
+stays exactly what the format says: it is a *publication*, not a store. An item
+this grid did not take — the seeded `Fixture Object` — has no linkset behind it
+and still rezzes from its body, which is what that fixture is for.
+
+One thing fell out on the way: the take's two halves used to derive the root
+prim's name and description in one place and the rez's properties record in
+another. They now share `filed_prim`, so the asset and the region cannot name a
+rezzed object differently.
+
+**The other half of the decision became its own task**,
+[[test-fake-grid-served-object-asset-xml]]: `Served` names OpenSim and serves
+the Linden text, which OpenSim never wrote. It is a format crate's worth of
+work, nothing in the workspace reads or writes a single element of
+`<SceneObjectGroup>`, and no viewer has a reader for either format — so it is a
+task with a stated shape rather than a paragraph of regret here.
+
+Verified by the two new tests, the unit test
+`a_take_publishes_a_lossy_body_and_rezzes_the_prim_it_took` (which asserts both
+halves at once, so a grid wrong in either direction fails it), and the 336
+`sl-conformance` + `sl-fake-grid` + `sl-object-asset` tests.
+
 ---
 
 Context: [context/testing.md](../context/testing.md).

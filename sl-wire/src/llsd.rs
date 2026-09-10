@@ -21,6 +21,7 @@ pub use sl_llsd::{
 pub(crate) use sl_llsd::{Scan, push_escaped};
 
 use crate::error::WireError;
+use crate::permissions::Permissions;
 
 /// Builds the LLSD-XML body for a capability-seed request: an array of the
 /// requested capability names.
@@ -317,54 +318,46 @@ pub fn parse_update_avatar_appearance_request(xml: &str) -> Result<i32, roxmltre
 /// `uploader` URL to which the raw asset bytes are then POSTed (see
 /// [`parse_asset_upload_response`]).
 ///
-/// `asset_type` and `inventory_type` are LL's short type names (e.g.
-/// `"texture"` / `"texture"`, `"animatn"` / `"animation"`, `"mesh"` /
-/// `"mesh"`); the `*_mask` values are the permission bitfields granted to the
-/// next owner / group / everyone; `expected_upload_cost` is the L$ price the
-/// client expects (the grid rejects a mismatch).
+/// The request is the client's own record of what it asked for, and stays worth
+/// keeping past the POST: the completion names only the ids it minted, so the
+/// item a viewer files in its inventory the moment the upload finishes is built
+/// from the two together (no grid announces it — see
+/// [`AssetUploadResponse::granted`]).
 #[must_use]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "mirrors the flat NewFileAgentInventory LLSD request fields"
-)]
-pub fn build_new_file_agent_inventory_request(
-    folder_id: InventoryFolderKey,
-    asset_type: &str,
-    inventory_type: &str,
-    name: &str,
-    description: &str,
-    next_owner_mask: u32,
-    group_mask: u32,
-    everyone_mask: u32,
-    expected_upload_cost: i32,
-) -> String {
+pub fn build_new_file_agent_inventory_request(request: &NewFileAgentInventoryRequest) -> String {
     let mut out = String::from("<llsd><map>");
     out.push_str("<key>folder_id</key><uuid>");
-    out.push_str(&folder_id.to_string());
+    out.push_str(&request.folder_id.to_string());
     out.push_str("</uuid><key>asset_type</key><string>");
-    push_escaped(&mut out, asset_type);
+    push_escaped(&mut out, &request.asset_type);
     out.push_str("</string><key>inventory_type</key><string>");
-    push_escaped(&mut out, inventory_type);
+    push_escaped(&mut out, &request.inventory_type);
     out.push_str("</string><key>name</key><string>");
-    push_escaped(&mut out, name);
+    push_escaped(&mut out, &request.name);
     out.push_str("</string><key>description</key><string>");
-    push_escaped(&mut out, description);
+    push_escaped(&mut out, &request.description);
     out.push_str("</string><key>next_owner_mask</key><integer>");
-    out.push_str(&next_owner_mask.to_string());
+    out.push_str(&request.next_owner_mask.to_string());
     out.push_str("</integer><key>group_mask</key><integer>");
-    out.push_str(&group_mask.to_string());
+    out.push_str(&request.group_mask.to_string());
     out.push_str("</integer><key>everyone_mask</key><integer>");
-    out.push_str(&everyone_mask.to_string());
+    out.push_str(&request.everyone_mask.to_string());
     out.push_str("</integer><key>expected_upload_cost</key><integer>");
-    out.push_str(&expected_upload_cost.to_string());
+    out.push_str(&request.expected_upload_cost.to_string());
     out.push_str("</integer></map></llsd>");
     out
 }
 
-/// A parsed `NewFileAgentInventory` step-1 metadata body — the simulator view
-/// of the client's [`build_new_file_agent_inventory_request`] fields. A
-/// missing field falls back to the empty string / nil key / `0`, matching the
-/// lenient request parsers elsewhere in this module.
+/// A `NewFileAgentInventory` step-1 metadata body: what the client asks the
+/// grid to create, and the simulator view of the same fields. A missing field
+/// falls back to the empty string / nil key / `0`, matching the lenient request
+/// parsers elsewhere in this module.
+///
+/// The `asset_type` / `inventory_type` are LL's short type names (e.g.
+/// `"texture"` / `"texture"`, `"animatn"` / `"animation"`, `"mesh"` /
+/// `"mesh"`); the `*_mask` fields are the permission bitfields the client asks
+/// be granted, which the grid may withhold (its answer is
+/// [`AssetUploadResponse::granted`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct NewFileAgentInventoryRequest {
@@ -429,15 +422,20 @@ fn caps_upload_uuid(root: &Llsd, key: &str) -> Uuid {
     root.get(key).and_then(Llsd::as_uuid).unwrap_or_default()
 }
 
-/// Reads a permission-mask map member as a `u32`. The wire carries masks as
-/// LLSD `<integer>` (`i32`); LL's masks are non-negative (`PERM_ALL` is
-/// `0x7fffffff`), so a plain `try_from` recovers the value and an
-/// out-of-range/negative encoding falls back to `0`.
+/// Reads a permission-mask map member as a `u32`, defaulting to `0` when it is
+/// absent.
 fn caps_upload_mask(root: &Llsd, key: &str) -> u32 {
-    root.get(key)
-        .and_then(Llsd::as_i32)
-        .and_then(|value| u32::try_from(value).ok())
-        .unwrap_or(0)
+    upload_mask(root, key).unwrap_or(0)
+}
+
+/// Reads an optional permission-mask / flags map member as a `u32`, or `None`
+/// when the member is absent (as opposed to present and zero, which several
+/// upload-completion fields distinguish). The wire carries masks as LLSD
+/// `<integer>` (`i32`): LL's masks run to `PERM_ALL` (`0x7fffffff`) and read
+/// back as themselves, and one carrying the reserved top bit reads back from
+/// its two's-complement encoding rather than being discarded.
+fn upload_mask(root: &Llsd, key: &str) -> Option<u32> {
+    root.get(key).and_then(Llsd::as_i32).map(i32::cast_unsigned)
 }
 
 /// Builds the LLSD-XML metadata body for the first step of an
@@ -664,6 +662,31 @@ pub struct AssetUploadResponse {
     /// as the grid formatted them. Empty for a non-script upload or a clean
     /// compile.
     pub errors: Vec<String>,
+    /// The permissions the grid actually **granted** the created item
+    /// (`new_next_owner_mask` / `new_group_mask` / `new_everyone_mask`), or
+    /// `None` when the completion named none — the grid is free to withhold
+    /// what the request asked for, so a client that assumes it got what it
+    /// asked for shows the wrong permissions on a fresh upload.
+    pub granted: Option<UploadGrantedPermissions>,
+    /// The created item's inventory flags (`inventory_flags`), or `None` when
+    /// the completion carried none.
+    pub inventory_flags: Option<u32>,
+}
+
+/// The permission masks a `NewFileAgentInventory` completion reports for the
+/// item it created. The three travel together: the reference viewer takes all
+/// of them if `new_next_owner_mask` is present and none of them otherwise
+/// (`LLResourceUploadInfo::finishUpload`), so they are one optional value
+/// rather than three.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct UploadGrantedPermissions {
+    /// What the next owner will receive (`new_next_owner_mask`).
+    pub next_owner: Permissions,
+    /// What the item's group receives (`new_group_mask`).
+    pub group: Permissions,
+    /// What everyone receives (`new_everyone_mask`).
+    pub everyone: Permissions,
 }
 
 /// Parses a CAPS asset-upload response (either step of the two-step uploader)
@@ -709,6 +732,24 @@ pub fn parse_asset_upload_response(xml: &str) -> Result<AssetUploadResponse, rox
                 .collect()
         })
         .unwrap_or_default();
+    // The creation permissions and flags of a `NewFileAgentInventory`
+    // completion. Gated on `new_next_owner_mask` exactly as the reference is:
+    // a grid that names none of them leaves the client to assume a default,
+    // and one that names the next-owner mask names all three.
+    let granted = root
+        .get("new_next_owner_mask")
+        .map(|_| UploadGrantedPermissions {
+            next_owner: Permissions::from_bits(caps_upload_mask(&root, "new_next_owner_mask")),
+            group: Permissions::from_bits(caps_upload_mask(&root, "new_group_mask")),
+            everyone: Permissions::from_bits(caps_upload_mask(&root, "new_everyone_mask")),
+        });
+    // The reference reads `inventory_flags`; OpenSim's completion carries the
+    // same number under `inventory_item_flags`
+    // (`OpenSim/Capabilities/LLSDAssetUploadComplete.cs`) and is therefore
+    // never read by a stock viewer. Accept both — the flags are the item's, not
+    // the grid's, and a spelling is not worth losing them over.
+    let inventory_flags = upload_mask(&root, "inventory_flags")
+        .or_else(|| upload_mask(&root, "inventory_item_flags"));
     Ok(AssetUploadResponse {
         state,
         uploader,
@@ -717,6 +758,8 @@ pub fn parse_asset_upload_response(xml: &str) -> Result<AssetUploadResponse, rox
         error,
         compiled,
         errors,
+        granted,
+        inventory_flags,
     })
 }
 
@@ -785,7 +828,32 @@ pub fn build_asset_upload_response(response: &AssetUploadResponse) -> String {
             ),
         );
     }
+    if let Some(granted) = response.granted {
+        // All three or none: the client reads them as one value, keyed on the
+        // presence of the next-owner mask.
+        for (key, mask) in [
+            ("new_next_owner_mask", granted.next_owner),
+            ("new_group_mask", granted.group),
+            ("new_everyone_mask", granted.everyone),
+        ] {
+            map.insert(key.to_owned(), upload_mask_llsd(mask.bits()));
+        }
+    }
+    if let Some(flags) = response.inventory_flags {
+        // The reference viewer's spelling, so what this builds is what a stock
+        // viewer reads (the parser also accepts OpenSim's `inventory_item_flags`).
+        map.insert("inventory_flags".to_owned(), upload_mask_llsd(flags));
+    }
     Llsd::Map(map).to_llsd_xml()
+}
+
+/// Encodes a permission mask / flags word as the LLSD `integer` the wire
+/// carries it in. LL's masks run to `PERM_ALL` (`0x7fffffff`) and encode as
+/// themselves; the reserved top bit (`PERM_RESERVED`) has no positive `i32`, so
+/// it rides as its two's-complement encoding — which is what a C# `int` field
+/// serializes to and what [`upload_mask`] reads back.
+const fn upload_mask_llsd(mask: u32) -> Llsd {
+    Llsd::Integer(mask.cast_signed())
 }
 
 /// Media-permission bit: no one (a `perms_interact` / `perms_control` value).

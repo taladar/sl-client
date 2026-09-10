@@ -29,10 +29,11 @@ use std::collections::{BTreeMap, HashMap};
 use sl_types::key::AgentKey;
 use sl_wire::{
     AisUpdate, AssetUploadResponse, DisplayName, ExperiencePermission, LandResourcesUrls, Llsd,
-    ObjectMediaRequest, ObjectMediaResponse, build_agent_preferences_response,
-    build_asset_upload_response, build_attachment_resources_response,
-    build_avatar_picker_search_response, build_create_inventory_category_response,
-    build_display_names_response, build_experience_ids_response, build_experience_infos_response,
+    ObjectMediaRequest, ObjectMediaResponse, Permissions, UploadGrantedPermissions,
+    build_agent_preferences_response, build_asset_upload_response,
+    build_attachment_resources_response, build_avatar_picker_search_response,
+    build_create_inventory_category_response, build_display_names_response,
+    build_experience_ids_response, build_experience_infos_response,
     build_experience_permissions_response, build_experience_status_response,
     build_get_object_cost_response, build_get_object_physics_data_response,
     build_land_resource_detail_response, build_land_resource_summary_response,
@@ -42,13 +43,13 @@ use sl_wire::{
     build_remote_parcel_response, build_render_materials_response,
     build_resource_cost_selected_response, build_seed_response, build_simulator_features_response,
     is_ais_current_outfit_links_url, is_ais_orphans_url, parse_agent_preferences,
-    parse_ais_category_children_fetch_url, parse_ais_category_children_url,
-    parse_ais_category_links_url, parse_ais_category_url, parse_ais_create_category_body,
-    parse_ais_create_category_url, parse_ais_create_link_body, parse_ais_item_url,
-    parse_ais_move_body, parse_ais_rename_category_body, parse_ais_update_item_body,
-    parse_avatar_picker_search_query, parse_create_inventory_category_request,
-    parse_display_names_query, parse_event_queue_request, parse_experience_id_query,
-    parse_experience_info_query, parse_fetch_inventory_items_request,
+    parse_ais_category_children_fetch_url, parse_ais_category_children_subset,
+    parse_ais_category_children_url, parse_ais_category_links_url, parse_ais_category_url,
+    parse_ais_create_category_body, parse_ais_create_category_url, parse_ais_create_link_body,
+    parse_ais_item_url, parse_ais_move_body, parse_ais_rename_category_body,
+    parse_ais_update_item_body, parse_avatar_picker_search_query,
+    parse_create_inventory_category_request, parse_display_names_query, parse_event_queue_request,
+    parse_experience_id_query, parse_experience_info_query, parse_fetch_inventory_items_request,
     parse_fetch_inventory_request, parse_find_experience_query, parse_forget_experience_query,
     parse_get_object_cost_request, parse_get_object_physics_data_request,
     parse_group_experiences_query, parse_land_resources_request, parse_llsd_xml,
@@ -97,8 +98,8 @@ use crate::{
     CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_UPDATE_SETTINGS_AGENT_INVENTORY,
     CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
     CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE,
-    CHAT_SESSION_START_CONFERENCE, Event, InventoryFolder, InventoryItem, ServerEvent,
-    VoiceProvisionRefusal, offline_messages_to_llsd,
+    CHAT_SESSION_START_CONFERENCE, Event, InventoryFolder, InventoryItem, InventoryListing,
+    ServerEvent, VoiceProvisionRefusal, offline_messages_to_llsd,
 };
 
 /// The LLSD-XML media type CAPS bodies use.
@@ -1203,6 +1204,21 @@ impl SimCaps {
                     return CapsResponse::bad_request();
                 };
                 let is_script = metadata.is_script();
+                // An upload that *creates* an item reports the permissions it
+                // was granted, as both real grids do (`BunchOfCaps` copies its
+                // three `m_*Mask` fields into every completion). This grid
+                // grants what was asked for; the fields are what stop a client
+                // from having to assume that, since a real grid need not.
+                let granted = match &metadata {
+                    CapsUploadMetadata::NewFileInventory(new_file) => {
+                        Some(UploadGrantedPermissions {
+                            next_owner: Permissions::from_bits(new_file.next_owner_mask),
+                            group: Permissions::from_bits(new_file.group_mask),
+                            everyone: Permissions::from_bits(new_file.everyone_mask),
+                        })
+                    }
+                    _other => None,
+                };
                 let (new_asset, new_inventory_item) =
                     sim.complete_caps_upload(metadata, request.body.to_vec());
                 CapsResponse::llsd_xml(build_asset_upload_response(&AssetUploadResponse {
@@ -1212,6 +1228,7 @@ impl SimCaps {
                     // A script upload reports the compile result; the sim server
                     // "compiles" cleanly (a real grid would run the compiler).
                     compiled: is_script.then_some(true),
+                    granted,
                     ..AssetUploadResponse::default()
                 }))
             }
@@ -1570,18 +1587,21 @@ impl SimCaps {
                 } else {
                     sim.agent_inventory()
                 };
-                // A children URL missing the `?depth=` query lists one level,
-                // the builder's smallest useful fetch.
+                // A children URL missing the `?depth=` query lists the folder
+                // itself, which is also what `depth=0` asks for: the parameter
+                // counts levels of recursion *below* the listing, not levels
+                // of it.
                 if let Some((folder_id, depth)) = parse_ais_category_children_fetch_url(&suffix)
-                    .or_else(|| parse_ais_category_children_url(&suffix).map(|id| (id, 1)))
+                    .or_else(|| parse_ais_category_children_url(&suffix).map(|id| (id, 0)))
                 {
-                    let Some(folder) = tree.folder(folder_id).cloned() else {
+                    // `&children=` narrows it to a subset fetch of named
+                    // children; without it the folder is listed entire.
+                    let subset = parse_ais_category_children_subset(&suffix);
+                    let Some(listing) = tree.listing_to_depth(folder_id, depth, subset.as_deref())
+                    else {
                         return CapsResponse::not_found();
                     };
-                    let Some((folders, items)) = tree.children_to_depth(folder_id, depth) else {
-                        return CapsResponse::not_found();
-                    };
-                    return match ais_category_children_reply_to_llsd(&folder, &folders, &items) {
+                    return match ais_category_children_reply_to_llsd(&listing) {
                         Ok(body) => CapsResponse::llsd_xml(body.to_llsd_xml()),
                         Err(_) => CapsResponse::internal_error(),
                     };
@@ -1657,7 +1677,12 @@ impl SimCaps {
                     return CapsResponse::bad_request();
                 };
                 match sim.ais_create_category(parent, &create) {
-                    Ok((update, folder)) => Self::ais_reply(&update, &[folder], &[]),
+                    // A folder the grid has just made holds nothing, and
+                    // saying so is what lets a viewer record its version
+                    // instead of holding it unknown until something fetches it.
+                    Ok((update, folder)) => {
+                        Self::ais_reply(&update, &[InventoryListing::empty(folder)], &[])
+                    }
                     Err(error) => Self::inventory_error(error),
                 }
             }
@@ -1689,7 +1714,11 @@ impl SimCaps {
                                 .cloned()
                                 .into_iter()
                                 .collect();
-                            Self::ais_reply(&update, &folders, &[])
+                            let listings: Vec<InventoryListing> = folders
+                                .into_iter()
+                                .map(InventoryListing::unlisted)
+                                .collect();
+                            Self::ais_reply(&update, &listings, &[])
                         }
                         Err(error) => Self::inventory_error(error),
                     };
@@ -1755,7 +1784,7 @@ impl SimCaps {
     /// unserializable item (an out-of-range sale price).
     fn ais_reply(
         update: &AisUpdate,
-        folders: &[InventoryFolder],
+        folders: &[InventoryListing],
         items: &[InventoryItem],
     ) -> CapsResponse {
         match ais_mutation_reply_to_llsd(update, folders, items) {

@@ -30,6 +30,26 @@
 //!   pointing at the asset it had before, and the viewer's next fetch of its
 //!   own wearable answers with what it saved over.
 //!
+//! # Who is told, and how
+//!
+//! The two capability paths announce the item they bound according to
+//! [`UploadAnnouncements`], which the imitated grid decides — and they are two
+//! answers, not one. A `NewFileAgentInventory` completion is followed by
+//! nothing on either live grid; an in-place save is followed by the legacy UDP
+//! `UpdateCreateInventoryItem` on Second Life and by nothing on OpenSim. Both
+//! measured 2026-09-08 and written up in the [`inventory`](crate::inventory)
+//! module docs, along with why the push survives where it does. Silence is a
+//! behaviour to serve, not a branch left unwritten — a viewer that waits for a
+//! push instead of reading the capability's own response hangs against every
+//! grid there is on the creation path, and against half of them on the save.
+//!
+//! The third path does not read the policy. `UpdateInventoryItem` is a UDP
+//! request, and its `UpdateCreateInventoryItem` is that request's **reply**,
+//! echoing the transaction and callback ids the client sent; a wearable save
+//! has nothing else to complete on, and OpenSim sends it there
+//! (`AssetXferUploader`) exactly where it stays quiet after a capability
+//! upload.
+//!
 //! # Ordering
 //!
 //! The two halves of a transaction save arrive in the order the client sent
@@ -53,6 +73,7 @@ use sl_proto::{
 use sl_types::key::ObjectKey;
 
 use crate::assets::GridAssets;
+use crate::inventory::{UploadAnnouncement, UploadAnnouncements};
 use crate::world::RegionWorld;
 
 /// Folds one drained [`ServerEvent`] into the grid's asset store and the
@@ -63,6 +84,7 @@ use crate::world::RegionWorld;
 pub(crate) fn answer_upload(
     assets: &GridAssets,
     world: &RegionWorld,
+    announcements: UploadAnnouncements,
     sim: &mut SimSession,
     event: &ServerEvent,
     now: Instant,
@@ -75,7 +97,15 @@ pub(crate) fn answer_upload(
             data,
         } => {
             store(assets, *new_asset, data.clone());
-            apply_caps_upload(world, sim, metadata, *new_asset, *new_inventory_item, now);
+            apply_caps_upload(
+                world,
+                announcements,
+                sim,
+                metadata,
+                *new_asset,
+                *new_inventory_item,
+                now,
+            );
             true
         }
         ServerEvent::AssetUploaded {
@@ -117,6 +147,7 @@ fn store(assets: &GridAssets, key: AssetKey, data: Vec<u8>) {
 /// task inventory); a baked texture names no item at all.
 fn apply_caps_upload(
     world: &RegionWorld,
+    announcements: UploadAnnouncements,
     sim: &mut SimSession,
     metadata: &CapsUploadMetadata,
     new_asset: AssetKey,
@@ -132,13 +163,13 @@ fn apply_caps_upload(
             };
             let item = created_item(sim, request, item_id, new_asset);
             sim.agent_inventory_mut().insert_item(item.clone());
-            announce(sim, &item, now);
+            announce(announcements.created, sim, &item, now);
         }
         CapsUploadMetadata::UpdateAgentItem { item_id, .. } => {
-            repoint_agent_item(sim, *item_id, new_asset, now);
+            repoint_agent_item(announcements.saved, sim, *item_id, new_asset, now);
         }
         CapsUploadMetadata::UpdateScriptAgent(request) => {
-            repoint_agent_item(sim, request.item_id, new_asset, now);
+            repoint_agent_item(announcements.saved, sim, request.item_id, new_asset, now);
         }
         CapsUploadMetadata::UpdateTaskItem {
             task_id, item_id, ..
@@ -187,9 +218,15 @@ fn created_item(
         last_owner_id: uuid::Uuid::nil(),
         creator_id: agent,
         group: None,
+        // You own what you upload outright: OpenSim's `BunchOfCaps` sets the
+        // base and current masks of a created item to `PermissionMask.All` and
+        // only the three *granted* masks from the request
+        // (`item.NextPermissions = item.BasePermissions & nextOwnerMask`). The
+        // same three are what the completion reports back, so the item a client
+        // assembles from that completion agrees with this one.
         permissions: Permissions5 {
-            base: sl_proto::Permissions::from_bits(request.next_owner_mask),
-            owner: sl_proto::Permissions::from_bits(request.next_owner_mask),
+            base: sl_proto::Permissions::ALL,
+            owner: sl_proto::Permissions::ALL,
             group: sl_proto::Permissions::from_bits(request.group_mask),
             everyone: sl_proto::Permissions::from_bits(request.everyone_mask),
             next_owner: sl_proto::Permissions::from_bits(request.next_owner_mask),
@@ -200,6 +237,7 @@ fn created_item(
 /// Sets an agent-inventory item's asset id and hands the client the rewritten
 /// item, so its own copy stops naming the asset the save replaced.
 fn repoint_agent_item(
+    announcement: UploadAnnouncement,
     sim: &mut SimSession,
     item_id: InventoryKey,
     new_asset: AssetKey,
@@ -214,7 +252,7 @@ fn repoint_agent_item(
     };
     item.asset_id = new_asset.uuid();
     sim.agent_inventory_mut().insert_item(item.clone());
-    announce(sim, &item, now);
+    announce(announcement, sim, &item, now);
 }
 
 /// Sets a task-inventory item's asset id and advances the holding object's
@@ -301,15 +339,32 @@ fn apply_item_updates(
     }
 }
 
-/// Hands the client one server-side item creation / rewrite.
-fn announce(sim: &mut SimSession, item: &InventoryItem, now: Instant) {
-    if let Err(error) = sim.send_inventory_item_created(
-        std::slice::from_ref(item),
-        TransactionId::from(uuid::Uuid::nil()),
-        true,
-        now,
-    ) {
-        tracing::warn!("handing over an uploaded item failed: {error}");
+/// Hands the client one server-side item creation / rewrite — if this grid
+/// announces one at all.
+///
+/// [`UploadAnnouncement::Silent`] is a real answer and not a missing branch:
+/// OpenSim was measured sending nothing after either capability upload and
+/// Second Life sending nothing after a creation, the response body a client
+/// already has naming both the asset and the item. See the
+/// [`inventory`](crate::inventory) module docs.
+fn announce(
+    announcement: UploadAnnouncement,
+    sim: &mut SimSession,
+    item: &InventoryItem,
+    now: Instant,
+) {
+    match announcement {
+        UploadAnnouncement::Silent => {}
+        UploadAnnouncement::Legacy => {
+            if let Err(error) = sim.send_inventory_item_created(
+                std::slice::from_ref(item),
+                TransactionId::from(uuid::Uuid::nil()),
+                true,
+                now,
+            ) {
+                tracing::warn!("handing over an uploaded item failed: {error}");
+            }
+        }
     }
 }
 

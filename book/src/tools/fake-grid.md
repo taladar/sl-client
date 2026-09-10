@@ -149,6 +149,14 @@ served — see below), and `border` (one checkered marker pillar floating
 just inside the region's west edge, which with two adjacent `--region`s
 is a scene for looking across — and walking over — a border).
 
+A scene may also say how it dresses a **pair** of regions
+(`NamedScenario::pair`), which is not the same as two copies of it: the
+two halves of a border are not interchangeable, so the registry names the
+near one (the west, where the agent logs in) and the far one separately.
+`border` is the only scene with a second half today, and a harness asked
+for a pair from a scene that has none is told so rather than handed two
+copies.
+
 A scene is *named* so that a harness photographing it can say which one
 it photographed, and so the next scene is a registry entry rather than a
 change to the harness. Each scene also names its **landmarks** — a name
@@ -228,6 +236,33 @@ frames.
 A run leaves `run.json`, the two configuration files, and per viewer its
 `frame_NNN.png` sequence, `scene.json` (when that viewer writes one),
 `harness-status.json` and its own `viewer.log`.
+
+**Two regions, and walking between them.** `--neighbour` stands the
+scene's *second* half one slot east of the first and lets the grid
+announce it, and `--cross-after <seconds>` walks the agent over that
+border once it has arrived (a one-step `Timeline` carrying
+`Action::CrossRegion`, so the crossing is the grid's, not a second
+login). `--cross-after` implies `--neighbour`.
+
+Only a scene that says how it dresses **both** halves can do this, which
+today is `border` alone — a pair is not two copies of a one-region scene,
+and asking for one from a scene that has no second half is refused rather
+than obliged. The two halves are not interchangeable: the near one is the
+west, with its vehicle against its east edge, and the far one is the east.
+
+The crossing is timed from the agent's *arrival*, while the capture
+starts when the scene settles, so a `--cross-after` that lands before the
+first frame photographs only the aftermath. Give it more than
+`--settle-timeout` and enough `--frames × --interval` to still be running
+when it fires.
+
+One thing a crossing run must not do is pin the camera. The reference
+harness re-derives the camera pose from the agent's **current** region
+every frame (`applyCamera` → `getPosGlobalFromRegion`), so a
+region-local pose that framed the border before the crossing frames the
+*next* border after it — the shot jumps a region east at the moment of
+interest. Leaving `--look-at` off puts the camera back on the avatar,
+which is where a crossing wants it anyway.
 
 The grid runs **inside** the runner rather than as a spawned
 `sl-fake-grid`, which is the launcher's port lesson taken one step
@@ -332,7 +367,86 @@ code: Firestorm drew every avatar with no right hand, because
 
 [secondlife/viewer#6240]: https://github.com/secondlife/viewer/issues/6240
 
-## The non-CAPS HTTP surfaces
+### Calibration: what these fixtures look like in the reference viewer
+
+A different use of the same runs, and the reason to keep them apart: the
+report above says whether the two viewers *differ*, while this says what a
+fixture **is supposed to look like**. Those answers are sentences, not
+images — an oracle calibrated against a stored screenshot is calibrated
+against one machine's driver — so they are written down here rather than
+committed as pixels. Measured on 2026-09-10, Firestorm 7.2.5, at
+1920×1080 and the reference's own 60° lens.
+
+**The ground reads as one green plain, and the region has a visible
+edge.** The stock region is flat at 25 m, so its four detail solids never
+separate by height; what the reference draws instead is a mid-green
+mottled with pale grey and faint brown, because its terrain shader mixes
+the four by a noise field as well as by altitude. There are no patch
+seams. The region's own **edge** is unmistakable — the green plain stops
+along a straight line and the void beyond it is a dark blue-grey band at
+the water height, with the sky above that. So "the ground rezzed" and
+"the region is 256 m across" are both readable by eye, and *the colour of
+the ground is not a height reading*: do not calibrate an oracle that says
+"green means low".
+
+**The sun is nearly overhead, and the stars are out anyway.** The stock
+environment is one keyframe carrying the reference's own default sky, so
+every capture of it is lit identically — that is the point of it. The
+default sky puts the sun at **80° altitude**, so the ground is lit from
+almost straight above (a plywood cube shows a bright top face and nearly
+black sides) — and it also carries `star_brightness` 250, so a
+midday-lit ground sits under a blue sky with stars in it. Read that as
+the fixture's signature rather than as dusk, and do not infer the time of
+day from the sky. `--day-position` cannot move it either: the harness
+pins the sun by looking for a frame **at exactly** that keyframe, a
+one-keyframe cycle has one at `0.0` and nothing anywhere else, and the
+only report of that is a line in the viewer's own log —
+`day cycle has no sky at position 0.5; leaving environment alone`. A
+scene that wants a choosable sun has to carry a day cycle with frames at
+the positions it means, through `RegionConfig::environment`.
+
+**The checker is legible at the fixture's own distance.** The catalogue's
+prims are 1 m and its checker is 512² with 128 px cells, so a face is
+4 × 4 cells of 25 cm. From the runner's default framing — 8 m south,
+2 m up — that face lands about 130 px wide, so a cell is roughly 30 px:
+not a texture you have to squint at, and enough that a wrong repeat count
+or a stuck low LOD is obvious rather than arguable. This is what
+`TEXTURE_SIZE = 512` buys; the same fixture at 64² reads as a blur at
+this distance and nothing about the framing would tell you why.
+
+**The border is visible only because the grounds are painted.** Two
+regions meeting share no geometry a viewer draws: nothing marks the line,
+no seam, no edge, no change in shading. What makes it legible in the pair
+scene is that each side's ground is its own flat colour, and then it is
+about as legible as a picture gets — a hard vertical boundary between a
+blue half and a yellow half, straight down the frame. An oracle for "am I
+looking at the border" is therefore a colour test, never an edge test.
+
+**The neighbour is drawn before you get there.** Standing in the west
+region, the east region's ground is already on the horizon as a yellow
+band — the neighbour announcement opened its child circuit and it has
+been streaming since arrival. The pair scene's pillars are 4 m inside
+each region's *west* edge, so from a camera at the shared line you see
+the far region's pillar and not the near one's; the near region's stands
+252 m behind you, beyond the draw distance.
+
+**A crossing changes everything at once, in one frame.** With frames
+1 s apart, the last west frame and the first east frame are adjacent:
+whole-ground blue in one, whole-ground yellow in the next, with no
+intermediate. The reference logs `process_crossed_region()` and
+`Entering region [Fake Region East]`, and does not tear the scene down.
+
+**Two avatars survive it, not three.** After the crossing the reference
+holds the agent's own body and **one** rider — and the pair scene has a
+rider on each side. That is not a loss: both riders are the same
+`RIDER_AGENT`, and an avatar is keyed by agent id, so the two are one
+avatar that belongs to whichever region streamed it last. The same goes
+for the vehicle: one grid-wide id, two regions, one object — which is
+exactly the property a ridden crossing needs and exactly why the marker
+**pillars** were given an id each instead. After the crossing the
+reference reports that one vehicle under the destination's own local id
+(`0x340`, not the source's `0x310`) at the destination's own position,
+which is the handover renumbering seen from the other end.
 
 Besides login and CAPS, a real login host answers three more things a
 viewer asks for, all served from the same loopback port (the sans-I/O
@@ -594,6 +708,55 @@ asset id and stays fetchable either way. It is the fake grid's own fixture,
 seeded so `asset-round-trip` has an authored object body to read back, and
 no live grid has an item like it at all.
 
+### Each grid's body is its own format
+
+`AssetType::Object` is **two formats on the two grids**, so which body a take
+publishes follows from which side the policy picked.
+
+A **withheld** body is the Linden text form (`sl-object-asset`), which is what
+Second Life is known to have written and which has **no keyword** for a face's
+glow or material id, for `ExtraParams` (flexi, light, sculpt, mesh, light
+image, extended mesh, render material, reflection probe), for floating text, a
+media URL, a texture animation or a particle system. That list is asserted, not
+described: `sl_object_asset::bridge`'s
+`the_text_carries_none_of_the_modern_prim` sets every one on a live object and
+watches it come back empty. No keyword for them will be invented, because
+there is nothing left to check a guess against — Second Life exposes no
+object asset to capture, and OpenSim writes XML instead — so a guess would be
+both unfalsifiable and unreadable.
+
+A **served** body is that XML: `<SceneObjectGroup>`
+(`sl_object_asset::opensim`), transcribed from
+`SceneObjectSerializer.ToOriginalXmlFormat` both ways. It loses none of the
+list above — its `Shape` block carries the wire's packed `TextureEntry` and
+`ExtraParams` blobs byte for byte, and floating text, media, a texture
+animation and a particle system each have an element — and
+`the_xml_carries_the_whole_modern_prim` is that same missing-field test read
+the other way round. Writing the text under `Served` would name OpenSim and
+serve bytes no OpenSim has ever produced, which is the one thing about that
+policy that used to be unfaithful.
+
+The take also writes each prim's **contents** into the served body, gathered
+out of the region's task inventories while it still has the object: an object
+update carries none, so a body that stated none would file a scripted prim as
+an empty one.
+
+A rez reads the format off the **bytes**, not off the policy — a
+`<SceneObjectGroup>` opens with `<` and a text asset with the `{` of its first
+prim header — so a grid can rez a body written under the other flavour instead
+of failing on it.
+
+### The body is a publication, not a store
+
+A grid must not *rez* out of the text, and neither live grid does: OpenSim's
+XML carries the whole prim, and Second Life's simulator has the object and
+reads no asset. The fake grid keeps **the linkset a take removed** — a third
+store in `GridAssets`, keyed by item under both policies — and
+`rez_from_inventory` puts that back, minting fresh ids for it exactly as the
+body path does. The published body is written beside it and stays exactly what
+its format says. An item this grid did not take, which means the seeded
+`Fixture Object`, has no linkset behind it and still rezzes from its body.
+
 A conformance case names the flavour it needs by naming the *grid*:
 `asset-round-trip` declares `Grid::FakeOpensim`, because its fourth leg
 reads a taken object's asset back and only OpenSim ever lets a viewer do
@@ -618,14 +781,16 @@ per-behaviour setters still win where they are called; the flavour is what
 an unset knob falls back to, not a lock, which is what a test wanting one
 deliberate deviation needs. Each resolves once, in `start`.
 
-Seven behaviours follow it today: a taken object's asset, whether the
+Nine behaviours follow it today: a taken object's asset, whether the
 login response is trimmed to the request's `options` list (Second Life
 honours it, OpenSim sends every field regardless), whether
 `SimulatorFeatures` carries the `OpenSimExtras` block, which spatial-voice
-backend the regions run, the two halves of how inventory works, and who
-composites an avatar. The `SimulatorFeatures` pair is covered under "How a
-region introduces itself" below, the inventory pair under "How this grid
-does inventory", and the bakes under "Who bakes an avatar".
+backend the regions run, the two halves of how inventory works, who
+composites an avatar, what the grid charges, and what it says the account
+is entitled to. The `SimulatorFeatures` pair is covered under "How a region
+introduces itself" below, the inventory pair under "How this grid does
+inventory", the bakes under "Who bakes an avatar", and the last two under
+"Policy: what the grid charges, permits and refuses".
 
 That second one is small and it immediately earned its keep. Turning it on
 by default broke a fake-grid end-to-end test that expected
@@ -635,10 +800,11 @@ and consumed a seventh, so against Second Life the grid's map-tile server
 URL would simply never have arrived. That is the entire point of a fake
 grid that commits to being one real grid.
 
-The divergences the flavour does **not** yet decide are audited in
-`imitates.rs` rather than left to be rediscovered, each with a roadmap item:
-the economy price list, and how an *upload*-created inventory item is
-announced.
+There is no longer a list of divergences the flavour does *not* decide:
+every one this crate has measured is derived from it, the economy price
+list having been the last one outstanding. `imitates.rs` keeps that audit,
+so a divergence taken one-sidedly in future has somewhere to be written
+down rather than rediscovered.
 
 ### Who bakes an avatar
 
@@ -709,12 +875,11 @@ packet, so the flavour's default is the observable road rather than the
 measured one. This is the one place the table deliberately deviates from a
 measurement, and it is written down in `imitates.rs` too.
 
-**The announcement.** `InventoryAnnouncement` says how a created item is
-handed over: OpenSim's legacy UDP `UpdateCreateInventoryItem`
+**The take's announcement.** `InventoryAnnouncement` says how a **taken**
+item is handed over: OpenSim's legacy UDP `UpdateCreateInventoryItem`
 (`SimSession::send_inventory_item_created`) or Second Life's
 `BulkUpdateInventory` over the event queue
-(`SimSession::enqueue_bulk_update_inventory`). A take reads it, and nothing
-else does yet.
+(`SimSession::enqueue_bulk_update_inventory`).
 
 Flipping the default to Second Life immediately broke two conformance cases
 that waited only for the legacy message and reported a take that had worked
@@ -732,6 +897,83 @@ lands on the client's next long-poll — so on the Second Life side the item
 arrives **after** the kills. A consumer that waits for the item and only
 then looks for the kills has already discarded them, which is how
 `a_taken_linkset_rezzes_back_whole` came to hang rather than fail.
+
+**An upload's announcement, which is not the same answer — and is two
+answers.** `UploadAnnouncements` says what follows a **capability upload**,
+once for each of the two paths. After an asset saved in place over an
+`Update*AgentInventory`, Second Life sends the *legacy* UDP
+`UpdateCreateInventoryItem` and OpenSim sends *nothing at all*: the two
+grids take the opposite sides from the ones they take on a take. After a
+`NewFileAgentInventory` completion **neither grid sends anything**. One
+enum could not have said take and upload both, which is why there are two;
+one value could not have said creation and save both, which is why the
+upload knob is a pair.
+
+Every cell is a measurement, taken 2026-09-08 by the conformance cases that
+already did the uploads — `notecard-create-update` records
+`save_announcement` (aditi: `update-create-inventory-item`; OpenSim:
+`none`) and `asset-upload` records `upload_announcement` (`none` on both).
+Taking them needed `support::observe_upload` rather than another
+`wait_for`: an announcement is a UDP push and a completion an HTTP
+response, so an announcement can arrive *first*, and a `wait_for` looking
+for the completion would have discarded it on the way past and recorded the
+grid as silent. The reference viewer wants no push anyway:
+`LLBufferedAssetUploadInfo::finishUpload` builds the item out of the
+response body.
+
+So does this workspace's client, since 2026-09-10: the runtime keeps the
+`NewFileAgentInventory` request past the POST and turns the completion into
+the item (`sl_proto::uploaded_inventory_item`, which `Event::AssetUploaded`
+carries as `created` and the session files before the event goes out). It
+had to — a viewer that waits for a push waits forever on every grid there
+is, and this one did, so an uploaded item sat on the grid and missing from
+the inventory window until something re-fetched its folder. The completion
+is also where the item's **permissions** come from: this grid reports what
+it granted, as both real grids do, because a grid is free to withhold what
+the request asked for.
+
+**The take and the save diverge for opposite reasons**, and reading the
+save as "Second Life does something extra" gets it backwards. The push is
+the older behaviour and OpenSim is the grid that omits it, which its own
+source says twice over: at the in-place save,
+`InventoryAccessModule.CapsUpdateInventoryItemAsset` ends on a
+commented-out `SendInventoryItemCreateUpdate` and answers with an
+`AlertMessage` instead — commented out since 2007-08, when that capability
+path was first written, and carried through the 2007-12 rename and the 2010
+move into the module still commented — and a `NewFileAgentInventory`
+completion reaches inventory through `Scene.AddUploadedInventoryItem`,
+which calls the *client-less* `AddInventoryItem` overload sitting right
+beside the one that announces. So the take is Second Life having **moved
+on** (inventory went behind AIS3 and the announcement went with it), and
+the save is OpenSim having **never sent** what a Linden simulator sends —
+which is also why Second Life's side of it is the legacy
+`UpdateCreateInventoryItem` rather than anything newer.
+
+**Second Life's `NewFileAgentInventory` row was extrapolated from the save,
+and it was extrapolated backwards.** Measuring it costs money: that
+capability accepts only the chargeable file-upload classes there — it
+answers a notecard with `Invalid asset type` — so reaching the completion
+needs an upload fee, and sending the right `expected_upload_cost` needed a
+price list. Once the account's benefits package made the fee nameable,
+`asset-upload` uploaded a 64×64 texture at the account's own price
+(L$ 10, charged, twice) and recorded `none` both times.
+
+The reasoning that got it wrong was not silly, which is why it is written
+down rather than quietly corrected: the message is the general-purpose
+legacy "here is an item you now have", and the grid was measured sending
+exactly it for the neighbouring path. What it missed is **what the client
+already holds**. A `NewFileAgentInventory` response body carries the whole
+new item, so a push would repeat it; an in-place save's response names only
+the new asset, and without the push the client's own copy of the item goes
+on naming the asset the save replaced. The push survives exactly where it
+still carries information.
+
+The legacy UDP transaction save follows neither knob and that is not a gap:
+`UpdateInventoryItem`'s `UpdateCreateInventoryItem` is the **reply** to a
+UDP request, echoing the transaction and callback ids the client sent, and
+OpenSim sends it there (`AssetXferUploader`) precisely where it stays quiet
+after a capability upload.
+
 One thing is deliberately not flavour-decided and is not a to-do:
 `GridIdentity::platform` stays `OpenSim` either way, because it is what
 Firestorm's grid manager reads to decide whether it will add the grid at
@@ -762,6 +1004,25 @@ block removes a duplicate, not a surface — which is what the assertions in
 `http_misc.rs`'s `grid_info_is_served_as_xml_and_xml_rpc` are there to keep
 true.
 
+The currency **symbol** is the exception, and it is a real divergence rather
+than a hole: stock OpenSim puts no symbol in *either* place. Its login
+service defaults `currency` to the empty string and emits the key only
+`if (currency != String.Empty)`, and its extras block carries
+`currency-base-uri` with no symbol beside it. So a viewer against a stock
+OpenSim grid falls back to its own default — `OS$` in Firestorm — while
+Second Life sends `L$` in the login response and has no extras block to
+copy it into. `ImitatedGrid::currency_symbol` follows that: `Some("L$")`
+against `None`.
+
+Modelling it as presence rather than as a second symbol is the point. On
+OpenSim the symbol is a *deployment's* choice, not the software's —
+`StandaloneCommon.ini` ships `Currency = ""` under "Ask co-operative
+viewers to use a different currency name", real grids do set it, and
+Firestorm carries a multi-currency subsystem that re-renders its UI when a
+region's extras override the symbol mid-session. A fake grid that picked
+one symbol for "OpenSim" would be modelling one deployment instead of the
+software, and would hide the fallback path a viewer actually takes.
+
 **Voice** (`FakeGridBuilder::voice_backend`).
 
 | | Second Life | OpenSim |
@@ -776,8 +1037,8 @@ The OpenSim column is one decision, not four: with no backend installed
 every advertisement falls away on its own, and the provision refuses
 itself. That is what a *stock* OpenSim region is — both its voice modules
 (`VivoxVoiceModule`, `FreeSwitchVoiceModule`) are optional and off by
-default — and modelling the stock region is the same choice `stock_prices`
-makes for money.
+default — and modelling the stock region is the same choice
+`open_sim_prices` makes for money.
 
 It is also the only honest option here. Both OpenSim modules answer with
 the Vivox SIP account shape, and this workspace implements Vivox-shaped
@@ -948,7 +1209,11 @@ the Bevy smoke tier's `SlRegionIdentity` assertion is what caught it.
 
 ## Typed prim fixtures and the catalogue
 
-`box_prim` makes an untextured cube and nothing else, because
+`box_prim` makes a plywood cube and nothing else. The default prim texture
+(`sl_proto::DEFAULT_PRIM_TEXTURE`) is the one surface a fixture gets for free,
+because it is the one a real simulator puts on a prim itself — `box_prim` and
+`prim_from_shape`, the object a `RezObject` produces, both wear it. Everything
+past that has to be encoded, because
 `full_update_block` emits only the **raw byte fields** of an `Object`: its
 `texture_entry`, `extra_params`, `particle_system` and `texture_anim`
 travel as blobs, and the typed views beside them (`extra`, `particles`,
@@ -973,6 +1238,7 @@ PrimFixture::boxed(local_id, full_id, owner, position, scale)
     .pbr(face, material)    // ExtraParams RenderMaterial (GLTF)
     .light(..) .projector(..) .flexi(..) .reflection_probe(..)
     .particles(..) .texture_anim(..) .hover_text(..) .media_url(..)
+    .looping_sound(sound, gain, radius)  // an already-running llLoopSound
     .rotated(..) .child_of(parent, offset, rotation)     // a linkset child
     .attached_to(wearer, point, item, offset, rotation)
     .build()
@@ -998,7 +1264,7 @@ which piece (objects and parcels over UDP, assets over
 media over `ObjectMedia`, the environment over `ExtEnvironment`, the
 ground as `LayerData` plus the estate RAW download).
 
-`fixtures::catalogue()` is the **named catalogue**: sixteen prims, one per
+`fixtures::catalogue()` is the **named catalogue**: nineteen prims, one per
 rendering feature, in a west-to-east row 8 m north of the arrival point at
 4 m spacing, with every texture, sculpt map, mesh and material they
 reference served. `catalogue::entries()` / `entry(name)` give a subject's
@@ -1007,12 +1273,41 @@ a hard-coded local id, and the same fixture backs the automated tiers and
 the binary's `--scenario catalogue` — which is what makes a Firestorm
 session and a full-stack capture look at the same objects.
 
+### A sounding prim says so twice
+
+The `sound-box` entry is the one prim whose feature is not visible, and it
+is worth knowing *why* it carries its sound the way it does. A simulator
+states an in-world sound in two unrelated places:
+
+- **On the object.** `llLoopSound` writes `Sound` / `Gain` / `Flags` /
+  `Radius` onto the prim and schedules a full update — OpenSim's
+  `SoundModule::LoopSound`, whose comment says it plainly: "just sending
+  the sound out once doesn't work so well when other avatars come in view
+  later on". Stopping it goes the same way (`Sound` nil, `STOP` set). This
+  is the only way an avatar arriving *after* the loop started ever hears
+  it, and the reference viewer reads the fields back in
+  `LLViewerObject::processUpdateMessage`, full and compressed updates
+  alike.
+- **In a message.** `AttachedSound` (a non-looping `llPlaySound`),
+  `AttachedSoundGainChange` (a live `llSetSoundVolume`), `SoundTrigger`
+  (a one-shot at a place — `llTriggerSound`, a collision) and
+  `PreloadSound` (`llPreloadSound`, and *only* that: no region sends one
+  on arrival). Each reaches only whoever is already there.
+
+So `looping_sound(..)` is a fixture for the first, and
+`SimSession::send_attached_sound` / `send_attached_sound_gain_change` /
+`send_sound_trigger` / `send_preload_sound` are the second. A viewer that
+implements only the message half is silent in every region whose sounds
+started before it logged in, which is nearly all of them.
+
 The procedural assets it needs come from `sl-test-assets`:
 `RgbaImage::checker` / `solid` (as JPEG2000), `sculpt_sphere` (a sculpt
 map — geometry stored as a texture), `mesh::unit_cube_mesh_asset` (the
-LLSD-binary header plus zlib-compressed LOD blocks `sl-mesh` decodes) and
+LLSD-binary header plus zlib-compressed LOD blocks `sl-mesh` decodes),
 `gltf_material_asset` (the `AT_MATERIAL` LLSD envelope around a glTF 2.0
-document).
+document) and `sound::marker_tone` (a real Ogg Vorbis tone, which the
+`sound-box` loops at concert pitch — a decoder can measure it, and an ear
+can tell two of them apart).
 
 ### Fixture textures: size it honestly, and mind the cache
 
@@ -1161,10 +1456,38 @@ They are stand-ins rather than Linden's own pixels, shaped to be
 recognisable in the role: a disc reads as a sun, and the halo's bright
 band sits at the 22° radius the shader samples it at.
 
+The library's other half is sound. The twelve **built-in UI sounds** a
+viewer plays for its own events — the typing chirp, the money chime, the
+teleport whoosh, the snapshot shutter — are library ids too
+(`sl_proto::BUILTIN_UI_SOUNDS`), and the reference viewer ships no sound
+anywhere in its tree, so a grid that answers none of them leaves every one
+of those events silent for the whole session: the fetch fails once, the id
+is marked unavailable, and nothing plays again. `default_assets` serves an
+Ogg Vorbis tone for each (`sl_test_assets::builtin::library_sounds`), one
+whole tone apart over two octaves from A3 up, in the order the shared list
+names them — so which built-in just played is something an ear can tell,
+and `sl_test_assets::builtin::ui_sound_pitch_hz` is where a test asks
+which pitch belongs to which id.
+
 `RegionConfig::environment` is the region's other environmental half: an
 `EnvironmentSettings` (day cycle, day length, sky-track altitudes) served
 by the `ExtEnvironment` capability. Left `None`, the session's stock
 four-hour day answers.
+
+**A sky frame that omits its three scattering profiles is a region with
+no environment.** `rayleigh_config`, `mie_config` and `absorption_config`
+are marked *required with no default* by the reference's sky validator,
+and `Validator::verify` fails a required field it cannot fill — so one
+missing key fails the frame, a track with no valid frame empties the day
+cycle, and `LLEnvironment::recordEnvironment` refuses the whole thing
+with `Invalid day cycle for region`. The viewer then lights the region
+with its own built-in sky and reports nothing outside its log. That is
+why `SkySettings` carries them as `DensityLayer` lists and why
+`legacy_windlight_default` seeds the reference's own defaults: a frame
+this crate *constructs* is going on a wire to a viewer that requires
+them, whatever a frame it merely *decoded* happened to carry. Found by
+pointing Firestorm at this grid on 2026-09-10, and invisible from here
+until then — nothing on the grid side had ever complained.
 
 ## Teleporting between regions
 
@@ -1401,6 +1724,15 @@ position, velocity)`, which refuses a destination that does not border
 the agent's region (`Error::NotAdjacent`) and publishes a
 `CrossingNotice` on `FakeGrid::crossings()`.
 
+A crossing has the teleport's arrival timeout too: no `AgentArrived`
+within `CROSSING_ARRIVAL_TIMEOUT` and the agent stays where it was
+(`Error::CrossingTimedOut`). The cleanup rule is the teleport's, one
+destination shape narrower — a crossing destination is nearly always a
+neighbour whose child circuit the *announcement* opened, so the failure
+is not entitled to take it down. `FakeGridBuilder::handover_timeout`
+shortens both budgets, which is what makes either failure a test rather
+than a thirty-second wait.
+
 ### Sitting, and riding across a border
 
 A sit is a conversation: the client's `AgentRequestSit`, the region's
@@ -1425,6 +1757,117 @@ pair: `Leaving` stands the vehicle against its region's east edge,
 one border, same full id and different local ids. `FakeAgent::with_world`
 (mutate a session's fixtures *and* send, under one lock) and
 `FakeAgent::seat_on` are what a test drives the handover with.
+
+`border_pair_side(side)` is that half made whole, and is what the
+`border` scene dresses each of a pair's two regions with: this side's
+painted ground, this side's vehicle with the rider aboard, and the
+marker pillar. It is what a two-region cross-check run photographs.
+
+The one thing it has to say out loud is **which ids are shared and
+which are not**, because a pair grid streams both regions at once and a
+viewer keys an object by its grid-wide id:
+
+- the **vehicle** keeps one id either side, deliberately — a vehicle
+  really is one object being handed over — so a pair grid holds one
+  vehicle, at whichever side streamed it last, and the crossing is what
+  makes that the right answer rather than a bug;
+- the **rider** likewise, so a pair shows one rider and not two, and a
+  crossing ends with two avatars in the scene (yours and it) rather
+  than three;
+- the **pillars** get an id each (`BorderSide::marker_object`), because
+  a pillar is scenery that belongs to one region. Sharing one id there
+  did not produce a pillar per side — it produced a single pillar being
+  moved from one region to the other, which is what Firestorm was
+  observed doing before the ids were split.
+
+## Scripted timelines
+
+Every surface above answers something the client asked for. A
+`Scenario::timeline` is the other half: what happens to a session because
+**time passed**, which is what a test of anything *moving* needs — a prim
+that moves, an avatar that starts an animation, a region whose sky
+changes, an agent walked over a border.
+
+```rust,ignore
+let timeline = Timeline::new()
+    .then(At::AfterArrival(Duration::from_secs(2)),
+          Action::MoveObject { local_id, to })
+    .after(Duration::ZERO, Action::Marker("moved".to_owned()))
+    .then(At::OnMarkerAck, Action::KillObject(local_id));
+```
+
+A step is an `At` and an `Action`. The `At` is a duration from the
+session's arrival (`AfterArrival`), a duration from the previous step
+(`AfterPrevious`), a `ServerEvent` the session drains (`OnEvent`, tested
+against every event since the script started, so a step waiting for
+something that already happened runs at once), or the client's own
+acknowledgement of the last marker (`OnMarkerAck`).
+
+`OnMarkerAck` is the one wait with a happens-before behind it rather than
+a guessed number of milliseconds. A client acknowledges a packet it has
+decoded and handled, so once the marker's ack is in, everything sent
+before it has already reached the viewer's own event stream — which is
+exactly what a test wants before it takes a second screenshot. It is also
+the one wait that does **not** stop the script when it times out: an
+ordering nicety that could strand a run would be worse than the
+reordering it prevents, which is the call `teleport.rs` already makes
+about its own `TeleportStart`. An `OnEvent` that times out *does* stop the
+script, because there the wait is the whole point of the step and the rest
+of the script was not written for a world where it never happened.
+
+The `Action` is anything a simulator does unprompted: `RezObject`,
+`MoveObject`, `UpdateObject`, `KillObject`, `Attach` / `Detach`,
+`AnimateAvatar`, `SetAppearance`, `Chat`, `Im`, `SetEnvironment`,
+`ConfigureRegion`, `ChangeParcel`, `Teleport`, `CrossRegion`, `SimStats`,
+`SimulatorTime`, `Marker`, and `Custom` for a hook.
+
+`SetEnvironment` and `ConfigureRegion` go together, and the pairing is a
+protocol fact rather than an inconvenience. Nothing carries new environment
+settings *to* a viewer that is already standing in the region: `SetEnvironment`
+changes what the `ExtEnvironment` capability answers, and the viewer's reason to
+ask again is a `RegionInfo` — which is what `ConfigureRegion` sends. The
+reference viewer re-reads on every one of those without comparing a field
+(`LLViewerRegion::processRegionInfo` runs `LLRegionInfoModel`'s update signal,
+which `LLEnvironment` has hooked to `requestRegion()`), and it could not do
+otherwise: a `RegionInfo` carries no environment fields at all. So an estate
+that changes only the sky saves the Region tab without moving a limit, and a
+script says the same thing with an empty `ConfigureRegion` edit.
+
+The one environment change that really is *pushed* is a different feature —
+`PushExpEnvironment`, an experience's `llSetEnvironment`, which travels as a
+`GenericMessage` and layers over the region's settings. Neither end of it exists
+in this workspace yet. The world-changing ones go through the
+region's shared store and publish to its change stream, so a second avatar
+standing there is told as well — a scripted rez is a rez, not a picture
+painted on one circuit.
+
+Every wait is a `tokio` sleep and every stamp comes from the grid's
+injected clock, so a test that pauses tokio's timer pauses the script with
+it: a scripted minute costs no wall-clock time.
+
+### The script belongs to the avatar
+
+A script that says "teleport, then move the prim you find there" has to
+outlive the session it started in — a teleport destination is always a
+*second* `SimSession`, and a crossing promotes a circuit the client
+already held. So once the client has actually arrived, the steps that have
+not run yet are handed to the destination's session and the one left
+behind keeps only the prefix it ran. That happens for a
+**client-initiated** teleport too, which is the point: the script belongs
+to the avatar, not to the patch of land.
+
+A destination whose own region declared a timeline loses it to the
+incoming one; a script that has already finished hands over nothing, which
+is what leaves the destination's own script alone. The runner parks on a
+notification rather than exiting when it runs out of steps, so it does not
+matter whether the script arrives before or after that session's arrival,
+and it carries a generation alongside its cursor so a runner waiting on
+step *n* of one script can never execute step *n* of the script that
+replaced it.
+
+A runner stops when its session closes, when the grid shuts down, or when
+the agent stops being the root agent there — which is what a crossing
+makes of the region left behind.
 
 ## The Bevy smoke tier
 
@@ -1479,6 +1922,43 @@ simulates no movement to make it with — so `TestContext::fake()` hands the cas
 regions an avatar may walk between, which neither live grid reliably offers.
 See the *conformance testing* chapter.
 
+### The logins that are refused
+
+Every conformance case starts from a login that *succeeded* — a `TestContext`
+is assembled out of live sessions — so no case can be the one that asserts a
+login was declined. `sl-conformance/tests/login_refusals.rs` is the other half,
+and it uses no registry at all: one grid built per case with exactly the gate
+under test set, driving `sl_client_tokio::Client::connect` straight at it.
+
+`FakeGridBuilder::gates` and `AccountConfig::mfa` between them cover every
+reason a real grid declines a correctly-addressed login, and each has to reach
+the client as something it can act on — a `tos` a viewer can put a dialog in
+front of, an MFA challenge it can answer, a `presence` it may retry:
+
+- a wrong password and an unknown account, which must be **indistinguishable**
+  or the endpoint tells a caller which names exist;
+- `tos` and `critical`, refused with the text to display and cleared by the
+  same login re-sent with `agree_to_tos` / `read_critical`. Note that
+  `LoginRequest::new` leaves both flags *set*, which is right for a driver
+  logging into a grid it has already agreed with — a viewer that has to show
+  the terms sends its first attempt without them;
+- `presence`, classified as retryable from the message rather than the reason
+  code;
+- an MFA challenge, answered by the one-time code or by echoing the
+  `mfa_hash` the challenge handed out ("remember this device") — and *not*
+  raised for a wrong password, which would tell an attacker the password was
+  right;
+- a redirect, followed to the grid that answers it, and abandoned at the hop
+  bound when it loops.
+
+`FakeGridBuilder::stale_presence` is the ghost rather than the gate: it refuses
+**one** login as already-logged-in and the refusal itself clears it, which is
+what OpenSim's login service does on its way to reporting one. That is the
+whole reason a driver may retry such a rejection at all, and the conformance
+runner's retry branch — the only production code in this workspace that reacts
+to an `AlreadyLoggedIn` — had no way to be exercised until a grid could both
+refuse and then relent.
+
 ## Policy: what the grid charges, permits and refuses
 
 Not every answer is content. Three of them are policy, and they live apart
@@ -1487,14 +1967,164 @@ statements about a region.
 
 `EconomyConfig` carries the whole money policy, both halves of it: the L$
 rate its web helper quotes over `currency.php` and the price list its
-simulator answers an `EconomyDataRequest` with (`EconomyConfig::prices`,
-defaulting to `stock_prices()`). One config, because a grid whose helper
-quoted one rate while its simulator quoted another is a grid no viewer can
-reconcile. Every L$ amount in the stock list is a **different** number,
-which stock OpenSim's are not (its `SampleMoneyModule` defaults every price
-to `0` and group creation to `-1`): with seventeen fields on one message, a
-reply of equal amounts cannot tell a test that the encoder wrote a price
-into the wrong slot.
+simulator answers an `EconomyDataRequest` with (`EconomyConfig::prices`).
+One config, because a grid whose helper quoted one rate while its simulator
+quoted another is a grid no viewer can reconcile.
+
+The price list follows the flavour (`ImitatedGrid::prices`,
+`EconomyConfig::for_grid`), and both columns are the real grid's rather
+than this crate's invention:
+
+| field | Second Life | stock OpenSim |
+| --- | --- | --- |
+| `object_capacity` | 20 000 LI | 15 000 LI |
+| `object_count` | 0 | 0 |
+| `price_energy_unit` | 100 | 0 |
+| `price_object_claim` | 10 | 0 |
+| `price_public_object_decay` | 4 | 4 |
+| `price_public_object_delete` | 4 | 0 |
+| `price_parcel_claim` | 1 | 0 |
+| `price_parcel_claim_factor` | 1.0 | 1.0 |
+| `price_upload` | 10 | 0 |
+| `price_rent_light` | 5 | 0 |
+| `teleport_min_price` | 2 | 0 |
+| `teleport_price_exponent` | 2.0 | 2.0 |
+| `energy_efficiency` | 1.0 | 1.0 |
+| `price_object_rent` | 1.0 | 0.0 |
+| `price_object_scale_factor` | 10.0 | 10.0 |
+| `price_parcel_rent` | 1 | 0 |
+| `price_group_create` | 100 | none stated (`-1`) |
+
+The Second Life column is one aditi run of the `economy-data` conformance
+case (2026-09-08), which records all seventeen fields for exactly this
+purpose. The OpenSim column is read off `SampleMoneyModule` — its field
+initialisers and its `[Economy]` config defaults — rather than measured,
+because the local OpenSim grid deliberately overrides `PriceUpload` and
+`PriceGroupCreate` in `bin/OpenSim.ini` so a live round trip is observable;
+its `economy-data` record therefore confirms fifteen of the seventeen and
+differs from stock in exactly those two.
+
+**The OpenSim column is not a table of zeroes**, and the five fields where
+the two grids still agree are the residue of a copy. OpenSim's money module
+once shipped a near-verbatim copy of a Linden simulator's price list: its
+pre-2018 defaults were `100`, `10`, `4`, `4`, `1`, `1.0`, `5`, `2`, `2.0`,
+`1`, `1.0`, `10`, `1` — thirteen of fifteen identical to what aditi
+answered in 2026, the exceptions being the upload charge (`0` against
+Second Life's L$ 10) and the group price. A 2018 commit then zeroed most of
+them "to no cost values, since that is our default", and what survived is
+exactly `PricePublicObjectDecay`, `PriceParcelClaimFactor`,
+`TeleportPriceExponent`, `EnergyEfficiency` and `PriceObjectScaleFactor`.
+The agreement is history, not policy.
+
+**One field arrives negative**, and it cost a decoder fix to model: a stock
+OpenSim region sends `-1` for `PriceGroupCreate`, which this workspace used
+to reject as an out-of-range L$ amount — dropping the whole reply, so a
+viewer against an unconfigured OpenSim grid learned no price at all rather
+than sixteen prices and one blank. `EconomyData::price_group_create` is an
+`Option<LindenAmount>` now, `None` for any negative. The other price fields
+keep the strict decode: no simulator has been measured sending a negative
+for one, so a negative there is still a malformed message worth dropping.
+
+**Read that `None` as "unknown", not as "free"** — the `-1` is not a
+considered sentinel and semantically it is nonsense as a price, since `0`
+was available and says exactly that. Three things explain it and none of
+them is intent. It is the value the reference viewer's own `LLBaseEconomy`
+initialises *every* price to before a reply arrives, meaning "not received
+yet", and it reached OpenSim's config default from there. It sits in a
+display-only field: OpenSim charges group creation from
+`IMoneyModule.GroupCreationCharge`, hard-coded `0` in `SampleMoneyModule`
+and guarded with `if (charge > 0)`, and never consults this number — while
+the modern reference viewer prices group creation from the account's
+benefits package (`create_group_cost`) rather than from this reply. And the
+2018 commit that set the field initialiser to `-1` is the one quoted above
+as setting "no cost values": it moved all fourteen sibling prices *to* `0`
+in the same breath. So the author meant free, and this is the single field
+that spells free differently from its neighbours.
+
+Because the two lists differ in twelve of seventeen fields, the
+`economy-data` case asserts the whole table field-for-field on both fake
+flavours. What that catches is a grid quoting the wrong grid — the wiring,
+not the codec. It is deliberately *not* a replacement for the
+encoder-slot check the synthetic all-distinct table used to provide: both
+sides of the comparison come from the same constant, and neither real list
+is all-distinct. That check stayed where it belongs, in `sl-proto`'s own
+`send_economy_data` round trip.
+
+### What the account is entitled to
+
+The price list is not where a modern viewer reads upload costs on Second
+Life. `LLAgentBenefits` reads them from the login response's **benefits
+package**, and Firestorm's `OpenSim legacy economy` patches fall back to
+`EconomyData`'s `price_upload` *only when the grid is not Second Life* — so
+the legacy field is the OpenSim path and the benefits package is the Second
+Life one, the opposite way round from how it reads.
+
+`ImitatedGrid::describes_account_entitlements` decides whether the grid
+sends any of it. Second Life sends `account_type` (the package the account
+is on), `account_level_benefits` (that package's numbers) and
+`premium_packages` (every package's numbers, so a viewer can render "Premium
+would give you N"). A stock OpenSim grid sends none of the three — its login
+service has no notion of a subscription — which is why Firestorm gates its
+whole benefits init behind `isInSecondLife()`: the reference parse *fails*
+on a missing field and insists on seeing both `Base` and `Premium`, so a
+grid sending half of this would make a viewer complain at every login.
+
+The table `sl-fake-grid` serves is measured, one aditi login on 2026-09-08
+(`sl-conformance`'s `login-handshake` records all of it):
+
+| package | texture | 2K texture | sound/anim | group | groups | animesh |
+| --- | --- | --- | --- | --- | --- | --- |
+| `Base` | 10 | **50** | 10 | 100 | 50 | 1 |
+| `Plus` | 10 | 50 | 10 | 100 | 55 | 1 |
+| `Premium` | 10 | **40** | 10 | 100 | 80 | 2 |
+| `Premium_Plus` | **0** | **0** | **0** | **10** | 150 | 3 |
+| `Premium_Plus_No_Stipend` | 0 | 0 | 0 | 10 | 150 | 3 |
+
+**Texture uploads are tiered**, which is the thing `EconomyData` cannot
+express: above `MIN_2K_TEXTURE_AREA` (1024×1024) a texture costs L$ 50 on
+`Base` against L$ 10 below it, while the legacy reply quotes a flat 10. A
+client sending the legacy figure as its `expected_upload_cost` for a large
+texture is refused and told nothing useful.
+
+Aditi sends **five** packages, not the two the viewer demands, so the fake
+grid sends five: the shape a viewer meets on the real grid includes tiers it
+has no special knowledge of. `picks_limit` (20) and `attachment_limit` (38)
+are identical on all five, so a viewer gating either on the subscription
+would be gating on nothing.
+
+### The maturity trio
+
+Three login fields, and the divergence is again mostly one of presence.
+
+| field | Second Life | stock OpenSim |
+| --- | --- | --- |
+| `agent_access_max` | per account | hard-coded `A` |
+| `agent_region_access` | per account | **absent** |
+| `agent_access` | `M` (see below) | hard-coded `M` |
+
+`agent_access_max` is the entitlement, and it is the one a client's
+`canSetMaturity` rule reads. `AccountConfig::maturity_ceiling` sets it, and
+it exists because until it did **every fake account was entitled to
+everything** — so that rule had never once been exercised against an account
+that could fail it.
+
+`agent_region_access` is, despite its name, not a property of a region: the
+reference viewer reads it as the account's *preference* and seeds
+`PreferredMaturity` from it. No OpenSim grid sends it — the field appears
+nowhere in OpenSim's sources — and Firestorm handles the absence
+deliberately, defaulting the preference to the ceiling (FIRE-8854).
+
+`agent_access` is the least understood, and the fake grid copies the
+measurement rather than deriving it. Aditi answered `M` on three runs whose
+ceiling *and* preference were both `A`; OpenSim hard-codes `M` for everyone.
+Two readings fit: a **clearance** (what the account is cleared for as
+against what its type permits — an unverified account is cleared to Moderate
+while entitled to Adult, and the same axis carried the pre-2010 Teen Grid
+restriction), or the **start region's own rating**. That avatar's start
+region is itself Mature, so the run cannot separate them; what it does rule
+out is a vestigial constant, since the value coincides with something rather
+than sitting where it was left. A login at a differently-rated region, or an
+age-verified avatar, settles it in one run.
 
 `AgentPolicy` is the per-session half — what *this* agent may do:
 

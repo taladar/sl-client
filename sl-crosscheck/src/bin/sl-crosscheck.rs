@@ -33,7 +33,11 @@ use sl_crosscheck::status::Artefacts;
 use sl_crosscheck::summary::{RunSummary, ViewerRun};
 use sl_crosscheck::{files, launch};
 use sl_fake_grid::fixtures::scenarios;
-use sl_fake_grid::{AccountConfig, FakeGridBuilder, GridIdentity, RegionConfig};
+use sl_fake_grid::{
+    AccountConfig, Action, At, FakeGridBuilder, GridIdentity, RegionConfig, Scenario, Timeline,
+};
+use sl_types::lsl::Vector;
+use sl_types::map::RegionCoordinates;
 
 /// The workspace root, as it stood when this binary was built. The viewer's own
 /// vendored-asset defaults are resolved the same way, so a build that has been
@@ -43,6 +47,13 @@ const WORKSPACE_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
 /// Command-line options.
 #[derive(Debug, Parser)]
 #[command(author, version, about)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "a command line is a flat list of independent switches — three capture layers and a \
+              neighbour, each meaningful in any combination — and clap parses this struct field \
+              for field; folding them into an enum would invent groupings the command line does \
+              not have"
+)]
 struct Options {
     /// The named scene every region is dressed with. The names come from the
     /// shared fixture registry, so a run says which scene it photographed
@@ -161,7 +172,36 @@ struct Options {
     /// timings above when unset.
     #[arg(long)]
     deadline: Option<f32>,
+
+    /// Stand the scene's **second** region one slot east of the first, and let
+    /// the grid announce it, so a framing can hold the line between two
+    /// regions. Only a scene that says how it dresses both halves can do this
+    /// — `border` is the one that does.
+    #[arg(long)]
+    neighbour: bool,
+
+    /// Walk the agent over the east border this many seconds after it arrives.
+    /// Implies `--neighbour`: a crossing needs somewhere to cross into.
+    #[arg(long, value_name = "SECONDS")]
+    cross_after: Option<f32>,
 }
+
+/// The name of the region the agent logs into.
+const NEAR_REGION: &str = "Fake Region";
+
+/// The name of the region one slot east of it, when a run asks for the pair.
+const FAR_REGION: &str = "Fake Region East";
+
+/// How far inside the far region's west edge a scripted crossing lands the
+/// agent, in metres. The vehicles stand at
+/// `border::VEHICLE_FROM_BORDER`; landing beside them is what puts the
+/// crossing in the same framing as the thing that crossed with it.
+const CROSSING_LANDING_X: f32 = 6.0;
+
+/// The eastward speed a scripted crossing carries over, in metres per second —
+/// a walk, because the velocity in a `CrossedRegion` is what keeps the client's
+/// momentum rather than teleport-stopping it dead.
+const CROSSING_SPEED: f32 = 1.5;
 
 /// Which half of the pair to run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -258,6 +298,86 @@ fn resolve_camera(
         }
         (None, None) => None,
     })
+}
+
+/// The regions this run's grid is built from: one, or the scene's pair when
+/// `--neighbour` (or a `--cross-after` that implies it) asked for two.
+///
+/// # Errors
+///
+/// Returns a message when a pair was asked for and the scene has no second
+/// half. Standing up two copies of a one-region scene would look like it
+/// worked — two identical regions, a border with nothing to say — so this
+/// refuses rather than obliging.
+fn regions_for(
+    options: &Options,
+    scene: &scenarios::NamedScenario,
+) -> Result<Vec<RegionConfig>, String> {
+    let want_pair = options.neighbour || options.cross_after.is_some();
+    let near = RegionConfig {
+        name: NEAR_REGION.to_owned(),
+        ..RegionConfig::default()
+    };
+    if !want_pair {
+        return Ok(vec![scene.dress(near)]);
+    }
+    let pair = scene.pair().ok_or_else(|| {
+        format!(
+            "the {} scene is about one region, so there is no neighbour to stand up; the \
+             scenes that have a second half are: {}",
+            scene.name,
+            scenarios::all()
+                .iter()
+                .filter(|scene| scene.pair().is_some())
+                .map(|scene| scene.name)
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    })?;
+    let far = RegionConfig {
+        name: FAR_REGION.to_owned(),
+        grid_x: near.grid_x.saturating_add(1),
+        ..RegionConfig::default()
+    };
+    let mut near = pair.dress_near(near);
+    if let Some(after) = options.cross_after {
+        near.scenario = Some(crossing_script(
+            near.scenario.take().unwrap_or_default(),
+            after,
+        ));
+    }
+    Ok(vec![near, pair.dress_far(far)])
+}
+
+/// `scenario` with a step that walks the agent over the east border `after`
+/// seconds from its arrival.
+///
+/// The script goes on the region rather than on the fixture because *when* a
+/// crossing happens is a property of the run — it has to land inside the
+/// capture window, which the frame count and interval decide — while *what*
+/// stands either side of the border is a property of the scene.
+fn crossing_script(mut scenario: Scenario, after: f32) -> Scenario {
+    scenario.timeline = Timeline::new().then(
+        At::AfterArrival(core::time::Duration::from_secs_f32(after)),
+        Action::CrossRegion {
+            region: FAR_REGION.to_owned(),
+            position: RegionCoordinates::new(
+                CROSSING_LANDING_X,
+                sl_fake_grid::fixtures::border::MARKER_Y,
+                // The ground plus half an avatar: a landing position is the
+                // avatar's *centre*, and handing the terrain height straight
+                // over buries it to the knees on the far side of the line.
+                f32::from(sl_fake_grid::scenario::STOCK_TERRAIN_HEIGHT_M)
+                    + sl_fake_grid::AVATAR_CENTRE_ABOVE_GROUND_M,
+            ),
+            velocity: Vector {
+                x: CROSSING_SPEED,
+                y: 0.0,
+                z: 0.0,
+            },
+        },
+    );
+    scenario
 }
 
 /// Run one viewer and collect what it left.
@@ -373,15 +493,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
+    let regions = regions_for(&options, &scene)?;
     let grid = runtime.block_on(async {
-        FakeGridBuilder::new()
+        let mut builder = FakeGridBuilder::new()
             .http_port(options.port)
             .grid_identity(GridIdentity {
                 name: format!("Fake Grid ({})", options.scenario),
                 nick: "fakegrid".to_owned(),
                 ..GridIdentity::default()
-            })
-            .region(scene.dress(RegionConfig::default()))
+            });
+        for region in regions {
+            builder = builder.region(region);
+        }
+        builder
             .account(AccountConfig::new(&first, &last, &password))
             .start()
             .await
@@ -392,6 +516,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         grid.login_uri(),
         scene.summary
     );
+    let region_names = grid.region_names();
+    if region_names.len() > 1 {
+        tracing::info!("regions west to east: {}", region_names.join(", "));
+    }
+    if let Some(after) = options.cross_after {
+        tracing::info!(
+            "the agent walks into {FAR_REGION} {after} s after it arrives; the capture window \
+             has to straddle that"
+        );
+    }
     for landmark in scene.landmarks() {
         tracing::info!(
             "landmark {:?} at <{}, {}, {}>",

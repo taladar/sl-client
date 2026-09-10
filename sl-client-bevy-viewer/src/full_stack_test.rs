@@ -722,6 +722,21 @@ impl ViewerHarness {
         self.app.world_mut().write_message(SlCommand(command));
     }
 
+    /// Say `line` on the public channel.
+    ///
+    /// A **cue**, more than a chat test: a scripted timeline waits on
+    /// [`At::OnEvent`](sl_fake_grid::At::OnEvent), and a line the viewer says is
+    /// the one grid-side event a rendering test can raise at the exact moment
+    /// it is ready — after its "before" capture, rather than a plausible number
+    /// of milliseconds after the arrival.
+    pub(crate) fn say(&mut self, line: &str) {
+        self.command(Command::Chat {
+            message: line.to_owned(),
+            chat_type: sl_proto::ChatType::Normal,
+            channel: sl_proto::ChatChannel(0),
+        });
+    }
+
     /// Teleport the avatar to `region_name` at `position`, and wait until the
     /// destination region's ground has arrived.
     ///
@@ -1155,7 +1170,9 @@ fn build_viewer_app(params: LoginParams, options: HarnessOptions) -> (App, Captu
 
 #[cfg(test)]
 mod tests {
-    use super::{FRAME, HarnessOptions, Recorded, SceneWork, ViewerHarness, stock_fixture};
+    use super::{
+        Duration, FRAME, HarnessOptions, Recorded, SceneWork, ViewerHarness, stock_fixture,
+    };
 
     use bevy::prelude::*;
     use sl_fake_grid::RegionConfig;
@@ -1518,6 +1535,103 @@ mod tests {
                 share < KILLED_SHARE,
                 "the killed box still paints {share} of its disc in {} — the object was removed \
                  from the world state but not from the picture",
+                marker.name()
+            );
+        }
+        harness.logout()
+    }
+
+    /// How far up a scripted move lifts the checker box, in metres.
+    ///
+    /// Two body-lengths, so the disc it left and the disc it arrived in do not
+    /// overlap, and well inside the frame: the camera stands 6 m away with a
+    /// 60° field, so its half-height there is about 3.4 m and the box is aimed
+    /// at from a metre below.
+    const SCRIPTED_LIFT_M: f32 = 2.0;
+
+    /// The line the viewer says to set the scripted move going.
+    const MOVE_CUE: &str = "move it";
+
+    /// **A scenario timeline moves an object, and the picture follows it.**
+    ///
+    /// The scripted half of [`a_killed_object_leaves_its_disc_empty`]: nothing
+    /// here drives the grid by hand. The region's own scenario carries the
+    /// script (`sl_fake_grid::Timeline`), and the two ends of it are the
+    /// viewer's — a line it says is what the first step waits for
+    /// (`At::OnEvent`), and the marker the second step sends is what the test
+    /// waits for before it looks again.
+    ///
+    /// That is what makes the check a check rather than a sleep: the "before"
+    /// capture is taken, *then* the cue goes out, so the move cannot have
+    /// happened early; and the "after" capture is taken because the marker
+    /// arrived, so the move cannot still be in flight. Both discs are asserted
+    /// — the one it left is empty and the one the script named is painted —
+    /// because an object that merely vanished would pass the first alone.
+    #[test]
+    fn a_scripted_move_puts_the_object_where_the_script_said() -> Result<(), TestError> {
+        let subject = entry("checker-box").ok_or("the catalogue has no checker-box")?;
+        let from = subject.position();
+        let to = Vector {
+            x: from.x,
+            y: from.y,
+            z: from.z + SCRIPTED_LIFT_M,
+        };
+        let local_id = subject.local_id;
+        let lifted = to.clone();
+        let mut fixture = sl_fake_grid::catalogue();
+        fixture.timeline = sl_fake_grid::Timeline::new()
+            .then(
+                sl_fake_grid::At::OnEvent(std::sync::Arc::new(|event| {
+                    matches!(event, sl_proto::ServerEvent::Chat { message, .. } if message == MOVE_CUE)
+                })),
+                sl_fake_grid::Action::MoveObject {
+                    local_id,
+                    to: lifted,
+                },
+            )
+            .after(
+                Duration::ZERO,
+                sl_fake_grid::Action::Marker("moved".to_owned()),
+            );
+
+        let mut harness = ViewerHarness::start(fixture)?;
+        harness.login()?;
+        let Some((before, disc)) = frame_subject(&mut harness, &subject)? else {
+            no_adapter("the scripted move check");
+            return Ok(());
+        };
+        for marker in [Marker::Red, Marker::Green] {
+            let share = coverage(&before, disc, marker);
+            assert!(
+                share > CHECKER_SHARE,
+                "the box is not where it started ({share} of its disc in {}), so moving it would \
+                 prove nothing",
+                marker.name()
+            );
+        }
+
+        harness.say(MOVE_CUE);
+        harness.wait_marker("moved")?;
+
+        let after = harness
+            .capture()?
+            .ok_or("the adapter answered the first capture and not the second")?;
+        for marker in [Marker::Red, Marker::Green] {
+            let share = coverage(&after, disc, marker);
+            assert!(
+                share < KILLED_SHARE,
+                "the moved box still paints {share} of the disc it left in {} — the scripted move \
+                 changed the world state but not the picture",
+                marker.name()
+            );
+        }
+        let landed = disc_at(&mut harness, &to, SUBJECT_DISC)?;
+        for marker in [Marker::Red, Marker::Green] {
+            let share = coverage(&after, landed, marker);
+            assert!(
+                share > CHECKER_SHARE,
+                "the box paints only {share} of the disc the script moved it to in {} — it left \
+                 where it was without arriving where it was sent",
                 marker.name()
             );
         }
@@ -3089,6 +3203,18 @@ mod tests {
     /// light through the whole atmosphere model and not the number itself.
     const NIGHT_LUMINANCE_SHARE: f32 = 0.5;
 
+    /// The mean luminance of the frame's sky band — the top eighth of the
+    /// picture, which every environment framing here aims at open sky.
+    ///
+    /// The one thing a capture can honestly say about a sky: how bright it came
+    /// out. What reaches these pixels is the authored light through the whole
+    /// atmosphere model, not a number the settings carry.
+    fn sky_band(frame: &Frame) -> Result<f32, TestError> {
+        band_mean(frame, 8, FRAME / 2 - 8)
+            .map(luminance)
+            .ok_or_else(|| TestError::from("the sky band"))
+    }
+
     /// **Changing the region's environment to night darkens the sky.**
     ///
     /// The EEP path end to end and the one thing a capture can honestly say
@@ -3133,11 +3259,6 @@ mod tests {
             no_adapter("the environment check");
             return Ok(());
         };
-        let sky_band = |frame: &Frame| {
-            band_mean(frame, 8, FRAME / 2 - 8)
-                .map(luminance)
-                .ok_or_else(|| TestError::from("the sky band"))
-        };
         let bright = sky_band(&day)?;
         assert!(
             bright > NOT_BLACK,
@@ -3170,6 +3291,113 @@ mod tests {
             dark < bright * NIGHT_LUMINANCE_SHARE,
             "the sky went from {bright} to {dark} when the region's environment changed to night \
              — the grid's own sky is not what is being rendered"
+        );
+        harness.logout()
+    }
+
+    /// The line the viewer says to set the scripted estate save going.
+    const ENV_CUE: &str = "change the sky";
+
+    /// **A scenario timeline changes the sky, and the viewer notices by
+    /// itself.**
+    ///
+    /// The scripted sibling of
+    /// [`an_environment_change_to_night_darkens_the_sky`], and it drops that
+    /// test's one piece of cheating: there is no
+    /// `harness.command(RequestEnvironment)` here. The script writes the new
+    /// settings and saves the region (`ConfigureRegion`, which is what sends the
+    /// `RegionInfo`), and the viewer has to decide on its own that its sky is
+    /// stale and re-read it — which is what a resident standing in a region
+    /// whose estate changes the environment actually gets, and what this viewer
+    /// did not do until the request cycle learned to re-arm on a `RegionInfo`.
+    ///
+    /// The region edit is deliberately **empty**. A `RegionInfo` carries no
+    /// environment fields at all — it is a notice that the region's settings
+    /// were written, not a copy of them — so an estate that changed only the
+    /// sky saves the Region tab without moving a single limit, and the
+    /// reference viewer re-reads on the message regardless of what is in it.
+    #[test]
+    fn a_scripted_environment_change_darkens_the_sky_unasked() -> Result<(), TestError> {
+        let mut region = sl_fake_grid::RegionFixture {
+            environment: Some(sl_test_assets::environment::noon_environment()),
+            ..stock_fixture()
+        };
+        region.timeline = sl_fake_grid::Timeline::new()
+            .then(
+                sl_fake_grid::At::OnEvent(std::sync::Arc::new(|event| {
+                    matches!(event, sl_proto::ServerEvent::Chat { message, .. } if message == ENV_CUE)
+                })),
+                sl_fake_grid::Action::SetEnvironment(Box::new(
+                    sl_test_assets::environment::night_environment(),
+                )),
+            )
+            .after(
+                Duration::ZERO,
+                sl_fake_grid::Action::ConfigureRegion {
+                    edit: std::sync::Arc::new(|_limits| {}),
+                },
+            )
+            .after(
+                Duration::ZERO,
+                sl_fake_grid::Action::Marker("night".to_owned()),
+            );
+
+        let mut harness = ViewerHarness::start_in_with(
+            vec![region.into_region(RegionConfig::default())],
+            HarnessOptions::following_the_region_environment(),
+        )?;
+        harness.login()?;
+        harness.wait_event("the region's environment", |event| {
+            matches!(event, sl_client_bevy::SlSessionEvent::Environment(_)).then_some(())
+        })?;
+        harness.look_from(
+            Vector {
+                x: 128.0,
+                y: 128.0,
+                z: 60.0,
+            },
+            Vector {
+                x: 128.0,
+                y: 228.0,
+                z: 60.0,
+            },
+        );
+        let Some(day) = harness.capture()? else {
+            no_adapter("the scripted environment check");
+            return Ok(());
+        };
+        let bright = sky_band(&day)?;
+        assert!(
+            bright > NOT_BLACK,
+            "the daylit sky is already black ({bright}), so darkening it would prove nothing"
+        );
+
+        let seen = harness.world().resource::<Recorded>().events.len();
+        harness.say(ENV_CUE);
+        // The marker only says the *grid* has done its half. What has to happen
+        // next is the viewer's own: a second `Environment` reply, which can only
+        // follow a request nothing in this test made.
+        harness.wait_marker("night")?;
+        harness.run_until("the viewer's own re-read of the environment", |harness| {
+            harness
+                .app
+                .world()
+                .resource::<Recorded>()
+                .events
+                .iter()
+                .skip(seen)
+                .any(|event| matches!(event, sl_client_bevy::SlSessionEvent::Environment(_)))
+                .then_some(())
+        })?;
+
+        let night = harness
+            .capture()?
+            .ok_or("the adapter answered the first capture and not the second")?;
+        let dark = sky_band(&night)?;
+        assert!(
+            dark < bright * NIGHT_LUMINANCE_SHARE,
+            "the sky went from {bright} to {dark} after the scripted estate save — the viewer did \
+             not re-read the region's environment on the `RegionInfo` that announced it"
         );
         harness.logout()
     }

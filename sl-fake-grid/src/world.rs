@@ -1079,6 +1079,10 @@ pub const SIT_TARGET_OFFSET: Vector = Vector {
 /// The skeleton every fixture object shares: a root object with no sound,
 /// text, media, particles, or extra params; the caller sets the identity,
 /// geometry and motion.
+///
+/// The caller sets the **surface** too, because what an object wears depends
+/// on what it is: a prim gets the default texture ([`default_texture_entry`]),
+/// an avatar gets none at all (see [`avatar_prim`]).
 fn bare_object(
     local_id: RegionLocalObjectId,
     full_id: ObjectKey,
@@ -1128,8 +1132,36 @@ fn bare_object(
     }
 }
 
+/// The packed `TextureEntry` a simulator gives a prim nobody has textured:
+/// the default plywood ([`sl_proto::DEFAULT_PRIM_TEXTURE`]) on every face,
+/// which the stock asset store answers
+/// ([`default_assets`](crate::scenario::default_assets)).
+///
+/// It takes no face count on purpose. The entry is run-length packed — one
+/// default value, then `(face bitmask, value)` overrides — so an entry whose
+/// faces all agree is *one* default and no overrides, and the bytes are the
+/// same however many faces the prim's shape renders. A client that decodes
+/// this blob for six faces and one that decodes it for nine both read plywood
+/// everywhere, which is what "the whole prim wears the default texture" means
+/// on the wire.
+///
+/// The alternative — leaving the blob empty — is not "no texture set" but *no
+/// per-face data at all*: [`decode_texture_entry`](sl_proto::decode_texture_entry)
+/// of an empty blob is an entry with no faces, so everything downstream (a
+/// viewer's renderer, a take writing an object asset) has to invent what the
+/// prim's faces are.
+fn default_texture_entry() -> Vec<u8> {
+    sl_proto::encode_texture_entry(&sl_proto::TextureEntry {
+        faces: vec![sl_proto::TextureFace::new(sl_proto::TextureKey::from(
+            sl_proto::DEFAULT_PRIM_TEXTURE,
+        ))],
+    })
+}
+
 /// A plain box prim of `scale` metres resting at `position`, owned by
-/// `owner` — the simplest object a viewer can render.
+/// `owner` — the simplest object a viewer can render, wearing the default
+/// texture a fresh prim has ([`sl_proto::DEFAULT_PRIM_TEXTURE`]) on every
+/// face.
 #[must_use]
 pub fn box_prim(
     local_id: RegionLocalObjectId,
@@ -1139,6 +1171,7 @@ pub fn box_prim(
     scale: Vector,
 ) -> Object {
     let mut object = bare_object(local_id, full_id, owner, position);
+    object.texture_entry = default_texture_entry();
     object.scale = scale;
     object.shape = PrimShapeParams {
         // A straight-extruded square profile: the legacy "box".
@@ -1158,6 +1191,13 @@ pub fn box_prim(
 /// the same wire block a simulator would send back), so nothing here is
 /// converted — the numbers move across as they are, and the object a rez
 /// produces is the object the client described.
+///
+/// The one thing the client does *not* describe is the surface: a
+/// [`PrimShape`] carries no `TextureEntry`, because a real simulator is the
+/// one that decides what a new prim looks like, and it decides the default
+/// plywood ([`sl_proto::DEFAULT_PRIM_TEXTURE`]) on every face the shape
+/// renders. A viewer retextures it afterwards, with an `ObjectImage` naming
+/// faces that have to already exist.
 #[must_use]
 pub fn prim_from_shape(
     local_id: RegionLocalObjectId,
@@ -1166,6 +1206,7 @@ pub fn prim_from_shape(
     shape: &PrimShape,
 ) -> Object {
     let mut object = bare_object(local_id, full_id, owner, shape.position.clone());
+    object.texture_entry = default_texture_entry();
     object.pcode = shape.pcode;
     object.state = shape.state;
     object.material = shape.material.to_code();
@@ -1202,6 +1243,12 @@ pub fn prim_from_shape(
 /// This is the avatar body every fake-grid avatar is rezzed as — the arriving
 /// agent's own (from the login identity) and every
 /// [`NpcFixture`]'s.
+///
+/// Unlike a prim it carries **no** `TextureEntry`: an avatar's faces are its
+/// bake slots, and what fills them travels in the `AvatarAppearance` a
+/// simulator pushes separately
+/// ([`NpcAppearance::texture_entry`]) — not in the object update. Giving one
+/// the prim default here would put plywood in a bake slot.
 #[must_use]
 pub fn avatar_prim(
     local_id: RegionLocalObjectId,
@@ -1642,8 +1689,21 @@ pub(crate) fn answer_world_request(
                 );
                 handled.extend(linkset.iter().map(|member| member.local_id));
                 if let Some(folder) = destination.agent_folder() {
+                    // What each prim contains, gathered while the region still
+                    // has it: an object update carries no contents, so a body
+                    // that stated none would lose a scripted prim's scripts.
+                    let contents: Vec<TaskInventory> = linkset
+                        .iter()
+                        .map(|member| {
+                            world
+                                .task_inventories
+                                .get(&member.local_id)
+                                .cloned()
+                                .unwrap_or_default()
+                        })
+                        .collect();
                     let item = taken_item(&linkset, folder, identity.agent_id, mint, object_assets);
-                    store_taken_asset(assets, &item, &linkset);
+                    store_taken_asset(assets, &item, &linkset, &contents);
                     created.push(item);
                 }
                 if destination.removes_from_world() {
@@ -2000,10 +2060,16 @@ pub fn default_object_properties(object: &Object) -> ObjectProperties {
 /// and invented masks is honoured there); a fake grid that validated them would
 /// fail a viewer for something no real grid fails it for.
 ///
-/// A **linkset** comes back whole. The asset states which prim is the root and
-/// carries each child's offset from it, so the region mints an id per prim and
-/// parents the children to the root's region-local id — the same `ParentID` a
-/// link would have set.
+/// A **linkset** comes back whole, and so does the prim: what a rez puts back
+/// is the linkset the take removed, kept beside the published body because the
+/// body's format cannot carry a light, a flexi path, a mesh, a glowing face,
+/// floating text, media, a texture animation or a particle system (see
+/// [`store_taken_asset`] and the [`crate::assets`] module docs). An item this
+/// grid did not take — a fixture's seeded object item — has no linkset behind
+/// it and is read out of its body instead, which states which prim is the root
+/// and carries each child's offset from it. Either way the region mints an id
+/// per prim and parents the children to the root's region-local id — the same
+/// `ParentID` a link would have set.
 ///
 /// Where it lands is the ray's end point: the fake grid casts no rays, and
 /// every viewer sets `bypass_raycast` on a drag-out anyway, so `ray_end` is
@@ -2040,42 +2106,40 @@ fn rez_from_inventory(
         tracing::debug!("a rez named item {item_id}, which this agent does not hold");
         return Vec::new();
     };
-    let Some(bytes) = taken_object_body(assets, &item) else {
-        tracing::debug!("a rez named item {item_id}, whose object body nothing holds");
-        return Vec::new();
-    };
-    let asset = match sl_object_asset::ObjectAsset::decode(&bytes) {
-        Ok(asset) => asset,
-        Err(error) => {
-            tracing::warn!("the object body item {item_id} names does not decode: {error}");
-            return Vec::new();
+    // A linkset this grid took is put back as it was taken. Anything else --
+    // a fixture's seeded object item, which no take ever made -- is read out of
+    // the published body, which is all there is for it. `store_taken_asset` and
+    // the `assets` module docs say why the two sources exist.
+    let rezzed = match assets
+        .taken_linkset(item_id)
+        .filter(|linkset| !linkset.is_empty())
+    {
+        Some(linkset) => rez_taken_linkset(
+            world,
+            sim.region_handle(),
+            mint,
+            &linkset,
+            &item,
+            &params.ray_end,
+        ),
+        None => {
+            let Some(bytes) = taken_object_body(assets, &item) else {
+                tracing::debug!("a rez named item {item_id}, whose object body nothing holds");
+                return Vec::new();
+            };
+            match rez_asset_body(
+                world,
+                sim.region_handle(),
+                mint,
+                &bytes,
+                &item,
+                &params.ray_end,
+            ) {
+                Some(rezzed) => rezzed,
+                None => return Vec::new(),
+            }
         }
     };
-    let Some(root_prim) = asset.root() else {
-        tracing::warn!("the object body item {item_id} names has no root prim");
-        return Vec::new();
-    };
-    let region_handle = sim.region_handle();
-    let root_local_id = world.mint_local_id();
-    let mut root = root_prim.to_object(sl_object_asset::RezTarget {
-        region_handle,
-        local_id: root_local_id,
-        full_id: mint(),
-        parent_id: RegionLocalObjectId(0),
-    });
-    root.motion.position = params.ray_end.clone();
-    root.properties = Some(rezzed_properties(root_prim, root.full_id, &item));
-    let mut rezzed = vec![root];
-    for child_prim in asset.children() {
-        let mut child = child_prim.to_object(sl_object_asset::RezTarget {
-            region_handle,
-            local_id: world.mint_local_id(),
-            full_id: mint(),
-            parent_id: root_local_id,
-        });
-        child.properties = Some(rezzed_properties(child_prim, child.full_id, &item));
-        rezzed.push(child);
-    }
     world.objects.extend(rezzed.iter().cloned());
     if let Err(error) = sim.send_object_update(&rezzed, REAL_TIME_DILATION, now) {
         tracing::warn!("streaming an object rezzed from inventory failed: {error}");
@@ -2090,6 +2154,195 @@ fn rez_from_inventory(
         .into_iter()
         .map(|object| RegionChange::Rezzed(Box::new(object)))
         .collect()
+}
+
+/// The objects a rez puts back when this grid is the one that **took** them:
+/// the linkset it removed, under the ids this region mints for it.
+///
+/// Everything the object carried comes back, which is the point — a light, a
+/// flexi path, a mesh, a glowing face, floating text, media, a texture
+/// animation, a particle system. None of that is in the published body, and
+/// both live grids rez from something that holds it
+/// ([`crate::assets`]).
+///
+/// Three things are *not* carried over, because they name the object where it
+/// was taken from rather than the one being made: its region-local id, its
+/// object key and its parent — all minted here, exactly as
+/// [`sl_object_asset::RezTarget`] does for the body path. The permission flags
+/// **are** kept: they say what this resident may do with the object, which a
+/// take does not change.
+fn rez_taken_linkset(
+    world: &mut SceneFixtures,
+    region_handle: sl_wire::RegionHandle,
+    mint: &dyn Fn() -> uuid::Uuid,
+    linkset: &[Object],
+    item: &InventoryItem,
+    at: &Vector,
+) -> Vec<Object> {
+    let Some((root_object, children)) = linkset.split_first() else {
+        return Vec::new();
+    };
+    let root_local_id = world.mint_local_id();
+    let mut rezzed = Vec::with_capacity(linkset.len());
+    let mut root = root_object.clone();
+    root.region_handle = region_handle;
+    root.local_id = root_local_id;
+    root.parent_id = RegionLocalObjectId(0);
+    root.full_id = ObjectKey::from(mint());
+    root.motion.position = at.clone();
+    root.properties = Some(rezzed_properties(
+        &filed_prim(root_object, item, true),
+        root.full_id,
+        item,
+    ));
+    rezzed.push(root);
+    for child_object in children {
+        let mut child = child_object.clone();
+        child.region_handle = region_handle;
+        child.local_id = world.mint_local_id();
+        child.parent_id = root_local_id;
+        child.full_id = ObjectKey::from(mint());
+        child.properties = Some(rezzed_properties(
+            &filed_prim(child_object, item, false),
+            child.full_id,
+            item,
+        ));
+        rezzed.push(child);
+    }
+    rezzed
+}
+
+/// The objects a rez puts back out of a published **body** — the path for an
+/// item this grid did not take, which is a fixture's seeded object item.
+///
+/// The class is two formats on the two grids and this grid writes both, so the
+/// body says which it is rather than the policy: a `<SceneObjectGroup>` opens
+/// with `<` and the Linden text with `{'task_id':`, and nothing else can look
+/// like either. Reading it off the bytes is what lets a grid rez a body written
+/// under the *other* flavour — an OAR-shaped fixture on a Second Life-flavoured
+/// grid, or the reverse — instead of failing on it.
+///
+/// [`None`] when the bytes do not decode or hold no prim; the caller has
+/// already logged which item they belong to.
+fn rez_asset_body(
+    world: &mut SceneFixtures,
+    region_handle: sl_wire::RegionHandle,
+    mint: &dyn Fn() -> uuid::Uuid,
+    bytes: &[u8],
+    item: &InventoryItem,
+    at: &Vector,
+) -> Option<Vec<Object>> {
+    let mut rezzed = if is_scene_object_xml(bytes) {
+        rez_scene_object_xml(world, region_handle, mint, bytes, item)?
+    } else {
+        rez_object_text(world, region_handle, mint, bytes, item)?
+    };
+    // Only the root moves to where the resident aimed; a child's position is
+    // its offset from the root, and moving it would take the linkset apart.
+    rezzed.first_mut()?.motion.position = at.clone();
+    Some(rezzed)
+}
+
+/// Whether a stored object body is OpenSim's XML rather than the Linden text.
+///
+/// The first non-whitespace byte decides, which is enough: a
+/// `<SceneObjectGroup>` opens with `<` and a text asset with the `{` of its
+/// first prim header.
+fn is_scene_object_xml(bytes: &[u8]) -> bool {
+    bytes
+        .iter()
+        .find(|byte| !byte.is_ascii_whitespace())
+        .is_some_and(|byte| *byte == b'<')
+}
+
+/// The objects a rez puts back out of a **Linden text** body.
+fn rez_object_text(
+    world: &mut SceneFixtures,
+    region_handle: sl_wire::RegionHandle,
+    mint: &dyn Fn() -> uuid::Uuid,
+    bytes: &[u8],
+    item: &InventoryItem,
+) -> Option<Vec<Object>> {
+    let asset = match sl_object_asset::ObjectAsset::decode(bytes) {
+        Ok(asset) => asset,
+        Err(error) => {
+            tracing::warn!(
+                "the object body item {} names does not decode: {error}",
+                item.item_id
+            );
+            return None;
+        }
+    };
+    let Some(root_prim) = asset.root() else {
+        tracing::warn!(
+            "the object body item {} names has no root prim",
+            item.item_id
+        );
+        return None;
+    };
+    let root_local_id = world.mint_local_id();
+    let mut root = root_prim.to_object(sl_object_asset::RezTarget {
+        region_handle,
+        local_id: root_local_id,
+        full_id: mint(),
+        parent_id: RegionLocalObjectId(0),
+    });
+    root.properties = Some(rezzed_properties(root_prim, root.full_id, item));
+    let mut rezzed = vec![root];
+    for child_prim in asset.children() {
+        let mut child = child_prim.to_object(sl_object_asset::RezTarget {
+            region_handle,
+            local_id: world.mint_local_id(),
+            full_id: mint(),
+            parent_id: root_local_id,
+        });
+        child.properties = Some(rezzed_properties(child_prim, child.full_id, item));
+        rezzed.push(child);
+    }
+    Some(rezzed)
+}
+
+/// The objects a rez puts back out of an OpenSim `<SceneObjectGroup>` body.
+///
+/// The group says which part is the root by *nesting* rather than by a marker,
+/// so unlike the text there is nothing to look for: `RootPart` is the root.
+fn rez_scene_object_xml(
+    world: &mut SceneFixtures,
+    region_handle: sl_wire::RegionHandle,
+    mint: &dyn Fn() -> uuid::Uuid,
+    bytes: &[u8],
+    item: &InventoryItem,
+) -> Option<Vec<Object>> {
+    let group = match sl_object_asset::opensim::SceneObjectGroup::decode(bytes) {
+        Ok(group) => group,
+        Err(error) => {
+            tracing::warn!(
+                "the scene object body item {} names does not decode: {error}",
+                item.item_id
+            );
+            return None;
+        }
+    };
+    let root_local_id = world.mint_local_id();
+    let mut root = group.root.to_object(sl_object_asset::RezTarget {
+        region_handle,
+        local_id: root_local_id,
+        full_id: mint(),
+        parent_id: RegionLocalObjectId(0),
+    });
+    root.properties = Some(stamp_rezzed(group.root.to_properties(root.full_id), item));
+    let mut rezzed = vec![root];
+    for child_part in &group.other_parts {
+        let mut child = child_part.to_object(sl_object_asset::RezTarget {
+            region_handle,
+            local_id: world.mint_local_id(),
+            full_id: mint(),
+            parent_id: root_local_id,
+        });
+        child.properties = Some(stamp_rezzed(child_part.to_properties(child.full_id), item));
+        rezzed.push(child);
+    }
+    Some(rezzed)
 }
 
 /// The object body `item` stands for, from whichever of the grid's two stores
@@ -2123,7 +2376,16 @@ fn rezzed_properties(
     object_id: ObjectKey,
     item: &InventoryItem,
 ) -> ObjectProperties {
-    let mut properties = prim.to_properties(object_id);
+    stamp_rezzed(prim.to_properties(object_id), item)
+}
+
+/// The three things the *region* knows about a just-rezzed prim and the body
+/// cannot: who holds it now, and which item and folder it came out of.
+///
+/// Both body formats go through this, so a prim rezzed from OpenSim's XML and
+/// one rezzed from the Linden text cannot end up disagreeing about whose object
+/// it is or where a viewer's "find in inventory" should lead.
+const fn stamp_rezzed(mut properties: ObjectProperties, item: &InventoryItem) -> ObjectProperties {
     properties.owner = item.owner;
     properties.item_id = item.item_id;
     properties.folder_id = Some(item.folder_id);
@@ -2158,19 +2420,125 @@ fn rezzed_properties(
 /// the order [`push_arrival_world`] already establishes (it writes an arriving
 /// agent's bakes under the same two locks). Nothing anywhere takes the region
 /// lock while holding the asset one, so the pair cannot invert.
-fn store_taken_asset(assets: &crate::assets::GridAssets, item: &InventoryItem, linkset: &[Object]) {
-    let mut prims = linkset.iter().map(taken_prim);
-    let Some(mut root) = prims.next() else {
+fn store_taken_asset(
+    assets: &crate::assets::GridAssets,
+    item: &InventoryItem,
+    linkset: &[Object],
+    contents: &[TaskInventory],
+) {
+    let Some((root_object, children)) = linkset.split_first() else {
         return;
     };
-    item.name.clone_into(&mut root.name);
-    root.description = Some(item.description.clone());
-    let body = sl_object_asset::ObjectAsset::linkset(root, prims.collect()).encode();
+    // The objects themselves, beside the body: the *text* cannot carry a light,
+    // a flexi path, a mesh, a glowing face, floating text, media, a texture
+    // animation or a particle system, and a rez out of it alone would hand back
+    // a plain box. Both live grids rez from something that *can* say all of it
+    // -- OpenSim's XML body, Second Life's simulator-side object -- so this one
+    // keeps the linkset too. See `crate::assets`.
+    assets.insert_taken_linkset(item.item_id, linkset.to_vec());
     if item.asset_id.is_nil() {
+        // Second Life's side: the Linden text, filed where no capability
+        // reaches it.
+        let root = filed_prim(root_object, item, true);
+        let prims = children
+            .iter()
+            .map(|child| filed_prim(child, item, false))
+            .collect();
+        let body = sl_object_asset::ObjectAsset::linkset(root, prims).encode();
         assets.insert_withheld_object(item.item_id, body);
         return;
     }
+    // OpenSim's side, and the one configuration where these bytes cross the
+    // wire -- so they are the bytes OpenSim would have written.
+    let body = filed_group(linkset, contents, item).encode();
     let _previous = assets.write().insert(AssetKey::from(item.asset_id), body);
+}
+
+/// The `<SceneObjectGroup>` a take **publishes** under
+/// [`ObjectAssetPolicy::Served`](crate::assets::ObjectAssetPolicy::Served) —
+/// what OpenSim writes as the `AssetType.Object` body
+/// (`SceneObjectSerializer.ToOriginalXmlFormat`, chosen in
+/// `InventoryAccessModule`).
+///
+/// Two things the group cannot read off the objects alone are stamped here, and
+/// both mirror what the text body's [`filed_prim`] does:
+///
+/// - the **root wears the item's name and description**, because a take is not
+///   a round trip and the item is what a viewer shows;
+/// - each prim's **contents** are written in, which is the thing an object
+///   update never carries. `contents` is one entry per member of `linkset`, in
+///   the same order; a prim with nothing in it writes no `TaskInventory`
+///   element at all, which is what OpenSim does.
+///
+/// Every part then goes through [`filed_part_defaults`], for the two things
+/// OpenSim's own `SceneObjectPart` is *constructed* with and a prim the wire
+/// described may not have.
+fn filed_group(
+    linkset: &[Object],
+    contents: &[TaskInventory],
+    item: &InventoryItem,
+) -> sl_object_asset::opensim::SceneObjectGroup {
+    let mut group = sl_object_asset::opensim::SceneObjectGroup::from_linkset(linkset);
+    item.name.clone_into(&mut group.root.name);
+    item.description.clone_into(&mut group.root.description);
+    let mut inventories = contents.iter();
+    if let Some(root_contents) = inventories.next() {
+        group
+            .root
+            .set_task_inventory(root_contents.serial, &root_contents.items);
+    }
+    for (part, part_contents) in group.other_parts.iter_mut().zip(inventories) {
+        part.set_task_inventory(part_contents.serial, &part_contents.items);
+    }
+    filed_part_defaults(&mut group.root);
+    for part in &mut group.other_parts {
+        filed_part_defaults(part);
+    }
+    group
+}
+
+/// The two things OpenSim's `SceneObjectPart` and `PrimitiveBaseShape`
+/// constructors give a prim that a taken one may be missing.
+///
+/// The same gap [`taken_prim`] fills for the text body, and for the same
+/// reason: an object rezzed by `ObjectAdd` has no `ObjectProperties` until
+/// something edits it.
+///
+/// - A prim nobody has named is called `Object`, which is what OpenSim's
+///   constructor sets and what a viewer shows. Only a child needs this — the
+///   root wears the item's name — but a linkset root with no children is both.
+/// - A prim with no `TextureEntry` at all gets the default one. OpenSim's shape
+///   is constructed with `DEFAULT_TEXTURE` and its reader hands whatever it
+///   decodes straight to `Primitive.TextureEntry`, so an empty block is not a
+///   prim without textures there, it is a body it cannot read.
+fn filed_part_defaults(part: &mut sl_object_asset::opensim::SceneObjectPart) {
+    if part.name.is_empty() {
+        DEFAULT_OBJECT_NAME.clone_into(&mut part.name);
+    }
+    if part.shape.texture_entry.is_empty() {
+        part.shape.texture_entry = default_texture_entry();
+    }
+}
+
+/// One object as the asset prim block a take **files** it as: [`taken_prim`],
+/// with the linkset root wearing the item's own name and description.
+///
+/// A take is not a round trip — the item is what a viewer shows, and an object
+/// rezzed by `ObjectAdd` has no `ObjectProperties` of its own yet — so the name
+/// the asset states is the item's. Only the root's: a child prim keeps whatever
+/// it was called.
+///
+/// Both halves of a take read this. The body is encoded from it, and a rez that
+/// puts the *stored linkset* back derives the same properties record through it
+/// ([`rezzed_properties`]), so the object a resident gets back cannot be named
+/// one thing by the asset and another by the region.
+fn filed_prim(object: &Object, item: &InventoryItem, root: bool) -> sl_object_asset::PrimBlock {
+    let mut prim = taken_prim(object);
+    if root {
+        item.name.clone_into(&mut prim.name);
+        prim.description = Some(item.description.clone());
+    }
+    prim
 }
 
 /// One object as the asset prim a take serialises it into.
@@ -2185,12 +2553,12 @@ fn taken_prim(object: &Object) -> sl_object_asset::PrimBlock {
         DEFAULT_OBJECT_NAME.clone_into(&mut prim.name);
     }
     if prim.faces.is_empty() {
-        // A prim rezzed here carries no `TextureEntry` at all (`bare_object`
-        // leaves it empty and nothing fills it in), while a real simulator
-        // gives a new prim the default texture. The asset still has to state
-        // the faces the shape renders -- an object asset with no faces rezzes
-        // an object nothing can texture -- so they are stated as untextured
-        // rather than omitted.
+        // An object with no `TextureEntry` at all -- which a prim this grid
+        // rezzed no longer is (`default_texture_entry`), but one rezzed from an
+        // asset that stated no faces still can be. The asset has to state
+        // the faces the shape renders either way -- an object asset with no
+        // faces rezzes an object nothing can texture -- so they are stated as
+        // untextured rather than omitted.
         prim.faces = vec![sl_object_asset::LegacyFace::default(); faces];
     }
     prim
@@ -2370,7 +2738,7 @@ fn send_parcel_or_no_data(
 
 #[cfg(test)]
 mod test {
-    use pretty_assertions::assert_eq;
+    use pretty_assertions::{assert_eq, assert_ne};
 
     use super::*;
 
@@ -2712,6 +3080,200 @@ mod test {
         assert_eq!(object.material, shape.material.to_code());
     }
 
+    /// A prim a client rezzes wears the default plywood on every face the
+    /// shape renders — a real simulator textures a new prim, and a client that
+    /// received no per-face data at all would have nothing to retexture.
+    ///
+    /// The shape here is a hollow cut box, whose rendered face count is *not*
+    /// the six a plain box has; both are asserted from one blob, which is what
+    /// the run-length encoding buys ([`default_texture_entry`]).
+    #[test]
+    fn a_rezzed_prim_wears_the_default_texture() {
+        let mut shape = sl_proto::PrimShape::cube(ZERO);
+        shape.profile_hollow = 25_000;
+        shape.profile_begin = 2_000;
+        let object = prim_from_shape(
+            RegionLocalObjectId(9),
+            ObjectKey::from(uuid::Uuid::from_u128(0x9)),
+            agent(0x1),
+            &shape,
+        );
+
+        let faces = sl_object_asset::rendered_face_count(&object.shape);
+        assert!(
+            faces > 6,
+            "a hollow cut box renders more than a plain box's six faces; got {faces}"
+        );
+        let entry = sl_proto::decode_texture_entry(&object.texture_entry, faces);
+        assert_eq!(entry.faces.len(), faces);
+        for (index, face) in entry.faces.iter().enumerate() {
+            assert_eq!(
+                face.texture_id.uuid(),
+                sl_proto::DEFAULT_PRIM_TEXTURE,
+                "face {index} is not the default prim texture"
+            );
+        }
+
+        // The same blob read as a plain box's six faces is plywood too: the
+        // entry states one default and no overrides, so the face count is the
+        // reader's business.
+        let six = sl_proto::decode_texture_entry(&object.texture_entry, 6);
+        assert!(
+            six.faces
+                .iter()
+                .all(|face| face.texture_id.uuid() == sl_proto::DEFAULT_PRIM_TEXTURE),
+            "the entry is not face-count independent"
+        );
+    }
+
+    /// A take of a prim the grid rezzed writes the faces it actually wears
+    /// into the object asset, rather than the untextured stand-ins a prim with
+    /// no `TextureEntry` forced.
+    #[test]
+    fn a_taken_rezzed_prim_states_its_default_faces() {
+        let object = prim_from_shape(
+            RegionLocalObjectId(9),
+            ObjectKey::from(uuid::Uuid::from_u128(0x9)),
+            agent(0x1),
+            &sl_proto::PrimShape::cube(ZERO),
+        );
+        let prim = taken_prim(&object);
+        assert_eq!(
+            prim.faces.len(),
+            sl_object_asset::rendered_face_count(&object.shape)
+        );
+        assert!(
+            prim.faces
+                .iter()
+                .all(|face| face.image_id == sl_proto::DEFAULT_PRIM_TEXTURE),
+            "a taken prim's faces are not the default texture"
+        );
+    }
+
+    /// The two halves of a take, side by side, on **both** flavours: what the
+    /// published body carries is the one thing the two grids disagree about,
+    /// and what the rez hands back is the one thing they do not.
+    ///
+    /// All of it is asserted in one test on purpose. Each half alone is
+    /// passable by a grid that is wrong in another direction — a Linden text
+    /// that invented keywords no grid could read, an XML body that dropped the
+    /// fields it exists to carry, or a rez that quietly handed back a box — and
+    /// the decision this encodes is that **each format stays what its own grid
+    /// writes** while the resident gets their lamp back either way.
+    #[test]
+    fn a_take_publishes_each_grids_own_body_and_rezzes_the_prim_it_took()
+    -> Result<(), Box<dyn core::error::Error>> {
+        let owner = agent(0x1);
+        let mut world = SceneFixtures::new();
+        let mut taken = box_prim(
+            RegionLocalObjectId(5),
+            ObjectKey::from(uuid::Uuid::from_u128(5)),
+            owner,
+            ZERO,
+            ZERO,
+        );
+        taken.extra = ObjectExtraParams {
+            light: Some(sl_proto::LightData {
+                color: [255, 220, 160, 255],
+                radius: 10.0,
+                cutoff: 1.2,
+                falloff: 0.5,
+            }),
+            ..ObjectExtraParams::default()
+        };
+        taken.extra_params = sl_proto::encode_extra_params(&taken.extra);
+        taken.text = "a lamp".to_owned();
+
+        let assets = crate::assets::GridAssets::default();
+        let folder = InventoryFolderKey::from(uuid::Uuid::from_u128(0xF0));
+        let filed = |policy, id: u128| InventoryItem {
+            name: "Lamp".to_owned(),
+            ..taken_item(
+                std::slice::from_ref(&taken),
+                folder,
+                owner,
+                &|| uuid::Uuid::from_u128(id),
+                policy,
+            )
+        };
+
+        // Second Life's side: a nil asset id, the Linden text out of reach of
+        // every capability, and the light gone out of it. That loss is the
+        // format's, and inventing a keyword for it would write an asset no grid
+        // could read -- see `sl_object_asset`'s crate docs.
+        let withheld = filed(crate::assets::ObjectAssetPolicy::Withheld, 0xA55E7);
+        store_taken_asset(&assets, &withheld, std::slice::from_ref(&taken), &[]);
+        let text = assets
+            .withheld_object(withheld.item_id)
+            .ok_or("the withheld take published no body")?;
+        let published = sl_object_asset::ObjectAsset::decode(&text)?
+            .root()
+            .cloned()
+            .ok_or("the published body holds no prim")?;
+        let from_text = published.to_object(sl_object_asset::RezTarget {
+            region_handle: sl_wire::RegionHandle(0),
+            local_id: RegionLocalObjectId(9),
+            full_id: uuid::Uuid::from_u128(9),
+            parent_id: RegionLocalObjectId(0),
+        });
+        assert_eq!(
+            from_text.extra,
+            ObjectExtraParams::default(),
+            "the text carries no ExtraParams; if it now does, this is the wrong test"
+        );
+        assert_eq!(from_text.text, "");
+        assert_eq!(published.name, "Lamp", "the body is named after the item");
+
+        // OpenSim's side: a minted asset id, a `<SceneObjectGroup>` served
+        // under it, and the light and the floating text still in it. This is
+        // the format OpenSim writes, and it can say all of it.
+        let served = filed(crate::assets::ObjectAssetPolicy::Served, 0x00B0_D1E5);
+        store_taken_asset(&assets, &served, std::slice::from_ref(&taken), &[]);
+        let body = assets
+            .read()
+            .get(AssetKey::from(served.asset_id))
+            .map(<[u8]>::to_vec)
+            .ok_or("the served take published no body")?;
+        let group = sl_object_asset::opensim::SceneObjectGroup::decode(&body)?;
+        let from_xml = group.root.to_object(sl_object_asset::RezTarget {
+            region_handle: sl_wire::RegionHandle(0),
+            local_id: RegionLocalObjectId(9),
+            full_id: uuid::Uuid::from_u128(9),
+            parent_id: RegionLocalObjectId(0),
+        });
+        assert_eq!(from_xml.extra, taken.extra, "the XML lost the light");
+        assert_eq!(from_xml.text, taken.text, "the XML lost the floating text");
+        assert_eq!(
+            from_xml.extra_params, taken.extra_params,
+            "the XML lost the packed ExtraParams blob"
+        );
+        assert_eq!(group.root.name, "Lamp", "the body is named after the item");
+
+        // The rez: the prim that was taken, under new ids, on either flavour.
+        let rezzed = rez_taken_linkset(
+            &mut world,
+            sl_wire::RegionHandle(0),
+            &|| uuid::Uuid::from_u128(0x9E7),
+            &[taken.clone()],
+            &served,
+            &ZERO,
+        );
+        let root = rezzed.first().ok_or("the rez put nothing back")?;
+        assert_eq!(root.extra, taken.extra, "the rez lost the light");
+        assert_eq!(root.text, taken.text, "the rez lost the floating text");
+        assert_ne!(root.full_id, taken.full_id, "a rez mints a fresh key");
+        assert_ne!(
+            root.local_id, taken.local_id,
+            "a rez mints a fresh local id"
+        );
+        assert_eq!(
+            root.properties.as_ref().map(|record| record.name.as_str()),
+            Some("Lamp"),
+            "the rezzed object is not named after the item it came out of"
+        );
+        Ok(())
+    }
+
     /// An object nobody has named reports the record a freshly rezzed prim has,
     /// and its contents serial comes from the inventory a write advances —
     /// never from a second copy on the object, which could then disagree with
@@ -2839,6 +3401,110 @@ mod test {
     }
 
     /// A task-inventory item fixture with a given id and name.
+    /// The **served** body carries what the prim contains, which no object
+    /// update ever does.
+    ///
+    /// OpenSim writes a prim's `TaskInventory` into the asset, so a scripted
+    /// object taken there comes back scripted. The contents reach the body only
+    /// because the take gathers them out of the region while it still has the
+    /// object; a body written from the object update alone would file every
+    /// scripted prim as an empty one, and nothing downstream could tell.
+    #[test]
+    fn a_served_body_carries_the_prims_contents() -> Result<(), Box<dyn core::error::Error>> {
+        let owner = agent(0x1);
+        let taken = box_prim(
+            RegionLocalObjectId(6),
+            ObjectKey::from(uuid::Uuid::from_u128(6)),
+            owner,
+            ZERO,
+            ZERO,
+        );
+        let contents =
+            TaskInventory::stated(4, vec![task_item(taken.full_id, 0x00C0_FFEE, "a notecard")]);
+
+        let assets = crate::assets::GridAssets::default();
+        let item = taken_item(
+            std::slice::from_ref(&taken),
+            InventoryFolderKey::from(uuid::Uuid::from_u128(0xF0)),
+            owner,
+            &|| uuid::Uuid::from_u128(0xC047),
+            crate::assets::ObjectAssetPolicy::Served,
+        );
+        store_taken_asset(
+            &assets,
+            &item,
+            std::slice::from_ref(&taken),
+            std::slice::from_ref(&contents),
+        );
+
+        let body = assets
+            .read()
+            .get(AssetKey::from(item.asset_id))
+            .map(<[u8]>::to_vec)
+            .ok_or("the take published no body")?;
+        let group = sl_object_asset::opensim::SceneObjectGroup::decode(&body)?;
+        assert_eq!(
+            group.root.inventory_serial, 4,
+            "the contents serial is lost"
+        );
+        let held = group
+            .root
+            .task_inventory
+            .first()
+            .ok_or("the body carries no contents")?;
+        assert_eq!(held.name, "a notecard");
+        assert_eq!(held.item_id, uuid::Uuid::from_u128(0x00C0_FFEE));
+        assert_eq!(
+            held.parent_part_id,
+            taken.full_id.uuid(),
+            "the item does not name the prim holding it"
+        );
+        Ok(())
+    }
+
+    /// A prim the wire never named or textured still reaches the served body
+    /// as OpenSim would have constructed it: called `Object`, wearing the
+    /// default texture entry.
+    ///
+    /// The texture half is not cosmetic — OpenSim hands whatever it base64-
+    /// decodes straight to `Primitive.TextureEntry`, so an empty block is a
+    /// body it cannot read rather than a prim without textures.
+    #[test]
+    fn a_nameless_untextured_prim_is_filed_with_opensims_own_defaults()
+    -> Result<(), Box<dyn core::error::Error>> {
+        let owner = agent(0x1);
+        let root = box_prim(
+            RegionLocalObjectId(7),
+            ObjectKey::from(uuid::Uuid::from_u128(7)),
+            owner,
+            ZERO,
+            ZERO,
+        );
+        let mut child = box_prim(
+            RegionLocalObjectId(8),
+            ObjectKey::from(uuid::Uuid::from_u128(8)),
+            owner,
+            ZERO,
+            ZERO,
+        );
+        child.parent_id = root.local_id;
+        child.properties = None;
+        child.texture_entry = Vec::new();
+
+        let item = taken_item(
+            &[root.clone(), child.clone()],
+            InventoryFolderKey::from(uuid::Uuid::from_u128(0xF0)),
+            owner,
+            &|| uuid::Uuid::from_u128(0xDEFA),
+            crate::assets::ObjectAssetPolicy::Served,
+        );
+        let group = filed_group(&[root, child], &[], &item);
+        let filed = group.other_parts.first().ok_or("the child was not filed")?;
+        assert_eq!(filed.name, DEFAULT_OBJECT_NAME);
+        assert_eq!(filed.shape.texture_entry, default_texture_entry());
+        Ok(())
+    }
+
     fn task_item(task: ObjectKey, item: u128, name: &str) -> TaskInventoryItem {
         TaskInventoryItem {
             item_id: InventoryKey::from(uuid::Uuid::from_u128(item)),

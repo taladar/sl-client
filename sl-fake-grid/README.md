@@ -130,6 +130,47 @@ at).
 scenario and prints, once the grid answers `get_grid_info`, the login URI
 as an IPv4 literal plus the `--grid` argument Firestorm wants.
 
+## Scripted timelines
+
+Everything above answers something the client asked for. A `Timeline` is
+the other half: what happens to a session because **time passed**.
+
+```rust,ignore
+let timeline = Timeline::new()
+    .then(At::AfterArrival(Duration::from_secs(2)),
+          Action::MoveObject { local_id, to })
+    .after(Duration::ZERO, Action::Marker("moved".to_owned()))
+    .then(At::OnMarkerAck, Action::KillObject(local_id));
+```
+
+A step's `At` is a duration from the arrival or from the previous step, a
+`ServerEvent` the session drains (`OnEvent`), or the client's own
+acknowledgement of the last `Marker` (`OnMarkerAck`) — the one wait that
+is a happens-before rather than a guess, because a client acknowledges a
+packet it has already decoded and handled. Its `Action` is anything a
+simulator does unprompted: rez, move, edit or kill an object, attach or
+detach one, animate the avatar, push an appearance, chat, IM, change the
+environment, save the region's own settings, change a parcel, teleport or
+walk over a border, report stats or the simulator's clock, send a marker,
+or a `Custom` hook.
+
+`SetEnvironment` needs `ConfigureRegion` beside it to reach a viewer that
+is already in the region: nothing carries new environment settings to one,
+so the viewer re-reads `ExtEnvironment` when a `RegionInfo` arrives — which
+is what `ConfigureRegion` sends, and what the reference viewer re-reads on
+unconditionally.
+
+The waits are `tokio` sleeps and the stamps come from the grid's injected
+clock, so a paused-time test runs a scripted minute in no wall-clock time
+at all.
+
+A script belongs to the **avatar**, not to the region it started in: when
+the client arrives in a teleport destination or across a border, the steps
+that have not run yet are handed to that session and the one left behind
+keeps only the prefix it ran. That happens for a client-initiated hop as
+much as for a scripted one. A script that has already finished hands over
+nothing, which is what leaves a destination region's own timeline alone.
+
 ## Which grid this one is
 
 The fake grid exists to fail a viewer the way a real grid would, and there are
@@ -144,13 +185,30 @@ the grid this workspace targets — and every divergent behaviour takes its
 default from that. A per-behaviour setter still wins where it is called: the
 flavour is what an unset knob falls back to, not a lock.
 
-Six behaviours follow it today: a taken object's asset (below), whether the
+Nine behaviours follow it today: a taken object's asset (below), whether the
 login response is trimmed to the request's `options` list (Second Life honours
 it, OpenSim sends every field regardless), the two that make up how a region
-introduces itself (below), and the two that make up how it does inventory
-(below). The divergences it does **not** yet decide — server bakes and the
-economy — are audited in `imitates.rs` with a roadmap item each, rather than
-left to be rediscovered.
+introduces itself (below), the two that make up how it does inventory (below),
+who composites an avatar, what the grid charges, and what it says the account
+is entitled to.
+
+There is no longer a list of divergences the flavour does *not* decide: every
+one this crate has measured is derived from it. `imitates.rs` keeps the audit
+so a divergence taken one-sidedly in future has somewhere to be written down
+rather than rediscovered.
+
+**What the grid charges** is the price list an `EconomyDataRequest` is answered
+with, measured on both grids — plus the currency symbol, where the divergence is
+one of *presence*: Second Life says `L$` and a stock OpenSim grid says nothing
+at all, leaving a viewer on its own default (`OS$` in Firestorm).
+
+**What the account is entitled to** is the login response's benefits package —
+`account_type`, `account_level_benefits`, `premium_packages` — and the maturity
+preference beside it. Second Life sends all four; a stock OpenSim grid sends
+none, which is why a modern viewer prices uploads from the package on one grid
+and from the legacy `EconomyData` on the other. It matters because the package
+is where **tiered** texture pricing lives: L$ 50 above 1024×1024 against L$ 10
+below it on the free tier, a distinction the older reply cannot express.
 
 ## How inventory is fetched, and how a new item is announced
 
@@ -170,13 +228,55 @@ answers a grid without it can give, this one takes the loud road: a
 that — but silence is indistinguishable from a lost packet, so it is not the
 default a test would have to wait out.
 
-**The announcement.** A take is answered with the legacy UDP
+**The take's announcement.** A take is answered with the legacy UDP
 `UpdateCreateInventoryItem` on OpenSim and with a `BulkUpdateInventory` over
 the event queue on Second Life. `InventoryAnnouncement` picks between them
 (`FakeGridBuilder::inventory_announcement` overrides). A client listening for
 only one of the two hears nothing at all from the other grid, which is why the
 conformance cases that take something use one shared helper that accepts
 either and records which arrived.
+
+**An upload's announcement is a different question, the grids swap sides on it,
+and it is two answers rather than one.** After an asset saved in place over an
+`Update*AgentInventory` capability, Second Life pushes the legacy
+`UpdateCreateInventoryItem` and OpenSim sends *nothing at all*. After a
+`NewFileAgentInventory` completion — the path that *creates* an item —
+**neither grid sends anything**: that response body carries the whole new item,
+so a push would repeat what the client is already holding, while a save's
+response names only the new asset and the push is what stops the client's copy
+of the item naming the one it replaced. So `UploadAnnouncements` is its own
+knob and carries a value per path
+(`FakeGridBuilder::upload_announcements`, `UploadAnnouncements::uniform` for a
+grid that should treat the two alike); reusing the take's answer for it would
+be wrong about a live grid in both directions at once, and reusing one upload
+answer for both paths was wrong about Second Life until it was measured.
+
+Measured 2026-09-08 by the conformance cases `notecard-create-update`
+(`save_announcement`: `update-create-inventory-item` on aditi, `none` on
+OpenSim) and `asset-upload` (`upload_announcement`: `none` on both).
+
+The take and the save diverge for **opposite reasons**, which is worth knowing
+before reading the save as "Second Life does something extra". The push is the
+older behaviour and OpenSim is the grid that omits it: at the in-place save
+`CapsUpdateInventoryItemAsset` ends on a commented-out
+`SendInventoryItemCreateUpdate` — commented since 2007-08, when that capability
+path was written — and answers with an `AlertMessage`, while the
+`NewFileAgentInventory` completion reaches inventory through the *client-less*
+`AddInventoryItem` overload. So the take is Second Life having moved on to
+AIS3, and the save is OpenSim having never sent what a Linden simulator sends.
+The reference viewer wants neither push: it builds the item from the response
+body.
+
+Reaching Second Life's `NewFileAgentInventory` completion at all costs money —
+that grid serves the capability only for the chargeable upload classes — so
+that half of the table was extrapolated from the save until 2026-09-08, and
+extrapolated the wrong way. The run that settled it uploaded a 64×64 texture at
+the account's own benefits price (L$ 10, charged) and recorded `none` twice.
+
+The legacy UDP transaction save (`UpdateInventoryItem`, how a wearable is
+saved) follows neither knob: its `UpdateCreateInventoryItem` is the **reply**
+to a UDP request, echoing the transaction and callback ids the client sent, and
+OpenSim sends it there exactly where it stays quiet after a capability upload.
 
 ## How a region introduces itself
 
@@ -205,7 +305,7 @@ default, and both answer with the Vivox SIP account shape — which this
 workspace implements nowhere, Second Life having moved to WebRTC. So there
 is no Vivox flavour to pick: a grid defaulting to one would be serving a
 path nothing here speaks. Modelling the stock region is the same choice
-`stock_prices` makes for money.
+`open_sim_prices` makes for money.
 
 ## A taken object's asset
 

@@ -6,24 +6,25 @@ use crate::GroupRoleKey;
 use crate::appearance;
 use crate::bookkeeping_ids::ImSessionId;
 use crate::types::{
-    ActiveGroup, AssetType, AvatarAppearance, AvatarAttachment, AvatarGroupMembership,
-    AvatarInterests, AvatarName, AvatarPickerResult, AvatarProperties, ChatAudible, ChatMessage,
-    ChatSource, ChatType, ClassifiedCategory, ClassifiedInfo, CloudPosDensity, Color, ColorAlpha,
-    DayCycle, DayCycleFrame, DisplayNameUpdate, EconomyData, EnvironmentAsset, EnvironmentSettings,
-    EnvironmentUpdate, EstateAccessKind, EstateInfo, Event, Friend, FriendRights, Glow,
-    GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
-    GroupAccountTransactions, GroupActiveProposalItem, GroupMember, GroupMembership, GroupName,
-    GroupNotice, GroupNoticeKey, GroupProfile, GroupRole, GroupTitle, GroupVote,
-    GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem, InventoryType,
-    LandingType, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity,
-    MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags, MuteType, NavMeshBuildStatus,
-    NavMeshStatus, NeighborInfo, Object, ObjectProperties, ObjectTransform, OpenRegionInfo,
-    ParcelCategory, ParcelInfo, ParcelRequestResult, ParcelStatus, PickInfo, PickKey,
-    PlayingAnimation, PrimShapeParams, ProductType, ProposalCandidateId, ProposalVoteId,
-    RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionLimits,
-    RegionTerrainComposition, RequiredVoiceVersion, RestoreItem, SaleType, Scale, ScriptDialog,
-    ScriptPermissionRequest, ScriptPermissions, SetDisplayNameReply, SkySettings,
-    TaskInventoryItem, WaterSettings, avatar_texture,
+    AccountBenefits, ActiveGroup, AssetType, AvatarAppearance, AvatarAttachment,
+    AvatarGroupMembership, AvatarInterests, AvatarName, AvatarPickerResult, AvatarProperties,
+    ChatAudible, ChatMessage, ChatSource, ChatType, ClassifiedCategory, ClassifiedInfo,
+    CloudPosDensity, Color, ColorAlpha, DayCycle, DayCycleFrame, DensityLayer, DisplayNameUpdate,
+    EconomyData, EnvironmentAsset, EnvironmentSettings, EnvironmentUpdate, EstateAccessKind,
+    EstateInfo, Event, Friend, FriendRights, Glow, GroupAccountDetails, GroupAccountDetailsEntry,
+    GroupAccountSummary, GroupAccountTransaction, GroupAccountTransactions,
+    GroupActiveProposalItem, GroupMember, GroupMembership, GroupName, GroupNotice, GroupNoticeKey,
+    GroupProfile, GroupRole, GroupTitle, GroupVote, GroupVoteHistoryItem, ImDialog, InstantMessage,
+    InventoryFolder, InventoryItem, InventoryListing, InventoryType, LandingType, MapItem,
+    MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MoneyBalance,
+    MoneyTransaction, MuteEntry, MuteFlags, MuteType, NavMeshBuildStatus, NavMeshStatus,
+    NeighborInfo, Object, ObjectProperties, ObjectTransform, OpenRegionInfo, ParcelCategory,
+    ParcelInfo, ParcelRequestResult, ParcelStatus, PickInfo, PickKey, PlayingAnimation,
+    PrimShapeParams, ProductType, ProposalCandidateId, ProposalVoteId, RegionChatSettings,
+    RegionCombatSettings, RegionIdentity, RegionLimits, RegionTerrainComposition,
+    RequiredVoiceVersion, RestoreItem, SaleType, Scale, ScriptDialog, ScriptPermissionRequest,
+    ScriptPermissions, SetDisplayNameReply, SkySettings, TaskInventoryItem, WaterSettings,
+    avatar_texture,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::AgentKey;
@@ -1091,7 +1092,49 @@ fn sky_settings_from_llsd(name: &str, sky: &Llsd) -> SkySettings {
         bloom_texture: optional_texture_member(sky, "bloom_id"),
         halo_texture: optional_texture_member(sky, "halo_id"),
         rainbow_texture: optional_texture_member(sky, "rainbow_id"),
+        rayleigh_config: density_profile_from_llsd(
+            sky.get("rayleigh_config"),
+            DensityLayer::rayleigh_default,
+        ),
+        mie_config: density_profile_from_llsd(sky.get("mie_config"), DensityLayer::mie_default),
+        absorption_config: density_profile_from_llsd(
+            sky.get("absorption_config"),
+            DensityLayer::absorption_default,
+        ),
     }
+}
+
+/// Parses one of a sky's density profiles, falling back to `default` when the
+/// key is absent or empty.
+///
+/// A grid always sends all three — the reference requires them — so the
+/// fallback is for a hand-written fixture rather than for the wire, and it
+/// matters because what this function returns is what gets *sent* again: a
+/// profile decoded as empty and re-encoded as empty is a sky the reference
+/// throws away.
+fn density_profile_from_llsd(
+    profile: Option<&Llsd>,
+    default: fn() -> Vec<DensityLayer>,
+) -> Vec<DensityLayer> {
+    let layers: Vec<DensityLayer> = profile
+        .and_then(Llsd::as_array)
+        .map(|layers| {
+            layers
+                .iter()
+                .map(|layer| DensityLayer {
+                    width: f32_member(layer, "width"),
+                    exp_term: f32_member(layer, "exp_term"),
+                    exp_scale: f32_member(layer, "exp_scale"),
+                    linear_term: f32_member(layer, "linear_term"),
+                    constant_term: f32_member(layer, "constant_term"),
+                    anisotropy: layer
+                        .get("anisotropy")
+                        .map(|_value| f32_member(layer, "anisotropy")),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if layers.is_empty() { default() } else { layers }
 }
 
 /// Parses a water frame `OSDMap` into [`WaterSettings`].
@@ -1323,7 +1366,7 @@ pub(crate) fn economy_data(
         price_object_rent: info.price_object_rent,
         price_object_scale_factor: info.price_object_scale_factor,
         price_parcel_rent: linden_from_wire("PriceParcelRent", info.price_parcel_rent)?,
-        price_group_create: linden_from_wire("PriceGroupCreate", info.price_group_create)?,
+        price_group_create: crate::types::unpriced_linden_from_wire(info.price_group_create),
     })
 }
 
@@ -1564,6 +1607,33 @@ pub(crate) fn classified_info(
             data.price_for_listing,
         )?,
     })
+}
+
+/// Decodes the login response's `account_level_benefits` blob.
+///
+/// `None` both when the grid sent no such field — every OpenSim grid — and when
+/// what it sent is not a benefits map this build can read. The two are not
+/// distinguished here on purpose: a consumer's answer to "no benefits package"
+/// is the same either way (fall back to the legacy
+/// [`EconomyData`](crate::EconomyData) prices), and the reference viewer draws
+/// the same line, refusing a package with a missing field exactly as it refuses
+/// an absent one.
+pub(crate) fn benefits_of(blob: Option<&sl_wire::Llsd>) -> Option<AccountBenefits> {
+    match blob? {
+        sl_wire::Llsd::Map(map) => AccountBenefits::from_llsd(map),
+        _not_a_map => None,
+    }
+}
+
+/// Decodes the login response's `premium_packages` blob into the per-package
+/// benefits map, empty when the grid sent none.
+pub(crate) fn packages_of(
+    blob: Option<&sl_wire::Llsd>,
+) -> std::collections::BTreeMap<String, AccountBenefits> {
+    match blob {
+        Some(sl_wire::Llsd::Map(map)) => crate::types::packages_from_llsd(map),
+        _absent_or_not_a_map => std::collections::BTreeMap::new(),
+    }
 }
 
 /// Converts a login [`SkeletonFolder`] into an [`InventoryFolder`].
@@ -4157,21 +4227,42 @@ pub(crate) fn ais_inventory_update_from_llsd(
     if body.get("category_id").is_some() {
         folders.push(inventory_folder_from_llsd(body));
     }
-    // Embedded objects (the affected set of a create/update/move).
-    if let Some(embedded) = body.get("_embedded") {
-        if let Some(categories) = embedded.get("categories").and_then(Llsd::as_map) {
-            folders.extend(categories.values().map(inventory_folder_from_llsd));
-        }
-        if let Some(embedded_items) = embedded.get("items").and_then(Llsd::as_map) {
-            items.extend(embedded_items.values().filter_map(inventory_item_from_llsd));
-        }
-        if let Some(links) = embedded.get("links").and_then(Llsd::as_map) {
-            items.extend(links.values().filter_map(inventory_item_from_llsd));
-        }
-    }
+    // Embedded objects (the affected set of a create/update/move, or the
+    // contents of a fetched folder).
+    gather_ais_embedded(body, &mut folders, &mut items);
     folders.retain(|folder| !folder.folder_id.uuid().is_nil());
     items.retain(|item| !item.item_id.uuid().is_nil());
     (folders, items)
+}
+
+/// Folds one `_embedded` block — and every `_embedded` block nested inside the
+/// categories it lists — into the flat folder / item accumulators.
+///
+/// The recursion is what a children fetch needs: AIS3 nests a listing one level
+/// per level of depth, so a `?depth=` above zero puts a sub-folder's contents
+/// inside *that folder's* map rather than beside it. Reading only the outermost
+/// block would see the first level of a recursive fetch and silently drop the
+/// rest.
+fn gather_ais_embedded(
+    body: &Llsd,
+    folders: &mut Vec<InventoryFolder>,
+    items: &mut Vec<InventoryItem>,
+) {
+    let Some(embedded) = body.get("_embedded") else {
+        return;
+    };
+    if let Some(categories) = embedded.get("categories").and_then(Llsd::as_map) {
+        for category in categories.values() {
+            folders.push(inventory_folder_from_llsd(category));
+            gather_ais_embedded(category, folders, items);
+        }
+    }
+    if let Some(embedded_items) = embedded.get("items").and_then(Llsd::as_map) {
+        items.extend(embedded_items.values().filter_map(inventory_item_from_llsd));
+    }
+    if let Some(links) = embedded.get("links").and_then(Llsd::as_map) {
+        items.extend(links.values().filter_map(inventory_item_from_llsd));
+    }
 }
 
 /// The `_updated_category_versions` map of an AIS3 mutation reply: each affected
@@ -4784,6 +4875,33 @@ fn reals_to_llsd(values: &[f32]) -> Llsd {
     Llsd::Array(values.iter().copied().map(real).collect())
 }
 
+/// Encodes one of a sky's density profiles as an LLSD array of layer maps (the
+/// inverse of `density_profile_from_llsd`).
+///
+/// `anisotropy` is written only when the layer has one, because the reference
+/// writes the key only for a non-zero Mie anisotropy — and its own Rayleigh and
+/// absorption validators do not list the key at all.
+fn density_profile_to_llsd(layers: &[DensityLayer]) -> Llsd {
+    Llsd::Array(
+        layers
+            .iter()
+            .map(|layer| {
+                let mut entries = vec![
+                    ("width", real(layer.width)),
+                    ("exp_term", real(layer.exp_term)),
+                    ("exp_scale", real(layer.exp_scale)),
+                    ("linear_term", real(layer.linear_term)),
+                    ("constant_term", real(layer.constant_term)),
+                ];
+                if let Some(anisotropy) = layer.anisotropy {
+                    entries.push(("anisotropy", real(anisotropy)));
+                }
+                llsd_map(entries)
+            })
+            .collect(),
+    )
+}
+
 /// Encodes [`SkySettings`] into a sky-frame `OSDMap` (the inverse of
 /// `sky_settings_from_llsd`). The legacy haze colours/scalars go into a
 /// `legacy_haze` sub-map, as the viewer expects.
@@ -4853,6 +4971,19 @@ fn sky_settings_to_llsd(sky: &SkySettings) -> Llsd {
         ("bloom_id", optional_texture_to_llsd(sky.bloom_texture)),
         ("halo_id", optional_texture_to_llsd(sky.halo_texture)),
         ("rainbow_id", optional_texture_to_llsd(sky.rainbow_texture)),
+        // All three are **required** by the reference's sky validator, with no
+        // default to fall back on: a frame missing one fails validation, which
+        // empties the day cycle it belongs to ("Must have at least one water and
+        // one sky frame!") and leaves the region with no environment at all.
+        (
+            "rayleigh_config",
+            density_profile_to_llsd(&sky.rayleigh_config),
+        ),
+        ("mie_config", density_profile_to_llsd(&sky.mie_config)),
+        (
+            "absorption_config",
+            density_profile_to_llsd(&sky.absorption_config),
+        ),
     ];
     // Only an EEP sky carries `reflection_probe_ambiance`; emitting it for a
     // legacy sky (where it decoded as `0.0`) would flip the reference's
@@ -5470,19 +5601,26 @@ fn ais_item_map(items: &[InventoryItem]) -> Result<Llsd, sl_wire::WireError> {
     ))
 }
 
-/// Serializes folders as an AIS3 uuid-keyed `categories` map.
-fn ais_category_map(folders: &[InventoryFolder]) -> Llsd {
-    Llsd::Map(
+/// Serializes listings as an AIS3 uuid-keyed `categories` map, each entry
+/// carrying its own contents when the listing stated them (see
+/// [`ais_category_children_reply_to_llsd`]).
+///
+/// # Errors
+///
+/// Returns [`WireError::ValueOutOfRange`](sl_wire::WireError::ValueOutOfRange) if
+/// an embedded item's L$ sale price exceeds the signed 32-bit range.
+fn ais_category_map(folders: &[InventoryListing]) -> Result<Llsd, sl_wire::WireError> {
+    Ok(Llsd::Map(
         folders
             .iter()
-            .map(|folder| {
-                (
-                    folder.folder_id.to_string(),
-                    inventory_folder_to_llsd(folder),
-                )
+            .map(|listing| {
+                Ok((
+                    listing.folder.folder_id.to_string(),
+                    ais_listing_to_llsd(listing)?,
+                ))
             })
-            .collect(),
-    )
+            .collect::<Result<_, sl_wire::WireError>>()?,
+    ))
 }
 
 /// Serializes folders and items as an AIS3 (`InventoryAPIv3`) response body
@@ -5507,14 +5645,14 @@ fn ais_category_map(folders: &[InventoryFolder]) -> Llsd {
 /// an item's L$ sale price exceeds the signed 32-bit range the wire field can
 /// hold.
 pub fn ais_inventory_update_to_llsd(
-    folders: &[InventoryFolder],
+    folders: &[InventoryListing],
     items: &[InventoryItem],
 ) -> Result<Llsd, sl_wire::WireError> {
     let (links, plain): (Vec<_>, Vec<_>) = items.iter().cloned().partition(is_link_item);
     Ok(llsd_map(vec![(
         "_embedded",
         llsd_map(vec![
-            ("categories", ais_category_map(folders)),
+            ("categories", ais_category_map(folders)?),
             ("items", ais_item_map(&plain)?),
             ("links", ais_item_map(&links)?),
         ]),
@@ -5621,7 +5759,7 @@ pub(crate) fn fetch_inventory_items_from_llsd(body: &Llsd) -> Vec<InventoryItem>
 /// hold.
 pub fn ais_mutation_reply_to_llsd(
     update: &sl_wire::AisUpdate,
-    folders: &[InventoryFolder],
+    folders: &[InventoryListing],
     items: &[InventoryItem],
 ) -> Result<Llsd, sl_wire::WireError> {
     let mut reply = sl_wire::ais_update_to_llsd(update);
@@ -5637,14 +5775,25 @@ pub fn ais_mutation_reply_to_llsd(
 
 /// Serializes an AIS3 `GET /category/<id>/children` reply: the fetched
 /// category's own fields at the top level (the `inventory_folder_to_llsd`
-/// shape, which the client's top-level `category_id` probe picks up) plus the
-/// listed descendants under `_embedded`.
+/// shape, which the client's top-level `category_id` probe picks up) plus its
+/// contents under `_embedded`, **nested one level per level of the listing**
+/// the way the real AIS service nests them.
 ///
-/// The real AIS service nests `_embedded` recursively per depth level; our
-/// client parser gathers only the top-level `_embedded` maps, so the whole
-/// subtree is served **flattened** into them — a deliberate, documented
-/// divergence that is information-equivalent (the maps are uuid-keyed and
-/// every entry carries its `parent_id`).
+/// Two rules, both of which a viewer's inventory accounting depends on and
+/// neither of which a round-trip against our own parser would have caught.
+///
+/// **A listed folder always carries all three keys** — `categories`, `links`
+/// and `items` — even when every one of them is empty. The reference's
+/// `AISUpdate::parseDescendentCount` believes a descendent count only from a
+/// listing that names all three, and `parseCategory` refuses to record a
+/// folder's `version` until it has that count. A folder listed without them is
+/// therefore a folder the viewer holds at version and count *unknown* forever,
+/// which makes every later update to it fail its accounting.
+///
+/// **A folder the listing did not open carries no `_embedded` at all**
+/// ([`InventoryListing::children`] is `None`). "This folder holds nothing" and
+/// "this listing did not go that deep" are different answers, and only the
+/// first may be served as an empty listing.
 ///
 /// # Errors
 ///
@@ -5652,17 +5801,26 @@ pub fn ais_mutation_reply_to_llsd(
 /// an item's L$ sale price exceeds the signed 32-bit range the wire field can
 /// hold.
 pub fn ais_category_children_reply_to_llsd(
-    folder: &InventoryFolder,
-    folders: &[InventoryFolder],
-    items: &[InventoryItem],
+    listing: &InventoryListing,
 ) -> Result<Llsd, sl_wire::WireError> {
-    let mut reply = inventory_folder_to_llsd(folder);
-    if folders.is_empty() && items.is_empty() {
+    ais_listing_to_llsd(listing)
+}
+
+/// One folder of a children listing as AIS3 LLSD: its own fields, plus an
+/// `_embedded` block of its contents when the listing opened it (see
+/// [`ais_category_children_reply_to_llsd`] for why the two cases must differ).
+fn ais_listing_to_llsd(listing: &InventoryListing) -> Result<Llsd, sl_wire::WireError> {
+    let mut reply = inventory_folder_to_llsd(&listing.folder);
+    let Some(children) = listing.children.as_ref() else {
         return Ok(reply);
-    }
-    let embedded = ais_inventory_update_to_llsd(folders, items)?;
-    if let (Llsd::Map(reply_map), Some(embedded_block)) = (&mut reply, embedded.get("_embedded")) {
-        let _previous = reply_map.insert("_embedded".to_owned(), embedded_block.clone());
+    };
+    let embedded = ais_inventory_update_to_llsd(&children.folders, &children.items)?;
+    let embedded = embedded
+        .get("_embedded")
+        .cloned()
+        .unwrap_or_else(|| llsd_map(Vec::new()));
+    if let Llsd::Map(reply_map) = &mut reply {
+        let _previous = reply_map.insert("_embedded".to_owned(), embedded);
     }
     Ok(reply)
 }
@@ -6355,6 +6513,7 @@ pub(crate) fn full_update_block(object: &Object) -> ObjectUpdateObjectDataBlock 
 mod caps_serializer_tests {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
+    use crate::types::InventoryListing;
     use pretty_assertions::assert_eq;
     use sl_types::key::AgentKey;
     use sl_types::key::GroupKey;
@@ -7402,8 +7561,13 @@ mod caps_serializer_tests {
             version: 5,
         }];
         let items = vec![sample_item(0x1b1)];
+        let listings: Vec<InventoryListing> = folders
+            .iter()
+            .cloned()
+            .map(InventoryListing::unlisted)
+            .collect();
         let (mut got_folders, mut got_items) =
-            ais_inventory_update_from_llsd(&ais_inventory_update_to_llsd(&folders, &items)?);
+            ais_inventory_update_from_llsd(&ais_inventory_update_to_llsd(&listings, &items)?);
         // The `_embedded` maps are uuid-keyed and unordered; sort for comparison.
         got_folders.sort_by_key(|folder| folder.folder_id.uuid());
         got_items.sort_by_key(|item| item.item_id.uuid());

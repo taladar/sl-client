@@ -175,36 +175,12 @@ mod tests {
             .ok_or_else(|| TestError::from("the fixture prim never reached the scene"))
     }
 
-    /// Seed the fat fixture prim **with a texture entry on the wire**, at
-    /// `local_id` and `position`.
-    ///
-    /// The shared seed leaves `texture_entry` empty, which is fine for a scene
-    /// test and wrong for this one: the Texture tab reflects an object's
-    /// *decoded entry*, and an object that never sent one has no faces for the
-    /// tab to show — it reads as "nothing selected" no matter what is. A real
-    /// prim always carries an entry, so the fixture carries one too: six
-    /// untextured faces, the shape of a default box.
-    fn seed_textured_prim(app: &mut App, local_id: u32, position: Vector) -> ScopedObjectId {
-        /// A box's face count.
-        const FACES: usize = 6;
-
-        let mut object = crate::world_test::fixture_prim(local_id, position, 0);
-        let blank = sl_client_bevy::TextureFace::new(sl_client_bevy::TextureKey::from(
-            sl_client_bevy::Uuid::nil(),
-        ));
-        object.texture_entry =
-            sl_client_bevy::encode_texture_entry(&sl_client_bevy::TextureEntry {
-                faces: vec![blank; FACES],
-            });
-        crate::world_test::seed_object(app, object)
-    }
-
     /// Seed one fat prim at [`FIXTURE_AT`], frame it beside the window, and
     /// select it with a **real click in the world**. Returns its scoped id and
     /// the viewport point the click landed on (the world point every later
     /// pointer gesture aims at).
     fn select_a_fixture_prim(app: &mut App) -> Result<(ScopedObjectId, Vec2), TestError> {
-        let scoped = seed_textured_prim(app, 1, FIXTURE_AT);
+        let scoped = crate::world_test::seed_prim(app, FIXTURE_AT);
         settle(app, 5);
         let position = scene_position(app, scoped)?;
         let points = frame_beside_the_window(app, &[position])?;

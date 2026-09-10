@@ -18,20 +18,33 @@
 //!
 //! | behaviour | Second Life | OpenSim |
 //! | --- | --- | --- |
-//! | a taken object's asset ([`ObjectAssetPolicy`]) | withheld: nil id, unfetchable body | served: minted id, body under it |
+//! | a taken object's asset ([`ObjectAssetPolicy`]) | withheld: nil id, an unfetchable Linden-text body | served: minted id, a `<SceneObjectGroup>` XML body under it |
 //! | the login response's `options` list ([`honor_options`](crate::FakeGridBuilder::honor_options)) | honoured: the response is trimmed to what was asked for | ignored: every field is sent |
 //! | the `OpenSimExtras` block in `SimulatorFeatures` ([`advertises_open_sim_extras`](ImitatedGrid::advertises_open_sim_extras)) | absent | sent, carrying the grid's map-tile and currency-helper URLs |
 //! | the spatial-voice backend ([`VoiceBackend`]) | WebRTC, named three ways: `SimulatorFeatures.VoiceServerType`, the login `voice-config`, the `RequiredVoiceVersion` push | none: a stock region loads no voice module, and nothing is advertised |
 //! | the deprecated UDP inventory fetch ([`LegacyUdpInventory`]) | refused with a `FeatureDisabled` | served out of the session's inventory tree |
-//! | how a created inventory item is announced ([`InventoryAnnouncement`]) | a `BulkUpdateInventory` over the event queue | the legacy UDP `UpdateCreateInventoryItem` |
+//! | how a **taken** item is announced ([`InventoryAnnouncement`]) | a `BulkUpdateInventory` over the event queue | the legacy UDP `UpdateCreateInventoryItem` |
+//! | how an item a capability upload **rewrote** is announced ([`UploadAnnouncements::saved`]) | the legacy UDP `UpdateCreateInventoryItem` | nothing: the capability's HTTP response is the whole answer |
+//! | how an item a capability upload **created** is announced ([`UploadAnnouncements::created`]) | nothing | nothing |
 //! | who composites an avatar ([`BakePolicy`]) | the grid: an `agent_appearance_service`, the central-bake protocol bit, an `AppearanceData` block on every appearance, and the `UpdateAvatarAppearance` trigger | every viewer for itself: none of those four |
 //! | the rest of `RegionProtocols` ([`region_protocol_bits`](ImitatedGrid::region_protocol_bits)) | nothing else claimed | bit 63, "more than 6 baked textures" |
+//! | the `EconomyData` price list ([`prices`](ImitatedGrid::prices)) | measured on aditi: L$ 10 an upload, L$ 100 a group, a 20 000 LI region | its `SampleMoneyModule` defaults: most prices free, no group price stated, a 15 000 LI region |
+//! | the currency symbol ([`currency_symbol`](ImitatedGrid::currency_symbol)) | `L$`, in the login response and nothing else | none announced anywhere, so a viewer falls back to its own default (`OS$`) |
+//! | the account's entitlements ([`describes_account_entitlements`](ImitatedGrid::describes_account_entitlements)) | a benefits package, its subscription name, every package's numbers, and the maturity preference | none of the four; a viewer prices uploads from the legacy `EconomyData` instead |
 //!
-//! **The inventory pair is the divergence a viewer is most likely to trip
-//! over**, which is why it is two rows rather than one setting. An inventory
-//! implementation that still reaches for the UDP fetch, or that only listens
-//! for the legacy create, works against OpenSim and fails against the grid this
-//! workspace targets — silently, in both directions. Second Life's refusal is
+//! **The inventory rows are the divergence a viewer is most likely to trip
+//! over**, which is why they are three rows rather than one setting. An
+//! inventory implementation that still reaches for the UDP fetch, or that only
+//! listens for the legacy create, works against OpenSim and fails against the
+//! grid this workspace targets — silently, in both directions.
+//!
+//! **And the two announcement rows do not point the same way**, which is the
+//! part worth reading twice: on a take Second Life is the grid that pushes a
+//! `BulkUpdateInventory` and OpenSim the one that sends the legacy message,
+//! while after a capability upload it is Second Life that sends the legacy
+//! message and OpenSim that sends nothing at all. They are two enums because
+//! they are two measurements, taken in the [`inventory`](crate::inventory)
+//! module docs. Second Life's refusal is
 //! the one deliberate deviation from the measurement in this table: aditi
 //! empirically *drops* the fetch without a word (2026-08-12), and
 //! [`LegacyUdpInventory::Ignored`] reproduces that, but of the two roads a grid
@@ -50,6 +63,14 @@
 //! Dropping the block on the Second Life side therefore hides no URL — it
 //! removes a *second* copy of two of them.
 //!
+//! The currency **symbol** is the one of those three that does not survive, and
+//! that is correct rather than a hole: a stock OpenSim grid does not put a
+//! symbol in either place (see
+//! [`currency_symbol`](ImitatedGrid::currency_symbol)), so there is no copy to
+//! lose. Second Life sends `L$` in the login response and has no extras block
+//! to duplicate it into; OpenSim sends nothing in either, and a viewer falls
+//! back to its own default.
+//!
 //! **The bake pair is the divergence that cost the most to derive**, and the
 //! reason it is a policy type rather than a boolean: withdrawing the appearance
 //! service on its own is *worse* than leaving it, because a viewer that has
@@ -58,17 +79,26 @@
 //! of them may — see the [`bakes`](crate::bakes) module docs for the four and
 //! for where each side of each was measured.
 //!
+//! **The price row is the one measurement that changes a viewer's arithmetic
+//! rather than its plumbing**, which is why it is worth a second look: a
+//! Second-Life-flavoured grid quotes L$ 10 for an upload and OpenSim quotes
+//! free, so a viewer that hard-codes either — or that sends an
+//! `expected_upload_cost` copied from the wrong grid — passes against one and
+//! is refused by the other. OpenSim is also the only grid of the two that
+//! declines to quote a price at all, which is why
+//! [`EconomyData::price_group_create`](sl_proto::EconomyData::price_group_create)
+//! is an `Option`.
+//!
 //! # What it does not decide yet, and why
 //!
-//! Each of these is a measured or documented divergence the fake grid takes one
-//! side of unconditionally. They are not derived here because the *other* side
-//! is not implemented — a flavour that claimed to decide them would be lying
-//! about what a viewer meets. Each has a roadmap item of its own:
-//!
-//! | behaviour | the side the fake grid takes | what the other side needs |
-//! | --- | --- | --- |
-//! | the economy helper and the price list | OpenSim's: a stock region's zeroes | what Second Life's helper and `EconomyData` actually answer is unmeasured ([[test-fake-grid-imitates-economy]]) |
-//! | how an **upload-created** item is announced (as opposed to a taken one) | the legacy UDP message on both flavours | what Second Life sends besides the capability's own HTTP response is unmeasured ([[test-fake-grid-imitates-upload-announcements]]) |
+//! Nothing, today. Every divergence this crate has measured is derived here.
+//! The economy was the last one outstanding, and it turned out to be two rows
+//! rather than one: the price list
+//! ([`prices`](ImitatedGrid::prices)) and the currency symbol
+//! ([`currency_symbol`](ImitatedGrid::currency_symbol)). What is left of
+//! [`EconomyConfig`](crate::EconomyConfig) — the L$-to-dollars rate, whether
+//! the site is up, whether buying land demands an upgrade, the confirm token —
+//! is deliberately *not* flavour policy but test policy, set per test.
 //!
 //! One thing is deliberately **not** flavour-decided and is not a to-do:
 //! [`GridIdentity::platform`](crate::GridIdentity) stays `OpenSim` whichever
@@ -78,7 +108,9 @@
 
 use crate::assets::ObjectAssetPolicy;
 use crate::bakes::{BakePolicy, REGION_PROTOCOL_BAKES_ON_MESH};
-use crate::inventory::{InventoryAnnouncement, LegacyUdpInventory};
+use crate::inventory::{
+    InventoryAnnouncement, LegacyUdpInventory, UploadAnnouncement, UploadAnnouncements,
+};
 use crate::voice::VoiceBackend;
 
 /// The live grid a [`FakeGrid`](crate::FakeGrid) imitates where the two real
@@ -103,6 +135,10 @@ impl ImitatedGrid {
     /// Second Life gives a viewer a nil asset id and no way to reach the body;
     /// OpenSim names a minted id and serves the body under it. Measured on
     /// aditi 2026-09-06 — see [`ObjectAssetPolicy`] for the numbers.
+    ///
+    /// The **format** follows from the same choice, because the class is two
+    /// formats on the two grids: a withheld body is the Linden text and a
+    /// served one is OpenSim's `<SceneObjectGroup>` XML.
     #[must_use]
     pub const fn object_assets(self) -> ObjectAssetPolicy {
         match self {
@@ -182,6 +218,28 @@ impl ImitatedGrid {
         }
     }
 
+    /// How this grid announces an item a **capability upload** created or
+    /// rewrote — which is neither one answer nor how it announces a taken one.
+    ///
+    /// After a `NewFileAgentInventory` completion both grids say nothing: the
+    /// response body carries the whole new item. After an in-place save they
+    /// diverge, and it is Second Life that pushes the legacy UDP
+    /// `UpdateCreateInventoryItem` while OpenSim stays quiet — the opposite
+    /// pairing to [`inventory_announcement`](Self::inventory_announcement).
+    /// Every cell is measured rather than reasoned; see the
+    /// [`inventory`](crate::inventory) module docs for the table and for what
+    /// the push still carries where it survives.
+    #[must_use]
+    pub const fn upload_announcements(self) -> UploadAnnouncements {
+        match self {
+            Self::SecondLife => UploadAnnouncements {
+                created: UploadAnnouncement::Silent,
+                saved: UploadAnnouncement::Legacy,
+            },
+            Self::OpenSim => UploadAnnouncements::uniform(UploadAnnouncement::Silent),
+        }
+    }
+
     /// Who composites this grid's avatars ([`BakePolicy`]).
     ///
     /// Second Life central-bakes; a stock OpenSim region leaves it to each
@@ -194,6 +252,77 @@ impl ImitatedGrid {
             Self::SecondLife => BakePolicy::ServerSide,
             Self::OpenSim => BakePolicy::ClientSide,
         }
+    }
+
+    /// The L$ price list and region object budget this grid answers an
+    /// `EconomyDataRequest` with.
+    ///
+    /// Second Life's is measured (aditi, 2026-09-08, all seventeen fields);
+    /// OpenSim's is read off its `SampleMoneyModule` defaults, which are *not*
+    /// a table of zeroes — five of the seventeen are the numbers a Linden
+    /// simulator was sending when that module was written, and the two grids
+    /// still agree on them. Only OpenSim declines to quote a group-creation
+    /// price. See the [`economy_policy`](crate::economy_policy) module docs for
+    /// both columns side by side.
+    #[must_use]
+    pub const fn prices(self) -> sl_proto::EconomyData {
+        match self {
+            Self::SecondLife => crate::economy_policy::second_life_prices(),
+            Self::OpenSim => crate::economy_policy::open_sim_prices(),
+        }
+    }
+
+    /// The currency symbol this grid announces, or `None` when it announces
+    /// none.
+    ///
+    /// Second Life says `L$`. A **stock** OpenSim region says nothing at all:
+    /// `LLLoginResponse` defaults its `currency` to the empty string and emits
+    /// the key only `if (currency != String.Empty)`, and the `OpenSimExtras`
+    /// block carries `currency-base-uri` without a symbol beside it. So this is
+    /// a divergence of *presence*, like the extras block itself, and the
+    /// difference a viewer sees is not `L$` against some other symbol but `L$`
+    /// against whatever it falls back to — `OS$` in Firestorm's case.
+    ///
+    /// Which is the honest model precisely because the symbol is a deployment's
+    /// choice on OpenSim, not the grid software's: `StandaloneCommon.ini` ships
+    /// `Currency = ""` under "Ask co-operative viewers to use a different
+    /// currency name", real grids do set it, and Firestorm honours a per-region
+    /// `OpenSimExtras.currency` override with a subsystem built for the purpose.
+    /// A fake grid that picked one symbol for "OpenSim" would be modelling one
+    /// deployment rather than the software, and would hide the fallback path a
+    /// viewer actually takes.
+    #[must_use]
+    pub const fn currency_symbol(self) -> Option<&'static str> {
+        match self {
+            Self::SecondLife => Some("L$"),
+            Self::OpenSim => None,
+        }
+    }
+
+    /// Whether this grid's login response describes what the account is
+    /// entitled to: the benefits package and the maturity *preference*.
+    ///
+    /// Second Life sends `account_type`, `account_level_benefits` and
+    /// `premium_packages`, and separately `agent_region_access`. A stock OpenSim
+    /// grid sends none of the four — `agent_region_access` appears nowhere in
+    /// its source, and its login service has no notion of a subscription at all.
+    ///
+    /// The four move together because the reference viewer treats them as one
+    /// decision: Firestorm gates its whole benefits init behind
+    /// `isInSecondLife()`, because the parse *fails* on a missing field and
+    /// insists on both a `Base` and a `Premium` package — so a grid that sent
+    /// half of this would make a viewer complain at every login, which is worse
+    /// than sending none.
+    ///
+    /// It leaves the *other* two maturity fields alone. `agent_access` and
+    /// `agent_access_max` are sent by both grids; what differs there is that
+    /// OpenSim hard-codes them to `M`/`A` for every account while Second Life
+    /// answers per account, which is
+    /// [`AccountConfig::maturity_ceiling`](crate::AccountConfig::maturity_ceiling)'s
+    /// business rather than this knob's.
+    #[must_use]
+    pub const fn describes_account_entitlements(self) -> bool {
+        matches!(self, Self::SecondLife)
     }
 
     /// The `RegionProtocols` bits this grid claims that are **not** the bake
@@ -253,8 +382,31 @@ mod test {
             sl.inventory_announcement(),
             opensim.inventory_announcement()
         );
+        assert_ne!(sl.upload_announcements(), opensim.upload_announcements());
         assert_ne!(sl.bakes(), opensim.bakes());
         assert_ne!(sl.region_protocol_bits(), opensim.region_protocol_bits());
+        assert_ne!(sl.prices(), opensim.prices());
+        assert_ne!(sl.currency_symbol(), opensim.currency_symbol());
+        assert_ne!(
+            sl.describes_account_entitlements(),
+            opensim.describes_account_entitlements()
+        );
+    }
+
+    /// Only one grid names a currency, and the other names none rather than
+    /// naming a different one.
+    ///
+    /// The distinction is the whole content of the knob. A stock OpenSim region
+    /// announces no symbol in the login response *or* the extras block, so the
+    /// viewer behaviour it provokes is a fallback to the viewer's own default
+    /// (`OS$` in Firestorm) — not the display of some other grid's symbol. An
+    /// `OpenSim => Some("OS$")` here would look more helpful and would be
+    /// wrong: it would model one deployment's choice as the software's, and a
+    /// viewer that never exercised its fallback would pass.
+    #[test]
+    fn only_one_grid_names_a_currency() {
+        assert_eq!(ImitatedGrid::SecondLife.currency_symbol(), Some("L$"));
+        assert_eq!(ImitatedGrid::OpenSim.currency_symbol(), None);
     }
 
     /// The bake policy is four coupled advertisements, and the flavour has to
@@ -327,6 +479,53 @@ mod test {
             ImitatedGrid::SecondLife.inventory_announcement(),
             InventoryAnnouncement::BulkUpdate
         );
+    }
+
+    /// A take and a *save* are announced by **opposite** rules, and each
+    /// flavour is on the other side of the two. Written as one test because
+    /// the mistake it guards against is reusing one answer for both questions:
+    /// every part of it is a measurement (`notecard-create-update`'s
+    /// `save_announcement`, `asset-upload`'s `upload_announcement`,
+    /// `object-asset-format`'s take leg), so a "tidying" that collapsed the two
+    /// enums would be wrong about a live grid in both directions at once.
+    #[test]
+    fn a_take_and_a_save_are_announced_by_opposite_rules() {
+        assert_eq!(
+            ImitatedGrid::SecondLife.inventory_announcement(),
+            InventoryAnnouncement::BulkUpdate
+        );
+        assert_eq!(
+            ImitatedGrid::SecondLife.upload_announcements().saved,
+            UploadAnnouncement::Legacy
+        );
+        assert_eq!(
+            ImitatedGrid::OpenSim.inventory_announcement(),
+            InventoryAnnouncement::Legacy
+        );
+        assert_eq!(
+            ImitatedGrid::OpenSim.upload_announcements().saved,
+            UploadAnnouncement::Silent
+        );
+    }
+
+    /// The half of the upload table the two grids **agree** on, which is the
+    /// half that was got wrong by reasoning from the other half.
+    ///
+    /// It is asserted rather than left implicit because the wrong answer is the
+    /// tempting one: Second Life sends the legacy push after an in-place save,
+    /// and "so it must send it after a creation too" is what the fake grid
+    /// served until the aditi run (2026-09-08, `asset-upload`) recorded `none`
+    /// on both grids. A future flavour that starts announcing a creation should
+    /// have to delete this test on purpose.
+    #[test]
+    fn no_live_grid_announces_an_item_a_capability_upload_created() {
+        for grid in [ImitatedGrid::SecondLife, ImitatedGrid::OpenSim] {
+            assert_eq!(
+                grid.upload_announcements().created,
+                UploadAnnouncement::Silent,
+                "{grid:?} announced an item a NewFileAgentInventory upload created"
+            );
+        }
     }
 
     /// The fake grid's own default has to be the one Second Life actually is,

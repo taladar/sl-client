@@ -23,9 +23,25 @@
 //! `ViewerAsset` `AssetStore` to confirm the body round-trips. Each run uses a
 //! unique body so a leftover notecard cannot be mistaken for this run's; the
 //! created item is deleted again on the way out.
+//!
+//! # The `save_announcement` measurement
+//!
+//! The body write is also this workspace's only **live** in-place asset save,
+//! which makes it the one place either grid can be asked what it pushes after
+//! an upload completes *besides* the HTTP response — the question
+//! `sl_fake_grid::InventoryAnnouncement` deliberately left unanswered for the
+//! upload paths (`test-fake-grid-imitates-upload-announcements`). So the write
+//! is watched with [`observe_upload`] rather than merely awaited, and the
+//! shapes that named the saved item are recorded as `save_announcement`:
+//! `update-create-inventory-item`, `bulk-update-inventory`, or `none`.
+//!
+//! It is recorded, not asserted. A grid answering the completion and nothing
+//! else is a legitimate answer — the reference viewer rebuilds the item from
+//! the response body — and pinning either grid to a shape before both have been
+//! measured would assert the guess rather than the behaviour.
 
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use sl_client_tokio::{
     AssetCacheLimits, AssetKey, AssetType, AssetUpdateLocation, Command, Event, InventoryKey,
@@ -36,7 +52,14 @@ use sl_client_tokio::{
 use crate::context::{TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
-use crate::support::{LONG_TIMEOUT, REGION_TIMEOUT, check};
+use crate::support::{
+    LONG_TIMEOUT, REGION_TIMEOUT, check, count_metric, drain_announcements, observe_upload,
+};
+
+/// How long the create's traffic is given to finish before the body write
+/// starts — short, because the create's own reply has already arrived by then;
+/// the window is only there to catch a grid that says it twice.
+const CREATE_SETTLE: Duration = Duration::from_secs(5);
 
 /// The next-owner permission mask a viewer sends for a fresh notecard
 /// (move / modify / copy / transfer) — mirrors `asset-upload`.
@@ -139,11 +162,17 @@ impl GridTest for NotecardCreateUpdate {
             )?;
             let create_secs = create_start.elapsed().as_secs_f64();
 
+            // Let the create's own traffic finish before the save starts, so an
+            // announcement seen during the save is the *save*'s. Without it a
+            // grid that repeats the creation — a second `UpdateCreateInventoryItem`,
+            // a bulk update naming the same item — would have that trailing
+            // message read as the save's answer.
+            let trailing = drain_announcements(session, CREATE_SETTLE).await?.len();
+
             // --- update: set the body over UpdateNotecardAgentInventory. The
             // completion names the new body asset id (replacing the placeholder).
             let body = notecard_bytes(&format!("sl-conformance notecard-create-update {tag}\n"));
             let byte_len = body.len();
-            let update_start = Instant::now();
             session
                 .send(Command::UpdateInventoryAsset {
                     location: AssetUpdateLocation::AgentInventory { item_id },
@@ -151,17 +180,15 @@ impl GridTest for NotecardCreateUpdate {
                     data: body,
                 })
                 .await?;
-            let outcome = session
-                .wait_for(LONG_TIMEOUT, |event| match event {
-                    Event::AssetUploaded { new_asset, .. } => Some(Ok(*new_asset)),
-                    Event::AssetUploadFailed { reason } => Some(Err(reason.clone())),
-                    _other => None,
-                })
-                .await?;
-            let update_secs = update_start.elapsed().as_secs_f64();
+            // Watched rather than merely awaited: what a grid pushes *besides*
+            // the HTTP completion after an in-place save is the measurement
+            // this leg exists to take (see the module docs).
+            let observed = observe_upload(session, LONG_TIMEOUT).await?;
+            let update_secs = observed.elapsed.as_secs_f64();
+            let save_announcement = observed.announced_for(item_id);
 
-            let new_asset = match outcome {
-                Ok(asset) => asset,
+            let new_asset = match observed.outcome {
+                Ok(completion) => completion.new_asset,
                 Err(reason) => {
                     // Clean up the empty item before failing so a retry starts clean.
                     delete_item(ctx, item_id).await;
@@ -187,6 +214,11 @@ impl GridTest for NotecardCreateUpdate {
             metrics.set("asset_bytes", i64::try_from(byte_len).unwrap_or(-1));
             metrics.set("item_id", item_id.to_string());
             metrics.set("new_asset", new_asset.to_string());
+            metrics.set("save_announcement", save_announcement);
+            metrics.set(
+                &count_metric("create_trailing_announcements"),
+                i64::try_from(trailing).unwrap_or(-1),
+            );
             match roundtrip {
                 Some(true) => metrics.set("roundtrip", "match"),
                 Some(false) => metrics.set("roundtrip", "mismatch"),

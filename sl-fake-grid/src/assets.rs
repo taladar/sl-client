@@ -35,11 +35,49 @@
 //! that is the point — and the only reader is the rez path, which resolves an
 //! item's body by the **item's** id rather than by an asset id the viewer was
 //! never told. See [`ObjectAssetPolicy`] for why.
+//!
+//! # The body is whichever format the item's own grid writes
+//!
+//! `AssetType::Object` is **two formats on the two grids**, so the store that
+//! took the body decides which one it holds:
+//!
+//! - a **withheld** body is the Linden text (`sl_object_asset`), the format
+//!   Second Life is known to have written;
+//! - a **served** body is the `<SceneObjectGroup>` XML
+//!   (`sl_object_asset::opensim`), which is what OpenSim stores under this
+//!   class and the only thing a viewer fetching it there could be handed.
+//!
+//! Writing the text under [`ObjectAssetPolicy::Served`] would name OpenSim and
+//! serve bytes no OpenSim ever wrote, which is the one thing about that policy
+//! that was not faithful.
+//!
+//! # And a third store, because the *text* cannot hold a whole prim
+//!
+//! The Linden text has no keyword for a face's glow or material id, for the
+//! `ExtraParams` block (flexi, light, sculpt, **mesh**, light image, extended
+//! mesh, render material, reflection probe), for floating text, a media URL, a
+//! texture animation or a particle system. `sl_object_asset::bridge`'s own
+//! `the_text_carries_none_of_the_modern_prim` is the record of that. A grid
+//! that rezzed out of those bytes would hand a resident who took a light back
+//! a plain box.
+//!
+//! Neither live grid does that. OpenSim's XML carries all of it; Second Life's
+//! simulator has the object itself and never has to read an asset at all. So
+//! the third store is the fake grid having the same thing they have: **the
+//! linkset a take removed**, kept under the item that stands for it, and
+//! rezzed from in preference to either body.
+//!
+//! The stores do not compete. A body is what a viewer may *fetch* — under
+//! [`ObjectAssetPolicy::Served`], the only configuration where one crosses the
+//! wire — and stays exactly the bytes its format says. The linkset is what the
+//! *simulator* rezzes from, and is nobody else's business. An item with no
+//! linkset behind it (the seeded `Fixture Object`, which no take ever made)
+//! still rezzes from its body, which is the whole reason that fixture exists.
 
 use std::collections::HashMap;
 use std::sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-use sl_proto::InMemoryAssetSource;
+use sl_proto::{InMemoryAssetSource, Object};
 use sl_types::key::InventoryKey;
 
 /// What a take's object asset is worth to a viewer: the `AssetType::Object`
@@ -80,19 +118,21 @@ use sl_types::key::InventoryKey;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ObjectAssetPolicy {
     /// Second Life: a take files an item with a **nil** asset id, and the
-    /// object's body goes where no capability can reach it.
+    /// object's body — the Linden text — goes where no capability can reach it.
     #[default]
     Withheld,
     /// OpenSim: a take mints an asset id, names it in the item, and the grid
-    /// serves the body under it like any other asset.
+    /// serves the body under it like any other asset — as the
+    /// `<SceneObjectGroup>` XML OpenSim itself writes for this class, not as
+    /// the text the other side files.
     Served,
 }
 
 /// The one asset store a running grid serves, shared by every session, and
-/// beside it the withheld object bodies no capability reads (see the module
-/// docs).
+/// beside it the withheld object bodies no capability reads and the linksets a
+/// take removed (see the module docs).
 ///
-/// Cheap to clone; all clones are the same pair of stores.
+/// Cheap to clone; all clones are the same three stores.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct GridAssets {
     /// The shared store behind its lock.
@@ -101,6 +141,14 @@ pub(crate) struct GridAssets {
     /// grid, keyed by the inventory item that stands for them — which is all a
     /// viewer is given, and all the rez path needs.
     objects: Arc<RwLock<HashMap<InventoryKey, Vec<u8>>>>,
+    /// The **linksets** a take removed from the world, root first, keyed by the
+    /// item they were filed as — what a rez puts back, because the published
+    /// body cannot say all of it (see the module docs).
+    ///
+    /// Keyed by item under **both** policies, unlike the body: the rez path
+    /// always has the item in hand, and one key means the two halves of a take
+    /// cannot end up filed under different ones.
+    taken: Arc<RwLock<HashMap<InventoryKey, Vec<Object>>>>,
 }
 
 impl GridAssets {
@@ -137,6 +185,28 @@ impl GridAssets {
     /// The withheld body filed under `item`, if there is one.
     pub(crate) fn withheld_object(&self, item: InventoryKey) -> Option<Vec<u8>> {
         self.objects
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&item)
+            .cloned()
+    }
+
+    /// Records the linkset a take removed from the world under the item it was
+    /// filed as — root first, children after, the order a rez wants them in.
+    pub(crate) fn insert_taken_linkset(&self, item: InventoryKey, linkset: Vec<Object>) {
+        let _previous = self
+            .taken
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(item, linkset);
+    }
+
+    /// The linkset filed under `item`, if this grid is the one that took it.
+    ///
+    /// [`None`] for an item no take made — a fixture's seeded object item —
+    /// which is what sends the rez to the published body instead.
+    pub(crate) fn taken_linkset(&self, item: InventoryKey) -> Option<Vec<Object>> {
+        self.taken
             .read()
             .unwrap_or_else(PoisonError::into_inner)
             .get(&item)

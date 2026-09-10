@@ -1,8 +1,13 @@
 # sl-object-asset
 
-Decoder / encoder for the Second Life / OpenSim **inventory object asset** —
-the nested-block text a simulator writes when an object is taken into
-inventory, and reads back when it is rezzed.
+Decoders / encoders for the Second Life and OpenSim **inventory object
+asset** — what a simulator writes when an object is taken into inventory, and
+reads back when it is rezzed.
+
+The class is **two formats, one per grid**, and the crate is one module tree
+per format. The root modules are Second Life's: the nested-block text below.
+`opensim` is OpenSim's: the `<SceneObjectGroup>` XML, which carries the whole
+prim where the text carries a 2005 subset of it.
 
 `AssetType::Object` is what an inventory object item points at, and it is not
 the `ObjectUpdate` wire form: the two are unrelated encodings of the same prim.
@@ -90,7 +95,8 @@ OpenSim does not use the format at all: it stores
 `CoalescedSceneObjectsSerializer.ToXml` for a multi-object take — as its
 `AssetType.Object` body (`InventoryAccessModule.cs`), which is XML and shares
 nothing with this. `AssetType::Object` is two different formats on the two
-grids, and this crate is the Second Life one.
+grids, and the crate carries both — everything outside `opensim` is the Second
+Life one.
 
 The grammar is therefore reconstructed — and the crate is explicit about which
 part rests on what:
@@ -129,16 +135,20 @@ full-perm to their owner. A viewer cannot fetch an object asset there at all,
 which is consistent with neither reference viewer ever having carried a reader
 for one.
 
-So this crate is not on a viewer's critical path. It is here because the fake
-grid's take has to serialise *something* — or nothing can drag the object back
-out of inventory — and because the two reference captures deserve a reader that
-can say what they contain.
+So neither format is on a viewer's critical path. The crate is here because the
+fake grid's take has to serialise *something* — or nothing can drag the object
+back out of inventory — because the two reference captures deserve a reader
+that can say what they contain, and because anything reading a taken object's
+asset off a live OpenSim gets `<SceneObjectGroup>` XML and needs a reader for
+that.
 
-The fake grid now imitates Second Life here by default
+The fake grid imitates Second Life here by default
 (`sl_fake_grid::ObjectAssetPolicy::Withheld`): a take is filed under a nil asset
-id and the body is kept where no capability reaches it, so these bytes never
-cross the wire unless a test asks for OpenSim's side (`Served`), where the item
-names the asset and the grid serves it.
+id and the Linden-text body is kept where no capability reaches it, so those
+bytes never cross the wire. A test that asks for OpenSim's side (`Served`) gets
+the item naming the asset, the grid serving it — and the body written as the
+XML OpenSim itself writes, because serving the text under OpenSim's name would
+be serving bytes no OpenSim has ever produced.
 
 ## Two departures from the reference
 
@@ -163,3 +173,38 @@ sculpt, mesh, reflection probe), none for floating text — only its colour —
 none for a media URL, and none for a texture animation or particle system. That
 is the format's limit rather than the crate's, and it is documented rather than
 papered over with invented keywords.
+
+## `opensim`: the other grid's format
+
+`SceneObjectSerializer.ToOriginalXmlFormat` transcribed both ways — the writer
+from `SOPToXml2` / `WriteShape` / `WriteTaskInventory`, the reader from the same
+file's element → handler tables, and therefore order-independent the way
+OpenSim's is. An element the module does not model (`DynAttrs`, a vehicle, a
+physics-inertia block, `SOPAnims`, a keyframe motion) is captured verbatim and
+written back, so a re-save loses nothing.
+
+What it buys over the text is the reason it exists: the `Shape` block carries
+the wire's packed `TextureEntry` and `ExtraParams` blobs **byte for byte**, so
+a face's glow and legacy material id and the whole flexi / light / sculpt /
+mesh / light-image / extended-mesh / render-material / reflection-probe set
+cross it without being interpreted at all, and floating text, a media URL, a
+texture animation and a particle system each have an element.
+`opensim::bridge`'s `the_xml_carries_the_whole_modern_prim` is the text
+format's own missing-field test read the other way round.
+
+Two conversions in that bridge are **not** the identity, and both are measured
+rather than assumed:
+
+- hover-text alpha is inverted — OpenSim stores `Color.A` as opacity and sends
+  `0xFF - A` (`SceneObjectPart.GetTextColor`), which the reference viewer
+  inverts straight back;
+- a light's alpha byte on the wire is its *intensity*
+  (`PrimitiveBaseShape.ExtraParamsToBytes` says so), so the XML's
+  `LightColorA` is a different value that never crosses the wire at all.
+
+Prim flags are written as OpenSim writes them: the **names** of the set bits,
+comma-separated by C# and then stripped of the commas. The names and values
+come out of the `OpenMetaverseTypes.dll` OpenSim ships rather than from memory —
+that fork's `ObjectTransfer` is `0x0002_0000` where upstream libopenmetaverse
+has `0x0004_0000`, so a table written from memory would misname every flag
+above `AllowInventoryDrop`.

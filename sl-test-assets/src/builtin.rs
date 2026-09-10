@@ -18,6 +18,13 @@
 //! flat `(128, 128, 255)` normal leaves the sea unrippled rather than warped, and
 //! the halo's bright band sits at the 22° radius the shader samples it at.
 //!
+//! The **built-in UI sounds** ([`library_sounds`]) are here for the same
+//! reason, one register over: the typing chirp, the money chime, the teleport
+//! whoosh and the rest are library ids too — the reference viewer ships no
+//! sound anywhere in its tree — so a grid answers them or a viewer's own
+//! feedback is silent. Their stand-in is a tone per id, a whole tone apart, so
+//! which one played is something an ear can tell.
+//!
 //! Each is keyed by the id `sl-proto` names for it, so nothing here restates a
 //! UUID the renderer already knows.
 
@@ -530,6 +537,67 @@ const fn wearable_layer_rgba(layer: sl_proto::avatar_texture::WearableLayer) -> 
     }
 }
 
+/// The lowest pitch a built-in UI sound stand-in is written at, in hertz — A3,
+/// the [`tones::LOW`](crate::sound::tones::LOW) of the fixture tones, so the
+/// library sounds sit in the same register as everything else this crate
+/// writes.
+const UI_SOUND_BASE_HZ: f32 = crate::sound::tones::LOW;
+
+/// How many whole steps of [`UI_SOUND_BASE_HZ`] make an octave: six, so the
+/// twelve stand-ins are a whole-tone series spanning two octaves.
+///
+/// A whole tone rather than a semitone because these are meant to be told apart
+/// *by ear, in the role* — a chime against a click against a shutter — and a
+/// semitone between two unfamiliar short sounds is not something anyone hears.
+const UI_SOUND_STEPS_PER_OCTAVE: f32 = 6.0;
+
+/// The pitch the stand-in for built-in UI sound `id` is written at, or `None`
+/// for an id that is not one of [`sl_proto::BUILTIN_UI_SOUNDS`].
+///
+/// The pitch is the id's position in that list, which makes it stable across
+/// runs and across the two sides that care: a test asserting what came off the
+/// wire, and an ear listening to a viewer play one. The order is the list's
+/// own, so adding a sound there gives it the next pitch up rather than
+/// renumbering the ones below it.
+#[must_use]
+pub fn ui_sound_pitch_hz(id: Uuid) -> Option<f32> {
+    let index = sl_proto::BUILTIN_UI_SOUNDS
+        .into_iter()
+        .position(|candidate| candidate == id)?;
+    // The list is twelve long, so the index is always a `u8`; the fallback
+    // would only be reached by a list longer than 255, which would be a
+    // different problem entirely.
+    let step = f32::from(u8::try_from(index).unwrap_or(u8::MAX));
+    Some(UI_SOUND_BASE_HZ * (step / UI_SOUND_STEPS_PER_OCTAVE).exp2())
+}
+
+/// One Ogg Vorbis stand-in per built-in UI sound
+/// ([`sl_proto::BUILTIN_UI_SOUNDS`]), each a quarter-second tone at its own
+/// [`ui_sound_pitch_hz`].
+///
+/// The same honesty as [`library_textures`], for the same reason: these are
+/// library ids on a real grid — the reference viewer ships no sound at all, its
+/// `static_assets` folders holding only animations, wearables and gestures — so
+/// a fake grid that serves none of them leaves every UI sound silent and every
+/// arrival with a handful of failed fetches. What it does *not* claim to be is
+/// Linden's own audio; a tone is what a stand-in can honestly be, and a
+/// distinct tone per id is what makes a played one identifiable.
+///
+/// # Errors
+///
+/// The encoder's error, which a quarter-second mono tone cannot produce.
+pub fn library_sounds() -> Result<Vec<(Uuid, Vec<u8>)>, sl_sound::EncodeError> {
+    sl_proto::BUILTIN_UI_SOUNDS
+        .into_iter()
+        .map(|id| {
+            // Every id is in the list being iterated, so the pitch is always
+            // there; the base pitch is the answer no id produces.
+            let pitch = ui_sound_pitch_hz(id).unwrap_or(UI_SOUND_BASE_HZ);
+            crate::sound::marker_tone(pitch).map(|bytes| (id, bytes))
+        })
+        .collect()
+}
+
 /// The vendored upstream textures, embedded so the fixture crate stays free of
 /// filesystem access like the rest of it.
 ///
@@ -575,8 +643,10 @@ fn vendored_textures() -> Vec<(Uuid, Vec<u8>)> {
 mod tests {
     use super::{
         FLAT_NORMAL_RGBA, HALO_BAND_CENTRE, SHAPED_SIZE, cloud_noise, flat_wave_normal, halo_ring,
-        library_textures, moon_disc, rainbow_band, star_bloom, sun_disc,
+        library_sounds, library_textures, moon_disc, rainbow_band, star_bloom, sun_disc,
+        ui_sound_pitch_hz,
     };
+    use crate::sound::oracle::{decode, magnitude_at};
     use pretty_assertions::assert_eq;
 
     type TestError = Box<dyn core::error::Error>;
@@ -619,6 +689,65 @@ mod tests {
                 "the stand-in for {id} encoded to nothing"
             );
         }
+        Ok(())
+    }
+
+    /// Every built-in UI sound is answered once, and what comes back decodes —
+    /// through `symphonium`, the decoder `sl-audio` plays a clip with — to the
+    /// pitch its id was assigned, louder there than at either neighbour's.
+    ///
+    /// Decoding rather than length-checking is the point: an id nothing serves
+    /// and an id serving a few bytes of nothing are the same silence to a
+    /// mixer.
+    #[test]
+    fn every_built_in_ui_sound_stand_in_carries_its_own_pitch() -> Result<(), TestError> {
+        let sounds = library_sounds()?;
+        assert_eq!(
+            sounds.len(),
+            sl_proto::BUILTIN_UI_SOUNDS.len(),
+            "the stand-ins and the built-in UI sound list disagree"
+        );
+        for (id, bytes) in &sounds {
+            let wanted = ui_sound_pitch_hz(*id).ok_or("a stand-in has no pitch")?;
+            let decoded = decode(bytes)?;
+            assert_eq!(decoded.len(), 1, "the stand-in for {id} is not mono");
+            let samples = decoded.first().ok_or("no channel")?;
+            let peak = magnitude_at(samples, wanted);
+            for (other, _bytes) in &sounds {
+                if other == id {
+                    continue;
+                }
+                let neighbour_pitch = ui_sound_pitch_hz(*other).ok_or("a stand-in has no pitch")?;
+                let neighbour = magnitude_at(samples, neighbour_pitch);
+                assert!(
+                    peak > neighbour * 8.0,
+                    "the stand-in for {id} ({wanted} Hz, {peak}) is not clearly \
+                     louder than {neighbour_pitch} Hz ({neighbour})"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// The pitches are a rising whole-tone series over two octaves, and an id
+    /// that is not a built-in UI sound has none. The series is what makes a
+    /// played sound identifiable by ear; a repeated pitch would put two of the
+    /// twelve beyond telling apart.
+    #[test]
+    fn the_ui_sound_pitches_rise_and_stay_in_the_audible_register() -> Result<(), TestError> {
+        let mut previous = 0.0_f32;
+        for id in sl_proto::BUILTIN_UI_SOUNDS {
+            let pitch = ui_sound_pitch_hz(id).ok_or("a built-in UI sound has no pitch")?;
+            assert!(
+                pitch > previous,
+                "the pitch for {id} ({pitch} Hz) does not rise above {previous} Hz"
+            );
+            previous = pitch;
+        }
+        // Two octaves up from A3 is A5, which is where a whole-tone series of
+        // twelve ends: comfortably inside anything that can play a UI chime.
+        assert!(previous < 880.0, "the series runs past A5 at {previous} Hz");
+        assert_eq!(ui_sound_pitch_hz(sl_proto::DEFAULT_PRIM_TEXTURE), None);
         Ok(())
     }
 

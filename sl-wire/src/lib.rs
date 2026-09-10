@@ -103,13 +103,14 @@ pub use header::{PacketFlags, ParsedDatagram, encode_datagram, parse_datagram};
 pub use inventory::{
     AIS_CURRENT_OUTFIT_LINKS_PATH, AIS_MAX_FOLDER_DEPTH, AIS_ORPHANS_PATH, AisCategoryCreate,
     AisItemUpdate, AisLinkCreate, AisUpdate, CreateInventoryCategoryRequest,
-    ais_category_children_fetch_url, ais_category_children_url, ais_category_links_url,
-    ais_category_url, ais_create_category_url, ais_current_outfit_links_url, ais_item_url,
-    ais_orphans_url, ais_update_to_llsd, build_ais_create_category_body,
-    build_ais_create_link_body, build_ais_move_body, build_ais_rename_category_body,
-    build_ais_update_item_body, build_ais_update_response, build_create_inventory_category_request,
-    build_create_inventory_category_response, is_ais_current_outfit_links_url, is_ais_orphans_url,
-    parse_ais_category_children_fetch_url, parse_ais_category_children_url,
+    ais_category_children_fetch_url, ais_category_children_subset_url, ais_category_children_url,
+    ais_category_links_url, ais_category_url, ais_create_category_url,
+    ais_current_outfit_links_url, ais_item_url, ais_orphans_url, ais_update_to_llsd,
+    build_ais_create_category_body, build_ais_create_link_body, build_ais_move_body,
+    build_ais_rename_category_body, build_ais_update_item_body, build_ais_update_response,
+    build_create_inventory_category_request, build_create_inventory_category_response,
+    is_ais_current_outfit_links_url, is_ais_orphans_url, parse_ais_category_children_fetch_url,
+    parse_ais_category_children_subset, parse_ais_category_children_url,
     parse_ais_category_links_url, parse_ais_category_url, parse_ais_create_category_body,
     parse_ais_create_category_url, parse_ais_create_link_body, parse_ais_item_url,
     parse_ais_move_body, parse_ais_rename_category_body, parse_ais_update_item_body,
@@ -122,9 +123,9 @@ pub use llsd::{
     MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER,
     MediaEntry, NewFileAgentInventoryRequest, ObjectMediaNavigateRequest, ObjectMediaRequest,
     ObjectMediaResponse, UpdateScriptAgentRequest, UpdateScriptTaskRequest,
-    UpdateTaskItemAssetRequest, build_asset_upload_response, build_event_queue_request,
-    build_event_queue_response, build_fetch_inventory_items_request, build_fetch_inventory_request,
-    build_group_member_data_request, build_group_notice_bucket,
+    UpdateTaskItemAssetRequest, UploadGrantedPermissions, build_asset_upload_response,
+    build_event_queue_request, build_event_queue_response, build_fetch_inventory_items_request,
+    build_fetch_inventory_request, build_group_member_data_request, build_group_notice_bucket,
     build_new_file_agent_inventory_request, build_object_media_get_request,
     build_object_media_navigate_request, build_object_media_update_request, build_seed_request,
     build_seed_response, build_update_avatar_appearance_request, build_update_item_asset_request,
@@ -253,14 +254,15 @@ mod test {
     use pretty_assertions::assert_eq;
 
     use super::{
-        MediaEntry, MessageId, ObjectMediaRequest, ObjectMediaResponse, PacketFlags, Reader,
-        SequenceNumber, WireError, Writer, build_group_notice_bucket,
-        build_new_file_agent_inventory_request, build_object_media_get_request,
-        build_object_media_navigate_request, build_object_media_update_request,
-        build_update_avatar_appearance_request, build_update_item_asset_request,
-        build_update_script_agent_request, build_update_script_task_request,
-        build_update_task_item_asset_request, combine_uuids, encode_datagram, message_name,
-        parse_asset_upload_response, parse_datagram, parse_llsd_xml,
+        AssetUploadResponse, MediaEntry, MessageId, NewFileAgentInventoryRequest,
+        ObjectMediaRequest, ObjectMediaResponse, PacketFlags, Permissions, Reader, SequenceNumber,
+        UploadGrantedPermissions, WireError, Writer, build_asset_upload_response,
+        build_group_notice_bucket, build_new_file_agent_inventory_request,
+        build_object_media_get_request, build_object_media_navigate_request,
+        build_object_media_update_request, build_update_avatar_appearance_request,
+        build_update_item_asset_request, build_update_script_agent_request,
+        build_update_script_task_request, build_update_task_item_asset_request, combine_uuids,
+        encode_datagram, message_name, parse_asset_upload_response, parse_datagram, parse_llsd_xml,
         parse_new_file_agent_inventory_request, parse_object_media_navigate_request,
         parse_object_media_request, parse_update_avatar_appearance_request,
         parse_update_item_asset_request, parse_update_script_agent_request,
@@ -481,17 +483,17 @@ mod test {
     #[test]
     fn new_file_agent_inventory_request_carries_metadata() {
         let folder = sl_types::key::InventoryFolderKey::from(uuid::Uuid::from_u128(0x00f0_1de7));
-        let body = build_new_file_agent_inventory_request(
-            folder,
-            "texture",
-            "texture",
-            "My Pic",
-            "a desc",
-            0x0008_e000,
-            0,
-            0,
-            0,
-        );
+        let body = build_new_file_agent_inventory_request(&NewFileAgentInventoryRequest {
+            folder_id: folder,
+            asset_type: "texture".to_owned(),
+            inventory_type: "texture".to_owned(),
+            name: "My Pic".to_owned(),
+            description: "a desc".to_owned(),
+            next_owner_mask: 0x0008_e000,
+            group_mask: 0,
+            everyone_mask: 0,
+            expected_upload_cost: 0,
+        });
         assert!(body.contains(&format!("<uuid>{folder}</uuid>")));
         assert!(body.contains("<key>asset_type</key><string>texture</string>"));
         assert!(body.contains("<key>inventory_type</key><string>texture</string>"));
@@ -539,6 +541,77 @@ mod test {
         assert_eq!(failed.state, "error");
         assert_eq!(failed.uploader, None);
         assert_eq!(failed.error.as_deref(), Some("insufficient funds"));
+        Ok(())
+    }
+
+    #[test]
+    fn upload_completion_reports_the_permissions_it_granted() -> Result<(), roxmltree::Error> {
+        let asset = uuid::Uuid::from_u128(0x000a_55e7);
+        let item = uuid::Uuid::from_u128(0x17e3);
+        let granted = parse_asset_upload_response(&format!(
+            "<llsd><map><key>state</key><string>complete</string>\
+             <key>new_asset</key><string>{asset}</string>\
+             <key>new_inventory_item</key><uuid>{item}</uuid>\
+             <key>new_next_owner_mask</key><integer>581632</integer>\
+             <key>new_group_mask</key><integer>0</integer>\
+             <key>new_everyone_mask</key><integer>32768</integer>\
+             <key>inventory_flags</key><integer>7</integer></map></llsd>"
+        ))?;
+        assert_eq!(
+            granted.granted,
+            Some(UploadGrantedPermissions {
+                next_owner: Permissions::from_bits(0x0008_e000),
+                group: Permissions::NONE,
+                everyone: Permissions::COPY,
+            })
+        );
+        assert_eq!(granted.inventory_flags, Some(7));
+
+        // A completion that names none of them says nothing about them: the
+        // client falls back to the reference's assumption rather than reading
+        // zeros as "no permissions granted".
+        let silent = parse_asset_upload_response(&format!(
+            "<llsd><map><key>state</key><string>complete</string>\
+             <key>new_asset</key><string>{asset}</string>\
+             <key>new_inventory_item</key><uuid>{item}</uuid></map></llsd>"
+        ))?;
+        assert_eq!(silent.granted, None);
+        assert_eq!(silent.inventory_flags, None);
+
+        // OpenSim spells the flags field `inventory_item_flags`
+        // (`LLSDAssetUploadComplete.cs`), which no stock viewer reads.
+        let opensim = parse_asset_upload_response(&format!(
+            "<llsd><map><key>state</key><string>complete</string>\
+             <key>new_asset</key><string>{asset}</string>\
+             <key>inventory_item_flags</key><integer>3</integer></map></llsd>"
+        ))?;
+        assert_eq!(opensim.inventory_flags, Some(3));
+        Ok(())
+    }
+
+    #[test]
+    fn upload_completion_round_trips_through_the_builder() -> Result<(), roxmltree::Error> {
+        let response = AssetUploadResponse {
+            state: "complete".to_owned(),
+            uploader: None,
+            new_asset: Some(uuid::Uuid::from_u128(0xa55e7)),
+            new_inventory_item: Some(uuid::Uuid::from_u128(0x17e3)),
+            error: None,
+            compiled: None,
+            errors: Vec::new(),
+            granted: Some(UploadGrantedPermissions {
+                next_owner: Permissions::ITEM_UNRESTRICTED,
+                group: Permissions::NONE,
+                everyone: Permissions::COPY,
+            }),
+            // The reserved top bit has no positive `i32`; it still survives the
+            // trip through the wire's signed encoding.
+            inventory_flags: Some(Permissions::RESERVED.bits()),
+        };
+        assert_eq!(
+            parse_asset_upload_response(&build_asset_upload_response(&response))?,
+            response
+        );
         Ok(())
     }
 
@@ -683,27 +756,19 @@ mod test {
         let task = sl_types::key::ObjectKey::from(uuid::Uuid::from_u128(0x7a));
         let exp = sl_types::key::ExperienceKey::from(uuid::Uuid::from_u128(0xe0));
 
-        let new_file = build_new_file_agent_inventory_request(
-            folder,
-            "animatn",
-            "animation",
-            "Wave",
-            "a wave",
-            0x0008_e000,
-            4,
-            2,
-            15,
-        );
-        let parsed = parse_new_file_agent_inventory_request(&new_file)?;
-        assert_eq!(parsed.folder_id, folder);
-        assert_eq!(parsed.asset_type, "animatn");
-        assert_eq!(parsed.inventory_type, "animation");
-        assert_eq!(parsed.name, "Wave");
-        assert_eq!(parsed.description, "a wave");
-        assert_eq!(parsed.next_owner_mask, 0x0008_e000);
-        assert_eq!(parsed.group_mask, 4);
-        assert_eq!(parsed.everyone_mask, 2);
-        assert_eq!(parsed.expected_upload_cost, 15);
+        let request = NewFileAgentInventoryRequest {
+            folder_id: folder,
+            asset_type: "animatn".to_owned(),
+            inventory_type: "animation".to_owned(),
+            name: "Wave".to_owned(),
+            description: "a wave".to_owned(),
+            next_owner_mask: 0x0008_e000,
+            group_mask: 4,
+            everyone_mask: 2,
+            expected_upload_cost: 15,
+        };
+        let new_file = build_new_file_agent_inventory_request(&request);
+        assert_eq!(parse_new_file_agent_inventory_request(&new_file)?, request);
 
         assert_eq!(
             parse_update_item_asset_request(&build_update_item_asset_request(item))?,

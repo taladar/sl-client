@@ -683,6 +683,244 @@ mod test {
         Ok(())
     }
 
+    /// An item a capability upload **rewrote** is pushed to the client on a
+    /// Second-Life-flavoured grid and on no other — the divergent half of
+    /// `sl_fake_grid::UploadAnnouncements`, asserted from the client's side
+    /// because that is the side it is visible from. The other half, an item an
+    /// upload *created*, is
+    /// [`no_flavour_announces_an_item_a_capability_upload_created`].
+    ///
+    /// Worth both flavours rather than one: a viewer that waits for a push
+    /// after a save works against the flavour that sends one and hangs against
+    /// the flavour that does not, and a viewer that ignores the push and reads
+    /// the capability's own response works against both — but then keeps an
+    /// item naming the asset the save replaced, which is the trade this row
+    /// makes visible. Only running the two shows which kind this workspace's
+    /// client is.
+    #[tokio::test]
+    async fn only_a_second_life_flavoured_grid_announces_an_item_an_upload_rewrote()
+    -> Result<(), TestError> {
+        let item = sl_fake_grid::scenario::fixture_item_id(sl_proto::AssetType::Notecard);
+
+        // Second Life: the legacy UDP push follows the completion. In one wait,
+        // because the two travel by different roads (an HTTP response and a UDP
+        // packet) and neither order is promised.
+        let mut running = start_configured(
+            vec![RegionConfig::default()],
+            None,
+            ImitatedGrid::SecondLife,
+        )
+        .await?;
+        save_over_seeded_notecard(&running, item).await?;
+        let mut completed = false;
+        let mut announced = false;
+        running
+            .wait_until(
+                "the save's completion and its legacy announcement",
+                |event| {
+                    match event {
+                        Event::AssetUploaded { .. } => completed = true,
+                        Event::InventoryItemCreated { item: got, .. } if got.item_id == item => {
+                            announced = true;
+                        }
+                        _other => {}
+                    }
+                    completed && announced
+                },
+            )
+            .await?;
+
+        // OpenSim: the completion, and nothing else. The task-inventory listing
+        // is the terminating condition — it is requested *after* the save
+        // finished and answered on the same circuit, so an announcement the
+        // save was going to make would already have arrived.
+        let mut running =
+            start_configured(vec![RegionConfig::default()], None, ImitatedGrid::OpenSim).await?;
+        save_over_seeded_notecard(&running, item).await?;
+        running
+            .wait_until("the save's completion", |event| {
+                matches!(event, Event::AssetUploaded { .. })
+            })
+            .await?;
+        running
+            .commands
+            .send(Command::FetchTaskInventory {
+                target: sl_client_tokio::ScopedObjectId::new(
+                    running.circuit,
+                    sl_fake_grid::scenario::STOCK_SCRIPTED_OBJECT_LOCAL_ID,
+                ),
+            })
+            .await?;
+        let mut spoke = false;
+        running
+            .wait_until("the listing that follows the save", |event| match event {
+                Event::InventoryItemCreated { item: got, .. } if got.item_id == item => {
+                    spoke = true;
+                    true
+                }
+                Event::TaskInventoryContents { .. } => true,
+                _other => false,
+            })
+            .await?;
+        assert!(
+            !spoke,
+            "an OpenSim-flavoured grid announced an item a capability upload rewrote"
+        );
+        Ok(())
+    }
+
+    /// A `NewFileAgentInventory` upload's **new** item is announced by neither
+    /// flavour — the half of `sl_fake_grid::UploadAnnouncements` the two live
+    /// grids agree on.
+    ///
+    /// Both halves again, and for a sharper reason than the save's test has:
+    /// this is the half that was filled in by reasoning from the other and
+    /// filled in *wrong*, so the Second Life leg is not "the same as OpenSim,
+    /// obviously" — it is the leg that used to push and was measured (aditi,
+    /// 2026-09-08) not to. A client that reads the completion's response body,
+    /// as the reference viewer and this workspace's do, sees the created item
+    /// either way; one that waits for a push waits forever on every grid there
+    /// is.
+    #[tokio::test]
+    async fn no_flavour_announces_an_item_a_capability_upload_created() -> Result<(), TestError> {
+        for imitates in [ImitatedGrid::SecondLife, ImitatedGrid::OpenSim] {
+            let mut running =
+                start_configured(vec![RegionConfig::default()], None, imitates).await?;
+            running.commands.send(Command::QueryInventoryRoots).await?;
+            let root = running
+                .wait_for(|event| match event {
+                    Event::InventoryRoots { agent_root, .. } => *agent_root,
+                    _ => None,
+                })
+                .await?;
+            running
+                .commands
+                .send(Command::UploadAsset {
+                    folder_id: root,
+                    asset_type: sl_proto::AssetType::Notecard,
+                    inventory_type: sl_proto::InventoryType::Notecard,
+                    name: "created-by-upload".to_owned(),
+                    description: "the item whose announcement is under test".to_owned(),
+                    next_owner_mask: 0x0008_e000,
+                    group_mask: 0,
+                    everyone_mask: 0,
+                    expected_upload_cost: 0,
+                    data: b"Linden text version 2\n{\nLLEmbeddedItems version 1\n{\ncount 0\n}\nText length 0\n}\n".to_vec(),
+                })
+                .await?;
+            let mut created = None;
+            running
+                .wait_until("the upload's completion", |event| match event {
+                    Event::AssetUploaded {
+                        new_inventory_item, ..
+                    } => {
+                        created = *new_inventory_item;
+                        true
+                    }
+                    _other => false,
+                })
+                .await?;
+            let created = created.ok_or("the upload minted no inventory item")?;
+
+            // The same terminating condition the save's OpenSim leg uses: a
+            // listing requested *after* the completion and answered on the same
+            // circuit, so an announcement the upload was going to make would
+            // already have overtaken it.
+            running
+                .commands
+                .send(Command::FetchTaskInventory {
+                    target: sl_client_tokio::ScopedObjectId::new(
+                        running.circuit,
+                        sl_fake_grid::scenario::STOCK_SCRIPTED_OBJECT_LOCAL_ID,
+                    ),
+                })
+                .await?;
+            let mut spoke = false;
+            running
+                .wait_until("the listing that follows the upload", |event| match event {
+                    Event::InventoryItemCreated { item: got, .. }
+                        if got.item_id == sl_types::key::InventoryKey::from(created) =>
+                    {
+                        spoke = true;
+                        true
+                    }
+                    Event::TaskInventoryContents { .. } => true,
+                    _other => false,
+                })
+                .await?;
+            assert!(
+                !spoke,
+                "a {imitates:?}-flavoured grid announced an item a capability upload created"
+            );
+
+            // And the other half of the same fact: because nothing announces
+            // it, the item is in inventory only if the client filed it from the
+            // completion itself. A folder query is answered from the *held*
+            // model then and there — a fetch it may also schedule cannot have
+            // replied before the page it returns — so finding the item in this
+            // first page is finding it in the model, with no re-fetch involved.
+            running
+                .commands
+                .send(Command::QueryInventoryFolder {
+                    folder: root,
+                    before: None,
+                    limit: 200,
+                })
+                .await?;
+            let items = running
+                .wait_for(|event| match event {
+                    Event::InventoryFolderPage { folder, items, .. } if *folder == root => {
+                        Some(std::sync::Arc::clone(items))
+                    }
+                    _other => None,
+                })
+                .await?;
+            let filed = items
+                .iter()
+                .find(|item| item.item_id == sl_types::key::InventoryKey::from(created))
+                .ok_or("the item the upload created is not in its own folder")?;
+            assert_eq!(filed.name, "created-by-upload");
+            assert_eq!(
+                filed.description,
+                "the item whose announcement is under test"
+            );
+            assert_eq!(filed.asset_type, sl_proto::AssetType::Notecard);
+            assert_eq!(filed.inv_type, sl_proto::InventoryType::Notecard);
+            // The grid reported what it granted, so those masks are the item's
+            // — not the ones the request asked for, and not a guess.
+            assert_eq!(
+                filed.permissions.next_owner,
+                sl_proto::Permissions::from_bits(0x0008_e000)
+            );
+        }
+        Ok(())
+    }
+
+    /// Saves a fresh body over the seeded notecard fixture through the
+    /// `UpdateNotecardAgentInventory` capability — the in-place save both live
+    /// grids serve, and the one whose announcement they disagree about.
+    async fn save_over_seeded_notecard(
+        running: &Running,
+        item: sl_types::key::InventoryKey,
+    ) -> Result<(), TestError> {
+        // The fixture's own edited body, so the bytes are a notecard the
+        // workspace's decoder accepts rather than a string this test invented.
+        let body = sl_test_assets::inventory::seeded_assets()?
+            .into_iter()
+            .find(|asset| asset.asset_type == sl_proto::AssetType::Notecard)
+            .ok_or("no seeded notecard fixture")?
+            .edited_body;
+        running
+            .commands
+            .send(Command::UpdateInventoryAsset {
+                location: sl_client_tokio::AssetUpdateLocation::AgentInventory { item_id: item },
+                asset_type: sl_client_tokio::UpdatableAssetType::Notecard,
+                data: body,
+            })
+            .await?;
+        Ok(())
+    }
+
     #[tokio::test]
     async fn estate_covenant_round_trips() -> Result<(), TestError> {
         let mut running = start().await?;
@@ -972,7 +1210,15 @@ mod test {
             .ok_or("an OpenSim-flavoured grid sent no OpenSimExtras")?;
         assert_eq!(extras.map_server_url.as_ref(), Some(&login_uri));
         assert_eq!(extras.currency_base_uri.as_ref(), Some(&login_uri));
-        assert_eq!(extras.currency.as_deref(), Some("L$"));
+        // The helper *base* is here; the currency **symbol** is not, and that is
+        // the shape of a stock OpenSim region rather than an omission. Its
+        // extras block carries `currency-base-uri` alone, and its login service
+        // emits `currency` only `if (currency != String.Empty)` — the default
+        // being empty. So a viewer against a grid nobody configured falls back
+        // to its own symbol (`OS$` in Firestorm), and asserting `L$` here, as
+        // this test did until the flavour decided the symbol, was asserting a
+        // Second Life answer from an OpenSim-flavoured grid.
+        assert_eq!(extras.currency, None);
         assert_eq!(features.voice_server_type, None);
         assert!(!named_a_backend, "OpenSim sends no RequiredVoiceVersion");
 
@@ -1885,14 +2131,81 @@ mod test {
         Ok(())
     }
 
+    /// **A crossing the client never completes leaves everything where it
+    /// was.**
+    ///
+    /// The teleport path has had its arrival timeout asserted twice; the
+    /// crossing path has the same branch —
+    /// [`CROSSING_ARRIVAL_TIMEOUT`](sl_fake_grid::CROSSING_ARRIVAL_TIMEOUT),
+    /// its own `wait_for_arrival` — and nothing had ever reached it. The
+    /// destination here is a *neighbour*, which is what a crossing destination
+    /// almost always is: the child circuit was opened by the neighbour
+    /// announcement, not by this crossing, so the failure is not entitled to
+    /// take it down. The client is stopped so its movement can never complete,
+    /// which is the one way to hold a handover open deterministically.
+    #[tokio::test]
+    async fn a_crossing_that_never_arrives_leaves_the_neighbour_alone() -> Result<(), TestError> {
+        let mut running = start_configured(
+            vec![RegionConfig::default(), adjacent_east_region()],
+            Some(SHORT_HANDOVER),
+            ImitatedGrid::default(),
+        )
+        .await?;
+        running
+            .wait_until("the east region's child circuit", |event| match event {
+                Event::GenericMessage(generic) => {
+                    sl_fake_grid::neighbour_marker_region(generic).as_deref()
+                        == Some("Fake Region East")
+                }
+                _ => false,
+            })
+            .await?;
+        let before = running._grid.sessions_in("Fake Region East").await;
+        let before_seq = before.first().ok_or("no child")?.session_seq().await;
+
+        // Stop the client: from here nothing can complete the movement.
+        running.run.abort();
+        let error = running
+            ._grid
+            .cross_agent(
+                &running.agent,
+                "Fake Region East",
+                RegionCoordinates::new(2.0, 128.0, 26.0),
+                Vector {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            )
+            .await
+            .err()
+            .ok_or("a crossing nobody completes cannot succeed")?;
+        assert!(matches!(error, sl_fake_grid::Error::CrossingTimedOut));
+
+        let after = running._grid.sessions_in("Fake Region East").await;
+        assert_eq!(after.len(), 1, "the neighbour's circuit is still there");
+        let survivor = after.first().ok_or("no child")?;
+        assert_eq!(
+            survivor.session_seq().await,
+            before_seq,
+            "and it is the same session, not a replacement"
+        );
+        assert!(!survivor.is_closed());
+        assert!(
+            !running.agent.is_closed() && running.agent.with_sim(|sim| sim.is_root_agent()).await,
+            "the agent stays the root agent of the region it never left"
+        );
+        Ok(())
+    }
+
     /// How long the failure tests let the grid wait for an arrival that is
     /// never coming.
     ///
     /// Long enough that it is a *timeout* and not a race with the announcement
-    /// that precedes it, short enough that four tests of the failure half cost
-    /// less than a second between them. `TELEPORT_ARRIVAL_TIMEOUT` is thirty
-    /// seconds, which is right for a viewer on a bad link and wrong for a
-    /// suite.
+    /// that precedes it, short enough that every test of the failure half
+    /// together costs less than a second. `TELEPORT_ARRIVAL_TIMEOUT` is thirty
+    /// seconds and `CROSSING_ARRIVAL_TIMEOUT` fifteen, which is right for a
+    /// viewer on a bad link and wrong for a suite.
     const SHORT_HANDOVER: Duration = Duration::from_millis(250);
 
     /// **A teleport into a region the agent already borders reuses its child
@@ -3052,6 +3365,114 @@ mod test {
         Ok(())
     }
 
+    /// **The catalogue's `sound-box` loops a clip the client can fetch.**
+    ///
+    /// A looping in-world sound is a *field of the object*, not a message:
+    /// OpenSim's `SoundModule::LoopSound` writes it onto the prim and schedules
+    /// a full update precisely so an avatar arriving later hears it too, and
+    /// the reference viewer reads those fields back in
+    /// `LLViewerObject::processUpdateMessage`. So this asserts the arrival
+    /// burst — what an avatar walking in is told — carries the sound, its gain,
+    /// its `LOOP` flag, its radius and the owner id a mute would name, and that
+    /// the clip it names is really served.
+    ///
+    /// The `AttachedSound` **message** is the other half (a non-looping
+    /// `llPlaySound`), and it is driven from the grid side here because
+    /// nothing on arrival sends one.
+    #[tokio::test]
+    async fn the_catalogue_sound_box_loops_a_fetchable_clip() -> Result<(), TestError> {
+        use sl_fake_grid::fixtures::catalogue::{
+            SOUND_CLIP, SOUND_GAIN, SOUND_RADIUS_METRES, entry,
+        };
+
+        let sound_box = entry("sound-box").ok_or("the catalogue has no sound-box")?;
+        let region = sl_fake_grid::catalogue().into_region(RegionConfig::default());
+        let mut running = start_in(vec![region]).await?;
+
+        let object = running
+            .wait_for(|event| match event {
+                Event::ObjectAdded(object) | Event::ObjectUpdated(object)
+                    if object.full_id == sound_box.full_id =>
+                {
+                    Some(object.clone())
+                }
+                _ => None,
+            })
+            .await?;
+        assert_eq!(
+            object.sound, SOUND_CLIP,
+            "the arrival burst does not carry the looping sound"
+        );
+        assert!(
+            sl_proto::SoundFlags(object.sound_flags).is_loop(),
+            "the sound is not marked looping"
+        );
+        assert!((object.gain - SOUND_GAIN).abs() < f32::EPSILON);
+        assert!((object.sound_radius - SOUND_RADIUS_METRES).abs() < f32::EPSILON);
+        assert!(
+            !object.owner_id.is_nil(),
+            "a sounding prim must name its owner: it is one of the two ids a \
+             viewer mutes a noisy object by"
+        );
+
+        // The clip itself: the fixture tone, byte for byte.
+        running
+            .commands
+            .send(Command::FetchAsset {
+                asset_id: sl_client_tokio::AssetKey::from(SOUND_CLIP),
+                asset_type: sl_proto::AssetType::Sound,
+                byte_range: None,
+            })
+            .await?;
+        let clip = running
+            .wait_for(|event| match event {
+                Event::AssetReceived(fetched) if fetched.id == SOUND_CLIP => {
+                    Some(fetched.data.clone())
+                }
+                _ => None,
+            })
+            .await?;
+        assert_eq!(
+            clip,
+            sl_test_assets::sound::marker_tone(sl_test_assets::sound::tones::MID)?
+        );
+
+        // The message half: a non-looping `llPlaySound` on the same prim.
+        let owner = sl_types::key::OwnerKey::Agent(sl_types::key::AgentKey::from(object.owner_id));
+        running
+            .agent
+            .with_sim(|sim| {
+                sim.send_attached_sound(
+                    sound_box.full_id,
+                    owner,
+                    sl_proto::AssetKey::from(SOUND_CLIP),
+                    0.5,
+                    sl_proto::SoundFlags::default(),
+                    sim_now(),
+                )
+            })
+            .await?;
+        let attached = running
+            .wait_for(|event| match event {
+                Event::AttachedSound {
+                    sound_id,
+                    object_id,
+                    gain,
+                    flags,
+                    ..
+                } if *object_id == sound_box.full_id => Some((*sound_id, *gain, *flags)),
+                _ => None,
+            })
+            .await?;
+        assert_eq!(attached.0, SOUND_CLIP);
+        assert!((attached.1 - 0.5).abs() < f32::EPSILON);
+        assert!(
+            !attached.2.is_loop(),
+            "an `llPlaySound` one-shot must not arrive marked as a loop"
+        );
+        Ok(())
+    }
+
     /// The catalogue's assets are actually served: the checker texture comes
     /// back over `GetTexture` and the mesh over `GetMesh2`, so a prim naming
     /// one is not pointing at a 404.
@@ -3096,6 +3517,129 @@ mod test {
         // What comes back is the mesh asset the fixture wrote: its header
         // parses and names every level of detail.
         assert_eq!(mesh, sl_test_assets::mesh::unit_cube_mesh_asset()?);
+        Ok(())
+    }
+
+    /// **A capability fetch carrying a `Range` returns the range, not the
+    /// asset.**
+    ///
+    /// This is how a viewer pulls one mesh level of detail out of a mesh asset
+    /// without transferring the rest: the asset's header names each LOD's byte
+    /// offsets and the fetcher asks for exactly that span. The asset caps have
+    /// honoured a `Range` since they were written and no test had ever sent
+    /// one — and a grid that ignored the header and answered `200` with the
+    /// whole asset would look identical to a client that only inspects the
+    /// bytes it asked about, so the assertion is that what comes back is
+    /// *shorter* as well as equal.
+    ///
+    /// Both asset surfaces are asked, because they are two capabilities:
+    /// `GetMesh2` (the mesh route) and `ViewerAsset` (the generic one).
+    #[tokio::test]
+    async fn a_ranged_capability_fetch_returns_only_the_range() -> Result<(), TestError> {
+        use sl_fake_grid::fixtures::catalogue::{MESH_ASSET, NPC_ANIMATION};
+
+        /// The span asked for: not at the start of the asset, so an answer that
+        /// ignored the header would differ in its bytes and not only its
+        /// length, and not `0..len-1`, which a server may honestly answer whole.
+        const RANGE: (u32, u32) = (16, 47);
+        /// How many bytes an inclusive `RANGE` covers.
+        const RANGE_LEN: usize = 32;
+
+        let region = sl_fake_grid::catalogue().into_region(RegionConfig::default());
+        let mut running = start_in(vec![region]).await?;
+
+        let whole_mesh = sl_test_assets::mesh::unit_cube_mesh_asset()?;
+        assert!(
+            whole_mesh.len() > RANGE_LEN,
+            "a range test needs an asset longer than the range"
+        );
+        running
+            .commands
+            .send(Command::FetchMesh {
+                mesh_id: MESH_ASSET,
+                byte_range: Some(RANGE),
+            })
+            .await?;
+        let slice = running
+            .wait_for(|event| match event {
+                Event::AssetReceived(fetched) if fetched.id == MESH_ASSET.uuid() => {
+                    Some(fetched.data.clone())
+                }
+                _ => None,
+            })
+            .await?;
+        assert_eq!(slice.len(), RANGE_LEN, "a ranged fetch is the range's size");
+        assert_eq!(
+            slice,
+            whole_mesh
+                .get(16..48)
+                .ok_or("the mesh asset is too short")?,
+            "the bytes are the ones at the offsets asked for"
+        );
+
+        // The generic asset capability answers the same way.
+        let whole_animation = sl_test_assets::anim::chest_twist_animation_asset();
+        running
+            .commands
+            .send(Command::FetchAsset {
+                asset_id: sl_client_tokio::AssetKey::from(NPC_ANIMATION),
+                asset_type: sl_proto::AssetType::Animation,
+                byte_range: Some(RANGE),
+            })
+            .await?;
+        let slice = running
+            .wait_for(|event| match event {
+                Event::AssetReceived(fetched) if fetched.id == NPC_ANIMATION => {
+                    Some(fetched.data.clone())
+                }
+                _ => None,
+            })
+            .await?;
+        assert_eq!(slice.len(), RANGE_LEN);
+        assert_eq!(
+            slice,
+            whole_animation
+                .get(16..48)
+                .ok_or("the animation asset is too short")?
+        );
+        Ok(())
+    }
+
+    /// A range that starts past the end of the asset is `416`, which the client
+    /// reports as a failed transfer rather than as an empty asset.
+    ///
+    /// The distinction is what a progressive fetcher walks a mesh with: it asks
+    /// for the next span until one of them is refused, and an empty *success*
+    /// would leave it asking forever.
+    #[tokio::test]
+    async fn a_range_past_the_end_of_an_asset_is_refused() -> Result<(), TestError> {
+        use sl_fake_grid::fixtures::catalogue::MESH_ASSET;
+
+        let region = sl_fake_grid::catalogue().into_region(RegionConfig::default());
+        let mut running = start_in(vec![region]).await?;
+        let past_the_end = u32::try_from(sl_test_assets::mesh::unit_cube_mesh_asset()?.len())?;
+        running
+            .commands
+            .send(Command::FetchMesh {
+                mesh_id: MESH_ASSET,
+                byte_range: Some((past_the_end, past_the_end.saturating_add(63))),
+            })
+            .await?;
+        // Both outcomes are picked up, so an answer that served bytes anyway
+        // fails the assertion instead of hanging until the deadline.
+        let refused = running
+            .wait_for(|event| match event {
+                Event::AssetTransferFailed { asset_id, .. } if *asset_id == MESH_ASSET.uuid() => {
+                    Some(true)
+                }
+                Event::AssetReceived(fetched) if fetched.id == MESH_ASSET.uuid() => Some(false),
+                _ => None,
+            })
+            .await?;
+        assert!(
+            refused,
+            "a range starting past the end of the asset came back as an asset"
+        );
         Ok(())
     }
 
@@ -3182,6 +3726,134 @@ mod test {
             Some(b"OggS".as_slice()),
             "the served sound is not an Ogg stream"
         );
+        Ok(())
+    }
+
+    /// **The login skeleton and the AIS surface report the same folder
+    /// versions**, and an AIS children fetch of a folder lists it.
+    ///
+    /// A folder version is not a property of either surface: it is a
+    /// *relationship between them*. The reference viewer builds its inventory
+    /// model from the login skeleton and then reconciles it against AIS, and
+    /// when the two disagree it warns, adjusts, and re-fetches — and if the AIS
+    /// side never states a usable version at all, it holds the folder at
+    /// "unknown" for the whole session and every later update to it fails its
+    /// accounting. So a round trip through either surface alone proves nothing
+    /// here; this asks both and compares.
+    ///
+    /// The fetch is `depth = 0`, the reference viewer's ordinary non-recursive
+    /// folder fetch, and it must come back as a *listing* — the folder plus its
+    /// children — rather than as the folder alone.
+    #[tokio::test]
+    async fn the_login_skeleton_and_ais_agree_about_folder_versions() -> Result<(), TestError> {
+        let (_grid, client, _agent) = connect().await?;
+        let (event_tx, mut events) = mpsc::channel::<Event>(256);
+        let (commands, command_rx) = mpsc::channel::<Command>(8);
+        let (diag_tx, _diag_rx) = mpsc::channel(16);
+        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+
+        let skeleton = wait_on(&mut events, |event| match event {
+            Event::InventorySkeleton(folders) => Some(folders.clone()),
+            _ => None,
+        })
+        .await?;
+        assert!(
+            skeleton.len() > 1,
+            "the stock account's skeleton is only {} folder(s)",
+            skeleton.len()
+        );
+
+        for folder in &skeleton {
+            commands
+                .send(Command::Ais3FetchFolderChildren {
+                    folder_id: folder.folder_id,
+                    depth: 0,
+                })
+                .await?;
+            let fetched = wait_on(&mut events, |event| match event {
+                Event::InventoryBulkUpdate { folders, .. } => folders
+                    .iter()
+                    .find(|candidate| candidate.folder_id == folder.folder_id)
+                    .cloned(),
+                _ => None,
+            })
+            .await?;
+            assert_eq!(
+                fetched.version, folder.version,
+                "the login skeleton and AIS disagree about {}'s version",
+                folder.name
+            );
+        }
+
+        // The listing is a listing: fetching the root brings its children back
+        // with it, not the root on its own.
+        let root = skeleton
+            .iter()
+            .find(|folder| folder.parent_id.is_none())
+            .ok_or("the skeleton names no root")?;
+        commands
+            .send(Command::Ais3FetchFolderChildren {
+                folder_id: root.folder_id,
+                depth: 0,
+            })
+            .await?;
+        let children = wait_on(&mut events, |event| match event {
+            Event::InventoryBulkUpdate { folders, .. } => {
+                let listed: Vec<_> = folders
+                    .iter()
+                    .filter(|candidate| candidate.parent_id == Some(root.folder_id))
+                    .cloned()
+                    .collect();
+                (!listed.is_empty()).then_some(listed)
+            }
+            _ => None,
+        })
+        .await?;
+        assert!(
+            children.len() > 1,
+            "a depth-0 fetch of the root listed only {} child folder(s)",
+            children.len()
+        );
+        run.abort();
+        Ok(())
+    }
+
+    /// Every **built-in UI sound** — the typing chirp, the money chime, the
+    /// teleport whoosh, the snapshot shutter — is served under its real Linden
+    /// id from the stock library, and what comes back is the tone that id was
+    /// assigned.
+    ///
+    /// No viewer ships these (the reference's `static_assets` folders hold no
+    /// sound at all), so a grid that answers none of them leaves a viewer's own
+    /// feedback silent for a whole session: the fetch fails once, the id is
+    /// marked unavailable, and nothing ever plays. Comparing against the
+    /// fixture bytes rather than only checking for an Ogg header is what makes
+    /// this a test of *which* sound is served: the stand-ins differ only by
+    /// pitch, and the encoder is deterministic, so the wrong tone under an id
+    /// fails here rather than being noticed by ear months later.
+    #[tokio::test]
+    async fn every_built_in_ui_sound_is_fetchable() -> Result<(), TestError> {
+        let mut running = start().await?;
+        for (id, expected) in sl_test_assets::builtin::library_sounds()? {
+            running
+                .commands
+                .send(Command::FetchAsset {
+                    asset_id: sl_client_tokio::AssetKey::from(id),
+                    asset_type: sl_proto::AssetType::Sound,
+                    byte_range: None,
+                })
+                .await?;
+            let bytes = running
+                .wait_for(|event| match event {
+                    Event::AssetReceived(fetched) if fetched.id == id => Some(fetched.data.clone()),
+                    _ => None,
+                })
+                .await?;
+            assert_eq!(
+                bytes, expected,
+                "the built-in UI sound {id} is not the tone it was assigned"
+            );
+        }
         Ok(())
     }
 
@@ -4100,6 +4772,132 @@ mod test {
         Ok(())
     }
 
+    /// **A take gives back the prim it took**, not the part of it the asset
+    /// format can spell.
+    ///
+    /// This grid imitates Second Life by default, so the published object body
+    /// is the Linden text form, and that format has no keyword for a face's
+    /// glow, for `ExtraParams` (a light, a flexi path, a sculpt, a **mesh**),
+    /// for floating text, media, a texture animation or a particle system —
+    /// `sl_object_asset`'s `the_text_carries_none_of_the_modern_prim` is the
+    /// record of it. A grid that rezzed out of those bytes would answer a
+    /// resident who took a lamp with a plain white box.
+    ///
+    /// Neither live grid does: OpenSim's body is `SceneObjectSerializer` XML,
+    /// which carries all of it (and which this grid writes under
+    /// [`sl_fake_grid::ObjectAssetPolicy::Served`]), and Second Life's
+    /// simulator has the object itself and reads no asset at all. So this one
+    /// keeps the linkset a take removed and rezzes from that, whichever body
+    /// it published.
+    ///
+    /// The catalogue's `light-box` is the fixture because it carries three of
+    /// the missing things at once — a light, glow, and full-bright faces — so a
+    /// rez that went back through the text fails on all three rather than
+    /// looking merely dim.
+    #[tokio::test]
+    async fn a_taken_prim_comes_back_with_the_light_the_text_cannot_carry() -> Result<(), TestError>
+    {
+        let light_box = sl_fake_grid::fixtures::catalogue::entry("light-box")
+            .ok_or("the catalogue has no light-box")?;
+        let grid = FakeGridBuilder::new()
+            .account(AccountConfig::new("First", "User", "password"))
+            .event_queue_hold(Duration::from_secs(2))
+            .region(sl_fake_grid::catalogue().into_region(RegionConfig::default()))
+            .start()
+            .await?;
+        let mut avatar = join(&grid, "First").await?;
+
+        // What the region streamed, so "came back the same" is measured against
+        // the prim that was actually standing there.
+        let before = wait_on(&mut avatar.events, |event| match event {
+            Event::ObjectAdded(object) | Event::ObjectUpdated(object)
+                if object.full_id == light_box.full_id =>
+            {
+                Some((**object).clone())
+            }
+            _ => None,
+        })
+        .await?;
+        let before_extra = sl_proto::decode_extra_params(&before.extra_params);
+        assert!(
+            before_extra.light.is_some(),
+            "the catalogue's light-box has no light to lose"
+        );
+
+        let objects_folder = avatar
+            .agent
+            .with_sim(|sim| {
+                sim.agent_inventory()
+                    .folders()
+                    .find(|folder| {
+                        folder.folder_type == sl_client_tokio::FolderType::Object.to_code()
+                    })
+                    .map(|folder| folder.folder_id)
+            })
+            .await
+            .ok_or("the seeded account has no Objects folder")?;
+        avatar
+            .commands
+            .send(Command::DerezObjects {
+                local_ids: vec![sl_client_tokio::ScopedObjectId::new(
+                    avatar.circuit,
+                    before.local_id,
+                )],
+                destination: sl_client_tokio::DeRezDestination::TakeIntoAgentInventory(
+                    objects_folder,
+                ),
+                transaction_id: sl_client_tokio::TransactionId::from(uuid::Uuid::from_u128(
+                    0x11_6B,
+                )),
+                group_id: None,
+            })
+            .await?;
+        let item = wait_for_taken_item(&mut avatar.events).await?;
+
+        let landing = Vector {
+            x: 150.0,
+            y: 150.0,
+            z: 27.0,
+        };
+        avatar
+            .commands
+            .send(Command::RezObjectFromInventory {
+                params: Box::new(rez_params(&item, &landing)),
+            })
+            .await?;
+        let rezzed = wait_on(&mut avatar.events, |event| match event {
+            Event::ObjectAdded(object) if object.motion.position == landing => {
+                Some((**object).clone())
+            }
+            _ => None,
+        })
+        .await?;
+
+        let extra = sl_proto::decode_extra_params(&rezzed.extra_params);
+        assert_eq!(
+            extra.light, before_extra.light,
+            "the rezzed prim lost the light it was taken with"
+        );
+        let faces = sl_proto::decode_texture_entry(&rezzed.texture_entry, 6);
+        let face = faces.face(0).ok_or("the rezzed prim has no first face")?;
+        assert!(
+            face.glow > 0.0,
+            "the rezzed prim lost the glow it was taken with"
+        );
+        assert!(
+            face.fullbright(),
+            "the rezzed prim lost the full-bright bit it was taken with"
+        );
+        assert_eq!(
+            rezzed.shape, before.shape,
+            "the rezzed prim is not the shape that was taken"
+        );
+        // A fresh key, because the object rezzed is a new one: the asset names
+        // the prim it was taken from, and something else may hold that id now.
+        assert_ne!(rezzed.full_id, before.full_id);
+        Ok(())
+    }
+
     /// The other grid: a take **names** the object's asset, and it is fetchable
     /// and describes the object that was taken.
     ///
@@ -4109,6 +4907,11 @@ mod test {
     /// other way: an id nothing serves is the failure the whole asset-id family
     /// exists to catch, and bytes that describe some *other* prim would be a
     /// take that filed the wrong object.
+    ///
+    /// The bytes are decoded as **OpenSim's** format, which is the third thing
+    /// this asserts: `AssetType::Object` is `<SceneObjectGroup>` XML on that
+    /// grid and the Linden text on the other, and a grid that named OpenSim
+    /// while serving the text would serve bytes no OpenSim ever wrote.
     #[tokio::test]
     async fn an_opensim_flavoured_take_names_a_fetchable_object_asset() -> Result<(), TestError> {
         let grid = FakeGridBuilder::new()
@@ -4174,14 +4977,13 @@ mod test {
             _ => None,
         })
         .await?;
-        let asset = sl_object_asset::ObjectAsset::decode(&bytes)?;
-        let prim = asset.root().ok_or("the taken object's asset has no prim")?;
+        let group = sl_object_asset::opensim::SceneObjectGroup::decode(&bytes)?;
         assert_eq!(
-            prim.task_id,
+            group.root.uuid,
             taken.full_id.uuid(),
             "the asset names a different prim than the one taken"
         );
-        assert_eq!(prim.name, item.name);
+        assert_eq!(group.root.name, item.name);
         Ok(())
     }
 

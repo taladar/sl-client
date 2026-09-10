@@ -1598,6 +1598,20 @@ pub enum Event {
         /// The created/updated inventory item's UUID (`new_inventory_item`), or
         /// `None` when the upload produced no inventory item (a baked texture).
         new_inventory_item: Option<Uuid>,
+        /// The item a `NewFileAgentInventory` upload **created**, assembled from
+        /// the metadata the upload asked for and the ids the completion named
+        /// (see [`uploaded_inventory_item`](crate::uploaded_inventory_item)).
+        /// `None` for an upload that created no item — a baked texture, or an
+        /// `Update*Inventory` save onto an item that already exists.
+        ///
+        /// It is carried because **no grid announces a created item**: both
+        /// Second Life and OpenSim were measured sending nothing after a
+        /// capability upload that creates one, so a client that files inventory
+        /// only from pushes never learns of its own upload. The runtime has
+        /// already folded this item into the session's inventory cache by the
+        /// time the event is delivered, so a consumer that keeps its own model
+        /// can equally re-read the folder.
+        created: Option<Box<InventoryItem>>,
     },
     /// A legacy transaction asset upload finished — the completion of a
     /// [`Session::save_inventory_asset`](crate::Session::save_inventory_asset)

@@ -24,7 +24,7 @@
 //! path uploads over it, so the store-a-temporary-asset flow runs on each. If a
 //! grid does not offer `UploadBakedTexture` (or declines the bake), the case
 //! records `partial` with the reason — the client formed and POSTed the request
-//! correctly — mirroring `asset-upload`'s aditi handling.
+//! correctly — mirroring `asset-fetch-http`'s aditi handling.
 
 use std::time::Instant;
 
@@ -116,6 +116,9 @@ impl GridTest for BakedTextureUpload {
                     Event::AssetUploaded {
                         new_asset,
                         new_inventory_item,
+                        // A baked texture creates no inventory item, so there
+                        // is never one to file.
+                        created: _,
                     } => Some(Ok((*new_asset, *new_inventory_item))),
                     Event::AssetUploadFailed { reason } => Some(Err(reason.clone())),
                     _other => None,
@@ -129,7 +132,7 @@ impl GridTest for BakedTextureUpload {
                     // A grid that declines the bake is a grid-behaviour difference,
                     // not a client fault (the request was formed and POSTed
                     // correctly), so record it partial with the server's reason, as
-                    // `asset-upload` does for aditi.
+                    // `asset-fetch-http` does for aditi.
                     if is_aditi(grid) {
                         ctx.mark_partial(&format!(
                             "grid declined the baked-texture upload — {reason}"

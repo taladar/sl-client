@@ -29,11 +29,12 @@ use sl_proto::{
     CAP_UPDATE_SCRIPT_TASK, CAP_UPLOAD_BAKED_TEXTURE, CAP_USER_INFO, CAP_VIEWER_ASSET,
     CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
     CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE,
-    INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd, RECV_BUFFER_SIZE, SelectedCostKind, Session,
-    UserInfoUpdate, ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
-    ais_create_category_url, ais_item_url, associate_inventory_request, avatar_picker_search_query,
-    build_agent_preferences_request, build_ais_create_category_body, build_ais_create_link_body,
-    build_ais_move_body, build_ais_rename_category_body, build_ais_update_item_body,
+    INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd, NewFileAgentInventoryRequest, RECV_BUFFER_SIZE,
+    SelectedCostKind, Session, UserInfoUpdate, ais_category_children_fetch_url,
+    ais_category_children_url, ais_category_url, ais_create_category_url, ais_item_url,
+    associate_inventory_request, avatar_picker_search_query, build_agent_preferences_request,
+    build_ais_create_category_body, build_ais_create_link_body, build_ais_move_body,
+    build_ais_rename_category_body, build_ais_update_item_body,
     build_create_inventory_category_request, build_environment_update_request,
     build_get_object_cost_request, build_get_object_physics_data_request,
     build_modify_material_params_request, build_new_file_agent_inventory_request,
@@ -58,48 +59,48 @@ pub use sl_proto::{
     ActiveGroup, AgentKey, AgentOrObjectKey, AgentPreferences, AnimatedObjects, AnimationKey,
     AnyMessage, Arrival, Asset, AssetKey, AssetType, AssetUpdateLocation, AssociateInventory,
     AttachmentMode, AttachmentPoint, AvatarClassified, AvatarGroupMembership, AvatarInterests,
-    AvatarPick, AvatarProperties, Camera, CameraError, ChatAudible, ChatChannel, ChatLifecycleView,
-    ChatLogConfig, ChatMessage, ChatSessionInfo, ChatSessionKind, ChatSource, ChatSourceType,
-    ChatType, ChatTypeNotAVolume, Child, CircuitCode, CircuitId, ClassifiedCategory,
-    ClassifiedInfo, ClassifiedKey, ClassifiedUpdate, ClickAction, ClientDirectories, ClockStyle,
-    Color, ColorAlpha, Command, ControlFlags, ConversationKind, CreateGroupParams, CreateListing,
-    DEFAULT_PRIM_TEXTURE, DayCycle, DayCycleFrame, DeRezDestination, DetachOrder, Diagnostic,
-    DirFindFlags, Direction, DirectoryVisibility, DiscardLevel, DisconnectReason, DisplayName,
-    DisplayNameUpdate, Distance, EconomyData, EnvironmentSettings, EstateAccessDelta,
-    EstateAccessKind, EstateCovenant, EstateInfo, EstateInfoUpdate, Event, ExperienceInfo,
-    ExperienceKey, ExperiencePermission, ExperienceProperties, ExperienceUpdate, ExtendedMesh,
-    FlexibleData, FolderInfo, FolderState, FolderType, Friend, FriendKey, FriendPresence,
-    FriendRights, GestureActivation, GlobalCoordinates, Glow, GltfMaterialOverride,
-    GridCoordinates, GroupKey, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment,
-    GroupNoticeKey, GroupProfile, GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit,
-    GroupRoleKey, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle,
-    HomeLocation, IceCandidate, ImDialog, ImSessionId, ImageCodec, InstantMessage, InterestsUpdate,
-    InventoryCacheConfig, InventoryCallbackId, InventoryCursor, InventoryFolder,
-    InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey, InventoryOffer,
-    InventoryOwner, InventoryType, InviteChannel, ItemInfo, Key, Kilobits, LandArea,
-    LandBrushAction, LandBrushSize, LandEdit, LandImpact, LandSearchType, LandingType,
-    LegacyMaterial, LightData, LightImage, LindenAmount, LindenBalance, Listing, ListingId,
-    LoadUrlRequest, LoggedChatType, LoginAccount, LoginParams, LoginRejectKind, LoginRequest,
-    LoginResponse, LureId, MAX_FACES, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP,
-    MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, MarketplaceApiError,
-    MarketplaceApiErrorKind, MarketplaceAssociateInventoryInfo, MarketplaceInventoryInfo,
-    MarketplaceOperation, Material, MaterialOverrideUpdate, Maturity, MediaEntry, MerchantStatus,
-    MeshKey, MessageCursor, MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType,
-    MovementMode, MuteEntry, MuteFlags, MuteType, NearbyHistoryLine, NegativeBalanceError,
-    NeighborInfo, NewInventoryItem, NewInventoryLink, Object, ObjectExtraParams,
-    ObjectFlagSettings, ObjectKey, ObjectMediaResponse, ObjectMotion, ObjectPermMasks,
-    ObjectPhysicsData, ObjectProperties, ObjectPropertiesFamily, ObjectTransform, OpenRegionInfo,
-    OpenSimExtras, OwnerKey, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
-    ParcelCategory, ParcelDetails, ParcelFlags, ParcelInfo, ParcelKey, ParcelMediaCommand,
-    ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayCell, ParcelOverlayGrid,
-    ParcelOverlayInfo, ParcelOwnership, ParcelRequestResult, ParcelReturnType, ParcelStatus,
-    ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField, Permissions, Permissions5,
-    PhysicsShapeType, PhysicsShapeTypes, PickInfo, PickKey, PickUpdate, PingId, PlayingAnimation,
-    PrimShape, PrimShapeParams, ProductType, ProfileUpdate, ProposalCandidateId, ProposalVoteId,
-    QueryId, ReflectionProbe, ReflectionProbeFlags, RegionChatSettings, RegionCombatSettings,
-    RegionCoordinates, RegionDebugUpdate, RegionFlags, RegionHandle, RegionIdentity,
-    RegionInfoUpdate, RegionLimits, RegionLocalObjectId, RegionLocalParcelId, RegionName,
-    RegionTerrainComposition, RegionTerrainUpdate, Reliability, RenderMaterialEntry,
+    AvatarPick, AvatarProperties, BUILTIN_UI_SOUNDS, Camera, CameraError, ChatAudible, ChatChannel,
+    ChatLifecycleView, ChatLogConfig, ChatMessage, ChatSessionInfo, ChatSessionKind, ChatSource,
+    ChatSourceType, ChatType, ChatTypeNotAVolume, Child, CircuitCode, CircuitId,
+    ClassifiedCategory, ClassifiedInfo, ClassifiedKey, ClassifiedUpdate, ClickAction,
+    ClientDirectories, ClockStyle, Color, ColorAlpha, Command, ControlFlags, ConversationKind,
+    CreateGroupParams, CreateListing, DEFAULT_PRIM_TEXTURE, DayCycle, DayCycleFrame,
+    DeRezDestination, DetachOrder, Diagnostic, DirFindFlags, Direction, DirectoryVisibility,
+    DiscardLevel, DisconnectReason, DisplayName, DisplayNameUpdate, Distance, EconomyData,
+    EnvironmentSettings, EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateInfo,
+    EstateInfoUpdate, Event, ExperienceInfo, ExperienceKey, ExperiencePermission,
+    ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData, FolderInfo, FolderState,
+    FolderType, Friend, FriendKey, FriendPresence, FriendRights, GestureActivation,
+    GlobalCoordinates, Glow, GltfMaterialOverride, GridCoordinates, GroupKey, GroupMember,
+    GroupMembership, GroupNotice, GroupNoticeAttachment, GroupNoticeKey, GroupProfile,
+    GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember,
+    GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog,
+    ImSessionId, ImageCodec, InstantMessage, InterestsUpdate, InventoryCacheConfig,
+    InventoryCallbackId, InventoryCursor, InventoryFolder, InventoryFolderKey, InventoryItem,
+    InventoryItemOrFolderKey, InventoryKey, InventoryOffer, InventoryOwner, InventoryType,
+    InviteChannel, ItemInfo, Key, Kilobits, LandArea, LandBrushAction, LandBrushSize, LandEdit,
+    LandImpact, LandSearchType, LandingType, LegacyMaterial, LightData, LightImage, LindenAmount,
+    LindenBalance, Listing, ListingId, LoadUrlRequest, LoggedChatType, LoginAccount, LoginParams,
+    LoginRejectKind, LoginRequest, LoginResponse, LureId, MAX_FACES, MEDIA_PERM_ALL,
+    MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType,
+    MapRegionInfo, MarketplaceApiError, MarketplaceApiErrorKind, MarketplaceAssociateInventoryInfo,
+    MarketplaceInventoryInfo, MarketplaceOperation, Material, MaterialOverrideUpdate, Maturity,
+    MediaEntry, MerchantStatus, MeshKey, MessageCursor, MfaChallenge, MoneyBalance,
+    MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType,
+    NearbyHistoryLine, NegativeBalanceError, NeighborInfo, NewInventoryItem, NewInventoryLink,
+    Object, ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectMediaResponse, ObjectMotion,
+    ObjectPermMasks, ObjectPhysicsData, ObjectProperties, ObjectPropertiesFamily, ObjectTransform,
+    OpenRegionInfo, OpenSimExtras, OwnerKey, ParcelAccessEntry, ParcelAccessFlags,
+    ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelFlags, ParcelInfo, ParcelKey,
+    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayCell,
+    ParcelOverlayGrid, ParcelOverlayInfo, ParcelOwnership, ParcelRequestResult, ParcelReturnType,
+    ParcelStatus, ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField, Permissions,
+    Permissions5, PhysicsShapeType, PhysicsShapeTypes, PickInfo, PickKey, PickUpdate, PingId,
+    PlayingAnimation, PrimShape, PrimShapeParams, ProductType, ProfileUpdate, ProposalCandidateId,
+    ProposalVoteId, QueryId, ReflectionProbe, ReflectionProbeFlags, RegionChatSettings,
+    RegionCombatSettings, RegionCoordinates, RegionDebugUpdate, RegionFlags, RegionHandle,
+    RegionIdentity, RegionInfoUpdate, RegionLimits, RegionLocalObjectId, RegionLocalParcelId,
+    RegionName, RegionTerrainComposition, RegionTerrainUpdate, Reliability, RenderMaterialEntry,
     RenderMaterialRef, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation,
     SaleType, ScopedObjectId, ScopedParcelId, ScriptCompileError, ScriptControl,
     ScriptControlAction, ScriptDialog, ScriptLanguage, ScriptPermissionRequest, ScriptPermissions,
@@ -109,7 +110,10 @@ pub use sl_proto::{
     TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TerraformArea, TerrainLayerType,
     TerrainPatch, Texture, TextureAnimation, TextureEntry, TextureFace, TextureKey, Throttle,
     ThrottleBuilder, ThrottleError, TimestampFormat, TransactionId, TransferId, TransferStatus,
-    Transmit, UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, UserInfo, Uuid, Vector,
+    Transmit, UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER, UI_SOUND_INVALID_OP,
+    UI_SOUND_MONEY_DOWN, UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT, UI_SOUND_SNAPSHOT,
+    UI_SOUND_TELEPORT_OUT, UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE, UI_SOUND_WINDOW_OPEN,
+    UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, UserInfo, Uuid, Vector,
     VoiceAccountInfo, VoiceProvisionRequest, WaterSettings, Wearable, WearableType, XferId,
     avatar_texture, decode_particle_system, decode_texture_anim, decode_texture_entry,
     encode_texture_entry, grid_to_handle, group_powers, handle_to_global, handle_to_grid, j2c,
@@ -443,6 +447,23 @@ impl Client {
         self.session.agent_id()
     }
 
+    /// What the login response said about the account: its maturity trio, the
+    /// package it is on, and the benefits package a modern Second Life viewer
+    /// prices uploads from.
+    ///
+    /// The same values reach a driver as
+    /// [`Event::Account`] the moment the response is
+    /// parsed, but that event is easy to miss — a driver that waits for
+    /// anything else first discards it on the way past — and an upload has to
+    /// know what it will be charged *before* it sends the
+    /// [`Command::UploadAsset`] the grid checks the figure against. So this is
+    /// the accessor to reach for when the cost matters; the event is for a
+    /// driver that wants to react to the account as it arrives.
+    #[must_use]
+    pub const fn login_account(&self) -> Option<&LoginAccount> {
+        self.session.login_account()
+    }
+
     /// The region handle of the region the agent logged in to, available once
     /// logged in. Seeded from the login response, so a driver can issue an
     /// intra-region [`Command::Teleport`] before
@@ -599,6 +620,12 @@ impl Client {
         // stamped with the generation of the region change that asked for it, so a
         // slow fetch overtaken by a second crossing cannot install a stale map.
         let (caps_map_tx, mut caps_map_rx) = mpsc::channel::<(u64, HashMap<String, String>)>(4);
+        // An asset upload that *creates* an inventory item completes into this
+        // channel rather than straight out to the client, because the item it
+        // built has to be filed in the session's inventory before anything acts
+        // on the completion — no grid announces it, so this is the only chance.
+        // Everything read here is forwarded to `events` unchanged.
+        let (upload_events, mut upload_rx) = mpsc::channel::<Event>(16);
         let mut caps_generation: u64 = 0;
         let mut caps_refetch_task: Option<tokio::task::JoinHandle<()>> = None;
         // The region must serve capabilities: fail login (propagating the readable
@@ -892,6 +919,17 @@ impl Client {
                         }
                     }
                 }
+                upload_event = upload_rx.recv() => {
+                    if let Some(event) = upload_event {
+                        // File the created item before the completion goes out,
+                        // so a client that re-reads the folder on the event
+                        // finds it there.
+                        if let Event::AssetUploaded { created: Some(item), .. } = &event {
+                            self.session.cache_uploaded_item(item.as_ref().clone());
+                        }
+                        deliver(&events, event).await;
+                    }
+                }
                 caps_event = caps_rx.recv() => {
                     if let Some((message, body)) = caps_event {
                         // A CAPS helper reports a failed request by sending the
@@ -1140,7 +1178,7 @@ impl Client {
                         Some(Command::Ais3CreateFolder { parent_id, folder_type, name }) => {
                             if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
                                 let url = format!("{base}{}", ais_create_category_url(parent_id, Uuid::new_v4()));
-                                let body = build_ais_create_category_body(folder_type, &name);
+                                let body = build_ais_create_category_body(parent_id, folder_type, &name);
                                 tokio::spawn(post_voice_cap(url, body, CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
                             }
                         }
@@ -1960,11 +1998,20 @@ impl Client {
                                 _ => None,
                             };
                             if let Some((url, asset_name, inv_name)) = caps_upload {
-                                let body = build_new_file_agent_inventory_request(
-                                    folder_id, asset_name, inv_name, &name, &description,
+                                let request = NewFileAgentInventoryRequest {
+                                    folder_id,
+                                    asset_type: asset_name.to_owned(),
+                                    inventory_type: inv_name.to_owned(),
+                                    name, description,
                                     next_owner_mask, group_mask, everyone_mask, expected_upload_cost,
-                                );
-                                tokio::spawn(run_caps_upload(url, body, data, http.clone(), events.clone()));
+                                };
+                                let body = build_new_file_agent_inventory_request(&request);
+                                // The request is kept for the completion: this is
+                                // the one upload that *creates* an item, and no
+                                // grid announces the item it created, so the
+                                // completion has to be turned into one here.
+                                let creating = self.session.agent_id().map(|owner| (request, owner));
+                                tokio::spawn(run_caps_upload(url, body, data, creating, http.clone(), upload_events.clone()));
                             } else {
                                 deliver(&events, Event::AssetUploadFailed { reason: "NewFileAgentInventory capability not available".to_owned(), }).await;
                             }
@@ -1972,7 +2019,7 @@ impl Client {
                         Some(Command::UploadBakedTexture { data }) => {
                             if let Some(url) = caps.get(CAP_UPLOAD_BAKED_TEXTURE).cloned() {
                                 let body = build_upload_baked_texture_request();
-                                tokio::spawn(run_caps_upload(url, body, data, http.clone(), events.clone()));
+                                tokio::spawn(run_caps_upload(url, body, data, None, http.clone(), events.clone()));
                             } else {
                                 deliver(&events, Event::AssetUploadFailed { reason: "UploadBakedTexture capability not available".to_owned(), }).await;
                             }
@@ -1992,7 +2039,7 @@ impl Client {
                                 ),
                             };
                             if let Some(url) = caps.get(cap).cloned() {
-                                tokio::spawn(run_caps_upload(url, body, data, http.clone(), events.clone()));
+                                tokio::spawn(run_caps_upload(url, body, data, None, http.clone(), events.clone()));
                             } else {
                                 deliver(&events, Event::AssetUploadFailed { reason: format!("{cap} capability not available"), }).await;
                             }

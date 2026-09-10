@@ -14,7 +14,8 @@
 //! terrain RAW file); the [`SceneFixtures`] are the parcels and
 //! objects pushed at an arriving agent and replayed on request; the
 //! `on_event` hook sees every drained [`ServerEvent`] for behaviour the
-//! stock fixtures do not cover.
+//! stock fixtures do not cover; and the [`Timeline`] is the one part that acts
+//! on its own, running scripted steps once the agent has arrived.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -27,6 +28,7 @@ use sl_proto::{
 };
 use sl_types::key::{AgentKey, InventoryFolderKey, InventoryKey, ObjectKey, OwnerKey, ParcelKey};
 
+use crate::timeline::Timeline;
 use crate::udp_assets::UdpAssetFixtures;
 use crate::world::{SceneFixtures, TaskInventory, box_prim, region_wide_parcel};
 
@@ -63,6 +65,12 @@ pub struct Scenario {
     /// The parcels and objects of the region (pushed on arrival, replayed on
     /// request).
     pub world: SceneFixtures,
+    /// What happens to a session here because **time passed**: the scripted
+    /// steps run from the moment the agent arrives ([`crate::timeline`]).
+    ///
+    /// Empty by default. Everything else in a scenario answers something a
+    /// client asked for; this is the only part that acts on its own.
+    pub timeline: Timeline,
 }
 
 impl std::fmt::Debug for Scenario {
@@ -76,6 +84,7 @@ impl std::fmt::Debug for Scenario {
             .field("on_event", &self.on_event.as_ref().map(|_| "<closure>"))
             .field("udp_assets", &self.udp_assets)
             .field("world", &self.world)
+            .field("timeline", &self.timeline)
             .finish_non_exhaustive()
     }
 }
@@ -91,6 +100,7 @@ impl Scenario {
             assets: sl_proto::InMemoryAssetSource::new(),
             udp_assets: UdpAssetFixtures::new(),
             world: SceneFixtures::new(),
+            timeline: Timeline::new(),
         }
     }
 }
@@ -109,21 +119,27 @@ impl Default for Scenario {
             assets: default_assets(),
             udp_assets: default_udp_assets(),
             world: default_world(),
+            timeline: Timeline::new(),
         }
     }
 }
 
-/// The stock asset store: the **library** textures a viewer asks any grid for
+/// The stock asset store: the **library** assets a viewer asks any grid for
 /// before it has been told about a single fixture — one JPEG2000 solid per
-/// default Linden terrain detail texture, and one stand-in per built-in sky,
-/// water and prim texture
-/// ([`sl_test_assets::builtin::library_textures`]).
+/// default Linden terrain detail texture, one stand-in per built-in sky, water
+/// and prim texture ([`sl_test_assets::builtin::library_textures`]), and one
+/// Ogg Vorbis tone per built-in UI sound
+/// ([`sl_test_assets::builtin::library_sounds`]).
 ///
 /// A fake grid is a grid *with a library*, so answering a Linden library id
 /// under its real UUID is honest — and not answering is expensive: each of the
 /// twelve is otherwise a fetch that burns its whole retry budget on every
 /// arrival, and the ground shades flat, the sky has no sun in it, and every
-/// untextured fixture prim is a hole.
+/// prim nobody textured is a hole — which is *every* prim this grid makes,
+/// since [`box_prim`] and the rez path both name the
+/// default prim texture. The sounds cost no retries (a sound is
+/// asked for once and then given up on) but cost every one of the viewer's own
+/// events its voice: no typing chirp, no money chime, no teleport whoosh.
 ///
 /// A texture that cannot be encoded is simply not registered (none of these
 /// can fail: they are all small, non-empty and four-component).
@@ -145,6 +161,17 @@ pub fn default_assets() -> sl_proto::InMemoryAssetSource {
             }
         }
         Err(error) => tracing::warn!("encoding the built-in library textures failed: {error}"),
+    }
+    // The built-in UI sounds, for the same reason and with the same honesty:
+    // they are library ids, no viewer ships one, and a grid that answers none
+    // of them makes every one of a viewer's own events silent.
+    match sl_test_assets::builtin::library_sounds() {
+        Ok(sounds) => {
+            for (id, ogg) in sounds {
+                let _previous = assets.insert(AssetKey::from(id), ogg);
+            }
+        }
+        Err(error) => tracing::warn!("encoding the built-in UI sounds failed: {error}"),
     }
     // The four library body parts the stock account is dressed in. A viewer
     // that ships them answers them locally and never asks -- but anything
@@ -214,6 +241,11 @@ const AGENT_SYSTEM_FOLDERS: &[(i8, &str)] = &[
     (23, "Favorites"),
     (46, "Current Outfit"),
     (48, "My Outfits"),
+    // `FT_MESH`. Seeded because the stock account holds a mesh, and without a
+    // folder of its class it falls back to the agent root -- which leaves the
+    // root holding one child the reference viewer's model does not, and its
+    // descendent count disagreeing with the grid's for the whole session.
+    (49, "Meshes"),
     (50, "Received Items"),
     (56, "Settings"),
     (57, "Materials"),
@@ -229,7 +261,12 @@ const AGENT_SYSTEM_FOLDER_BASE: u128 = 0xFA80;
 const AGENT_FIXTURE_ITEM_BASE: u128 = 0xFA_E000;
 
 /// The inventory item id for the seeded fixture of `asset_type`.
-fn fixture_item_id(asset_type: AssetType) -> InventoryKey {
+///
+/// Public because a test that saves over one of these items has to name it, and
+/// re-deriving the same id from the fixture id base on the far side would be
+/// the fixture's layout written down twice.
+#[must_use]
+pub fn fixture_item_id(asset_type: AssetType) -> InventoryKey {
     let code = u128::try_from(asset_type.to_code()).unwrap_or(0);
     InventoryKey::from(uuid::Uuid::from_u128(
         AGENT_FIXTURE_ITEM_BASE.saturating_add(code),
@@ -734,15 +771,29 @@ mod test {
         }
         // Four terrain solids, seven environment textures, the prim texture,
         // two avatar sentinels, fifteen bump maps, two viewer textures, two
-        // water plane textures, five wearable layer textures and four body
-        // parts — the library — plus one body per seeded inventory class and
-        // the stock scripted object's script, and nothing else: a stock
-        // scenario's store is the library and what its own items name, not a
-        // fixture dump.
-        let library = 4 + 7 + 1 + 2 + 15 + 2 + 2 + 5 + 4;
+        // water plane textures, five wearable layer textures, four body parts
+        // and twelve UI sounds — the library — plus one body per seeded
+        // inventory class and the stock scripted object's script, and nothing
+        // else: a stock scenario's store is the library and what its own items
+        // name, not a fixture dump.
+        let library = 4 + 7 + 1 + 2 + 15 + 2 + 2 + 5 + 4 + sl_proto::BUILTIN_UI_SOUNDS.len();
         let seeded = sl_test_assets::inventory::seeded_assets()?.len();
         assert_eq!(assets.len(), library + seeded + 1);
         Ok(())
+    }
+
+    /// Every built-in UI sound is answered, so a viewer's own feedback — the
+    /// typing chirp, the money chime, the teleport whoosh — has a voice on the
+    /// fake grid instead of failing a fetch and playing nothing.
+    #[test]
+    fn the_stock_assets_hold_every_builtin_ui_sound() {
+        let assets = default_assets();
+        for id in sl_proto::BUILTIN_UI_SOUNDS {
+            assert!(
+                assets.contains(AssetKey::from(id)),
+                "no asset registered for built-in UI sound {id}"
+            );
+        }
     }
 
     #[test]

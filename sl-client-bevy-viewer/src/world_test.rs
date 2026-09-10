@@ -694,12 +694,34 @@ pub(crate) fn seed_child_prim(
 /// distinct on both), at `position`, with the ordinary editable agent-flag mask
 /// plus `extra_flags`. A zero mask would read as "may not move" and refuse a
 /// gizmo drag.
+///
+/// It carries a **six-face `TextureEntry`**, because a real prim always does:
+/// a simulator textures a prim it rezzes, and the fake grid's `box_prim` does
+/// the same. An object that sent no entry has no faces at all — not
+/// untextured ones — and anything reading its faces (the build floater's
+/// Texture tab most visibly, which would read "nothing selected" for a prim
+/// that plainly is selected) gets nothing to show. The faces name the **nil**
+/// texture
+/// rather than the default plywood so that no tier-I fixture asks a world
+/// with no asset source for an asset it cannot serve; nil renders untextured,
+/// which is what these fixtures looked like before they had an entry at all.
 pub(crate) fn fixture_prim(
     local_id: u32,
     position: sl_client_bevy::Vector,
     extra_flags: u32,
 ) -> Object {
+    /// A box's face count — the shape [`crate::objects::fixture_object`] makes.
+    const FACES: usize = 6;
+
     let mut object: Object = crate::objects::fixture_object(pcode::PRIMITIVE);
+    object.texture_entry = sl_client_bevy::encode_texture_entry(&sl_client_bevy::TextureEntry {
+        faces: vec![
+            sl_client_bevy::TextureFace::new(sl_client_bevy::TextureKey::from(
+                sl_client_bevy::Uuid::nil()
+            ));
+            FACES
+        ],
+    });
     object.local_id = sl_client_bevy::RegionLocalObjectId(local_id);
     object.full_id =
         sl_client_bevy::ObjectKey::from(sl_client_bevy::Uuid::from_u128(u128::from(local_id)));

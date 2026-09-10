@@ -2,8 +2,17 @@
 
 use crate::caps::deliver;
 use reqwest::Client as ReqwestClient;
-use sl_proto::{Event, ScriptCompileError, parse_asset_upload_response};
+use sl_proto::{
+    AgentKey, Event, NewFileAgentInventoryRequest, ScriptCompileError, parse_asset_upload_response,
+    uploaded_inventory_item,
+};
 use tokio::sync::mpsc;
+
+/// What an upload was asked to create, kept for the completion: the
+/// `NewFileAgentInventory` request body plus the agent the created item belongs
+/// to. `None` for the uploads that create no item — `UploadBakedTexture` and the
+/// `Update*Inventory` saves onto an item that already exists.
+pub(crate) type NewItemUpload = Option<(NewFileAgentInventoryRequest, AgentKey)>;
 
 /// Runs the modern two-step CAPS asset upload: POST the LLSD `metadata` to the
 /// capability `cap_url` to obtain an `uploader` URL, then POST the raw `data`
@@ -12,14 +21,18 @@ use tokio::sync::mpsc;
 /// `NewFileAgentInventory`, `UploadBakedTexture`, and `Update*AgentInventory`
 /// uploads, whose responses share the `{ state, uploader, new_asset,
 /// new_inventory_item }` shape.
+///
+/// `creating` carries the request of an upload that creates an item, so the
+/// completion can be turned into the item itself — no grid announces one.
 pub(crate) async fn run_caps_upload(
     cap_url: String,
     metadata: String,
     data: Vec<u8>,
+    creating: NewItemUpload,
     http: ReqwestClient,
     events: mpsc::Sender<Event>,
 ) {
-    let event = caps_upload_event(&cap_url, metadata, data, &http).await;
+    let event = caps_upload_event(&cap_url, metadata, data, creating, &http).await;
     deliver(&events, event).await;
 }
 
@@ -28,6 +41,7 @@ pub(crate) async fn caps_upload_event(
     cap_url: &str,
     metadata: String,
     data: Vec<u8>,
+    creating: NewItemUpload,
     http: &ReqwestClient,
 ) -> Event {
     // Step 1: POST the metadata, expecting an `uploader` URL back.
@@ -57,6 +71,10 @@ pub(crate) async fn caps_upload_event(
             Some(new_asset) => Event::AssetUploaded {
                 new_asset,
                 new_inventory_item: response.new_inventory_item,
+                created: creating.and_then(|(request, owner)| {
+                    uploaded_inventory_item(&request, &response, owner, unix_seconds())
+                        .map(Box::new)
+                }),
             },
             None => Event::AssetUploadFailed {
                 reason: response.error.unwrap_or_else(|| {
@@ -66,6 +84,18 @@ pub(crate) async fn caps_upload_event(
         },
         Err(reason) => Event::AssetUploadFailed { reason },
     }
+}
+
+/// The current Unix time in seconds, for the creation date of an item the grid
+/// creates but never dates (`LLResourceUploadInfo::finishUpload` stamps
+/// `time_corrected()` for the same reason). Saturates rather than wrapping
+/// outside the range the wire field can hold.
+fn unix_seconds() -> i32 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| {
+            i32::try_from(since.as_secs()).unwrap_or(i32::MAX)
+        })
 }
 
 /// Runs a two-step **script** upload (`UpdateScriptAgent` / `UpdateScriptTask`)
@@ -128,6 +158,9 @@ async fn script_upload_event(
                 };
             }
             Event::ScriptUploaded {
+                // A script upload always replaces the source of an item that
+                // already exists — `Command::UploadScript` names it — so unlike
+                // `AssetUploaded` there is never an item to assemble here.
                 new_asset: response.new_asset,
                 new_inventory_item: response.new_inventory_item,
                 // A grid that completed but omitted `compiled` is treated as a

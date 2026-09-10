@@ -27,12 +27,12 @@ use sl_proto::{
     CAP_UPDATE_EXPERIENCE, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_USER_INFO,
     CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
     CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE,
-    Event as SessionEvent, INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd, LoginResponse, RECV_BUFFER_SIZE,
-    SelectedCostKind, Session, SessionMessage, UserInfoUpdate, ais_category_children_fetch_url,
-    ais_category_children_url, ais_category_url, ais_create_category_url, ais_item_url,
-    associate_inventory_request, avatar_picker_search_query, build_agent_preferences_request,
-    build_ais_create_category_body, build_ais_create_link_body, build_ais_move_body,
-    build_ais_rename_category_body, build_ais_update_item_body,
+    Event as SessionEvent, INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd, LoginResponse,
+    NewFileAgentInventoryRequest, RECV_BUFFER_SIZE, SelectedCostKind, Session, SessionMessage,
+    UserInfoUpdate, ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
+    ais_create_category_url, ais_item_url, associate_inventory_request, avatar_picker_search_query,
+    build_agent_preferences_request, build_ais_create_category_body, build_ais_create_link_body,
+    build_ais_move_body, build_ais_rename_category_body, build_ais_update_item_body,
     build_create_inventory_category_request, build_environment_update_request,
     build_get_object_cost_request, build_get_object_physics_data_request,
     build_modify_material_params_request, build_object_media_navigate_request,
@@ -58,32 +58,33 @@ pub use sl_proto::{
     ActiveGroup, AgentKey, AgentOrObjectKey, AgentPreferences, AnimatedObjects, AnimationKey,
     AnyMessage, Arrival, AssetKey, AssetUpdateLocation, AssociateInventory, AttachmentMode,
     AttachmentPoint, AvatarAppearance, AvatarClassified, AvatarGroupMembership, AvatarInterests,
-    AvatarName, AvatarPick, AvatarPickerResult, AvatarProperties, Camera, CameraError, ChatAudible,
-    ChatChannel, ChatLogConfig, ChatMessage, ChatSessionKind, ChatSource, ChatSourceType, ChatType,
-    ChatTypeNotAVolume, Child, CircuitCode, CircuitId, ClassifiedCategory, ClassifiedInfo,
-    ClassifiedKey, ClassifiedUpdate, ClickAction, ClientDirectories, ClockStyle, CoarseLocation,
-    Color, ColorAlpha, Command, ControlFlags, ConversationKind, CreateGroupParams, CreateListing,
-    DEFAULT_BLOOM_TEXTURE, DEFAULT_CLOUD_TEXTURE, DEFAULT_HALO_TEXTURE, DEFAULT_MOON_TEXTURE,
-    DEFAULT_PRIM_TEXTURE, DEFAULT_RAINBOW_TEXTURE, DEFAULT_SUN_TEXTURE,
-    DEFAULT_WATER_NORMAL_TEXTURE, DayCycle, DayCycleFrame, DeRezDestination, DetachOrder,
-    Diagnostic, DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
-    DirPeopleResult, DirPlaceResult, Direction, DirectoryVisibility, DisconnectReason, DisplayName,
-    DisplayNameUpdate, Distance, EconomyData, EnvironmentAsset, EnvironmentSettings,
-    Error as SessionError, EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateFlags,
-    EstateInfo, EstateInfoUpdate, EventId, EventInfo, ExperienceInfo, ExperienceKey,
-    ExperiencePermission, ExperienceProperties, ExperienceUpdate, ExtendedMesh, FaceMaterialPut,
-    FlexibleData, FolderInfo, FolderState, FolderType, Friend, FriendKey, FriendPresence,
-    FriendRights, GestureActivation, GlobalCoordinates, Glow, GltfMaterialOverride,
-    GridCoordinates, GroupInvitationReceived, GroupKey, GroupMember, GroupMembership, GroupNotice,
-    GroupNoticeAttachment, GroupNoticeItem, GroupNoticeKey, GroupNoticeReceived, GroupProfile,
-    GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember,
-    GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog,
-    ImSessionId, InstantMessage, InterestsUpdate, InventoryCacheConfig, InventoryCallbackId,
-    InventoryCursor, InventoryFolder, InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey,
-    InventoryKey, InventoryOffer, InventoryOwner, InventoryType, ItemInfo, Key, Kilobits, LandArea,
-    LandImpact, LandSearchType, LandingType, LegacyMaterial, LightData, LightImage, LindenAmount,
-    LindenBalance, Listing, ListingId, LoadUrlRequest, LoggedChatType, LoginAccount, LoginFailure,
-    LoginParams, LoginRejectKind, LoginRequest, LookAtType, LureId, MAX_FACES, MEDIA_PERM_ALL,
+    AvatarName, AvatarPick, AvatarPickerResult, AvatarProperties, BUILTIN_UI_SOUNDS, Camera,
+    CameraError, ChatAudible, ChatChannel, ChatLogConfig, ChatMessage, ChatSessionKind, ChatSource,
+    ChatSourceType, ChatType, ChatTypeNotAVolume, Child, CircuitCode, CircuitId,
+    ClassifiedCategory, ClassifiedInfo, ClassifiedKey, ClassifiedUpdate, ClickAction,
+    ClientDirectories, ClockStyle, CoarseLocation, Color, ColorAlpha, Command, ControlFlags,
+    ConversationKind, CreateGroupParams, CreateListing, DEFAULT_BLOOM_TEXTURE,
+    DEFAULT_CLOUD_TEXTURE, DEFAULT_HALO_TEXTURE, DEFAULT_MOON_TEXTURE, DEFAULT_PRIM_TEXTURE,
+    DEFAULT_RAINBOW_TEXTURE, DEFAULT_SUN_TEXTURE, DEFAULT_WATER_NORMAL_TEXTURE, DayCycle,
+    DayCycleFrame, DeRezDestination, DetachOrder, Diagnostic, DirClassifiedResult, DirEventResult,
+    DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, Direction,
+    DirectoryVisibility, DisconnectReason, DisplayName, DisplayNameUpdate, Distance, EconomyData,
+    EnvironmentAsset, EnvironmentSettings, Error as SessionError, EstateAccessDelta,
+    EstateAccessKind, EstateCovenant, EstateFlags, EstateInfo, EstateInfoUpdate, EventId,
+    EventInfo, ExperienceInfo, ExperienceKey, ExperiencePermission, ExperienceProperties,
+    ExperienceUpdate, ExtendedMesh, FaceMaterialPut, FlexibleData, FolderInfo, FolderState,
+    FolderType, Friend, FriendKey, FriendPresence, FriendRights, GestureActivation,
+    GlobalCoordinates, Glow, GltfMaterialOverride, GridCoordinates, GroupInvitationReceived,
+    GroupKey, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment, GroupNoticeItem,
+    GroupNoticeKey, GroupNoticeReceived, GroupProfile, GroupRequestId, GroupRole, GroupRoleChange,
+    GroupRoleEdit, GroupRoleKey, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType,
+    GroupTitle, HomeLocation, IceCandidate, ImDialog, ImSessionId, InstantMessage, InterestsUpdate,
+    InventoryCacheConfig, InventoryCallbackId, InventoryCursor, InventoryFolder,
+    InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey, InventoryOffer,
+    InventoryOwner, InventoryType, ItemInfo, Key, Kilobits, LandArea, LandImpact, LandSearchType,
+    LandingType, LegacyMaterial, LightData, LightImage, LindenAmount, LindenBalance, Listing,
+    ListingId, LoadUrlRequest, LoggedChatType, LoginAccount, LoginFailure, LoginParams,
+    LoginRejectKind, LoginRequest, LookAtType, LureId, MAX_FACES, MEDIA_PERM_ALL,
     MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType,
     MapRegionInfo, MarketplaceApiError, MarketplaceApiErrorKind, MarketplaceAssociateInventoryInfo,
     MarketplaceInventoryInfo, MarketplaceOperation, Material, MaterialOverrideUpdate, Maturity,
@@ -113,9 +114,12 @@ pub use sl_proto::{
     SurfaceInfo, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TerrainLayerType,
     TerrainPatch, TextureAnimation, TextureEntry, TextureFace, TextureKey, Throttle,
     ThrottleBuilder, ThrottleError, TimestampFormat, TransactionId, TransferId, Transmit,
-    UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, UserInfo, Uuid, Vector, ViewerEffect,
-    ViewerEffectData, ViewerEffectType, VoiceAccountInfo, VoiceProvisionRequest, WaterSettings,
-    Wearable, WearableType, WireError, XferId, avatar_texture, azimuth_altitude_to_rotation,
+    UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER, UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN,
+    UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT, UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT,
+    UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE, UI_SOUND_WINDOW_OPEN, UpdatableAssetType,
+    UpdateGroupInfoParams, UpdateListing, UserInfo, Uuid, Vector, ViewerEffect, ViewerEffectData,
+    ViewerEffectType, VoiceAccountInfo, VoiceProvisionRequest, WaterSettings, Wearable,
+    WearableType, WireError, XferId, avatar_texture, azimuth_altitude_to_rotation,
     decode_particle_system, decode_texture_anim, decode_texture_entry, encode_texture_entry,
     environment_asset_from_bytes, grid_to_handle, group_powers, handle_to_global, handle_to_grid,
     particle_pattern, pcode, sim_access, texture_anim_mode,
@@ -391,7 +395,7 @@ use crate::materials::{
 use crate::media::{post_caps_llsd_oneway, run_object_media_fetch};
 use crate::upload::{
     emit_upload_failure, emit_upload_unavailable, run_caps_upload, run_report_screenshot_upload,
-    run_script_upload, spawn_new_file_upload,
+    run_script_upload, spawn_new_file_upload, upload_type_names,
 };
 use crate::voice::{run_voice_cap, run_voice_signaling};
 use crate::world::{SlRegionIndex, maintain_world};
@@ -1387,6 +1391,17 @@ fn advance_running(
         }
         // Binary asset fetches return fully-formed session events; surface them.
         while let Ok(event) = caps.asset_rx.try_recv() {
+            // An upload that created an inventory item is the exception: file
+            // the item before the completion goes out, so a reader that
+            // re-reads the folder on that event finds it there. No grid
+            // announces this one, so nothing else ever would.
+            if let SessionEvent::AssetUploaded {
+                created: Some(item),
+                ..
+            } = &event
+            {
+                session.cache_uploaded_item(item.as_ref().clone());
+            }
             report(outbound, NetOutbound::Event(event));
         }
 
@@ -1993,7 +2008,7 @@ fn apply_command(
                     "{base}{}",
                     ais_create_category_url(*parent_id, Uuid::new_v4())
                 );
-                let body = build_ais_create_category_body(*folder_type, name);
+                let body = build_ais_create_category_body(*parent_id, *folder_type, name);
                 std::thread::spawn(move || {
                     run_voice_cap(&url, body, CAP_INVENTORY_API_V3, &events_tx);
                 });
@@ -3331,26 +3346,26 @@ fn apply_command(
             // The modern CAPS uploader (the only upload path — the legacy UDP
             // asset-upload fallback was dropped): needs both the region
             // capability and a CAPS name for the asset and inventory classes.
-            let caps_available = matches!(
-                (asset_type.caps_asset_name(), inventory_type.caps_name()),
-                (Some(_), Some(_))
-            ) && caps
+            let caps_available = caps
                 .as_ref()
                 .is_some_and(|caps| caps.map.contains_key(CAP_NEW_FILE_AGENT_INVENTORY));
-            if caps_available {
-                spawn_new_file_upload(
-                    caps,
-                    *folder_id,
-                    *asset_type,
-                    *inventory_type,
-                    name,
-                    description,
-                    *next_owner_mask,
-                    *group_mask,
-                    *everyone_mask,
-                    *expected_upload_cost,
-                    data.clone(),
-                );
+            let names = upload_type_names(*asset_type, *inventory_type);
+            if let (Some((asset_name, inv_name)), true) = (names, caps_available) {
+                // The request is kept for the completion: this is the one
+                // upload that *creates* an item, and no grid announces the item
+                // it created, so the completion has to be turned into one.
+                let request = NewFileAgentInventoryRequest {
+                    folder_id: *folder_id,
+                    asset_type: asset_name.to_owned(),
+                    inventory_type: inv_name.to_owned(),
+                    name: name.clone(),
+                    description: description.clone(),
+                    next_owner_mask: *next_owner_mask,
+                    group_mask: *group_mask,
+                    everyone_mask: *everyone_mask,
+                    expected_upload_cost: *expected_upload_cost,
+                };
+                spawn_new_file_upload(caps, session.agent_id(), &request, data.clone());
             } else {
                 emit_upload_failure(
                     caps,
@@ -3366,7 +3381,7 @@ fn apply_command(
                 let body = build_upload_baked_texture_request();
                 let data = data.clone();
                 std::thread::spawn(move || {
-                    let event = run_caps_upload(&url, body, data);
+                    let event = run_caps_upload(&url, body, data, None);
                     deliver(&asset_tx, event);
                 });
             } else {
@@ -3397,7 +3412,7 @@ fn apply_command(
                 let asset_tx = caps.asset_tx.clone();
                 let data = data.clone();
                 std::thread::spawn(move || {
-                    let event = run_caps_upload(&url, body, data);
+                    let event = run_caps_upload(&url, body, data, None);
                     deliver(&asset_tx, event);
                 });
             } else {

@@ -141,23 +141,26 @@ impl UiSound {
 
     /// The reference viewer's default asset UUID for this sound (its `UISnd*`
     /// settings default). These are the built-in SL UI sound assets, fetched over
-    /// `ViewerAsset` like any other asset.
-    const fn default_asset(self) -> &'static str {
+    /// `ViewerAsset` like any other asset — no viewer ships them — so the ids are
+    /// shared with the grid side ([`sl_client_bevy::BUILTIN_UI_SOUNDS`]) rather than
+    /// spelled out again here: a fake grid answers exactly the set this catalogue
+    /// can ask for.
+    const fn default_asset(self) -> Uuid {
         match self {
-            Self::Click => "4c8c3c77-de8d-bde2-b9b8-32635e0fd4a6",
-            Self::Typing => "5e191c7b-8996-9ced-a177-b2ac32bfea06",
-            Self::Alert => "ed124764-705d-d497-167a-182cd9fa2e6c",
-            Self::InvalidOp => "4174f859-0d3d-c517-c424-72923dc21f65",
-            Self::MoneyUp => "77a018af-098e-c037-51a6-178f05877c6f",
-            Self::MoneyDown => "104974e3-dfda-428b-99ee-b0d4e748d3a3",
-            Self::TeleportOut => "d7a9a565-a013-2a69-797d-5332baa1a947",
-            Self::Snapshot => "3d09f582-3851-c0e0-f5ba-277ac5c73fb4",
-            Self::WindowOpen => "c80260ba-41fd-8a46-768a-6bf236360e3a",
-            Self::WindowClose => "2c346eda-b60c-ab33-1119-b8941916a499",
+            Self::Click => sl_client_bevy::UI_SOUND_CLICK,
+            Self::Typing => sl_client_bevy::UI_SOUND_TYPING,
+            Self::Alert => sl_client_bevy::UI_SOUND_ALERT,
+            Self::InvalidOp => sl_client_bevy::UI_SOUND_INVALID_OP,
+            Self::MoneyUp => sl_client_bevy::UI_SOUND_MONEY_UP,
+            Self::MoneyDown => sl_client_bevy::UI_SOUND_MONEY_DOWN,
+            Self::TeleportOut => sl_client_bevy::UI_SOUND_TELEPORT_OUT,
+            Self::Snapshot => sl_client_bevy::UI_SOUND_SNAPSHOT,
+            Self::WindowOpen => sl_client_bevy::UI_SOUND_WINDOW_OPEN,
+            Self::WindowClose => sl_client_bevy::UI_SOUND_WINDOW_CLOSE,
             Self::IncomingIm | Self::InventoryOffer | Self::TeleportOffer => {
-                "67cc2844-00f3-2b3c-b991-6418d01e1bb7"
+                sl_client_bevy::UI_SOUND_IM_OR_OFFER
             }
-            Self::NearbyChat | Self::RadarAlert => "a3f48b85-c29f-1f97-ebb6-644b7c053512",
+            Self::NearbyChat | Self::RadarAlert => sl_client_bevy::UI_SOUND_NEARBY_CHAT,
         }
     }
 
@@ -256,7 +259,7 @@ fn resolve(
         }
     }
     // 3. Reference default.
-    let uuid = Uuid::parse_str(sound.default_asset()).ok()?;
+    let uuid = sound.default_asset();
     (!uuid.is_nil()).then(|| ResolvedUiSound::Grid(AssetKey::from(uuid)))
 }
 
@@ -578,9 +581,11 @@ mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
 
-    /// Every UI sound has a unique setting key and a parseable default asset.
+    /// Every UI sound has a unique setting key and a real (non-nil) default
+    /// asset — a nil id is how the reference spells "this sound is off", which
+    /// no catalogue entry's *default* may be.
     #[test]
-    fn keys_unique_and_assets_parse() {
+    fn keys_unique_and_assets_are_real() {
         let mut keys: Vec<&str> = UiSound::ALL.iter().map(|sound| sound.key()).collect();
         let count = keys.len();
         keys.sort_unstable();
@@ -588,10 +593,29 @@ mod tests {
         assert_eq!(keys.len(), count, "UI sound keys are unique");
         for sound in UiSound::ALL {
             assert!(
-                Uuid::parse_str(sound.default_asset()).is_ok(),
-                "default asset for {sound:?} parses"
+                !sound.default_asset().is_nil(),
+                "default asset for {sound:?} is the nil id"
             );
         }
+    }
+
+    /// The catalogue and the shared grid-side list name **the same twelve
+    /// assets**. That agreement is what lets a fake grid serve exactly what a
+    /// viewer can ask for: a catalogue id missing from the list is a sound no
+    /// fixture grid answers (a silent event and a failed fetch on arrival), and
+    /// a list id no catalogue entry names is bytes registered under a key
+    /// nothing will ever ask for.
+    #[test]
+    fn the_catalogue_and_the_shared_list_agree() {
+        let mut catalogue: Vec<Uuid> = UiSound::ALL
+            .into_iter()
+            .map(UiSound::default_asset)
+            .collect();
+        catalogue.sort_unstable();
+        catalogue.dedup();
+        let mut shared = sl_client_bevy::BUILTIN_UI_SOUNDS.to_vec();
+        shared.sort_unstable();
+        assert_eq!(catalogue, shared);
     }
 
     /// One `-sk-uisnd-<key>` CSS property per UI sound, names unique, and a fresh
