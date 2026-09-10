@@ -649,6 +649,32 @@ do_status() {
 hook_wrapped_verdict() {
   _hwv_cmd=$1
 
+  # The wrapper has to be the first thing the command runs. The case that
+  # reaches here matched `*coord.sh*heavy*`, which matches the wrapper ANYWHERE
+  # in the string, and the payload is read from the first `--`; so without this
+  # `rm -rf x && coord.sh heavy -- cargo build` would be approved on the
+  # strength of a payload the rm is not part of. Only a leading env assignment
+  # or `env` may come first, since neither runs anything itself.
+  _hwv_lead=${_hwv_cmd}
+  while :; do
+    case "${_hwv_lead%% *}" in
+    env | nice | ionice) ;;
+    [A-Za-z_]*=*) ;;
+    *) break ;;
+    esac
+    case "${_hwv_lead}" in
+    *' '*) _hwv_lead=${_hwv_lead#* } ;;
+    *) break ;;
+    esac
+  done
+  case "${_hwv_lead%% *}" in
+  coord.sh | */coord.sh) ;;
+  *)
+    printf 'ask\n'
+    return
+    ;;
+  esac
+
   # The payload is everything after the wrapper's own `--`. Shortest-prefix
   # removal takes the *first* one, so a `cargo test -- --nocapture` keeps its
   # second `--` inside the payload where it belongs.
