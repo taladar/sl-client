@@ -91,6 +91,23 @@ APPROVE = [
         "formatter on the edited file, output piped",
         heredoc(MD_EDIT, "&& rumdl check notes.md 2>&1 | tail -5"),
     ),
+    # `>` inside a quoted awk program is a comparison, not a shell redirect.
+    (
+        "awk comparing a length",
+        heredoc(EDIT, "&& awk 'length > 80 {print NR\": \"length}' a.rs"),
+    ),
+    (
+        "awk comparison, piped",
+        heredoc(EDIT, "&& awk 'length > 80 {print FILENAME\":\"FNR}' a.rs | head"),
+    ),
+    ("grep for a literal angle bracket", heredoc(EDIT, "&& grep -n 'a > b' a.rs")),
+    # Regenerating the index it exclusively owns.
+    ("roadmap index regenerated", heredoc(EDIT, "&& python3 roadmap/index.py")),
+    (
+        "roadmap index checked",
+        heredoc(EDIT, "&& python3 roadmap/index.py --check 2>&1 | tail -3"),
+    ),
+    ("roadmap index by ./ path", heredoc(EDIT, "&& python3 ./roadmap/index.py")),
     # Whole-tree, but the commit hook holds the tree to it anyway.
     ("cargo fmt over the workspace", heredoc(EDIT, "&& cargo fmt --all")),
     ("cargo sort over the workspace", heredoc(EDIT, "&& cargo sort --workspace")),
@@ -164,6 +181,12 @@ REFUSE = [
             "p='notes.md'\nq='other.md'\ns=open(p).read()\nopen(q,'w').write(s)",
             "&& rumdl fmt notes.md",
         ),
+    ),
+    ("some other python script", heredoc(EDIT, "&& python3 tools/release.py")),
+    ("another script in roadmap/", heredoc(EDIT, "&& python3 roadmap/other.py")),
+    (
+        "a real redirect outside quotes",
+        heredoc(EDIT, "&& awk '{print $1}' a.rs > out.txt"),
     ),
     ("cargo build is not a formatter", heredoc(EDIT, "&& cargo build")),
     ("cargo test is not a formatter", heredoc(EDIT, "&& cargo test -p x")),

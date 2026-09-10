@@ -162,12 +162,23 @@ FORMATTER_HEADS = {
     "yamllint",
     "shellcheck",
 }
-# Formatters exempt from the "name the edited file" rule, because the commit
-# hook already holds the whole tree to their output on every commit. Running
-# one tree-wide can then only ever be a no-op or a fix the next commit would
-# have demanded anyway, so there is nothing for a review to catch. This is a
-# property of THIS repo's hooks -- an adopter without them should empty it.
-WHOLE_TREE_FORMATTERS = {("cargo", "fmt"), ("cargo", "sort")}
+# Tools exempt from the "name the edited file" rule, for two distinct reasons.
+#
+#   * `cargo fmt` and `cargo sort`: the commit hook already holds the whole tree
+#     to their output on every commit, so running one tree-wide can only ever be
+#     a no-op or a fix the next commit would have demanded anyway.
+#   * `roadmap/index.py`: it regenerates roadmap/INDEX.md, a file nothing else
+#     writes, from the roadmap items -- and the same hook runs it with --check.
+#     Its whole output is one file it exclusively owns.
+#
+# Both reasons are properties of THIS repo, and an adopter without those hooks
+# should empty the set. Matched on (head, first word), with the first word
+# normalised, so `./roadmap/index.py` and `roadmap/index.py` are the same entry.
+WHOLE_TREE_TOOLS = {
+    ("cargo", "fmt"),
+    ("cargo", "sort"),
+    ("python3", "roadmap/index.py"),
+}
 # Several of the above read by default and write when asked. Naming the head is
 # therefore not enough: `sed -i` rewrites in place, an awk program can redirect
 # to a file from inside its own script, `typos -w` fixes what it finds, and
@@ -225,6 +236,27 @@ def _literal_env(tree):
 def _has_substitution(text):
     """True if the shell would run something inside this fragment."""
     return "`" in text or "$(" in text
+
+
+def _outside_quotes(text):
+    """The text with single- and double-quoted spans blanked out.
+
+    An operator only operates where the shell can see it, so scanning for
+    redirects has to ignore quoted text. Spans are replaced by spaces rather
+    than deleted so that nothing either side of a quote is accidentally joined.
+    """
+    out, quote = [], ""
+    for char in text:
+        if quote:
+            out.append(" ")
+            if char == quote:
+                quote = ""
+        elif char in "'\"":
+            quote = char
+            out.append(" ")
+        else:
+            out.append(char)
+    return "".join(out)
 
 
 def _call_name(node):
@@ -344,15 +376,19 @@ def check_tail(rest, edited, cwd):
         if not segment:
             continue
         # `2>&1` and `>/dev/null` are fine; a redirect to a real file is a write
-        # this has not checked, whatever the command in front of it is.
-        for match in re.finditer(r"(?<!\d)>+\s*([^\s|;&]+)", segment):
+        # this has not checked, whatever the command in front of it is. Only the
+        # unquoted part counts -- a `>` the shell never sees is not a redirect,
+        # and `awk 'length > 80 {print NR}'` is a comparison, not a write. An
+        # awk program that really does redirect is caught by TAIL_WRITE_FLAGS,
+        # which reads the quoted text this deliberately drops.
+        for match in re.finditer(r"(?<!\d)>+\s*([^\s|;&]+)", _outside_quotes(segment)):
             if match.group(1) not in ("/dev/null", "&1", "&2"):
                 return "tail/redirect"
         words = segment.split()
         head = os.path.basename(words[0]) if words else ""
-        subcommand = words[1] if len(words) > 1 else ""
+        subcommand = os.path.normpath(words[1]) if len(words) > 1 else ""
 
-        if (head, subcommand) in WHOLE_TREE_FORMATTERS:
+        if (head, subcommand) in WHOLE_TREE_TOOLS:
             continue
         if head in FORMATTER_HEADS:
             targets = _file_arguments(words[1:])
