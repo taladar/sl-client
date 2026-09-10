@@ -62,6 +62,7 @@ pub use teleport::TELEPORT_ARRIVAL_TIMEOUT;
 pub use terrain::{Heightfield, TerrainFixture};
 pub use time::{Now, system_clock, tokio_clock};
 pub use udp_assets::{UdpAssetFixtures, flat_terrain_raw};
+pub use uploads::UpdateCompletionItem;
 pub use voice::VoiceBackend;
 pub use world::{
     AvatarIdentity, ParcelAccessLists, ParcelListing, RegionChange, RegionUpdate, RegionWorld,

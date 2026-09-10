@@ -2613,6 +2613,7 @@ fn handle_item_creations(
 /// reason that one does: it is the inventory that has to hear about a new item.
 fn handle_settings_creations(
     mut events: MessageReader<SlEvent>,
+    model: Res<InventoryModel>,
     mut pending: ResMut<PendingSettingsCreations>,
     mut commands: MessageWriter<SlCommand>,
     mut created: MessageWriter<SettingsItemCreated>,
@@ -2623,6 +2624,18 @@ fn handle_settings_creations(
         };
         // The wire item carries raw type codes, not the typed enums.
         if i32::from(item.item_type) != AssetType::Settings.to_code() {
+            continue;
+        }
+        // **`UpdateCreateInventoryItem` does not only announce creations.**
+        // Second Life sends it again when a capability upload *rewrites* an
+        // item, which is every settings Save — so on that grid the message that
+        // means "here is the item you asked me to make" and the one that means
+        // "the item you just saved has a new asset" are the same message. A
+        // creation is the one an item did not exist before, so an item the
+        // mirror already holds is a rewrite and must not spend a queue entry:
+        // the entry belongs to a creation still in flight, and spending it here
+        // would write that creation's body onto the item somebody merely saved.
+        if model.find_item(item.item_id).is_some() {
             continue;
         }
         let Some(creation) = pending.take_next() else {

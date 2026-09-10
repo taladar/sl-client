@@ -25,6 +25,7 @@
 //! | the deprecated UDP inventory fetch ([`LegacyUdpInventory`]) | refused with a `FeatureDisabled` | served out of the session's inventory tree |
 //! | how a created inventory item is announced ([`InventoryAnnouncement`]) | a `BulkUpdateInventory` over the event queue | the legacy UDP `UpdateCreateInventoryItem` |
 //! | who composites an avatar ([`BakePolicy`]) | the grid: an `agent_appearance_service`, the central-bake protocol bit, an `AppearanceData` block on every appearance, and the `UpdateAvatarAppearance` trigger | every viewer for itself: none of those four |
+//! | whether an update capability's completion names the item it rewrote ([`UpdateCompletionItem`]) | omitted: `new_asset` alone, and the client uses the id it sent | echoed: `new_inventory_item` carries the rewritten item |
 //! | the rest of `RegionProtocols` ([`region_protocol_bits`](ImitatedGrid::region_protocol_bits)) | nothing else claimed | bit 63, "more than 6 baked textures" |
 //!
 //! **The inventory pair is the divergence a viewer is most likely to trip
@@ -79,6 +80,7 @@
 use crate::assets::ObjectAssetPolicy;
 use crate::bakes::{BakePolicy, REGION_PROTOCOL_BAKES_ON_MESH};
 use crate::inventory::{InventoryAnnouncement, LegacyUdpInventory};
+use crate::uploads::UpdateCompletionItem;
 use crate::voice::VoiceBackend;
 
 /// The live grid a [`FakeGrid`](crate::FakeGrid) imitates where the two real
@@ -98,6 +100,20 @@ pub enum ImitatedGrid {
 }
 
 impl ImitatedGrid {
+    /// Whether an **update** capability's completion names the item it rewrote.
+    ///
+    /// OpenSim echoes it; Second Life does not, and the reference client never
+    /// asks it to. See [`UpdateCompletionItem`] for both sources — it is the
+    /// divergence a client is most likely to depend on **without noticing**,
+    /// because the lenient answer makes a broken correlation work.
+    #[must_use]
+    pub const fn update_completion_item(self) -> UpdateCompletionItem {
+        match self {
+            Self::SecondLife => UpdateCompletionItem::Omitted,
+            Self::OpenSim => UpdateCompletionItem::Echoed,
+        }
+    }
+
     /// What this grid does with a taken object's asset.
     ///
     /// Second Life gives a viewer a nil asset id and no way to reach the body;
@@ -341,5 +357,33 @@ mod test {
         );
         assert_eq!(ImitatedGrid::OpenSim.voice_backend(), VoiceBackend::Silent);
         assert_eq!(VoiceBackend::default(), VoiceBackend::WebRtc);
+    }
+
+    /// **The two flavours answer an update's completion differently**, and the
+    /// stock grid is the strict one.
+    ///
+    /// This is the divergence a client is most likely to depend on without
+    /// noticing, because the lenient answer makes a broken correlation work: a
+    /// viewer that matches "my save landed" on the echoed item passes against
+    /// OpenSim and hangs on "Saving…" against Second Life. Modelling only the
+    /// lenient side is what let exactly that ship — so the default has to be the
+    /// side that fails it, and the other side has to remain reachable, or a run
+    /// imitating OpenSim is not imitating OpenSim.
+    #[test]
+    fn only_the_open_sim_flavour_echoes_a_rewritten_item() {
+        assert_eq!(
+            ImitatedGrid::SecondLife.update_completion_item(),
+            UpdateCompletionItem::Omitted
+        );
+        assert_eq!(
+            ImitatedGrid::OpenSim.update_completion_item(),
+            UpdateCompletionItem::Echoed
+        );
+        assert_eq!(
+            UpdateCompletionItem::default(),
+            UpdateCompletionItem::Omitted
+        );
+        assert!(!UpdateCompletionItem::Omitted.names_item());
+        assert!(UpdateCompletionItem::Echoed.names_item());
     }
 }

@@ -3132,6 +3132,11 @@ pub enum ServerEvent {
 pub struct SimSession {
     /// The current lifecycle state.
     state: SimState,
+    /// Whether an **update** capability's completion names the item it wrote —
+    /// the one grid divergence this session models as a knob rather than a
+    /// behaviour. Defaults to `false`, the stricter (Second Life) answer; see
+    /// [`SimSession::set_update_completion_names_item`].
+    update_completion_names_item: bool,
     /// The region handle this simulator serves (echoed in `AgentMovementComplete`).
     region_handle: RegionHandle,
     /// The channel/version string reported in `AgentMovementComplete`.
@@ -3427,13 +3432,30 @@ impl CapsUploadMetadata {
     /// The inventory item this upload replaces the asset of, when it replaces
     /// one rather than creating one.
     ///
-    /// The completion's `new_inventory_item` is this id for every `Update*`
-    /// family, **not** a freshly minted one: OpenSim's `ItemUpdater` answers
-    /// `uploadComplete.new_inventory_item = m_inventoryItemID`, and it has to —
-    /// the item already exists, and handing the client an id nothing holds
-    /// would have it file a second copy of a notecard it only edited.
+    /// The item an `Update*` family replaces — which the **driver** needs (the
+    /// upload has to be applied to that item) but which this simulator
+    /// deliberately does **not** echo in the completion reply.
+    ///
+    /// The two real grids differ here, and only one of them is safe to model:
+    ///
+    /// - **OpenSim echoes it.** `UpdateItemAsset.cs` answers
+    ///   `uploadComplete.new_inventory_item = m_inventoryItemID`.
+    /// - **Second Life does not**, and the reference client never asks it to:
+    ///   `LLBufferedAssetUploadInfo::finishUpload` — the update path — reads
+    ///   `result["new_asset"]` and takes the item from `getItemId()`, the id it
+    ///   sent in the request. Only the *create* path
+    ///   (`LLResourceUploadInfo::finishUpload`) reads `new_inventory_item`.
+    ///
+    /// So a client may never depend on the echo, and this simulator answers the
+    /// **stricter** way so that one which does fails here rather than in front
+    /// of a person. Modelling the lenient behaviour instead made exactly that
+    /// bug invisible: the settings editor matched its save completion on the
+    /// echoed item, passed every offline test, and reported "Saving…" forever
+    /// against the real grid.
+    ///
     /// `NewFileAgentInventory` is the one family that mints an id (it creates
-    /// the item), and `UploadBakedTexture` has no item at all.
+    /// the item, so the client cannot know it), and `UploadBakedTexture` has no
+    /// item at all.
     pub(crate) const fn replaced_item(&self) -> Option<InventoryKey> {
         match self {
             Self::NewFileInventory(_) | Self::BakedTexture => None,
@@ -3544,6 +3566,7 @@ impl SimSession {
     pub fn new(region_handle: RegionHandle, now: Instant) -> Self {
         Self {
             state: SimState::AwaitingCircuit,
+            update_completion_names_item: false,
             region_handle,
             channel_version: b"sl-proto SimSession".to_vec(),
             client_addr: None,
@@ -3921,28 +3944,68 @@ impl SimSession {
 
     /// Completes a two-stage CAPS upload: mints the stored asset id (and, for
     /// the inventory-creating caps, an inventory item id), routes the upload to
-    /// the driver as [`ServerEvent::CapsAssetUploaded`], and returns the minted
-    /// ids for the `{ state: "complete", new_asset, new_inventory_item? }`
-    /// reply. The ids come from the deterministic sim serial
+    /// the driver as [`ServerEvent::CapsAssetUploaded`], and returns the ids for
+    /// the `{ state: "complete", new_asset, new_inventory_item? }` reply. They
+    /// come from the deterministic sim serial
     /// ([`next_sim_serial`](Self::next_sim_serial)).
+    ///
+    /// **The returned item is `None` for every update**, so the reply carries
+    /// `new_asset` alone — see [`CapsUploadMetadata::replaced_item`] for why
+    /// this models the stricter of two real behaviours on purpose. The event
+    /// handed to the driver still names the item, because applying an update
+    /// needs it.
     pub(crate) fn complete_caps_upload(
         &mut self,
         metadata: CapsUploadMetadata,
         data: Vec<u8>,
     ) -> (AssetKey, Option<InventoryKey>) {
         let new_asset = AssetKey::from(Uuid::from_u128(self.next_serial()));
-        let new_inventory_item = metadata.replaced_item().or_else(|| {
-            metadata
-                .creates_inventory_item()
-                .then(|| InventoryKey::from(Uuid::from_u128(self.next_serial())))
-        });
+        // Only a *create* mints an id, and only a create's id is echoed — see
+        // the return value's contract below.
+        let minted = metadata
+            .creates_inventory_item()
+            .then(|| InventoryKey::from(Uuid::from_u128(self.next_serial())));
         self.events.push_back(ServerEvent::CapsAssetUploaded {
-            metadata: Box::new(metadata),
+            metadata: Box::new(metadata.clone()),
             new_asset,
-            new_inventory_item,
+            // The **driver** is told the item either way: an update has to be
+            // applied to the item it replaces, and that is the only place that
+            // id can come from once the metadata is consumed.
+            new_inventory_item: metadata.replaced_item().or(minted),
             data,
         });
-        (new_asset, new_inventory_item)
+        (
+            new_asset,
+            if self.update_completion_names_item {
+                metadata.replaced_item().or(minted)
+            } else {
+                minted
+            },
+        )
+    }
+
+    /// Choose whether an **update** capability's completion echoes the item it
+    /// wrote, which is the one place the two real grids disagree about this
+    /// reply.
+    ///
+    /// - **OpenSim echoes it** — `UpdateItemAsset.cs` answers
+    ///   `uploadComplete.new_inventory_item = m_inventoryItemID`.
+    /// - **Second Life does not**, and the reference client never asks it to:
+    ///   `LLBufferedAssetUploadInfo::finishUpload` reads `result["new_asset"]`
+    ///   and takes the item from the id it sent. Only the *create* path
+    ///   (`LLResourceUploadInfo::finishUpload`) reads `new_inventory_item`.
+    ///
+    /// The default is Second Life's, because it is the **stricter** of the two:
+    /// a client that works against a grid which never echoes works against both,
+    /// and one that depends on the echo fails here rather than in front of a
+    /// person. It is a knob rather than a fixed answer so a grid imitating
+    /// OpenSim can be the lenient one and a test can tell the two apart — which
+    /// is the whole point of imitating a named grid.
+    ///
+    /// A *create* names its item either way: it minted the id, so the client
+    /// cannot know it.
+    pub const fn set_update_completion_names_item(&mut self, names: bool) {
+        self.update_completion_names_item = names;
     }
 
     /// Registers (or replaces) a material in the store the `RenderMaterials`

@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 42 |
 | in-progress | 21 |
 | bugs | 63 |
-| done | 1033 |
+| done | 1034 |
 | deferred | 25 |
 | wont-do | 14 |
-| **total** | **1625** |
+| **total** | **1626** |
 
 ## ideas (101)
 
@@ -1349,7 +1349,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1033)
+## done (1034)
 
 ### protocol
 
@@ -3338,6 +3338,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-terrain-layerdata`](done/test-fake-grid-terrain-layerdata.md)
   — The fake grid sends terrain — LayerData patches, wind, clouds (blocked by
   `test-fake-grid-determinism` (done))
+- [`test-fake-grid-update-completion-item`](done/test-fake-grid-update-completion-item.md)
+  — A fake grid that echoed a field the real one withholds
 - [`test-firestorm-crosscheck-report`](done/test-firestorm-crosscheck-report.md)
   — Report the divergences — contact sheet, image diff, scene-dump diff (blocked
   by `test-firestorm-crosscheck-runner` (done), `viewer-scene-dump` (done))
