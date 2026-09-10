@@ -221,12 +221,13 @@ pub fn run() -> AppExit {
                     }),
                     ..default()
                 })
+                // Resolve the viewer's own `assets/` the way the viewer binary
+                // does (`crate::asset_root`): the gallery is where appearance is
+                // judged, and a gallery with no skin has no focus ring at all.
+                //
                 // Watch the skin `.css` files: the gallery is the skin-authoring
                 // surface, so an edit re-applies live here without a restart.
-                .set(AssetPlugin {
-                    watch_for_changes_override: Some(true),
-                    ..default()
-                })
+                .set(crate::asset_root::asset_plugin(Some(true)))
                 // The binary installs its own subscriber (`crate::init_tracing`),
                 // as the viewer does; two would clash over the global slot.
                 .disable::<LogPlugin>(),

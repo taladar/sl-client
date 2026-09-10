@@ -395,6 +395,10 @@ pub fn run() -> AppExit {
                     }),
                     ..default()
                 })
+                // Resolve the viewer's own `assets/` the way the viewer binary
+                // does (`crate::asset_root`), so a scene run out of `target/`
+                // reads the same tree a `cargo run` would.
+                .set(crate::asset_root::asset_plugin(None))
                 // The binary installs its own subscriber (`crate::init_tracing`),
                 // as the viewer does; two would clash over the global slot.
                 .disable::<LogPlugin>(),

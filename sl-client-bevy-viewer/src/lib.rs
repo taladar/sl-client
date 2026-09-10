@@ -85,6 +85,7 @@ pub(crate) const REGISTRARS: &[fn(&mut crate::settings::ViewerSettings)] = &[
 // `crate::<module>::…` path in the viewer still resolves.
 pub(crate) use sl_viewer_kit::appearance;
 mod asset_blacklist;
+mod asset_root;
 pub(crate) use sl_viewer_world_avatar::avatar_asset_stats;
 pub(crate) use sl_viewer_world_objects::asset_budget;
 pub(crate) use sl_viewer_world_objects::asset_stats;
@@ -1122,13 +1123,14 @@ fn run_session(
                 close_when_requested: false,
                 ..default()
             })
+            // Resolve the viewer's own `assets/` (icons, locales, skins) rather
+            // than inheriting Bevy's executable-relative default, which a binary
+            // run out of `target/` finds nothing under — see `asset_root`.
+            //
             // Watch the asset directory so an edited skin `.css` re-applies live
             // (`--watch-skins`, the skin-authoring loop). Off unless asked, since
             // watching carries a small background cost.
-            .set(AssetPlugin {
-                watch_for_changes_override: watch_skins.then_some(true),
-                ..default()
-            })
+            .set(crate::asset_root::asset_plugin(watch_skins.then_some(true)))
             // The binary installs its own `tracing` subscriber (so the
             // pre-window login logs go somewhere); drop Bevy's `LogPlugin` to
             // avoid the "global subscriber already set" clash.

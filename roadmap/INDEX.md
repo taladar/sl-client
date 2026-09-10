@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 324 |
 | blocked | 42 |
 | in-progress | 21 |
-| bugs | 53 |
-| done | 1069 |
+| bugs | 52 |
+| done | 1070 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1651** |
@@ -1189,7 +1189,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (53)
+## bugs (52)
 
 ### viewer
 
@@ -1197,9 +1197,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Add Friend sends the offer silently — no message dialog, no feedback
 - [`viewer-animesh-intermittent-render`](bugs/viewer-animesh-intermittent-render.md)
   — Animesh intermittently fails to render (timing race, not deterministic)
-- [`viewer-asset-root-needs-an-env-var`](bugs/viewer-asset-root-needs-an-env-var.md)
-  — The viewer binary finds no icons, skin or locales unless BEVY_ASSET_ROOT is
-  set
 - [`viewer-audio-tests-open-real-devices`](bugs/viewer-audio-tests-open-real-devices.md)
   — Unit tests open real audio devices on the developer's machine
 - [`viewer-audit-about-land-row-rebuild`](bugs/viewer-audit-about-land-row-rebuild.md)
@@ -1315,7 +1312,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1069)
+## done (1070)
 
 ### protocol
 
@@ -1568,6 +1565,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Retry failed asset fetches and make the F3 overlay honest about deferred work
 - [`viewer-asset-retry-counter-stuck`](done/viewer-asset-retry-counter-stuck.md)
   — Asset fetch retry counter stuck at 1/6 — permanent failures retry forever
+- [`viewer-asset-root-needs-an-env-var`](done/viewer-asset-root-needs-an-env-var.md)
+  — The viewer binary finds no icons, skin or locales unless BEVY_ASSET_ROOT is
+  set
 - [`viewer-attachment-context-menu`](done/viewer-attachment-context-menu.md) —
   Attachment context / pie menu entries (worn on self + on others) (blocked by
   `viewer-avatar-context-menu` (done))

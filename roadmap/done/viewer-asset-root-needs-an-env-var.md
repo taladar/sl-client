@@ -2,7 +2,7 @@
 id: viewer-asset-root-needs-an-env-var
 title: The viewer binary finds no icons, skin or locales unless BEVY_ASSET_ROOT is set
 topic: viewer
-status: bugs
+status: done
 origin: hit again during the hold-to-fly live test (2026-09-10); recurring since
   the skin work
 ---
@@ -52,9 +52,48 @@ and the locales folder failing to load are not cosmetic, and a viewer that
 cannot find them should say so once, plainly, rather than emitting a scatter of
 per-file `bevy_asset` errors that read like ordinary noise.
 
+## What landed
+
+`sl-client-bevy-viewer/src/asset_root.rs`: the three-step resolution above,
+pinned onto `AssetPlugin::file_path` as an **absolute** path (an absolute
+`file_path` replaces Bevy's base entirely, since that base is only `join`ed
+onto it). All three binaries take it — the viewer, the UI gallery
+(`gallery.rs`) and the render gallery (`render_gallery.rs`), the last of which
+was not setting `AssetPlugin` at all.
+
+Start-up now says which layout it found in one `viewer assets` line, and an
+incomplete tree is a single `error!` naming the directory, what it lacks of
+`skins` / `locales` / `icons`, and the override — instead of a scatter of
+per-file `bevy_asset` failures.
+
+`BEVY_ASSET_ROOT` is obeyed **whether or not it exists**: a wrong override must
+fail at the path the operator named rather than fall through to a tree that
+happens to be there and quietly render a different skin.
+
+Ten unit tests cover the order (override wins, installed beats development, the
+`target/release` case, neither present, no executable path) and the
+missing-entry report, with one that asserts the shipped crate tree really does
+hold every required entry — the compile-time fallback the whole thing leans on.
+
 ## Verify
 
 `./target/release/sl-client-bevy-viewer` from the repo root, with no environment
 set: the skin, toolbar icons and Fluent labels all load, and the log carries no
 `Path not found` under `assets/`. Same for
 `sl-client-bevy-viewer-gallery`, whose focus ring is the tell.
+
+**Verified (2026-09-10, release builds, `BEVY_ASSET_ROOT` explicitly unset).**
+
+- `sl-client-bevy-viewer-gallery` from the repo root: one
+  `INFO … viewer assets path=…/sl-client-bevy-viewer/assets source="the viewer
+  crate's source tree"`, and **zero** `ERROR` lines in the whole run — against a
+  `target/release/` that holds no `assets/` at all, which is the reported case.
+- `sl-client-bevy-viewer` on the local OpenSim grid, same bare invocation: the
+  same resolution line, zero `ERROR` lines, no `Path not found`, and the UI
+  confirmed skinned by eye over a five-minute session to a clean `session
+  ended`.
+- The loud path, `BEVY_ASSET_ROOT=/nonexistent-tree`: one
+  `ERROR … the viewer's asset tree is incomplete … path=/nonexistent-tree/assets
+  source="BEVY_ASSET_ROOT" missing="skins, locales, icons"` **ahead of** the
+  per-file `bevy_asset` scatter, so a mistyped override names itself instead of
+  hiding in the noise.

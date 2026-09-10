@@ -138,11 +138,12 @@ pub struct Launch {
 /// nickname; the credentials file carries the same URI, and passing it
 /// explicitly means a stale file cannot silently send the run elsewhere.
 ///
-/// `asset_root` is the crate directory holding the viewer's `assets/` (its skins
-/// and fonts). Bevy resolves its asset root relative to the *executable*, so a
-/// viewer run straight out of `target/release` finds no skin at all and draws an
-/// unskinned interface — which matters the moment a run captures the UI layer,
-/// and is invisible until then.
+/// `asset_root` is the directory holding the viewer's `assets/` (its skins and
+/// icons), passed as `BEVY_ASSET_ROOT`. The viewer resolves its own root now
+/// (`asset_root` there: beside the executable, else the crate it was built in),
+/// so this is no longer needed to get a skinned interface — it pins the tree a
+/// capture is judged against explicitly, which is what a harness wants, and
+/// still lets one be pointed at a different tree than the binary would pick.
 #[must_use]
 pub fn sl_client(
     program: impl Into<PathBuf>,

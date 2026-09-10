@@ -65,6 +65,12 @@ cargo run --release --bin sl-client-bevy-viewer-gallery
 Edit a `.css`, save, and the running viewer/gallery restyles instantly — no
 recompile.
 
+Either binary may also be run straight out of `target/release/`: it locates its
+own `assets/` — beside the executable when installed, otherwise the crate it was
+built from — so a bare run wears the same skin a `cargo run` does, and says so
+in one `viewer assets` line at start-up. Set `BEVY_ASSET_ROOT` to the directory
+*holding* `assets/` to point a run at a different tree.
+
 ## The token model
 
 A skin is a block of **abstract role tokens** on `:root`, each with a direct
