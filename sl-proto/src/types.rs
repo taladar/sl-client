@@ -496,8 +496,8 @@ pub use environment::{
     BUILTIN_WATER_PLANE_TEXTURES, CloudPosDensity, Color, ColorAlpha, DEFAULT_BLOOM_TEXTURE,
     DEFAULT_CLOUD_TEXTURE, DEFAULT_HALO_TEXTURE, DEFAULT_MOON_TEXTURE, DEFAULT_RAINBOW_TEXTURE,
     DEFAULT_SKY_FRAME, DEFAULT_SUN_TEXTURE, DEFAULT_WATER_FRAME, DEFAULT_WATER_NORMAL_TEXTURE,
-    DayCycle, DayCycleFrame, EnvironmentAsset, EnvironmentSettings, EnvironmentUpdate, Glow, Scale,
-    SkySettings, WaterSettings, azimuth_altitude_to_rotation,
+    DayCycle, DayCycleFrame, DensityLayer, EnvironmentAsset, EnvironmentSettings,
+    EnvironmentUpdate, Glow, Scale, SkySettings, WaterSettings, azimuth_altitude_to_rotation,
 };
 pub use event::Event;
 pub use generic::{GenericMessage, GenericStreamingMessage};

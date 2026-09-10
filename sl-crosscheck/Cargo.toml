@@ -37,6 +37,8 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 signal-hook = { version = "0.4.4", default-features = false }
 sl-fake-grid = { path = "../sl-fake-grid", version = "0.1.0" }
+# Region coordinates and the velocity a scripted border crossing carries over.
+sl-types = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "time"] }
 toml = { workspace = true }

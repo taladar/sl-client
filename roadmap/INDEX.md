@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 100 |
-| ready | 318 |
+| ideas | 99 |
+| ready | 319 |
 | blocked | 46 |
 | in-progress | 20 |
 | bugs | 57 |
-| done | 1044 |
+| done | 1046 |
 | deferred | 26 |
 | wont-do | 14 |
-| **total** | **1625** |
+| **total** | **1627** |
 
-## ideas (100)
+## ideas (99)
 
 ### protocol
 
@@ -189,8 +189,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
-- [`test-firestorm-fake-grid-crosscheck`](ideas/test-firestorm-fake-grid-crosscheck.md)
-  — Point Firestorm at the fake grid to calibrate oracles
 - [`test-reference-cpp-oracles`](ideas/test-reference-cpp-oracles.md) —
   Reference-viewer C++ math and GLSL as test oracles (FFI / naga)
 
@@ -238,7 +236,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (318)
+## ready (319)
 
 ### protocol
 
@@ -979,6 +977,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Factor the repeated session/id acquisition out of the conformance cases
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
+- [`test-crosscheck-day-position-is-inert`](ready/test-crosscheck-day-position-is-inert.md)
+  — --day-position asks for a keyframe the stock cycle does not have
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
@@ -1317,7 +1317,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-water-refraction-smears-avatar-silhouette`](bugs/viewer-water-refraction-smears-avatar-silhouette.md)
   — Water behind an avatar smears a skin-coloured fringe around its silhouette
 
-## done (1044)
+## done (1046)
 
 ### protocol
 
@@ -3313,6 +3313,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The OpenSim-flavoured grid serves an object body OpenSim never wrote
 - [`test-fake-grid-simulator-request-surfaces`](done/test-fake-grid-simulator-request-surfaces.md)
   — Four client requests no simulator half answers
+- [`test-fake-grid-sky-without-density-profiles`](done/test-fake-grid-sky-without-density-profiles.md)
+  — A sky frame with no scattering profiles is a region with no environment
 - [`test-fake-grid-teleport-phase-order-flake`](done/test-fake-grid-teleport-phase-order-flake.md)
   — teleport-cross-region intermittently sees a phase before TeleportStart
 - [`test-fake-grid-teleport-shapes`](done/test-fake-grid-teleport-shapes.md) —
@@ -3331,6 +3333,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Run both viewers against one fake grid and collect their artifacts (blocked
   by `viewer-screenshot-fixed-resolution` (done),
   `test-fake-grid-fixed-port-scenario` (done))
+- [`test-firestorm-fake-grid-crosscheck`](done/test-firestorm-fake-grid-crosscheck.md)
+  — Point Firestorm at the fake grid to calibrate oracles
 - [`test-friendship-offer-accept`](done/test-friendship-offer-accept-offer-accept-confirm-both-friend-lists.md)
   — offer, accept, confirm both friend lists
 - [`test-friendship-offer-accept-aditi`](done/test-friendship-offer-accept-aditi-add-the-aditi-variant.md)

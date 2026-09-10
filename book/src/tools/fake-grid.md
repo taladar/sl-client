@@ -149,6 +149,14 @@ served — see below), and `border` (one checkered marker pillar floating
 just inside the region's west edge, which with two adjacent `--region`s
 is a scene for looking across — and walking over — a border).
 
+A scene may also say how it dresses a **pair** of regions
+(`NamedScenario::pair`), which is not the same as two copies of it: the
+two halves of a border are not interchangeable, so the registry names the
+near one (the west, where the agent logs in) and the far one separately.
+`border` is the only scene with a second half today, and a harness asked
+for a pair from a scene that has none is told so rather than handed two
+copies.
+
 A scene is *named* so that a harness photographing it can say which one
 it photographed, and so the next scene is a registry entry rather than a
 change to the harness. Each scene also names its **landmarks** — a name
@@ -228,6 +236,33 @@ frames.
 A run leaves `run.json`, the two configuration files, and per viewer its
 `frame_NNN.png` sequence, `scene.json` (when that viewer writes one),
 `harness-status.json` and its own `viewer.log`.
+
+**Two regions, and walking between them.** `--neighbour` stands the
+scene's *second* half one slot east of the first and lets the grid
+announce it, and `--cross-after <seconds>` walks the agent over that
+border once it has arrived (a one-step `Timeline` carrying
+`Action::CrossRegion`, so the crossing is the grid's, not a second
+login). `--cross-after` implies `--neighbour`.
+
+Only a scene that says how it dresses **both** halves can do this, which
+today is `border` alone — a pair is not two copies of a one-region scene,
+and asking for one from a scene that has no second half is refused rather
+than obliged. The two halves are not interchangeable: the near one is the
+west, with its vehicle against its east edge, and the far one is the east.
+
+The crossing is timed from the agent's *arrival*, while the capture
+starts when the scene settles, so a `--cross-after` that lands before the
+first frame photographs only the aftermath. Give it more than
+`--settle-timeout` and enough `--frames × --interval` to still be running
+when it fires.
+
+One thing a crossing run must not do is pin the camera. The reference
+harness re-derives the camera pose from the agent's **current** region
+every frame (`applyCamera` → `getPosGlobalFromRegion`), so a
+region-local pose that framed the border before the crossing frames the
+*next* border after it — the shot jumps a region east at the moment of
+interest. Leaving `--look-at` off puts the camera back on the avatar,
+which is where a crossing wants it anyway.
 
 The grid runs **inside** the runner rather than as a spawned
 `sl-fake-grid`, which is the launcher's port lesson taken one step
@@ -332,7 +367,86 @@ code: Firestorm drew every avatar with no right hand, because
 
 [secondlife/viewer#6240]: https://github.com/secondlife/viewer/issues/6240
 
-## The non-CAPS HTTP surfaces
+### Calibration: what these fixtures look like in the reference viewer
+
+A different use of the same runs, and the reason to keep them apart: the
+report above says whether the two viewers *differ*, while this says what a
+fixture **is supposed to look like**. Those answers are sentences, not
+images — an oracle calibrated against a stored screenshot is calibrated
+against one machine's driver — so they are written down here rather than
+committed as pixels. Measured on 2026-09-10, Firestorm 7.2.5, at
+1920×1080 and the reference's own 60° lens.
+
+**The ground reads as one green plain, and the region has a visible
+edge.** The stock region is flat at 25 m, so its four detail solids never
+separate by height; what the reference draws instead is a mid-green
+mottled with pale grey and faint brown, because its terrain shader mixes
+the four by a noise field as well as by altitude. There are no patch
+seams. The region's own **edge** is unmistakable — the green plain stops
+along a straight line and the void beyond it is a dark blue-grey band at
+the water height, with the sky above that. So "the ground rezzed" and
+"the region is 256 m across" are both readable by eye, and *the colour of
+the ground is not a height reading*: do not calibrate an oracle that says
+"green means low".
+
+**The sun is nearly overhead, and the stars are out anyway.** The stock
+environment is one keyframe carrying the reference's own default sky, so
+every capture of it is lit identically — that is the point of it. The
+default sky puts the sun at **80° altitude**, so the ground is lit from
+almost straight above (a plywood cube shows a bright top face and nearly
+black sides) — and it also carries `star_brightness` 250, so a
+midday-lit ground sits under a blue sky with stars in it. Read that as
+the fixture's signature rather than as dusk, and do not infer the time of
+day from the sky. `--day-position` cannot move it either: the harness
+pins the sun by looking for a frame **at exactly** that keyframe, a
+one-keyframe cycle has one at `0.0` and nothing anywhere else, and the
+only report of that is a line in the viewer's own log —
+`day cycle has no sky at position 0.5; leaving environment alone`. A
+scene that wants a choosable sun has to carry a day cycle with frames at
+the positions it means, through `RegionConfig::environment`.
+
+**The checker is legible at the fixture's own distance.** The catalogue's
+prims are 1 m and its checker is 512² with 128 px cells, so a face is
+4 × 4 cells of 25 cm. From the runner's default framing — 8 m south,
+2 m up — that face lands about 130 px wide, so a cell is roughly 30 px:
+not a texture you have to squint at, and enough that a wrong repeat count
+or a stuck low LOD is obvious rather than arguable. This is what
+`TEXTURE_SIZE = 512` buys; the same fixture at 64² reads as a blur at
+this distance and nothing about the framing would tell you why.
+
+**The border is visible only because the grounds are painted.** Two
+regions meeting share no geometry a viewer draws: nothing marks the line,
+no seam, no edge, no change in shading. What makes it legible in the pair
+scene is that each side's ground is its own flat colour, and then it is
+about as legible as a picture gets — a hard vertical boundary between a
+blue half and a yellow half, straight down the frame. An oracle for "am I
+looking at the border" is therefore a colour test, never an edge test.
+
+**The neighbour is drawn before you get there.** Standing in the west
+region, the east region's ground is already on the horizon as a yellow
+band — the neighbour announcement opened its child circuit and it has
+been streaming since arrival. The pair scene's pillars are 4 m inside
+each region's *west* edge, so from a camera at the shared line you see
+the far region's pillar and not the near one's; the near region's stands
+252 m behind you, beyond the draw distance.
+
+**A crossing changes everything at once, in one frame.** With frames
+1 s apart, the last west frame and the first east frame are adjacent:
+whole-ground blue in one, whole-ground yellow in the next, with no
+intermediate. The reference logs `process_crossed_region()` and
+`Entering region [Fake Region East]`, and does not tear the scene down.
+
+**Two avatars survive it, not three.** After the crossing the reference
+holds the agent's own body and **one** rider — and the pair scene has a
+rider on each side. That is not a loss: both riders are the same
+`RIDER_AGENT`, and an avatar is keyed by agent id, so the two are one
+avatar that belongs to whichever region streamed it last. The same goes
+for the vehicle: one grid-wide id, two regions, one object — which is
+exactly the property a ridden crossing needs and exactly why the marker
+**pillars** were given an id each instead. After the crossing the
+reference reports that one vehicle under the destination's own local id
+(`0x340`, not the source's `0x310`) at the destination's own position,
+which is the handover renumbering seen from the other end.
 
 Besides login and CAPS, a real login host answers three more things a
 viewer asks for, all served from the same loopback port (the sans-I/O
@@ -1360,6 +1474,21 @@ which pitch belongs to which id.
 by the `ExtEnvironment` capability. Left `None`, the session's stock
 four-hour day answers.
 
+**A sky frame that omits its three scattering profiles is a region with
+no environment.** `rayleigh_config`, `mie_config` and `absorption_config`
+are marked *required with no default* by the reference's sky validator,
+and `Validator::verify` fails a required field it cannot fill — so one
+missing key fails the frame, a track with no valid frame empties the day
+cycle, and `LLEnvironment::recordEnvironment` refuses the whole thing
+with `Invalid day cycle for region`. The viewer then lights the region
+with its own built-in sky and reports nothing outside its log. That is
+why `SkySettings` carries them as `DensityLayer` lists and why
+`legacy_windlight_default` seeds the reference's own defaults: a frame
+this crate *constructs* is going on a wire to a viewer that requires
+them, whatever a frame it merely *decoded* happened to carry. Found by
+pointing Firestorm at this grid on 2026-09-10, and invisible from here
+until then — nothing on the grid side had ever complained.
+
 ## Teleporting between regions
 
 A `SimSession` has its region handle fixed at construction, so a teleport
@@ -1624,6 +1753,28 @@ pair: `Leaving` stands the vehicle against its region's east edge,
 one border, same full id and different local ids. `FakeAgent::with_world`
 (mutate a session's fixtures *and* send, under one lock) and
 `FakeAgent::seat_on` are what a test drives the handover with.
+
+`border_pair_side(side)` is that half made whole, and is what the
+`border` scene dresses each of a pair's two regions with: this side's
+painted ground, this side's vehicle with the rider aboard, and the
+marker pillar. It is what a two-region cross-check run photographs.
+
+The one thing it has to say out loud is **which ids are shared and
+which are not**, because a pair grid streams both regions at once and a
+viewer keys an object by its grid-wide id:
+
+- the **vehicle** keeps one id either side, deliberately — a vehicle
+  really is one object being handed over — so a pair grid holds one
+  vehicle, at whichever side streamed it last, and the crossing is what
+  makes that the right answer rather than a bug;
+- the **rider** likewise, so a pair shows one rider and not two, and a
+  crossing ends with two avatars in the scene (yours and it) rather
+  than three;
+- the **pillars** get an id each (`BorderSide::marker_object`), because
+  a pillar is scenery that belongs to one region. Sharing one id there
+  did not produce a pillar per side — it produced a single pillar being
+  moved from one region to the other, which is what Firestorm was
+  observed doing before the ids were split.
 
 ## Scripted timelines
 

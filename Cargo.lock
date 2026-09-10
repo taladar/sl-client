@@ -8650,6 +8650,7 @@ dependencies = [
  "serde_json",
  "signal-hook",
  "sl-fake-grid",
+ "sl-types",
  "thiserror 2.0.19",
  "tokio",
  "toml",

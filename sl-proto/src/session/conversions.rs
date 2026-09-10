@@ -9,21 +9,22 @@ use crate::types::{
     AccountBenefits, ActiveGroup, AssetType, AvatarAppearance, AvatarAttachment,
     AvatarGroupMembership, AvatarInterests, AvatarName, AvatarPickerResult, AvatarProperties,
     ChatAudible, ChatMessage, ChatSource, ChatType, ClassifiedCategory, ClassifiedInfo,
-    CloudPosDensity, Color, ColorAlpha, DayCycle, DayCycleFrame, DisplayNameUpdate, EconomyData,
-    EnvironmentAsset, EnvironmentSettings, EnvironmentUpdate, EstateAccessKind, EstateInfo, Event,
-    Friend, FriendRights, Glow, GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary,
-    GroupAccountTransaction, GroupAccountTransactions, GroupActiveProposalItem, GroupMember,
-    GroupMembership, GroupName, GroupNotice, GroupNoticeKey, GroupProfile, GroupRole, GroupTitle,
-    GroupVote, GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
-    InventoryListing, InventoryType, LandingType, MapItem, MapItemType, MapLayer, MapRegionInfo,
-    MapRequestFlags, Maturity, MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags, MuteType,
-    NavMeshBuildStatus, NavMeshStatus, NeighborInfo, Object, ObjectProperties, ObjectTransform,
-    OpenRegionInfo, ParcelCategory, ParcelInfo, ParcelRequestResult, ParcelStatus, PickInfo,
-    PickKey, PlayingAnimation, PrimShapeParams, ProductType, ProposalCandidateId, ProposalVoteId,
-    RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionLimits,
-    RegionTerrainComposition, RequiredVoiceVersion, RestoreItem, SaleType, Scale, ScriptDialog,
-    ScriptPermissionRequest, ScriptPermissions, SetDisplayNameReply, SkySettings,
-    TaskInventoryItem, WaterSettings, avatar_texture,
+    CloudPosDensity, Color, ColorAlpha, DayCycle, DayCycleFrame, DensityLayer, DisplayNameUpdate,
+    EconomyData, EnvironmentAsset, EnvironmentSettings, EnvironmentUpdate, EstateAccessKind,
+    EstateInfo, Event, Friend, FriendRights, Glow, GroupAccountDetails, GroupAccountDetailsEntry,
+    GroupAccountSummary, GroupAccountTransaction, GroupAccountTransactions,
+    GroupActiveProposalItem, GroupMember, GroupMembership, GroupName, GroupNotice, GroupNoticeKey,
+    GroupProfile, GroupRole, GroupTitle, GroupVote, GroupVoteHistoryItem, ImDialog, InstantMessage,
+    InventoryFolder, InventoryItem, InventoryListing, InventoryType, LandingType, MapItem,
+    MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MoneyBalance,
+    MoneyTransaction, MuteEntry, MuteFlags, MuteType, NavMeshBuildStatus, NavMeshStatus,
+    NeighborInfo, Object, ObjectProperties, ObjectTransform, OpenRegionInfo, ParcelCategory,
+    ParcelInfo, ParcelRequestResult, ParcelStatus, PickInfo, PickKey, PlayingAnimation,
+    PrimShapeParams, ProductType, ProposalCandidateId, ProposalVoteId, RegionChatSettings,
+    RegionCombatSettings, RegionIdentity, RegionLimits, RegionTerrainComposition,
+    RequiredVoiceVersion, RestoreItem, SaleType, Scale, ScriptDialog, ScriptPermissionRequest,
+    ScriptPermissions, SetDisplayNameReply, SkySettings, TaskInventoryItem, WaterSettings,
+    avatar_texture,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::AgentKey;
@@ -1091,7 +1092,49 @@ fn sky_settings_from_llsd(name: &str, sky: &Llsd) -> SkySettings {
         bloom_texture: optional_texture_member(sky, "bloom_id"),
         halo_texture: optional_texture_member(sky, "halo_id"),
         rainbow_texture: optional_texture_member(sky, "rainbow_id"),
+        rayleigh_config: density_profile_from_llsd(
+            sky.get("rayleigh_config"),
+            DensityLayer::rayleigh_default,
+        ),
+        mie_config: density_profile_from_llsd(sky.get("mie_config"), DensityLayer::mie_default),
+        absorption_config: density_profile_from_llsd(
+            sky.get("absorption_config"),
+            DensityLayer::absorption_default,
+        ),
     }
+}
+
+/// Parses one of a sky's density profiles, falling back to `default` when the
+/// key is absent or empty.
+///
+/// A grid always sends all three — the reference requires them — so the
+/// fallback is for a hand-written fixture rather than for the wire, and it
+/// matters because what this function returns is what gets *sent* again: a
+/// profile decoded as empty and re-encoded as empty is a sky the reference
+/// throws away.
+fn density_profile_from_llsd(
+    profile: Option<&Llsd>,
+    default: fn() -> Vec<DensityLayer>,
+) -> Vec<DensityLayer> {
+    let layers: Vec<DensityLayer> = profile
+        .and_then(Llsd::as_array)
+        .map(|layers| {
+            layers
+                .iter()
+                .map(|layer| DensityLayer {
+                    width: f32_member(layer, "width"),
+                    exp_term: f32_member(layer, "exp_term"),
+                    exp_scale: f32_member(layer, "exp_scale"),
+                    linear_term: f32_member(layer, "linear_term"),
+                    constant_term: f32_member(layer, "constant_term"),
+                    anisotropy: layer
+                        .get("anisotropy")
+                        .map(|_value| f32_member(layer, "anisotropy")),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if layers.is_empty() { default() } else { layers }
 }
 
 /// Parses a water frame `OSDMap` into [`WaterSettings`].
@@ -4832,6 +4875,33 @@ fn reals_to_llsd(values: &[f32]) -> Llsd {
     Llsd::Array(values.iter().copied().map(real).collect())
 }
 
+/// Encodes one of a sky's density profiles as an LLSD array of layer maps (the
+/// inverse of `density_profile_from_llsd`).
+///
+/// `anisotropy` is written only when the layer has one, because the reference
+/// writes the key only for a non-zero Mie anisotropy — and its own Rayleigh and
+/// absorption validators do not list the key at all.
+fn density_profile_to_llsd(layers: &[DensityLayer]) -> Llsd {
+    Llsd::Array(
+        layers
+            .iter()
+            .map(|layer| {
+                let mut entries = vec![
+                    ("width", real(layer.width)),
+                    ("exp_term", real(layer.exp_term)),
+                    ("exp_scale", real(layer.exp_scale)),
+                    ("linear_term", real(layer.linear_term)),
+                    ("constant_term", real(layer.constant_term)),
+                ];
+                if let Some(anisotropy) = layer.anisotropy {
+                    entries.push(("anisotropy", real(anisotropy)));
+                }
+                llsd_map(entries)
+            })
+            .collect(),
+    )
+}
+
 /// Encodes [`SkySettings`] into a sky-frame `OSDMap` (the inverse of
 /// `sky_settings_from_llsd`). The legacy haze colours/scalars go into a
 /// `legacy_haze` sub-map, as the viewer expects.
@@ -4901,6 +4971,19 @@ fn sky_settings_to_llsd(sky: &SkySettings) -> Llsd {
         ("bloom_id", optional_texture_to_llsd(sky.bloom_texture)),
         ("halo_id", optional_texture_to_llsd(sky.halo_texture)),
         ("rainbow_id", optional_texture_to_llsd(sky.rainbow_texture)),
+        // All three are **required** by the reference's sky validator, with no
+        // default to fall back on: a frame missing one fails validation, which
+        // empties the day cycle it belongs to ("Must have at least one water and
+        // one sky frame!") and leaves the region with no environment at all.
+        (
+            "rayleigh_config",
+            density_profile_to_llsd(&sky.rayleigh_config),
+        ),
+        ("mie_config", density_profile_to_llsd(&sky.mie_config)),
+        (
+            "absorption_config",
+            density_profile_to_llsd(&sky.absorption_config),
+        ),
     ];
     // Only an EEP sky carries `reflection_probe_ambiance`; emitting it for a
     // legacy sky (where it decoded as `0.0`) would flip the reference's

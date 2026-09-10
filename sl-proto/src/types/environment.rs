@@ -7,8 +7,13 @@
 //! definitions the tracks reference.
 //!
 //! The deep atmospheric-scattering profiles (`rayleigh_config`, `mie_config`,
-//! `absorption_config`) that the renderer uses are intentionally not parsed here;
-//! every other documented sky/water parameter is.
+//! `absorption_config`) are carried as [`DensityLayer`] lists. They used to be
+//! skipped — this workspace's renderer takes its atmosphere from the legacy
+//! haze block — but skipping them on the way *out* is not an option: the
+//! reference viewer's sky validator marks all three **required with no
+//! default**, so a sky frame missing them fails validation, takes its whole day
+//! cycle down with it (`Must have at least one water and one sky frame!`), and
+//! leaves the region with no environment at all.
 
 use std::collections::BTreeMap;
 
@@ -119,6 +124,94 @@ pub struct DayCycleFrame {
     pub name: String,
 }
 
+/// One layer of an atmospheric **density profile**: how much of a scattering
+/// species is present at a given altitude, in the shape the reference's
+/// `rayleigh_config`, `mie_config` and `absorption_config` arrays carry.
+///
+/// A layer's density is `exp_term * exp(exp_scale * h) + linear_term * h +
+/// constant_term`, and [`width`](Self::width) is how far up it applies (zero
+/// meaning "the rest of the atmosphere"). Ozone is the reason a profile is a
+/// *list*: its absorption ramps up and then down again, which one layer cannot
+/// say.
+///
+/// (Not `Eq`: holds `f32` fields.)
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct DensityLayer {
+    /// How far up this layer applies, in metres; `0.0` means the whole of the
+    /// remaining atmosphere.
+    pub width: f32,
+    /// The coefficient of the exponential term.
+    pub exp_term: f32,
+    /// The scale inside the exponential, per metre (negative: density falls
+    /// with altitude).
+    pub exp_scale: f32,
+    /// The coefficient of the linear term, per metre.
+    pub linear_term: f32,
+    /// The constant term.
+    pub constant_term: f32,
+    /// The Mie phase function's anisotropy, which only a `mie_config` layer
+    /// carries — the reference omits the key entirely when it is zero, and its
+    /// presence is what distinguishes a Mie layer on the wire.
+    pub anisotropy: Option<f32>,
+}
+
+impl DensityLayer {
+    /// The reference's default `rayleigh_config`
+    /// (`LLSettingsSky::rayleighConfigDefault`): one layer, falling off with an
+    /// 8 km scale height.
+    #[must_use]
+    pub fn rayleigh_default() -> Vec<Self> {
+        vec![Self {
+            width: 0.0,
+            exp_term: 1.0,
+            exp_scale: -1.0 / 8000.0,
+            linear_term: 0.0,
+            constant_term: 0.0,
+            anisotropy: None,
+        }]
+    }
+
+    /// The reference's default `mie_config`
+    /// (`LLSettingsSky::mieConfigDefault`): one layer with a 1.2 km scale
+    /// height and a forward-scattering anisotropy of `0.8`.
+    #[must_use]
+    pub fn mie_default() -> Vec<Self> {
+        vec![Self {
+            width: 0.0,
+            exp_term: 1.0,
+            exp_scale: -1.0 / 1200.0,
+            linear_term: 0.0,
+            constant_term: 0.0,
+            anisotropy: Some(0.8),
+        }]
+    }
+
+    /// The reference's default `absorption_config`
+    /// (`LLSettingsSky::absorptionConfigDefault`): the ozone layer's two linear
+    /// ramps, up to 25 km and then above it.
+    #[must_use]
+    pub fn absorption_default() -> Vec<Self> {
+        vec![
+            Self {
+                width: 25000.0,
+                exp_term: 0.0,
+                exp_scale: 0.0,
+                linear_term: -1.0 / 25000.0,
+                constant_term: -2.0 / 3.0,
+                anisotropy: None,
+            },
+            Self {
+                width: 0.0,
+                exp_term: 0.0,
+                exp_scale: 0.0,
+                linear_term: -1.0 / 15000.0,
+                constant_term: 8.0 / 3.0,
+                anisotropy: None,
+            },
+        ]
+    }
+}
+
 /// A single sky frame (`LLSettingsSky`): the atmosphere, sun, moon, and cloud
 /// state at one keyframe. The legacy haze colours/scalars (`ambient`,
 /// `blue_horizon`, `blue_density`, `haze_*`, the multipliers) are read from the
@@ -209,6 +302,12 @@ pub struct SkySettings {
     pub halo_texture: Option<TextureKey>,
     /// The rainbow texture (`None` for the viewer default).
     pub rainbow_texture: Option<TextureKey>,
+    /// The Rayleigh (air molecule) scattering density profile.
+    pub rayleigh_config: Vec<DensityLayer>,
+    /// The Mie (aerosol) scattering density profile.
+    pub mie_config: Vec<DensityLayer>,
+    /// The absorption (ozone) density profile.
+    pub absorption_config: Vec<DensityLayer>,
 }
 
 /// A decoded EEP settings asset (`AT_SETTINGS`) — a sky frame, a water frame, or
@@ -882,6 +981,22 @@ impl SkySettings {
             bloom_texture: pick_at_half(&self.bloom_texture, &other.bloom_texture, factor),
             halo_texture: pick_at_half(&self.halo_texture, &other.halo_texture, factor),
             rainbow_texture: pick_at_half(&self.rainbow_texture, &other.rainbow_texture, factor),
+            // The reference blends a density profile the way it blends any
+            // other setting — but only where the two frames' layer *lists* line
+            // up, which is what `lerp_density_profile` insists on before it
+            // interpolates. Two profiles of different shapes snap like a
+            // texture id rather than producing a layer list neither frame has.
+            rayleigh_config: lerp_density_profile(
+                &self.rayleigh_config,
+                &other.rayleigh_config,
+                factor,
+            ),
+            mie_config: lerp_density_profile(&self.mie_config, &other.mie_config, factor),
+            absorption_config: lerp_density_profile(
+                &self.absorption_config,
+                &other.absorption_config,
+                factor,
+            ),
         }
     }
 
@@ -914,9 +1029,10 @@ impl SkySettings {
 
     /// The reference viewer's built-in default sky (`LLSettingsSky::defaults`,
     /// `indra/llinventory/llsettingssky.cpp`), including the legacy-haze fallbacks
-    /// (`LLColor3`/`F32` defaults from `LLSettingsSky::loadValuesFromLLSD`). The
-    /// deep atmospheric-scattering profiles are not modelled (see the module
-    /// docs); every documented scalar/colour is set to its reference default.
+    /// (`LLColor3`/`F32` defaults from `LLSettingsSky::loadValuesFromLLSD`) and
+    /// the three atmospheric-scattering profiles, which the reference requires
+    /// of every sky frame. Every documented scalar/colour is set to its
+    /// reference default.
     #[must_use]
     pub fn legacy_windlight_default(name: &str) -> Self {
         // Sun and moon tracks at the default day's start (track position 0): the
@@ -970,8 +1086,52 @@ impl SkySettings {
             bloom_texture: None,
             halo_texture: None,
             rainbow_texture: None,
+            rayleigh_config: DensityLayer::rayleigh_default(),
+            mie_config: DensityLayer::mie_default(),
+            absorption_config: DensityLayer::absorption_default(),
         }
     }
+}
+
+/// Blends two density profiles, layer for layer.
+///
+/// Only where the two lists are the same length: a profile is a *shape* (how
+/// many ramps ozone has, whether Mie carries an anisotropy), and interpolating
+/// between two shapes would invent a third that neither frame asked for. Where
+/// they differ, the profile snaps at the halfway mark like the frame's other
+/// non-blendable settings.
+fn lerp_density_profile(
+    from: &[DensityLayer],
+    to: &[DensityLayer],
+    factor: f32,
+) -> Vec<DensityLayer> {
+    if from.len() != to.len() {
+        return if factor > 0.5 {
+            to.to_vec()
+        } else {
+            from.to_vec()
+        };
+    }
+    from.iter()
+        .zip(to)
+        .map(|(from, to)| DensityLayer {
+            width: lerp_f32(from.width, to.width, factor),
+            exp_term: lerp_f32(from.exp_term, to.exp_term, factor),
+            exp_scale: lerp_f32(from.exp_scale, to.exp_scale, factor),
+            linear_term: lerp_f32(from.linear_term, to.linear_term, factor),
+            constant_term: lerp_f32(from.constant_term, to.constant_term, factor),
+            anisotropy: match (from.anisotropy, to.anisotropy) {
+                (Some(from), Some(to)) => Some(lerp_f32(from, to, factor)),
+                (from, to) => {
+                    if factor > 0.5 {
+                        to
+                    } else {
+                        from
+                    }
+                }
+            },
+        })
+        .collect()
 }
 
 impl WaterSettings {

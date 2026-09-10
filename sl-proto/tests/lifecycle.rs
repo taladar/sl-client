@@ -15,13 +15,13 @@ mod test {
         ChatSessionKind, ChatSessionLifecycle, ChatSource, ChatType, Child, ClassifiedCategory,
         ClassifiedKey, ClassifiedUpdate, ClickAction, CloudPosDensity, CoarseLocation, Color,
         ColorAlpha, ControlFlags, CreateGroupParams, DayCycle, DayCycleFrame, DeRezDestination,
-        DetachOrder, Diagnostic, DirFindFlags, Direction, DirectoryVisibility, DisconnectReason,
-        DisplayName, DisplayNameUpdate, Distance, EjectAction, EnvironmentSettings,
-        EstateAccessDelta, EstateAccessKind, Event, EventId, FolderInfo, FolderState, FolderType,
-        FollowCamProperty, FreezeAction, FriendKey, FriendPresence, FriendRights,
-        GestureActivation, GlobalCoordinates, Glow, GodRegionUpdate, GridCoordinates, GroupKey,
-        GroupNoticeAttachment, GroupRequestId, GroupRoleChange, GroupRoleEdit, GroupRoleKey,
-        GroupRoleMemberChange, GroupRoleUpdateType, INVENTORY_FETCH_MAX_IN_FLIGHT,
+        DensityLayer, DetachOrder, Diagnostic, DirFindFlags, Direction, DirectoryVisibility,
+        DisconnectReason, DisplayName, DisplayNameUpdate, Distance, EjectAction,
+        EnvironmentSettings, EstateAccessDelta, EstateAccessKind, Event, EventId, FolderInfo,
+        FolderState, FolderType, FollowCamProperty, FreezeAction, FriendKey, FriendPresence,
+        FriendRights, GestureActivation, GlobalCoordinates, Glow, GodRegionUpdate, GridCoordinates,
+        GroupKey, GroupNoticeAttachment, GroupRequestId, GroupRoleChange, GroupRoleEdit,
+        GroupRoleKey, GroupRoleMemberChange, GroupRoleUpdateType, INVENTORY_FETCH_MAX_IN_FLIGHT,
         INVENTORY_FETCH_TIMEOUT, ImDialog, ImSessionId, ImageCodec, InterestsUpdate,
         InventoryCallbackId, InventoryFolder, InventoryFolderKey, InventoryItem, InventoryItemMove,
         InventoryItemOrFolderKey, InventoryKey, InventoryOwner, InventoryType, InviteChannel,
@@ -11636,6 +11636,44 @@ mod test {
             bloom_texture: Some(TextureKey::from(uuid::Uuid::from_u128(0xb1))),
             halo_texture: Some(TextureKey::from(uuid::Uuid::from_u128(0xa10))),
             rainbow_texture: Some(TextureKey::from(uuid::Uuid::from_u128(0x4a1))),
+            // Shapes rather than the reference defaults: one layer, two layers,
+            // and the Mie anisotropy that is the one key a layer may omit, so a
+            // round trip proves the *list* survives and not merely a constant
+            // the encoder could have invented.
+            rayleigh_config: vec![DensityLayer {
+                width: 0.0,
+                exp_term: 1.0,
+                exp_scale: -0.125,
+                linear_term: 0.0,
+                constant_term: 0.0,
+                anisotropy: None,
+            }],
+            mie_config: vec![DensityLayer {
+                width: 0.0,
+                exp_term: 1.0,
+                exp_scale: -0.25,
+                linear_term: 0.0,
+                constant_term: 0.0,
+                anisotropy: Some(0.5),
+            }],
+            absorption_config: vec![
+                DensityLayer {
+                    width: 25000.0,
+                    exp_term: 0.0,
+                    exp_scale: 0.0,
+                    linear_term: -0.5,
+                    constant_term: -0.25,
+                    anisotropy: None,
+                },
+                DensityLayer {
+                    width: 0.0,
+                    exp_term: 0.0,
+                    exp_scale: 0.0,
+                    linear_term: -0.25,
+                    constant_term: 0.75,
+                    anisotropy: None,
+                },
+            ],
         }
     }
 
@@ -11711,6 +11749,87 @@ mod test {
             })
             .ok_or("expected an Environment event")?;
         assert_eq!(*decoded, original);
+        Ok(())
+    }
+
+    /// **Every encoded sky frame names all three scattering profiles.**
+    ///
+    /// Not a round-trip property — the round trip above passes just as well
+    /// with all three dropped on both sides — but the one the *reference*
+    /// enforces: `LLSettingsSky::settingValidation` marks `rayleigh_config`,
+    /// `mie_config` and `absorption_config` required with no default, so a
+    /// frame missing one fails validation, empties the day cycle it belongs to
+    /// ("Must have at least one water and one sky frame!") and leaves the
+    /// region with no environment at all. That is exactly what a Firestorm
+    /// capture against the fake grid found (2026-09-10), and nothing on this
+    /// side reported it.
+    #[test]
+    fn an_encoded_sky_carries_the_profiles_the_reference_requires() -> Result<(), TestError> {
+        let mut sky_frames = std::collections::BTreeMap::new();
+        sky_frames.insert("Noon".to_owned(), sky_fixture("Noon"));
+        let mut water_frames = std::collections::BTreeMap::new();
+        water_frames.insert("Default".to_owned(), water_fixture("Default"));
+        let settings = EnvironmentSettings {
+            parcel_id: -1,
+            region_id: uuid::Uuid::from_u128(0x42),
+            day_length: 14400,
+            day_offset: 0,
+            flags: 0,
+            env_version: 3,
+            track_altitudes: [1000.0, 2000.0, 3000.0],
+            day_cycle: DayCycle {
+                name: "Test Cycle".to_owned(),
+                water_track: vec![DayCycleFrame {
+                    keyframe: 0.0,
+                    name: "Default".to_owned(),
+                }],
+                sky_tracks: vec![vec![DayCycleFrame {
+                    keyframe: 0.0,
+                    name: "Noon".to_owned(),
+                }]],
+                sky_frames,
+                water_frames,
+            },
+        };
+        let sky = sl_proto::environment_to_llsd(&settings)
+            .get("environment")
+            .and_then(|environment| environment.get("day_cycle"))
+            .and_then(|cycle| cycle.get("frames"))
+            .and_then(|frames| frames.get("Noon"))
+            .ok_or("the encoded environment has no Noon sky frame")?
+            .clone();
+        for required in ["rayleigh_config", "mie_config", "absorption_config"] {
+            let profile = sky
+                .get(required)
+                .ok_or_else(|| format!("the encoded sky omits {required}"))?;
+            let layers = profile
+                .as_array()
+                .ok_or_else(|| format!("{required} is not an array of layers"))?;
+            assert!(
+                !layers.is_empty(),
+                "{required} is an empty array, which the reference reads as no profile at all"
+            );
+        }
+        // The Mie anisotropy is the one key a layer may leave out, and the only
+        // one that says which profile a layer belongs to on the wire.
+        let mie = sky
+            .get("mie_config")
+            .and_then(sl_proto::Llsd::as_array)
+            .and_then(<[sl_proto::Llsd]>::first)
+            .ok_or("mie_config has no first layer")?;
+        assert!(
+            mie.get("anisotropy").is_some(),
+            "a Mie layer with an anisotropy must write it"
+        );
+        let rayleigh = sky
+            .get("rayleigh_config")
+            .and_then(sl_proto::Llsd::as_array)
+            .and_then(<[sl_proto::Llsd]>::first)
+            .ok_or("rayleigh_config has no first layer")?;
+        assert!(
+            rayleigh.get("anisotropy").is_none(),
+            "a Rayleigh layer has no anisotropy, and the reference's validator does not list one"
+        );
         Ok(())
     }
 

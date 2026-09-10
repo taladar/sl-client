@@ -72,7 +72,7 @@ pub use timeline::{
 pub use udp_assets::{UdpAssetFixtures, flat_terrain_raw};
 pub use voice::VoiceBackend;
 pub use world::{
-    AvatarIdentity, ParcelAccessLists, ParcelListing, RegionChange, RegionUpdate, RegionWorld,
-    SceneFixtures, TaskInventory, avatar_prim, box_prim, default_object_properties,
-    prim_from_shape, region_limits, region_wide_parcel,
+    AVATAR_CENTRE_ABOVE_GROUND_M, AvatarIdentity, ParcelAccessLists, ParcelListing, RegionChange,
+    RegionUpdate, RegionWorld, SceneFixtures, TaskInventory, avatar_prim, box_prim,
+    default_object_properties, prim_from_shape, region_limits, region_wide_parcel,
 };

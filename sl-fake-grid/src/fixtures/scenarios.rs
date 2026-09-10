@@ -32,6 +32,36 @@ pub struct Landmark {
     pub position: Vector,
 }
 
+/// How a scene that needs **two** regions dresses each of them.
+///
+/// Most scenes are about one region and have none of this. A border is not: the
+/// questions it exists for — is the neighbour drawn, does its ground meet this
+/// one's along a line, does an avatar survive being handed over that line —
+/// are undecidable in a grid with one region in it, and the two halves are not
+/// interchangeable. Naming both halves here is what lets a harness stand the
+/// pair up without knowing which fixture goes on which side.
+#[derive(Debug, Clone, Copy)]
+pub struct ScenePair {
+    /// How the region the agent logs into is dressed — the **west** half.
+    near: fn(RegionConfig) -> RegionConfig,
+    /// How the region one slot **east** of it is dressed.
+    far: fn(RegionConfig) -> RegionConfig,
+}
+
+impl ScenePair {
+    /// `region` dressed as the half the agent logs into.
+    #[must_use]
+    pub fn dress_near(&self, region: RegionConfig) -> RegionConfig {
+        (self.near)(region)
+    }
+
+    /// `region` dressed as the half one slot east of it.
+    #[must_use]
+    pub fn dress_far(&self, region: RegionConfig) -> RegionConfig {
+        (self.far)(region)
+    }
+}
+
 /// One named scene: what it is called, what it shows, how it dresses a region,
 /// and what stands in it.
 #[derive(Debug, Clone, Copy)]
@@ -45,6 +75,9 @@ pub struct NamedScenario {
     dress: fn(RegionConfig) -> RegionConfig,
     /// What stands in the scene, in the order a camera sweeping it meets them.
     landmarks: fn() -> Vec<Landmark>,
+    /// How the scene dresses a **pair** of regions, for a harness that stands
+    /// two of them up — `None` for a scene about one region.
+    pair: Option<ScenePair>,
 }
 
 impl NamedScenario {
@@ -68,6 +101,14 @@ impl NamedScenario {
             .into_iter()
             .find(|landmark| landmark.name == name)
     }
+
+    /// How this scene dresses two adjacent regions, or `None` if it is about
+    /// one region — which is what a harness asked for a pair reports back
+    /// rather than quietly standing up two copies of a one-region scene.
+    #[must_use]
+    pub const fn pair(&self) -> Option<ScenePair> {
+        self.pair
+    }
 }
 
 /// The scenario a grid starts with when none is named: the stock content every
@@ -79,12 +120,33 @@ fn border(region: RegionConfig) -> RegionConfig {
     super::border().into_region(region)
 }
 
-/// The one thing standing in the border scene: its marker pillar.
+/// The west half of the border pair: the side a crossing leaves from, on its
+/// own painted ground, with the vehicle waiting against its east edge.
+fn border_near(region: RegionConfig) -> RegionConfig {
+    super::border::border_pair_side(super::border::BorderSide::Leaving).into_region(region)
+}
+
+/// The east half: the side a crossing arrives in, the other colour of ground,
+/// and the same vehicle under another region-local id.
+fn border_far(region: RegionConfig) -> RegionConfig {
+    super::border::border_pair_side(super::border::BorderSide::Arriving).into_region(region)
+}
+
+/// What stands in the border scene: its marker pillar, and the middle of the
+/// **east edge** — the line the region shares with the neighbour a pair run
+/// stands up, and the only place a camera can be aimed at "the border" itself
+/// rather than at something near it.
 fn border_landmarks() -> Vec<Landmark> {
-    vec![Landmark {
-        name: "border-marker".to_owned(),
-        position: super::border::marker_position(),
-    }]
+    vec![
+        Landmark {
+            name: "border-marker".to_owned(),
+            position: super::border::marker_position(),
+        },
+        Landmark {
+            name: "east-border".to_owned(),
+            position: super::border::east_border_position(),
+        },
+    ]
 }
 
 /// Every named scene, in the order the binary's help lists them.
@@ -95,6 +157,7 @@ const ALL: [NamedScenario; 3] = [
                   an arrival greeting, the stock inventory and library",
         dress: stock,
         landmarks: stock_landmarks,
+        pair: None,
     },
     NamedScenario {
         name: "catalogue",
@@ -102,14 +165,20 @@ const ALL: [NamedScenario; 3] = [
                   west-to-east row, an NPC avatar, every asset they reference",
         dress: catalogue,
         landmarks: catalogue_landmarks,
+        pair: None,
     },
     NamedScenario {
         name: "border",
         summary: "one checkered marker pillar floating just inside the region's \
                   west edge, for looking at (and walking into) the region next \
-                  door",
+                  door; as a pair, two painted grounds meeting at one line with \
+                  a ridden vehicle either side of it",
         dress: border,
         landmarks: border_landmarks,
+        pair: Some(ScenePair {
+            near: border_near,
+            far: border_far,
+        }),
     },
 ];
 

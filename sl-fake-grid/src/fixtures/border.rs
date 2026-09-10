@@ -145,6 +145,23 @@ impl BorderSide {
         }
     }
 
+    /// The marker pillar's grid-wide id on this side.
+    ///
+    /// Distinct per side, unlike the vehicle's, and for the opposite reason: a
+    /// pillar is *scenery*, one per region, and a pair grid streams both
+    /// regions at once. A viewer keys an object by its grid-wide id, so two
+    /// regions naming one id do not get a pillar each — the second update
+    /// **moves** the first pillar into the other region, and the picture shows
+    /// one. The vehicle keeps a shared id on purpose, because a vehicle really
+    /// is one object being handed over; a pillar is not.
+    #[must_use]
+    pub const fn marker_object(self) -> ObjectKey {
+        match self {
+            Self::Leaving => MARKER_OBJECT,
+            Self::Arriving => ObjectKey(Key(uuid::Uuid::from_u128(0x000B_04DE_0030))),
+        }
+    }
+
     /// The texture this side's ground is painted with — its own id, so the two
     /// regions' grounds are two different textures rather than one shared one.
     #[must_use]
@@ -238,6 +255,21 @@ pub const fn marker_position() -> Vector {
     }
 }
 
+/// The middle of the region's **east edge**, at the vehicles' height: the line
+/// this region shares with the neighbour a pair run stands up.
+///
+/// A place rather than a thing, and the only one a camera can be aimed at to
+/// frame "the border" itself. In a one-region grid it is still the region's own
+/// east edge, which is where the neighbour would be.
+#[must_use]
+pub const fn east_border_position() -> Vector {
+    Vector {
+        x: REGION_SIZE_M,
+        y: MARKER_Y,
+        z: MARKER_Z,
+    }
+}
+
 /// The border scene as a [`RegionFixture`]: one region-wide parcel, one
 /// checkered marker pillar inside the west edge, and the checker it wears.
 ///
@@ -319,6 +351,36 @@ pub fn border_with_vehicle(side: BorderSide, ridden: bool) -> RegionFixture {
 pub fn border_on_painted_ground(side: BorderSide) -> RegionFixture {
     let mut fixture = border();
     fixture.terrain.composition.detail_textures = [side.ground_texture().uuid(); 4];
+    fixture
+}
+
+/// One half of the **pair scene**: this side's ridden vehicle standing on this
+/// side's painted ground.
+///
+/// Everything above is a piece of a border scene; this is the whole of one,
+/// and it is what a harness that stands two regions up dresses each of them
+/// with. A framing that holds the line then holds all three of the things a
+/// crossing is decided on at once — which ground is which, where the object
+/// that crosses stands, and who is aboard it — so one capture answers them
+/// rather than three runs each answering one.
+///
+/// The rider is always aboard here, because the question the pair scene exists
+/// for is what happens to *somebody else's* avatar at the line; the alone case
+/// is [`border_with_vehicle`] with `ridden` false.
+#[must_use]
+#[expect(
+    clippy::module_name_repetitions,
+    reason = "re-exported nowhere; `border::border_pair_side` is how a caller reads it"
+)]
+pub fn border_pair_side(side: BorderSide) -> RegionFixture {
+    let mut fixture = border_on_painted_ground(side);
+    for object in &mut fixture.world.objects {
+        if object.local_id == MARKER_LOCAL_ID {
+            object.full_id = side.marker_object();
+        }
+    }
+    fixture.world.objects.push(vehicle(side).build());
+    fixture.world.npcs.push(rider(side));
     fixture
 }
 
@@ -471,5 +533,43 @@ mod test {
             vehicle(BorderSide::Arriving).build().full_id,
             "and it is the same object, or nothing was handed over"
         );
+    }
+
+    /// **The pair scene's two pillars are two objects.**
+    ///
+    /// A pair grid streams both regions at once, and a viewer keys an object by
+    /// its grid-wide id — so one id across two regions is one pillar that keeps
+    /// being moved from one side of the line to the other, not a pillar each.
+    /// Measured against Firestorm on 2026-09-10, which drew exactly one.
+    #[test]
+    fn the_pair_scene_gives_each_side_its_own_pillar() -> Result<(), Box<dyn core::error::Error>> {
+        let marker_of = |side: BorderSide| -> Result<ObjectKey, Box<dyn core::error::Error>> {
+            Ok(border_pair_side(side)
+                .world
+                .objects
+                .iter()
+                .find(|object| object.local_id == MARKER_LOCAL_ID)
+                .ok_or("the pair scene's half rezzes no marker pillar")?
+                .full_id)
+        };
+        assert_ne!(
+            marker_of(BorderSide::Leaving)?,
+            marker_of(BorderSide::Arriving)?
+        );
+        // The vehicle, on the other hand, stays one object across the line.
+        let vehicle_of = |side: BorderSide| -> Result<ObjectKey, Box<dyn core::error::Error>> {
+            Ok(border_pair_side(side)
+                .world
+                .objects
+                .iter()
+                .find(|object| object.local_id == side.vehicle_local_id())
+                .ok_or("the pair scene's half rezzes no vehicle")?
+                .full_id)
+        };
+        assert_eq!(
+            vehicle_of(BorderSide::Leaving)?,
+            vehicle_of(BorderSide::Arriving)?
+        );
+        Ok(())
     }
 }
