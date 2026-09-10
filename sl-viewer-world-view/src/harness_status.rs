@@ -11,7 +11,7 @@
 //! still writes a full set of them, black and on schedule.
 //!
 //! So both viewers write this file into their `--screenshot-dir` before they
-//! quit, with the same five keys. Firestorm's half is `FSTestHarness::
+//! quit, with the same keys. Firestorm's half is `FSTestHarness::
 //! writeStatus`; this is ours, and the schema is its schema:
 //!
 //! ```json
@@ -20,7 +20,12 @@
 //!   "reason": "complete",
 //!   "frames_written": 30,
 //!   "frames_expected": 30,
-//!   "viewer": "sl-client"
+//!   "viewer": "sl-client",
+//!   "day_position": {
+//!     "requested": 0.5,
+//!     "honoured": true,
+//!     "detail": "sampled the region's day cycle at 0.5"
+//!   }
 //! }
 //! ```
 //!
@@ -28,6 +33,13 @@
 //! the runner prints it. `viewer` names which half of the pair wrote the file,
 //! so a directory that was copied or collected out of order still says what it
 //! holds.
+//!
+//! `day_position` is absent when the run pinned no sun, and present whenever it
+//! did — **including when the pin could not be honoured**, which is the case it
+//! exists for. A capture taken under lighting that is not the lighting that was
+//! asked for is not a capture of the requested scene, and the only report of one
+//! used to be a line in a viewer's own log, which nobody reads until after they
+//! have believed the frames.
 //!
 //! **A missing file is itself the answer**: the run did not reach the point of
 //! writing one (a crash, a `SIGKILL`, a viewer that never started). That is why
@@ -46,8 +58,10 @@ pub const VIEWER_NAME: &str = "sl-client";
 ///
 /// [`Deserialize`] as well as [`Serialize`] so the schema has one definition
 /// and its own tests can read back what they wrote; the cross-check runner
-/// parses the same five keys from both viewers' files.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// parses the same keys from both viewers' files.
+///
+/// (Not `Eq`: a recorded day position is an `f32`.)
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HarnessStatus {
     /// Whether the run did what it was asked to do. A run that captured its
     /// frames is `true` even if the scene never went quiet — the frames are
@@ -63,10 +77,35 @@ pub struct HarnessStatus {
     pub frames_expected: usize,
     /// Which viewer wrote this file: [`VIEWER_NAME`] here, `"firestorm"` there.
     pub viewer: String,
+    /// What became of a pinned sun, when the run pinned one.
+    ///
+    /// `#[serde(default)]` on the way in, so a status written by a viewer build
+    /// that predates this field still parses. The runner tells the two apart:
+    /// a run that asked for a day position and gets a status without this key
+    /// back has learned nothing about its lighting, which is not the same as
+    /// having learned that it was fine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub day_position: Option<DayPositionStatus>,
+}
+
+/// What a run's pinned day position selected, as the status file carries it.
+///
+/// (Not `Eq`: `requested` is the `f32` position that was asked for.)
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DayPositionStatus {
+    /// The position the run asked for, `0.0..=1.0`.
+    pub requested: f32,
+    /// Whether the frames were taken under the sky the **region** serves at that
+    /// position. False when anything stood in for it — a viewer's own substitute
+    /// cycle, a fixed sky, or a cycle that cannot be sampled at all.
+    pub honoured: bool,
+    /// Prose saying what happened, for whoever reads the run.
+    pub detail: String,
 }
 
 impl HarnessStatus {
-    /// A status from this viewer, with [`VIEWER_NAME`] filled in.
+    /// A status from this viewer, with [`VIEWER_NAME`] filled in and no sun
+    /// pinned; [`with_day_position`](Self::with_day_position) adds one.
     #[must_use]
     pub fn new(ok: bool, reason: impl Into<String>, written: usize, expected: usize) -> Self {
         Self {
@@ -75,7 +114,27 @@ impl HarnessStatus {
             frames_written: written,
             frames_expected: expected,
             viewer: VIEWER_NAME.to_owned(),
+            day_position: None,
         }
+    }
+
+    /// Record what the run's pinned day position selected.
+    ///
+    /// An **unhonoured** pin also fails the status outright: the frames exist,
+    /// but they are not frames of the scene that was asked for, and a run that
+    /// reported them as a success would be inviting a person to compare two
+    /// viewers' skies without either of them having been told which sky to draw.
+    #[must_use]
+    pub fn with_day_position(mut self, day_position: DayPositionStatus) -> Self {
+        if !day_position.honoured {
+            self.ok = false;
+            self.reason = format!(
+                "the run asked for day position {} and did not get it: {}",
+                day_position.requested, day_position.detail
+            );
+        }
+        self.day_position = Some(day_position);
+        self
     }
 
     /// Write `harness-status.json` into `dir`.
@@ -110,14 +169,15 @@ pub enum StatusError {
 mod tests {
     use pretty_assertions::assert_eq;
 
-    use super::{HarnessStatus, VIEWER_NAME};
+    use super::{DayPositionStatus, HarnessStatus, VIEWER_NAME};
 
     /// The boxed error every test in this module reports through.
     type TestError = Box<dyn core::error::Error>;
 
-    /// The five keys are the schema Firestorm's `writeStatus` emits: a rename
-    /// here silently halves a cross-check, because the runner reads both files
-    /// with one parser.
+    /// The five always-present keys are the schema Firestorm's `writeStatus`
+    /// emits: a rename here silently halves a cross-check, because the runner
+    /// reads both files with one parser. `day_position` is the sixth and is
+    /// written only by a run that pinned one.
     #[test]
     fn the_status_carries_firestorms_five_keys() -> Result<(), TestError> {
         let status = HarnessStatus::new(true, "complete", 30, 30);
@@ -151,6 +211,50 @@ mod tests {
         assert_eq!(round_trip, status);
         assert_eq!(round_trip.frames_written, 4);
         assert_eq!(round_trip.frames_expected, 30);
+        Ok(())
+    }
+
+    /// A pin that could not be honoured fails the run and says why in the
+    /// `reason`, so a person reading the printed report meets it there rather
+    /// than having to open the JSON — the whole point of moving this out of the
+    /// viewer's log.
+    #[test]
+    fn an_unhonoured_pin_fails_the_run() -> Result<(), TestError> {
+        let status =
+            HarnessStatus::new(true, "complete", 30, 30).with_day_position(DayPositionStatus {
+                requested: 0.5,
+                honoured: false,
+                detail: "the region's day cycle schedules one sky".to_owned(),
+            });
+        assert!(!status.ok);
+        assert!(status.reason.contains("did not get it"));
+        assert!(status.reason.contains("schedules one sky"));
+        // The frames are still counted: they exist, they are just not frames of
+        // the scene that was asked for.
+        assert_eq!(status.frames_written, 30);
+
+        let honoured =
+            HarnessStatus::new(true, "complete", 30, 30).with_day_position(DayPositionStatus {
+                requested: 0.5,
+                honoured: true,
+                detail: "sampled the region's day cycle at 0.5".to_owned(),
+            });
+        assert!(honoured.ok);
+        assert_eq!(honoured.reason, "complete");
+        let round_trip: HarnessStatus = serde_json::from_str(&serde_json::to_string(&honoured)?)?;
+        assert_eq!(round_trip, honoured);
+        Ok(())
+    }
+
+    /// A status written by a build that predates the day-position key still
+    /// parses — and reads as "this run said nothing about its lighting", which
+    /// the runner must not confuse with "the lighting was fine".
+    #[test]
+    fn a_status_without_a_day_position_still_parses() -> Result<(), TestError> {
+        let parsed: HarnessStatus = serde_json::from_str(
+            r#"{"ok":true,"reason":"complete","frames_written":30,"frames_expected":30,"viewer":"firestorm"}"#,
+        )?;
+        assert_eq!(parsed.day_position, None);
         Ok(())
     }
 

@@ -33,6 +33,7 @@ mod report;
 mod script;
 mod server_error;
 mod session;
+pub(crate) mod sky_presets;
 mod sound;
 mod terrain;
 mod voice;
@@ -559,6 +560,10 @@ pub use server_error::{FeatureDisabled, Kick, ServerError};
 pub use session::{
     Camera, CameraError, DisconnectReason, Kilobits, LoginHttpRequest, LoginParams, MovementMode,
     Reliability, StartLocationSlot, Throttle, ThrottleBuilder, ThrottleError, Transmit,
+};
+pub use sky_presets::{
+    MIDDAY, MIDNIGHT, PRESET_DAY_CYCLE_NAME, PRESET_DAY_KEYFRAMES, SUNRISE, SUNSET, SkyPreset,
+    install_preset_day_cycle, preset_day_cycle, preset_sky_schedule, sky_settings_from,
 };
 pub use sound::{
     BUILTIN_UI_SOUNDS, UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER, UI_SOUND_INVALID_OP,

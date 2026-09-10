@@ -310,6 +310,80 @@ impl EnvironmentTransition {
     }
 }
 
+/// What a pinned day position selected against the environment in force.
+///
+/// A capture harness asked to photograph the scene at a particular time of day
+/// has to be able to say whether it got one: a position accepted against a cycle
+/// that cannot be sampled changes nothing, and the frames are then of whatever
+/// sky the region already had, under a filename that says otherwise. This is the
+/// answer, recorded whenever the environment is composed, so the run's status
+/// file can carry it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DayPositionPin {
+    /// No position is pinned; the sky follows the region clock.
+    NotPinned,
+    /// The pinned position samples the region's own day cycle, which schedules
+    /// more than one sky. This is the only outcome under which two viewers
+    /// pointed at one region are looking at the same sky.
+    RegionDayCycle {
+        /// The pinned position, `0.0..=1.0`.
+        position: f32,
+    },
+    /// The region's cycle schedules one sky, so the four legacy WindLight
+    /// presets were installed over it and the position samples *those*. The sun
+    /// moves, but the sky is no longer the sky the region sent.
+    SubstitutedPresets {
+        /// The pinned position, `0.0..=1.0`.
+        position: f32,
+    },
+    /// A fixed sky (World ▸ Environment) is selected, which names one frame
+    /// outright; the pinned position is not consulted at all.
+    OverriddenByFixedSky {
+        /// The pinned position, `0.0..=1.0`.
+        position: f32,
+    },
+}
+
+impl DayPositionPin {
+    /// The position that was asked for, if one was.
+    #[must_use]
+    pub const fn position(self) -> Option<f32> {
+        match self {
+            Self::NotPinned => None,
+            Self::RegionDayCycle { position }
+            | Self::SubstitutedPresets { position }
+            | Self::OverriddenByFixedSky { position } => Some(position),
+        }
+    }
+
+    /// Whether the sky on screen is the one the *region* serves at the pinned
+    /// position — false as soon as anything stood in for it, which is what makes
+    /// a cross-check capture comparable or not.
+    #[must_use]
+    pub const fn is_the_regions_own_sky(self) -> bool {
+        matches!(self, Self::NotPinned | Self::RegionDayCycle { .. })
+    }
+
+    /// One line for a run's status file, or `None` when nothing was pinned.
+    #[must_use]
+    pub fn describe(self) -> Option<String> {
+        match self {
+            Self::NotPinned => None,
+            Self::RegionDayCycle { position } => {
+                Some(format!("sampled the region's day cycle at {position}"))
+            }
+            Self::SubstitutedPresets { position } => Some(format!(
+                "the region's day cycle schedules one sky, so the legacy WindLight presets were \
+                 installed over it and {position} samples those — not the region's sky"
+            )),
+            Self::OverriddenByFixedSky { position } => Some(format!(
+                "a fixed sky is selected, which names one frame outright, so the pinned {position} \
+                 selected nothing"
+            )),
+        }
+    }
+}
+
 /// The viewer's current environment: the sky / water / day-cycle settings the
 /// later rendering phases draw from, plus where they came from.
 #[derive(Debug, Resource)]
@@ -325,6 +399,10 @@ pub struct EnvironmentState {
     /// water, terrain and fog driver asks `crate::sky::day_position` of this
     /// state and none of them should have to know where the pin came from.
     pub pinned_day_position: Option<f32>,
+    /// What [`Self::pinned_day_position`] selected the last time the environment
+    /// was composed — read by the capture harness, which has to report a pin it
+    /// could not honour rather than hand back frames that quietly ignore it.
+    day_position_pin: DayPositionPin,
     /// The provenance of [`Self::settings`].
     pub(crate) source: EnvironmentSource,
     /// The last **shared** (grid) environment: what [`Self::settings`] shows
@@ -425,6 +503,7 @@ impl Default for EnvironmentState {
         Self {
             settings: EnvironmentSettings::legacy_windlight_default(),
             pinned_day_position: None,
+            day_position_pin: DayPositionPin::NotPinned,
             source: EnvironmentSource::Default,
             shared: EnvironmentSettings::legacy_windlight_default(),
             shared_source: EnvironmentSource::Default,
@@ -450,10 +529,16 @@ impl EnvironmentState {
     /// The default state with the day position the overrides pin, if any.
     #[must_use]
     pub fn from_overrides(overrides: &crate::render_overrides::RenderOverrides) -> Self {
-        Self {
+        let mut state = Self {
             pinned_day_position: overrides.day_position,
             ..Self::default()
-        }
+        };
+        // Composed once here rather than waiting for the first environment to
+        // arrive: a run that never reaches a region must still report the pin it
+        // was given, and the built-in default it starts from is a single-frame
+        // cycle like any other.
+        state.apply();
+        state
     }
 
     /// The environment currently pinned by the World ▸ Environment menu, if any
@@ -895,22 +980,55 @@ impl EnvironmentState {
             pin_water_into(&mut self.settings, settings, name);
         }
 
-        // Debug affordance: when a pinned day position (`SL_VIEWER_SKY_DAY_POSITION`)
-        // (used by the screenshot harness and headless checks), install a full
-        // day cycle synthesised from the four legacy presets so the pinned
-        // position actually moves the sun — the local OpenSim grid ships a
-        // single-frame environment, which leaves the position nothing to
-        // interpolate (every value renders the same noon sky). A pinned fixed
-        // environment (the World ▸ Environment menu) already selects a specific
-        // frame and takes precedence, so the override only applies when none is
-        // pinned.
-        // Gated on the *resolved* override rather than on the variable merely being
-        // present, so the synthesised cycle is installed exactly when the pin will
-        // actually drive it (`crate::sky::day_position`); a malformed value falls
-        // back to the clock, which the region's own environment already follows.
-        if self.fixed.is_none() && self.pinned_day_position.is_some() {
-            crate::sky_presets::install_preset_day_cycle(&mut self.settings);
+        self.day_position_pin = self.resolve_day_position_pin();
+    }
+
+    /// Settle what a pinned day position (`SL_VIEWER_SKY_DAY_POSITION`, used by
+    /// the screenshot harness and headless checks) can actually select against
+    /// the environment just composed, substituting the four-preset cycle when it
+    /// would otherwise select nothing.
+    ///
+    /// A pinned position only means something if the cycle in force schedules
+    /// more than one sky: a single-frame environment — which is what the local
+    /// OpenSim grid and this workspace's own fake grid serve by default — renders
+    /// the same noon sky at every position. So when there is nothing to
+    /// interpolate the legacy presets go in instead, and the run gets a sunrise
+    /// it can look at.
+    ///
+    /// **Only then.** Substituting over a region that *does* serve a real cycle
+    /// would render a sky the region never sent, which is exactly the kind of
+    /// silent divergence a cross-check run exists to find; the reference viewer
+    /// has no such affordance and would draw the region's own frames. Whichever
+    /// way it goes, the answer is recorded rather than assumed, because a
+    /// substituted sky is a fact about the capture and belongs in its status
+    /// file.
+    ///
+    /// A pinned **fixed** environment (the World ▸ Environment menu) already
+    /// selects a specific frame and takes precedence, so nothing is substituted
+    /// under one. Gated on the *resolved* override rather than on the variable
+    /// merely being present, so the cycle is installed exactly when the pin will
+    /// drive it (`crate::sky::day_position`); a malformed value falls back to the
+    /// clock, which the region's own environment already follows.
+    fn resolve_day_position_pin(&mut self) -> DayPositionPin {
+        let Some(position) = self.pinned_day_position else {
+            return DayPositionPin::NotPinned;
+        };
+        if self.fixed.is_some() {
+            return DayPositionPin::OverriddenByFixedSky { position };
         }
+        if self.settings.day_position_moves_the_sky(0.0) {
+            return DayPositionPin::RegionDayCycle { position };
+        }
+        crate::sky_presets::install_preset_day_cycle(&mut self.settings);
+        DayPositionPin::SubstitutedPresets { position }
+    }
+
+    /// What the pinned day position selected the last time the environment was
+    /// composed: whether the sky on screen is the one the region serves at that
+    /// position, and what stood in for it when it is not.
+    #[must_use]
+    pub const fn day_position_pin(&self) -> DayPositionPin {
+        self.day_position_pin
     }
 
     /// Replace the sky schedule of the environment being composed with a single
@@ -1476,7 +1594,7 @@ mod tests {
     use sl_client_bevy::{Command, SlCommand, SlEvent, SlSessionEvent};
 
     use super::{
-        EnvironmentAsset, EnvironmentSettings, EnvironmentSource, EnvironmentState,
+        DayPositionPin, EnvironmentAsset, EnvironmentSettings, EnvironmentSource, EnvironmentState,
         FixedEnvironment, SavedEnvironment, SkySettings, Uuid,
     };
     use crate::sky_presets::FixedSky;
@@ -1489,6 +1607,104 @@ mod tests {
         settings.parcel_id = parcel_id;
         settings.day_length = day_length;
         settings
+    }
+
+    /// A region cycle with two named sky keyframes, so a day position has
+    /// something to choose between.
+    fn two_frame_region_cycle() -> EnvironmentSettings {
+        let mut settings = reply(-1, 1234);
+        let dawn = SkySettings::legacy_windlight_default("region-dawn");
+        let dusk = SkySettings::legacy_windlight_default("region-dusk");
+        settings.day_cycle.sky_tracks = vec![vec![
+            sl_client_bevy::DayCycleFrame {
+                keyframe: 0.0,
+                name: "region-dawn".to_owned(),
+            },
+            sl_client_bevy::DayCycleFrame {
+                keyframe: 0.5,
+                name: "region-dusk".to_owned(),
+            },
+        ]];
+        settings.day_cycle.sky_frames = [
+            ("region-dawn".to_owned(), dawn),
+            ("region-dusk".to_owned(), dusk),
+        ]
+        .into_iter()
+        .collect();
+        settings
+    }
+
+    /// A pinned day position against a region that serves one sky is a request
+    /// nothing can answer — so the legacy presets go in, and the run is told
+    /// that the sky on screen is not the region's.
+    #[test]
+    fn a_pin_over_a_one_frame_cycle_substitutes_the_presets_and_says_so() {
+        let mut state = EnvironmentState {
+            pinned_day_position: Some(0.5),
+            ..Default::default()
+        };
+        state.apply();
+        assert_eq!(
+            state.day_position_pin(),
+            DayPositionPin::SubstitutedPresets { position: 0.5 }
+        );
+        assert!(!state.day_position_pin().is_the_regions_own_sky());
+        assert!(
+            state
+                .day_position_pin()
+                .describe()
+                .is_some_and(|line| line.contains("not the region's sky"))
+        );
+        // And the substitute is a cycle a position can actually sample.
+        assert!(state.settings.day_position_moves_the_sky(0.0));
+    }
+
+    /// A region that *does* serve a cycle keeps it. Substituting here would draw
+    /// a sky the region never sent while reporting the pin as honoured, which is
+    /// the one way a cross-check can lie about which renderer drew what.
+    #[test]
+    fn a_pin_over_a_real_cycle_leaves_the_regions_own_frames_alone() {
+        let mut state = EnvironmentState {
+            pinned_day_position: Some(0.25),
+            ..Default::default()
+        };
+        assert_eq!(
+            state.ingest_reply(two_frame_region_cycle()),
+            EnvironmentSource::Region
+        );
+        assert_eq!(
+            state.day_position_pin(),
+            DayPositionPin::RegionDayCycle { position: 0.25 }
+        );
+        assert!(state.day_position_pin().is_the_regions_own_sky());
+        let names: Vec<&str> = state
+            .settings
+            .day_cycle
+            .sky_frames
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(names, ["region-dawn", "region-dusk"]);
+    }
+
+    /// A fixed sky names one frame outright, so the pin selects nothing — and a
+    /// run that asked for both has asked for two different things.
+    #[test]
+    fn a_fixed_sky_beats_the_pin_and_the_run_is_told() {
+        let mut state = EnvironmentState {
+            pinned_day_position: Some(0.75),
+            ..Default::default()
+        };
+        assert_eq!(
+            state.ingest_reply(two_frame_region_cycle()),
+            EnvironmentSource::Region
+        );
+        state.set_fixed(Some(FixedEnvironment::Legacy(FixedSky::Midnight)));
+        assert_eq!(
+            state.day_position_pin(),
+            DayPositionPin::OverriddenByFixedSky { position: 0.75 }
+        );
+        assert!(!state.day_position_pin().is_the_regions_own_sky());
     }
 
     /// `-1` is the whole region; every non-negative id — `0` included — is a

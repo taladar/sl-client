@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 323 |
+| ready | 322 |
 | blocked | 42 |
 | in-progress | 21 |
 | bugs | 52 |
-| done | 1071 |
+| done | 1072 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1651** |
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (323)
+## ready (322)
 
 ### protocol
 
@@ -988,8 +988,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Factor the repeated session/id acquisition out of the conformance cases
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
-- [`test-crosscheck-day-position-is-inert`](ready/test-crosscheck-day-position-is-inert.md)
-  — --day-position asks for a keyframe the stock cycle does not have
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
@@ -1310,7 +1308,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1071)
+## done (1072)
 
 ### protocol
 
@@ -3267,6 +3265,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — verify whisper/shout reach vs normal
 - [`test-chat-whisper-shout-range-aditi`](done/test-chat-whisper-shout-range-aditi-add-the-aditi-variant.md)
   — Chat whisper/shout range — [aditi] variant
+- [`test-crosscheck-day-position-is-inert`](done/test-crosscheck-day-position-is-inert.md)
+  — --day-position asks for a keyframe the stock cycle does not have
 - [`test-current-outfit-folder`](done/test-current-outfit-folder-read-the-current-outfit-folder-the-cof-ais3-way-to-know-what.md)
   — read the Current Outfit Folder (the COF / AIS3 way to know what the av
 - [`test-dir-find-people-groups-events`](done/test-dir-find-people-groups-events-dirfindquery-across-types.md)

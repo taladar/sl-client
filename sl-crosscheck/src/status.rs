@@ -2,12 +2,18 @@
 //! status file that says whether the run happened at all.
 //!
 //! Both viewers write `harness-status.json` into their capture directory before
-//! they log out, with the same five keys — this crate's reader is the one parser
-//! for both. The distinction that matters is between *a status that says the run
+//! they log out, with the same keys — this crate's reader is the one parser for
+//! both. The distinction that matters is between *a status that says the run
 //! failed* and *no status at all*: the first is a viewer reporting honestly, the
 //! second is a run that never reached the point of reporting, and telling a
 //! person "firestorm: failed" when the truth is "firestorm never started" sends
 //! them looking for a rendering bug in a run that produced no rendering.
+//!
+//! The same distinction runs one level down, in `day_position`: a viewer that
+//! reports an unhonoured pin has told you its frames are not of the scene you
+//! asked for, while a viewer that reports **nothing** about the pin is a build
+//! from before the field existed and has told you nothing at all. Both are
+//! printed, and neither reads as success.
 //!
 //! Nothing here judges the frames. Whether the two viewers drew the same thing
 //! is a separate question with a separate answer; this module answers only
@@ -18,12 +24,14 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 /// The contents of `harness-status.json`, as both viewers write it.
+///
+/// (Not `Eq`: a recorded day position is an `f32`.)
 #[expect(
     clippy::module_name_repetitions,
     reason = "the type is named after the file it parses, which both viewers write under that \
               name; renaming it here would only hide the correspondence"
 )]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HarnessStatus {
     /// Whether the run did what it was asked to do.
     pub ok: bool,
@@ -35,10 +43,36 @@ pub struct HarnessStatus {
     pub frames_expected: usize,
     /// Which viewer wrote the file (`sl-client` / `firestorm`).
     pub viewer: String,
+    /// What became of a pinned sun, when the run pinned one — absent when it did
+    /// not, and absent from a viewer build that predates the field.
+    #[serde(default)]
+    pub day_position: Option<DayPositionStatus>,
+}
+
+/// What a run's pinned day position selected, as either viewer reports it.
+///
+/// (Not `Eq`: `requested` is the `f32` position that was asked for.)
+#[expect(
+    clippy::module_name_repetitions,
+    reason = "named for the `day_position` key of the status file this module parses, as \
+              `HarnessStatus` above is named for the file itself; the shared suffix is the \
+              correspondence, not an accident of the module it landed in"
+)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DayPositionStatus {
+    /// The position the run asked for, `0.0..=1.0`.
+    pub requested: f32,
+    /// Whether the frames were taken under the sky the **region** serves at that
+    /// position.
+    pub honoured: bool,
+    /// Prose saying what happened.
+    pub detail: String,
 }
 
 /// What was found where a viewer's status file should have been.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// (Not `Eq`: a reported status can carry an `f32` day position.)
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Status {
     /// The viewer reported: the run happened, and this is what it says.
@@ -72,6 +106,49 @@ impl Status {
         matches!(self, Self::Reported { .. })
     }
 
+    /// Whether nothing in this status contradicts the lighting the run asked
+    /// for — `asked` being the plan's `--day-position`, or `None` when it pinned
+    /// no sun.
+    ///
+    /// A run that pinned a sun and did **not** report on it is false as surely
+    /// as one that reported failing to honour it: a viewer build from before the
+    /// field existed cannot tell you which sky it drew, and a comparison of two
+    /// skies neither viewer was told to draw is not a comparison of renderers.
+    ///
+    /// A status that never happened is `true` here, because it is already a
+    /// failed run by [`happened`](Self::happened) and saying so twice only
+    /// makes the report longer.
+    #[must_use]
+    pub fn lighting_as_asked(&self, asked: Option<f32>) -> bool {
+        if asked.is_none() {
+            return true;
+        }
+        match self {
+            Self::Reported { status } => {
+                status.day_position.as_ref().is_some_and(|pin| pin.honoured)
+            }
+            Self::Missing | Self::Unreadable { .. } => true,
+        }
+    }
+
+    /// The report's line about the run's pinned sun, or `None` when it pinned
+    /// none (or never got far enough to say).
+    #[must_use]
+    pub fn describe_day_position(&self, asked: Option<f32>) -> Option<String> {
+        let asked = asked?;
+        let Self::Reported { status } = self else {
+            return None;
+        };
+        Some(match &status.day_position {
+            Some(pin) if pin.honoured => format!("sun pinned at {asked} — {}", pin.detail),
+            Some(pin) => format!("SUN NOT PINNED at {asked} — {}", pin.detail),
+            None => format!(
+                "SUN NOT REPORTED — the run asked for day position {asked} and this viewer said \
+                 nothing about it; it predates the day_position field"
+            ),
+        })
+    }
+
     /// One line for the printed report.
     #[must_use]
     pub fn describe(&self) -> String {
@@ -94,7 +171,9 @@ impl Status {
 }
 
 /// Everything one viewer left in its capture directory.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// (Not `Eq`: the status it holds can carry an `f32` day position.)
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Artefacts {
     /// The captured frames, in name order — which is capture order, the files
     /// being numbered.

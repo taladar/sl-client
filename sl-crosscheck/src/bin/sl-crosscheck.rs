@@ -154,6 +154,14 @@ struct Options {
     /// Pin the sun at this day position in `[0, 1]`. Unset leaves each viewer
     /// its own default, and the two defaults are not the same — pin it for any
     /// comparison involving light, which is all of them.
+    ///
+    /// Both viewers pin by sampling the **region's** day cycle at the position,
+    /// so a run that asks for one also dresses every region with a cycle it can
+    /// sample: a scene whose environment schedules a single sky renders that sky
+    /// whatever the position, and gets the four legacy WindLight presets instead
+    /// (a scene that carries its own multi-frame cycle keeps it). A viewer that
+    /// cannot honour the pin says so in its `harness-status.json` and fails the
+    /// run — a capture lit by a sky nobody chose looks exactly like a good one.
     #[arg(long)]
     day_position: Option<f32>,
 
@@ -310,6 +318,28 @@ fn resolve_camera(
 /// worked — two identical regions, a border with nothing to say — so this
 /// refuses rather than obliging.
 fn regions_for(
+    options: &Options,
+    scene: &scenarios::NamedScenario,
+) -> Result<Vec<RegionConfig>, String> {
+    let mut regions = undressed_regions_for(options, scene)?;
+    if options.day_position.is_some() {
+        for region in &mut regions {
+            if region.ensure_day_cycle_can_be_sampled() {
+                tracing::info!(
+                    "{}: the scene's environment schedules one sky, which no day position can \
+                     choose between, so the region now serves the four legacy WindLight presets \
+                     (midnight, sunrise, midday, sunset at 0.0 / 0.25 / 0.5 / 0.75)",
+                    region.name
+                );
+            }
+        }
+    }
+    Ok(regions)
+}
+
+/// [`regions_for`] before the pinned sun is taken into account: the scene's own
+/// regions, dressed as the scene dresses them.
+fn undressed_regions_for(
     options: &Options,
     scene: &scenarios::NamedScenario,
 ) -> Result<Vec<RegionConfig>, String> {

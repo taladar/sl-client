@@ -126,8 +126,15 @@ pub use sl_proto::{
     environment_asset_to_bytes, grid_to_handle, group_powers, handle_to_global, handle_to_grid,
     particle_pattern, pcode, rotation_to_azimuth_altitude, sim_access, texture_anim_mode,
 };
+// Linden's four ported WindLight sky presets and the day cycle that schedules
+// them: content both halves of the protocol need, so it lives in `sl-proto`
+// (see its `sky_presets`) and reaches the viewer through here.
 #[doc(no_inline)]
 pub use sl_proto::{Asset, AssetType, ImageCodec, Texture, TransferStatus};
+pub use sl_proto::{
+    MIDDAY, MIDNIGHT, PRESET_DAY_CYCLE_NAME, PRESET_DAY_KEYFRAMES, SUNRISE, SUNSET, SkyPreset,
+    install_preset_day_cycle, preset_day_cycle, preset_sky_schedule, sky_settings_from,
+};
 pub use sl_proto::{WireLandmarkAsset, landmark_to_wire, parse_landmark};
 // The `GetTexture` capability name, so a frontend driving the texture store
 // directly (rather than the `Command::FetchTexture` path) can resolve the cap

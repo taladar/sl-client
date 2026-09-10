@@ -90,9 +90,20 @@ impl ViewerRun {
             .is_some_and(|artefacts| artefacts.status.happened() && !artefacts.frames.is_empty())
     }
 
-    /// The report's line for this viewer.
+    /// Whether nothing this viewer reported contradicts the run's requested
+    /// lighting — `asked` being the plan's `--day-position`, or `None`. See
+    /// [`Status::lighting_as_asked`](crate::status::Status::lighting_as_asked).
     #[must_use]
-    pub fn describe(&self) -> String {
+    pub fn lighting_as_asked(&self, asked: Option<f32>) -> bool {
+        self.artefacts
+            .as_ref()
+            .is_none_or(|artefacts| artefacts.status.lighting_as_asked(asked))
+    }
+
+    /// The report's line for this viewer. `asked` is the run's requested day
+    /// position, so the line can say what became of it.
+    #[must_use]
+    pub fn describe(&self, asked: Option<f32>) -> String {
         let name = &self.viewer;
         let Some(artefacts) = &self.artefacts else {
             return match (&self.skipped, &self.ending) {
@@ -108,8 +119,12 @@ impl ViewerRun {
             .ending
             .as_deref()
             .map_or_else(String::new, |ending| format!(", ended {ending}"));
+        let sun = artefacts
+            .status
+            .describe_day_position(asked)
+            .map_or_else(String::new, |line| format!("\n    {line}"));
         format!(
-            "  {name}: {}\n    {} frame(s){}{}{}",
+            "  {name}: {}\n    {} frame(s){}{}{}{sun}",
             artefacts.status.describe(),
             artefacts.frames.len(),
             artefacts
@@ -142,6 +157,11 @@ pub struct RunSummary {
     pub camera_position: Option<String>,
     /// What the camera looked at, when it was aimed.
     pub camera_look_at: Option<String>,
+    /// The day position the run pinned, when it pinned one. Kept here because
+    /// every judgement about a viewer's lighting is a judgement against what was
+    /// asked for, and `run.json` has to carry the question as well as the
+    /// answers.
+    pub day_position: Option<f32>,
     /// Each viewer's half.
     pub viewers: Vec<ViewerRun>,
 }
@@ -170,6 +190,7 @@ impl RunSummary {
                 .camera
                 .and_then(|camera| camera.look_at)
                 .map(|point| point.to_string()),
+            day_position: plan.capture.day_position,
             viewers,
         }
     }
@@ -182,6 +203,12 @@ impl RunSummary {
     /// because `--only sl-client` is a legitimate thing to want — a one-sided
     /// run is not a failed run, and reporting it as one teaches its operator to
     /// ignore the exit status.
+    ///
+    /// **Frames are not enough.** A run that pinned a sun and got frames lit by
+    /// some other sky produced a capture of a scene nobody asked for, and it
+    /// looks exactly like a successful one from the outside — a directory of
+    /// plausible images. So an unhonoured (or unreported) day position fails the
+    /// run here, where somebody will notice.
     #[must_use]
     pub fn ran_as_asked(&self) -> bool {
         let mut attempted = self
@@ -189,7 +216,9 @@ impl RunSummary {
             .iter()
             .filter(|viewer| viewer.attempted)
             .peekable();
-        attempted.peek().is_some() && attempted.all(ViewerRun::usable)
+        attempted.peek().is_some()
+            && attempted
+                .all(|viewer| viewer.usable() && viewer.lighting_as_asked(self.day_position))
     }
 
     /// Whether there are **two** sets of frames, which is the only case in which
@@ -216,12 +245,31 @@ impl RunSummary {
                 None => format!("camera at {position}"),
             });
         }
+        if let Some(position) = self.day_position {
+            lines.push(format!("sun pinned at day position {position}"));
+        }
         for viewer in &self.viewers {
-            lines.push(viewer.describe());
+            lines.push(viewer.describe(self.day_position));
         }
         // Never "the viewers agree" or "the viewers differ": nothing here has
         // looked at a pixel. This says only whether there is a pair to look at,
         // and — separately — whether what was asked for happened.
+        let unlit: Vec<&str> = self
+            .viewers
+            .iter()
+            .filter(|viewer| {
+                viewer.attempted && viewer.usable() && !viewer.lighting_as_asked(self.day_position)
+            })
+            .map(|viewer| viewer.viewer.as_str())
+            .collect();
+        if !unlit.is_empty() {
+            lines.push(format!(
+                "the sun was not pinned for {}: these frames are lit by a sky the run did not \
+                 ask for, so nothing about light — shading, shadows, haze, water — can be \
+                 concluded from them",
+                unlit.join(" and ")
+            ));
+        }
         let failed: Vec<&str> = self
             .viewers
             .iter()
@@ -263,7 +311,7 @@ mod tests {
     use crate::launch::Viewer;
     use crate::plan::{CaptureSpec, RunPlan};
     use crate::process::Ending;
-    use crate::status::{Artefacts, HarnessStatus, Status};
+    use crate::status::{Artefacts, DayPositionStatus, HarnessStatus, Status};
 
     /// The boxed error every test in this module reports through.
     type TestError = Box<dyn core::error::Error>;
@@ -297,10 +345,81 @@ mod tests {
                         frames_written: 2,
                         frames_expected: 2,
                         viewer: viewer.name().to_owned(),
+                        day_position: None,
                     },
                 },
             },
         )
+    }
+
+    /// A plan that pins the sun at `position`.
+    fn pinned_plan(position: f32) -> Result<RunPlan, TestError> {
+        let mut plan = plan()?;
+        plan.capture.day_position = Some(position);
+        Ok(plan)
+    }
+
+    /// `good`, but reporting what became of a pinned sun.
+    fn good_with_pin(viewer: Viewer, pin: Option<DayPositionStatus>) -> ViewerRun {
+        let mut run = good(viewer);
+        if let Some(artefacts) = run.artefacts.as_mut()
+            && let Status::Reported { status } = &mut artefacts.status
+        {
+            status.day_position = pin;
+        }
+        run
+    }
+
+    /// A run that asked for a sun and did not get it has produced a directory of
+    /// plausible frames of the wrong scene. It fails, and the report says which
+    /// viewer and why — a warning in a viewer log is what this replaces.
+    #[test]
+    fn an_unhonoured_pin_fails_the_run() -> Result<(), TestError> {
+        let honoured = Some(DayPositionStatus {
+            requested: 0.5,
+            honoured: true,
+            detail: "sampled the region's day cycle at 0.5".to_owned(),
+        });
+        let missed = Some(DayPositionStatus {
+            requested: 0.5,
+            honoured: false,
+            detail: "the day cycle schedules one sky".to_owned(),
+        });
+        let summary = RunSummary::new(
+            &pinned_plan(0.5)?,
+            vec![
+                good_with_pin(Viewer::SlClient, honoured),
+                good_with_pin(Viewer::Firestorm, missed),
+            ],
+        );
+        // Both halves produced frames, so there *are* two sets of images — which
+        // is exactly why this must not read as a successful run.
+        assert!(summary.comparable());
+        assert!(!summary.ran_as_asked());
+        let report = summary.render();
+        assert!(report.contains("sun pinned at day position 0.5"));
+        assert!(report.contains("SUN NOT PINNED at 0.5"));
+        assert!(report.contains("the sun was not pinned for firestorm"));
+        Ok(())
+    }
+
+    /// A viewer that says nothing about the pin has not said it was fine: an old
+    /// build cannot report a field it does not have, and a run that treated
+    /// silence as success would quietly stop checking.
+    #[test]
+    fn silence_about_the_pin_is_not_success() -> Result<(), TestError> {
+        let summary = RunSummary::new(
+            &pinned_plan(0.25)?,
+            vec![good_with_pin(Viewer::Firestorm, None)],
+        );
+        assert!(!summary.ran_as_asked());
+        assert!(summary.render().contains("SUN NOT REPORTED"));
+
+        // And with no sun asked for, the same silence is simply silence.
+        let unpinned = RunSummary::new(&plan()?, vec![good_with_pin(Viewer::Firestorm, None)]);
+        assert!(unpinned.ran_as_asked());
+        assert!(!unpinned.render().contains("sun"));
+        Ok(())
     }
 
     /// Two good halves are a comparison, and the report says so without claiming
