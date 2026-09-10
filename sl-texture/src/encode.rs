@@ -167,6 +167,10 @@ pub const fn encode_j2c(_image: &DecodedImage) -> Result<Vec<u8>, EncodeError> {
 ///
 /// Always returns [`EncodeError::Disabled`].
 #[cfg(not(feature = "encode"))]
+#[expect(
+    clippy::module_name_repetitions,
+    reason = "re-exported at the crate root, where `encode_baked_avatar_j2c` reads clearly"
+)]
 pub const fn encode_baked_avatar_j2c(
     _image: &DecodedImage,
     _morph_mask: &[u8],
