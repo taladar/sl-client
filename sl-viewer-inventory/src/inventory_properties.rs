@@ -1164,10 +1164,11 @@ fn open_previews(
                 landmark_opens.write(crate::inventory::OpenAboutLandmark { item: item.clone() });
             }
             InventoryType::Settings => {
-                // The settings editors own this type (sky / water; a day cycle
-                // gets its own editor and is dropped here until it exists). The
-                // *kind* is the item's own flag byte, which is the only way to
-                // tell one settings item from another without fetching it.
+                // The settings editors own this type — the fixed sky and water
+                // editors, and the day-cycle editor, each reading this stream
+                // and taking the kinds it shows. The *kind* is the item's own
+                // flag byte, which is the only way to tell one settings item
+                // from another without fetching it.
                 let Some(kind) = SettingsKind::from_item_flags(item.flags) else {
                     warn!(
                         "settings item {} has no recognisable kind flag; not opening",

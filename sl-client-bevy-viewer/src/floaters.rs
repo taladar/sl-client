@@ -172,6 +172,16 @@ pub(crate) const FLOATERS: &[FloaterElement] = &[
         ),
     },
     FloaterElement {
+        id: "day-cycle-editor",
+        summary: "Day Cycle: the track picker beside the keyframe timeline and its scrubber, over \
+                  the knob tabs of the selected keyframe, with Save, Save As and Revert.",
+        spec: crate::day_cycle_editor::day_cycle_editor_floater_spec,
+        content: FloaterContent::Stub(
+            "The five track buttons, the timeline and its transport, the knob tabs of the \
+             selected keyframe, and the save row.",
+        ),
+    },
+    FloaterElement {
         id: "debug_settings",
         summary: "Debug settings: the raw settings editor — a search box over the changed-marker \
                   list beside the per-layer detail column.",

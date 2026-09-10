@@ -12,9 +12,12 @@
 //! - [`settings_editor`] — the fixed sky and water editors, over a settings
 //!   **asset** in inventory: the same knobs on tabs, plus a name and
 //!   Save / Save As / Revert.
+//! - [`day_cycle_editor`] — the day-cycle editor, over a day-cycle asset: the
+//!   keyframes of one track on a timeline, a scrubber that previews any time of
+//!   day, and the same knob tabs over whichever keyframe is selected.
 //! - [`my_environments`] — the My Environments library: every settings asset in
 //!   inventory, filterable by kind and name, with apply-to-self, edit, rename
-//!   and delete, and the two creators that mint a fresh sky or water.
+//!   and delete, and the three creators that mint a fresh sky, water or day.
 //! - [`settings_picker`] — the chooser another panel summons for one settings
 //!   field, over the same list narrowed to one kind.
 //!
@@ -24,7 +27,9 @@
 //!
 //! The knobs themselves are one table ([`knobs`]) and the controls that draw
 //! them one set of spawners ([`rows`]), so a value cannot be labelled or scaled
-//! one way in one window and another way in the next.
+//! one way in one window and another way in the next. Which knob sits on which
+//! tab is a table too ([`tabs`]), shared by the two windows that show a frame's
+//! pages — as the reference shares the panels themselves.
 //!
 //! # Which layer an editor writes
 //!
@@ -48,6 +53,7 @@
               find it — so the repetition is the protocol, not an accident of naming"
 )]
 
+pub mod day_cycle_editor;
 pub mod knobs;
 pub mod my_environments;
 pub mod personal_lighting;
@@ -55,6 +61,7 @@ pub mod rows;
 pub mod settings_editor;
 pub mod settings_list;
 pub mod settings_picker;
+pub mod tabs;
 
 use bevy::prelude::*;
 
@@ -110,6 +117,7 @@ impl Plugin for EnvironmentUiPlugins {
     fn build(&self, app: &mut App) {
         app.add_plugins(personal_lighting::PersonalLightingPlugin)
             .add_plugins(settings_editor::SettingsEditorPlugin)
+            .add_plugins(day_cycle_editor::DayCycleEditorPlugin)
             .add_plugins(my_environments::MyEnvironmentsPlugin)
             .add_plugins(settings_picker::SettingsPickerPlugin);
     }
@@ -153,6 +161,11 @@ mod tests {
         app.init_resource::<UiScale>()
             .init_resource::<ButtonInput<KeyCode>>()
             .init_resource::<bevy::input_focus::InputFocus>()
+            // The clock the day-cycle editor's playback reads. A `Res<T>` for a
+            // resource nothing inserted fails param validation exactly as an
+            // unregistered message does, so the host's clock is one of the seams
+            // this test has to bring.
+            .init_resource::<Time>()
             // The seams the host brings: the two picker replies the swatches are
             // answered on, and the session's command / event channels.
             .add_message::<ColorPicked>()

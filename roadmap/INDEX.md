@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 324 |
+| ready | 323 |
 | blocked | 42 |
 | in-progress | 21 |
 | bugs | 53 |
-| done | 1069 |
+| done | 1070 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1651** |
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (324)
+## ready (323)
 
 ### protocol
 
@@ -481,8 +481,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-edit-permission-gating`](ready/viewer-edit-permission-gating.md) —
   Permission-aware editing (grey out what perms forbid) (blocked by
   `viewer-object-selection-core` (done))
-- [`viewer-environment-day-cycle-editor`](ready/viewer-environment-day-cycle-editor.md)
-  — Day-cycle editor (blocked by `viewer-environment-fixed-editor` (done))
 - [`viewer-environment-density-profiles`](ready/viewer-environment-density-profiles.md)
   — Render the atmospheric density profiles
 - [`viewer-environment-import-legacy-presets`](ready/viewer-environment-import-legacy-presets.md)
@@ -1315,7 +1313,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1069)
+## done (1070)
 
 ### protocol
 
@@ -1806,6 +1804,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-emoji-picker-floater`](done/viewer-emoji-picker-floater.md) — Emoji
   picker floater (blocked by `viewer-emoji-data` (done),
   `viewer-ui-floater-basic` (done))
+- [`viewer-environment-day-cycle-editor`](done/viewer-environment-day-cycle-editor.md)
+  — Day-cycle editor (blocked by `viewer-environment-fixed-editor` (done))
 - [`viewer-environment-fixed-editor`](done/viewer-environment-fixed-editor.md) —
   Environment editors — sky & water settings assets (blocked by
   `viewer-ui-widget-scaffold` (done))

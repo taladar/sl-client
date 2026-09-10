@@ -93,6 +93,7 @@ use sl_viewer_world_scene::environment::EnvironmentState;
 use crate::knobs::{ColorKnob, SkyKnob, TextureKnob, WaterKnob};
 use crate::rows::{spawn_action_button, spawn_color_row, spawn_slider, spawn_texture_row};
 use crate::style::{DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR};
+use crate::tabs::{SKY_TABS, TabPage, WATER_TABS};
 
 /// The sky editor's floater id.
 pub const SKY_EDITOR_FLOATER_ID: &str = "settings-editor-sky";
@@ -169,166 +170,6 @@ impl EditorKind {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// The tabs.
-// ---------------------------------------------------------------------------
-
-/// One tab of an editor: its label and the knobs on it.
-///
-/// A table rather than three hand-written panels, so "every knob is on exactly
-/// one tab" is a property a test can check — a knob added to
-/// [`SkyKnob::ALL`] and forgotten here would
-/// otherwise be a control nobody can reach.
-#[derive(Debug, Clone, Copy)]
-struct TabPage {
-    /// The tab label's Fluent key.
-    label: &'static str,
-    /// The tab's short name, for the element ids of the nodes on it.
-    slug: &'static str,
-    /// The colour swatches, in the first column.
-    colors: &'static [ColorKnob],
-    /// The texture swatches, under them.
-    textures: &'static [TextureKnob],
-    /// The sky sliders, split over the other two columns (empty in the water
-    /// editor).
-    sky: &'static [SkyKnob],
-    /// The water sliders (empty in the sky editor).
-    water: &'static [WaterKnob],
-}
-
-/// The sky editor's three tabs, in the reference's order.
-const SKY_TABS: &[TabPage] = &[
-    TabPage {
-        label: "settings-editor-tab-atmosphere",
-        slug: "atmosphere",
-        colors: &[
-            ColorKnob::Ambient,
-            ColorKnob::BlueHorizon,
-            ColorKnob::BlueDensity,
-        ],
-        textures: &[],
-        sky: &[
-            SkyKnob::HazeHorizon,
-            SkyKnob::HazeDensity,
-            SkyKnob::MoistureLevel,
-            SkyKnob::DropletRadius,
-            SkyKnob::IceLevel,
-            SkyKnob::DensityMultiplier,
-            SkyKnob::DistanceMultiplier,
-            SkyKnob::MaxAltitude,
-            SkyKnob::ProbeAmbiance,
-            SkyKnob::Gamma,
-        ],
-        water: &[],
-    },
-    TabPage {
-        label: "settings-editor-tab-clouds",
-        slug: "clouds",
-        colors: &[ColorKnob::CloudColor],
-        textures: &[TextureKnob::CloudImage],
-        sky: &[
-            SkyKnob::CloudCoverage,
-            SkyKnob::CloudScale,
-            SkyKnob::CloudVariance,
-            SkyKnob::CloudScrollX,
-            SkyKnob::CloudScrollY,
-            SkyKnob::CloudDensityX,
-            SkyKnob::CloudDensityY,
-            SkyKnob::CloudDensityD,
-            SkyKnob::CloudDetailX,
-            SkyKnob::CloudDetailY,
-            SkyKnob::CloudDetailD,
-        ],
-        water: &[],
-    },
-    TabPage {
-        label: "settings-editor-tab-sun-moon",
-        slug: "sun-moon",
-        colors: &[ColorKnob::SunColor],
-        textures: &[
-            TextureKnob::SunImage,
-            TextureKnob::MoonImage,
-            TextureKnob::BloomImage,
-            TextureKnob::HaloImage,
-            TextureKnob::RainbowImage,
-        ],
-        sky: &[
-            SkyKnob::SunAzimuth,
-            SkyKnob::SunElevation,
-            SkyKnob::SunScale,
-            SkyKnob::GlowFocus,
-            SkyKnob::GlowSize,
-            SkyKnob::StarBrightness,
-            SkyKnob::MoonAzimuth,
-            SkyKnob::MoonElevation,
-            SkyKnob::MoonScale,
-            SkyKnob::MoonBrightness,
-            SkyKnob::SunArcRadians,
-        ],
-        water: &[],
-    },
-    TabPage {
-        label: "settings-editor-tab-density",
-        slug: "density",
-        colors: &[],
-        textures: &[],
-        sky: &[
-            SkyKnob::RayleighExpTerm,
-            SkyKnob::RayleighExpScale,
-            SkyKnob::RayleighLinear,
-            SkyKnob::RayleighConstant,
-            SkyKnob::RayleighWidth,
-            SkyKnob::MieExpTerm,
-            SkyKnob::MieExpScale,
-            SkyKnob::MieLinear,
-            SkyKnob::MieConstant,
-            SkyKnob::MieAnisotropy,
-            SkyKnob::MieWidth,
-            SkyKnob::AbsorptionExpTerm,
-            SkyKnob::AbsorptionExpScale,
-            SkyKnob::AbsorptionLinear,
-            SkyKnob::AbsorptionConstant,
-            SkyKnob::AbsorptionWidth,
-            // The atmosphere's geometry, which the same scattering model reads
-            // and the reference's panel does not offer. Their ranges are its
-            // validator's.
-            SkyKnob::PlanetRadius,
-            SkyKnob::SkyBottomRadius,
-            SkyKnob::SkyTopRadius,
-        ],
-        water: &[],
-    },
-];
-
-/// The water editor's one tab. The reference's water panel is a single page
-/// too, and every water knob fits on it.
-const WATER_TABS: &[TabPage] = &[TabPage {
-    label: "settings-editor-tab-water",
-    slug: "water",
-    colors: &[ColorKnob::WaterFogColor],
-    textures: &[
-        TextureKnob::WaterNormalMap,
-        TextureKnob::WaterTransparentTexture,
-    ],
-    sky: &[],
-    water: &[
-        WaterKnob::FogDensity,
-        WaterKnob::UnderwaterModifier,
-        WaterKnob::FresnelScale,
-        WaterKnob::FresnelOffset,
-        WaterKnob::NormalScaleX,
-        WaterKnob::NormalScaleY,
-        WaterKnob::NormalScaleZ,
-        WaterKnob::ScaleAbove,
-        WaterKnob::ScaleBelow,
-        WaterKnob::BlurMultiplier,
-        WaterKnob::LargeWaveX,
-        WaterKnob::LargeWaveY,
-        WaterKnob::SmallWaveX,
-        WaterKnob::SmallWaveY,
-    ],
-}];
 
 // ---------------------------------------------------------------------------
 // Components.
@@ -434,14 +275,18 @@ struct EditSession {
 }
 
 /// The inventory item an open session came from.
+///
+/// Shared with the day-cycle editor, which has exactly the same three facts to
+/// remember about the item it is holding: what a Save writes onto, where a Save
+/// As files the copy, and whether either is allowed at all.
 #[derive(Debug, Clone, Copy)]
-struct EditedItem {
+pub(crate) struct EditedItem {
     /// The item whose asset a Save replaces.
-    item_id: InventoryKey,
+    pub(crate) item_id: InventoryKey,
     /// The folder a Save As files the copy in.
-    folder_id: InventoryFolderKey,
+    pub(crate) folder_id: InventoryFolderKey,
     /// Whether the item may be written back to at all.
-    editable: bool,
+    pub(crate) editable: bool,
 }
 
 impl EditSession {
@@ -965,8 +810,9 @@ fn open_settings_editor(
     for open in opens.read() {
         let Some(editor) = EditorKind::of_settings(open.kind) else {
             // A day cycle is a settings item too, and neither of these windows
-            // can show one; the day-cycle editor is its own task.
-            warn!("no settings editor for a day cycle yet: {}", open.name);
+            // can show one — `crate::day_cycle_editor` reads the same stream and
+            // takes it. Not a warning: it is somebody else's message, not a
+            // dropped one.
             continue;
         };
         // These windows are singletons — one per kind — because the frame being
@@ -1658,8 +1504,8 @@ fn set_status(texts: &mut Query<&mut Text>, status: Option<Entity>, message: &st
 
 #[cfg(test)]
 mod tests {
-    use super::{EditorKind, SKY_TABS, WATER_TABS, frame_name, named, settings_kind_word};
-    use crate::knobs::{ColorKnob, SkyKnob, TextureKnob, WaterKnob};
+    use super::{EditorKind, frame_name, named, settings_kind_word};
+    use crate::knobs::SkyKnob;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{
         DensityLayer, EnvironmentAsset, SettingsKind, SkySettings, WaterSettings,
@@ -1705,76 +1551,6 @@ mod tests {
         let mut deduped = unique.to_vec();
         deduped.dedup();
         assert_eq!(deduped.len(), words.len(), "{words:?}");
-    }
-
-    /// **Every knob is on exactly one tab.** The knob tables and the tab tables
-    /// are two lists that have to agree, and the failure is silent in both
-    /// directions: a knob missing from every tab is a value nobody can edit, and
-    /// one on two tabs is two controls writing the same field with only the last
-    /// re-seed deciding which is right.
-    #[test]
-    fn every_knob_is_on_exactly_one_tab() {
-        let sky: Vec<SkyKnob> = SKY_TABS
-            .iter()
-            .chain(WATER_TABS)
-            .flat_map(|page| page.sky.iter().copied())
-            .collect();
-        assert_eq!(
-            sky.len(),
-            SkyKnob::ALL.len(),
-            "a sky knob is missing or twice over"
-        );
-        for knob in SkyKnob::ALL {
-            assert_eq!(
-                sky.iter().filter(|shown| *shown == knob).count(),
-                1,
-                "{knob:?} is not on exactly one tab"
-            );
-        }
-
-        let water: Vec<WaterKnob> = SKY_TABS
-            .iter()
-            .chain(WATER_TABS)
-            .flat_map(|page| page.water.iter().copied())
-            .collect();
-        assert_eq!(water.len(), WaterKnob::ALL.len());
-        for knob in WaterKnob::ALL {
-            assert_eq!(water.iter().filter(|shown| *shown == knob).count(), 1);
-        }
-
-        let colors: Vec<ColorKnob> = SKY_TABS
-            .iter()
-            .chain(WATER_TABS)
-            .flat_map(|page| page.colors.iter().copied())
-            .collect();
-        assert_eq!(colors.len(), ColorKnob::ALL.len());
-        for knob in ColorKnob::ALL {
-            assert_eq!(colors.iter().filter(|shown| *shown == knob).count(), 1);
-        }
-
-        let textures: Vec<TextureKnob> = SKY_TABS
-            .iter()
-            .chain(WATER_TABS)
-            .flat_map(|page| page.textures.iter().copied())
-            .collect();
-        assert_eq!(textures.len(), TextureKnob::ALL.len());
-        for knob in TextureKnob::ALL {
-            assert_eq!(textures.iter().filter(|shown| *shown == knob).count(), 1);
-        }
-    }
-
-    /// **A tab shows one kind of slider.** The sky editor's panels hold sky
-    /// knobs and the water editor's water ones; a knob on the wrong window's tab
-    /// would spawn a control whose write-back looks in a frame that window's
-    /// session never holds, and do nothing at all.
-    #[test]
-    fn a_tab_holds_only_its_own_editor_s_knobs() {
-        for page in SKY_TABS {
-            assert!(page.water.is_empty(), "{} shows water knobs", page.label);
-        }
-        for page in WATER_TABS {
-            assert!(page.sky.is_empty(), "{} shows sky knobs", page.label);
-        }
     }
 
     /// A settings item opens in the editor its kind names, and a day cycle in

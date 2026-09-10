@@ -277,9 +277,7 @@ static NEW_SETTINGS_MENU: MenuDef = MenuDef {
     items: &[
         MenuItemDef::Command(MenuCommand::new("New Sky", "new-sky")),
         MenuItemDef::Command(MenuCommand::new("New Water", "new-water")),
-        MenuItemDef::Command(
-            MenuCommand::new("New Day Cycle", "new-daycycle").enabled_when(UNIMPLEMENTED),
-        ),
+        MenuItemDef::Command(MenuCommand::new("New Day Cycle", "new-daycycle")),
     ],
 };
 
