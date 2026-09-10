@@ -3369,13 +3369,37 @@ fn apply_command(
                     build_update_task_item_asset_request(*task_id, *item_id),
                 ),
             };
+            // The item this update is *about*, for the completion below. A task
+            // item is not an agent-inventory item, so it stays `None`.
+            let updated_item = match location {
+                AssetUpdateLocation::AgentInventory { item_id } => Some(item_id.uuid()),
+                AssetUpdateLocation::TaskInventory { .. } => None,
+            };
             if let Some(caps) = caps
                 && let Some(url) = caps.map.get(cap).cloned()
             {
                 let asset_tx = caps.asset_tx.clone();
                 let data = data.clone();
                 std::thread::spawn(move || {
-                    let event = run_caps_upload(&url, body, data);
+                    let mut event = run_caps_upload(&url, body, data);
+                    // **Name the item ourselves when the grid does not.** An
+                    // update cap's completion is only obliged to carry the new
+                    // *asset*: the item already exists and the client is the one
+                    // that named it, so a grid may echo it, may send a nil (which
+                    // parses as `None`, as `UploadBakedTexture`'s genuinely
+                    // item-less completion does), or may omit it. A consumer
+                    // correlating a save with the item it saved cannot tell those
+                    // apart from "somebody else's upload", so it would simply
+                    // never see its own save land — which is what left the
+                    // settings editor reporting "Saving…" forever on a save that
+                    // had in fact succeeded.
+                    if let SessionEvent::AssetUploaded {
+                        new_inventory_item, ..
+                    } = &mut event
+                        && new_inventory_item.is_none()
+                    {
+                        *new_inventory_item = updated_item;
+                    }
                     deliver(&asset_tx, event);
                 });
             } else {

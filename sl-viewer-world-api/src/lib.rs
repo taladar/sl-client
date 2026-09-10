@@ -1972,6 +1972,78 @@ impl PendingItemCreations {
     }
 }
 
+/// The **settings** items asked of the simulator and not yet seen back, oldest
+/// first.
+///
+/// A settings item is minted by `CreateInventoryItem` rather than by an upload —
+/// the simulator authors the default asset for the kind and stamps the subtype
+/// byte — and its `UpdateCreateInventoryItem` reply names the item but not who
+/// asked for it. So this is the viewer's **one** queue for those replies, for
+/// exactly the reason [`PendingItemCreations`] is the one queue for the upload
+/// kind: two queues watching the same untagged reply stream would each pop on
+/// the other's creation, and a Save As would write its body onto somebody else's
+/// fresh item.
+///
+/// One ordered queue is also what makes each *consumer's* own bookkeeping sound.
+/// The library window counts the creations it asked for and claims that many
+/// [`SettingsItemCreated`]s; so does the editor. Because every creation passes
+/// through here in order, "the next one is mine" is a true statement for both.
+#[derive(Resource, Debug, Default)]
+pub struct PendingSettingsCreations {
+    /// The in-flight creations, oldest first.
+    queue: VecDeque<PendingSettingsCreation>,
+}
+
+/// One in-flight settings creation: which kind, and what to do with the item
+/// when it arrives.
+#[derive(Debug, Clone)]
+pub struct PendingSettingsCreation {
+    /// The kind asked for — carried rather than read back off the reply,
+    /// because it is what the user chose whatever the simulator stamped.
+    pub kind: SettingsKind,
+    /// The encoded asset to write onto the fresh item, for a creator that has a
+    /// body to store (the editors' **Save As**).
+    ///
+    /// `None` for New Sky / New Water, where the *point* is the default asset
+    /// the simulator authors — `LLSettingsVOBase::onInventoryItemCreated` says
+    /// so outright when it is called with no settings: "no need to upload
+    /// asset".
+    pub body: Option<Vec<u8>>,
+}
+
+impl PendingSettingsCreations {
+    /// Enqueue a creation, so the reply that names its item is matched to it.
+    pub fn enqueue(&mut self, kind: SettingsKind, body: Option<Vec<u8>>) {
+        self.queue.push_back(PendingSettingsCreation { kind, body });
+    }
+
+    /// Take the oldest in-flight creation — the reply that just landed is its
+    /// own, since the simulator answers in the order it was asked.
+    pub fn take_next(&mut self) -> Option<PendingSettingsCreation> {
+        self.queue.pop_front()
+    }
+}
+
+/// A settings item the simulator has created for us, published once its reply
+/// has been matched to the request that asked for it.
+///
+/// Consumers read this rather than the raw
+/// `SlSessionEvent::InventoryItemCreated`, so that "was this one mine?" is
+/// answered once, in queue order, instead of separately (and racily) by each
+/// window.
+#[derive(Message, Debug, Clone)]
+pub struct SettingsItemCreated {
+    /// The fresh item.
+    pub item: InventoryKey,
+    /// The folder it landed in.
+    pub folder: InventoryFolderKey,
+    /// The kind that was asked for.
+    pub kind: SettingsKind,
+    /// Whether a body was written onto it (a **Save As**) rather than the
+    /// simulator's default asset being kept (a New Sky / New Water).
+    pub authored: bool,
+}
+
 /// Open the settings editor on an EEP **settings** inventory item — the sky
 /// editor or the water editor, chosen by the item's own
 /// [`SettingsKind`] flag. Written by the

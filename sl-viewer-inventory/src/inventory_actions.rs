@@ -45,11 +45,12 @@
 use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use sl_client_bevy::{
-    AgentKey, AssetKey, AssetType, AttachmentMode, AttachmentPoint, Command, DetachOrder,
-    FolderInfo, FolderType, GestureActivation, InventoryFolderKey, InventoryItemOrFolderKey,
-    InventoryKey, InventoryType, ItemInfo, NewInventoryItem, NewInventoryLink, Permissions,
-    RezAttachment, ScriptLanguage, SettingsKind, SlCommand, SlEvent, SlIdentity, SlSessionEvent,
-    TransactionId, Uuid, VisualParams, Wearable, WearableType,
+    AgentKey, AssetKey, AssetType, AssetUpdateLocation, AttachmentMode, AttachmentPoint, Command,
+    DetachOrder, FolderInfo, FolderType, GestureActivation, InventoryFolderKey,
+    InventoryItemOrFolderKey, InventoryKey, InventoryType, ItemInfo, NewInventoryItem,
+    NewInventoryLink, Permissions, RezAttachment, ScriptLanguage, SettingsKind, SlCommand, SlEvent,
+    SlIdentity, SlSessionEvent, TransactionId, UpdatableAssetType, Uuid, VisualParams, Wearable,
+    WearableType,
 };
 use std::collections::HashSet;
 
@@ -66,6 +67,7 @@ use crate::world_api::InputContext;
 use crate::world_api::PendingItemCreations;
 use crate::world_api::StartConference;
 use crate::world_api::{ConversationKey, OpenConversation};
+use crate::world_api::{PendingSettingsCreations, SettingsItemCreated};
 
 /// The `element` the inventory context menus attribute their [`UiAction`]s to.
 pub(crate) const INVENTORY_MENU_ELEMENT: &str = "inventory-menu";
@@ -1683,6 +1685,7 @@ fn handle_inventory_menu_actions(
         ResMut<crate::inventory::InlineRename>,
         ResMut<PendingShare>,
         ResMut<PendingItemCreations>,
+        ResMut<PendingSettingsCreations>,
         ResMut<crate::inventory::PendingReveal>,
     ),
     library: Option<Res<crate::avatar_assets::AvatarAssetLibrary>>,
@@ -1708,6 +1711,7 @@ fn handle_inventory_menu_actions(
         mut rename,
         mut pending_share,
         mut pending_creations,
+        mut settings_creations,
         mut pending_reveal,
     ) = stashes;
     let (
@@ -2016,6 +2020,7 @@ fn handle_inventory_menu_actions(
                     identity.agent_id,
                     library.as_ref().map(|library| library.params()),
                     &mut pending_creations,
+                    &mut settings_creations,
                     &mut commands,
                     &mut ui_actions,
                     &mut rename,
@@ -2592,6 +2597,70 @@ fn handle_item_creations(
     }
 }
 
+/// Finish a **settings** creation when its reply lands: write the body the
+/// creator was holding, widen the permissions as the reference does, and
+/// publish it.
+///
+/// The other half of [`new_settings_item`]. The simulator has already authored
+/// the default asset for the kind and stamped the subtype, so a New Sky / New
+/// Water needs nothing more; a **Save As** has a body to store, and stores it
+/// exactly the way an in-place Save does — `UpdateSettingsAgentInventory`,
+/// through [`AssetUpdateLocation::AgentInventory`] on the item the reply just
+/// named. That two-step is `LLSettingsVOBase::createInventoryItem` →
+/// `onInventoryItemCreated` → `updateInventoryItem`.
+///
+/// The consumer lives here, beside [`handle_item_creations`], for the same
+/// reason that one does: it is the inventory that has to hear about a new item.
+fn handle_settings_creations(
+    mut events: MessageReader<SlEvent>,
+    mut pending: ResMut<PendingSettingsCreations>,
+    mut commands: MessageWriter<SlCommand>,
+    mut created: MessageWriter<SettingsItemCreated>,
+) {
+    for event in events.read() {
+        let SlSessionEvent::InventoryItemCreated { item, .. } = &event.0 else {
+            continue;
+        };
+        // The wire item carries raw type codes, not the typed enums.
+        if i32::from(item.item_type) != AssetType::Settings.to_code() {
+            continue;
+        }
+        let Some(creation) = pending.take_next() else {
+            // A settings item the viewer did not ask for — an accepted
+            // inventory offer, say. Nothing to finish.
+            continue;
+        };
+        let authored = creation.body.is_some();
+        if let Some(data) = creation.body {
+            commands.write(SlCommand(Command::UpdateInventoryAsset {
+                location: AssetUpdateLocation::AgentInventory {
+                    item_id: item.item_id,
+                },
+                asset_type: UpdatableAssetType::Settings,
+                data,
+            }));
+        }
+        // `onInventoryItemCreated` widens the everyone mask to PERM_COPY on
+        // every settings item it makes, whatever the creator asked for, and
+        // pushes it back with `updateServer`. Guarded the same way, so an item
+        // that already carries it costs nothing.
+        if !item.permissions.everyone.contains(Permissions::COPY) {
+            let mut widened = item.clone();
+            widened.permissions.everyone = Permissions::COPY;
+            commands.write(SlCommand(Command::UpdateInventoryItem {
+                item: Box::new(widened),
+                transaction_id: TransactionId::from(Uuid::nil()),
+            }));
+        }
+        created.write(SettingsItemCreated {
+            item: item.item_id,
+            folder: item.folder_id,
+            kind: creation.kind,
+            authored,
+        });
+    }
+}
+
 /// The `CreateInventoryItem` that mints a fresh **settings** item of `kind`
 /// named `name` in `dest`.
 ///
@@ -2659,6 +2728,7 @@ fn dispatch_create(
     own_agent: Option<AgentKey>,
     params: Option<&VisualParams>,
     pending_creations: &mut PendingItemCreations,
+    settings_creations: &mut PendingSettingsCreations,
     commands: &mut MessageWriter<SlCommand>,
     ui_actions: &mut MessageWriter<crate::inventory::InventoryUiAction>,
     rename: &mut crate::inventory::InlineRename,
@@ -2693,6 +2763,10 @@ fn dispatch_create(
     // a settings item's subtype from the create itself.
     if let Some((kind, name)) = settings_kind_of(action) {
         commands.write(SlCommand(new_settings_item(kind, name, dest)));
+        // No body: the point of this path is the default asset the simulator
+        // authors. The entry still rides the queue so every settings creation
+        // passes through it in order.
+        settings_creations.enqueue(kind, None);
         query_folder_page(dest, commands);
         return true;
     }
@@ -2767,6 +2841,7 @@ fn handle_inventory_add_actions(
     identity: Res<SlIdentity>,
     library: Option<Res<crate::avatar_assets::AvatarAssetLibrary>>,
     mut pending_creations: ResMut<PendingItemCreations>,
+    mut settings_creations: ResMut<PendingSettingsCreations>,
     mut rename: ResMut<crate::inventory::InlineRename>,
     mut ui_actions: MessageWriter<crate::inventory::InventoryUiAction>,
     mut commands: MessageWriter<SlCommand>,
@@ -2792,6 +2867,7 @@ fn handle_inventory_add_actions(
             identity.agent_id,
             library.as_ref().map(|lib| lib.params()),
             &mut pending_creations,
+            &mut settings_creations,
             &mut commands,
             &mut ui_actions,
             &mut rename,
@@ -2865,6 +2941,8 @@ impl Plugin for InventoryActionsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<InventoryMenuTarget>()
             .init_resource::<InventoryClipboard>()
+            .init_resource::<PendingSettingsCreations>()
+            .add_message::<SettingsItemCreated>()
             .init_resource::<WornAttachments>()
             .init_resource::<ActiveGestures>()
             .init_resource::<PendingShare>()
@@ -2877,6 +2955,7 @@ impl Plugin for InventoryActionsPlugin {
                     handle_inventory_add_actions,
                     handle_share_picks,
                     handle_item_creations,
+                    handle_settings_creations,
                     seed_worn_from_cof,
                 )
                     .chain(),
@@ -2984,6 +3063,7 @@ mod tests {
         outfit_remove_commands, paste_commands, take_off_set, wear_set,
     };
     use crate::menu::{MenuDef, MenuItemDef};
+    use crate::world_api::PendingSettingsCreations;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{
         AgentKey, AssetType, Command, FolderInfo, FolderState, FolderType, InventoryFolderKey,
@@ -3031,6 +3111,46 @@ mod tests {
             assert_eq!(new.transaction_id, Uuid::nil());
             assert_eq!(new.name, "New Thing");
         }
+    }
+
+    /// **A Save As body is written onto the item the simulator made, not
+    /// uploaded.**
+    ///
+    /// The queue is what carries the body across the gap between asking for the
+    /// item and being told its id, and it is *one* queue for the whole viewer
+    /// on purpose: the library window's New Sky and an editor's Save As land in
+    /// the same untagged reply stream, so two queues would each pop on the
+    /// other's creation and a Save As would write its frame onto somebody
+    /// else's fresh item. Order is the whole of the correlation, so this pins
+    /// it: interleave a bodyless creation with an authored one and each has to
+    /// come back out as it went in.
+    #[test]
+    fn the_settings_creation_queue_keeps_its_bodies_in_order()
+    -> Result<(), Box<dyn core::error::Error>> {
+        let mut queue = PendingSettingsCreations::default();
+        queue.enqueue(SettingsKind::Sky, None);
+        queue.enqueue(SettingsKind::Water, Some(b"a water frame".to_vec()));
+        queue.enqueue(SettingsKind::DayCycle, None);
+
+        let first = queue.take_next().ok_or("the sky was asked for first")?;
+        assert_eq!(first.kind, SettingsKind::Sky);
+        assert!(
+            first.body.is_none(),
+            "New Sky keeps the simulator's default"
+        );
+
+        let second = queue.take_next().ok_or("the water was asked for second")?;
+        assert_eq!(second.kind, SettingsKind::Water);
+        assert_eq!(second.body.as_deref(), Some(b"a water frame".as_slice()));
+
+        let third = queue
+            .take_next()
+            .ok_or("the day cycle was asked for last")?;
+        assert_eq!(third.kind, SettingsKind::DayCycle);
+        assert!(third.body.is_none());
+
+        assert!(queue.take_next().is_none(), "nothing else was asked for");
+        Ok(())
     }
 
     /// A minimal item of the given types, owned with the given owner mask.

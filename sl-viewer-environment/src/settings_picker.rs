@@ -54,6 +54,7 @@ use sl_viewer_ui_core::virtual_list::{VirtualList, VirtualRow, layout_virtual_li
 use sl_viewer_ui_widgets::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, floater_shown, spawn_floater,
 };
+use sl_viewer_ui_widgets::floater_persist::FloaterOpenExempt;
 use sl_viewer_ui_widgets::ui_search::{SearchFieldSpec, spawn_search_field};
 use sl_viewer_ui_widgets::ui_table::{
     TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells, TableSelectionMode,
@@ -307,7 +308,11 @@ fn spawn_settings_picker(mut commands: Commands, root: Res<UiRoot>) {
     let builder = commands.register_system(build_settings_picker_content);
     commands
         .entity(handle.root)
-        .insert(DeferredFloaterContent { builder, handle });
+        .insert(DeferredFloaterContent { builder, handle })
+        // Its rectangle is worth keeping; its being open is not. A chooser
+        // exists only while a panel is waiting on it, and on the next run
+        // nothing is.
+        .insert(FloaterOpenExempt);
     commands.queue(move |world: &mut World| {
         world.insert_resource(SettingsPickerUi {
             panel: handle.root,

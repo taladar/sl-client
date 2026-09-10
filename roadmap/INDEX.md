@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 326 |
 | blocked | 42 |
 | in-progress | 21 |
-| bugs | 64 |
-| done | 1032 |
+| bugs | 63 |
+| done | 1033 |
 | deferred | 25 |
 | wont-do | 14 |
 | **total** | **1625** |
@@ -1196,7 +1196,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (64)
+## bugs (63)
 
 ### viewer
 
@@ -1315,8 +1315,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rigged-attachments-wearer-not-resolved`](bugs/viewer-rigged-attachments-wearer-not-resolved.md)
   — Worn rigged attachments (e.g. own shoes) don't render — wearer never
   resolved / too many rigged-pending objects
-- [`viewer-settings-save-as-create-then-put`](bugs/viewer-settings-save-as-create-then-put.md)
-  — A settings Save As uploads through a cap that does not take settings
 - [`viewer-sunlit-face-clips-two-channels`](bugs/viewer-sunlit-face-clips-two-channels.md)
   — A sunlit opaque face pins red and green rather than showing its texture
 - [`viewer-takeoff-hold-jumps-instead-of-flying`](bugs/viewer-takeoff-hold-jumps-instead-of-flying.md)
@@ -1351,7 +1349,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1032)
+## done (1033)
 
 ### protocol
 
@@ -2703,6 +2701,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-settings-account-scope-persist`](done/viewer-settings-account-scope-persist.md)
   — Load and save both global and per-account settings in the viewer (blocked by
   `viewer-ui-settings-store` (done))
+- [`viewer-settings-save-as-create-then-put`](done/viewer-settings-save-as-create-then-put.md)
+  — A settings Save As uploads through a cap that does not take settings
 - [`viewer-settings-toml-format`](done/viewer-settings-toml-format.md) — TOML
   settings file with comments and nested sections (blocked by
   `viewer-ui-settings-store` (done))

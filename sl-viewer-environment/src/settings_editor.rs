@@ -6,8 +6,8 @@
 //! (`LLFloaterFixedEnvironmentSky` / `LLFloaterFixedEnvironmentWater`): a name
 //! field, the knobs on tabs, and Save / Save As / Revert. What they edit is an
 //! *asset* — the item opened from inventory, saved back over itself with
-//! `UpdateSettingsAgentInventory`, or copied into a fresh item with
-//! `NewFileAgentInventory`.
+//! `UpdateSettingsAgentInventory`, or copied into a fresh item the simulator
+//! mints and the same capability then fills in.
 //!
 //! # The preview is a layer, not a write
 //!
@@ -64,10 +64,12 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui_widgets::{SliderRange, SliderValue, ValueChange};
 use sl_client_bevy::{
-    AssetKey, AssetType, AssetUpdateLocation, Command, EnvironmentAsset, InventoryFolderKey,
-    InventoryKey, InventoryType, SettingsKind, SkySettings, SlCommand, SlEvent, SlSessionEvent,
-    TextureKey, UpdatableAssetType, WaterSettings, environment_asset_to_bytes,
+    AssetKey, AssetUpdateLocation, Command, EnvironmentAsset, InventoryFolderKey, InventoryKey,
+    SettingsKind, SkySettings, SlCommand, SlEvent, SlSessionEvent, TextureKey, UpdatableAssetType,
+    WaterSettings, environment_asset_to_bytes,
 };
+use sl_viewer_inventory::inventory_actions::new_settings_item;
+use sl_viewer_notifications::{NotificationResponse, ShowNotification};
 use sl_viewer_pickers::ui_texture_picker::TextureSwatchValue;
 use sl_viewer_platform::environment_assets::EnvironmentAssetManager;
 use sl_viewer_ui_core::i18n::Translated;
@@ -77,12 +79,15 @@ use sl_viewer_ui_widgets::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterCommand, FloaterHandle, FloaterOp, FloaterSpec,
     FloaterSystems, spawn_floater,
 };
+use sl_viewer_ui_widgets::floater_persist::FloaterOpenExempt;
 use sl_viewer_ui_widgets::ui_color_picker::{ColorPicked, ColorSwatchValue};
 use sl_viewer_ui_widgets::ui_tab::{
     DEFAULT_ELLIPSIS, TabPlacement, TabSpec, fill_tab_container, spawn_tab_container,
 };
 use sl_viewer_ui_widgets::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
-use sl_viewer_world_api::{OpenSettingsEditor, PendingItemCreations, TexturePicked};
+use sl_viewer_world_api::{
+    OpenSettingsEditor, PendingSettingsCreations, SettingsItemCreated, TexturePicked,
+};
 use sl_viewer_world_scene::environment::EnvironmentState;
 
 use crate::knobs::{ColorKnob, SkyKnob, TextureKnob, WaterKnob};
@@ -97,10 +102,6 @@ pub const WATER_EDITOR_FLOATER_ID: &str = "settings-editor-water";
 
 /// How many columns a tab panel lays its controls out in.
 const COLUMNS: usize = 3;
-
-/// The permissions a Save As grants the next owner (modify | copy | transfer),
-/// matching the inventory's other creators.
-const NEXT_OWNER_DEFAULT: u32 = 0x0008_e000;
 
 // ---------------------------------------------------------------------------
 // Which editor.
@@ -398,6 +399,15 @@ struct EditorUi {
 }
 
 /// The frame one window is editing.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "the four are independent facts about one session with different lifetimes, not a \
+              state machine an enum could replace: `dirty` and `reseed` are one-shot signals \
+              spent by the systems that read them (push the preview; re-seed the widgets), \
+              while `modified` and `saving` are states that outlive a frame — and a session \
+              can legitimately be all four at once, which is exactly why `modified` could not \
+              simply reuse `dirty`"
+)]
 #[derive(Debug, Clone)]
 struct EditSession {
     /// The inventory item this asset came from. Always one: a settings frame
@@ -411,8 +421,12 @@ struct EditSession {
     original: EnvironmentAsset,
     /// The frame being edited.
     edited: EnvironmentAsset,
-    /// A control changed the frame: push it to the edit layer.
+    /// A control changed the frame: push it to the edit layer. Spent every
+    /// frame, so it cannot answer "are there unsaved changes".
     dirty: bool,
+    /// The frame differs from what was loaded (or last saved) — the
+    /// reference's `isDirty`, and what a confirmation has to ask about.
+    modified: bool,
     /// The frame was replaced (opened, or reverted): re-seed every widget.
     reseed: bool,
     /// A Save is in flight, so its reply is this window's.
@@ -521,7 +535,16 @@ impl Plugin for SettingsEditorPlugin {
             // Idempotent: the inventory owns this queue and its consumer, but
             // a host that stands these windows up without the inventory (the
             // gallery) must still have somewhere for a Save As to enqueue.
-            .init_resource::<PendingItemCreations>()
+            .init_resource::<PendingSettingsCreations>()
+            .init_resource::<PendingEditorSaveAs>()
+            .init_resource::<PendingEditorReplace>()
+            // The confirmation channels. Registered here too (idempotent) so
+            // these windows stand up in a host that brought no notification
+            // plugin — a `MessageWriter` for an unregistered message is a system
+            // that panics on its first run, not a quiet no-op.
+            .add_message::<ShowNotification>()
+            .add_message::<NotificationResponse>()
+            .add_message::<SettingsItemCreated>()
             .add_message::<OpenSettingsEditor>()
             .add_systems(
                 Startup,
@@ -545,6 +568,8 @@ impl Plugin for SettingsEditorPlugin {
                     reseed_editor_widgets,
                     push_editor_preview,
                     report_editor_save,
+                    report_editor_save_as,
+                    confirm_editor_replace,
                     drop_preview_on_close,
                 )
                     .chain(),
@@ -602,7 +627,12 @@ fn spawn_settings_editors(mut commands: Commands, root: Res<UiRoot>) {
         };
         commands
             .entity(handle.root)
-            .insert(DeferredFloaterContent { builder, handle });
+            .insert(DeferredFloaterContent { builder, handle })
+            // Where it sits is worth remembering; that it was open is not. The
+            // window is bound to one inventory item of one account and the
+            // session does not outlive the run, so restoring it open would
+            // restore an empty shell — chrome and knobs over no session at all.
+            .insert(FloaterOpenExempt);
         editors.get_mut(editor).ui.panel = Some(handle.root);
     }
     commands.insert_resource(editors);
@@ -916,10 +946,18 @@ fn spawn_button_row(
 
 /// Handle an [`OpenSettingsEditor`]: show the right window and start fetching
 /// the item's asset.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources: the open stream, the \
+              editors and the asset store an open drives, the confirmation stash and channel a \
+              modified session needs, and the panel / raise / status outputs"
+)]
 fn open_settings_editor(
     mut opens: MessageReader<OpenSettingsEditor>,
     mut editors: ResMut<SettingsEditors>,
     mut assets: Option<ResMut<EnvironmentAssetManager>>,
+    mut confirm: ResMut<PendingEditorReplace>,
+    mut notify: MessageWriter<ShowNotification>,
     mut panels: Query<&mut UiPanelShown>,
     mut raises: MessageWriter<FloaterCommand>,
     mut texts: Query<&mut Text>,
@@ -931,6 +969,31 @@ fn open_settings_editor(
             warn!("no settings editor for a day cycle yet: {}", open.name);
             continue;
         };
+        // These windows are singletons — one per kind — because the frame being
+        // edited is *previewed*, and two previews of one track cannot both be
+        // what the user is standing under. So opening a second item replaces the
+        // first, and the reference asks before throwing unsaved work away
+        // (`checkAndConfirmSettingsLoss`, which guards its own load-from-
+        // inventory the same way).
+        if editors
+            .get_mut(editor)
+            .session
+            .as_ref()
+            .is_some_and(|session| session.modified)
+        {
+            let held = editors.get_mut(editor);
+            let name = held
+                .session
+                .as_ref()
+                .map_or_else(String::new, |session| session.name.clone());
+            confirm.0 = Some(open.clone());
+            notify.write(
+                ShowNotification::new("SettingsConfirmLoss")
+                    .arg("TYPE", settings_kind_word(editor.settings_kind()))
+                    .arg("NAME", name),
+            );
+            continue;
+        }
         let asset = AssetKey::from(open.asset_id);
         let state = editors.get_mut(editor);
         state.pending = Some(PendingOpen {
@@ -997,6 +1060,7 @@ fn poll_pending_open(
                 original: asset.clone(),
                 edited: asset,
                 dirty: true,
+                modified: false,
                 reseed: true,
                 saving: false,
             });
@@ -1034,6 +1098,7 @@ fn on_editor_sky_slider(
     {
         row_info.0.write(sky, clamped);
         session.dirty = true;
+        session.modified = true;
     }
 }
 
@@ -1055,6 +1120,7 @@ fn on_editor_water_slider(
     {
         row_info.0.write(water, clamped);
         session.dirty = true;
+        session.modified = true;
     }
 }
 
@@ -1076,6 +1142,7 @@ fn apply_editor_color_picks(
         };
         write_color(session, swatch.knob, pick.color);
         session.dirty = true;
+        session.modified = true;
     }
 }
 
@@ -1096,6 +1163,7 @@ fn apply_editor_texture_picks(
         };
         write_texture(session, swatch.knob, pick.texture);
         session.dirty = true;
+        session.modified = true;
     }
 }
 
@@ -1126,6 +1194,7 @@ fn read_editor_names(
             let value = editable.value().to_string();
             if session.name != value {
                 session.name = value;
+                session.modified = true;
             }
         }
     }
@@ -1253,12 +1322,19 @@ fn drop_preview_on_close(
 // ---------------------------------------------------------------------------
 
 /// A chrome button press: Save (over the item), Save As (a new item), Revert.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy observer's parameters are its injected resources: the button pool and its \
+              disabled filter, the session state, the two creation queues a Save As writes, and \
+              the command and status channels"
+)]
 fn on_editor_button(
     press: On<Pointer<Press>>,
     buttons: Query<&EditorButton>,
     disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
     mut editors: ResMut<SettingsEditors>,
-    mut creations: ResMut<PendingItemCreations>,
+    mut settings_creations: ResMut<PendingSettingsCreations>,
+    mut saving_as: ResMut<PendingEditorSaveAs>,
     mut commands: MessageWriter<SlCommand>,
     mut texts: Query<&mut Text>,
 ) {
@@ -1302,32 +1378,25 @@ fn on_editor_button(
             let folder_id = session.item.folder_id;
             let name = session.name.clone();
             let data = environment_asset_to_bytes(&named(&session.edited, &name));
-            commands.write(SlCommand(Command::UploadAsset {
-                folder_id,
-                asset_type: AssetType::Settings,
-                inventory_type: InventoryType::Settings,
-                name,
-                description: String::new(),
-                next_owner_mask: NEXT_OWNER_DEFAULT,
-                group_mask: 0,
-                everyone_mask: 0,
-                expected_upload_cost: 0,
-                data,
-            }));
+            let kind = button.editor.settings_kind();
+            // **Two steps, not an upload.** `NewFileAgentInventory` has no
+            // settings arm on either grid — OpenSim files the item as a Texture
+            // and Second Life creates nothing — so the simulator mints the item
+            // (which is also what stamps its kind), and the body is written onto
+            // it when the reply names it. That is the reference's
+            // `createInventoryItem` → `onInventoryItemCreated` →
+            // `updateInventoryItem`, and the second half is the same
+            // `UpdateSettingsAgentInventory` an in-place Save already uses.
+            commands.write(SlCommand(new_settings_item(kind, &name, folder_id)));
+            settings_creations.enqueue(kind, Some(data));
+            saving_as.0 = saving_as.0.saturating_add(1);
             set_status(&mut texts, status, "Saving a copy…");
-            // The fresh item is created with empty flags, and for a settings
-            // item that byte *is* its kind — a copy saved without it is a
-            // settings item nothing can list or open. The stamp rides the
-            // viewer's one creation queue.
-            creations.enqueue(
-                u32::from(button.editor.settings_kind().subtype()),
-                folder_id,
-            );
         }
         EditorAction::Revert => {
             session.edited = session.original.clone();
             session.name = frame_name(&session.original);
             session.dirty = true;
+            session.modified = false;
             session.reseed = true;
             set_status(&mut texts, status, "Reverted.");
         }
@@ -1362,17 +1431,116 @@ fn report_editor_save(
                     continue;
                 }
                 let _taken = editors.saves.pop_front();
-                finish_save(&mut editors, pending.editor, "Saved.", &mut texts);
+                finish_save(&mut editors, pending.editor, "Saved.", true, &mut texts);
             }
             SlSessionEvent::AssetUploadFailed { reason } => {
                 let Some(pending) = editors.saves.pop_front() else {
                     continue;
                 };
                 let message = format!("Save failed: {reason}");
-                finish_save(&mut editors, pending.editor, &message, &mut texts);
+                finish_save(&mut editors, pending.editor, &message, false, &mut texts);
             }
             _other => {}
         }
+    }
+}
+
+/// The open a window is holding until the user says the unsaved changes it
+/// would discard can go.
+///
+/// One slot, and the reply is only acted on while it is full — the notification
+/// response carries the template name rather than the raise's own id, so this is
+/// what tells our confirmation from anybody else's.
+#[derive(Resource, Debug, Default)]
+struct PendingEditorReplace(Option<OpenSettingsEditor>);
+
+/// The reference's `getSettingsType()` word, for the confirmation's `[TYPE]`.
+const fn settings_kind_word(kind: SettingsKind) -> &'static str {
+    match kind {
+        SettingsKind::Sky => "sky",
+        SettingsKind::Water => "water",
+        SettingsKind::DayCycle => "day cycle",
+    }
+}
+
+/// Carry out (or drop) an open the user was asked to confirm.
+///
+/// Replaying the original [`OpenSettingsEditor`] rather than opening by hand
+/// keeps one route into these windows: the confirmed open takes the same path an
+/// unconfirmed one does, and the session it replaces is gone by the time it runs.
+fn confirm_editor_replace(
+    mut responses: MessageReader<NotificationResponse>,
+    mut confirm: ResMut<PendingEditorReplace>,
+    mut editors: ResMut<SettingsEditors>,
+    mut opens: MessageWriter<OpenSettingsEditor>,
+) {
+    for response in responses.read() {
+        if response.template != "SettingsConfirmLoss" {
+            continue;
+        }
+        let Some(open) = confirm.0.take() else {
+            continue;
+        };
+        if response.button != Some("OK") {
+            continue;
+        }
+        // Drop the session *before* replaying, or the open would find it still
+        // modified and ask again.
+        if let Some(editor) = EditorKind::of_settings(open.kind) {
+            editors.get_mut(editor).session = None;
+        }
+        opens.write(open);
+    }
+}
+
+/// How many **Save As** copies this crate's editors are waiting on.
+///
+/// The shared settings-creation queue publishes every creation in order, so a
+/// count is enough to know that the next [`SettingsItemCreated`] is one of ours
+/// rather than the library window's or the inventory's.
+#[derive(Resource, Debug, Default)]
+struct PendingEditorSaveAs(usize);
+
+/// Report a **Save As** landing: the item exists, its body has been written, and
+/// the window now edits the copy.
+///
+/// Following the copy is the reference's `onInventoryCreated`, which clears the
+/// dirty flag and then `loadInventoryItem`s the item it just made. It is also
+/// the only coherent answer: the frame on screen is now stored in the *copy*, so
+/// a window still pointed at the original would write everything you just did
+/// into the wrong item on the next plain Save, and would keep asking about
+/// "unsaved" changes that are, in fact, saved.
+///
+/// Re-pointing rather than re-fetching — the reference re-loads the item, but
+/// the bytes it would fetch are the ones just uploaded, and they are already in
+/// hand.
+fn report_editor_save_as(
+    mut created: MessageReader<SettingsItemCreated>,
+    mut saving_as: ResMut<PendingEditorSaveAs>,
+    mut editors: ResMut<SettingsEditors>,
+    mut texts: Query<&mut Text>,
+) {
+    for item in created.read() {
+        if !item.authored || saving_as.0 == 0 {
+            continue;
+        }
+        saving_as.0 = saving_as.0.saturating_sub(1);
+        let Some(editor) = EditorKind::of_settings(item.kind) else {
+            continue;
+        };
+        let state = editors.get_mut(editor);
+        let status = state.ui.status;
+        if let Some(session) = state.session.as_mut() {
+            session.item = EditedItem {
+                item_id: item.item,
+                folder_id: item.folder,
+                // Freshly minted by this agent, so modifiable by definition.
+                editable: true,
+            };
+            session.modified = false;
+            session.original = session.edited.clone();
+        }
+        set_status(&mut texts, status, "Saved a copy.");
     }
 }
 
@@ -1381,12 +1549,21 @@ fn finish_save(
     editors: &mut SettingsEditors,
     editor: EditorKind,
     message: &str,
+    saved: bool,
     texts: &mut Query<&mut Text>,
 ) {
     let state = editors.get_mut(editor);
     let status = state.ui.status;
     if let Some(session) = state.session.as_mut() {
         session.saving = false;
+        // A save that landed *is* the new baseline — nothing unsaved is left,
+        // and a Revert should now go back to what was stored rather than to
+        // what was on screen before the save. A failed one changes neither: the
+        // work is still unsaved and the next open must still ask about it.
+        if saved {
+            session.modified = false;
+            session.original = session.edited.clone();
+        }
     }
     set_status(texts, status, message);
 }
@@ -1481,7 +1658,7 @@ fn set_status(texts: &mut Query<&mut Text>, status: Option<Entity>, message: &st
 
 #[cfg(test)]
 mod tests {
-    use super::{EditorKind, SKY_TABS, WATER_TABS, frame_name, named};
+    use super::{EditorKind, SKY_TABS, WATER_TABS, frame_name, named, settings_kind_word};
     use crate::knobs::{ColorKnob, SkyKnob, TextureKnob, WaterKnob};
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{
@@ -1492,6 +1669,43 @@ mod tests {
     /// A boxed error, so a test can `?` rather than reach for the `panic!` the
     /// workspace's lints (rightly) forbid.
     type TestError = Box<dyn core::error::Error>;
+
+    /// **The confirmation this editor routes on is the one the catalogue
+    /// holds.** The template name and the button name are plain strings on both
+    /// sides, so a rename in the catalogue would leave the open path raising a
+    /// notification nothing answers — and the editor would then silently
+    /// discard unsaved work again, which is the bug the confirmation exists to
+    /// fix.
+    #[test]
+    fn the_loss_confirmation_is_catalogued_with_the_button_we_route_on() -> Result<(), TestError> {
+        let template = sl_viewer_notifications::template("SettingsConfirmLoss")
+            .ok_or("the reference's SettingsConfirmLoss is in the catalogue")?;
+        assert!(
+            template.form.iter().any(|button| button.name == "OK"),
+            "the confirm arm routes on the stable reference functor name"
+        );
+        assert!(
+            template.form.iter().any(|button| button.name == "Cancel"),
+            "and so does the refusal"
+        );
+        Ok(())
+    }
+
+    /// Each settings kind gets its own `[TYPE]` word, so the confirmation says
+    /// what is about to be lost rather than "settings".
+    #[test]
+    fn every_kind_names_itself_in_the_confirmation() {
+        let words = [
+            settings_kind_word(SettingsKind::Sky),
+            settings_kind_word(SettingsKind::Water),
+            settings_kind_word(SettingsKind::DayCycle),
+        ];
+        let mut unique = words;
+        unique.sort_unstable();
+        let mut deduped = unique.to_vec();
+        deduped.dedup();
+        assert_eq!(deduped.len(), words.len(), "{words:?}");
+    }
 
     /// **Every knob is on exactly one tab.** The knob tables and the tab tables
     /// are two lists that have to agree, and the failure is silent in both

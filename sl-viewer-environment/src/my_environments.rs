@@ -72,8 +72,7 @@ use bevy::text::EditableText;
 use bevy::ui::Checked;
 use bevy::ui_widgets::{Checkbox, ValueChange};
 use sl_client_bevy::{
-    AssetKey, AssetType, Command, FolderType, InventoryKey, Permissions, SettingsKind, SlCommand,
-    SlEvent, SlSessionEvent,
+    AssetKey, Command, FolderType, InventoryKey, Permissions, SettingsKind, SlCommand,
 };
 use sl_viewer_inventory::inventory::{InventoryModel, query_folder_page};
 use sl_viewer_inventory::inventory_actions::new_settings_item;
@@ -96,10 +95,9 @@ use sl_viewer_ui_widgets::ui_table::{
     spawn_table_row,
 };
 use sl_viewer_ui_widgets::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
-use sl_viewer_world_api::OpenSettingsEditor;
 use sl_viewer_world_api::rlv::{RlvSession, can_change_environment};
+use sl_viewer_world_api::{OpenSettingsEditor, PendingSettingsCreations, SettingsItemCreated};
 use sl_viewer_world_scene::environment::LocalEnvironmentPick;
-use std::collections::VecDeque;
 
 use crate::settings_list::{
     FILTER_KINDS, SettingsListFilters, SettingsListRow, kind_key, kind_slug, location_text,
@@ -248,18 +246,14 @@ struct SelectedEnvironment(Option<InventoryKey>);
 #[derive(Resource, Debug, Default)]
 struct MyEnvironmentsMenuTarget(Option<InventoryKey>);
 
-/// The creations this window has asked for and not yet seen land, oldest first.
+/// How many creations this window has asked for and not yet seen land.
 ///
-/// The reply to a `CreateInventoryItem` names the item, but not who asked — and
-/// the inventory's own create menu mints the same items. So this holds *our*
-/// outstanding asks, and a created settings item is claimed (and selected) only
-/// while one of them is ours.
-///
-/// It carries the **kind** rather than a count because the reveal below needs
-/// it, and the kind we asked for is a better answer than the one read back off
-/// the reply: it is what the user clicked, whatever the simulator stamped.
+/// The kind and the item come back on [`SettingsItemCreated`], which the
+/// inventory publishes in the order the creations were asked for — so a count is
+/// enough here, and "the next one is mine" is true because there is exactly one
+/// queue behind it.
 #[derive(Resource, Debug, Default)]
-struct PendingEnvironmentCreations(VecDeque<SettingsKind>);
+struct PendingEnvironmentCreations(usize);
 
 /// Set when the selection was moved by something other than a click, so the
 /// list has to be scrolled to it once a row for it exists.
@@ -357,6 +351,8 @@ impl Plugin for MyEnvironmentsPlugin {
             .init_resource::<PendingEnvironmentDelete>()
             .init_resource::<PendingEnvironmentCreations>()
             .init_resource::<ScrollToSelection>()
+            .init_resource::<PendingSettingsCreations>()
+            .add_message::<SettingsItemCreated>()
             // Idempotent: the viewer's own plugins init both, but this window
             // must still stand up in a host that has neither (the gallery).
             .init_resource::<LocalEnvironmentPick>()
@@ -1105,6 +1101,7 @@ fn handle_my_environments_actions(
     mut stashes: (
         ResMut<PendingEnvironmentDelete>,
         ResMut<PendingEnvironmentCreations>,
+        ResMut<PendingSettingsCreations>,
         Option<ResMut<LocalEnvironmentPick>>,
         Option<ResMut<bevy::clipboard::Clipboard>>,
     ),
@@ -1116,8 +1113,13 @@ fn handle_my_environments_actions(
     mut texts: Query<&mut Text>,
 ) {
     let (mut actions, mut creates, target, selected, rlv) = inputs;
-    let (ref mut pending_delete, ref mut pending_creations, ref mut pick, ref mut clipboard) =
-        stashes;
+    let (
+        ref mut pending_delete,
+        ref mut pending_creations,
+        ref mut settings_creations,
+        ref mut pick,
+        ref mut clipboard,
+    ) = stashes;
     let (ref mut commands, ref mut editors, ref mut notify) = outputs;
     let Some(model) = model else {
         // Every action below reaches the inventory mirror; without one there is
@@ -1150,7 +1152,11 @@ fn handle_my_environments_actions(
         // subtype; there is nothing to upload and nothing to stamp afterwards.
         commands.write(SlCommand(new_settings_item(create.kind, &name, dest)));
         query_folder_page(dest, commands);
-        pending_creations.0.push_back(create.kind);
+        // No body: the simulator's default asset is the point. The count is
+        // this window's own — the shared queue keeps every settings creation in
+        // order, so "the next one published is mine" holds.
+        settings_creations.enqueue(create.kind, None);
+        pending_creations.0 = pending_creations.0.saturating_add(1);
     }
 
     for action in actions.read() {
@@ -1349,31 +1355,38 @@ fn sync_kind_checkboxes(
 /// usable: the list is name-ordered over the whole inventory, so a new item can
 /// land anywhere in it, and hunting for the row you just made is not a thing a
 /// person should have to do.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources: the creation stream, the \
+              window's entities and rows, and the four stashes a claimed creation writes"
+)]
 fn select_created_environment(
-    mut events: MessageReader<SlEvent>,
+    mut created: MessageReader<SettingsItemCreated>,
     ui: Option<Res<MyEnvironmentsUi>>,
+    view: Res<MyEnvironmentsView>,
     mut pending: ResMut<PendingEnvironmentCreations>,
     mut selected: ResMut<SelectedEnvironment>,
     mut filters: ResMut<SettingsListFilters>,
     mut scroll: ResMut<ScrollToSelection>,
     mut fields: Query<&mut EditableText>,
 ) {
-    for event in events.read() {
-        let SlSessionEvent::InventoryItemCreated { item, .. } = &event.0 else {
-            continue;
-        };
-        // The wire item carries raw type codes, not the typed enums.
-        if i32::from(item.item_type) != AssetType::Settings.to_code() {
+    for item in created.read() {
+        if pending.0 == 0 {
+            // Somebody else's creation — the inventory's own create menu, an
+            // editor's Save As, or an item the simulator materialised.
             continue;
         }
-        let Some(kind) = pending.0.pop_front() else {
-            // Somebody else's creation — the inventory's own create menu, or an
-            // item the simulator materialised.
-            continue;
-        };
+        pending.0 = pending.0.saturating_sub(1);
+        let kind = item.kind;
         // Widen whatever would have hidden it, or the selection below points at
-        // a row nothing draws.
-        if filters.reveal(kind, &item.name)
+        // a row nothing draws. The name is the one the list will show, which is
+        // the row's if it is already known and the default otherwise.
+        let name = view
+            .rows
+            .iter()
+            .find(|row| row.item == item.item)
+            .map_or_else(String::new, |row| row.name.clone());
+        if filters.reveal(kind, &name)
             && let Some(ui) = ui.as_ref()
             && let Ok(mut field) = fields.get_mut(ui.filter_field)
         {
@@ -1382,7 +1395,7 @@ fn select_created_environment(
             // the next pass.
             field.editor.set_text("");
         }
-        selected.0 = Some(item.item_id);
+        selected.0 = Some(item.item);
         scroll.0 = true;
     }
 }

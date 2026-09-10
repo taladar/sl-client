@@ -60,6 +60,7 @@ use crate::ui::{LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSyste
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_element::ElementCx;
 use crate::ui_font::UiFont;
+use sl_viewer_ui_widgets::floater_persist::FloaterOpenExempt;
 
 /// The stable floater id (its geometry-persistence key and lookup handle).
 pub(crate) const QUICK_PREFS_FLOATER_ID: &str = "quick-preferences";
@@ -664,7 +665,12 @@ fn spawn_quick_prefs_floater(mut commands: Commands, root: Res<UiRoot>) {
     let builder = commands.register_system(build_quick_prefs_content);
     commands
         .entity(handle.root)
-        .insert(DeferredFloaterContent { builder, handle });
+        .insert(DeferredFloaterContent { builder, handle })
+        // Where it sits is worth remembering; that it was open is not. This is a
+        // panel a person opens to change a thing and closes when done, and one
+        // that reappears by itself at every login is a nuisance rather than a
+        // convenience.
+        .insert(FloaterOpenExempt);
 }
 
 /// First-open content build: the environment section, a divider, then one row per
