@@ -126,7 +126,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Event::AssetUploaded {
                 new_asset,
                 new_inventory_item,
-            } => info!("AssetUploaded (CAPS) asset={new_asset} item={new_inventory_item:?}"),
+                created,
+            } => info!(
+                "AssetUploaded (CAPS) asset={new_asset} item={new_inventory_item:?} \
+                 created={:?}",
+                created.as_ref().map(|item| &item.name)
+            ),
             Event::AssetUploadFailed { reason } => warn!("AssetUploadFailed: {reason}"),
             Event::LoggedOut => {
                 info!("logged out cleanly");

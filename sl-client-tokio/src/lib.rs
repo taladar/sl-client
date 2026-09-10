@@ -29,11 +29,12 @@ use sl_proto::{
     CAP_UPDATE_SCRIPT_TASK, CAP_UPLOAD_BAKED_TEXTURE, CAP_USER_INFO, CAP_VIEWER_ASSET,
     CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
     CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE,
-    INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd, RECV_BUFFER_SIZE, SelectedCostKind, Session,
-    UserInfoUpdate, ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
-    ais_create_category_url, ais_item_url, associate_inventory_request, avatar_picker_search_query,
-    build_agent_preferences_request, build_ais_create_category_body, build_ais_create_link_body,
-    build_ais_move_body, build_ais_rename_category_body, build_ais_update_item_body,
+    INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd, NewFileAgentInventoryRequest, RECV_BUFFER_SIZE,
+    SelectedCostKind, Session, UserInfoUpdate, ais_category_children_fetch_url,
+    ais_category_children_url, ais_category_url, ais_create_category_url, ais_item_url,
+    associate_inventory_request, avatar_picker_search_query, build_agent_preferences_request,
+    build_ais_create_category_body, build_ais_create_link_body, build_ais_move_body,
+    build_ais_rename_category_body, build_ais_update_item_body,
     build_create_inventory_category_request, build_environment_update_request,
     build_get_object_cost_request, build_get_object_physics_data_request,
     build_modify_material_params_request, build_new_file_agent_inventory_request,
@@ -619,6 +620,12 @@ impl Client {
         // stamped with the generation of the region change that asked for it, so a
         // slow fetch overtaken by a second crossing cannot install a stale map.
         let (caps_map_tx, mut caps_map_rx) = mpsc::channel::<(u64, HashMap<String, String>)>(4);
+        // An asset upload that *creates* an inventory item completes into this
+        // channel rather than straight out to the client, because the item it
+        // built has to be filed in the session's inventory before anything acts
+        // on the completion — no grid announces it, so this is the only chance.
+        // Everything read here is forwarded to `events` unchanged.
+        let (upload_events, mut upload_rx) = mpsc::channel::<Event>(16);
         let mut caps_generation: u64 = 0;
         let mut caps_refetch_task: Option<tokio::task::JoinHandle<()>> = None;
         // The region must serve capabilities: fail login (propagating the readable
@@ -910,6 +917,17 @@ impl Client {
                                 "the region advertises no EventQueueGet — no CrossedRegion / TeleportFinish will arrive"
                             );
                         }
+                    }
+                }
+                upload_event = upload_rx.recv() => {
+                    if let Some(event) = upload_event {
+                        // File the created item before the completion goes out,
+                        // so a client that re-reads the folder on the event
+                        // finds it there.
+                        if let Event::AssetUploaded { created: Some(item), .. } = &event {
+                            self.session.cache_uploaded_item(item.as_ref().clone());
+                        }
+                        deliver(&events, event).await;
                     }
                 }
                 caps_event = caps_rx.recv() => {
@@ -1983,11 +2001,20 @@ impl Client {
                                 _ => None,
                             };
                             if let Some((url, asset_name, inv_name)) = caps_upload {
-                                let body = build_new_file_agent_inventory_request(
-                                    folder_id, asset_name, inv_name, &name, &description,
+                                let request = NewFileAgentInventoryRequest {
+                                    folder_id,
+                                    asset_type: asset_name.to_owned(),
+                                    inventory_type: inv_name.to_owned(),
+                                    name, description,
                                     next_owner_mask, group_mask, everyone_mask, expected_upload_cost,
-                                );
-                                tokio::spawn(run_caps_upload(url, body, data, http.clone(), events.clone()));
+                                };
+                                let body = build_new_file_agent_inventory_request(&request);
+                                // The request is kept for the completion: this is
+                                // the one upload that *creates* an item, and no
+                                // grid announces the item it created, so the
+                                // completion has to be turned into one here.
+                                let creating = self.session.agent_id().map(|owner| (request, owner));
+                                tokio::spawn(run_caps_upload(url, body, data, creating, http.clone(), upload_events.clone()));
                             } else {
                                 deliver(&events, Event::AssetUploadFailed { reason: "NewFileAgentInventory capability not available".to_owned(), }).await;
                             }
@@ -1995,7 +2022,7 @@ impl Client {
                         Some(Command::UploadBakedTexture { data }) => {
                             if let Some(url) = caps.get(CAP_UPLOAD_BAKED_TEXTURE).cloned() {
                                 let body = build_upload_baked_texture_request();
-                                tokio::spawn(run_caps_upload(url, body, data, http.clone(), events.clone()));
+                                tokio::spawn(run_caps_upload(url, body, data, None, http.clone(), events.clone()));
                             } else {
                                 deliver(&events, Event::AssetUploadFailed { reason: "UploadBakedTexture capability not available".to_owned(), }).await;
                             }
@@ -2015,7 +2042,7 @@ impl Client {
                                 ),
                             };
                             if let Some(url) = caps.get(cap).cloned() {
-                                tokio::spawn(run_caps_upload(url, body, data, http.clone(), events.clone()));
+                                tokio::spawn(run_caps_upload(url, body, data, None, http.clone(), events.clone()));
                             } else {
                                 deliver(&events, Event::AssetUploadFailed { reason: format!("{cap} capability not available"), }).await;
                             }

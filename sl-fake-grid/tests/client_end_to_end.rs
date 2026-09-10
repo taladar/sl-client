@@ -852,6 +852,46 @@ mod test {
                 !spoke,
                 "a {imitates:?}-flavoured grid announced an item a capability upload created"
             );
+
+            // And the other half of the same fact: because nothing announces
+            // it, the item is in inventory only if the client filed it from the
+            // completion itself. A folder query is answered from the *held*
+            // model then and there — a fetch it may also schedule cannot have
+            // replied before the page it returns — so finding the item in this
+            // first page is finding it in the model, with no re-fetch involved.
+            running
+                .commands
+                .send(Command::QueryInventoryFolder {
+                    folder: root,
+                    before: None,
+                    limit: 200,
+                })
+                .await?;
+            let items = running
+                .wait_for(|event| match event {
+                    Event::InventoryFolderPage { folder, items, .. } if *folder == root => {
+                        Some(std::sync::Arc::clone(items))
+                    }
+                    _other => None,
+                })
+                .await?;
+            let filed = items
+                .iter()
+                .find(|item| item.item_id == sl_types::key::InventoryKey::from(created))
+                .ok_or("the item the upload created is not in its own folder")?;
+            assert_eq!(filed.name, "created-by-upload");
+            assert_eq!(
+                filed.description,
+                "the item whose announcement is under test"
+            );
+            assert_eq!(filed.asset_type, sl_proto::AssetType::Notecard);
+            assert_eq!(filed.inv_type, sl_proto::InventoryType::Notecard);
+            // The grid reported what it granted, so those masks are the item's
+            // — not the ones the request asked for, and not a guess.
+            assert_eq!(
+                filed.permissions.next_owner,
+                sl_proto::Permissions::from_bits(0x0008_e000)
+            );
         }
         Ok(())
     }

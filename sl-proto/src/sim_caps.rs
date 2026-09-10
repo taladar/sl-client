@@ -29,10 +29,11 @@ use std::collections::{BTreeMap, HashMap};
 use sl_types::key::AgentKey;
 use sl_wire::{
     AisUpdate, AssetUploadResponse, DisplayName, ExperiencePermission, LandResourcesUrls, Llsd,
-    ObjectMediaRequest, ObjectMediaResponse, build_agent_preferences_response,
-    build_asset_upload_response, build_attachment_resources_response,
-    build_avatar_picker_search_response, build_create_inventory_category_response,
-    build_display_names_response, build_experience_ids_response, build_experience_infos_response,
+    ObjectMediaRequest, ObjectMediaResponse, Permissions, UploadGrantedPermissions,
+    build_agent_preferences_response, build_asset_upload_response,
+    build_attachment_resources_response, build_avatar_picker_search_response,
+    build_create_inventory_category_response, build_display_names_response,
+    build_experience_ids_response, build_experience_infos_response,
     build_experience_permissions_response, build_experience_status_response,
     build_get_object_cost_response, build_get_object_physics_data_response,
     build_land_resource_detail_response, build_land_resource_summary_response,
@@ -1203,6 +1204,21 @@ impl SimCaps {
                     return CapsResponse::bad_request();
                 };
                 let is_script = metadata.is_script();
+                // An upload that *creates* an item reports the permissions it
+                // was granted, as both real grids do (`BunchOfCaps` copies its
+                // three `m_*Mask` fields into every completion). This grid
+                // grants what was asked for; the fields are what stop a client
+                // from having to assume that, since a real grid need not.
+                let granted = match &metadata {
+                    CapsUploadMetadata::NewFileInventory(new_file) => {
+                        Some(UploadGrantedPermissions {
+                            next_owner: Permissions::from_bits(new_file.next_owner_mask),
+                            group: Permissions::from_bits(new_file.group_mask),
+                            everyone: Permissions::from_bits(new_file.everyone_mask),
+                        })
+                    }
+                    _other => None,
+                };
                 let (new_asset, new_inventory_item) =
                     sim.complete_caps_upload(metadata, request.body.to_vec());
                 CapsResponse::llsd_xml(build_asset_upload_response(&AssetUploadResponse {
@@ -1212,6 +1228,7 @@ impl SimCaps {
                     // A script upload reports the compile result; the sim server
                     // "compiles" cleanly (a real grid would run the compiler).
                     compiled: is_script.then_some(true),
+                    granted,
                     ..AssetUploadResponse::default()
                 }))
             }

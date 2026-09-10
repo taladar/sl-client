@@ -27,12 +27,12 @@ use sl_proto::{
     CAP_UPDATE_EXPERIENCE, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_USER_INFO,
     CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
     CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE,
-    Event as SessionEvent, INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd, LoginResponse, RECV_BUFFER_SIZE,
-    SelectedCostKind, Session, SessionMessage, UserInfoUpdate, ais_category_children_fetch_url,
-    ais_category_children_url, ais_category_url, ais_create_category_url, ais_item_url,
-    associate_inventory_request, avatar_picker_search_query, build_agent_preferences_request,
-    build_ais_create_category_body, build_ais_create_link_body, build_ais_move_body,
-    build_ais_rename_category_body, build_ais_update_item_body,
+    Event as SessionEvent, INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd, LoginResponse,
+    NewFileAgentInventoryRequest, RECV_BUFFER_SIZE, SelectedCostKind, Session, SessionMessage,
+    UserInfoUpdate, ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
+    ais_create_category_url, ais_item_url, associate_inventory_request, avatar_picker_search_query,
+    build_agent_preferences_request, build_ais_create_category_body, build_ais_create_link_body,
+    build_ais_move_body, build_ais_rename_category_body, build_ais_update_item_body,
     build_create_inventory_category_request, build_environment_update_request,
     build_get_object_cost_request, build_get_object_physics_data_request,
     build_modify_material_params_request, build_object_media_navigate_request,
@@ -391,7 +391,7 @@ use crate::materials::{
 use crate::media::{post_caps_llsd_oneway, run_object_media_fetch};
 use crate::upload::{
     emit_upload_failure, emit_upload_unavailable, run_caps_upload, run_report_screenshot_upload,
-    run_script_upload, spawn_new_file_upload,
+    run_script_upload, spawn_new_file_upload, upload_type_names,
 };
 use crate::voice::{run_voice_cap, run_voice_signaling};
 use crate::world::{SlRegionIndex, maintain_world};
@@ -1361,6 +1361,17 @@ fn advance_running(
         }
         // Binary asset fetches return fully-formed session events; surface them.
         while let Ok(event) = caps.asset_rx.try_recv() {
+            // An upload that created an inventory item is the exception: file
+            // the item before the completion goes out, so a reader that
+            // re-reads the folder on that event finds it there. No grid
+            // announces this one, so nothing else ever would.
+            if let SessionEvent::AssetUploaded {
+                created: Some(item),
+                ..
+            } = &event
+            {
+                session.cache_uploaded_item(item.as_ref().clone());
+            }
             report(outbound, NetOutbound::Event(event));
         }
 
@@ -3311,26 +3322,26 @@ fn apply_command(
             // The modern CAPS uploader (the only upload path — the legacy UDP
             // asset-upload fallback was dropped): needs both the region
             // capability and a CAPS name for the asset and inventory classes.
-            let caps_available = matches!(
-                (asset_type.caps_asset_name(), inventory_type.caps_name()),
-                (Some(_), Some(_))
-            ) && caps
+            let caps_available = caps
                 .as_ref()
                 .is_some_and(|caps| caps.map.contains_key(CAP_NEW_FILE_AGENT_INVENTORY));
-            if caps_available {
-                spawn_new_file_upload(
-                    caps,
-                    *folder_id,
-                    *asset_type,
-                    *inventory_type,
-                    name,
-                    description,
-                    *next_owner_mask,
-                    *group_mask,
-                    *everyone_mask,
-                    *expected_upload_cost,
-                    data.clone(),
-                );
+            let names = upload_type_names(*asset_type, *inventory_type);
+            if let (Some((asset_name, inv_name)), true) = (names, caps_available) {
+                // The request is kept for the completion: this is the one
+                // upload that *creates* an item, and no grid announces the item
+                // it created, so the completion has to be turned into one.
+                let request = NewFileAgentInventoryRequest {
+                    folder_id: *folder_id,
+                    asset_type: asset_name.to_owned(),
+                    inventory_type: inv_name.to_owned(),
+                    name: name.clone(),
+                    description: description.clone(),
+                    next_owner_mask: *next_owner_mask,
+                    group_mask: *group_mask,
+                    everyone_mask: *everyone_mask,
+                    expected_upload_cost: *expected_upload_cost,
+                };
+                spawn_new_file_upload(caps, session.agent_id(), &request, data.clone());
             } else {
                 emit_upload_failure(
                     caps,
@@ -3346,7 +3357,7 @@ fn apply_command(
                 let body = build_upload_baked_texture_request();
                 let data = data.clone();
                 std::thread::spawn(move || {
-                    let event = run_caps_upload(&url, body, data);
+                    let event = run_caps_upload(&url, body, data, None);
                     deliver(&asset_tx, event);
                 });
             } else {
@@ -3377,7 +3388,7 @@ fn apply_command(
                 let asset_tx = caps.asset_tx.clone();
                 let data = data.clone();
                 std::thread::spawn(move || {
-                    let event = run_caps_upload(&url, body, data);
+                    let event = run_caps_upload(&url, body, data, None);
                     deliver(&asset_tx, event);
                 });
             } else {

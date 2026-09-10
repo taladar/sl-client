@@ -4,39 +4,34 @@ use crate::{Caps, EVENT_QUEUE_TIMEOUT, deliver};
 use bevy::prelude::*;
 use sl_proto::Event as SessionEvent;
 use sl_proto::{
-    AssetType, AssetUploadResponse, CAP_NEW_FILE_AGENT_INVENTORY, InventoryFolderKey,
-    InventoryType, ScriptCompileError, build_new_file_agent_inventory_request,
-    parse_asset_upload_response,
+    AgentKey, AssetType, AssetUploadResponse, CAP_NEW_FILE_AGENT_INVENTORY, InventoryType,
+    NewFileAgentInventoryRequest, ScriptCompileError, build_new_file_agent_inventory_request,
+    parse_asset_upload_response, uploaded_inventory_item,
 };
+
+/// What an upload was asked to create, kept for the completion: the
+/// `NewFileAgentInventory` request body plus the agent the created item belongs
+/// to. `None` for the uploads that create no item — `UploadBakedTexture` and the
+/// `Update*Inventory` saves onto an item that already exists.
+pub(crate) type NewItemUpload = Option<(NewFileAgentInventoryRequest, AgentKey)>;
 
 /// Spawns the modern `NewFileAgentInventory` two-step CAPS upload on a background
 /// thread, emitting [`SlSessionEvent::AssetUploaded`] /
 /// [`SlSessionEvent::AssetUploadFailed`] over the asset channel. Emits a failure
-/// immediately if the asset/inventory type is not uploadable or the capability
-/// is unavailable.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "mirrors the flat NewFileAgentInventory upload command fields"
-)]
+/// immediately if the capability is unavailable (a class that cannot be
+/// uploaded at all has no CAPS type names — see [`upload_type_names`]).
+///
+/// `owner` is the uploading agent, kept — with the request — for the completion:
+/// this is the one upload that *creates* an inventory item, and no grid
+/// announces the item it created, so the completion is what the item is built
+/// from. A session with no agent id yet cannot name a creator, and the
+/// completion then carries no item.
 pub(crate) fn spawn_new_file_upload(
     caps: Option<&Caps>,
-    folder_id: InventoryFolderKey,
-    asset_type: AssetType,
-    inventory_type: InventoryType,
-    name: &str,
-    description: &str,
-    next_owner_mask: u32,
-    group_mask: u32,
-    everyone_mask: u32,
-    expected_upload_cost: i32,
+    owner: Option<AgentKey>,
+    request: &NewFileAgentInventoryRequest,
     data: Vec<u8>,
 ) {
-    let (Some(asset_name), Some(inv_name)) =
-        (asset_type.caps_asset_name(), inventory_type.caps_name())
-    else {
-        emit_upload_failure(caps, "asset/inventory type is not uploadable".to_owned());
-        return;
-    };
     let Some(caps) = caps else {
         return;
     };
@@ -50,22 +45,22 @@ pub(crate) fn spawn_new_file_upload(
         );
         return;
     };
-    let body = build_new_file_agent_inventory_request(
-        folder_id,
-        asset_name,
-        inv_name,
-        name,
-        description,
-        next_owner_mask,
-        group_mask,
-        everyone_mask,
-        expected_upload_cost,
-    );
+    let body = build_new_file_agent_inventory_request(request);
+    let creating = owner.map(|owner| (request.clone(), owner));
     let asset_tx = caps.asset_tx.clone();
     std::thread::spawn(move || {
-        let event = run_caps_upload(&url, body, data);
+        let event = run_caps_upload(&url, body, data, creating);
         deliver(&asset_tx, event);
     });
+}
+
+/// The CAPS type names a `NewFileAgentInventory` request needs, or `None` when
+/// either class has none and the pair therefore cannot be uploaded at all.
+pub(crate) fn upload_type_names(
+    asset_type: AssetType,
+    inventory_type: InventoryType,
+) -> Option<(&'static str, &'static str)> {
+    asset_type.caps_asset_name().zip(inventory_type.caps_name())
 }
 
 /// Emits an [`SlSessionEvent::AssetUploadFailed`] over the asset channel naming a
@@ -87,7 +82,15 @@ pub(crate) fn emit_upload_failure(caps: Option<&Caps>, reason: String) {
 /// URL, then POST the raw `data` bytes there. Returns
 /// [`SlSessionEvent::AssetUploaded`] on success or
 /// [`SlSessionEvent::AssetUploadFailed`] on any failure.
-pub(crate) fn run_caps_upload(cap_url: &str, metadata: String, data: Vec<u8>) -> SessionEvent {
+///
+/// `creating` carries the request of an upload that creates an item, so the
+/// completion can be turned into the item itself — no grid announces one.
+pub(crate) fn run_caps_upload(
+    cap_url: &str,
+    metadata: String,
+    data: Vec<u8>,
+    creating: NewItemUpload,
+) -> SessionEvent {
     // Step 1: POST the metadata, expecting an `uploader` URL back.
     let uploader = match caps_upload_step(cap_url, "application/llsd+xml", metadata.into_bytes()) {
         Ok(response) => match response.uploader {
@@ -108,6 +111,10 @@ pub(crate) fn run_caps_upload(cap_url: &str, metadata: String, data: Vec<u8>) ->
             Some(new_asset) => SessionEvent::AssetUploaded {
                 new_asset,
                 new_inventory_item: response.new_inventory_item,
+                created: creating.and_then(|(request, owner)| {
+                    uploaded_inventory_item(&request, &response, owner, unix_seconds())
+                        .map(Box::new)
+                }),
             },
             None => SessionEvent::AssetUploadFailed {
                 reason: response.error.unwrap_or_else(|| {
@@ -117,6 +124,18 @@ pub(crate) fn run_caps_upload(cap_url: &str, metadata: String, data: Vec<u8>) ->
         },
         Err(reason) => SessionEvent::AssetUploadFailed { reason },
     }
+}
+
+/// The current Unix time in seconds, for the creation date of an item the grid
+/// creates but never dates (`LLResourceUploadInfo::finishUpload` stamps
+/// `time_corrected()` for the same reason). Saturates rather than wrapping
+/// outside the range the wire field can hold.
+fn unix_seconds() -> i32 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| {
+            i32::try_from(since.as_secs()).unwrap_or(i32::MAX)
+        })
 }
 
 /// Runs a two-step **script** upload (`UpdateScriptAgent`/`UpdateScriptTask`)

@@ -218,9 +218,15 @@ fn created_item(
         last_owner_id: uuid::Uuid::nil(),
         creator_id: agent,
         group: None,
+        // You own what you upload outright: OpenSim's `BunchOfCaps` sets the
+        // base and current masks of a created item to `PermissionMask.All` and
+        // only the three *granted* masks from the request
+        // (`item.NextPermissions = item.BasePermissions & nextOwnerMask`). The
+        // same three are what the completion reports back, so the item a client
+        // assembles from that completion agrees with this one.
         permissions: Permissions5 {
-            base: sl_proto::Permissions::from_bits(request.next_owner_mask),
-            owner: sl_proto::Permissions::from_bits(request.next_owner_mask),
+            base: sl_proto::Permissions::ALL,
+            owner: sl_proto::Permissions::ALL,
             group: sl_proto::Permissions::from_bits(request.group_mask),
             everyone: sl_proto::Permissions::from_bits(request.everyone_mask),
             next_owner: sl_proto::Permissions::from_bits(request.next_owner_mask),

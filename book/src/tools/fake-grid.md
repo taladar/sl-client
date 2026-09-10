@@ -807,6 +807,17 @@ grid as silent. The reference viewer wants no push anyway:
 `LLBufferedAssetUploadInfo::finishUpload` builds the item out of the
 response body.
 
+So does this workspace's client, since 2026-09-10: the runtime keeps the
+`NewFileAgentInventory` request past the POST and turns the completion into
+the item (`sl_proto::uploaded_inventory_item`, which `Event::AssetUploaded`
+carries as `created` and the session files before the event goes out). It
+had to — a viewer that waits for a push waits forever on every grid there
+is, and this one did, so an uploaded item sat on the grid and missing from
+the inventory window until something re-fetched its folder. The completion
+is also where the item's **permissions** come from: this grid reports what
+it granted, as both real grids do, because a grid is free to withhold what
+the request asked for.
+
 **The take and the save diverge for opposite reasons**, and reading the
 save as "Second Life does something extra" gets it backwards. The push is
 the older behaviour and OpenSim is the grid that omits it, which its own

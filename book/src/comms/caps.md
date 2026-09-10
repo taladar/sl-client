@@ -340,6 +340,15 @@ runs:
   produces a temporary asset with **no** inventory item; a bytes-POST with no
   parked upload is a `400`.
 
+A `NewFileAgentInventory` completion also reports the permissions it
+**granted** the created item (`new_next_owner_mask`, `new_group_mask`,
+`new_everyone_mask`), as both real grids do — OpenSim's `BunchOfCaps` copies
+its three mask fields into every completion, and the reference viewer reads
+them precisely so it does not have to assume it got the permissions it asked
+for. That matters because **no grid announces a created item**: a client files
+it from the completion or not at all (`sl_proto::uploaded_inventory_item`), so
+the completion is the only place those masks can come from.
+
 The minted `new_asset` / `new_inventory_item` ids come from a monotonic
 per-session serial (`SimSession::next_sim_serial`) — a deliberate
 simplification: a real grid mints random asset ids, but the client stores

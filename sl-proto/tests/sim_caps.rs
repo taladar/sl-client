@@ -56,15 +56,15 @@ mod test {
     use sl_wire::PROPERTY_PRIVATE;
     use sl_wire::{
         CircuitCode, FetchItemRef, Llsd, LoginRequest, LoginResponse, LoginSuccess,
-        ais_category_children_fetch_url, ais_category_url, ais_create_category_url, ais_item_url,
-        build_agent_preferences_request, build_ais_create_category_body,
-        build_ais_create_link_body, build_ais_move_body, build_ais_rename_category_body,
-        build_ais_update_item_body, build_create_inventory_category_request,
-        build_fetch_inventory_items_request, build_fetch_inventory_request,
-        build_modify_material_params_request, build_new_file_agent_inventory_request,
-        build_object_media_get_request, build_object_media_navigate_request,
-        build_object_media_update_request, build_render_materials_put_request,
-        build_render_materials_request, build_send_user_report,
+        NewFileAgentInventoryRequest, ais_category_children_fetch_url, ais_category_url,
+        ais_create_category_url, ais_item_url, build_agent_preferences_request,
+        build_ais_create_category_body, build_ais_create_link_body, build_ais_move_body,
+        build_ais_rename_category_body, build_ais_update_item_body,
+        build_create_inventory_category_request, build_fetch_inventory_items_request,
+        build_fetch_inventory_request, build_modify_material_params_request,
+        build_new_file_agent_inventory_request, build_object_media_get_request,
+        build_object_media_navigate_request, build_object_media_update_request,
+        build_render_materials_put_request, build_render_materials_request, build_send_user_report,
         build_update_avatar_appearance_request, build_update_item_asset_request,
         build_update_script_agent_request, build_update_task_item_asset_request,
         build_upload_baked_texture_request, display_names_query, parse_agent_preferences,
@@ -1177,17 +1177,17 @@ mod test {
         let mut caps = new_caps()?;
         let mut sim = new_sim();
         let folder = InventoryFolderKey::from(uuid::Uuid::from_u128(0x0f01_de11));
-        let metadata = build_new_file_agent_inventory_request(
-            folder,
-            "texture",
-            "texture",
-            "My Texture",
-            "a note",
-            0x0008_e000,
-            0,
-            0,
-            10,
-        );
+        let metadata = build_new_file_agent_inventory_request(&NewFileAgentInventoryRequest {
+            folder_id: folder,
+            asset_type: "texture".to_owned(),
+            inventory_type: "texture".to_owned(),
+            name: "My Texture".to_owned(),
+            description: "a note".to_owned(),
+            next_owner_mask: 0x0008_e000,
+            group_mask: 0,
+            everyone_mask: 0,
+            expected_upload_cost: 10,
+        });
 
         // A bytes-POST before any step 1 is a bad request.
         let path = granted_cap_path(&caps, CAP_NEW_FILE_AGENT_INVENTORY)?;
@@ -1206,6 +1206,17 @@ mod test {
         assert_eq!(completion.state, "complete");
         let new_asset = completion.new_asset.ok_or("no new_asset")?;
         assert!(completion.new_inventory_item.is_some());
+        // A creation reports the permissions it granted, as both real grids do:
+        // the client builds the created item out of this completion (nothing
+        // announces it) and must not have to assume it got what it asked for.
+        assert_eq!(
+            completion.granted,
+            Some(sl_wire::UploadGrantedPermissions {
+                next_owner: sl_wire::Permissions::from_bits(0x0008_e000),
+                group: sl_wire::Permissions::NONE,
+                everyone: sl_wire::Permissions::NONE,
+            })
+        );
 
         match sim.poll_event() {
             Some(ServerEvent::CapsAssetUploaded {

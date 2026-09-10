@@ -2570,8 +2570,13 @@ fn handle_wearable_uploads(
 ) {
     for event in events.read() {
         match &event.0 {
+            // Only an upload that **created** an item can be the wearable
+            // creation this queue is waiting for; a save (which also completes
+            // as `AssetUploaded`, naming the item it rebound) must not pop the
+            // queue and stamp an unrelated item's flags with a wearable slot.
             SlSessionEvent::AssetUploaded {
                 new_inventory_item: Some(item),
+                created: Some(_),
                 ..
             } => {
                 if let Some((slot, folder)) = pending.queue.pop_front() {

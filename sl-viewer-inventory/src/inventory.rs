@@ -2160,6 +2160,25 @@ fn ingest_inventory(
                 // refresh).
                 request_folder(&mut model, item.folder_id, &mut commands);
             }
+            // An upload **created** an item. No grid announces this one — both
+            // Second Life and OpenSim were measured silent after a
+            // `NewFileAgentInventory` completion — so the item is on the grid
+            // and missing from this window until something re-fetches the
+            // folder. The runtime has already filed it in the session's model
+            // from the completion; re-read its folder, exactly as a created
+            // item's announcement does above, and the row appears.
+            SlSessionEvent::AssetUploaded {
+                created: Some(item),
+                ..
+            } => {
+                model.push_recent(
+                    item.item_id,
+                    item.name.clone(),
+                    InventoryType::from_code(i32::from(item.inv_type)),
+                    item.flags,
+                );
+                request_folder(&mut model, item.folder_id, &mut commands);
+            }
             // A save wrote a new asset and the grid rebound the item to it.
             // Follow, or the next open of that item fetches the asset it had
             // *before* the save — which is how a saved notecard read back
@@ -2168,6 +2187,7 @@ fn ingest_inventory(
             SlSessionEvent::AssetUploaded {
                 new_asset,
                 new_inventory_item: Some(item),
+                created: None,
             }
             | SlSessionEvent::ScriptUploaded {
                 new_asset: Some(new_asset),
@@ -4337,5 +4357,112 @@ mod tests {
             model,
             SlSessionEvent::InventorySkeleton(Vec::new()),
         ));
+    }
+
+    /// Run [`ingest_inventory`] over one fed [`SlEvent`], returning the model it
+    /// left behind and the folders it asked to re-read.
+    fn ingest_one(
+        model: InventoryModel,
+        event: SlSessionEvent,
+    ) -> Result<(InventoryModel, Vec<sl_client_bevy::InventoryFolderKey>), String> {
+        use bevy::prelude::*;
+        let mut app = App::new();
+        app.add_message::<SlEvent>();
+        app.add_message::<SlCommand>();
+        app.insert_resource(model);
+        app.init_resource::<super::PendingSkeletonMerge>();
+        app.add_systems(Update, super::ingest_inventory);
+        app.world_mut()
+            .resource_mut::<Messages<SlEvent>>()
+            .write(SlEvent(event));
+        app.update();
+        let messages = app.world().resource::<Messages<SlCommand>>();
+        let mut cursor = messages.get_cursor();
+        let queried = cursor
+            .read(messages)
+            .filter_map(|command| match &command.0 {
+                sl_client_bevy::Command::QueryInventoryFolder { folder, .. } => Some(*folder),
+                _other => None,
+            })
+            .collect();
+        let model = app
+            .world_mut()
+            .remove_resource::<InventoryModel>()
+            .ok_or_else(|| "the model resource survives the run".to_owned())?;
+        Ok((model, queried))
+    }
+
+    /// The item an upload created, as the runtime assembles it from the
+    /// completion.
+    fn uploaded_item(folder: u128, item: u128, name: &str) -> sl_client_bevy::InventoryItem {
+        sl_client_bevy::InventoryItem {
+            item_id: sl_client_bevy::InventoryKey::from(sl_client_bevy::Uuid::from_u128(item)),
+            folder_id: sl_client_bevy::InventoryFolderKey::from(sl_client_bevy::Uuid::from_u128(
+                folder,
+            )),
+            name: name.to_owned(),
+            description: String::new(),
+            asset_id: sl_client_bevy::Uuid::from_u128(0x000a_55e7),
+            item_type: 0,
+            inv_type: 0,
+            flags: 0,
+            sale_type: 0,
+            sale_price: None,
+            creation_date: 0,
+            owner: sl_client_bevy::OwnerKey::Agent(sl_client_bevy::AgentKey::from(
+                sl_client_bevy::Uuid::from_u128(0x000a_9e47),
+            )),
+            last_owner_id: sl_client_bevy::Uuid::nil(),
+            creator_id: sl_client_bevy::AgentKey::from(sl_client_bevy::Uuid::from_u128(
+                0x000a_9e47,
+            )),
+            group: None,
+            permissions: sl_client_bevy::Permissions5::empty(),
+        }
+    }
+
+    /// An upload that created an item files it, against a grid that announces
+    /// nothing — which is every grid. The runtime has already put the item in
+    /// the session's model, so the window's part is to re-read the folder it
+    /// landed in, exactly as an announced creation does.
+    #[test]
+    fn an_upload_files_the_item_no_grid_announces() -> Result<(), String> {
+        let folder = sl_client_bevy::InventoryFolderKey::from(sl_client_bevy::Uuid::from_u128(0x5));
+        let (model, queried) = ingest_one(
+            InventoryModel::default(),
+            SlSessionEvent::AssetUploaded {
+                new_asset: sl_client_bevy::Uuid::from_u128(0x000a_55e7),
+                new_inventory_item: Some(sl_client_bevy::Uuid::from_u128(0x17e3)),
+                created: Some(Box::new(uploaded_item(0x5, 0x17e3, "My Pic"))),
+            },
+        )?;
+        assert_eq!(queried, vec![folder]);
+        let filed = model
+            .recent
+            .first()
+            .ok_or_else(|| "the upload's item is in Recent".to_owned())?;
+        assert_eq!(model.recent.len(), 1);
+        assert_eq!(filed.name, "My Pic");
+        Ok(())
+    }
+
+    /// A *save* carries no created item — the item already exists and the grid
+    /// rebound it — so nothing is filed and the Recent list does not gain a row
+    /// for an item it already had.
+    #[test]
+    fn a_save_files_nothing_new() -> Result<(), String> {
+        let (model, queried) = ingest_one(
+            InventoryModel::default(),
+            SlSessionEvent::AssetUploaded {
+                new_asset: sl_client_bevy::Uuid::from_u128(0x000a_55e7),
+                new_inventory_item: Some(sl_client_bevy::Uuid::from_u128(0x17e3)),
+                created: None,
+            },
+        )?;
+        // The rebind found no such item in this (empty) model, so it asked for
+        // nothing; either way it never invents a Recent row.
+        assert!(queried.is_empty());
+        assert!(model.recent.is_empty());
+        Ok(())
     }
 }

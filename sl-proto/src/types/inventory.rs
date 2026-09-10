@@ -4,7 +4,10 @@ use sl_types::key::{
     AgentKey, GroupKey, InventoryFolderKey, InventoryItemOrFolderKey, InventoryKey, OwnerKey,
 };
 use sl_types::money::LindenAmount;
-use sl_wire::{Permissions5, RegionHandle};
+use sl_wire::{
+    AssetUploadResponse, NewFileAgentInventoryRequest, Permissions, Permissions5, RegionHandle,
+    UploadGrantedPermissions,
+};
 use uuid::Uuid;
 
 use crate::{AssetType, FolderState, InventoryType, SaleType, WearableType};
@@ -137,6 +140,88 @@ pub struct InventoryItem {
     pub group: Option<GroupKey>,
     /// The base / owner / group / everyone / next-owner permission masks.
     pub permissions: Permissions5,
+}
+
+/// Builds the inventory item a `NewFileAgentInventory` upload created, from the
+/// metadata the client asked for and the completion the grid answered with.
+///
+/// **No grid announces this item.** Second Life and OpenSim were both measured
+/// (2026-09-08) sending nothing after a capability upload that *creates* an
+/// item; the push either of them does send follows an in-place save, where the
+/// item already exists. So a client that waits to be told never files it, and the
+/// reference viewer does not wait: `LLResourceUploadInfo::finishUpload` builds
+/// an item out of its own request plus the response body and hands it straight
+/// to `gInventory.updateItem`. This is that function.
+///
+/// What comes from where:
+///
+/// - the folder, name, description and the two type classes are the client's
+///   own request (the completion never repeats them);
+/// - the item and asset ids are the grid's (`None` if it named neither — an
+///   upload that stored an asset without creating an item, such as a baked
+///   texture, has no item to build);
+/// - the permissions are the grid's **grant**
+///   ([`AssetUploadResponse::granted`]) when it reported one, and otherwise the
+///   reference's assumption for a grid that does not: nothing for the group or
+///   for everyone, and move + transfer for the next owner. The masks the
+///   request *asked* for are deliberately not the fallback — the grid is free
+///   to withhold them, and a client that assumes it got what it asked for
+///   displays permissions the grid does not hold.
+///
+/// `creation_date` is the item's Unix-seconds creation time, which the grid
+/// does not report either: sans-IO, so the caller passes its own clock (the
+/// reference stamps `time_corrected()`).
+#[must_use]
+pub fn uploaded_inventory_item(
+    request: &NewFileAgentInventoryRequest,
+    response: &AssetUploadResponse,
+    owner: AgentKey,
+    creation_date: i32,
+) -> Option<InventoryItem> {
+    let item_id = InventoryKey::from(response.new_inventory_item?);
+    let asset_id = response.new_asset?;
+    // The reference refuses to build an item it cannot file
+    // ("if (getFolderId().isNull()) return LLUUID::null").
+    if request.folder_id.uuid().is_nil() {
+        return None;
+    }
+    let granted = response.granted.unwrap_or(UploadGrantedPermissions {
+        next_owner: Permissions::MOVE | Permissions::TRANSFER,
+        group: Permissions::NONE,
+        everyone: Permissions::NONE,
+    });
+    let permissions = Permissions5 {
+        base: Permissions::ALL,
+        owner: Permissions::ALL,
+        group: granted.group,
+        everyone: granted.everyone,
+        next_owner: granted.next_owner,
+    }
+    // `initMasks` fixes every block it is handed; an uploaded item is owned by
+    // the agent that uploaded it, never group owned.
+    .fair_use_fixed(false);
+    Some(InventoryItem {
+        item_id,
+        folder_id: request.folder_id,
+        name: request.name.clone(),
+        description: request.description.clone(),
+        asset_id,
+        item_type: i8::try_from(AssetType::from_type_name(&request.asset_type).to_code())
+            .unwrap_or(-1),
+        inv_type: i8::try_from(InventoryType::from_type_name(&request.inventory_type).to_code())
+            .unwrap_or(-1),
+        flags: response.inventory_flags.unwrap_or(0),
+        sale_type: SaleType::NotForSale.to_code(),
+        sale_price: None,
+        creation_date,
+        owner: OwnerKey::Agent(owner),
+        // Nothing has owned it before, and the creator of an upload is the
+        // agent that made it.
+        last_owner_id: Uuid::nil(),
+        creator_id: owner,
+        group: None,
+        permissions,
+    })
 }
 
 /// Parameters for creating a new inventory item via
@@ -661,7 +746,11 @@ mod tests {
     use pretty_assertions::assert_eq;
     use uuid::Uuid;
 
-    use super::{InventoryFolder, InventoryFolderKey, InventoryKey};
+    use super::{
+        AgentKey, AssetType, AssetUploadResponse, InventoryFolder, InventoryFolderKey,
+        InventoryKey, InventoryType, NewFileAgentInventoryRequest, OwnerKey, Permissions, SaleType,
+        UploadGrantedPermissions, uploaded_inventory_item,
+    };
 
     /// [`InventoryKey`] and [`InventoryFolderKey`] are transparent wrappers over
     /// their [`Uuid`]: wrapping a raw id and unwrapping it again yields the
@@ -701,5 +790,144 @@ mod tests {
         };
         assert_eq!(folder.folder_id.uuid(), folder_raw);
         assert!(folder.parent_id.is_none());
+    }
+
+    /// A `NewFileAgentInventory` request, as the runtime keeps it for the
+    /// completion.
+    fn upload_request(folder: InventoryFolderKey) -> NewFileAgentInventoryRequest {
+        NewFileAgentInventoryRequest {
+            folder_id: folder,
+            asset_type: "texture".to_owned(),
+            inventory_type: "snapshot".to_owned(),
+            name: "My Pic".to_owned(),
+            description: "taken in-world".to_owned(),
+            next_owner_mask: Permissions::ITEM_UNRESTRICTED.bits(),
+            group_mask: 0,
+            everyone_mask: 0,
+            expected_upload_cost: 10,
+        }
+    }
+
+    /// A `{ state: complete }` upload completion naming the two minted ids.
+    fn upload_completion(asset: Uuid, item: Uuid) -> AssetUploadResponse {
+        AssetUploadResponse {
+            state: "complete".to_owned(),
+            new_asset: Some(asset),
+            new_inventory_item: Some(item),
+            ..AssetUploadResponse::default()
+        }
+    }
+
+    /// The item is the request's metadata plus the completion's ids: the grid
+    /// repeats neither the name nor the folder, and announces nothing at all,
+    /// so a client that does not assemble this has no record of its own upload.
+    #[test]
+    fn an_upload_becomes_the_item_the_grid_never_announces() -> Result<(), String> {
+        let folder = InventoryFolderKey::from(Uuid::from_u128(0x00f0_1de7));
+        let asset = Uuid::from_u128(0x000a_55e7);
+        let item = Uuid::from_u128(0x17e3);
+        let owner = AgentKey::from(Uuid::from_u128(0x000a_9e47));
+        let built = uploaded_inventory_item(
+            &upload_request(folder),
+            &upload_completion(asset, item),
+            owner,
+            1_700_000_000,
+        )
+        .ok_or_else(|| "a completion naming both ids builds an item".to_owned())?;
+
+        assert_eq!(built.item_id, InventoryKey::from(item));
+        assert_eq!(built.asset_id, asset);
+        assert_eq!(built.folder_id, folder);
+        assert_eq!(built.name, "My Pic");
+        assert_eq!(built.description, "taken in-world");
+        assert_eq!(built.creation_date, 1_700_000_000);
+        assert_eq!(built.creator_id, owner);
+        assert_eq!(built.owner, OwnerKey::Agent(owner));
+        // The two type classes are resolved from the request's short names —
+        // one asset class, a different inventory class.
+        assert_eq!(
+            AssetType::from_code(i32::from(built.item_type)),
+            AssetType::Texture
+        );
+        assert_eq!(
+            InventoryType::from_code(i32::from(built.inv_type)),
+            InventoryType::Snapshot
+        );
+        assert_eq!(built.sale_type, SaleType::NotForSale.to_code());
+        assert_eq!(built.sale_price, None);
+        Ok(())
+    }
+
+    /// A grid that reports what it granted is believed over what was asked for;
+    /// one that reports nothing gets the reference's assumption, **not** the
+    /// request's masks.
+    #[test]
+    fn the_grant_beats_the_request_and_the_fallback_is_not_the_request() -> Result<(), String> {
+        let folder = InventoryFolderKey::from(Uuid::from_u128(0x00f0_1de7));
+        let owner = AgentKey::from(Uuid::from_u128(0x000a_9e47));
+        let request = upload_request(folder);
+        let mut granted = upload_completion(Uuid::from_u128(1), Uuid::from_u128(2));
+        granted.granted = Some(UploadGrantedPermissions {
+            // The grid withheld copy from what the request asked for.
+            next_owner: Permissions::MODIFY | Permissions::TRANSFER,
+            group: Permissions::NONE,
+            everyone: Permissions::COPY,
+        });
+        let built = uploaded_inventory_item(&request, &granted, owner, 0)
+            .ok_or_else(|| "a completion naming both ids builds an item".to_owned())?;
+        assert_eq!(
+            built.permissions.next_owner,
+            Permissions::MODIFY | Permissions::TRANSFER | Permissions::MOVE
+        );
+        assert_eq!(built.permissions.everyone, Permissions::COPY);
+        assert_eq!(built.permissions.base, Permissions::ALL);
+        assert_eq!(built.permissions.owner, Permissions::ALL);
+
+        let silent = uploaded_inventory_item(
+            &request,
+            &upload_completion(Uuid::from_u128(1), Uuid::from_u128(2)),
+            owner,
+            0,
+        )
+        .ok_or_else(|| "a completion naming both ids builds an item".to_owned())?;
+        assert_eq!(
+            silent.permissions.next_owner,
+            Permissions::MOVE | Permissions::TRANSFER
+        );
+        assert_eq!(silent.permissions.group, Permissions::NONE);
+        assert_eq!(silent.permissions.everyone, Permissions::NONE);
+        Ok(())
+    }
+
+    /// There is nothing to file without both minted ids, or without a folder to
+    /// file it in.
+    #[test]
+    fn an_upload_that_created_nothing_builds_no_item() {
+        let folder = InventoryFolderKey::from(Uuid::from_u128(0x00f0_1de7));
+        let owner = AgentKey::from(Uuid::from_u128(0x000a_9e47));
+        let request = upload_request(folder);
+        // A baked texture: an asset, no item.
+        let baked = AssetUploadResponse {
+            new_inventory_item: None,
+            ..upload_completion(Uuid::from_u128(1), Uuid::from_u128(2))
+        };
+        assert!(uploaded_inventory_item(&request, &baked, owner, 0).is_none());
+        // A completion that named no asset is a failure, not an item.
+        let no_asset = AssetUploadResponse {
+            new_asset: None,
+            ..upload_completion(Uuid::from_u128(1), Uuid::from_u128(2))
+        };
+        assert!(uploaded_inventory_item(&request, &no_asset, owner, 0).is_none());
+        // No folder to file it in — the reference refuses the same way.
+        let rootless = upload_request(InventoryFolderKey::from(Uuid::nil()));
+        assert!(
+            uploaded_inventory_item(
+                &rootless,
+                &upload_completion(Uuid::from_u128(1), Uuid::from_u128(2)),
+                owner,
+                0,
+            )
+            .is_none()
+        );
     }
 }

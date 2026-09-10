@@ -116,6 +116,9 @@ impl GridTest for BakedTextureUpload {
                     Event::AssetUploaded {
                         new_asset,
                         new_inventory_item,
+                        // A baked texture creates no inventory item, so there
+                        // is never one to file.
+                        created: _,
                     } => Some(Ok((*new_asset, *new_inventory_item))),
                     Event::AssetUploadFailed { reason } => Some(Err(reason.clone())),
                     _other => None,

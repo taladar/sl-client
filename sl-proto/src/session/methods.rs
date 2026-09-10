@@ -10252,6 +10252,22 @@ impl Session {
         self.inventory.cache_item(item, InventoryOwner::Agent);
     }
 
+    /// Files the item a capability upload just **created** into the held model,
+    /// as [`uploaded_inventory_item`](crate::uploaded_inventory_item) assembled
+    /// it from the upload's request and completion.
+    ///
+    /// The upload path is the one inventory mutation the grid never announces —
+    /// neither flavour pushes anything after a `NewFileAgentInventory`
+    /// completion — so without this the item is on the grid and missing from
+    /// every local view of inventory until something re-fetches its folder.
+    /// This is the driver's hook for that: the runtime calls it as the
+    /// completion comes back, before delivering
+    /// [`Event::AssetUploaded`](crate::Event::AssetUploaded), so a consumer that
+    /// re-reads the folder on that event sees the new item in the page.
+    pub fn cache_uploaded_item(&mut self, item: InventoryItem) {
+        self.cache_inventory_item(item);
+    }
+
     /// Allocates the next async inventory `CallbackID` (never zero).
     fn next_inventory_callback(&mut self) -> InventoryCallbackId {
         self.inventory.next_callback()

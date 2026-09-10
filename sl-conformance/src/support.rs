@@ -258,9 +258,14 @@ pub async fn observe_upload(
         .wait_for(timeout, |event| {
             collect_announcement(&mut announcements, event);
             match event {
+                // The item the client assembled from the completion is not
+                // part of what an upload case measures — that is the *grid's*
+                // announcements, and the client files this one precisely
+                // because no grid announces it.
                 Event::AssetUploaded {
                     new_asset,
                     new_inventory_item,
+                    ..
                 } => Some(Ok(UploadCompletion {
                     new_asset: *new_asset,
                     new_inventory_item: *new_inventory_item,

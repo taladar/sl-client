@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 318 |
 | blocked | 46 |
 | in-progress | 20 |
-| bugs | 58 |
-| done | 1043 |
+| bugs | 57 |
+| done | 1044 |
 | deferred | 26 |
 | wont-do | 14 |
 | **total** | **1625** |
@@ -1182,7 +1182,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (58)
+## bugs (57)
 
 ### viewer
 
@@ -1312,14 +1312,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-tree-species-all-rendered-as-trees`](bugs/viewer-tree-species-all-rendered-as-trees.md)
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)
-- [`viewer-uploaded-item-never-enters-the-model`](bugs/viewer-uploaded-item-never-enters-the-model.md)
-  — An item the viewer just uploaded is not in its own inventory
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 - [`viewer-water-refraction-smears-avatar-silhouette`](bugs/viewer-water-refraction-smears-avatar-silhouette.md)
   — Water behind an avatar smears a skin-coloured fringe around its silhouette
 
-## done (1043)
+## done (1044)
 
 ### protocol
 
@@ -2844,6 +2842,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A submerged camera sees translucent objects as if beyond the water surface
 - [`viewer-unticking-for-sale-erased-the-price`](done/viewer-unticking-for-sale-erased-the-price.md)
   — Unticking For Sale threw the item's price away — on screen and on the grid
+- [`viewer-uploaded-item-never-enters-the-model`](done/viewer-uploaded-item-never-enters-the-model.md)
+  — An item the viewer just uploaded is not in its own inventory
 - [`viewer-url-linkification`](done/viewer-url-linkification.md) — URLs in chat
   & other text contexts (blocked by `viewer-ui-text-foundation` (done))
 - [`viewer-volume-panel`](done/viewer-volume-panel.md) — Volume panel (master +
