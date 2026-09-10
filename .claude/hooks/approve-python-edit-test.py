@@ -108,6 +108,13 @@ APPROVE = [
         heredoc(EDIT, "&& python3 roadmap/index.py --check 2>&1 | tail -3"),
     ),
     ("roadmap index by ./ path", heredoc(EDIT, "&& python3 ./roadmap/index.py")),
+    # Read-only git, already allowed on its own by this repo's rules.
+    ("git status after the edit", heredoc(EDIT, "&& git status --short")),
+    (
+        "git diff --stat on the edited file",
+        heredoc(EDIT, "&& git diff --stat sl-wire/src/lib.rs"),
+    ),
+    ("git log piped", heredoc(EDIT, "&& git log --oneline -3 | cat")),
     # Whole-tree, but the commit hook holds the tree to it anyway.
     ("cargo fmt over the workspace", heredoc(EDIT, "&& cargo fmt --all")),
     ("cargo sort over the workspace", heredoc(EDIT, "&& cargo sort --workspace")),
@@ -163,6 +170,14 @@ REFUSE = [
     ("command substitution in the cd target", heredoc(EDIT, cd="$(echo /etc)")),
     ("build chained after the edit", heredoc(EDIT, "&& cargo build")),
     ("commit chained after the edit", heredoc(EDIT, "&& git commit -m x")),
+    # Read-only git is admitted by subcommand; the rest of git is not.
+    ("git add -A stages the whole tree", heredoc(EDIT, "&& git add -A")),
+    ("git mv renames", heredoc(EDIT, "&& git mv roadmap/bugs/x.md roadmap/done/")),
+    (
+        "git checkout discards uncommitted work",
+        heredoc(EDIT, "&& git checkout sl-viewer-ui-core/Cargo.toml"),
+    ),
+    ("git push", heredoc(EDIT, "&& git push")),
     ("rm chained after the edit", heredoc(EDIT, "&& rm -rf /home/taladar/devel")),
     (
         "tail redirecting into a file",

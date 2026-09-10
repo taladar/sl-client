@@ -179,6 +179,21 @@ WHOLE_TREE_TOOLS = {
     ("cargo", "sort"),
     ("python3", "roadmap/index.py"),
 }
+# Read-only subcommands of a tool whose bare head is far too broad to admit.
+# Kept apart from WHOLE_TREE_TOOLS deliberately: that set admits things whose
+# whole-tree effect is already accounted for, this one admits things that plainly
+# do not write, and merging them would leave one comment explaining both badly.
+# `git status` and `git diff` are already allowed outright by this repo's rules,
+# so these grant nothing new -- they close the gap where each half of
+# `<edit> && git status` is permitted but the whole is not. The rest of git stays
+# out on purpose: `git add -A` stages whatever else is in the tree, `git mv`
+# renames, and `git checkout <file>` discards uncommitted work outright.
+SAFE_TAIL_SUBCOMMANDS = {
+    ("git", "status"),
+    ("git", "diff"),
+    ("git", "log"),
+    ("git", "show"),
+}
 # Several of the above read by default and write when asked. Naming the head is
 # therefore not enough: `sed -i` rewrites in place, an awk program can redirect
 # to a file from inside its own script, `typos -w` fixes what it finds, and
@@ -389,6 +404,8 @@ def check_tail(rest, edited, cwd):
         subcommand = os.path.normpath(words[1]) if len(words) > 1 else ""
 
         if (head, subcommand) in WHOLE_TREE_TOOLS:
+            continue
+        if (head, subcommand) in SAFE_TAIL_SUBCOMMANDS:
             continue
         if head in FORMATTER_HEADS:
             targets = _file_arguments(words[1:])
