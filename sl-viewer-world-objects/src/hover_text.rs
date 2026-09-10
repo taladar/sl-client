@@ -43,7 +43,7 @@ use bevy::text::TextBounds;
 use crate::name_tag_billboard::tag_render_layers;
 use crate::name_tag_billboard::{
     HoverTextMaterials, NEUTRAL_MESH_TAG, NameTagMaterial, NameTagPixelSize, NameTagPullRadius,
-    TagContent, TagLine, TagLineSize, TagText, WorldTextStyle,
+    TagContent, TagLine, TagLineSize, TagText, WorldTextOverlay, WorldTextStyle,
 };
 use crate::objects::{ObjectSlMotion, SceneObject};
 
@@ -203,6 +203,10 @@ fn hover_text_render_bundle(pull_radius: f32) -> impl Bundle {
         // per-instance offset stays neutral (else it unpacks tag 0 as a huge
         // negative offset and draws off-screen).
         bevy::mesh::MeshTag(NEUTRAL_MESH_TAG),
+        // An overlay, not world translucency: floating text on a prim under the
+        // sea is drawn over the surface, as the reference's late text pass draws
+        // it, rather than into the screen copy the surface refracts.
+        WorldTextOverlay,
         Transform::default(),
         // Hidden until the first placement so it never flashes at the origin.
         Visibility::Hidden,
@@ -483,9 +487,19 @@ impl Plugin for HoverTextPlugin {
 #[cfg(test)]
 mod tests {
     use super::{HOVER_ANCHOR_SCALE_FACTOR, ObjectFloatingText, hover_text_anchor};
-    use crate::name_tag_billboard::TagLineSize;
+    use crate::name_tag_billboard::{TagLineSize, WorldTextOverlay};
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
+
+    /// Floating text is a [`WorldTextOverlay`] too, so the sea never draws over it —
+    /// including the case the bucket-by-centre rule got wrong in both eye states:
+    /// `llSetText` on a prim under the water (`viewer-nametags-refracted-by-distant-water`).
+    #[test]
+    fn the_hover_text_render_bundle_carries_the_overlay_marker() {
+        let mut world = World::new();
+        let text = world.spawn(super::hover_text_render_bundle(0.5)).id();
+        assert!(world.entity(text).contains::<WorldTextOverlay>());
+    }
 
     /// The wire alpha byte is inverted: a transmitted 0 means fully opaque, a
     /// transmitted 255 means fully transparent (the `llSetText` invisible trick).

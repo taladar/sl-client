@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 42 |
 | in-progress | 21 |
 | bugs | 52 |
-| done | 1072 |
+| done | 1073 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1651** |
+| **total** | **1652** |
 
 ## ideas (100)
 
@@ -1263,6 +1263,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   groups
 - [`viewer-hair-dome-stays-grey`](bugs/viewer-hair-dome-stays-grey.md) — The
   default hair dome intermittently stays grey for a whole session
+- [`viewer-hover-text-colour-change-not-redrawn`](bugs/viewer-hover-text-colour-change-not-redrawn.md)
+  — A floating text that only changes colour keeps the old colour until its text
+  changes
 - [`viewer-hover-tooltip-202ms-frame-spike`](bugs/viewer-hover-tooltip-202ms-frame-spike.md)
   — update_hover_tooltip spikes to 202 ms on a single frame
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
@@ -1276,8 +1279,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Mouselook — parts of the own avatar's head render from the inside
 - [`viewer-muted-residents-text-still-shown`](bugs/viewer-muted-residents-text-still-shown.md)
   — A blocked resident's chat and IMs are still shown
-- [`viewer-nametags-refracted-by-distant-water`](bugs/viewer-nametags-refracted-by-distant-water.md)
-  — Water draws over a name tag that stands in front of it, smearing it
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
 - [`viewer-notecard-preview-ignores-unsaved-text`](bugs/viewer-notecard-preview-ignores-unsaved-text.md)
@@ -1308,7 +1309,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1072)
+## done (1073)
 
 ### protocol
 
@@ -2055,6 +2056,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   tags — preference toggles (blocked by `viewer-preferences-floater` (done))
 - [`viewer-nametags-occluded-by-clouds`](done/viewer-nametags-occluded-by-clouds.md)
   — Name tags render behind the cloud layer (near tag occluded by far clouds)
+- [`viewer-nametags-refracted-by-distant-water`](done/viewer-nametags-refracted-by-distant-water.md)
+  — Water draws over a name tag that stands in front of it, smearing it
 - [`viewer-new-notecard-unreadable-on-opensim`](done/viewer-new-notecard-unreadable-on-opensim.md)
   — A notecard created on OpenSim opened as "could not be read"
 - [`viewer-nonblocking-overlay-steals-focus`](done/viewer-nonblocking-overlay-steals-focus.md)

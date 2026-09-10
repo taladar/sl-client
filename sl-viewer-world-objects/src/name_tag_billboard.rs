@@ -5,9 +5,11 @@
 //! Each tag is a small mesh authored in **tag-local physical pixels ÷ 1024**
 //! around the bubble centre — an SDF rounded-rect backdrop, drop-shadow glyph
 //! copies, then the glyph quads — drawn by the main world camera in the
-//! transparent phase ([`AlphaMode::Blend`]: depth-**tested** against world
-//! geometry, no depth write), so occlusion, depth sorting and distance fade all
-//! come from the world pass rather than special-cased projection code. The
+//! transparent phase ([`AlphaMode::Blend`]: no depth write, and — as in the
+//! reference, which draws this text into a framebuffer with no scene depth in it
+//! at all — no depth *test* either, so a tag is readable through a wall and
+//! through the sea), so depth sorting and distance fade come from the world pass
+//! rather than special-cased projection code. The
 //! vertex shader (`name_tag.wgsl`) expands the mesh into a camera-facing
 //! billboard whose **on-screen size is constant at every distance** (the
 //! reference's pixel-vector behaviour), pulls it toward the camera by the
@@ -211,9 +213,10 @@ impl Material for NameTagMaterial {
         ShaderRef::Handle(NAME_TAG_SHADER_HANDLE)
     }
 
-    /// Alpha-blended: tags render in the transparent phase — depth-tested
-    /// against the world (occluded by geometry in front) without writing depth,
-    /// exactly the reference's `LLGLDepthTest(GL_TRUE, GL_FALSE)`.
+    /// Alpha-blended: tags render in the transparent phase, writing no depth —
+    /// the reference's `LLGLDepthTest(GL_TRUE, GL_FALSE)`. What they are
+    /// depth-*tested* against is set in [`Self::specialize`], and the answer is
+    /// nothing.
     fn alpha_mode(&self) -> AlphaMode {
         AlphaMode::Blend
     }
@@ -246,6 +249,27 @@ impl Material for NameTagMaterial {
         ])?;
         descriptor.vertex.buffers = vec![vertex_layout];
         descriptor.primitive.cull_mode = None;
+        // Occluded by nothing, which is the reference's behaviour and not an
+        // approximation of it. Its text carries `LLGLDepthTest(GL_TRUE, GL_FALSE)`,
+        // but `LLHUDObject::renderAll()` runs from `render_ui` — after
+        // `renderFinalize`, drawing into the *default framebuffer*, whose depth
+        // buffer the deferred pipeline never fills (`pipeline.cpp`'s
+        // `copyContentsToFramebuffer(… GL_DEPTH_BUFFER_BIT …)` for exactly that is
+        // commented out). So the test passes everywhere, which is why a name tag and
+        // `llSetText` floating text are famously readable through a wall in Second
+        // Life.
+        //
+        // Testing against the world's depth instead cost more than tags behind
+        // walls: the **sea** writes depth (it is opaque, in `Transmissive3d`), so an
+        // avatar on the shore lost its tag entirely to any camera under the surface,
+        // and floating text under the sea was invisible from above it
+        // (`viewer-nametags-refracted-by-distant-water`). The ordering carve-out
+        // keeps this text out of the passes before the water; this keeps the water
+        // from cutting it out.
+        if let Some(depth_stencil) = descriptor.depth_stencil.as_mut() {
+            depth_stencil.depth_compare =
+                Some(bevy::render::render_resource::CompareFunction::Always);
+        }
         // The SL glow pass extracts `scene_rgb * scene.a`, reading the frame's
         // alpha channel as the per-face glow mask (`glow_extract.wgsl`). A
         // blended overlay would otherwise write its text alpha into that channel
@@ -674,6 +698,26 @@ impl Default for NameTagPullRadius {
         Self(0.5)
     }
 }
+
+/// Marks a **world-anchored text overlay** — a name tag, a tag's extra atlas
+/// page, or an object's floating text — so the water-relative transparency
+/// ordering can keep it out of the passes that run *before* the sea is drawn
+/// (`sl_viewer_world_scene`'s `classify_bucket`).
+///
+/// These billboards are alpha-blended and world-anchored, so they land in the
+/// [`Transparent3d`](bevy::core_pipeline::core_3d::Transparent3d) phase and are
+/// bucketed by which side of the water surface their centre is on — and a tag on
+/// the far side is drawn *early*, into the screen copy the refracting sea samples,
+/// and then painted over by the sea itself (which is opaque and writes depth,
+/// while a tag writes none). The tag comes back only as a smeared refraction
+/// (`viewer-nametags-refracted-by-distant-water`).
+///
+/// The reference does not put this text in an alpha pool at all: `LLHUDObject`'s
+/// text is drawn by `render_ui`'s `LLHUDObject::renderAll()`
+/// (`llviewerdisplay.cpp`), after the whole 3D scene — water, haze and all. This
+/// marker is how that "drawn last, never refracted" property is expressed here.
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct WorldTextOverlay;
 
 /// The tag bubble's current on-screen size in **physical pixels**, recorded by
 /// [`build_tag_meshes`]; the anti-overlap solver and the cursor hit test both
@@ -1231,21 +1275,7 @@ pub(crate) fn build_tag_meshes(
                     let mut mesh = empty_tag_mesh();
                     write_page_mesh(&mut mesh, geometry);
                     let page = commands
-                        .spawn((
-                            NameTagPage,
-                            Mesh3d(meshes.add(mesh)),
-                            MeshMaterial3d(material),
-                            Transform::IDENTITY,
-                            Visibility::Inherited,
-                            // Without a neutral MeshTag the shader would
-                            // unpack tag 0 as a −32768 px offset and draw the
-                            // page far off-screen. (Different font sizes use
-                            // different atlas pages, so multi-page tags are
-                            // the NORM for any tag with small + name lines.)
-                            MeshTag(NEUTRAL_MESH_TAG),
-                            bevy::camera::visibility::NoFrustumCulling,
-                            tag_render_layers(),
-                        ))
+                        .spawn(tag_page_render_bundle(meshes.add(mesh), material))
                         .id();
                     commands.entity(entity).add_child(page);
                 }
@@ -1391,12 +1421,39 @@ pub fn name_tag_render_bundle(pull_radius: f32) -> impl Bundle {
         NameTagSmooth::default(),
         NameTagOverlapOffset::default(),
         bevy::mesh::MeshTag(NEUTRAL_MESH_TAG),
+        // An overlay, not world translucency: never drawn before the sea.
+        WorldTextOverlay,
         Transform::default(),
         // Hidden until the first placement so it never flashes at the origin.
         Visibility::Hidden,
         // Tag-local units are px ÷ 1024, not world geometry — the mesh AABB
         // is meaningless for culling, and the CPU distance cutoff already
         // hides far tags.
+        bevy::camera::visibility::NoFrustumCulling,
+        tag_render_layers(),
+    )
+}
+
+/// The renderer-side components of one **extra atlas page** of a tag: a child of
+/// the tag entity carrying that page's own mesh and material, and no placement
+/// state of its own (it inherits the tag's transform and visibility).
+///
+/// A page is a [`Transparent3d`](bevy::core_pipeline::core_3d::Transparent3d) item
+/// in its own right, so it needs every render-side property of the tag entity —
+/// including [`WorldTextOverlay`].
+fn tag_page_render_bundle(mesh: Handle<Mesh>, material: Handle<NameTagMaterial>) -> impl Bundle {
+    (
+        NameTagPage,
+        Mesh3d(mesh),
+        MeshMaterial3d(material),
+        Transform::IDENTITY,
+        Visibility::Inherited,
+        // Without a neutral MeshTag the shader would unpack tag 0 as a
+        // −32768 px offset and draw the page far off-screen. (Different font
+        // sizes use different atlas pages, so multi-page tags are the NORM for
+        // any tag with small + name lines.)
+        MeshTag(NEUTRAL_MESH_TAG),
+        WorldTextOverlay,
         bevy::camera::visibility::NoFrustumCulling,
         tag_render_layers(),
     )
@@ -1932,11 +1989,36 @@ mod tests {
     use super::{
         GlyphQuadInput, NEUTRAL_MESH_TAG, NameTag, SETTING_SHOW_NAME_TAGS,
         SETTING_SHOW_OWN_NAME_TAG, TagContent, TagLine, TagLineSize, TagPageGeometry, TagText,
-        build_tag_mesh_data, empty_tag_mesh, pack_overlap_offset, sync_tag_spans,
+        WorldTextOverlay, build_tag_mesh_data, empty_tag_mesh, pack_overlap_offset, sync_tag_spans,
         unpack_overlap_offset, viewport_size_changed, write_page_mesh,
     };
     use bevy::prelude::*;
     use pretty_assertions::{assert_eq, assert_ne};
+
+    /// Both of a tag's render bundles carry [`WorldTextOverlay`] — the marker the
+    /// water-relative transparency ordering reads to keep a tag out of the pass that
+    /// runs before the sea (`viewer-nametags-refracted-by-distant-water`). A marker
+    /// that is not on the entity does exactly nothing, and nothing else in the tag's
+    /// appearance would change if it went missing, so the wiring is pinned here.
+    #[test]
+    fn the_tag_render_bundles_carry_the_overlay_marker() {
+        let mut world = World::new();
+        let tag = world.spawn(super::name_tag_render_bundle(0.5)).id();
+        assert!(
+            world.entity(tag).contains::<WorldTextOverlay>(),
+            "the tag entity (atlas page 0) is a text overlay",
+        );
+        let page = world
+            .spawn(super::tag_page_render_bundle(
+                Handle::default(),
+                Handle::default(),
+            ))
+            .id();
+        assert!(
+            world.entity(page).contains::<WorldTextOverlay>(),
+            "an extra atlas page is its own phase item, so it is a text overlay too",
+        );
+    }
 
     /// Two-line content: a small grey title over a white name line.
     fn two_line_content() -> TagContent {

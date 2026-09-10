@@ -5,7 +5,11 @@
 //! copy the water refracts — and the **sky-backdrop bucket**
 //! (`viewer-nametags-occluded-by-clouds`), which keeps the camera-anchored sun,
 //! moon, star, and cloud backdrops behind every world-anchored transparent overlay
-//! instead of on top of them (the crate-private `SkyBackdrop` marker).
+//! instead of on top of them (the crate-private `SkyBackdrop` marker) — and the
+//! **text-overlay carve-out** (`viewer-nametags-refracted-by-distant-water`), which
+//! keeps name tags and floating text out of the early passes altogether
+//! ([`WorldTextOverlay`]), because the reference draws that text after the whole 3D
+//! scene rather than inside its alpha pools.
 //!
 //! **The problem this started as.** Bevy draws the whole [`Transparent3d`] phase
 //! back-to-front by each item's *mesh centre*. The water plane follows the camera,
@@ -89,10 +93,11 @@ use bevy::render::extract_resource::ExtractResourcePlugin;
 use bevy::render::render_phase::{PhaseItem as _, ViewSortedRenderPhases, sort_phase_system};
 use bevy::render::render_resource::{RenderPassDescriptor, StoreOp};
 use bevy::render::renderer::{RenderContext, ViewQuery};
-use bevy::render::sync_world::{MainEntity, MainEntityHashMap};
+use bevy::render::sync_world::{MainEntity, MainEntityHashMap, MainEntityHashSet};
 use bevy::render::view::{ExtractedView, RetainedViewEntity, ViewDepthTexture, ViewTarget};
 use bevy::render::{Extract, Render, RenderApp, RenderSystems};
 
+use crate::name_tag_billboard::WorldTextOverlay;
 use crate::water::{DEFAULT_WATER_HEIGHT, WaterLevel};
 use crate::water_clip::WaterClipSide;
 
@@ -124,20 +129,28 @@ const BACKDROP_BUCKET: u8 = 1;
 /// surface: left to Bevy's transparent pass, which runs after the water and
 /// depth-tests against the depth the water wrote.
 const POST_WATER_BUCKET: u8 = 2;
+/// The sort bucket for the world-anchored **text overlays** ([`WorldTextOverlay`]:
+/// name tags, their atlas pages, object floating text): after every piece of world
+/// translucency, which is where the reference draws them — its text is not in an
+/// alpha pool at all but in `render_ui`, after the whole 3D scene
+/// (`LLHUDObject::renderAll()`, `llviewerdisplay.cpp`). Distance-sorted *within* the
+/// bucket, so overlapping bubbles still composite near-over-far.
+const TEXT_OVERLAY_BUCKET: u8 = 3;
 /// The sort bucket for [`TransparentSortingInfo3d::AlwaysOnTop`] items: drawn after
 /// everything else so they stay on top, as their name promises (selection
 /// highlights and the like).
-const ALWAYS_ON_TOP_BUCKET: u8 = 3;
+const ALWAYS_ON_TOP_BUCKET: u8 = 4;
 
-/// The buckets must ascend pre-water → backdrop → post-water → always-on-top,
-/// because `sort_transparent_by_water` sorts by bucket ascending and that is the
-/// order the items are drawn in — and because [`PreWaterSplit`] takes the pre-water
-/// items to be a *prefix* of the sorted phase.
+/// The buckets must ascend pre-water → backdrop → post-water → text overlay →
+/// always-on-top, because `sort_transparent_by_water` sorts by bucket ascending and
+/// that is the order the items are drawn in — and because [`PreWaterSplit`] takes the
+/// pre-water items to be a *prefix* of the sorted phase.
 const _: () = assert!(
     PRE_WATER_BUCKET < BACKDROP_BUCKET
         && BACKDROP_BUCKET < POST_WATER_BUCKET
-        && POST_WATER_BUCKET < ALWAYS_ON_TOP_BUCKET,
-    "water sort buckets must ascend pre-water < backdrop < post-water < always-on-top"
+        && POST_WATER_BUCKET < TEXT_OVERLAY_BUCKET
+        && TEXT_OVERLAY_BUCKET < ALWAYS_ON_TOP_BUCKET,
+    "sort buckets must ascend pre-water < backdrop < post-water < text overlay < always-on-top"
 );
 
 /// Marks one of the camera-anchored **sky backdrops** — the sun / moon discs, the
@@ -208,6 +221,29 @@ fn extract_sky_backdrops(
     );
 }
 
+/// Every [`WorldTextOverlay`] entity, keyed by its main-world entity — the
+/// render-world mirror `sort_transparent_by_water` asks whether a phase item is an
+/// overlay rather than world translucency.
+///
+/// Keyed by [`MainEntity`] for the same reason [`SkyBackdrops`] is: a
+/// [`Transparent3d`] item's render entity is still `Entity::PLACEHOLDER` when the
+/// phase is sorted.
+#[derive(Resource, Default, Debug)]
+pub(crate) struct WorldTextOverlays(MainEntityHashSet);
+
+/// Mirror the main world's [`WorldTextOverlay`] markers into the render world.
+///
+/// Rebuilt each frame like [`extract_sky_backdrops`]: one entry per visible name
+/// tag, per extra atlas page of one, and per object floating text — tens of
+/// entities in a busy scene, and none once they despawn.
+fn extract_world_text_overlays(
+    mut overlays: ResMut<WorldTextOverlays>,
+    markers: Extract<Query<Entity, With<WorldTextOverlay>>>,
+) {
+    overlays.0.clear();
+    overlays.0.extend(markers.iter().map(MainEntity::from));
+}
+
 /// Where each view's sorted [`Transparent3d`] phase divides into the two prefixes
 /// the viewer draws in passes of its own: the items on the far side of the water
 /// surface from that view's eye (the reference's `POOL_ALPHA_PRE_WATER`), and the
@@ -256,14 +292,22 @@ pub(crate) struct PreWaterSplit(HashMap<RetainedViewEntity, PhasePrefixes>);
 /// property of that view's eye: the main camera can be submerged while a reflection
 /// probe's capture camera is not. A view whose `ExtractedView` this cannot resolve
 /// falls back to an eye above the water, the state every view is in most of the time.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected ECS state, and the bucket decision \
+              needs the water level, every marker mirror that overrides it, the views' eyes, \
+              the phases it sorts, and the split it records"
+)]
 fn sort_transparent_by_water(
     overrides: Res<RenderOverrides>,
     water_level: Option<Res<WaterLevel>>,
     backdrops: Res<SkyBackdrops>,
+    overlays: Res<WorldTextOverlays>,
     clips: Res<crate::water_clip::WaterClipSides>,
     views: Query<&ExtractedView>,
     mut phases: ResMut<ViewSortedRenderPhases<Transparent3d>>,
     mut split: ResMut<PreWaterSplit>,
+    mut last_kept_out: Local<Option<(usize, usize)>>,
 ) {
     let level = water_level.map_or(DEFAULT_WATER_HEIGHT, |water_level| water_level.0);
     // Each view's eye height, to resolve its side of the surface below.
@@ -277,8 +321,21 @@ fn sort_transparent_by_water(
         })
         .collect();
     split.0.clear();
+    // How many text overlays the carve-out kept out of the early passes this frame,
+    // summed over every view. Logged when it changes, because it is the one number
+    // that says whether a "the sea drew over my name tag" report is this ordering at
+    // all: zero while the artifact is on screen means the tag was bucketed
+    // post-water and something else is painting over it.
+    let mut kept_out = 0_usize;
+    // …and how many views the eye is under the surface in, since that is the state
+    // that puts an *above*-water tag on the far side, and a third-person camera dips
+    // under the sea without the picture obviously saying so.
+    let mut submerged_views = 0_usize;
     for (view, phase) in phases.iter_mut() {
         let submerged = eyes.get(view).is_some_and(|eye| eye_submerged(*eye, level));
+        if submerged {
+            submerged_views = submerged_views.saturating_add(1);
+        }
         // Decorate-sort: compute each item's `(bucket, backdrop order, distance)` key
         // exactly once (`sort_by_cached_key` is stable, like the `sort_by` it
         // replaces), instead of re-running the bucket lookup for both operands of
@@ -289,6 +346,7 @@ fn sort_transparent_by_water(
                 level,
                 submerged,
                 backdrops.0.get(&item.entity.1).copied(),
+                overlays.0.contains(&item.entity.1),
                 clips.get(item.entity.1),
             );
             (bucket, order, FloatOrd(item.distance))
@@ -300,11 +358,19 @@ fn sort_transparent_by_water(
             continue;
         }
         let prefixes = count_prefixes(phase.items.values().map(|item| {
+            let overlay = overlays.0.contains(&item.entity.1);
+            if overlay
+                && let TransparentSortingInfo3d::Sorted { mesh_center, .. } = item.sorting_info
+                && far_side_of_water(mesh_center.y, level, submerged)
+            {
+                kept_out = kept_out.saturating_add(1);
+            }
             classify_bucket(
                 item.sorting_info,
                 level,
                 submerged,
                 backdrops.0.get(&item.entity.1).copied(),
+                overlay,
                 clips.get(item.entity.1),
             )
             .0
@@ -312,6 +378,14 @@ fn sort_transparent_by_water(
         if prefixes.drawn_early() > 0 {
             split.0.insert(*view, prefixes);
         }
+    }
+    if *last_kept_out != Some((kept_out, submerged_views)) {
+        *last_kept_out = Some((kept_out, submerged_views));
+        debug!(
+            "water ordering: {kept_out} world-text overlay(s) on the far side of the water \
+             surface (level {level} m), kept out of the pre-water pass; \
+             {submerged_views} view(s) with a submerged eye"
+        );
     }
 }
 
@@ -380,10 +454,29 @@ const fn classify_bucket(
     level: f32,
     submerged: bool,
     backdrop: Option<SkyBackdrop>,
+    overlay: bool,
     clip: Option<WaterClipSide>,
 ) -> (u8, u8) {
     if let Some(backdrop) = backdrop {
         return (BACKDROP_BUCKET, backdrop.draw_order());
+    }
+    // A world-anchored **text overlay** ([`WorldTextOverlay`]: a name tag, one of
+    // its extra atlas pages, an object's floating text) goes in its own bucket after
+    // all world translucency, wherever its centre sits. It is not world translucency:
+    // the reference draws this text from `render_ui`, after the whole 3D scene, so it
+    // is never in the copy the sea refracts and never underneath the sea. Bucketed by
+    // its centre it *would* be — a tag on the far side of the surface is drawn early,
+    // smeared by the refraction and then painted over by the opaque, depth-writing sea
+    // it wrote no depth against (`viewer-nametags-refracted-by-distant-water`; the
+    // submerged eye put every above-water tag on the far side, and a prim's floating
+    // text under the sea was lost the same way with the eye above it).
+    //
+    // Its own bucket rather than always-on-top so the tags keep Bevy's back-to-front
+    // distance order among themselves: a [`TransparentSortingInfo3d::AlwaysOnTop`]
+    // item sorts at `f32::NEG_INFINITY`, which would tie every tag in the scene and
+    // leave overlapping bubbles to composite in insertion order.
+    if overlay {
+        return (TEXT_OVERLAY_BUCKET, 0);
     }
     // A **clipped** draw — one half of a face that straddles the surface
     // ([`crate::water_clip`]) — is bucketed by the side it keeps, not by where its
@@ -404,17 +497,24 @@ const fn classify_bucket(
     match sorting_info {
         TransparentSortingInfo3d::AlwaysOnTop => (ALWAYS_ON_TOP_BUCKET, 0),
         TransparentSortingInfo3d::Sorted { mesh_center, .. } => {
-            let far_side = if submerged {
-                mesh_center.y > level
-            } else {
-                mesh_center.y < level
-            };
-            if far_side {
+            if far_side_of_water(mesh_center.y, level, submerged) {
                 (PRE_WATER_BUCKET, 0)
             } else {
                 (POST_WATER_BUCKET, 0)
             }
         }
+    }
+}
+
+/// Whether a point at height `height` is on the **far side** of the water surface at
+/// `level` from an eye that is (or is not) `submerged` — the side the pre-water pass
+/// draws, and the reference's flipped `water_sign`. Content *on* the plane counts as
+/// the eye's own side either way.
+const fn far_side_of_water(height: f32, level: f32, submerged: bool) -> bool {
+    if submerged {
+        height > level
+    } else {
+        height < level
     }
 }
 
@@ -573,9 +673,11 @@ fn draw_early_phase_range(
 /// transparent pass skipped the items too, so far-side translucency vanished
 /// outright. The viewer has several views — the main camera, the HUD camera, and the
 /// reflection-probe capture cameras, which cycle every frame — so which view lost its
-/// far-side content came down to schedule order. Name tags showed it first, because
-/// they were bucketed pre-water only while submerged — which, with the eye-relative
-/// bucket, they no longer are at all.
+/// far-side content came down to schedule order. Name tags showed it first, because a
+/// submerged eye put every above-water tag on the far side and so into this prefix.
+/// They cannot land here at all any more — the text-overlay carve-out
+/// ([`WorldTextOverlay`]) keeps them post-water — but the per-view rule is what every
+/// *other* piece of far-side translucency still depends on.
 fn suppress_pre_water_items(
     view: ViewQuery<&ExtractedView>,
     mut phases: ResMut<ViewSortedRenderPhases<Transparent3d>>,
@@ -605,10 +707,10 @@ fn suppress_view_pre_water_items(
 }
 
 /// Wires the water-relative transparency ordering into the app: extract the
-/// `WaterLevel` and the `SkyBackdrop` markers into the render world, add the
-/// re-sort after Bevy's transparent sort, and add the pre-water pass and its
-/// suppression to the `Core3d` main pass. Add once, after `DefaultPlugins`, like the
-/// other viewer render plugins.
+/// `WaterLevel`, the `SkyBackdrop` markers and the [`WorldTextOverlay`] markers into
+/// the render world, add the re-sort after Bevy's transparent sort, and add the
+/// pre-water pass and its suppression to the `Core3d` main pass. Add once, after
+/// `DefaultPlugins`, like the other viewer render plugins.
 #[derive(Debug, Default)]
 pub struct TransparencyOrderPlugin;
 
@@ -624,12 +726,16 @@ impl Plugin for TransparencyOrderPlugin {
         render_app
             .init_resource::<PreWaterSplit>()
             .init_resource::<SkyBackdrops>()
+            .init_resource::<WorldTextOverlays>()
             // The straddling-face split's mirror is read by the sort below, and
             // `init_resource` is idempotent — so the sort works whether or not
             // `crate::water_clip::WaterClipPlugin` is also added, and simply sees no
             // clipped draws when it is not.
             .init_resource::<crate::water_clip::WaterClipSides>()
-            .add_systems(ExtractSchedule, extract_sky_backdrops)
+            .add_systems(
+                ExtractSchedule,
+                (extract_sky_backdrops, extract_world_text_overlays),
+            )
             .add_systems(
                 Render,
                 sort_transparent_by_water
@@ -674,8 +780,8 @@ mod tests {
 
     use super::{
         ALWAYS_ON_TOP_BUCKET, BACKDROP_BUCKET, POST_WATER_BUCKET, PRE_WATER_BUCKET, PhasePrefixes,
-        PreWaterSplit, SkyBackdrop, WaterClipSide, classify_bucket, count_prefixes, eye_submerged,
-        suppress_view_pre_water_items,
+        PreWaterSplit, SkyBackdrop, TEXT_OVERLAY_BUCKET, WaterClipSide, classify_bucket,
+        count_prefixes, eye_submerged, suppress_view_pre_water_items,
     };
     use bevy::core_pipeline::core_3d::{Transparent3d, TransparentSortingInfo3d};
     use bevy::ecs::entity::Entity;
@@ -688,16 +794,27 @@ mod tests {
     use bevy::render::view::RetainedViewEntity;
     use pretty_assertions::assert_eq;
 
-    /// [`classify_bucket`] for an **unclipped** item — the ordinary face, whose
-    /// bucket comes from its centre. A helper so each test reads as the question it
-    /// asks rather than carrying a `None` for the straddling split it is not about.
+    /// [`classify_bucket`] for an **unclipped** item that is not a text overlay —
+    /// the ordinary face, whose bucket comes from its centre. A helper so each test
+    /// reads as the question it asks rather than carrying a `false` and a `None` for
+    /// the carve-out and the straddling split it is not about.
     fn classify_bucket_4(
         sorting_info: TransparentSortingInfo3d,
         level: f32,
         submerged: bool,
         backdrop: Option<SkyBackdrop>,
     ) -> (u8, u8) {
-        classify_bucket(sorting_info, level, submerged, backdrop, None)
+        classify_bucket(sorting_info, level, submerged, backdrop, false, None)
+    }
+
+    /// [`classify_bucket`] for a [`WorldTextOverlay`] item — a name tag, one of its
+    /// atlas pages, or an object's floating text.
+    fn classify_overlay(
+        sorting_info: TransparentSortingInfo3d,
+        level: f32,
+        submerged: bool,
+    ) -> (u8, u8) {
+        classify_bucket(sorting_info, level, submerged, None, true, None)
     }
 
     /// A `Sorted` sorting info centred at height `y` (the field the bucket reads).
@@ -940,12 +1057,28 @@ mod tests {
             (true, PRE_WATER_BUCKET, POST_WATER_BUCKET),
         ] {
             assert_eq!(
-                classify_bucket(centre, 20.0, submerged, None, Some(WaterClipSide::Above)).0,
+                classify_bucket(
+                    centre,
+                    20.0,
+                    submerged,
+                    None,
+                    false,
+                    Some(WaterClipSide::Above)
+                )
+                .0,
                 above_bucket,
                 "the above-water half, eye submerged = {submerged}",
             );
             assert_eq!(
-                classify_bucket(centre, 20.0, submerged, None, Some(WaterClipSide::Below)).0,
+                classify_bucket(
+                    centre,
+                    20.0,
+                    submerged,
+                    None,
+                    false,
+                    Some(WaterClipSide::Below)
+                )
+                .0,
                 below_bucket,
                 "the below-water half, eye submerged = {submerged}",
             );
@@ -963,6 +1096,7 @@ mod tests {
                 20.0,
                 false,
                 Some(SkyBackdrop::Clouds),
+                false,
                 Some(WaterClipSide::Above),
             )
             .0,
@@ -1050,6 +1184,7 @@ mod tests {
             classify_bucket_4(sorted_at(25.0), 20.0, false, None).0,
             classify_bucket_4(sorted_at(25.0), 20.0, false, Some(SkyBackdrop::Clouds)).0,
             classify_bucket_4(sorted_at(15.0), 20.0, false, None).0,
+            classify_overlay(sorted_at(25.0), 20.0, false).0,
         ];
         buckets.sort_unstable();
         assert_eq!(
@@ -1058,9 +1193,62 @@ mod tests {
                 PRE_WATER_BUCKET,
                 BACKDROP_BUCKET,
                 POST_WATER_BUCKET,
+                TEXT_OVERLAY_BUCKET,
                 ALWAYS_ON_TOP_BUCKET
             ],
-            "sorting by bucket must run pre-water → backdrops → post-water → on top",
+            "sorting by bucket must run pre-water → backdrops → post-water → text → on top",
         );
+    }
+
+    /// A name tag or a prim's floating text is **never** pre-water, whichever side of
+    /// the surface it and the eye are on (`viewer-nametags-refracted-by-distant-water`).
+    ///
+    /// Every one of these four cases is a real one: a tag below the level with the eye
+    /// above it (an avatar standing in shallow water, or floating text on a submerged
+    /// prim) and a tag above it with the eye below (the camera dipped under the sea
+    /// while the avatar stands on the shore — third person over water does that
+    /// readily) are the two the carve-out changes.
+    #[test]
+    fn a_text_overlay_is_never_drawn_before_the_water() {
+        for submerged in [false, true] {
+            for height in [25.0_f32, 15.0] {
+                assert_eq!(
+                    classify_overlay(sorted_at(height), 20.0, submerged).0,
+                    TEXT_OVERLAY_BUCKET,
+                    "a text overlay at {height} m, eye submerged = {submerged}, must not be \
+                     drawn into the screen copy the sea refracts",
+                );
+            }
+        }
+    }
+
+    /// The carve-out is what makes the difference, not the heights: the same centres
+    /// without the overlay marker still bucket by the water surface. Guards against a
+    /// test that would pass with the carve-out deleted.
+    #[test]
+    fn the_same_centres_without_the_marker_still_bucket_by_the_water() {
+        assert_eq!(
+            classify_bucket_4(sorted_at(15.0), 20.0, false, None).0,
+            PRE_WATER_BUCKET,
+        );
+        assert_eq!(
+            classify_bucket_4(sorted_at(25.0), 20.0, true, None).0,
+            PRE_WATER_BUCKET,
+        );
+    }
+
+    /// A text overlay in the phase leaves the early prefixes empty, so neither early
+    /// pass draws it and the suppression never empties its batch range — the property
+    /// the two passes actually act on, one level up from the bucket itself.
+    #[test]
+    fn a_phase_of_text_overlays_draws_nothing_early() {
+        let prefixes = count_prefixes(
+            [
+                classify_overlay(sorted_at(15.0), 20.0, false).0,
+                classify_overlay(sorted_at(25.0), 20.0, true).0,
+            ]
+            .into_iter(),
+        );
+        assert_eq!(prefixes.drawn_early(), 0);
     }
 }
