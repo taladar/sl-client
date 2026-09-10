@@ -37,7 +37,8 @@ use crate::ui_font::UiFont;
 use crate::world_api::LocalChatNotice;
 use crate::world_api::rlv::swallows_owner_say;
 use crate::world_api::{
-    ObjectState, SETTING_CHAT_FONT_SIZE, SETTING_CHAT_MAX_LINES, SETTING_NEARBY_TOAST_LIFETIME,
+    MuteModel, ObjectState, SETTING_CHAT_FONT_SIZE, SETTING_CHAT_MAX_LINES,
+    SETTING_NEARBY_TOAST_LIFETIME, chat_text_muted,
 };
 
 /// The most chat lines the overlay ever shows at once when no
@@ -294,7 +295,8 @@ pub fn position_chat_overlay(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources / queries: the chat and \
               notice streams, the overlay state and its container, the font / colour settings, \
-              the own-agent identity, and the object mirror the RLV owner-say gate reads"
+              the own-agent identity, the object mirror the RLV owner-say gate reads, and the \
+              mute list the block filter reads"
 )]
 pub fn update_chat_overlay(
     mut commands: Commands,
@@ -305,6 +307,7 @@ pub fn update_chat_overlay(
     settings: Option<Res<ViewerSettings>>,
     identity: Option<Res<SlIdentity>>,
     objects: Option<Res<ObjectState>>,
+    mutes: Option<Res<MuteModel>>,
 ) {
     let Ok(container) = container.single() else {
         return;
@@ -337,6 +340,11 @@ pub fn update_chat_overlay(
         // An owner-say `@`-line is an object commanding the viewer, and the
         // RLV intake takes it: it is not something the person said and must not
         // float over the world as if it were.
+        //
+        // A blocked resident's (or object's) say is dropped here, where the
+        // reference drops it: blocking someone whose every word still floats
+        // over the world is not blocking them. A missing mute list — a headless
+        // world that registered none — reads as "nothing is blocked".
         if let SlSessionEvent::ChatReceived(message) = &event.0
             && is_displayable(message)
             && !swallows_owner_say(
@@ -346,6 +354,9 @@ pub fn update_chat_overlay(
                 message.chat_type,
                 &message.message,
             )
+            && !mutes
+                .as_deref()
+                .is_some_and(|mutes| chat_text_muted(mutes, message))
         {
             spawn_line(
                 format_chat_line(message),
@@ -433,13 +444,17 @@ pub fn restyle_chat_overlay(
 #[cfg(test)]
 mod tests {
     use super::{
-        CHAT_FADE_DURATION, CHAT_HOLD_TIME, ChatOverlayContainer, format_chat_line, is_displayable,
-        is_faded, line_alpha, setup_chat_overlay,
+        CHAT_FADE_DURATION, CHAT_HOLD_TIME, ChatOverlay, ChatOverlayContainer, ChatOverlayLine,
+        LocalChatNotice, MuteModel, format_chat_line, is_displayable, is_faded, line_alpha,
+        setup_chat_overlay, update_chat_overlay,
     };
     use crate::ui::{UiRoot, UiScaffoldSystems};
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
-    use sl_client_bevy::{ChatAudible, ChatMessage, ChatSource, ChatType, RegionCoordinates};
+    use sl_client_bevy::{
+        AgentKey, ChatAudible, ChatMessage, ChatSource, ChatType, MuteEntry, MuteFlags, MuteType,
+        RegionCoordinates, SlEvent, SlSessionEvent, Uuid,
+    };
     use sl_viewer_testkit::{LayoutTest, TestError, find_by_name, settle};
 
     /// Build a minimal received chat message with the given speaker, type, and
@@ -604,6 +619,70 @@ mod tests {
             .get::<ChildOf>(overlay)
             .ok_or("chat overlay has no parent — it is still a top-level root")?;
         assert_eq!(parent.parent(), root);
+        Ok(())
+    }
+
+    /// Blocking a resident's text chat stops their say reaching the on-screen
+    /// overlay: the same words from an unblocked speaker still spawn a line, so
+    /// this measures the block and not a dead overlay.
+    #[test]
+    fn a_blocked_speaker_spawns_no_overlay_line() -> Result<(), TestError> {
+        let troll = AgentKey::from(Uuid::from_u128(0xB10C));
+        let friend = AgentKey::from(Uuid::from_u128(0xF11E));
+        let mut mutes = MuteModel::default();
+        mutes.replace(vec![MuteEntry {
+            id: troll.uuid(),
+            name: "Troll Resident".to_owned(),
+            mute_type: MuteType::Agent,
+            flags: MuteFlags::default(),
+        }]);
+
+        let mut app = LayoutTest::new().build();
+        app.add_message::<SlEvent>()
+            // `update_chat_overlay` reads the client-notice stream too, and an
+            // unregistered message is a param-validation panic on frame one.
+            .add_message::<LocalChatNotice>()
+            .init_resource::<ChatOverlay>()
+            .insert_resource(mutes)
+            .add_systems(
+                Startup,
+                setup_chat_overlay.after(UiScaffoldSystems::SpawnRoot),
+            )
+            .add_systems(Update, update_chat_overlay);
+        settle(&mut app);
+
+        let say = |speaker: AgentKey, name: &str| {
+            SlEvent(SlSessionEvent::ChatReceived(Box::new(ChatMessage {
+                from_name: name.to_owned(),
+                source: ChatSource::Agent(speaker),
+                owner_id: None,
+                chat_type: ChatType::Normal,
+                audible: ChatAudible::Fully,
+                position: RegionCoordinates::new(0.0, 0.0, 0.0),
+                message: "hello".to_owned(),
+            })))
+        };
+        app.world_mut().write_message(say(troll, "Troll Resident"));
+        settle(&mut app);
+        assert_eq!(
+            app.world_mut()
+                .query::<&ChatOverlayLine>()
+                .iter(app.world())
+                .count(),
+            0,
+            "a blocked resident's say never becomes a line"
+        );
+
+        app.world_mut().write_message(say(friend, "Avatar One"));
+        settle(&mut app);
+        assert_eq!(
+            app.world_mut()
+                .query::<&ChatOverlayLine>()
+                .iter(app.world())
+                .count(),
+            1,
+            "an unblocked resident's say still becomes a line"
+        );
         Ok(())
     }
 }

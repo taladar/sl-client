@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 42 |
 | in-progress | 21 |
 | bugs | 51 |
-| done | 1074 |
+| done | 1075 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1652** |
+| **total** | **1653** |
 
 ## ideas (100)
 
@@ -1249,6 +1249,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The world map keeps a second live arboard handle
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
   — Mesh-head brow spikes forward from face-bone shape deformation
+- [`viewer-chat-log-records-blocked-residents`](bugs/viewer-chat-log-records-blocked-residents.md)
+  — The disk chat transcript records a blocked resident's lines
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
   — Check clouds vs the waterline at the horizon against Firestorm
 - [`viewer-combo-stops-opening`](bugs/viewer-combo-stops-opening.md) — A combo
@@ -1274,8 +1276,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Minimap other-avatar dots are red, not green like the reference
 - [`viewer-mouselook-own-head-visible-from-inside`](bugs/viewer-mouselook-own-head-visible-from-inside.md)
   — Mouselook — parts of the own avatar's head render from the inside
-- [`viewer-muted-residents-text-still-shown`](bugs/viewer-muted-residents-text-still-shown.md)
-  — A blocked resident's chat and IMs are still shown
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
 - [`viewer-notecard-preview-ignores-unsaved-text`](bugs/viewer-notecard-preview-ignores-unsaved-text.md)
@@ -1306,7 +1306,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1074)
+## done (1075)
 
 ### protocol
 
@@ -2042,6 +2042,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-world-test-harness` (done))
 - [`viewer-music-controls-push-chat-bar`](done/viewer-music-controls-push-chat-bar.md)
   — Parcel music controls push the nearby chat bar up when they appear
+- [`viewer-muted-residents-text-still-shown`](done/viewer-muted-residents-text-still-shown.md)
+  — A blocked resident's chat and IMs are still shown
 - [`viewer-name-tags-billboard-render`](done/viewer-name-tags-billboard-render.md)
   — Name tags — world-space billboard renderer
 - [`viewer-name-tags-complexity-distance`](done/viewer-name-tags-complexity-distance.md)

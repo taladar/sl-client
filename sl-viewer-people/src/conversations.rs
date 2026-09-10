@@ -66,7 +66,7 @@ use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;
 use sl_client_bevy::{
     AgentKey, ChatSource, ChatType, Command, GroupKey, ImDialog, ImSessionId, MessageCursor,
-    ObjectKey, SlCommand, SlEvent, SlIdentity, SlSessionEvent, Uuid,
+    MuteFlags, ObjectKey, SlCommand, SlEvent, SlIdentity, SlSessionEvent, Uuid,
 };
 
 use crate::chat_input::{ChatInputSpec, ChatInputSubmit, spawn_chat_input};
@@ -86,7 +86,8 @@ use crate::ui_font::UiFont;
 use crate::ui_tab::{TabDivider, TabPlacement, TabStrip, TabStripWidth, resize_strip_width};
 use crate::world_api::rlv::swallows_owner_say;
 use crate::world_api::{
-    AvatarPicked, ConversationKey, OpenAvatarPicker, OpenConversation, StartConference,
+    AvatarPicked, ConversationKey, MuteModel, OpenAvatarPicker, OpenConversation, StartConference,
+    chat_text_muted,
 };
 
 /// The hosting floater's [`crate::floater::FloaterSpec::id`] — it also keys the
@@ -1755,19 +1756,41 @@ fn ingest_conversation_notices(
     }
 }
 
+/// Whether the resident `id` / `name` names has their **text chat** blocked —
+/// the reference's `LLMuteList::isMuted(id, name, LLMute::flagTextChat)`, the
+/// one question every conversation surface asks of the mute list.
+///
+/// `None` for the model means no mute list is present (a headless world that
+/// never registered one), which reads as "nothing is blocked": a missing list
+/// must not silence the conversation floater. An empty `name` falls back to
+/// matching by id alone.
+fn text_muted(mutes: Option<&MuteModel>, id: Uuid, name: &str) -> bool {
+    mutes.is_some_and(|mutes| mutes.is_muted_aspect_named(id, name, MuteFlags::ALLOW_TEXT_CHAT))
+}
+
 /// Fold every relevant inbound event into the model: chat / IM / group /
 /// conference lines, typing notifications, invites, and the name caches behind
 /// the tab titles.
 ///
 /// One inbound event can be refused outright here: an **ad-hoc conference**
-/// invitation under the ignore-conferences mode ([`crate::auto_reject`]) is
-/// declined on the wire and never given a tab.
+/// invitation under the ignore-conferences mode ([`crate::auto_reject`]), or
+/// from a resident whose text chat is blocked, is declined on the wire and
+/// never given a tab.
+///
+/// A **blocked** resident is filtered at this ingest, which is where the
+/// reference does it too: not their nearby chat, not their IM, not their line
+/// in a group or conference (live or in the server's backlog), and not their
+/// typing notification — because a one-to-one typing notice *opens the tab*
+/// ([`ConversationModel::set_typing`]), so letting it through would put a
+/// blocked resident's name on screen with nothing said. See [`text_muted`]
+/// for what "blocked" means per aspect.
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources / queries: the event \
               stream, the conversation model and avatar-name cache it fills, the identity, \
               the settings and friends model the auto-reject reads, the object mirror the \
-              RLV owner-say gate reads, and the command writer a refusal answers on"
+              RLV owner-say gate reads, the mute list the block filter reads, and the \
+              command writer a refusal answers on"
 )]
 pub(crate) fn ingest_conversation_events(
     mut events: MessageReader<SlEvent>,
@@ -1777,8 +1800,10 @@ pub(crate) fn ingest_conversation_events(
     settings: Option<Res<crate::settings::ViewerSettings>>,
     friends: Option<Res<crate::world_api::FriendsModel>>,
     objects: Option<Res<crate::world_api::ObjectState>>,
+    mutes: Option<Res<MuteModel>>,
     mut sl: MessageWriter<SlCommand>,
 ) {
+    let mutes = mutes.as_deref();
     for event in events.read() {
         match &event.0 {
             SlSessionEvent::ChatReceived(message) => {
@@ -1798,6 +1823,7 @@ pub(crate) fn ingest_conversation_events(
                         message.chat_type,
                         &message.message,
                     )
+                    && !mutes.is_some_and(|mutes| chat_text_muted(mutes, message))
                 {
                     model.push_nearby(&message.from_name, &message.source, &message.message);
                 }
@@ -1807,15 +1833,22 @@ pub(crate) fn ingest_conversation_events(
                 source_id,
                 typing,
             } => {
-                model.set_typing(
-                    ConversationKey::Nearby,
-                    AgentKey::from(*source_id),
-                    from_name,
-                    *typing,
-                );
+                // A blocked resident's "…is typing" is the one line of theirs
+                // that carries no text, and so would slip past the filter on
+                // `ChatReceived` and announce them anyway.
+                if !text_muted(mutes, *source_id, from_name) {
+                    model.set_typing(
+                        ConversationKey::Nearby,
+                        AgentKey::from(*source_id),
+                        from_name,
+                        *typing,
+                    );
+                }
             }
             SlSessionEvent::InstantMessageReceived(im)
-                if im.dialog == ImDialog::Message && !im.from_group =>
+                if im.dialog == ImDialog::Message
+                    && !im.from_group
+                    && !text_muted(mutes, im.from_agent_id.uuid(), &im.from_agent_name) =>
             {
                 avatars.note_legacy_name(im.from_agent_id, &im.from_agent_name);
                 model.push_remote(
@@ -1831,9 +1864,15 @@ pub(crate) fn ingest_conversation_events(
                 session_id,
                 typing,
             } => {
-                let key = model.typing_key(*from_agent_id, *session_id);
-                avatars.note_legacy_name(*from_agent_id, from_agent_name);
-                model.set_typing(key, *from_agent_id, from_agent_name, *typing);
+                // As for nearby typing — and this one is the sharper edge: a
+                // one-to-one typing notice *opens* the IM tab, so a blocked
+                // resident could put their name on screen without saying a
+                // word.
+                if !text_muted(mutes, from_agent_id.uuid(), from_agent_name) {
+                    let key = model.typing_key(*from_agent_id, *session_id);
+                    avatars.note_legacy_name(*from_agent_id, from_agent_name);
+                    model.set_typing(key, *from_agent_id, from_agent_name, *typing);
+                }
             }
             SlSessionEvent::GroupSessionMessage {
                 group_id,
@@ -1845,7 +1884,9 @@ pub(crate) fn ingest_conversation_events(
                 // echo it locally as "You:" on send (`route_conversation_input`),
                 // so drop the self-echo to avoid showing it twice (once as "You:"
                 // and once under our own name).
-                if identity.agent_id != Some(*from_agent_id) {
+                if identity.agent_id != Some(*from_agent_id)
+                    && !text_muted(mutes, from_agent_id.uuid(), from_name)
+                {
                     avatars.note_legacy_name(*from_agent_id, from_name);
                     model.push_remote(
                         ConversationKey::Group(*group_id),
@@ -1863,7 +1904,9 @@ pub(crate) fn ingest_conversation_events(
             } => {
                 // Same self-echo suppression as group sessions (a conference
                 // session likewise echoes the sender's own line back).
-                if identity.agent_id != Some(*from_agent_id) {
+                if identity.agent_id != Some(*from_agent_id)
+                    && !text_muted(mutes, from_agent_id.uuid(), from_name)
+                {
                     avatars.note_legacy_name(*from_agent_id, from_name);
                     model.push_remote(
                         ConversationKey::Conference(ImSessionId::from(*session_id)),
@@ -1882,7 +1925,17 @@ pub(crate) fn ingest_conversation_events(
                 session_name,
                 ..
             } => {
+                // The invitation carries no sender name, so a blocked inviter
+                // is matched on the id alone.
+                let invited_by_blocked = text_muted(mutes, from_agent_id.uuid(), "");
                 if *from_group {
+                    // A group session a blocked resident started opens no tab
+                    // — but the invitation is *not* declined, because the group
+                    // is one the user chose to be in and everyone else in it is
+                    // still worth hearing (the reference's reasoning verbatim).
+                    if invited_by_blocked {
+                        continue;
+                    }
                     let group = GroupKey::from(*session_id);
                     model.note_group_name(group, session_name);
                     model.mark_invite(ConversationKey::Group(group));
@@ -1891,10 +1944,17 @@ pub(crate) fn ingest_conversation_events(
                     // The ignore-conferences mode: decline the invitation and
                     // open no tab. Only ad-hoc conferences are refused — a
                     // group IM invitation is a group the user chose to be in.
+                    //
+                    // A blocked inviter's ad-hoc conference takes the same exit.
+                    // Unlike a group, an ad-hoc conference *is* the person who
+                    // opened it, so there is nothing left to stay for — the
+                    // reference leaves such a session outright.
                     let is_friend = friends
                         .as_deref()
                         .is_some_and(|friends| friends.is_friend(*from_agent_id));
-                    if crate::auto_reject::ignores_ad_hoc(settings.as_deref(), is_friend) {
+                    if invited_by_blocked
+                        || crate::auto_reject::ignores_ad_hoc(settings.as_deref(), is_friend)
+                    {
                         info!(
                             "conversations: ignoring ad-hoc conference invite from {from_agent_id}"
                         );
@@ -1991,10 +2051,18 @@ pub(crate) fn ingest_conversation_events(
             // ring by the session layer; set as the tab's muted-green
             // server-history band. The record carries the sender's display name
             // as the server rendered it — harvest it into the name cache too.
+            //
+            // The backlog is the one place a blocked resident's line can arrive
+            // long after they said it, so it is filtered like the live ring is
+            // (the reference does the same, in `LLFloaterIMSessionTab`'s
+            // server-history walk).
             SlSessionEvent::SessionServerHistory { kind, messages } => {
                 let key = ConversationKey::from_session_kind(*kind);
                 let lines: Vec<TranscriptLine> = messages
                     .iter()
+                    .filter(|message| {
+                        !text_muted(mutes, message.sender.uuid(), &message.sender_name)
+                    })
                     .map(|message| {
                         avatars.note_legacy_name(message.sender, &message.sender_name);
                         let own = identity.agent_id == Some(message.sender);
@@ -2838,12 +2906,18 @@ fn position_conversations_dock_host(
 #[cfg(test)]
 mod tests {
     use super::{
-        Command, ConferencePlan, ConversationKey, ConversationModel, ConversationTitle,
+        Command, ConferencePlan, ConversationKey, ConversationModel, ConversationTitle, MuteModel,
         SpeakerLink, TranscriptLine, command_for, conference_plan, invite_command, line_text,
         tab_label, transcript_line_color,
     };
+    use bevy::app::{App, Update};
     use pretty_assertions::assert_eq;
-    use sl_client_bevy::{AgentKey, ChatSource, GroupKey, ImSessionId, ObjectKey, Uuid};
+    use sl_client_bevy::{
+        AgentKey, ChatAudible, ChatMessage, ChatSessionKind, ChatSource, ChatType, GroupKey,
+        ImDialog, ImSessionId, InstantMessage, MuteEntry, MuteFlags, MuteType, ObjectKey,
+        RegionCoordinates, ServerHistoryMessage, SlCommand, SlEvent, SlIdentity, SlSessionEvent,
+        Uuid,
+    };
 
     /// The transcript colour chooser: the Nearby tab colours by speaker, every
     /// IM-flavoured tab colours own lines self and everything else IM.
@@ -3421,5 +3495,237 @@ mod tests {
             );
         }
         assert_eq!(ConversationKey::Nearby.session_kind(), None);
+    }
+
+    /// The blocked resident every filter test speaks as.
+    const TROLL: u128 = 0xB10C;
+
+    /// An app running *only* [`super::ingest_conversation_events`] over the
+    /// resources it reads — no floater, no UI, no grid. `blocked` is the mute
+    /// list it sees; an empty one is the control.
+    fn ingest_app(blocked: &[AgentKey]) -> App {
+        let mut model = MuteModel::default();
+        model.replace(
+            blocked
+                .iter()
+                .map(|agent| MuteEntry {
+                    id: agent.uuid(),
+                    name: "Troll Resident".to_owned(),
+                    mute_type: MuteType::Agent,
+                    flags: MuteFlags::default(),
+                })
+                .collect(),
+        );
+        let mut app = App::new();
+        app.add_message::<SlEvent>()
+            .add_message::<SlCommand>()
+            .init_resource::<ConversationModel>()
+            .init_resource::<crate::world_api::AvatarState>()
+            .init_resource::<SlIdentity>()
+            .insert_resource(model)
+            .add_systems(Update, super::ingest_conversation_events);
+        app
+    }
+
+    /// Feed one session event through the ingest.
+    fn ingest(app: &mut App, event: SlSessionEvent) {
+        app.world_mut().write_message(SlEvent(event));
+        app.update();
+    }
+
+    /// The events a blocked resident's presence arrives as: a nearby say, a
+    /// nearby typing notice, a direct IM, an IM typing notice, a group line and
+    /// a conference line.
+    fn blocked_traffic(troll: AgentKey) -> Vec<SlSessionEvent> {
+        let im = InstantMessage {
+            from_agent_id: troll,
+            from_agent_name: "Troll Resident".to_owned(),
+            to_agent_id: AgentKey::from(Uuid::from_u128(1)),
+            dialog: ImDialog::Message,
+            from_group: false,
+            region_id: None,
+            position: RegionCoordinates::new(0.0, 0.0, 0.0),
+            offline: false,
+            timestamp: None,
+            id: Uuid::from_u128(0xDEF),
+            parent_estate_id: 0,
+            message: "let me in".to_owned(),
+            binary_bucket: Vec::new(),
+        };
+        vec![
+            SlSessionEvent::ChatReceived(Box::new(ChatMessage {
+                from_name: "Troll Resident".to_owned(),
+                source: ChatSource::Agent(troll),
+                owner_id: None,
+                chat_type: ChatType::Normal,
+                audible: ChatAudible::Fully,
+                position: RegionCoordinates::new(0.0, 0.0, 0.0),
+                message: "shouting at you".to_owned(),
+            })),
+            SlSessionEvent::ChatTyping {
+                from_name: "Troll Resident".to_owned(),
+                source_id: troll.uuid(),
+                typing: true,
+            },
+            SlSessionEvent::InstantMessageReceived(Box::new(im)),
+            SlSessionEvent::ImTyping {
+                from_agent_id: troll,
+                from_agent_name: "Troll Resident".to_owned(),
+                session_id: Uuid::from_u128(0xDEF),
+                typing: true,
+            },
+            SlSessionEvent::GroupSessionMessage {
+                group_id: GroupKey::from(Uuid::from_u128(0x6409)),
+                from_agent_id: troll,
+                from_name: "Troll Resident".to_owned(),
+                message: "and here too".to_owned(),
+            },
+            SlSessionEvent::ConferenceSessionMessage {
+                session_id: Uuid::from_u128(0xC0FE),
+                from_agent_id: troll,
+                from_name: "Troll Resident".to_owned(),
+                message: "and here".to_owned(),
+            },
+        ]
+    }
+
+    /// The control: with nothing blocked, every one of those events lands — so
+    /// the filter test below is measuring the block, not a broken fixture.
+    #[test]
+    fn an_unblocked_resident_reaches_every_conversation_surface() {
+        let troll = AgentKey::from(Uuid::from_u128(TROLL));
+        let mut app = ingest_app(&[]);
+        for event in blocked_traffic(troll) {
+            ingest(&mut app, event);
+        }
+        let model = app.world().resource::<ConversationModel>();
+        assert_eq!(
+            get(model, ConversationKey::Nearby).map(|entry| entry.lines.len()),
+            Some(1),
+            "the nearby say is shown"
+        );
+        assert_eq!(
+            get(model, ConversationKey::Nearby).map(|entry| entry.typing.len()),
+            Some(1),
+            "the nearby typing notice is shown"
+        );
+        assert!(
+            get(model, ConversationKey::Direct(troll)).is_some(),
+            "the IM opens a tab"
+        );
+        assert!(
+            get(
+                model,
+                ConversationKey::Group(GroupKey::from(Uuid::from_u128(0x6409)))
+            )
+            .is_some(),
+            "the group line opens a tab"
+        );
+        assert!(
+            get(
+                model,
+                ConversationKey::Conference(ImSessionId::from(Uuid::from_u128(0xC0FE))),
+            )
+            .is_some(),
+            "the conference line opens a tab"
+        );
+    }
+
+    /// Blocking a resident's text chat drops every text surface they reach:
+    /// nearby chat, nearby *and* IM typing (either would name them without a
+    /// word said), the direct IM, and their group / conference lines. The
+    /// Nearby tab is still there — it always is — but it holds nothing.
+    #[test]
+    fn a_blocked_resident_reaches_no_conversation_surface() {
+        let troll = AgentKey::from(Uuid::from_u128(TROLL));
+        let mut app = ingest_app(&[troll]);
+        for event in blocked_traffic(troll) {
+            ingest(&mut app, event);
+        }
+        let model = app.world().resource::<ConversationModel>();
+        assert_eq!(
+            get(model, ConversationKey::Nearby).map(|entry| entry.lines.len()),
+            Some(0),
+            "no nearby line"
+        );
+        assert_eq!(
+            get(model, ConversationKey::Nearby).map(|entry| entry.typing.len()),
+            Some(0),
+            "no nearby typing notice"
+        );
+        assert!(
+            get(model, ConversationKey::Direct(troll)).is_none(),
+            "no IM tab is opened"
+        );
+        assert!(
+            get(
+                model,
+                ConversationKey::Group(GroupKey::from(Uuid::from_u128(0x6409)))
+            )
+            .is_none(),
+            "no group tab is opened"
+        );
+        assert!(
+            get(
+                model,
+                ConversationKey::Conference(ImSessionId::from(Uuid::from_u128(0xC0FE))),
+            )
+            .is_none(),
+            "no conference tab is opened"
+        );
+        assert_eq!(model.entries.len(), 1, "only the permanent Nearby tab");
+    }
+
+    /// A blocked resident's line in the **server backlog** is dropped too — the
+    /// one path by which something they said before the block can still arrive
+    /// — while everybody else's line in the same fetch is kept.
+    #[test]
+    fn server_backlog_drops_a_blocked_speaker() {
+        let troll = AgentKey::from(Uuid::from_u128(TROLL));
+        let friend = AgentKey::from(Uuid::from_u128(0xF11E));
+        let group = GroupKey::from(Uuid::from_u128(0x6409));
+        let mut app = ingest_app(&[troll]);
+        // The backlog deliberately opens no tab of its own — the session that
+        // fetched it opened one already — so an unblocked line opens it first.
+        ingest(
+            &mut app,
+            SlSessionEvent::GroupSessionMessage {
+                group_id: group,
+                from_agent_id: friend,
+                from_name: "Avatar One".to_owned(),
+                message: "live line".to_owned(),
+            },
+        );
+        ingest(
+            &mut app,
+            SlSessionEvent::SessionServerHistory {
+                kind: ChatSessionKind::Group { group_id: group },
+                messages: vec![
+                    ServerHistoryMessage {
+                        sender: troll,
+                        sender_name: "Troll Resident".to_owned(),
+                        text: "said before the block".to_owned(),
+                        timestamp: None,
+                    },
+                    ServerHistoryMessage {
+                        sender: friend,
+                        sender_name: "Avatar One".to_owned(),
+                        text: "kept".to_owned(),
+                        timestamp: None,
+                    },
+                ],
+            },
+        );
+        let model = app.world().resource::<ConversationModel>();
+        let band: Vec<&str> = get(model, ConversationKey::Group(group))
+            .map(|entry| {
+                entry
+                    .server_history
+                    .iter()
+                    .map(|line| line.body.as_str())
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert_eq!(band, vec!["kept"]);
     }
 }

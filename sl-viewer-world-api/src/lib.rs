@@ -29,17 +29,17 @@ use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use sl_client_bevy::{
-    AgentKey, AssetUpdateLocation, AttachmentPoint, AvatarName, BodyPhysics, ChatSessionKind,
-    Command, ControlFlags, DecodedTexture, DisplayName, Friend, FriendKey, FriendPresence,
-    FriendRights, GroupKey, GroupMembership, ImSessionId, InventoryFolderKey, InventoryKey,
-    JointOverrides, LightData, MAX_FACES, MeshKey, MuteEntry, MuteFlags, MuteType, Object,
-    ObjectExtraParams, ObjectKey, ObjectProperties, ParticleSystem, PrimFaceId, PrimLod,
-    PrimShapeParams, Priority, ReflectionProbe, ReflectionProbeFlags, RegionCoordinates,
-    RegionHandle, RestoreItem, Rotation, ScopedObjectId, ScriptLanguage, ScriptTarget,
-    ScriptUploadLocation, SculptOrMeshKey, SettingsKind, SkeletalDeformations, SlCommand,
-    SurfaceInfo, TaskInventoryKey, TerrainPatch, TextureAnimation, TextureFace, TextureKey,
-    TreeLod, Uuid, Vector, VolumeDeformations, avatar_texture, decode_texture_entry, pcode,
-    texture_face_uv_transform, to_bevy_image,
+    AgentKey, AssetUpdateLocation, AttachmentPoint, AvatarName, BodyPhysics, ChatMessage,
+    ChatSessionKind, ChatSource, Command, ControlFlags, DecodedTexture, DisplayName, Friend,
+    FriendKey, FriendPresence, FriendRights, GroupKey, GroupMembership, ImSessionId,
+    InventoryFolderKey, InventoryKey, JointOverrides, LightData, MAX_FACES, MeshKey, MuteEntry,
+    MuteFlags, MuteType, Object, ObjectExtraParams, ObjectKey, ObjectProperties, ParticleSystem,
+    PrimFaceId, PrimLod, PrimShapeParams, Priority, ReflectionProbe, ReflectionProbeFlags,
+    RegionCoordinates, RegionHandle, RestoreItem, Rotation, ScopedObjectId, ScriptLanguage,
+    ScriptTarget, ScriptUploadLocation, SculptOrMeshKey, SettingsKind, SkeletalDeformations,
+    SlCommand, SurfaceInfo, TaskInventoryKey, TerrainPatch, TextureAnimation, TextureFace,
+    TextureKey, TreeLod, Uuid, Vector, VolumeDeformations, avatar_texture, decode_texture_entry,
+    pcode, texture_face_uv_transform, to_bevy_image,
 };
 use sl_terrain::TerrainComposition;
 use sl_viewer_kit::coords::{sl_rotation_to_quat, sl_to_bevy_rotation};
@@ -671,7 +671,29 @@ impl MuteModel {
     pub fn is_muted_aspect(&self, id: Uuid, allow_mask: u32) -> bool {
         self.entries
             .iter()
-            .any(|entry| entry.id == id && !entry.flags.contains(allow_mask))
+            .any(|entry| !entry.id.is_nil() && entry.id == id && !entry.flags.contains(allow_mask))
+    }
+
+    /// [`Self::is_muted_aspect`] widened with the reference's **by-name**
+    /// fallback: `LLMuteList::isMuted(id, name, flags)` looks the id up first
+    /// and, failing that, consults the legacy by-name set.
+    ///
+    /// A [`MuteType::ByName`] entry is what the *Block object by name…* dialog
+    /// writes, and it is the only lever there is against a spammy object one
+    /// cannot click — a griefer's rezzer hands out a fresh id per object, so
+    /// matching on the id alone would leave that dialog inert for the very case
+    /// it exists for. An empty `name` never matches, so a caller with no name
+    /// to offer degrades to the id-only test rather than to "mute everything
+    /// blocked by name".
+    #[must_use]
+    pub fn is_muted_aspect_named(&self, id: Uuid, name: &str, allow_mask: u32) -> bool {
+        self.is_muted_aspect(id, allow_mask)
+            || (!name.is_empty()
+                && self.entries.iter().any(|entry| {
+                    entry.id.is_nil()
+                        && entry.name.eq_ignore_ascii_case(name)
+                        && !entry.flags.contains(allow_mask)
+                }))
     }
 
     /// The whole list, in display order.
@@ -762,6 +784,36 @@ fn same_target(entry: &MuteEntry, id: Uuid, name: &str) -> bool {
         entry.id.is_nil() && entry.name.eq_ignore_ascii_case(name)
     } else {
         entry.id == id
+    }
+}
+
+/// Whether a nearby-chat message must be swallowed because its speaker's **text
+/// chat** is blocked — the reference's pair of `flagTextChat` tests in
+/// `LLViewerMessage`'s `process_chat_from_simulator`:
+/// `isMuted(from_id, from_name, flagTextChat) || isMuted(owner_id,
+/// flagTextChat)`.
+///
+/// An object is muted by *either* its own id or its owner's, exactly as a
+/// sound from it is (`world_sounds`' `muted`): blocking the resident who
+/// rezzed a chatspammer has to silence every one of their objects, not just
+/// the one that was clickable. The owner is not consulted for an avatar
+/// speaker — an avatar owns itself, and `owner_id` is `None` there anyway.
+///
+/// The system's own lines are never mutable: they carry no id to block, and
+/// swallowing them would hide region restarts and the viewer's own notices.
+#[must_use]
+pub fn chat_text_muted(mutes: &MuteModel, message: &ChatMessage) -> bool {
+    let by_speaker =
+        |id: Uuid| mutes.is_muted_aspect_named(id, &message.from_name, MuteFlags::ALLOW_TEXT_CHAT);
+    match message.source {
+        ChatSource::Agent(agent) => by_speaker(agent.uuid()),
+        ChatSource::Object(object) => {
+            by_speaker(object.uuid())
+                || message
+                    .owner_id
+                    .is_some_and(|owner| mutes.is_muted_aspect(owner, MuteFlags::ALLOW_TEXT_CHAT))
+        }
+        ChatSource::System | ChatSource::Unknown { .. } => false,
     }
 }
 
@@ -7111,17 +7163,126 @@ mod tests {
     use std::collections::HashMap;
 
     use super::{
-        PROVISIONAL_ID_CHARS, PatchKey, TerrainState, provisional_label, target_for,
-        used_baked_slots,
+        MuteModel, PROVISIONAL_ID_CHARS, PatchKey, TerrainState, chat_text_muted,
+        provisional_label, target_for, used_baked_slots,
     };
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{
-        AgentKey, RegionHandle, ScriptLanguage, ScriptTarget, TerrainLayerType, TerrainPatch,
-        TextureEntry, TextureFace, TextureKey, Uuid, avatar_texture, encode_texture_entry,
+        AgentKey, ChatAudible, ChatMessage, ChatSource, ChatType, MuteEntry, MuteFlags, MuteType,
+        ObjectKey, RegionCoordinates, RegionHandle, ScriptLanguage, ScriptTarget, TerrainLayerType,
+        TerrainPatch, TextureEntry, TextureFace, TextureKey, Uuid, avatar_texture,
+        encode_texture_entry,
     };
 
     /// The region and grid position the terrain test patches use.
     const KEY: PatchKey = (RegionHandle(0), 1, 2);
+
+    /// A mute-list entry blocking `id` under `name` as `mute_type`, with the
+    /// given exception bits (`MuteFlags::default()` mutes every aspect).
+    fn mute(id: Uuid, name: &str, mute_type: MuteType, flags: u32) -> MuteEntry {
+        MuteEntry {
+            id,
+            name: name.to_owned(),
+            mute_type,
+            flags: MuteFlags(flags),
+        }
+    }
+
+    /// A received nearby-chat message from `source`, named `from_name`, with an
+    /// optional owner (an object's).
+    fn said(from_name: &str, source: ChatSource, owner_id: Option<Uuid>) -> ChatMessage {
+        ChatMessage {
+            from_name: from_name.to_owned(),
+            source,
+            owner_id,
+            chat_type: ChatType::Normal,
+            audible: ChatAudible::Fully,
+            position: RegionCoordinates::new(0.0, 0.0, 0.0),
+            message: "hello".to_owned(),
+        }
+    }
+
+    /// The text-chat aspect is muted only for a target actually on the list and
+    /// only while that entry does *not* carry the text exception — and a
+    /// **by-name** entry (what *Block object by name…* writes) matches a
+    /// speaker whose id is nowhere on the list, which is the whole point of
+    /// blocking by name.
+    #[test]
+    fn text_mute_honours_the_exception_bit_and_the_by_name_fallback() {
+        let troll = Uuid::from_u128(0x11);
+        let quiet = Uuid::from_u128(0x22);
+        let spammer = Uuid::from_u128(0x33);
+        let mut model = MuteModel::default();
+        model.replace(vec![
+            mute(troll, "Troll Resident", MuteType::Agent, 0),
+            // Blocked, but text chat excepted — they may still speak.
+            mute(
+                quiet,
+                "Quiet Resident",
+                MuteType::Agent,
+                MuteFlags::ALLOW_TEXT_CHAT,
+            ),
+            mute(Uuid::nil(), "Ad Spammer", MuteType::ByName, 0),
+        ]);
+
+        assert!(model.is_muted_aspect_named(troll, "Troll Resident", MuteFlags::ALLOW_TEXT_CHAT));
+        assert!(
+            !model.is_muted_aspect_named(quiet, "Quiet Resident", MuteFlags::ALLOW_TEXT_CHAT),
+            "an entry carrying the text exception is not text-muted"
+        );
+        assert!(
+            model.is_muted_aspect_named(spammer, "ad spammer", MuteFlags::ALLOW_TEXT_CHAT),
+            "a by-name entry matches case-insensitively, whatever the speaker's id"
+        );
+        assert!(
+            !model.is_muted_aspect_named(spammer, "Someone Else", MuteFlags::ALLOW_TEXT_CHAT),
+            "an unblocked speaker stays unblocked"
+        );
+        assert!(
+            !model.is_muted_aspect_named(Uuid::nil(), "", MuteFlags::ALLOW_TEXT_CHAT),
+            "a nil id with no name matches nothing — not every by-name entry at once"
+        );
+    }
+
+    /// An object's chat is silenced by a block on the object *or* on its owner,
+    /// the same pair of keys a sound from it is silenced by; the system's own
+    /// lines are never blocked.
+    #[test]
+    fn object_chat_is_muted_by_object_or_owner() {
+        let owner = Uuid::from_u128(0x44);
+        let object = Uuid::from_u128(0x55);
+        let other = Uuid::from_u128(0x66);
+        let mut owner_blocked = MuteModel::default();
+        owner_blocked.replace(vec![mute(owner, "Rezzer Resident", MuteType::Agent, 0)]);
+        let mut object_blocked = MuteModel::default();
+        object_blocked.replace(vec![mute(object, "Yapping Cube", MuteType::Object, 0)]);
+
+        let chatted = said(
+            "Yapping Cube",
+            ChatSource::Object(ObjectKey::from(object)),
+            Some(owner),
+        );
+        assert!(chat_text_muted(&owner_blocked, &chatted), "owner blocked");
+        assert!(chat_text_muted(&object_blocked, &chatted), "object blocked");
+        assert!(
+            !chat_text_muted(
+                &owner_blocked,
+                &said(
+                    "Innocent Cube",
+                    ChatSource::Object(ObjectKey::from(other)),
+                    Some(other),
+                ),
+            ),
+            "another owner's object is untouched"
+        );
+        assert!(
+            !chat_text_muted(
+                &owner_blocked,
+                &said("Second Life", ChatSource::System, None)
+            ),
+            "the system has no id to block and is never swallowed"
+        );
+    }
 
     /// A single-patch map for the land patch of the given edge size whose height
     /// is `f(x, y)`, at [`KEY`].
