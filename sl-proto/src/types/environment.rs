@@ -646,6 +646,79 @@ impl EnvironmentSettings {
         }
     }
 
+    /// The environment a simulator serves for a region that has not been given
+    /// one: the reference's own default sky and water on a **single-keyframe**
+    /// day cycle, over a four-hour day offset sixteen hours.
+    ///
+    /// An *empty* cycle is not a neutral choice — it says nothing about the sky,
+    /// so every client renders its own built-in default instead and two viewers
+    /// pointed at the same region disagree for reasons that have nothing to do
+    /// with either renderer. Serving a real frame makes the sky
+    /// wire-determined.
+    ///
+    /// **One** keyframe, deliberately: a cycle with two renders differently
+    /// depending on the region clock, so two captures minutes apart would not be
+    /// comparable. The price is that a day *position* cannot select anything
+    /// here ([`day_position_moves_the_sky`](Self::day_position_moves_the_sky) is
+    /// false) — a region that wants a choosable sun serves a cycle that holds
+    /// one, e.g. [`sky_presets::install_preset_day_cycle`](crate::install_preset_day_cycle).
+    #[must_use]
+    pub fn default_region() -> Self {
+        let sky = SkySettings::legacy_windlight_default(DEFAULT_SKY_FRAME);
+        let water = WaterSettings::legacy_default(DEFAULT_WATER_FRAME);
+        // The two frames are named apart because sky and water frames share one
+        // name namespace on the wire (see `DayCycle`): a same-named pair encodes
+        // to a single map entry and the sky is the one lost.
+        let keyframe = |name: &str| {
+            vec![DayCycleFrame {
+                keyframe: 0.0,
+                name: name.to_owned(),
+            }]
+        };
+        Self {
+            parcel_id: -1,
+            region_id: Uuid::nil(),
+            day_length: 14400,
+            day_offset: 57600,
+            flags: 0,
+            env_version: 1,
+            track_altitudes: [1000.0, 2000.0, 3000.0],
+            day_cycle: DayCycle {
+                name: "Default Daycycle".to_owned(),
+                water_track: keyframe(DEFAULT_WATER_FRAME),
+                sky_tracks: vec![keyframe(DEFAULT_SKY_FRAME)],
+                sky_frames: BTreeMap::from([(DEFAULT_SKY_FRAME.to_owned(), sky)]),
+                water_frames: BTreeMap::from([(DEFAULT_WATER_FRAME.to_owned(), water)]),
+            },
+        }
+    }
+
+    /// Whether the day-cycle position can change the sky a camera at `altitude`
+    /// sees: the track in force there schedules at least two keyframes naming
+    /// **different** frames the cycle actually defines.
+    ///
+    /// This is the question a harness asking for "the sky at day position `p`"
+    /// has to answer before it can claim to have honoured the request. A cycle
+    /// with one keyframe renders the same sky at every position, and so does one
+    /// whose keyframes all name the same frame or name frames that are not
+    /// there: in each case the position is accepted, changes nothing, and the
+    /// capture is of whatever sky the region already had.
+    #[must_use]
+    pub fn day_position_moves_the_sky(&self, altitude: f32) -> bool {
+        let cycle = &self.day_cycle;
+        let Some(track) = cycle.sky_tracks.get(self.sky_track_for_altitude(altitude)) else {
+            return false;
+        };
+        let mut defined = track
+            .iter()
+            .map(|frame| frame.name.as_str())
+            .filter(|name| cycle.sky_frames.contains_key(*name));
+        let Some(first) = defined.next() else {
+            return false;
+        };
+        defined.any(|name| name != first)
+    }
+
     /// The 0-based index into [`DayCycle::sky_tracks`] whose altitude band
     /// contains `altitude` (metres above the region), mirroring the reference
     /// `LLEnvironment::calculateSkyTrackForAltitude`

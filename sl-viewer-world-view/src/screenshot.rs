@@ -81,7 +81,7 @@ use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use bevy::window::WindowRef;
 use sl_client_bevy::SlCommand;
 
-use crate::harness_status::HarnessStatus;
+use crate::harness_status::{DayPositionStatus, HarnessStatus};
 use crate::quiescence::SceneQuiescence;
 use crate::session::{ViewerSession, request_logout};
 use crate::world_api::{OverlayCamera, ViewerCamera};
@@ -342,6 +342,18 @@ pub(crate) struct ScreenshotSchedule {
     /// Whether a region is expected at all — false for a grid-less `--replay`
     /// run, where nothing should wait for a login that was never attempted.
     grid_expected: bool,
+    /// The worst thing the run's pinned sun selected while a frame was being
+    /// taken, or `None` when it pinned none.
+    ///
+    /// Two rules, because the window matters. **Before the first frame** each
+    /// reading simply replaces the last: a viewer starts on its built-in
+    /// single-frame default and only asks the region for an environment once it
+    /// is in world, so the first several seconds of every run report a
+    /// substituted sky that nothing was photographed under. **From the first
+    /// frame onward** an unhonoured reading sticks: a late environment can turn
+    /// a substituted sky into the region's own, but it cannot un-take the frames
+    /// captured before it did.
+    day_position: Option<DayPositionStatus>,
 }
 
 /// How many consecutive quiet frames the first capture waits for: long enough
@@ -395,7 +407,32 @@ impl ScreenshotSchedule {
             settled: false,
             status_written: false,
             grid_expected,
+            day_position: None,
         }
+    }
+
+    /// Fold what the environment currently makes of the run's pinned sun into
+    /// the answer the status file will carry — see [`Self::day_position`] for
+    /// which readings are kept.
+    fn observe_day_position(&mut self, pin: sl_viewer_world_scene::environment::DayPositionPin) {
+        let (Some(requested), Some(detail)) = (pin.position(), pin.describe()) else {
+            return;
+        };
+        // A frame is on disk, and this reading is no better than the one it was
+        // taken under.
+        if self.written > 0
+            && self
+                .day_position
+                .as_ref()
+                .is_some_and(|seen| !seen.honoured)
+        {
+            return;
+        }
+        self.day_position = Some(DayPositionStatus {
+            requested,
+            honoured: pin.is_the_regions_own_sky(),
+            detail,
+        });
     }
 
     /// Write `harness-status.json` for this run, once.
@@ -420,6 +457,13 @@ impl ScreenshotSchedule {
                 self.written,
                 self.max_frames,
             ),
+        };
+        // After the frame counts, so a pin that could not be honoured overrides
+        // "complete": the frames are there and they are not of the asked-for
+        // scene, which is the more important of the two things to say first.
+        let status = match self.day_position.clone() {
+            Some(day_position) => status.with_day_position(day_position),
+            None => status,
         };
         if let Err(error) = status.write(&self.dir) {
             // The frames are already on disk and the run is over; a harness that
@@ -762,8 +806,15 @@ pub(crate) fn capture_screenshots(
     mut pinned: Option<ResMut<PinnedCapture>>,
     mut scene_dump: Option<ResMut<crate::scene_dump::SceneDumpRequest>>,
     overlays: Query<(Entity, &OverlayCamera, Option<&RenderTarget>)>,
+    environment: Option<Res<sl_viewer_world_scene::environment::EnvironmentState>>,
 ) {
     let now = time.elapsed_secs();
+    // Sampled every frame rather than once, because the environment arrives
+    // after the schedule is armed and can be replaced again mid-run; the
+    // schedule keeps the worst answer it has seen.
+    if let Some(environment) = environment.as_deref() {
+        schedule.observe_day_position(environment.day_position_pin());
+    }
     // A run that cannot capture is over: say so in the status file and log out,
     // rather than filling the directory with frames of whatever is on screen.
     if schedule.failure.is_some() {
@@ -948,10 +999,56 @@ mod tests {
 
     use crate::world_api::OverlayCamera;
 
-    use super::{CaptureContent, CaptureSize, MAX_CAPTURE_DIMENSION, parse_capture_size};
+    use super::{
+        CaptureContent, CaptureSize, MAX_CAPTURE_DIMENSION, ScreenshotSchedule, parse_capture_size,
+    };
+    use sl_viewer_world_scene::environment::DayPositionPin;
 
     /// The boxed error every test in this module reports through.
     type TestError = Box<dyn core::error::Error>;
+
+    /// A run whose first seconds report a substituted sky — which every run's
+    /// do, because a viewer starts on its built-in single-frame default and only
+    /// asks the region for an environment once it is in world — must not carry
+    /// that into its status. Nothing was photographed under it.
+    ///
+    /// This is not hypothetical: the first cross-check run of the pinned sun
+    /// failed exactly here, reporting "the region's day cycle schedules one sky"
+    /// for a viewer whose own log showed it had ingested a four-frame cycle
+    /// seconds later and long before the first frame.
+    #[test]
+    fn the_startup_sky_is_not_the_sky_the_frames_were_taken_under() {
+        let mut schedule = ScreenshotSchedule::new(std::env::temp_dir(), true);
+        schedule.observe_day_position(DayPositionPin::SubstitutedPresets { position: 0.5 });
+        schedule.observe_day_position(DayPositionPin::RegionDayCycle { position: 0.5 });
+        assert_eq!(
+            schedule.day_position.as_ref().map(|pin| pin.honoured),
+            Some(true),
+            "the region's cycle arrived before any frame was taken"
+        );
+    }
+
+    /// Once a frame is on disk, a later good reading does not un-take it: the
+    /// captured frames really were lit by the substitute.
+    #[test]
+    fn a_substituted_sky_sticks_from_the_first_frame() {
+        let mut schedule = ScreenshotSchedule::new(std::env::temp_dir(), true);
+        schedule.written = 1;
+        schedule.observe_day_position(DayPositionPin::SubstitutedPresets { position: 0.5 });
+        schedule.observe_day_position(DayPositionPin::RegionDayCycle { position: 0.5 });
+        assert_eq!(
+            schedule.day_position.as_ref().map(|pin| pin.honoured),
+            Some(false)
+        );
+    }
+
+    /// A run that pinned nothing reports nothing, whatever the environment says.
+    #[test]
+    fn an_unpinned_run_reports_no_sun() {
+        let mut schedule = ScreenshotSchedule::new(std::env::temp_dir(), true);
+        schedule.observe_day_position(DayPositionPin::NotPinned);
+        assert!(schedule.day_position.is_none());
+    }
 
     /// The ordinary form: the 1080p grid both viewers' harnesses are pointed at.
     #[test]

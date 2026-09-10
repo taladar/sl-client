@@ -11,7 +11,7 @@ use bytes::Bytes;
 use sl_proto::{
     ArrivalPlacement, EnvironmentSettings, Maturity, OpenSimExtras, ProductType, RegionHandle,
     RegionIdentity, RegionLocalObjectId, SimSession, SimulatorFeatures, Uuid, VoiceConfig,
-    region_name_from_wire,
+    install_preset_day_cycle, region_name_from_wire,
 };
 use sl_types::key::AgentKey;
 use sl_types::lsl::Vector;
@@ -97,6 +97,40 @@ pub struct RegionConfig {
     /// client opens a child circuit to each and can walk over the border into
     /// them ([`crate::neighbours`]).
     pub neighbours: NeighbourPolicy,
+}
+
+impl RegionConfig {
+    /// Make sure a day *position* can select a sky in this region, installing
+    /// the four legacy WindLight presets over its sky schedule when it cannot,
+    /// and say whether that was necessary.
+    ///
+    /// A region's stock environment is deliberately **one keyframe**
+    /// ([`EnvironmentSettings::default_region`]): a cycle with one frame does
+    /// not move with the region clock, which is what makes two captures minutes
+    /// apart comparable. The price is that "photograph this scene at dusk" has
+    /// no answer here — every position renders the same sky — so a run that
+    /// wants to choose a sun has to be given a cycle that holds one, and this is
+    /// where it is given.
+    ///
+    /// Done on the **grid** rather than in a viewer on purpose. Either viewer
+    /// could synthesise a cycle of its own when the region's cannot be sampled,
+    /// and then the two would be photographing two different skies while
+    /// agreeing that they had honoured the same request — which is the one
+    /// failure a cross-check must not be able to produce. A region that serves
+    /// the schedule serves it to both of them.
+    ///
+    /// A scene that already carries a samplable cycle is left exactly as it is:
+    /// its author chose those frames.
+    pub fn ensure_day_cycle_can_be_sampled(&mut self) -> bool {
+        let environment = self
+            .environment
+            .get_or_insert_with(EnvironmentSettings::default_region);
+        if environment.day_position_moves_the_sky(0.0) {
+            return false;
+        }
+        install_preset_day_cycle(environment);
+        true
+    }
 }
 
 impl Default for RegionConfig {

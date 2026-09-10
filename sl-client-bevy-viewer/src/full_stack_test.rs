@@ -213,10 +213,13 @@ pub(crate) struct HarnessOptions {
     /// render the region's **own** environment as the grid serves it.
     ///
     /// Pinning is the default because the sky is a function of a clock nothing
-    /// in a test controls. It is also a *replacement*: a pinned position
-    /// installs a synthesised cycle of legacy presets
-    /// ([`EnvironmentState::apply`]), which is exactly what an environment test
-    /// must not have — the grid's own sky would never reach the picture.
+    /// in a test controls. Against **this grid** it is also a *replacement*:
+    /// the fake region's stock environment schedules a single sky, which no
+    /// position can choose between, so the viewer installs a synthesised cycle
+    /// of legacy presets over it ([`EnvironmentState::apply`]) — exactly what an
+    /// environment test must not have, because the grid's own sky would never
+    /// reach the picture. (A region serving a cycle with more than one sky keeps
+    /// it, pin or no pin; none of these fixtures does.)
     ///
     /// [`EnvironmentState::apply`]: sl_viewer_world_scene::environment::EnvironmentState
     day_position: Option<f32>,

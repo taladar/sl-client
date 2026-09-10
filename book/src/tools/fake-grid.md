@@ -237,6 +237,50 @@ A run leaves `run.json`, the two configuration files, and per viewer its
 `frame_NNN.png` sequence, `scene.json` (when that viewer writes one),
 `harness-status.json` and its own `viewer.log`.
 
+**Choosing the sun.** `--day-position <0..1>` pins the time of day in
+both viewers, and any comparison involving light wants it: the two
+viewers' *own* defaults are not the same sky.
+
+Both pin the same way — sample the **region's** day cycle at that
+position, hold the result as a fixed local sky — which means the region
+has to serve a cycle the position can choose between. A region's stock
+environment is deliberately a single keyframe (that is what makes two
+captures minutes apart comparable), so `--day-position` also dresses
+every region of the run with the four legacy WindLight presets, keyed
+midnight / sunrise / midday / sunset at `0.0` / `0.25` / `0.5` / `0.75`.
+A scene that carries its own multi-frame cycle through
+`RegionFixture::environment` keeps it, frames and all.
+
+Done on the grid rather than in a viewer deliberately. Either viewer
+could synthesise a cycle of its own when the region's cannot be sampled
+— and then the two would be photographing two different skies while both
+reporting the request as honoured, which is the one failure a
+cross-check must not be able to produce.
+
+Each viewer reports what its pin selected in `harness-status.json`:
+
+```json
+{
+  "ok": true,
+  "reason": "complete",
+  "frames_written": 30,
+  "frames_expected": 30,
+  "viewer": "firestorm",
+  "day_position": {
+    "requested": 0.25,
+    "honoured": true,
+    "detail": "blended the region's day cycle (4 sky keyframes) at 0.25"
+  }
+}
+```
+
+An **unhonoured** pin fails that viewer's status, fails the run, and is
+printed — `SUN NOT PINNED at 0.25 — …`. A capture lit by a sky nobody
+chose is indistinguishable, from the outside, from a good one: it is a
+directory of plausible frames of the wrong scene. So is a viewer that
+says nothing about the pin at all (`SUN NOT REPORTED`), which is what a
+build older than the field looks like.
+
 **Two regions, and walking between them.** `--neighbour` stands the
 scene's *second* half one slot east of the first and lets the grid
 announce it, and `--cross-after <seconds>` walks the agent over that
@@ -397,13 +441,9 @@ almost straight above (a plywood cube shows a bright top face and nearly
 black sides) — and it also carries `star_brightness` 250, so a
 midday-lit ground sits under a blue sky with stars in it. Read that as
 the fixture's signature rather than as dusk, and do not infer the time of
-day from the sky. `--day-position` cannot move it either: the harness
-pins the sun by looking for a frame **at exactly** that keyframe, a
-one-keyframe cycle has one at `0.0` and nothing anywhere else, and the
-only report of that is a line in the viewer's own log —
-`day cycle has no sky at position 0.5; leaving environment alone`. A
-scene that wants a choosable sun has to carry a day cycle with frames at
-the positions it means, through `RegionConfig::environment`.
+day from the sky. That is the sky of an **unpinned** run; a run that
+passes `--day-position` is photographing a different cycle on purpose —
+see below.
 
 **The checker is legible at the fixture's own distance.** The catalogue's
 prims are 1 m and its checker is 512² with 128 px cells, so a face is

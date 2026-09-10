@@ -196,6 +196,10 @@ pub use types::{
     packages_from_llsd, particle_pattern, pcode, prim_flags, rotation_to_azimuth_altitude,
     texture_anim_mode, uploaded_inventory_item,
 };
+pub use types::{
+    MIDDAY, MIDNIGHT, PRESET_DAY_CYCLE_NAME, PRESET_DAY_KEYFRAMES, SUNRISE, SUNSET, SkyPreset,
+    install_preset_day_cycle, preset_day_cycle, preset_sky_schedule, sky_settings_from,
+};
 
 // Re-export `Uuid`: it appears in public types (chat/IM ids) and command APIs,
 // so consumers can name it without depending on `uuid` directly.
