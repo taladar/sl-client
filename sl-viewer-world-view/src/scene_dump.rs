@@ -135,8 +135,8 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use serde::Serialize;
 use sl_client_bevy::{
-    AgentKey, MAX_FACES, RegionHandle, Rotation, ScopedObjectId, SlIdentity, SlRegionIdentity,
-    TextureFace, decode_texture_entry, pcode,
+    AgentKey, MAX_FACES, RegionHandle, ScopedObjectId, SlIdentity, SlRegionIdentity, TextureFace,
+    decode_texture_entry, pcode,
 };
 use sl_viewer_world_api::{
     AvatarState, MAX_PARENT_WALK, ObjectCategory, ObjectState, SceneObject, TrackedObject,
@@ -763,14 +763,11 @@ const FOCUS_DISTANCE_M: f32 = 10.0;
 /// The `environment` section.
 fn build_environment(environment: &EnvironmentState) -> EnvironmentDump {
     let position = sl_viewer_world_scene::sky::day_position(environment);
-    let sky = environment.settings.blended_sky_settings(0.0, position);
-    let water = environment.settings.blended_water_settings(position);
-    let direction = |rotation: &Rotation| {
-        // The reference's own derivation (`LLSettingsSky::getSunDirection`): the
-        // body's orientation applied to the Second Life X axis.
-        let vector = crate::coords::sl_rotation_to_quat(rotation).mul_vec3(Vec3::X);
-        [vector.x, vector.y, vector.z]
-    };
+    let sky = environment.sky_at(0.0, position);
+    let water = environment.water_at(position);
+    // The reference's own derivation (`LLSettingsSky::getSunDirection`): the
+    // body's orientation applied to the Second Life X axis.
+    let direction = crate::coords::sky_body_direction;
     EnvironmentDump {
         day_position: position,
         sun_direction: sky

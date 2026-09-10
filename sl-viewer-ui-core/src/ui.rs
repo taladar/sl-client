@@ -115,6 +115,22 @@ use bevy::ui_widgets::{Activate, Button};
 
 use crate::ui_font::{UiFont, register_ui_fonts};
 
+/// A node that is **fixed to the screen**: permanent chrome the user cannot drag
+/// aside, dismiss, or close — the top menu bar, the bottom toolbar.
+///
+/// It exists for one guarantee: a floater's **title bar** is the only part of it
+/// a pointer can drag, so a title bar under opaque fixed chrome is a window that
+/// is on screen and permanently out of reach. The floater manager confines
+/// windows to the screen minus every band marked here — the reference viewer's
+/// `LLFloaterView` snap rect.
+///
+/// **Not** for anything the user can get out of the way themselves. A menu
+/// popup, a context menu and another floater all overlap a title bar
+/// temporarily, and reserving space for them would push windows around every
+/// time one opened. This marks only what is always there.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct ScreenChrome;
+
 /// The bottom-area layout host, published so the neighbour bottom-edge controls
 /// (nearby chat bar, volume, voice, quick preferences — each its own task) parent
 /// themselves into the row just above the button bar. That row is split into two

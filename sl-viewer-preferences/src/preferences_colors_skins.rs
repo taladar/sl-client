@@ -315,10 +315,7 @@ fn repopulate_theme_combo(
             mapped.push(SettingValue::String((*theme).to_owned()));
         }
     }
-    set_options.write(SetComboOptions {
-        combo: anchor,
-        labels,
-    });
+    set_options.write(SetComboOptions::new(anchor, labels));
     values.0 = mapped;
     *memo = Some(skin);
 }

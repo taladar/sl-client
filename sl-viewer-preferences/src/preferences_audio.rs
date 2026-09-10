@@ -211,10 +211,10 @@ fn refresh_output_device_options(
         if values.0 != new_values {
             values.0 = new_values;
         }
-        writer.write(SetComboOptions {
+        writer.write(SetComboOptions::new(
             combo,
-            labels: options.iter().map(|(label, _)| label.clone()).collect(),
-        });
+            options.iter().map(|(label, _)| label.clone()).collect(),
+        ));
     }
 }
 

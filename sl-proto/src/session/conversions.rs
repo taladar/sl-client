@@ -1045,24 +1045,46 @@ fn track_from_llsd(track: &Llsd) -> Vec<DayCycleFrame> {
         .unwrap_or_default()
 }
 
-/// Parses a sky frame `OSDMap` into [`SkySettings`]. The legacy haze colours and
-/// scalars come from the frame's `legacy_haze` sub-map.
+/// Parses a sky frame `OSDMap` into [`SkySettings`].
+///
+/// The seven legacy-haze values are looked up in **three** places, in the
+/// reference's own order (`get_float` / `get_color`,
+/// `indra/llinventory/llsettingssky.cpp`): the frame's `legacy_haze` sub-map,
+/// then the frame itself, then the viewer's built-in default. All three are
+/// real: a sky the reference saved writes each value into whichever of the two
+/// places it was read from (`set_legacy`), so an asset in the wild can hold
+/// them either way — and one that holds them at the top level used to decode
+/// here as a black, hazeless sky, because only the sub-map was read and the
+/// fallback was zero rather than the default.
 fn sky_settings_from_llsd(name: &str, sky: &Llsd) -> SkySettings {
     let haze = sky.get("legacy_haze");
-    let haze_f32 = |key: &str| haze.map_or(0.0, |block| f32_member(block, key));
-    let haze_color = |key: &str| color_from_llsd(haze.and_then(|block| block.get(key)));
+    // The built-in defaults, stated once: the same frame `legacy_windlight_default`
+    // builds, which is the reference's `LLSettingsSky::defaults()` plus the haze
+    // fallbacks `get_float` / `get_color` carry.
+    let fallback = SkySettings::legacy_windlight_default(name);
+    let haze_f32 = |key: &str, default: f32| {
+        haze.and_then(|block| block.get(key))
+            .or_else(|| sky.get(key))
+            .and_then(Llsd::as_f32)
+            .unwrap_or(default)
+    };
+    let haze_color = |key: &str, default: Color| {
+        haze.and_then(|block| block.get(key))
+            .or_else(|| sky.get(key))
+            .map_or(default, |value| color_from_llsd(Some(value)))
+    };
     SkySettings {
         name: name.to_owned(),
         sun_rotation: rotation_from_llsd(sky.get("sun_rotation")),
         moon_rotation: rotation_from_llsd(sky.get("moon_rotation")),
         sunlight_color: color_alpha_from_llsd(sky.get("sunlight_color")),
-        ambient: haze_color("ambient"),
-        blue_horizon: haze_color("blue_horizon"),
-        blue_density: haze_color("blue_density"),
-        haze_horizon: haze_f32("haze_horizon"),
-        haze_density: haze_f32("haze_density"),
-        density_multiplier: haze_f32("density_multiplier"),
-        distance_multiplier: haze_f32("distance_multiplier"),
+        ambient: haze_color("ambient", fallback.ambient),
+        blue_horizon: haze_color("blue_horizon", fallback.blue_horizon),
+        blue_density: haze_color("blue_density", fallback.blue_density),
+        haze_horizon: haze_f32("haze_horizon", fallback.haze_horizon),
+        haze_density: haze_f32("haze_density", fallback.haze_density),
+        density_multiplier: haze_f32("density_multiplier", fallback.density_multiplier),
+        distance_multiplier: haze_f32("distance_multiplier", fallback.distance_multiplier),
         max_y: f32_member(sky, "max_y"),
         gamma: f32_member(sky, "gamma"),
         // Top-level EEP-only setting; absent on a legacy sky, so `0.0` there.
@@ -1092,6 +1114,11 @@ fn sky_settings_from_llsd(name: &str, sky: &Llsd) -> SkySettings {
         bloom_texture: optional_texture_member(sky, "bloom_id"),
         halo_texture: optional_texture_member(sky, "halo_id"),
         rainbow_texture: optional_texture_member(sky, "rainbow_id"),
+        // Carried, never read: the reference no longer reads the two dome
+        // values either, but it still writes them, so an asset that has them
+        // keeps them.
+        dome_offset: sky.get("dome_offset").and_then(Llsd::as_f32),
+        dome_radius: sky.get("dome_radius").and_then(Llsd::as_f32),
         rayleigh_config: density_profile_from_llsd(
             sky.get("rayleigh_config"),
             DensityLayer::rayleigh_default,
@@ -4994,6 +5021,16 @@ fn sky_settings_to_llsd(sky: &SkySettings) -> Llsd {
             "reflection_probe_ambiance",
             real(sky.reflection_probe_ambiance),
         ));
+    }
+    // The two dome values the viewer carries but does not read, and only when
+    // the frame had them.
+    for (key, value) in [
+        ("dome_offset", sky.dome_offset),
+        ("dome_radius", sky.dome_radius),
+    ] {
+        if let Some(value) = value {
+            entries.push((key, real(value)));
+        }
     }
     llsd_map(entries)
 }

@@ -95,10 +95,7 @@ pub fn drive_terrain_lighting(
 ) {
     let altitude = camera.single().map_or(0.0, |camera| camera.translation().y);
     let position = crate::sky::day_position(&environment);
-    let Some(sky) = environment
-        .settings
-        .blended_sky_settings(altitude, position)
-    else {
+    let Some(sky) = environment.sky_at(altitude, position) else {
         return;
     };
     let lighting = terrain_lighting(&sky);

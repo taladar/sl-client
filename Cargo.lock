@@ -8545,6 +8545,7 @@ dependencies = [
  "sl-viewer-audio",
  "sl-viewer-chat",
  "sl-viewer-edit",
+ "sl-viewer-environment",
  "sl-viewer-inventory",
  "sl-viewer-kit",
  "sl-viewer-map",
@@ -9192,6 +9193,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-viewer-environment"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "pretty_assertions",
+ "sl-client-bevy",
+ "sl-viewer-inventory",
+ "sl-viewer-notifications",
+ "sl-viewer-pickers",
+ "sl-viewer-platform",
+ "sl-viewer-settings",
+ "sl-viewer-ui-core",
+ "sl-viewer-ui-widgets",
+ "sl-viewer-world-api",
+ "sl-viewer-world-scene",
+]
+
+[[package]]
 name = "sl-viewer-inventory"
 version = "0.1.0"
 dependencies = [
@@ -9219,6 +9238,7 @@ dependencies = [
  "jiff",
  "parry3d",
  "pretty_assertions",
+ "serde",
  "sl-client-bevy",
  "sl-l10n",
  "thiserror 2.0.19",
@@ -9404,6 +9424,7 @@ dependencies = [
  "sl-rlv",
  "sl-settings",
  "sl-viewer-audio",
+ "sl-viewer-inventory",
  "sl-viewer-kit",
  "sl-viewer-notifications",
  "sl-viewer-platform",
@@ -9612,6 +9633,8 @@ dependencies = [
  "bytes",
  "image",
  "pretty_assertions",
+ "serde",
+ "serde_json",
  "sl-avatar",
  "sl-client-bevy",
  "sl-proto",

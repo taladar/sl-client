@@ -590,9 +590,7 @@ pub(crate) fn setup_sky(
     let placeholder = images.add(placeholder_image());
     // Seed the material from the current environment at ground level and the
     // current day position; `drive_sky` refines it every frame.
-    let sky = environment
-        .settings
-        .blended_sky_settings(0.0, day_position(&environment));
+    let sky = environment.sky_at(0.0, day_position(&environment));
     let params = sky.map_or_else(default_sky_params, |sky| {
         sky_params(&sky, Vec3::Y, 1.0, 1.0)
     });
@@ -759,10 +757,7 @@ pub(crate) fn drive_sky(
 ) {
     let altitude = camera.single().map_or(0.0, |camera| camera.translation().y);
     let position = day_position(&environment);
-    let Some(sky) = environment
-        .settings
-        .blended_sky_settings(altitude, position)
-    else {
+    let Some(sky) = environment.sky_at(altitude, position) else {
         return;
     };
 
@@ -998,10 +993,7 @@ pub(crate) fn drive_sun_moon_discs(
     };
     let camera_pos = camera.translation();
     let position = day_position(&environment);
-    let Some(sky) = environment
-        .settings
-        .blended_sky_settings(camera_pos.y, position)
-    else {
+    let Some(sky) = environment.sky_at(camera_pos.y, position) else {
         return;
     };
 
@@ -1246,10 +1238,7 @@ pub(crate) fn drive_clouds(
 ) {
     let altitude = camera.single().map_or(0.0, |camera| camera.translation().y);
     let position = day_position(&environment);
-    let Some(sky) = environment
-        .settings
-        .blended_sky_settings(altitude, position)
-    else {
+    let Some(sky) = environment.sky_at(altitude, position) else {
         return;
     };
 
@@ -1481,10 +1470,7 @@ pub(crate) fn drive_stars(
     };
     let camera_pos = camera.translation();
     let position = day_position(&environment);
-    let Some(sky) = environment
-        .settings
-        .blended_sky_settings(camera_pos.y, position)
-    else {
+    let Some(sky) = environment.sky_at(camera_pos.y, position) else {
         return;
     };
 

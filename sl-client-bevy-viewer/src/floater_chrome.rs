@@ -102,7 +102,16 @@ mod tests {
     const SHRINK_BY: Vec2 = Vec2::new(-2000.0, -2000.0);
 
     /// How far past the trailing-bottom corner the clamp check throws a window,
-    /// in logical pixels.
+    /// in logical pixels — *on top of* the window's own size.
+    ///
+    /// The window's size has to be in the sum. The drag is aimed from the middle
+    /// of the title bar, so a throw of a fixed distance carries a wide window's
+    /// leading edge only half its width past the corner; a window wider than
+    /// twice this would land short of the clamp, still comfortably on screen,
+    /// and sail through the grabbable check below without the clamp ever having
+    /// run. That is what the `AT_THE_EDGE` half of the check exists to catch,
+    /// and it caught it — on the first window wide enough (Personal Lighting) to
+    /// out-run a constant written when nothing was over 760 wide.
     const OFF_SCREEN_BY: f32 = 400.0;
 
     /// How much of a thrown-off window's title bar must still be on screen, in
@@ -299,12 +308,13 @@ mod tests {
                 failures.push(format!("floater `{}`: no title bar to grab", floater.id));
                 continue;
             };
+            let window = logical_size(&app, root).unwrap_or(Vec2::ZERO);
             drag_by(
                 &mut app,
                 bar,
                 Vec2::new(
-                    viewport.x - bar.x + OFF_SCREEN_BY,
-                    viewport.y - bar.y + OFF_SCREEN_BY,
+                    viewport.x - bar.x + window.x + OFF_SCREEN_BY,
+                    viewport.y - bar.y + window.y + OFF_SCREEN_BY,
                 ),
             );
 

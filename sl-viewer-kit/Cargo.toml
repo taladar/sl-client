@@ -30,6 +30,9 @@ image = { version = "0.25.10", default-features = false, features = ["tga"] }
 # Civil dates, for turning a profile's "born on" string into an age in days.
 jiff = { version = "0.2.35" }
 parry3d = { version = "0.27.0" }
+# `FixedSky` is written to the account's saved personal environment, so the menu
+# pin survives a relog along with the settings it pins.
+serde = { workspace = true, features = ["derive"] }
 sl-client-bevy = { workspace = true, features = ["bevy_pbr"] }
 # `bevy_pbr` for `preserve_glow_mask_alpha`, which the alpha-blended materials
 # here must call in `Material::specialize` or they bloom through the glow pass.

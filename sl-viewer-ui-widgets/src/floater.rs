@@ -734,22 +734,137 @@ fn logical_size(computed: &ComputedNode) -> Vec2 {
 }
 
 /// Clamp a floater's logical position so at least `MIN_VISIBLE` pixels of it
-/// stay on screen.
+/// stay inside `snap` — the screen minus every band of fixed chrome.
 ///
 /// Reasoned entirely in **logical inline/block** terms, which is what makes it
 /// direction-independent: `position.x` is the offset of the leading edge from the
 /// leading side of the viewport, and under RTL the whole frame mirrors uniformly,
 /// so the same bounds hold. The inline offset may go as negative as
 /// `MIN_VISIBLE - width` (the trailing sliver still shows) and as positive as
-/// `viewport - MIN_VISIBLE` (the leading sliver still shows); the top is kept at
-/// or below zero's worth of visibility down to `viewport - MIN_VISIBLE`.
-fn clamp_position(position: Vec2, size: Vec2, viewport: Vec2) -> Vec2 {
-    let inline = position.x.clamp(
-        MIN_VISIBLE - size.x,
-        (viewport.x - MIN_VISIBLE).max(MIN_VISIBLE - size.x),
-    );
-    let block = position.y.clamp(0.0, (viewport.y - MIN_VISIBLE).max(0.0));
+/// `snap.max.x - MIN_VISIBLE` (the leading sliver still shows).
+///
+/// # Why it is a snap rect and not the viewport
+///
+/// The block **minimum** is `snap.min.y`, not zero, and that is the whole point.
+/// A window's **title bar** is the only part of it a pointer can drag; a title
+/// bar under the opaque menu bar is a window that cannot be moved, resized from
+/// the top, or closed. Not off screen — which this clamp already rescued — but
+/// on screen and permanently out of reach, which it did not.
+///
+/// The same argument covers every band of chrome the user cannot get out of the
+/// way: the bottom toolbar, and any side bar. So the clamp confines a window to
+/// the screen *minus* all of them (`ScreenChrome`, gathered by
+/// [`snap_rect_of`]) — the reference viewer's `LLFloaterView` snap rect.
+/// Transient overlays are deliberately **not** in it: a menu popup, a context
+/// menu and another floater all cover a title bar for a moment, and reserving
+/// space for them would shove every window aside each time one opened.
+///
+/// Because the clamp runs every frame it also **repairs** a position persisted
+/// before the rule existed — which is how the quick-preferences panel came to
+/// open at `[16, 0]` on one grid and stay there, undraggable, every session
+/// after.
+fn clamp_position(position: Vec2, size: Vec2, snap: Rect) -> Vec2 {
+    let inline_min = snap.min.x + MIN_VISIBLE - size.x;
+    let inline = position
+        .x
+        .clamp(inline_min, (snap.max.x - MIN_VISIBLE).max(inline_min));
+    let block = position
+        .y
+        .clamp(snap.min.y, (snap.max.y - MIN_VISIBLE).max(snap.min.y));
     Vec2::new(inline, block)
+}
+
+/// The logical rect of a laid-out UI node — `ComputedNode` is physical and
+/// `UiGlobalTransform` is a centre, so both are converted here rather than at
+/// each use.
+///
+/// Per component, because the whole-`Vec2` operators are `glam`'s and the
+/// workspace's `arithmetic_side_effects` lint fires on those — the same reason
+/// [`logical_size`] spells its arithmetic out.
+fn logical_rect(computed: &ComputedNode, transform: &UiGlobalTransform) -> Rect {
+    let size = logical_size(computed);
+    let inverse = computed.inverse_scale_factor();
+    let centre = Vec2::new(
+        transform.translation.x * inverse,
+        transform.translation.y * inverse,
+    );
+    let half = Vec2::new(size.x / 2.0, size.y / 2.0);
+    Rect {
+        min: Vec2::new(centre.x - half.x, centre.y - half.y),
+        max: Vec2::new(centre.x + half.x, centre.y + half.y),
+    }
+}
+
+/// How much of an edge a chrome band must span before it counts as covering that
+/// edge, as a fraction of the viewport.
+///
+/// Nearly all of it, because a *bar* is a thing that spans its edge: the menu bar
+/// and the toolbar are full width, and a side bar runs the height between them.
+/// A box that covers only part of an edge is one a window can be dragged out
+/// from under, so it reserves nothing and the user keeps the room.
+///
+/// A band that does not reach across is not covering the side it touches, and
+/// insisting it does is what makes this safe against **mid-layout** boxes: the
+/// menu bar is spawned content-sized and stretched to the window width a frame
+/// later, so for exactly one frame it measures as a tall narrow column — 4x316
+/// in an 800x600 harness whose settled bar is 800x38. Reserving off that frame
+/// shoved every window a third of the way down the screen and left it there,
+/// because this clamp only ever pushes: the unrecoverable move the snap rect
+/// exists to prevent, delivered by the snap rect. Found by the build-tools
+/// tests, whose window silently stopped being where they clicked.
+const CHROME_EDGE_SPAN: f32 = 0.9;
+
+/// How close to an edge a chrome band must sit to count as anchored to it, in
+/// logical pixels — a bar is flush against its edge, so this is slack for
+/// rounding, not for placement.
+const CHROME_EDGE_TOLERANCE: f32 = 1.0;
+
+/// The screen minus every band of fixed chrome: the region a floater is confined
+/// to.
+///
+/// A band is credited to the edge it is anchored to **and** spans, so a
+/// full-width strip at the top raises the rect's top and one at the bottom
+/// lowers its bottom; a full-height strip at either side does the same inline.
+/// A band that touches no edge reserves nothing however large it is — a window
+/// can always be dragged out from under something that is not against an edge.
+///
+/// A degenerate result (chrome that would swallow the screen) falls back to the
+/// whole viewport: a rect no window fits in would clamp every window to one
+/// point, which is worse than the overlap it was avoiding.
+///
+/// Pure, over plain rects, because this is the part worth testing and a test
+/// should not have to stand up a laid-out UI tree to reach it.
+fn snap_rect_of(bands: &[Rect], viewport: Vec2) -> Rect {
+    let screen = Rect {
+        min: Vec2::ZERO,
+        max: viewport,
+    };
+    let mut snap = screen;
+    for band in bands {
+        let width = band.max.x - band.min.x;
+        let height = band.max.y - band.min.y;
+        if width <= 0.0 || height <= 0.0 {
+            continue;
+        }
+        if width >= viewport.x * CHROME_EDGE_SPAN {
+            if band.min.y <= CHROME_EDGE_TOLERANCE {
+                snap.min.y = snap.min.y.max(band.max.y);
+            } else if band.max.y >= viewport.y - CHROME_EDGE_TOLERANCE {
+                snap.max.y = snap.max.y.min(band.min.y);
+            }
+        }
+        if height >= viewport.y * CHROME_EDGE_SPAN {
+            if band.min.x <= CHROME_EDGE_TOLERANCE {
+                snap.min.x = snap.min.x.max(band.max.x);
+            } else if band.max.x >= viewport.x - CHROME_EDGE_TOLERANCE {
+                snap.max.x = snap.max.x.min(band.min.x);
+            }
+        }
+    }
+    if snap.max.x - snap.min.x < MIN_VISIBLE || snap.max.y - snap.min.y < MIN_VISIBLE {
+        return screen;
+    }
+    snap
 }
 
 // ---------------------------------------------------------------------------
@@ -1958,6 +2073,7 @@ fn close_active_floater_shortcut(
 fn clamp_floaters_on_screen(
     mut floaters: Query<(&mut Floater, &ComputedNode, &UiPanelShown)>,
     windows: Query<&Window, With<PrimaryWindow>>,
+    chrome: Query<(&ComputedNode, &UiGlobalTransform), With<sl_viewer_ui_core::ui::ScreenChrome>>,
     ui_scale: Res<UiScale>,
 ) {
     let Ok(window) = windows.single() else {
@@ -1967,11 +2083,28 @@ fn clamp_floaters_on_screen(
     // dividing the viewport to infinity and clamping every window to nothing.
     let scale = if ui_scale.0 > 0.0 { ui_scale.0 } else { 1.0 };
     let viewport = Vec2::new(window.width() / scale, window.height() / scale);
+    // The screen minus the fixed chrome, measured rather than assumed: each bar
+    // is a row of text that reflows with the UI font size and the locale, so a
+    // constant would be wrong for everyone who has changed either. A surface
+    // with no chrome at all (the gallery, most tests) gets the whole viewport,
+    // which is the behaviour that predates this.
+    let bands: Vec<Rect> = chrome
+        .iter()
+        .map(|(computed, transform)| logical_rect(computed, transform))
+        .collect();
+    let snap = snap_rect_of(&bands, viewport);
     for (mut floater, computed, shown) in &mut floaters {
         if !shown.0 || floater.docked_in.is_some() {
             continue;
         }
-        let clamped = clamp_position(floater.position, logical_size(computed), viewport);
+        // A window that has never been laid out has no size to keep on screen,
+        // and the bounds derived from a zero one are meaningless. Wait for the
+        // measurement rather than move it by a frame's worth of nothing.
+        let size = logical_size(computed);
+        if size.x <= 0.0 || size.y <= 0.0 {
+            continue;
+        }
+        let clamped = clamp_position(floater.position, size, snap);
         // Exact inequality is right: `clamp_position` returns the input unchanged
         // when it is already on screen, and a bound otherwise — no epsilon needed,
         // and the whole-`Vec2` subtraction the lint forbids is avoided.
@@ -2209,7 +2342,8 @@ mod tests {
         FloaterSystems, FloaterZTop, KeyedFloaterOpen, KeyedFloaters, MIN_VISIBLE, RESIZE_FLOOR,
         apply_floater_commands, apply_floater_content, apply_floater_glyphs, apply_floater_inset,
         build_deferred_floater_content, clamp_floaters_on_screen, clamp_position, drag_position,
-        floater_panel, highlight_active_floater, resize_size, spawn_floater, toggle_floater,
+        floater_panel, highlight_active_floater, resize_size, snap_rect_of, spawn_floater,
+        toggle_floater,
     };
     use bevy::picking::backend::HitData;
     use bevy::picking::pointer::PointerId;
@@ -2410,21 +2544,223 @@ mod tests {
     fn the_clamp_keeps_a_sliver_on_screen() {
         let size = Vec2::new(300.0, 200.0);
         let viewport = Vec2::new(1000.0, 800.0);
+        let screen = Rect {
+            min: Vec2::ZERO,
+            max: viewport,
+        };
         // Well inside: unchanged.
         assert_eq!(
-            clamp_position(Vec2::new(100.0, 100.0), size, viewport),
+            clamp_position(Vec2::new(100.0, 100.0), size, screen),
             Vec2::new(100.0, 100.0),
         );
         // Dragged far off the trailing / bottom edge: pulled back to the last
         // visible sliver.
-        let far = clamp_position(Vec2::new(2000.0, 2000.0), size, viewport);
+        let far = clamp_position(Vec2::new(2000.0, 2000.0), size, screen);
         assert_eq!(far.x, viewport.x - MIN_VISIBLE);
         assert_eq!(far.y, viewport.y - MIN_VISIBLE);
         // Dragged far off the leading / top edge: the trailing sliver still shows,
         // and the top never goes above zero.
-        let near = clamp_position(Vec2::new(-2000.0, -2000.0), size, viewport);
+        let near = clamp_position(Vec2::new(-2000.0, -2000.0), size, screen);
         assert_eq!(near.x, MIN_VISIBLE - size.x);
         assert_eq!(near.y, 0.0);
+    }
+
+    /// **A title bar is never left under the menu bar.**
+    ///
+    /// The menu bar is opaque and drawn over the floaters, so a window at block
+    /// offset zero is on screen and unreachable: its title bar -- the only part
+    /// a drag can grab -- is behind the bar, and no amount of dragging can help
+    /// because there is nothing left to drag. The clamp that exists to keep a
+    /// window reachable has to cover this too.
+    ///
+    /// The case that found it: the quick-preferences panel had persisted
+    /// `[16, 0]` on one grid, so every later session restored it under the bar
+    /// and left it there. That is why the floor is applied to a window that is
+    /// merely *restored* too, not only to one being dragged -- the clamp runs
+    /// every frame, so it repairs geometry saved before the rule existed.
+    #[expect(
+        clippy::float_cmp,
+        reason = "the clamp produces exact bound values, asserted exactly"
+    )]
+    #[test]
+    fn the_clamp_keeps_the_title_bar_below_the_menu_bar() {
+        let size = Vec2::new(300.0, 200.0);
+        let inset = 24.0;
+        let snap = Rect {
+            min: Vec2::new(0.0, inset),
+            max: Vec2::new(1000.0, 800.0),
+        };
+        // The persisted position that started this: hard against the top.
+        let restored = clamp_position(Vec2::new(16.0, 0.0), size, snap);
+        assert_eq!(restored.x, 16.0, "the inline offset is not this rule's");
+        assert_eq!(restored.y, inset, "pushed clear of the bar");
+        // Dragged up past the bar: same floor.
+        assert_eq!(
+            clamp_position(Vec2::new(100.0, -2000.0), size, snap).y,
+            inset
+        );
+        // Already below it: untouched.
+        assert_eq!(
+            clamp_position(Vec2::new(100.0, 100.0), size, snap),
+            Vec2::new(100.0, 100.0),
+        );
+        // A snap rect shorter than the bar cannot satisfy both bounds; the floor
+        // wins, because a window below the bar is the one that can be moved.
+        let cramped = Rect {
+            min: Vec2::new(0.0, inset),
+            max: Vec2::new(1000.0, 10.0),
+        };
+        assert_eq!(
+            clamp_position(Vec2::new(100.0, 0.0), size, cramped).y,
+            inset
+        );
+    }
+
+    /// **The bottom toolbar reserves too** — the generalisation the menu bar was
+    /// only the first case of. A window dragged to the bottom keeps a grabbable
+    /// sliver **above** the toolbar rather than sliding its title bar behind it.
+    #[expect(
+        clippy::float_cmp,
+        reason = "the clamp produces exact bound values, asserted exactly"
+    )]
+    #[test]
+    fn the_clamp_reserves_every_fixed_band() {
+        let size = Vec2::new(300.0, 200.0);
+        let snap = Rect {
+            min: Vec2::new(0.0, 24.0),
+            max: Vec2::new(1000.0, 740.0),
+        };
+        // Dragged off the bottom: held a sliver clear of the toolbar, not of the
+        // screen edge.
+        assert_eq!(
+            clamp_position(Vec2::new(100.0, 2000.0), size, snap).y,
+            snap.max.y - MIN_VISIBLE
+        );
+        // A side bar does the same inline, in whichever direction it sits.
+        let with_side = Rect {
+            min: Vec2::new(60.0, 24.0),
+            max: Vec2::new(940.0, 740.0),
+        };
+        assert_eq!(
+            clamp_position(Vec2::new(-2000.0, 100.0), size, with_side).x,
+            with_side.min.x + MIN_VISIBLE - size.x
+        );
+        assert_eq!(
+            clamp_position(Vec2::new(2000.0, 100.0), size, with_side).x,
+            with_side.max.x - MIN_VISIBLE
+        );
+    }
+
+    /// **The snap rect is built from the bands that actually cover an edge.**
+    ///
+    /// A full-width strip at the top raises the top, one at the bottom lowers the
+    /// bottom, and a full-height strip at a side moves that side in. Anything
+    /// floating in the middle of the screen reserves nothing, however large — it
+    /// is not covering an edge, and a window can always be dragged out from under
+    /// it.
+    #[expect(
+        clippy::float_cmp,
+        reason = "the snap rect is assembled from exact edges, asserted exactly"
+    )]
+    #[test]
+    fn the_snap_rect_credits_each_band_to_the_edge_it_covers() {
+        let viewport = Vec2::new(1000.0, 800.0);
+        let bands = [
+            // A menu bar across the top.
+            (
+                Rect {
+                    min: Vec2::new(0.0, 0.0),
+                    max: Vec2::new(1000.0, 38.0),
+                },
+                "top",
+            ),
+            // A toolbar across the bottom.
+            (
+                Rect {
+                    min: Vec2::new(0.0, 760.0),
+                    max: Vec2::new(1000.0, 800.0),
+                },
+                "bottom",
+            ),
+            // A side bar down the leading edge.
+            (
+                Rect {
+                    min: Vec2::new(0.0, 38.0),
+                    max: Vec2::new(50.0, 760.0),
+                },
+                "leading",
+            ),
+            // A big panel in the middle: touches no edge, reserves nothing.
+            (
+                Rect {
+                    min: Vec2::new(200.0, 200.0),
+                    max: Vec2::new(900.0, 600.0),
+                },
+                "middle",
+            ),
+        ];
+        let snap = snap_rect_of(&bands.map(|(rect, _)| rect), viewport);
+        assert_eq!(snap.min.y, 38.0, "the top bar raised the top");
+        assert_eq!(snap.max.y, 760.0, "the bottom bar lowered the bottom");
+        assert_eq!(snap.min.x, 50.0, "the side bar moved the leading edge in");
+        assert_eq!(snap.max.x, 1000.0, "nothing covers the trailing edge");
+    }
+
+    /// **A band mid-layout reserves nothing.**
+    ///
+    /// The menu bar is spawned content-sized and stretched to the window width a
+    /// frame later, so for exactly one frame it measures as a tall narrow column
+    /// — 4x316 in an 800x600 harness whose settled bar is 800x38. Reserving off
+    /// that frame shoved every window a third of the way down the screen and
+    /// left it there, because the clamp only ever pushes: precisely the
+    /// unrecoverable move the snap rect exists to prevent, delivered by the snap
+    /// rect. Found by the build-tools tests, whose window silently stopped being
+    /// where they clicked.
+    #[expect(
+        clippy::float_cmp,
+        reason = "the snap rect is assembled from exact edges, asserted exactly"
+    )]
+    #[test]
+    fn a_band_that_does_not_span_its_edge_reserves_nothing() {
+        let viewport = Vec2::new(800.0, 600.0);
+        // The transient box: as tall as a third of the screen, four pixels wide.
+        let transient = Rect {
+            min: Vec2::ZERO,
+            max: Vec2::new(4.0, 316.0),
+        };
+        assert_eq!(
+            snap_rect_of(&[transient], viewport),
+            Rect {
+                min: Vec2::ZERO,
+                max: viewport
+            },
+            "a column four pixels wide covers neither the top nor a side"
+        );
+        // The bar it becomes, one frame later, does reserve.
+        let settled = Rect {
+            min: Vec2::ZERO,
+            max: Vec2::new(800.0, 38.0),
+        };
+        assert_eq!(snap_rect_of(&[settled], viewport).min.y, 38.0);
+    }
+
+    /// Chrome that would swallow the screen falls back to the whole viewport: a
+    /// rect no window fits in would clamp every window to one point, which is
+    /// worse than the overlap it avoids.
+    #[test]
+    fn chrome_that_swallows_the_screen_reserves_nothing() {
+        let viewport = Vec2::new(800.0, 600.0);
+        let everything = Rect {
+            min: Vec2::ZERO,
+            max: viewport,
+        };
+        assert_eq!(
+            snap_rect_of(&[everything], viewport),
+            Rect {
+                min: Vec2::ZERO,
+                max: viewport
+            },
+        );
     }
 
     /// The on-screen clamp measures the viewport in the **floater's** units, so

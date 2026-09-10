@@ -70,6 +70,7 @@ pub use timeline::{
     Action, At, EventPredicate, ObjectEdit, ParcelEdit, RegionEdit, Step, Timeline,
 };
 pub use udp_assets::{UdpAssetFixtures, flat_terrain_raw};
+pub use uploads::UpdateCompletionItem;
 pub use voice::VoiceBackend;
 pub use world::{
     AVATAR_CENTRE_ABOVE_GROUND_M, AvatarIdentity, ParcelAccessLists, ParcelListing, RegionChange,

@@ -1272,8 +1272,22 @@ mod test {
         Ok(())
     }
 
-    /// An `Update*AgentInventory` replacement carries the cap name and the item
-    /// being updated through to the completion event.
+    /// **An update's completion carries the new asset and *not* the item**,
+    /// while the event handed to the driver still names it.
+    ///
+    /// The two real grids disagree: OpenSim echoes the item
+    /// (`UpdateItemAsset.cs`), Second Life does not, and the reference client
+    /// never asks it to — `LLBufferedAssetUploadInfo::finishUpload` reads
+    /// `new_asset` and takes the item from the id it sent. So a client may not
+    /// depend on the echo, and this simulator answers the **stricter** way on
+    /// purpose: one that does depend on it has to fail here rather than in front
+    /// of a person. Modelling the lenient behaviour is what let the settings
+    /// editor match its save on the echoed item, pass every offline test, and
+    /// then report "Saving…" forever against the real grid.
+    ///
+    /// The driver half is not optional in the other direction: an update has to
+    /// be applied to the item it replaces, and once the metadata is consumed the
+    /// event is the only place that id survives.
     #[test]
     fn update_agent_item_replaces_asset() -> Result<(), TestError> {
         let mut caps = new_caps()?;
@@ -1287,15 +1301,31 @@ mod test {
             b"notecard-text",
         )?;
         assert!(completion.new_asset.is_some());
-        assert!(completion.new_inventory_item.is_some());
+        assert!(
+            completion.new_inventory_item.is_none(),
+            "an update's reply names the asset only; the client already knows the item"
+        );
         match sim.poll_event() {
-            Some(ServerEvent::CapsAssetUploaded { metadata, .. }) => match *metadata {
-                CapsUploadMetadata::UpdateAgentItem { cap, item_id } => {
-                    assert_eq!(cap, CAP_UPDATE_NOTECARD_AGENT_INVENTORY);
-                    assert_eq!(item_id, item);
+            Some(ServerEvent::CapsAssetUploaded {
+                metadata,
+                new_inventory_item,
+                ..
+            }) => {
+                assert_eq!(
+                    new_inventory_item,
+                    Some(item),
+                    "the driver still has to know which item to apply the upload to"
+                );
+                match *metadata {
+                    CapsUploadMetadata::UpdateAgentItem { cap, item_id } => {
+                        assert_eq!(cap, CAP_UPDATE_NOTECARD_AGENT_INVENTORY);
+                        assert_eq!(item_id, item);
+                    }
+                    other => {
+                        return Err(format!("expected UpdateAgentItem, got {other:?}").into());
+                    }
                 }
-                other => return Err(format!("expected UpdateAgentItem, got {other:?}").into()),
-            },
+            }
             other => return Err(format!("expected CapsAssetUploaded, got {other:?}").into()),
         }
         Ok(())

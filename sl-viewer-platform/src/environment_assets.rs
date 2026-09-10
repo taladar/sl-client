@@ -132,6 +132,21 @@ impl EnvironmentAssetManager {
         self.decoded.get(&id)
     }
 
+    /// Whether `id` is known to have no fetchable / decodable asset, so a
+    /// caller waiting on [`get`](Self::get) can stop waiting.
+    ///
+    /// [`request`](Self::request) is idempotent and silently ignores a failed
+    /// id, which makes "still fetching" and "will never arrive" look identical
+    /// from outside — and a UI that waits on the difference (the quick
+    /// preferences preset combos hold their selection until the pick lands)
+    /// would wait for the rest of the session. A capability arriving later
+    /// re-arms the set (`rearm_unavailable`), so this is "failed as of now", not
+    /// a verdict.
+    #[must_use]
+    pub fn is_unavailable(&self, id: AssetKey) -> bool {
+        self.unavailable.contains(&id)
+    }
+
     /// A point-in-time snapshot of the settings-asset fetch/decode pipeline, for
     /// the F3 diagnostics overlay: entry counts bucketed by stage plus the
     /// cumulative disk-cache-hit / GC counters. Delegates to the wrapped

@@ -55,7 +55,7 @@ use crate::world_api::rlv::{
     SETTING_HIDE_LOCKED_INVENTORY, SETTING_HIDE_LOCKED_LAYERS, SETTING_MAIN,
     SETTING_SHARED_INV_AUTO_RENAME, SETTING_SHOW_ASSERTION_FAILURES, SETTING_SHOW_ELLIPSIS,
     SETTING_SHOW_REDIRECT_CHAT_TYPING, SETTING_SPLIT_REDIRECT_CHAT, SETTING_WEAR_REPLACE_UNLOCKED,
-    rlv_flag,
+    can_change_environment, rlv_flag,
 };
 
 /// The z-index the bar renders at — above the floaters (so a window never covers
@@ -157,6 +157,11 @@ const CAN_UNDO: &str = "can-undo";
 /// Condition key: the current selection has an object whose last undone edit can
 /// be **redone** (`crate::edit_undo`).
 const CAN_REDO: &str = "can-redo";
+
+/// Condition key: the user may still change their own environment — false while
+/// an object holds `@setenv`, which hands one object the sky and takes the
+/// menu (and, in the reference, the environment editors) away from the user.
+const CAN_CHANGE_ENVIRONMENT: &str = "can-change-environment";
 
 /// The condition keys that hold while the matching World ▸ Environment fixed
 /// environment is pinned — one per group × time (Day Cycle / Legacy / Modern ×
@@ -322,19 +327,23 @@ static ENV_DAYCYCLE_MENU: MenuDef = MenuDef {
     items: &[
         MenuItemDef::Command(
             MenuCommand::new("Sunrise", "env-daycycle-sunrise")
-                .checked_when(ENV_DAYCYCLE_SUNRISE_ACTIVE),
+                .checked_when(ENV_DAYCYCLE_SUNRISE_ACTIVE)
+                .enabled_when(CAN_CHANGE_ENVIRONMENT),
         ),
         MenuItemDef::Command(
             MenuCommand::new("Midday", "env-daycycle-midday")
-                .checked_when(ENV_DAYCYCLE_MIDDAY_ACTIVE),
+                .checked_when(ENV_DAYCYCLE_MIDDAY_ACTIVE)
+                .enabled_when(CAN_CHANGE_ENVIRONMENT),
         ),
         MenuItemDef::Command(
             MenuCommand::new("Sunset", "env-daycycle-sunset")
-                .checked_when(ENV_DAYCYCLE_SUNSET_ACTIVE),
+                .checked_when(ENV_DAYCYCLE_SUNSET_ACTIVE)
+                .enabled_when(CAN_CHANGE_ENVIRONMENT),
         ),
         MenuItemDef::Command(
             MenuCommand::new("Midnight", "env-daycycle-midnight")
-                .checked_when(ENV_DAYCYCLE_MIDNIGHT_ACTIVE),
+                .checked_when(ENV_DAYCYCLE_MIDNIGHT_ACTIVE)
+                .enabled_when(CAN_CHANGE_ENVIRONMENT),
         ),
     ],
 };
@@ -346,17 +355,23 @@ static ENV_LEGACY_MENU: MenuDef = MenuDef {
     items: &[
         MenuItemDef::Command(
             MenuCommand::new("Sunrise", "env-legacy-sunrise")
-                .checked_when(ENV_LEGACY_SUNRISE_ACTIVE),
+                .checked_when(ENV_LEGACY_SUNRISE_ACTIVE)
+                .enabled_when(CAN_CHANGE_ENVIRONMENT),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Midday", "env-legacy-midday").checked_when(ENV_LEGACY_MIDDAY_ACTIVE),
+            MenuCommand::new("Midday", "env-legacy-midday")
+                .checked_when(ENV_LEGACY_MIDDAY_ACTIVE)
+                .enabled_when(CAN_CHANGE_ENVIRONMENT),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Sunset", "env-legacy-sunset").checked_when(ENV_LEGACY_SUNSET_ACTIVE),
+            MenuCommand::new("Sunset", "env-legacy-sunset")
+                .checked_when(ENV_LEGACY_SUNSET_ACTIVE)
+                .enabled_when(CAN_CHANGE_ENVIRONMENT),
         ),
         MenuItemDef::Command(
             MenuCommand::new("Midnight", "env-legacy-midnight")
-                .checked_when(ENV_LEGACY_MIDNIGHT_ACTIVE),
+                .checked_when(ENV_LEGACY_MIDNIGHT_ACTIVE)
+                .enabled_when(CAN_CHANGE_ENVIRONMENT),
         ),
     ],
 };
@@ -369,17 +384,23 @@ static ENV_MODERN_MENU: MenuDef = MenuDef {
     items: &[
         MenuItemDef::Command(
             MenuCommand::new("Sunrise", "env-modern-sunrise")
-                .checked_when(ENV_MODERN_SUNRISE_ACTIVE),
+                .checked_when(ENV_MODERN_SUNRISE_ACTIVE)
+                .enabled_when(CAN_CHANGE_ENVIRONMENT),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Midday", "env-modern-midday").checked_when(ENV_MODERN_MIDDAY_ACTIVE),
+            MenuCommand::new("Midday", "env-modern-midday")
+                .checked_when(ENV_MODERN_MIDDAY_ACTIVE)
+                .enabled_when(CAN_CHANGE_ENVIRONMENT),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Sunset", "env-modern-sunset").checked_when(ENV_MODERN_SUNSET_ACTIVE),
+            MenuCommand::new("Sunset", "env-modern-sunset")
+                .checked_when(ENV_MODERN_SUNSET_ACTIVE)
+                .enabled_when(CAN_CHANGE_ENVIRONMENT),
         ),
         MenuItemDef::Command(
             MenuCommand::new("Midnight", "env-modern-midnight")
-                .checked_when(ENV_MODERN_MIDNIGHT_ACTIVE),
+                .checked_when(ENV_MODERN_MIDNIGHT_ACTIVE)
+                .enabled_when(CAN_CHANGE_ENVIRONMENT),
         ),
     ],
 };
@@ -398,8 +419,26 @@ static ENVIRONMENT_MENU: MenuDef = MenuDef {
         MenuItemDef::Separator,
         MenuItemDef::Command(
             MenuCommand::new("Use Shared Environment", "env-shared")
-                .checked_when(ENV_SHARED_ACTIVE),
+                .checked_when(ENV_SHARED_ACTIVE)
+                .enabled_when(CAN_CHANGE_ENVIRONMENT),
         ),
+        MenuItemDef::Separator,
+        // The window that edits the same local layer the presets above pin, so
+        // it is gated on the same `@setenv` restriction they are.
+        MenuItemDef::Command(
+            MenuCommand::new("Personal Lighting…", "toggle-personal-lighting")
+                .enabled_when(CAN_CHANGE_ENVIRONMENT),
+        ),
+        // The settings-asset library. Deliberately *not* gated on `@setenv`:
+        // most of what it does is inventory work — rename, delete, open the
+        // editor — and a collar holding the sky has nothing to say about those.
+        // The one entry that does change the environment, Apply Only To Myself,
+        // carries the restriction itself, so the window stays usable while the
+        // sky stays taken.
+        MenuItemDef::Command(MenuCommand::new(
+            "My Environments…",
+            "toggle-my-environments",
+        )),
     ],
 };
 
@@ -727,6 +766,9 @@ fn spawn_top_menu_bar(mut commands: Commands, root: Res<UiRoot>, asset_server: R
         GlobalZIndex(TOP_BAR_Z),
         MenuConditions::default(),
         TopMenuBar,
+        // Permanent, opaque, and drawn over the floaters: the floater manager
+        // keeps every title bar out from under it (`ScreenChrome`).
+        crate::ui::ScreenChrome,
         // A lone `Alt` tap opens this bar into keyboard navigation (see
         // `crate::menu`'s `menu_alt_enter`).
         PrimaryMenuBar,
@@ -758,7 +800,8 @@ fn spawn_top_menu_bar(mut commands: Commands, root: Res<UiRoot>, asset_server: R
     reason = "a Bevy system's parameters are its injected resources / queries, and this one is \
               the fan-in of every condition the bar's check marks and enable gates read: the \
               floaters, the environment, the selection and edit tool, the settings, the \
-              presence modes, the panel-shown query, and the bar itself"
+              presence modes, the RLV state that can take the environment menu away, the \
+              panel-shown query, and the bar itself"
 )]
 fn update_top_menu_conditions(
     floaters: Query<(Entity, &crate::floater::Floater)>,
@@ -767,6 +810,7 @@ fn update_top_menu_conditions(
     edit_tool: Res<crate::world_api::EditToolState>,
     settings: Res<crate::settings::ViewerSettings>,
     presence: Option<Res<crate::world_api::PresenceState>>,
+    rlv_session: Option<Res<crate::world_api::rlv::RlvSession>>,
     panels: Query<&UiPanelShown>,
     mut bars: Query<&mut MenuConditions, With<TopMenuBar>>,
 ) {
@@ -940,10 +984,22 @@ fn update_top_menu_conditions(
         }
     }
     // The Environment submenu's check marks: exactly one of the four presets or
-    // the shared default holds. The gallery has no environment resource, so the
-    // submenu simply shows no check there.
-    if let Some(environment) = &environment {
+    // the shared default holds — unless a script owns the local layer, when none
+    // of the entries describes what is being rendered. The gallery has no
+    // environment resource, so the submenu simply shows no check there.
+    if let Some(environment) = &environment
+        && environment.local().is_empty()
+    {
         wanted.push(environment_condition(environment.fixed()));
+    }
+    // `@setenv=n` hands one object the sky, and the user's own menu has to stop
+    // working while it holds it. No session means no restrictions, so the menu
+    // is enabled — which is what the gallery and a logged-out viewer want.
+    if rlv_session
+        .as_deref()
+        .is_none_or(|session| can_change_environment(session.state()))
+    {
+        wanted.push(CAN_CHANGE_ENVIRONMENT);
     }
     for mut conditions in &mut bars {
         if conditions.0 != wanted {
@@ -1006,11 +1062,24 @@ fn handle_top_menu_actions(
 ) {
     use crate::environment::FixedEnvironment;
     use crate::sky_presets::FixedSky;
+    // Whether picking the environment already pinned reverts to the shared one
+    // (`EnvironmentRepeatedTogglesShared`). Read once, before the loop, because
+    // it is the same answer for every action in the batch.
+    let toggles_shared = crate::environment::repeated_toggles_shared(Some(&settings));
     // The World ▸ Environment picks share one shape: pin a fixed environment (or
     // restore the shared environment) on the environment state.
     let set_fixed = |environment: &mut Option<ResMut<crate::environment::EnvironmentState>>,
                      fixed: Option<FixedEnvironment>| {
         if let Some(environment) = environment {
+            // Picking what is already pinned un-pins it, so each entry — and the
+            // shortcut on it — is a toggle rather than a one-way switch. Off by
+            // default, as in the reference: a menu that does the opposite of
+            // what it says when clicked twice has to be asked for.
+            let fixed = if toggles_shared && fixed.is_some() && environment.fixed() == fixed {
+                None
+            } else {
+                fixed
+            };
             environment.set_fixed(fixed);
         }
     };
@@ -1247,6 +1316,20 @@ fn handle_top_menu_actions(
                 );
             }
             "env-shared" => set_fixed(&mut environment, None),
+            "toggle-personal-lighting" => {
+                toggle_floater(
+                    &floaters,
+                    &mut panels,
+                    crate::personal_lighting::PERSONAL_LIGHTING_FLOATER_ID,
+                );
+            }
+            "toggle-my-environments" => {
+                toggle_floater(
+                    &floaters,
+                    &mut panels,
+                    crate::my_environments::MY_ENVIRONMENTS_FLOATER_ID,
+                );
+            }
             "toggle-rlv-console" => {
                 toggle_floater(
                     &floaters,
@@ -1301,7 +1384,56 @@ mod tests {
     use sl_viewer_ui_widgets::menu::action_paths;
     use sl_viewer_ui_widgets::menu_accel::{Accelerator, accelerators};
 
-    use super::TOP_MENU_BAR;
+    use super::{CAN_CHANGE_ENVIRONMENT, TOP_MENU_BAR};
+    use crate::menu::{MenuCommand, MenuDef, MenuItemDef};
+
+    /// Every command entry in the bar, submenus included, in walk order.
+    fn commands() -> Vec<MenuCommand> {
+        /// Walk one menu, appending its commands and descending into its static
+        /// submenus.
+        fn walk(menu: &MenuDef, found: &mut Vec<MenuCommand>) {
+            for item in menu.items {
+                match *item {
+                    MenuItemDef::Command(command) => found.push(command),
+                    MenuItemDef::Submenu(sub) | MenuItemDef::SubmenuWhen(sub, _) => {
+                        walk(sub, found);
+                    }
+                    MenuItemDef::DynamicSubmenu { .. } | MenuItemDef::Separator => {}
+                }
+            }
+        }
+        let mut found = Vec::new();
+        for menu in TOP_MENU_BAR.menus {
+            walk(menu, &mut found);
+        }
+        found
+    }
+
+    /// `@setenv=n` hands one object the sky, and the user's own menu has to stop
+    /// working while it holds it — so **every** World ▸ Environment entry is
+    /// gated on it, the return to the shared environment included. An entry
+    /// added to that submenu without the gate would be the one way a user could
+    /// still take the sky back from a script.
+    #[test]
+    fn every_environment_entry_is_gated_on_the_setenv_restriction() {
+        let environment: Vec<MenuCommand> = commands()
+            .into_iter()
+            .filter(|command| command.action.starts_with("env-"))
+            .collect();
+        assert_eq!(
+            environment.len(),
+            13,
+            "three groups of four times of day, plus the shared default"
+        );
+        for command in environment {
+            assert_eq!(
+                command.enabled_when,
+                Some(CAN_CHANGE_ENVIRONMENT),
+                "{} is not gated",
+                command.action
+            );
+        }
+    }
 
     /// The whole bar's action table: every command, in walk order, under the
     /// `>`-joined path of menu labels that reaches it.
@@ -1411,6 +1543,8 @@ mod tests {
                 "env-modern-midnight",
             ),
             ("World > Environment".to_owned(), "env-shared"),
+            ("World > Environment".to_owned(), "toggle-personal-lighting"),
+            ("World > Environment".to_owned(), "toggle-my-environments"),
             ("Build".to_owned(), "toggle-build-tools"),
             ("Build".to_owned(), "undo-objects"),
             ("Build".to_owned(), "redo-objects"),

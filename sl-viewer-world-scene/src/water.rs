@@ -235,9 +235,7 @@ pub(crate) fn setup_water(
     let placeholder = images.add(flat_normal_image());
     // Seed the material from the current environment water at the current day
     // position; `drive_water` refines it every frame.
-    let water = environment
-        .settings
-        .blended_water_settings(day_position(&environment));
+    let water = environment.water_at(day_position(&environment));
     let params = water.map_or_else(default_water_params, |water| {
         let fog = WaterFogSettings::from_water(&water, DEFAULT_WATER_HEIGHT);
         water_params(&water, Vec3::Y, default_reflection(), Vec3::ONE, false, fog)
@@ -341,12 +339,10 @@ pub(crate) fn drive_water(
 
     // Fold the current environment water + sky into the shared material.
     let position = day_position(&environment);
-    let Some(water) = environment.settings.blended_water_settings(position) else {
+    let Some(water) = environment.water_at(position) else {
         return;
     };
-    let sky = environment
-        .settings
-        .blended_sky_settings(camera_pos.y, position);
+    let sky = environment.sky_at(camera_pos.y, position);
 
     // The sun direction (Bevy space) and a sky-reflection tint, both from the sky
     // frame (as `drive_sky` computes the sun direction).

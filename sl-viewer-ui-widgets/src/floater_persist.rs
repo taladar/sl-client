@@ -157,6 +157,20 @@ struct FloaterSeeded;
 #[derive(Component, Debug, Clone, Copy, Default)]
 pub struct FloaterPersistExempt;
 
+/// Opts a floater out of remembering **whether it was open** — its rectangle,
+/// minimized and docked states are still persisted.
+///
+/// The narrower sibling of [`FloaterPersistExempt`], for a window whose
+/// *geometry* is worth keeping but whose being open is not a state to restore:
+/// a panel a person opens to do a thing and closes when done, which reappearing
+/// by itself at every login is a nuisance rather than a convenience. Insert it
+/// on the floater root right after `spawn_floater`.
+///
+/// A window bound to something the session does not outlive wants the whole
+/// exemption instead — restoring its rectangle is meaningless too.
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct FloaterOpenExempt;
+
 /// The query filter `persist_floater_changes` runs on: a seeded floater whose
 /// geometry *or* open state changed this frame. Aliased to keep the system
 /// signature readable (and clear of `clippy::type_complexity`).
@@ -260,12 +274,12 @@ fn px_to_f32(value: i32) -> f32 {
 /// mechanical UI state the raw debug-settings editor deliberately skips.
 fn register_floater_settings(
     settings: Option<ResMut<ViewerSettings>>,
-    floaters: Query<(&Floater, &UiPanelShown), AddedPersistedFloater>,
+    floaters: Query<(&Floater, &UiPanelShown, Has<FloaterOpenExempt>), AddedPersistedFloater>,
 ) {
     let Some(mut settings) = settings else {
         return;
     };
-    for (floater, shown) in &floaters {
+    for (floater, shown, open_exempt) in &floaters {
         let Some(id) = floater.persist_id() else {
             continue;
         };
@@ -288,12 +302,14 @@ fn register_floater_settings(
             "Window rectangle (logical px [left, top, right, bottom]); a zero-width rect is a \
              content-sized window",
         );
-        settings.register_hidden_in(
-            FLOATER_SECTION,
-            &visible_key(id),
-            SettingValue::Bool(shown.0),
-            "Whether the window is open",
-        );
+        if !open_exempt {
+            settings.register_hidden_in(
+                FLOATER_SECTION,
+                &visible_key(id),
+                SettingValue::Bool(shown.0),
+                "Whether the window is open",
+            );
+        }
         settings.register_hidden_in(
             FLOATER_SECTION,
             &minimized_key(id),
@@ -318,7 +334,15 @@ fn register_floater_settings(
 /// clamp (a manager system) then rescues a rect saved on a larger display.
 fn seed_floaters_from_settings(
     settings: Option<Res<ViewerSettings>>,
-    mut floaters: Query<(Entity, &mut Floater, &mut UiPanelShown), UnseededPersistedFloater>,
+    mut floaters: Query<
+        (
+            Entity,
+            &mut Floater,
+            &mut UiPanelShown,
+            Has<FloaterOpenExempt>,
+        ),
+        UnseededPersistedFloater,
+    >,
     mut commands: Commands,
     mut floater_commands: MessageWriter<FloaterCommand>,
 ) {
@@ -329,7 +353,7 @@ fn seed_floaters_from_settings(
         return;
     }
     let store = settings.store();
-    for (entity, mut floater, mut shown) in &mut floaters {
+    for (entity, mut floater, mut shown, open_exempt) in &mut floaters {
         // A subject-keyed instance stores nothing (see `Floater::persist_id`),
         // so there is nothing to apply — it keeps the cascade position the
         // manager opened it at. Marking it seeded anyway keeps this pass from
@@ -360,7 +384,10 @@ fn seed_floaters_from_settings(
         {
             want_dock = docked;
         }
-        if store.is_overridden(&visible_key(id))
+        // An open-exempt window keeps whatever its spec says it starts as —
+        // closed — however it was left last time.
+        if !open_exempt
+            && store.is_overridden(&visible_key(id))
             && let Ok(visible) = store.get_bool(&visible_key(id))
         {
             shown.0 = visible;
@@ -384,7 +411,7 @@ fn seed_floaters_from_settings(
 /// the seed itself, and never runs before the stored values have been applied.
 fn persist_floater_changes(
     settings: Option<ResMut<ViewerSettings>>,
-    floaters: Query<(&Floater, &UiPanelShown), ChangedSeededFloater>,
+    floaters: Query<(&Floater, &UiPanelShown, Has<FloaterOpenExempt>), ChangedSeededFloater>,
     mut dirty: ResMut<FloaterPersistDirty>,
     time: Res<Time>,
 ) {
@@ -392,14 +419,16 @@ fn persist_floater_changes(
         return;
     };
     let mut any = false;
-    for (floater, shown) in &floaters {
+    for (floater, shown, open_exempt) in &floaters {
         let Some(id) = floater.persist_id() else {
             continue;
         };
         let id = id.as_str();
         let geometry = floater.geometry();
         settings.set_account(&rect_key(id), SettingValue::Rect(encode_rect(geometry)));
-        settings.set_account(&visible_key(id), SettingValue::Bool(shown.0));
+        if !open_exempt {
+            settings.set_account(&visible_key(id), SettingValue::Bool(shown.0));
+        }
         settings.set_account(&minimized_key(id), SettingValue::Bool(geometry.minimized));
         settings.set_account(&docked_key(id), SettingValue::Bool(geometry.docked));
         any = true;
@@ -681,6 +710,7 @@ mod tests {
         use crate::floater::{
             Floater, FloaterCaps, FloaterGeometry, FloaterPlugin, FloaterSpec, spawn_floater,
         };
+        use crate::floater_persist::FloaterOpenExempt;
         use crate::ui_test::interact::{self, InteractionTest, centre_of};
         use crate::ui_test::{TestError, find_by_name, settle};
         use bevy::prelude::*;
@@ -749,6 +779,63 @@ mod tests {
             );
             settle(&mut app);
             app
+        }
+
+        /// The same session, but the fixture opts out of remembering whether it
+        /// was open.
+        fn open_exempt_session() -> App {
+            let mut app = InteractionTest::new().build();
+            app.add_plugins((FloaterPlugin, FloaterPersistPlugin));
+            let mut settings = ViewerSettings::from_store_for_test(SettingsStore::new());
+            settings.mark_account_loaded_for_test();
+            app.insert_resource(settings);
+            app.add_systems(
+                Startup,
+                (|mut commands: Commands, root: Res<UiRoot>| {
+                    let handle = spawn_floater(&mut commands, root.0, fixture_spec());
+                    commands
+                        .entity(handle.root)
+                        .insert((UiPanelShown(true), FloaterOpenExempt));
+                })
+                .after(UiScaffoldSystems::SpawnRoot),
+            );
+            settle(&mut app);
+            app
+        }
+
+        /// **An open-exempt window still remembers where it is, and never
+        /// remembers that it was open.**
+        ///
+        /// The two are separate settings and a window can want one without the
+        /// other: an editor bound to an inventory item is worth putting back
+        /// where it was left, but restoring it *open* restores an empty shell,
+        /// since the session it was editing does not outlive the run. The whole
+        /// mechanism is that one key is written and the other is not, so both
+        /// halves are pinned here — a rect that stopped being saved would be
+        /// just as wrong as a visible that started being.
+        #[test]
+        fn an_open_exempt_window_saves_its_rect_and_not_its_openness() -> Result<(), TestError> {
+            let mut app = open_exempt_session();
+            let bar = centre_of(&mut app, "floater-title-bar").ok_or("no title bar")?;
+            interact::drag(
+                &mut app,
+                bar,
+                Vec2::new(bar.x + TRAVEL.x, bar.y + TRAVEL.y),
+                4,
+                MouseButton::Left,
+            );
+            settle(&mut app);
+
+            let store = app.world().resource::<ViewerSettings>().store();
+            assert!(
+                store.is_overridden(&rect_key(FIXTURE_ID)),
+                "an open-exempt window still remembers where it sits"
+            );
+            assert!(
+                !store.is_registered(&visible_key(FIXTURE_ID)),
+                "and never declares — let alone writes — whether it was open"
+            );
+            Ok(())
         }
 
         /// The fixture's live geometry.

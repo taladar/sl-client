@@ -19,7 +19,7 @@
 pub mod rlv;
 pub mod world_scoped;
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -31,14 +31,15 @@ use serde::{Deserialize, Serialize};
 use sl_client_bevy::{
     AgentKey, AssetUpdateLocation, AttachmentPoint, AvatarName, BodyPhysics, ChatSessionKind,
     Command, ControlFlags, DecodedTexture, DisplayName, Friend, FriendKey, FriendPresence,
-    FriendRights, GroupKey, GroupMembership, ImSessionId, InventoryKey, JointOverrides, LightData,
-    MAX_FACES, MeshKey, MuteEntry, MuteFlags, MuteType, Object, ObjectExtraParams, ObjectKey,
-    ObjectProperties, ParticleSystem, PrimFaceId, PrimLod, PrimShapeParams, Priority,
-    ReflectionProbe, ReflectionProbeFlags, RegionCoordinates, RegionHandle, RestoreItem, Rotation,
-    ScopedObjectId, ScriptLanguage, ScriptTarget, ScriptUploadLocation, SculptOrMeshKey,
-    SkeletalDeformations, SlCommand, SurfaceInfo, TaskInventoryKey, TerrainPatch, TextureAnimation,
-    TextureFace, TextureKey, TreeLod, Uuid, Vector, VolumeDeformations, avatar_texture,
-    decode_texture_entry, pcode, texture_face_uv_transform, to_bevy_image,
+    FriendRights, GroupKey, GroupMembership, ImSessionId, InventoryFolderKey, InventoryKey,
+    JointOverrides, LightData, MAX_FACES, MeshKey, MuteEntry, MuteFlags, MuteType, Object,
+    ObjectExtraParams, ObjectKey, ObjectProperties, ParticleSystem, PrimFaceId, PrimLod,
+    PrimShapeParams, Priority, ReflectionProbe, ReflectionProbeFlags, RegionCoordinates,
+    RegionHandle, RestoreItem, Rotation, ScopedObjectId, ScriptLanguage, ScriptTarget,
+    ScriptUploadLocation, SculptOrMeshKey, SettingsKind, SkeletalDeformations, SlCommand,
+    SurfaceInfo, TaskInventoryKey, TerrainPatch, TextureAnimation, TextureFace, TextureKey,
+    TreeLod, Uuid, Vector, VolumeDeformations, avatar_texture, decode_texture_entry, pcode,
+    texture_face_uv_transform, to_bevy_image,
 };
 use sl_terrain::TerrainComposition;
 use sl_viewer_kit::coords::{sl_rotation_to_quat, sl_to_bevy_rotation};
@@ -1605,7 +1606,7 @@ pub enum PickerKind {
 }
 
 /// Open the texture picker for `requester`, seeded with `current`.
-#[derive(Message, Debug, Clone, Copy)]
+#[derive(Message, Debug, Clone)]
 pub struct OpenTexturePicker {
     /// The swatch (or other widget) the reply is tagged back to.
     pub requester: Entity,
@@ -1617,7 +1618,11 @@ pub struct OpenTexturePicker {
     ///
     /// Two swatches declared with the same element id share one window, since
     /// they are the same field as far as the UI is concerned.
-    pub field: &'static str,
+    ///
+    /// Owned rather than `&'static str` because a field id is not always a
+    /// literal: a table-driven panel (the environment editors) names its
+    /// controls `{window}-{knob}`, which is a name computed at spawn time.
+    pub field: Box<str>,
     /// The texture (or, in material mode, material id) to open on.
     pub current: TextureKey,
     /// Whether to browse textures or materials.
@@ -1920,6 +1925,207 @@ pub struct OpenNotecard {
     pub editable: bool,
     /// Where the notecard lives, so Save writes back to the right place.
     pub source: NotecardSource,
+}
+
+/// The item-minting uploads whose reply has not arrived yet, oldest first.
+///
+/// `NewFileAgentInventory` creates the item server-side but leaves its **flags**
+/// empty, and for several classes that byte is the item's subtype: a wearable's
+/// slot, a settings item's sky / water / day-cycle kind. So every such upload is
+/// followed by a `ChangeInventoryItemFlags` carrying it — matched FIFO, because
+/// the reply carries no correlation id.
+///
+/// One queue for the whole viewer rather than one per feature, and that is the
+/// point: two queues watching the same untagged reply stream would each pop on
+/// the other's upload, and stamp an item with the wrong subtype. The producers
+/// (the inventory's New-Clothes / New-Body-Parts / New-Settings creators, the
+/// appearance editor's Save As, the settings editors' Save As) only enqueue;
+/// the inventory owns the single consumer, since finishing a creation also
+/// means refreshing the folder it landed in.
+#[derive(Resource, Debug, Default)]
+pub struct PendingItemCreations {
+    /// The in-flight creations, oldest first.
+    queue: VecDeque<PendingItemCreation>,
+}
+
+/// One in-flight item-minting upload.
+#[derive(Debug, Clone, Copy)]
+pub struct PendingItemCreation {
+    /// The `flags` byte to stamp on the fresh item — a wearable's slot code, a
+    /// settings kind's subtype.
+    pub flags: u32,
+    /// The folder to refresh once it lands.
+    pub folder: InventoryFolderKey,
+}
+
+impl PendingItemCreations {
+    /// Enqueue a creation so the fresh item's flags are stamped and its folder
+    /// refreshed when the upload reply lands.
+    pub fn enqueue(&mut self, flags: u32, folder: InventoryFolderKey) {
+        self.queue.push_back(PendingItemCreation { flags, folder });
+    }
+
+    /// Take the oldest in-flight creation — the reply that just landed is its
+    /// own, since replies arrive in the order the uploads were made.
+    pub fn take_next(&mut self) -> Option<PendingItemCreation> {
+        self.queue.pop_front()
+    }
+}
+
+/// The **settings** items asked of the simulator and not yet seen back, oldest
+/// first.
+///
+/// A settings item is minted by `CreateInventoryItem` rather than by an upload —
+/// the simulator authors the default asset for the kind and stamps the subtype
+/// byte — and its `UpdateCreateInventoryItem` reply names the item but not who
+/// asked for it. So this is the viewer's **one** queue for those replies, for
+/// exactly the reason [`PendingItemCreations`] is the one queue for the upload
+/// kind: two queues watching the same untagged reply stream would each pop on
+/// the other's creation, and a Save As would write its body onto somebody else's
+/// fresh item.
+///
+/// One ordered queue is also what makes each *consumer's* own bookkeeping sound.
+/// The library window counts the creations it asked for and claims that many
+/// [`SettingsItemCreated`]s; so does the editor. Because every creation passes
+/// through here in order, "the next one is mine" is a true statement for both.
+#[derive(Resource, Debug, Default)]
+pub struct PendingSettingsCreations {
+    /// The in-flight creations, oldest first.
+    queue: VecDeque<PendingSettingsCreation>,
+}
+
+/// One in-flight settings creation: which kind, and what to do with the item
+/// when it arrives.
+#[derive(Debug, Clone)]
+pub struct PendingSettingsCreation {
+    /// The kind asked for — carried rather than read back off the reply,
+    /// because it is what the user chose whatever the simulator stamped.
+    pub kind: SettingsKind,
+    /// The encoded asset to write onto the fresh item, for a creator that has a
+    /// body to store (the editors' **Save As**).
+    ///
+    /// `None` for New Sky / New Water, where the *point* is the default asset
+    /// the simulator authors — `LLSettingsVOBase::onInventoryItemCreated` says
+    /// so outright when it is called with no settings: "no need to upload
+    /// asset".
+    pub body: Option<Vec<u8>>,
+}
+
+impl PendingSettingsCreations {
+    /// Enqueue a creation, so the reply that names its item is matched to it.
+    pub fn enqueue(&mut self, kind: SettingsKind, body: Option<Vec<u8>>) {
+        self.queue.push_back(PendingSettingsCreation { kind, body });
+    }
+
+    /// Take the oldest in-flight creation — the reply that just landed is its
+    /// own, since the simulator answers in the order it was asked.
+    pub fn take_next(&mut self) -> Option<PendingSettingsCreation> {
+        self.queue.pop_front()
+    }
+}
+
+/// A settings item the simulator has created for us, published once its reply
+/// has been matched to the request that asked for it.
+///
+/// Consumers read this rather than the raw
+/// `SlSessionEvent::InventoryItemCreated`, so that "was this one mine?" is
+/// answered once, in queue order, instead of separately (and racily) by each
+/// window.
+#[derive(Message, Debug, Clone)]
+pub struct SettingsItemCreated {
+    /// The fresh item.
+    pub item: InventoryKey,
+    /// The folder it landed in.
+    pub folder: InventoryFolderKey,
+    /// The kind that was asked for.
+    pub kind: SettingsKind,
+    /// Whether a body was written onto it (a **Save As**) rather than the
+    /// simulator's default asset being kept (a New Sky / New Water).
+    pub authored: bool,
+}
+
+/// Open the settings editor on an EEP **settings** inventory item — the sky
+/// editor or the water editor, chosen by the item's own
+/// [`SettingsKind`] flag. Written by the
+/// inventory's Open / Edit actions.
+///
+/// Flat fields rather than an inventory `ItemInfo` because the editor lives
+/// below the inventory in the crate graph, and because a *freshly created*
+/// settings item is opened straight from its upload reply, which carries the
+/// ids and nothing else.
+#[derive(Message, Debug, Clone)]
+pub struct OpenSettingsEditor {
+    /// The item's name, shown in the editor's name field and saved with the
+    /// asset.
+    pub name: String,
+    /// The settings asset to fetch and edit.
+    pub asset_id: Uuid,
+    /// The inventory item the asset belongs to, so Save writes back onto it.
+    pub item_id: InventoryKey,
+    /// The folder it lives in, where a Save As puts the copy.
+    pub folder_id: InventoryFolderKey,
+    /// Which editor this is — a sky item opens the sky editor, a water item the
+    /// water editor.
+    pub kind: SettingsKind,
+    /// Whether the item may be saved back onto (its owner modify bit).
+    pub editable: bool,
+}
+
+/// Open the **settings picker** on one field: a chooser over the settings assets
+/// in inventory of one [`SettingsKind`], answering with [`SettingsPicked`].
+///
+/// The reference's `LLFloaterSettingsPicker`, which the region / parcel
+/// environment panel and the day-cycle editor summon. The kind is fixed by the
+/// opener (`setSettingsFilter`), because a water field being handed a day cycle
+/// is not a choice the user should be able to make.
+#[derive(Message, Debug, Clone)]
+pub struct OpenSettingsPicker {
+    /// The widget (or panel) the reply is tagged back to.
+    pub requester: Entity,
+    /// Which field is being picked for — shown in the window's subtitle, so two
+    /// consecutive picks say which one is being answered.
+    ///
+    /// Owned rather than `&'static str` for the same reason
+    /// [`OpenTexturePicker::field`] is: a table-driven panel names its controls
+    /// at spawn time.
+    pub field: Box<str>,
+    /// Which kind of settings asset may be chosen.
+    pub kind: SettingsKind,
+    /// The settings **asset** the field currently holds, opened on and restored
+    /// by Cancel; `None` for a field holding nothing yet.
+    pub current: Option<Uuid>,
+}
+
+/// One settings asset a picker can answer with — the item the user sees and the
+/// asset behind it, which are two different ids.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PickedSettings {
+    /// The inventory item chosen (a link, when a link is what the list held).
+    pub item: InventoryKey,
+    /// The settings asset behind it — what a panel publishes or applies.
+    pub asset_id: Uuid,
+    /// Its name, which the reference carries alongside the asset id in every
+    /// environment update so a panel can show what it is holding.
+    pub name: String,
+}
+
+/// The settings asset a picker returned, tagged back to the
+/// [`requester`](Self::requester).
+///
+/// Emitted **non-final** on each selection so a consumer can live-preview it,
+/// once on **OK** with [`final_pick`](Self::final_pick) true, and on **Cancel**
+/// as the asset the picker opened on (a revert) — the same protocol
+/// [`TexturePicked`] follows.
+#[derive(Message, Debug, Clone)]
+pub struct SettingsPicked {
+    /// The widget that opened the picker.
+    pub requester: Entity,
+    /// The chosen asset, or `None` when the picker opened on nothing and a
+    /// Cancel put that back.
+    pub chosen: Option<PickedSettings>,
+    /// Whether this is the committed choice (**OK**) rather than a live-preview
+    /// or revert update.
+    pub final_pick: bool,
 }
 
 /// Marks the notecard editor floater as an **inventory drop target**: dropping

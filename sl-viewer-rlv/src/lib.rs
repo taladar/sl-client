@@ -105,6 +105,11 @@ impl Plugin for RlvUiPlugins {
         // not schedules — the same reason the selection and the mute list are
         // initialised by the features that fill them.
         app.init_resource::<sl_viewer_world_api::rlv::RlvSession>();
+        // The seam the `@setenv_*` family writes through and the scene reads.
+        // Initialised here for the same reason: the scene's half only runs in a
+        // viewer with a world, but a console typing `@setenv_ambient` must have
+        // somewhere to write even in one without.
+        app.init_resource::<sl_viewer_world_api::rlv::RlvEnvironmentSlot>();
         app.add_plugins((
             rlv_console::RlvConsolePlugin,
             rlv_behaviours::RlvBehavioursPlugin,

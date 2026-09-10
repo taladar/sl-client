@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 320 |
-| blocked | 46 |
-| in-progress | 20 |
-| bugs | 52 |
-| done | 1061 |
+| ready | 324 |
+| blocked | 42 |
+| in-progress | 21 |
+| bugs | 53 |
+| done | 1069 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1641** |
+| **total** | **1651** |
 
 ## ideas (100)
 
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (320)
+## ready (324)
 
 ### protocol
 
@@ -481,14 +481,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-edit-permission-gating`](ready/viewer-edit-permission-gating.md) —
   Permission-aware editing (grey out what perms forbid) (blocked by
   `viewer-object-selection-core` (done))
-- [`viewer-environment-fixed-editor`](ready/viewer-environment-fixed-editor.md)
-  — Environment editors — sky & water settings assets (blocked by
-  `viewer-ui-widget-scaffold` (done))
+- [`viewer-environment-day-cycle-editor`](ready/viewer-environment-day-cycle-editor.md)
+  — Day-cycle editor (blocked by `viewer-environment-fixed-editor` (done))
+- [`viewer-environment-density-profiles`](ready/viewer-environment-density-profiles.md)
+  — Render the atmospheric density profiles
+- [`viewer-environment-import-legacy-presets`](ready/viewer-environment-import-legacy-presets.md)
+  — Import a legacy WindLight preset from disk
 - [`viewer-environment-pause-clouds`](ready/viewer-environment-pause-clouds.md)
   — Pause cloud animation toggle
-- [`viewer-environment-personal-lighting`](ready/viewer-environment-personal-lighting.md)
-  — Personal lighting — local environment override (blocked by
-  `viewer-ui-widget-scaffold` (done))
+- [`viewer-environment-settings-unsupported-gate`](ready/viewer-environment-settings-unsupported-gate.md)
+  — Grey the settings creators on a grid that cannot store settings
 - [`viewer-event-details`](ready/viewer-event-details.md) — Event details
   floater + reminders (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-experience-event-stream`](ready/viewer-experience-event-stream.md) —
@@ -796,6 +798,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (sim) debug console (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-region-entry-maturity-gate`](ready/viewer-region-entry-maturity-gate.md)
   — Eight ported notifications for a refused entry, and nothing raises one
+- [`viewer-region-environment-panel`](ready/viewer-region-environment-panel.md)
+  — Region / parcel environment settings panel (blocked by
+  `viewer-region-options-general` (done), `viewer-environment-my-environments`
+  (done))
 - [`viewer-region-estate-group-picker`](ready/viewer-region-estate-group-picker.md)
   — Group picker for the Region/Estate Access → Allowed Groups list
 - [`viewer-region-estate-object-return`](ready/viewer-region-estate-object-return.md)
@@ -847,9 +853,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   camera restrictions and vision overlay (blocked by
   `viewer-rlv-restriction-state` (done), `viewer-camera-third-person-orbit`
   (done))
-- [`viewer-rlv-environment-commands`](ready/viewer-rlv-environment-commands.md)
-  — RLV — @setenv_*/@getenv_* environment control (blocked by
-  `viewer-rlv-restriction-state` (done))
 - [`viewer-rlv-vision-render`](ready/viewer-rlv-vision-render.md) — RLV
   vision-restriction rendering (blocked by `viewer-rlv-restriction-state`
   (done))
@@ -935,6 +938,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-styling-interaction-tests`](ready/viewer-ui-styling-interaction-tests.md)
   — bevy_flair state styling under synthetic hover and focus (blocked by
   `viewer-ui-interaction-harness` (done))
+- [`viewer-ui-virtual-trackball`](ready/viewer-ui-virtual-trackball.md) —
+  Virtual trackball widget (sun / moon direction) (blocked by
+  `viewer-ui-widget-scaffold` (done))
 - [`viewer-underwater-alpha-fog-remaining-materials`](ready/viewer-underwater-alpha-fog-remaining-materials.md)
   — The particle billboards do not carry the water fog
 - [`viewer-url-context-menus`](ready/viewer-url-context-menus.md) — Right-click
@@ -950,6 +956,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wearable-favorites`](ready/viewer-wearable-favorites.md) — Wearable
   favorites floater (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-ui-virtualized-list` (done))
+- [`viewer-windlight-bulk-import`](ready/viewer-windlight-bulk-import.md) —
+  Legacy Windlight bulk import (blocked by `viewer-environment-fixed-editor`
+  (done))
 - [`viewer-window-title-unread-count`](ready/viewer-window-title-unread-count.md)
   — Unread IM/chat count in the window title
 - [`viewer-world-map-tracking-teleport`](ready/viewer-world-map-tracking-teleport.md)
@@ -992,17 +1001,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-binary-duplication`](ready/repl-audit-binary-duplication.md) —
   The two REPL binaries share ~400 near-verbatim lines and have already drifted
 
-## blocked (46)
+## blocked (42)
 
 ### viewer
 
 - [`viewer-avatar-moderation-actions`](blocked/viewer-avatar-moderation-actions.md)
   — Per-avatar parcel / estate moderation — the shared action layer (blocked by
   `viewer-region-options-estate`)
-- [`viewer-environment-day-cycle-editor`](blocked/viewer-environment-day-cycle-editor.md)
-  — Day-cycle editor (blocked by `viewer-environment-fixed-editor`)
-- [`viewer-environment-my-environments`](blocked/viewer-environment-my-environments.md)
-  — My Environments library (blocked by `viewer-environment-fixed-editor`)
 - [`viewer-fs-bridge-protocol`](blocked/viewer-fs-bridge-protocol.md) —
   Firestorm LSL bridge — the viewer↔script protocol and what it exposes (blocked
   by `viewer-fs-bridge-lifecycle`)
@@ -1056,9 +1061,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (blocked by `viewer-voice-audio`)
 - [`viewer-projector-lights-spot-shadows`](blocked/viewer-projector-lights-spot-shadows.md)
   — Projector spot-shadow tier (blocked by `viewer-projector-lights-textured`)
-- [`viewer-region-environment-panel`](blocked/viewer-region-environment-panel.md)
-  — Region / parcel environment settings panel (blocked by
-  `viewer-region-options-general` (done), `viewer-environment-my-environments`)
 - [`viewer-render-hud-and-actor-axes`](blocked/viewer-render-hud-and-actor-axes.md)
   — HUD screen axis and the name-tag, particle and avatar actors (blocked by
   `viewer-render-context-matrix`)
@@ -1115,8 +1117,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-voice-controls`](blocked/viewer-voice-controls.md) — Voice controls —
   talk button, PTT, participants, per-speaker volume (blocked by
   `viewer-voice-audio`)
-- [`viewer-windlight-bulk-import`](blocked/viewer-windlight-bulk-import.md) —
-  Legacy Windlight bulk import (blocked by `viewer-environment-fixed-editor`)
 - [`viewer-world-map-script-destination`](blocked/viewer-world-map-script-destination.md)
   — Script-requested map destination (llMapDestination) (blocked by
   `viewer-world-map-tracking-teleport`)
@@ -1131,7 +1131,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (20)
+## in-progress (21)
 
 ### viewer
 
@@ -1145,6 +1145,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Avatar ground probe from the simulator's collision plane (drop the raycast)
 - [`viewer-conference-start-ui`](in-progress/viewer-conference-start-ui.md) —
   Start an ad-hoc conference from a multi-selection
+- [`viewer-environment-personal-lighting`](in-progress/viewer-environment-personal-lighting.md)
+  — Personal lighting — local environment override (blocked by
+  `viewer-ui-widget-scaffold` (done))
 - [`viewer-keyed-floater-audit`](in-progress/viewer-keyed-floater-audit.md) —
   Audit the other per-subject singletons onto the keyed-floater scaffold
 - [`viewer-media-prim-browser`](in-progress/viewer-media-prim-browser.md) —
@@ -1186,7 +1189,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (52)
+## bugs (53)
 
 ### viewer
 
@@ -1265,6 +1268,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-groups-pane-empty-on-opensim`](bugs/viewer-groups-pane-empty-on-opensim.md)
   — The Groups pane lists nothing while the profile's group list has the same
   groups
+- [`viewer-hair-dome-stays-grey`](bugs/viewer-hair-dome-stays-grey.md) — The
+  default hair dome intermittently stays grey for a whole session
 - [`viewer-hover-tooltip-202ms-frame-spike`](bugs/viewer-hover-tooltip-202ms-frame-spike.md)
   — update_hover_tooltip spikes to 202 ms on a single frame
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
@@ -1310,7 +1315,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1061)
+## done (1069)
 
 ### protocol
 
@@ -1801,8 +1806,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-emoji-picker-floater`](done/viewer-emoji-picker-floater.md) — Emoji
   picker floater (blocked by `viewer-emoji-data` (done),
   `viewer-ui-floater-basic` (done))
+- [`viewer-environment-fixed-editor`](done/viewer-environment-fixed-editor.md) —
+  Environment editors — sky & water settings assets (blocked by
+  `viewer-ui-widget-scaffold` (done))
+- [`viewer-environment-my-environments`](done/viewer-environment-my-environments.md)
+  — My Environments library (blocked by `viewer-environment-fixed-editor`
+  (done))
 - [`viewer-environment-not-refetched-on-region-info`](done/viewer-environment-not-refetched-on-region-info.md)
   — An estate's sky change never reaches a viewer that is already standing there
+- [`viewer-environment-settings-index`](done/viewer-environment-settings-index.md)
+  — Settings assets by name — the inventory index the Library Environments
+  folder needs
 - [`viewer-experience-permission-body-links`](done/viewer-experience-permission-body-links.md)
   — Experience card name — clickable experience-profile SLURL (blocked by
   `viewer-url-linkification` (done))
@@ -2522,6 +2536,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Custom tracing subscriber blocks Bevy's trace_tracy / trace_chrome profilers
 - [`viewer-quick-preferences`](done/viewer-quick-preferences.md) —
   Quick-preferences panel (blocked by `viewer-preferences-floater` (done))
+- [`viewer-quick-prefs-environment-presets`](done/viewer-quick-prefs-environment-presets.md)
+  — Quick preferences — sky / water / day-cycle combos over inventory (blocked
+  by `viewer-environment-settings-index` (done))
 - [`viewer-quit-graceful-logout`](done/viewer-quit-graceful-logout.md) —
   Graceful logout on menu Quit and window close (fix intermittent exit hang)
 - [`viewer-r1`](done/viewer-r1-rigged-mesh-skinning-distortion.md) — Rigged-mesh
@@ -2616,6 +2633,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-render-test-harness`](done/viewer-render-test-harness.md) — 3D render
   test harness — render one object without a grid, assert automatically, catch
   regressions
+- [`viewer-rlv-blocked-behaviours`](done/viewer-rlv-blocked-behaviours.md) — RLV
+  — blocked behaviours, and RestrainedLoveNoSetEnv as the one that uses them
 - [`viewer-rlv-command-intake`](done/viewer-rlv-command-intake.md) — RLV — the
   owner-say command intake and the reply/notify chat path (blocked by
   `viewer-rlv-restriction-state` (done))
@@ -2629,6 +2648,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-rlv-restriction-state` (done))
 - [`viewer-rlv-enforce-send-side`](done/viewer-rlv-enforce-send-side.md) — RLV —
   enforce send-side blocks at the Session boundary (blocked by
+  `viewer-rlv-restriction-state` (done))
+- [`viewer-rlv-environment-commands`](done/viewer-rlv-environment-commands.md) —
+  RLV — @setenv_*/@getenv_* environment control (blocked by
   `viewer-rlv-restriction-state` (done))
 - [`viewer-rlv-locks`](done/viewer-rlv-locks.md) — RLV — attachment, wearable
   and folder locks (blocked by `viewer-rlv-restriction-state` (done))
@@ -2672,6 +2694,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-settings-account-scope-persist`](done/viewer-settings-account-scope-persist.md)
   — Load and save both global and per-account settings in the viewer (blocked by
   `viewer-ui-settings-store` (done))
+- [`viewer-settings-save-as-create-then-put`](done/viewer-settings-save-as-create-then-put.md)
+  — A settings Save As uploads through a cap that does not take settings
 - [`viewer-settings-toml-format`](done/viewer-settings-toml-format.md) — TOML
   settings file with comments and nested sections (blocked by
   `viewer-ui-settings-store` (done))
@@ -3354,6 +3378,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `test-fake-grid-determinism` (done))
 - [`test-fake-grid-timeline`](done/test-fake-grid-timeline.md) — Scripted
   scenario timelines with markers
+- [`test-fake-grid-update-completion-item`](done/test-fake-grid-update-completion-item.md)
+  — A fake grid that echoed a field the real one withholds
 - [`test-fake-grid-xmlrpc-int-width`](done/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 - [`test-firestorm-crosscheck-report`](done/test-firestorm-crosscheck-report.md)

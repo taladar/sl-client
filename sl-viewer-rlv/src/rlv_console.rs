@@ -50,8 +50,8 @@ use bevy::prelude::*;
 use bevy::text::{EditableText, FontCx, LayoutCx};
 use sl_client_bevy::SlIdentity;
 use sl_rlv::{
-    RLV_PREFIX, RlvCommand, RlvExtCommand, RlvExtSource, RlvOutcome, RlvParam, RlvState,
-    parse_chat_line,
+    RLV_PREFIX, RlvCommand, RlvEnvCommand, RlvEnvSource, RlvExtCommand, RlvExtSource, RlvOutcome,
+    RlvParam, RlvReply, RlvState, parse_chat_line,
 };
 use sl_viewer_settings::ViewerSettings;
 use sl_viewer_ui_core::i18n::Translated;
@@ -69,8 +69,8 @@ use sl_viewer_ui_widgets::floater::{
 use sl_viewer_ui_widgets::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use sl_viewer_world_api::AvatarControls;
 use sl_viewer_world_api::rlv::{
-    RlvConsoleKind, RlvExtFacts, RlvSession, SETTING_DEBUG_HIDE_UNSET_DUPLICATE, ViewerRlvExt,
-    rlv_flag, rlv_is_enabled,
+    RlvConsoleKind, RlvEnvironmentSlot, RlvExtFacts, RlvSession,
+    SETTING_DEBUG_HIDE_UNSET_DUPLICATE, ViewerRlvExt, rlv_flag, rlv_is_enabled,
 };
 use uuid::Uuid;
 
@@ -166,6 +166,7 @@ pub const fn outcome_suffix(outcome: RlvOutcome) -> Option<&'static str> {
         RlvOutcome::FailedLock => Some("already held by another object"),
         RlvOutcome::FailedUnheldBehaviour => Some("behaviour not held"),
         RlvOutcome::FailedNoSharedRoot => Some("no #RLV folder"),
+        RlvOutcome::FailedDisabled => Some("turned off in your settings"),
         _ => Some("failed"),
     }
 }
@@ -199,12 +200,28 @@ pub struct ConsoleRun {
     pub rotate_to: Option<f32>,
 }
 
+/// What one of the two extension handlers made of a command, in the shape the
+/// console reports: an outcome, the answer it built, whether it *owed* one, and
+/// the heading only `@setrot` produces.
+struct Handled {
+    /// How the handler says it went.
+    outcome: RlvOutcome,
+    /// The line a script would have heard, if any.
+    reply: Option<RlvReply>,
+    /// Whether this was a **read** — one that owed an answer, so the absence of
+    /// one is worth saying out loud rather than passing over.
+    is_read: bool,
+    /// The heading `@setrot` asks the avatar to face.
+    rotate_to: Option<f32>,
+}
+
 /// Run one command line against `state` as if `issuer` had said it, appending
 /// each command's report to `lines`.
 ///
-/// A command the dictionary does not claim is offered to the extension handlers
-/// (`ext`) before it is reported unknown — that is where `@getdebug_*`,
-/// `@setdebug_*` and `@setrot` live.
+/// A command the dictionary does not claim is offered to the two extension
+/// handlers before it is reported unknown, in the reference's order: the debug
+/// window (`ext`) — `@getdebug_*`, `@setdebug_*` and `@setrot` — and then the
+/// environment (`env`) — `@getenv_*` and `@setenv_*`.
 ///
 /// Split out from the system so the whole decision — parse, apply, classify,
 /// report — is testable without an app.
@@ -214,6 +231,7 @@ pub fn run_line(
     line: &str,
     hide_unset_duplicate: bool,
     ext: &mut impl RlvExtSource,
+    env: &mut impl RlvEnvSource,
     lines: &mut Vec<(RlvConsoleKind, String)>,
 ) -> ConsoleRun {
     let mut run = ConsoleRun::default();
@@ -231,18 +249,40 @@ pub fn run_line(
                 // The state machine hands back every `=force` action and every
                 // query; one of those may still be an extension command, which
                 // is the last place a keyword can be recognised.
-                let extension = (applied == RlvOutcome::NotAStateChange)
-                    .then(|| state.run_extension(issuer, &command, ext))
-                    .flatten();
+                let mut handled = None;
+                if applied == RlvOutcome::NotAStateChange {
+                    if let Some(result) = state.run_extension(issuer, &command, ext) {
+                        handled = Some(Handled {
+                            outcome: result.outcome,
+                            reply: result.reply,
+                            is_read: matches!(
+                                RlvExtCommand::classify(&command),
+                                Some(RlvExtCommand::GetDebug { .. })
+                            ),
+                            rotate_to: result.rotate_to,
+                        });
+                    } else if let Some(result) = state.run_environment(issuer, &command, env) {
+                        handled = Some(Handled {
+                            outcome: result.outcome,
+                            reply: result.reply,
+                            is_read: matches!(
+                                RlvEnvCommand::classify(&command),
+                                Some(RlvEnvCommand::GetEnv { .. })
+                            ),
+                            rotate_to: None,
+                        });
+                    }
+                }
                 // Only what the *state machine* applied can have changed the
                 // held set. An extension command answers a question, writes a
-                // setting or turns the avatar — none of them a restriction, so
-                // none of them may wake the floaters watching the revision.
+                // setting, turns the avatar or repaints the sky — none of them a
+                // restriction, so none may wake the floaters watching the
+                // revision.
                 if applied.succeeded() {
                     run.changed = true;
                 }
                 let mut outcome = applied;
-                if let Some(ref result) = extension {
+                if let Some(ref result) = handled {
                     outcome = result.outcome;
                     if let Some(heading) = result.rotate_to {
                         run.rotate_to = Some(heading);
@@ -252,7 +292,7 @@ pub fn run_line(
                     continue;
                 }
                 lines.push((outcome_stream(outcome), report_line(&text, outcome)));
-                match extension {
+                match handled {
                     // An extension read: the answer, as the asking script would
                     // have heard it. An empty one is shown as an empty one.
                     Some(result) => match result.reply {
@@ -265,11 +305,7 @@ pub fn run_line(
                         // debugging console that is worth saying out loud.
                         // `@setrot` asked as a query is not a read and answers
                         // nothing by design, so it says nothing here either.
-                        None if matches!(
-                            RlvExtCommand::classify(&command),
-                            Some(RlvExtCommand::GetDebug { .. })
-                        ) =>
-                        {
+                        None if result.is_read => {
                             lines.push((
                                 RlvConsoleKind::Error,
                                 "no reply may be chatted on that channel".to_owned(),
@@ -526,8 +562,8 @@ fn spawn_clear_button(commands: &mut Commands, parent: Entity) {
     reason = "a Bevy system's parameters are its injected resources / queries: the keyboard and \
               focus that decide a submit happened, the UI handles, the identity and settings the \
               run needs, the two facts the debug-setting allowlist reads, the movement controls a \
-              forced rotation writes, the session it writes to, and the field plus the two text \
-              contexts clearing it requires"
+              forced rotation writes, the environment seam the sky family writes through, the \
+              session it writes to, and the field plus the two text contexts clearing it requires"
 )]
 fn submit_console_line(
     mut keyboard: ResMut<ButtonInput<KeyCode>>,
@@ -537,6 +573,7 @@ fn submit_console_line(
     settings: Option<Res<ViewerSettings>>,
     facts: Option<Res<RlvExtFacts>>,
     mut controls: Option<ResMut<AvatarControls>>,
+    mut environment: ResMut<RlvEnvironmentSlot>,
     mut session: ResMut<RlvSession>,
     mut fields: Query<&mut EditableText>,
     mut contexts: (ResMut<FontCx>, ResMut<LayoutCx>),
@@ -595,6 +632,7 @@ fn submit_console_line(
                     &typed,
                     hide,
                     &mut ext,
+                    &mut *environment,
                     &mut lines,
                 );
                 for (kind, text) in lines {
@@ -754,7 +792,7 @@ mod tests {
     };
     use pretty_assertions::assert_eq;
     use sl_rlv::{RlvDebugSetting, RlvDebugValue, RlvExtSource as _, RlvOutcome, RlvState};
-    use sl_viewer_world_api::rlv::{RlvConsoleKind, RlvExtFacts, ViewerRlvExt};
+    use sl_viewer_world_api::rlv::{RlvConsoleKind, RlvEnvironmentSlot, RlvExtFacts, ViewerRlvExt};
     use uuid::Uuid;
 
     /// A `Box<dyn Error>` alias, so a test can use `?`.
@@ -784,6 +822,7 @@ mod tests {
             line,
             hide_unset_duplicate,
             &mut ext(RlvExtFacts::default()),
+            &mut RlvEnvironmentSlot::default(),
             lines,
         )
     }
@@ -849,6 +888,20 @@ mod tests {
         );
         assert!(outcome_suffix(RlvOutcome::Success).is_none());
         assert!(outcome_suffix(RlvOutcome::FailedParam).is_some());
+    }
+
+    /// A keyword the *user* turned off does not read as one the viewer never
+    /// had: the console is where they find out it was their own doing.
+    #[test]
+    fn a_disabled_keyword_says_whose_doing_it_was() {
+        assert_eq!(
+            report_line("setenv=n", RlvOutcome::FailedDisabled),
+            "@setenv=n (turned off in your settings)"
+        );
+        assert_eq!(
+            outcome_stream(RlvOutcome::FailedDisabled),
+            RlvConsoleKind::Error
+        );
     }
 
     /// Running a real line applies it and reports one line per command.
@@ -948,6 +1001,7 @@ mod tests {
             "@getdebug_avatarsex=2222",
             false,
             &mut source,
+            &mut RlvEnvironmentSlot::default(),
             &mut lines,
         );
 
@@ -993,6 +1047,7 @@ mod tests {
             "@setdebug_renderresolutiondivisor:4=force",
             false,
             &mut source,
+            &mut RlvEnvironmentSlot::default(),
             &mut lines,
         );
         assert_eq!(

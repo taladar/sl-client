@@ -7,13 +7,15 @@
 //! definitions the tracks reference.
 //!
 //! The deep atmospheric-scattering profiles (`rayleigh_config`, `mie_config`,
-//! `absorption_config`) are carried as [`DensityLayer`] lists. They used to be
-//! skipped — this workspace's renderer takes its atmosphere from the legacy
-//! haze block — but skipping them on the way *out* is not an option: the
-//! reference viewer's sky validator marks all three **required with no
-//! default**, so a sky frame missing them fails validation, takes its whole day
-//! cycle down with it (`Must have at least one water and one sky frame!`), and
-//! leaves the region with no environment at all.
+//! `absorption_config`) are carried as [`DensityLayer`] lists rather than
+//! interpreted: nothing here renders from them — this workspace's renderer
+//! takes its atmosphere from the legacy haze block — but carrying them is not
+//! optional in either direction. An editor that saves a sky asset back over the
+//! item it came from must not silently drop them, and the reference viewer's
+//! sky validator marks all three **required with no default**, so a sky frame
+//! missing them fails validation, takes its whole day cycle down with it (`Must
+//! have at least one water and one sky frame!`), and leaves the region with no
+//! environment at all. Every other documented sky/water parameter is parsed.
 
 use std::collections::BTreeMap;
 
@@ -302,11 +304,25 @@ pub struct SkySettings {
     pub halo_texture: Option<TextureKey>,
     /// The rainbow texture (`None` for the viewer default).
     pub rainbow_texture: Option<TextureKey>,
-    /// The Rayleigh (air molecule) scattering density profile.
+    /// The sky dome's offset (`dome_offset`), carried and never read.
+    ///
+    /// The reference stopped reading it — `getSkyDomeOffset` is commented out
+    /// and the dome is a constant now — but it is still in
+    /// `LLSettingsSky::defaults()`, so every sky it saves carries one. `None`
+    /// when the asset holds none, so a frame that never had one does not gain
+    /// one by passing through here.
+    pub dome_offset: Option<f32>,
+    /// The sky dome's radius (`dome_radius`), carried and never read, for the
+    /// same reason as [`dome_offset`](Self::dome_offset).
+    pub dome_radius: Option<f32>,
+    /// The Rayleigh (air molecule) scattering density profile
+    /// (`rayleigh_config`), carried verbatim — see [`DensityLayer`].
     pub rayleigh_config: Vec<DensityLayer>,
-    /// The Mie (aerosol) scattering density profile.
+    /// The Mie (aerosol) scattering density profile (`mie_config`), the one
+    /// whose layers carry an [`anisotropy`](DensityLayer::anisotropy).
     pub mie_config: Vec<DensityLayer>,
-    /// The absorption (ozone) density profile.
+    /// The absorption (ozone) density profile (`absorption_config`), two
+    /// ramping layers in the reference's own default.
     pub absorption_config: Vec<DensityLayer>,
 }
 
@@ -332,6 +348,104 @@ pub enum EnvironmentAsset {
     /// water frames and the tracks that sequence them. Boxed for the same
     /// reason as [`Sky`](Self::Sky) — a cycle carries whole frames.
     DayCycle(Box<DayCycle>),
+}
+
+impl EnvironmentAsset {
+    /// Which of the three kinds this decoded asset is — the same distinction
+    /// [`SettingsKind`] carries, reached by having parsed the body rather than
+    /// by reading an inventory item's flags.
+    #[must_use]
+    pub const fn kind(&self) -> SettingsKind {
+        match *self {
+            Self::Sky(_) => SettingsKind::Sky,
+            Self::Water(_) => SettingsKind::Water,
+            Self::DayCycle(_) => SettingsKind::DayCycle,
+        }
+    }
+}
+
+/// Which kind of settings asset an inventory item holds, carried in the low byte
+/// of the item's `flags` (`II_FLAGS_SUBTYPE_MASK`) exactly as a wearable's slot
+/// and a script's language are (`LLSettingsType::type_e`).
+///
+/// This is the *only* way to tell one settings item from another **without
+/// fetching it**: an [`EnvironmentAsset`] tags its own kind in its body, but a
+/// list of every settings item in inventory cannot afford to download them all
+/// to find out what they are. The reference reads the same byte for the same
+/// reason (`LLSettingsType::fromInventoryFlags`).
+///
+/// The reference casts the byte straight to its enum, so an unrecognised one
+/// becomes a value no arm of its `switch` matches and the item is logged and
+/// dropped; here that is [`None`], which reaches the same outcome by a route
+/// that cannot be mistaken for a valid kind.
+/// Deliberately **not** `#[non_exhaustive]`, unlike its neighbours: these three
+/// are the whole of `LLSettingsType::type_e`, its two sentinels being the
+/// [`None`] this type's constructors return rather than kinds. Every consumer
+/// files an asset under exactly one of them, and a fourth kind would be a
+/// protocol change that ought to break each of those matches rather than fall
+/// into a wildcard that quietly drops it.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub enum SettingsKind {
+    /// A single sky frame (`ST_SKY = 0`).
+    Sky,
+    /// A single water frame (`ST_WATER = 1`).
+    Water,
+    /// A whole day cycle (`ST_DAYCYCLE = 2`).
+    DayCycle,
+}
+
+impl SettingsKind {
+    /// The item-`flags` low-byte mask carrying the settings subtype
+    /// (`II_FLAGS_SUBTYPE_MASK`) — the same byte
+    /// [`ScriptLanguage`](crate::ScriptLanguage) and a wearable's slot use.
+    pub const SUBTYPE_MASK: u32 = 0x0000_00ff;
+
+    /// The `LLSettingsType::type_e` byte for this kind.
+    #[must_use]
+    pub const fn subtype(self) -> u8 {
+        match self {
+            Self::Sky => 0,
+            Self::Water => 1,
+            Self::DayCycle => 2,
+        }
+    }
+
+    /// Classifies an `LLSettingsType::type_e` byte, or `None` for one that names
+    /// no kind (the reference's `ST_INVALID` / `ST_NONE` included).
+    #[must_use]
+    pub const fn from_subtype(byte: u8) -> Option<Self> {
+        match byte {
+            0 => Some(Self::Sky),
+            1 => Some(Self::Water),
+            2 => Some(Self::DayCycle),
+            _ => None,
+        }
+    }
+
+    /// The kind recorded in an inventory item's `flags`, reading the subtype low
+    /// byte ([`SUBTYPE_MASK`](Self::SUBTYPE_MASK)); `None` for an unknown one.
+    ///
+    /// The caller must already know the item *is* a settings item — every
+    /// inventory item has flags, and a wearable's slot byte would be read as a
+    /// kind just as happily.
+    #[must_use]
+    pub fn from_item_flags(flags: u32) -> Option<Self> {
+        let byte = u8::try_from(flags & Self::SUBTYPE_MASK).ok()?;
+        Self::from_subtype(byte)
+    }
+
+    /// The reference's own short name for the kind
+    /// (`LLSettingsType::getDefaultName` keys: `"sky"`, `"water"`, `"day"`).
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Sky => "sky",
+            Self::Water => "water",
+            Self::DayCycle => "day",
+        }
+    }
 }
 
 /// A single water frame (`LLSettingsWater`): the surface and underwater state at
@@ -789,6 +903,42 @@ fn lerp_array2(a: [f32; 2], b: [f32; 2], factor: f32) -> [f32; 2] {
     [lerp_f32(ax, bx, factor), lerp_f32(ay, by, factor)]
 }
 
+/// Layer-wise lerp of two density profiles.
+///
+/// Two profiles of the **same shape** interpolate term by term, which is what
+/// the reference's own map interpolation does when it walks two settings LLSDs
+/// of matching structure. Two of *different* shapes have no term-wise
+/// correspondence at all — a two-layer ozone ramp against a one-layer one — so
+/// they switch at the halfway point rather than producing a stack that is
+/// neither. Two absent profiles stay absent.
+fn lerp_density_profile(a: &[DensityLayer], b: &[DensityLayer], factor: f32) -> Vec<DensityLayer> {
+    if a.len() != b.len() {
+        return if factor > 0.5 { b.to_vec() } else { a.to_vec() };
+    }
+    a.iter()
+        .zip(b)
+        .map(|(lower, upper)| DensityLayer {
+            width: lerp_f32(lower.width, upper.width, factor),
+            exp_term: lerp_f32(lower.exp_term, upper.exp_term, factor),
+            exp_scale: lerp_f32(lower.exp_scale, upper.exp_scale, factor),
+            linear_term: lerp_f32(lower.linear_term, upper.linear_term, factor),
+            constant_term: lerp_f32(lower.constant_term, upper.constant_term, factor),
+            // An anisotropy only one side carries is not a number to blend
+            // toward from nothing: take whichever side is in force.
+            anisotropy: match (lower.anisotropy, upper.anisotropy) {
+                (Some(lower), Some(upper)) => Some(lerp_f32(lower, upper, factor)),
+                (lower, upper) => {
+                    if factor > 0.5 {
+                        upper
+                    } else {
+                        lower
+                    }
+                }
+            },
+        })
+        .collect()
+}
+
 /// Per-axis lerp of two [`Scale`]s (e.g. the water `normal_scale`).
 fn lerp_scale(a: Scale, b: Scale, factor: f32) -> Scale {
     Scale::new(
@@ -911,6 +1061,35 @@ pub fn azimuth_altitude_to_rotation(azimuth: f32, altitude: f32) -> Rotation {
     }
 }
 
+/// The inverse of [`azimuth_altitude_to_rotation`]: where a sky's sun or moon
+/// *is*, as spherical angles in radians — the reference's
+/// `LLVirtualTrackball::getAzimuthAndElevation`.
+///
+/// Public for the same reason the forward conversion is: an environment editor
+/// has to show the sun's azimuth and elevation on two sliders, and
+/// [`SkySettings::sun_rotation`] is a quaternion with no other way to ask.
+/// Azimuth comes back normalised to `0.0..TAU` so a slider over `0°..360°` has a
+/// value for every rotation; altitude is `-FRAC_PI_2..=FRAC_PI_2`.
+#[must_use]
+pub fn rotation_to_azimuth_altitude(rotation: &Rotation) -> (f32, f32) {
+    // The rotation applied to the local `+X` axis — the first column of the
+    // rotation matrix, which is the direction the forward conversion encoded.
+    let (x, y, z, s) = (rotation.x, rotation.y, rotation.z, rotation.s);
+    let dir_x = 1.0 - 2.0 * z.mul_add(z, y * y);
+    let dir_y = 2.0 * s.mul_add(z, x * y);
+    let dir_z = 2.0 * s.mul_add(-y, x * z);
+    let altitude = dir_z.clamp(-1.0, 1.0).asin();
+    let azimuth = dir_y.atan2(dir_x);
+    (
+        if azimuth < 0.0 {
+            azimuth + std::f32::consts::TAU
+        } else {
+            azimuth
+        },
+        altitude,
+    )
+}
+
 impl SkySettings {
     /// Blend this sky frame toward `other` by `factor` (`0.0` → `self`, `1.0` →
     /// `other`), the reference day-cycle frame interpolation
@@ -981,6 +1160,8 @@ impl SkySettings {
             bloom_texture: pick_at_half(&self.bloom_texture, &other.bloom_texture, factor),
             halo_texture: pick_at_half(&self.halo_texture, &other.halo_texture, factor),
             rainbow_texture: pick_at_half(&self.rainbow_texture, &other.rainbow_texture, factor),
+            dome_offset: pick_at_half(&self.dome_offset, &other.dome_offset, factor),
+            dome_radius: pick_at_half(&self.dome_radius, &other.dome_radius, factor),
             // The reference blends a density profile the way it blends any
             // other setting — but only where the two frames' layer *lists* line
             // up, which is what `lerp_density_profile` insists on before it
@@ -1086,52 +1267,20 @@ impl SkySettings {
             bloom_texture: None,
             halo_texture: None,
             rainbow_texture: None,
+            // Absent, not the reference's 0.96 / 15000: this default stands in
+            // for a sky *document*, and the two are carried rather than read,
+            // so inventing them would put keys in a frame that never had any.
+            dome_offset: None,
+            dome_radius: None,
+            // The reference's own defaults, unlike the dome pair above: all
+            // three profiles are *required with no default* by its sky
+            // validator, so a frame that leaves them empty is one it throws
+            // away — see the module documentation.
             rayleigh_config: DensityLayer::rayleigh_default(),
             mie_config: DensityLayer::mie_default(),
             absorption_config: DensityLayer::absorption_default(),
         }
     }
-}
-
-/// Blends two density profiles, layer for layer.
-///
-/// Only where the two lists are the same length: a profile is a *shape* (how
-/// many ramps ozone has, whether Mie carries an anisotropy), and interpolating
-/// between two shapes would invent a third that neither frame asked for. Where
-/// they differ, the profile snaps at the halfway mark like the frame's other
-/// non-blendable settings.
-fn lerp_density_profile(
-    from: &[DensityLayer],
-    to: &[DensityLayer],
-    factor: f32,
-) -> Vec<DensityLayer> {
-    if from.len() != to.len() {
-        return if factor > 0.5 {
-            to.to_vec()
-        } else {
-            from.to_vec()
-        };
-    }
-    from.iter()
-        .zip(to)
-        .map(|(from, to)| DensityLayer {
-            width: lerp_f32(from.width, to.width, factor),
-            exp_term: lerp_f32(from.exp_term, to.exp_term, factor),
-            exp_scale: lerp_f32(from.exp_scale, to.exp_scale, factor),
-            linear_term: lerp_f32(from.linear_term, to.linear_term, factor),
-            constant_term: lerp_f32(from.constant_term, to.constant_term, factor),
-            anisotropy: match (from.anisotropy, to.anisotropy) {
-                (Some(from), Some(to)) => Some(lerp_f32(from, to, factor)),
-                (from, to) => {
-                    if factor > 0.5 {
-                        to
-                    } else {
-                        from
-                    }
-                }
-            },
-        })
-        .collect()
 }
 
 impl WaterSettings {
@@ -1196,8 +1345,49 @@ impl WaterSettings {
 mod tests {
     use super::{
         CloudPosDensity, Color, ColorAlpha, EnvironmentSettings, Glow, Scale, SkySettings,
+        azimuth_altitude_to_rotation, rotation_to_azimuth_altitude,
     };
     use pretty_assertions::assert_eq;
+
+    /// Placing the sun at an angle and asking where it is gives the angle back.
+    ///
+    /// The two are used together by any environment editor: the sliders read
+    /// through the inverse and write through the forward conversion, so a sky
+    /// merely *opened* in one must not drift.
+    #[test]
+    fn sun_angles_round_trip_through_the_rotation() {
+        // Azimuths on both sides of the `atan2` branch cut, and altitudes at and
+        // near the poles the forward conversion special-cases.
+        for azimuth_deg in [0.0_f32, 45.0, 179.0, 181.0, 270.0, 359.0] {
+            for altitude_deg in [-89.0_f32, -45.0, -0.5, 0.0, 0.5, 45.0, 89.0] {
+                let (azimuth, altitude) = (azimuth_deg.to_radians(), altitude_deg.to_radians());
+                let (back_azimuth, back_altitude) =
+                    rotation_to_azimuth_altitude(&azimuth_altitude_to_rotation(azimuth, altitude));
+                assert!(
+                    (back_azimuth.to_degrees() - azimuth_deg).abs() < 0.01,
+                    "azimuth {azimuth_deg} came back as {}",
+                    back_azimuth.to_degrees()
+                );
+                assert!(
+                    (back_altitude.to_degrees() - altitude_deg).abs() < 0.01,
+                    "altitude {altitude_deg} came back as {}",
+                    back_altitude.to_degrees()
+                );
+            }
+        }
+    }
+
+    /// Azimuth comes back in `0..360°`, never negative — a slider over that
+    /// range has to have a value for a sun in the western half of the sky.
+    #[test]
+    fn a_western_azimuth_is_not_reported_negative() {
+        let rotation = azimuth_altitude_to_rotation(300.0_f32.to_radians(), 0.0);
+        let (azimuth, _altitude) = rotation_to_azimuth_altitude(&rotation);
+        assert!(
+            (0.0..std::f32::consts::TAU).contains(&azimuth),
+            "azimuth {azimuth} is outside 0..TAU"
+        );
+    }
 
     #[test]
     fn color_channels_round_trip() {
@@ -1642,5 +1832,58 @@ mod tests {
                 && noon.water_fog_density.to_bits() == reference.water_fog_density.to_bits()
                 && noon.name == reference.name
         }));
+    }
+
+    #[test]
+    fn settings_kind_reads_the_reference_subtype_bytes_both_ways() {
+        use super::SettingsKind;
+        // `LLSettingsType::type_e`: ST_SKY = 0, ST_WATER = 1, ST_DAYCYCLE = 2.
+        for (kind, byte) in [
+            (SettingsKind::Sky, 0_u8),
+            (SettingsKind::Water, 1),
+            (SettingsKind::DayCycle, 2),
+        ] {
+            assert_eq!(kind.subtype(), byte);
+            assert_eq!(SettingsKind::from_subtype(byte), Some(kind));
+        }
+        // ST_INVALID (255) and everything else names no kind.
+        assert_eq!(SettingsKind::from_subtype(3), None);
+        assert_eq!(SettingsKind::from_subtype(255), None);
+    }
+
+    #[test]
+    fn settings_kind_masks_the_low_flag_byte_and_ignores_the_rest() {
+        use super::SettingsKind;
+        // Only `II_FLAGS_SUBTYPE_MASK` carries the kind: the high bits are other
+        // item flags (`II_FLAGS_OBJECT_SLAM_PERM`, the shared-reference bit, …)
+        // and must not change the answer.
+        assert_eq!(SettingsKind::from_item_flags(0), Some(SettingsKind::Sky));
+        assert_eq!(
+            SettingsKind::from_item_flags(0xdead_ff00 | 2),
+            Some(SettingsKind::DayCycle)
+        );
+        assert_eq!(
+            SettingsKind::from_item_flags(0x4000_0001),
+            Some(SettingsKind::Water)
+        );
+        // A byte no kind claims is refused rather than cast into one, which is
+        // where the reference's unchecked cast lands its `default:` arm.
+        assert_eq!(SettingsKind::from_item_flags(0xff), None);
+    }
+
+    #[test]
+    fn a_decoded_asset_reports_the_kind_its_flags_would_have_carried() {
+        use super::{EnvironmentAsset, SettingsKind, SkySettings, WaterSettings};
+        let sky = EnvironmentAsset::Sky(Box::new(SkySettings::legacy_windlight_default(
+            super::DEFAULT_SKY_FRAME,
+        )));
+        let water =
+            EnvironmentAsset::Water(WaterSettings::legacy_default(super::DEFAULT_WATER_FRAME));
+        let day = EnvironmentAsset::DayCycle(Box::new(
+            EnvironmentSettings::legacy_windlight_default().day_cycle,
+        ));
+        assert_eq!(sky.kind(), SettingsKind::Sky);
+        assert_eq!(water.kind(), SettingsKind::Water);
+        assert_eq!(day.kind(), SettingsKind::DayCycle);
     }
 }

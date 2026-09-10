@@ -55,36 +55,36 @@ use sl_proto::{
 // survey commands, and read events. `Event` is aliased to avoid clashing with
 // Bevy's `Event` derive.
 pub use sl_proto::{
-    ActiveGroup, AgentKey, AgentOrObjectKey, AgentPreferences, AnimatedObjects, AnimationKey,
-    AnyMessage, Arrival, AssetKey, AssetUpdateLocation, AssociateInventory, AttachmentMode,
-    AttachmentPoint, AvatarAppearance, AvatarClassified, AvatarGroupMembership, AvatarInterests,
-    AvatarName, AvatarPick, AvatarPickerResult, AvatarProperties, BUILTIN_UI_SOUNDS, Camera,
-    CameraError, ChatAudible, ChatChannel, ChatLogConfig, ChatMessage, ChatSessionKind, ChatSource,
-    ChatSourceType, ChatType, ChatTypeNotAVolume, Child, CircuitCode, CircuitId,
-    ClassifiedCategory, ClassifiedInfo, ClassifiedKey, ClassifiedUpdate, ClickAction,
-    ClientDirectories, ClockStyle, CoarseLocation, Color, ColorAlpha, Command, ControlFlags,
-    ConversationKind, CreateGroupParams, CreateListing, DEFAULT_BLOOM_TEXTURE,
-    DEFAULT_CLOUD_TEXTURE, DEFAULT_HALO_TEXTURE, DEFAULT_MOON_TEXTURE, DEFAULT_PRIM_TEXTURE,
-    DEFAULT_RAINBOW_TEXTURE, DEFAULT_SUN_TEXTURE, DEFAULT_WATER_NORMAL_TEXTURE, DayCycle,
-    DayCycleFrame, DeRezDestination, DetachOrder, Diagnostic, DirClassifiedResult, DirEventResult,
-    DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, Direction,
-    DirectoryVisibility, DisconnectReason, DisplayName, DisplayNameUpdate, Distance, EconomyData,
-    EnvironmentAsset, EnvironmentSettings, Error as SessionError, EstateAccessDelta,
-    EstateAccessKind, EstateCovenant, EstateFlags, EstateInfo, EstateInfoUpdate, EventId,
-    EventInfo, ExperienceInfo, ExperienceKey, ExperiencePermission, ExperienceProperties,
-    ExperienceUpdate, ExtendedMesh, FaceMaterialPut, FlexibleData, FolderInfo, FolderState,
-    FolderType, Friend, FriendKey, FriendPresence, FriendRights, GestureActivation,
-    GlobalCoordinates, Glow, GltfMaterialOverride, GridCoordinates, GroupInvitationReceived,
-    GroupKey, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment, GroupNoticeItem,
-    GroupNoticeKey, GroupNoticeReceived, GroupProfile, GroupRequestId, GroupRole, GroupRoleChange,
-    GroupRoleEdit, GroupRoleKey, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType,
-    GroupTitle, HomeLocation, IceCandidate, ImDialog, ImSessionId, InstantMessage, InterestsUpdate,
-    InventoryCacheConfig, InventoryCallbackId, InventoryCursor, InventoryFolder,
-    InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey, InventoryOffer,
-    InventoryOwner, InventoryType, ItemInfo, Key, Kilobits, LandArea, LandImpact, LandSearchType,
-    LandingType, LegacyMaterial, LightData, LightImage, LindenAmount, LindenBalance, Listing,
-    ListingId, LoadUrlRequest, LoggedChatType, LoginAccount, LoginFailure, LoginParams,
-    LoginRejectKind, LoginRequest, LookAtType, LureId, MAX_FACES, MEDIA_PERM_ALL,
+    ASSET_CODE_LINK, ASSET_CODE_LINK_FOLDER, ActiveGroup, AgentKey, AgentOrObjectKey,
+    AgentPreferences, AnimatedObjects, AnimationKey, AnyMessage, Arrival, AssetKey,
+    AssetUpdateLocation, AssociateInventory, AttachmentMode, AttachmentPoint, AvatarAppearance,
+    AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarName, AvatarPick,
+    AvatarPickerResult, AvatarProperties, BUILTIN_UI_SOUNDS, Camera, CameraError, ChatAudible,
+    ChatChannel, ChatLogConfig, ChatMessage, ChatSessionKind, ChatSource, ChatSourceType, ChatType,
+    ChatTypeNotAVolume, Child, CircuitCode, CircuitId, ClassifiedCategory, ClassifiedInfo,
+    ClassifiedKey, ClassifiedUpdate, ClickAction, ClientDirectories, ClockStyle, CloudPosDensity,
+    CoarseLocation, Color, ColorAlpha, Command, ControlFlags, ConversationKind, CreateGroupParams,
+    CreateListing, DEFAULT_BLOOM_TEXTURE, DEFAULT_CLOUD_TEXTURE, DEFAULT_HALO_TEXTURE,
+    DEFAULT_MOON_TEXTURE, DEFAULT_PRIM_TEXTURE, DEFAULT_RAINBOW_TEXTURE, DEFAULT_SUN_TEXTURE,
+    DEFAULT_WATER_NORMAL_TEXTURE, DayCycle, DayCycleFrame, DeRezDestination, DensityLayer,
+    DetachOrder, Diagnostic, DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult,
+    DirLandResult, DirPeopleResult, DirPlaceResult, Direction, DirectoryVisibility,
+    DisconnectReason, DisplayName, DisplayNameUpdate, Distance, EconomyData, EnvironmentAsset,
+    EnvironmentSettings, Error as SessionError, EstateAccessDelta, EstateAccessKind,
+    EstateCovenant, EstateFlags, EstateInfo, EstateInfoUpdate, EventId, EventInfo, ExperienceInfo,
+    ExperienceKey, ExperiencePermission, ExperienceProperties, ExperienceUpdate, ExtendedMesh,
+    FaceMaterialPut, FlexibleData, FolderInfo, FolderState, FolderType, Friend, FriendKey,
+    FriendPresence, FriendRights, GestureActivation, GlobalCoordinates, Glow, GltfMaterialOverride,
+    GridCoordinates, GroupInvitationReceived, GroupKey, GroupMember, GroupMembership, GroupNotice,
+    GroupNoticeAttachment, GroupNoticeItem, GroupNoticeKey, GroupNoticeReceived, GroupProfile,
+    GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember,
+    GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog,
+    ImSessionId, InstantMessage, InterestsUpdate, InventoryCacheConfig, InventoryCallbackId,
+    InventoryCursor, InventoryFolder, InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey,
+    InventoryKey, InventoryOffer, InventoryOwner, InventoryType, ItemInfo, Key, Kilobits, LandArea,
+    LandImpact, LandSearchType, LandingType, LegacyMaterial, LightData, LightImage, LindenAmount,
+    LindenBalance, Listing, ListingId, LoadUrlRequest, LoggedChatType, LoginAccount, LoginFailure,
+    LoginParams, LoginRejectKind, LoginRequest, LookAtType, LureId, MAX_FACES, MEDIA_PERM_ALL,
     MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType,
     MapRegionInfo, MarketplaceApiError, MarketplaceApiErrorKind, MarketplaceAssociateInventoryInfo,
     MarketplaceInventoryInfo, MarketplaceOperation, Material, MaterialOverrideUpdate, Maturity,
@@ -106,14 +106,14 @@ pub use sl_proto::{
     RegionInfoUpdate, RegionLimits, RegionLocalObjectId, RegionLocalParcelId, RegionName,
     RegionTerrainComposition, RegionTerrainUpdate, Reliability, RenderMaterialEntry,
     RenderMaterialRef, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation,
-    SaleInfo, SaleType, ScopedObjectId, ScopedParcelId, ScriptCompileError, ScriptControl,
+    SaleInfo, SaleType, Scale, ScopedObjectId, ScopedParcelId, ScriptCompileError, ScriptControl,
     ScriptControlAction, ScriptDialog, ScriptLanguage, ScriptPermissionRequest, ScriptPermissions,
     ScriptTarget, ScriptTeleportRequest, ScriptUploadLocation, SculptData, SculptOrMeshKey,
-    SequenceNumber, ServerHistoryMessage, SetDisplayNameReply, SimulatorFeatures, SkySettings,
-    SoundFlags, SoundPreload, StartLocation, StartLocationParseError, StartLocationSlot,
-    SurfaceInfo, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TerrainLayerType,
-    TerrainPatch, TextureAnimation, TextureEntry, TextureFace, TextureKey, Throttle,
-    ThrottleBuilder, ThrottleError, TimestampFormat, TransactionId, TransferId, Transmit,
+    SequenceNumber, ServerHistoryMessage, SetDisplayNameReply, SettingsKind, SimulatorFeatures,
+    SkySettings, SoundFlags, SoundPreload, StartLocation, StartLocationParseError,
+    StartLocationSlot, SurfaceInfo, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply,
+    TerrainLayerType, TerrainPatch, TextureAnimation, TextureEntry, TextureFace, TextureKey,
+    Throttle, ThrottleBuilder, ThrottleError, TimestampFormat, TransactionId, TransferId, Transmit,
     UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER, UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN,
     UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT, UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT,
     UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE, UI_SOUND_WINDOW_OPEN, UpdatableAssetType,
@@ -121,8 +121,9 @@ pub use sl_proto::{
     ViewerEffectType, VoiceAccountInfo, VoiceProvisionRequest, WaterSettings, Wearable,
     WearableType, WireError, XferId, avatar_texture, azimuth_altitude_to_rotation,
     decode_particle_system, decode_texture_anim, decode_texture_entry, encode_texture_entry,
-    environment_asset_from_bytes, grid_to_handle, group_powers, handle_to_global, handle_to_grid,
-    particle_pattern, pcode, sim_access, texture_anim_mode,
+    environment_asset_from_bytes, environment_asset_to_bytes, grid_to_handle, group_powers,
+    handle_to_global, handle_to_grid, particle_pattern, pcode, rotation_to_azimuth_altitude,
+    sim_access, texture_anim_mode,
 };
 #[doc(no_inline)]
 pub use sl_proto::{Asset, AssetType, ImageCodec, Texture, TransferStatus};
@@ -3406,13 +3407,37 @@ fn apply_command(
                     build_update_task_item_asset_request(*task_id, *item_id),
                 ),
             };
+            // The item this update is *about*, for the completion below. A task
+            // item is not an agent-inventory item, so it stays `None`.
+            let updated_item = match location {
+                AssetUpdateLocation::AgentInventory { item_id } => Some(item_id.uuid()),
+                AssetUpdateLocation::TaskInventory { .. } => None,
+            };
             if let Some(caps) = caps
                 && let Some(url) = caps.map.get(cap).cloned()
             {
                 let asset_tx = caps.asset_tx.clone();
                 let data = data.clone();
                 std::thread::spawn(move || {
-                    let event = run_caps_upload(&url, body, data, None);
+                    let mut event = run_caps_upload(&url, body, data, None);
+                    // **Name the item ourselves when the grid does not.** An
+                    // update cap's completion is only obliged to carry the new
+                    // *asset*: the item already exists and the client is the one
+                    // that named it, so a grid may echo it, may send a nil (which
+                    // parses as `None`, as `UploadBakedTexture`'s genuinely
+                    // item-less completion does), or may omit it. A consumer
+                    // correlating a save with the item it saved cannot tell those
+                    // apart from "somebody else's upload", so it would simply
+                    // never see its own save land — which is what left the
+                    // settings editor reporting "Saving…" forever on a save that
+                    // had in fact succeeded.
+                    if let SessionEvent::AssetUploaded {
+                        new_inventory_item, ..
+                    } = &mut event
+                        && new_inventory_item.is_none()
+                    {
+                        *new_inventory_item = updated_item;
+                    }
                     deliver(&asset_tx, event);
                 });
             } else {

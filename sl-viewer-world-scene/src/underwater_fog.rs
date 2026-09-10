@@ -173,9 +173,7 @@ pub(crate) fn update_underwater_fog(
     for (camera_transform, projection, mut fog) in &mut cameras {
         let camera_pos = camera_transform.translation;
         let position = day_position(&environment);
-        let sky = environment
-            .settings
-            .blended_sky_settings(camera_pos.y, position);
+        let sky = environment.sky_at(camera_pos.y, position);
 
         // world_from_clip = inverse(clip_from_view * view_from_world), to
         // reconstruct a fragment's world position from its depth in the shader.

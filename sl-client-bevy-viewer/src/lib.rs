@@ -77,6 +77,7 @@ pub(crate) const REGISTRARS: &[fn(&mut crate::settings::ViewerSettings)] = &[
     crate::debug_settings::register_settings,
     crate::notification_host::register_settings,
     crate::rlv::register_settings,
+    crate::environment::register_settings,
 ];
 
 // The leaf toolkit (geometry math, render leaves, small models) is its own
@@ -193,6 +194,7 @@ pub(crate) use sl_viewer_inventory::inventory_drag;
 pub(crate) use sl_viewer_inventory::inventory_filters;
 pub(crate) use sl_viewer_inventory::inventory_gallery;
 pub(crate) use sl_viewer_inventory::inventory_properties;
+pub(crate) use sl_viewer_inventory::settings_index;
 mod land_menu;
 pub(crate) use sl_viewer_notices::linkified_text;
 pub(crate) use sl_viewer_world_objects::legacy_materials;
@@ -246,6 +248,7 @@ pub(crate) use sl_viewer_preferences::preferences_general;
 pub(crate) use sl_viewer_preferences::preferences_graphics;
 pub(crate) use sl_viewer_preferences::preferences_network_cache;
 pub(crate) use sl_viewer_preferences::quick_preferences;
+pub(crate) use sl_viewer_preferences::quick_prefs_environment;
 pub(crate) use sl_viewer_ui_pie_menu::pie_menu;
 pub(crate) use sl_viewer_world_avatar::reach;
 pub(crate) use sl_viewer_world_objects::objects;
@@ -254,6 +257,10 @@ pub(crate) use sl_viewer_world_scene::particles;
 pub(crate) use sl_viewer_world_scene::probes;
 pub(crate) use sl_viewer_world_view::physics;
 pub mod render_gallery;
+pub(crate) use sl_viewer_environment::my_environments;
+pub(crate) use sl_viewer_environment::personal_lighting;
+pub(crate) use sl_viewer_environment::settings_editor;
+pub(crate) use sl_viewer_environment::settings_picker;
 pub(crate) use sl_viewer_rlv::rlv_behaviours;
 pub(crate) use sl_viewer_rlv::rlv_console;
 pub(crate) use sl_viewer_rlv::rlv_locks;
@@ -430,6 +437,7 @@ use crate::session::{
 };
 use crate::settings::{AccountContext, ViewerSettings, flush_settings, load_account_settings};
 use crate::settings_binding::SettingsBindingPlugin;
+use crate::settings_index::SettingsIndexPlugin;
 use crate::stand_stop_button::StandStopButtonPlugin;
 use crate::ui::{UiScaffoldSystems, ViewerUiPlugin};
 use crate::ui_element::UiAction;
@@ -1150,7 +1158,25 @@ fn run_session(
             enabled: true,
             cache_library: true,
         },
-        background_inventory_fetch: false,
+        // **On**, which the default is not. The flag defaults off so a *library*
+        // consumer that ignores inventory pays nothing for it; a viewer is the
+        // other case entirely, and leaving it off meant caching a tree we never
+        // fetched — the persistence paid for, the completeness not.
+        //
+        // Everything that asks a question of the whole inventory is wrong
+        // without it, and wrong *silently*, because a folder nobody has expanded
+        // simply contributes nothing: inventory search matches only what has
+        // been browsed to, and the settings surfaces (the quick-preferences
+        // combos, the My Environments library, the settings picker) listed only
+        // the folders the user happened to have opened — which is how a freshly
+        // created sky came to be invisible until its folder was clicked.
+        //
+        // The cost is bounded and paid once per account: the crawl is
+        // breadth-first with a bounded number of folder-contents requests in
+        // flight, and the on-disk cache above reconciles against the login
+        // skeleton so version-matching folders skip the refetch on every later
+        // login.
+        background_inventory_fetch: true,
         fetch_server_chat_history,
         offline,
     })
@@ -1280,6 +1306,11 @@ fn run_session(
     .add_plugins(InventoryFiltersPlugin)
     .add_plugins(InventoryGalleryPlugin)
     .add_plugins(InventoryPropertiesPlugin)
+    // The settings-asset index (viewer-environment-settings-index): every sky /
+    // water / day-cycle item the mirror holds, grouped by kind and addressable
+    // by name — what `@setenv_preset:<name>` resolves against, and what the
+    // environment pickers list. Needs InventoryPlugin's model, so it follows it.
+    .add_plugins(SettingsIndexPlugin)
     .add_plugins(AboutLandmarkPlugin)
     .add_plugins(AvatarPickerPlugin)
     // The avatar profile floater (viewer-social-profiles): 2nd Life / Web /
@@ -1454,6 +1485,10 @@ fn run_session(
     // the restrictions / locks / strings windows, and the RLVa menu's toggles.
     // They read the one RlvSession the world-API tier holds, so they can go
     // anywhere after it is initialised.
+    // The environment editors (viewer-environment-personal-lighting): the
+    // Personal Lighting window and the local sky / water override it writes.
+    // After the environment state exists, which the scene tier initialises.
+    .add_plugins(sl_viewer_environment::EnvironmentUiPlugins)
     .add_plugins(sl_viewer_rlv::RlvUiPlugins)
     // The RLV command intake (viewer-rlv-command-intake): the owner-say gate a
     // worn collar speaks through, the one seam every `@get*` / `@notify` answer
@@ -1551,6 +1586,7 @@ fn run_session(
     // area. After FloaterPlugin (its spawn_floater / deferred-content build) and
     // the bottom toolbar (its BottomArea host).
     .add_plugins(crate::quick_preferences::QuickPreferencesPlugin)
+    .add_plugins(crate::quick_prefs_environment::QuickPrefsEnvironmentPlugin)
     // The alerts tab's popup list (viewer-preferences-alerts-tab): the model
     // refresh, row pool and binding behind the panel build_alerts_tab plugs
     // into the shell's registry.

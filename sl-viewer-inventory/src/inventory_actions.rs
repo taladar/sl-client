@@ -45,13 +45,14 @@
 use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use sl_client_bevy::{
-    AgentKey, AssetKey, AssetType, AttachmentMode, AttachmentPoint, Command, DetachOrder,
-    FolderInfo, FolderType, GestureActivation, InventoryFolderKey, InventoryItemOrFolderKey,
-    InventoryKey, InventoryType, ItemInfo, NewInventoryItem, NewInventoryLink, Permissions,
-    RezAttachment, ScriptLanguage, SlCommand, SlEvent, SlIdentity, SlSessionEvent, TransactionId,
-    Uuid, VisualParams, Wearable, WearableType,
+    AgentKey, AssetKey, AssetType, AssetUpdateLocation, AttachmentMode, AttachmentPoint, Command,
+    DetachOrder, FolderInfo, FolderType, GestureActivation, InventoryFolderKey,
+    InventoryItemOrFolderKey, InventoryKey, InventoryType, ItemInfo, NewInventoryItem,
+    NewInventoryLink, Permissions, RezAttachment, ScriptLanguage, SettingsKind, SlCommand, SlEvent,
+    SlIdentity, SlSessionEvent, TransactionId, UpdatableAssetType, Uuid, VisualParams, Wearable,
+    WearableType,
 };
-use std::collections::{HashSet, VecDeque};
+use std::collections::HashSet;
 
 use crate::inventory::{
     InlineRename, InventoryModel, InventorySelection, InventoryUi, InventoryView, RowKey,
@@ -63,8 +64,10 @@ use crate::ui::focus_within;
 use crate::ui_element::UiAction;
 use crate::virtual_list::VirtualRow;
 use crate::world_api::InputContext;
+use crate::world_api::PendingItemCreations;
 use crate::world_api::StartConference;
 use crate::world_api::{ConversationKey, OpenConversation};
+use crate::world_api::{PendingSettingsCreations, SettingsItemCreated};
 
 /// The `element` the inventory context menus attribute their [`UiAction`]s to.
 pub(crate) const INVENTORY_MENU_ELEMENT: &str = "inventory-menu";
@@ -272,10 +275,8 @@ static UPLOAD_MENU: MenuDef = MenuDef {
 static NEW_SETTINGS_MENU: MenuDef = MenuDef {
     label: "New Settings",
     items: &[
-        MenuItemDef::Command(MenuCommand::new("New Sky", "new-sky").enabled_when(UNIMPLEMENTED)),
-        MenuItemDef::Command(
-            MenuCommand::new("New Water", "new-water").enabled_when(UNIMPLEMENTED),
-        ),
+        MenuItemDef::Command(MenuCommand::new("New Sky", "new-sky")),
+        MenuItemDef::Command(MenuCommand::new("New Water", "new-water")),
         MenuItemDef::Command(
             MenuCommand::new("New Day Cycle", "new-daycycle").enabled_when(UNIMPLEMENTED),
         ),
@@ -592,6 +593,7 @@ pub(crate) static INVENTORY_ITEM_MENU: MenuDef = MenuDef {
                 .enabled_when(WORN),
         ),
         // Settings.
+        MenuItemDef::Command(MenuCommand::new("Edit", "edit-settings").visible_when(IS_SETTINGS)),
         MenuItemDef::Command(
             MenuCommand::new("Apply Only To Myself", "settings-apply-local")
                 .visible_when(IS_SETTINGS)
@@ -1682,7 +1684,8 @@ fn handle_inventory_menu_actions(
         ResMut<ActiveGestures>,
         ResMut<crate::inventory::InlineRename>,
         ResMut<PendingShare>,
-        ResMut<PendingWearableUploads>,
+        ResMut<PendingItemCreations>,
+        ResMut<PendingSettingsCreations>,
         ResMut<crate::inventory::PendingReveal>,
     ),
     library: Option<Res<crate::avatar_assets::AvatarAssetLibrary>>,
@@ -1707,7 +1710,8 @@ fn handle_inventory_menu_actions(
         mut gestures,
         mut rename,
         mut pending_share,
-        mut pending_wearables,
+        mut pending_creations,
+        mut settings_creations,
         mut pending_reveal,
     ) = stashes;
     let (
@@ -1775,6 +1779,14 @@ fn handle_inventory_menu_actions(
                 if let MenuTarget::Item(item) = &menu_target {
                     wearable_editor
                         .write(crate::inventory::OpenWearableEditor { item: item.clone() });
+                }
+            }
+            "edit-settings" => {
+                // The same route the Open action takes for a settings item —
+                // the editor is the preview.
+                if let MenuTarget::Item(item) = &menu_target {
+                    previews
+                        .write(crate::inventory_properties::OpenItemPreview { item: item.clone() });
                 }
             }
             "edit-material" => {
@@ -2001,13 +2013,14 @@ fn handle_inventory_menu_actions(
             | "new-pants" | "new-shoes" | "new-socks" | "new-jacket" | "new-skirt"
             | "new-gloves" | "new-undershirt" | "new-underpants" | "new-alpha" | "new-tattoo"
             | "new-universal" | "new-physics" | "new-shape" | "new-skin" | "new-hair"
-            | "new-eyes" => {
+            | "new-eyes" | "new-sky" | "new-water" => {
                 dispatch_create(
                     action.action,
                     dest,
                     identity.agent_id,
                     library.as_ref().map(|library| library.params()),
-                    &mut pending_wearables,
+                    &mut pending_creations,
+                    &mut settings_creations,
                     &mut commands,
                     &mut ui_actions,
                     &mut rename,
@@ -2435,23 +2448,13 @@ fn deep_copy_folder(
 // New-wearable creation (viewer-inventory-new-wearables).
 // ---------------------------------------------------------------------------
 
-/// The wearable creations whose upload reply has not arrived yet, oldest
-/// first. `NewFileAgentInventory` creates the item server-side but leaves its
-/// flags empty, so the reply is followed with a `ChangeInventoryItemFlags`
-/// carrying the slot — matched FIFO (the reply carries no correlation id).
-#[derive(Resource, Debug, Default)]
-pub struct PendingWearableUploads {
-    /// The in-flight creations: the slot to stamp and the folder to refresh.
-    queue: VecDeque<(WearableType, InventoryFolderKey)>,
-}
-
-impl PendingWearableUploads {
-    /// Enqueue a wearable-item creation so its flags are stamped (with `slot`)
-    /// and its `folder` refreshed when the upload reply lands. Shared by the
-    /// New-Clothes / New-Body-Parts creators and the appearance editor's
-    /// Save-As, which both mint a fresh wearable item via `UploadAsset`.
-    pub fn enqueue(&mut self, slot: WearableType, folder: InventoryFolderKey) {
-        self.queue.push_back((slot, folder));
+/// The settings kind (and default item name) a create action names.
+pub(crate) fn settings_kind_of(action: &str) -> Option<(SettingsKind, &'static str)> {
+    match action {
+        "new-sky" => Some((SettingsKind::Sky, "New Sky")),
+        "new-water" => Some((SettingsKind::Water, "New Water")),
+        "new-daycycle" => Some((SettingsKind::DayCycle, "New Day Cycle")),
+        _other => None,
     }
 }
 
@@ -2558,14 +2561,18 @@ pub(crate) fn default_wearable_asset(
     text
 }
 
-/// Finish an in-flight wearable creation when its upload reply lands: stamp
-/// the fresh item's flags with the wearable slot (the uploader path leaves
-/// them empty, which would read as a Shape) and refresh its folder. Matched
-/// FIFO against [`PendingWearableUploads`]; an upload failure drops the
-/// oldest pending entry.
-fn handle_wearable_uploads(
+/// Finish an in-flight item creation when its upload reply lands: stamp the
+/// fresh item's flags with its subtype (the uploader path leaves them empty,
+/// which reads as a Shape for a wearable and as no kind at all for a settings
+/// item) and refresh its folder. Matched FIFO against
+/// [`PendingItemCreations`]; an upload failure drops the oldest pending entry.
+///
+/// The consumer lives here, in the inventory, because finishing a creation is
+/// half an inventory refresh — the producers are wherever the uploads are
+/// started (the creators below, the appearance editor, the settings editors).
+fn handle_item_creations(
     mut events: MessageReader<SlEvent>,
-    mut pending: ResMut<PendingWearableUploads>,
+    mut pending: ResMut<PendingItemCreations>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     for event in events.read() {
@@ -2579,20 +2586,149 @@ fn handle_wearable_uploads(
                 created: Some(_),
                 ..
             } => {
-                if let Some((slot, folder)) = pending.queue.pop_front() {
+                if let Some(creation) = pending.take_next() {
                     commands.write(SlCommand(Command::ChangeInventoryItemFlags {
                         item_id: InventoryKey::from(*item),
-                        flags: u32::from(slot.to_code()),
+                        flags: creation.flags,
                     }));
-                    query_folder_page(folder, &mut commands);
+                    query_folder_page(creation.folder, &mut commands);
                 }
             }
             SlSessionEvent::AssetUploadFailed { .. } => {
-                let _dropped = pending.queue.pop_front();
+                let _dropped = pending.take_next();
             }
             _other => {}
         }
     }
+}
+
+/// Finish a **settings** creation when its reply lands: write the body the
+/// creator was holding, widen the permissions as the reference does, and
+/// publish it.
+///
+/// The other half of [`new_settings_item`]. The simulator has already authored
+/// the default asset for the kind and stamped the subtype, so a New Sky / New
+/// Water needs nothing more; a **Save As** has a body to store, and stores it
+/// exactly the way an in-place Save does — `UpdateSettingsAgentInventory`,
+/// through [`AssetUpdateLocation::AgentInventory`] on the item the reply just
+/// named. That two-step is `LLSettingsVOBase::createInventoryItem` →
+/// `onInventoryItemCreated` → `updateInventoryItem`.
+///
+/// The consumer lives here, beside [`handle_item_creations`], for the same
+/// reason that one does: it is the inventory that has to hear about a new item.
+fn handle_settings_creations(
+    mut events: MessageReader<SlEvent>,
+    model: Res<InventoryModel>,
+    mut pending: ResMut<PendingSettingsCreations>,
+    mut commands: MessageWriter<SlCommand>,
+    mut created: MessageWriter<SettingsItemCreated>,
+) {
+    for event in events.read() {
+        let SlSessionEvent::InventoryItemCreated { item, .. } = &event.0 else {
+            continue;
+        };
+        // The wire item carries raw type codes, not the typed enums.
+        if i32::from(item.item_type) != AssetType::Settings.to_code() {
+            continue;
+        }
+        // **`UpdateCreateInventoryItem` does not only announce creations.**
+        // Second Life sends it again when a capability upload *rewrites* an
+        // item, which is every settings Save — so on that grid the message that
+        // means "here is the item you asked me to make" and the one that means
+        // "the item you just saved has a new asset" are the same message. A
+        // creation is the one an item did not exist before, so an item the
+        // mirror already holds is a rewrite and must not spend a queue entry:
+        // the entry belongs to a creation still in flight, and spending it here
+        // would write that creation's body onto the item somebody merely saved.
+        if model.find_item(item.item_id).is_some() {
+            continue;
+        }
+        let Some(creation) = pending.take_next() else {
+            // A settings item the viewer did not ask for — an accepted
+            // inventory offer, say. Nothing to finish.
+            continue;
+        };
+        let authored = creation.body.is_some();
+        if let Some(data) = creation.body {
+            commands.write(SlCommand(Command::UpdateInventoryAsset {
+                location: AssetUpdateLocation::AgentInventory {
+                    item_id: item.item_id,
+                },
+                asset_type: UpdatableAssetType::Settings,
+                data,
+            }));
+        }
+        // `onInventoryItemCreated` widens the everyone mask to PERM_COPY on
+        // every settings item it makes, whatever the creator asked for, and
+        // pushes it back with `updateServer`. Guarded the same way, so an item
+        // that already carries it costs nothing.
+        if !item.permissions.everyone.contains(Permissions::COPY) {
+            let mut widened = item.clone();
+            widened.permissions.everyone = Permissions::COPY;
+            commands.write(SlCommand(Command::UpdateInventoryItem {
+                item: Box::new(widened),
+                transaction_id: TransactionId::from(Uuid::nil()),
+            }));
+        }
+        created.write(SettingsItemCreated {
+            item: item.item_id,
+            folder: item.folder_id,
+            kind: creation.kind,
+            authored,
+        });
+    }
+}
+
+/// The `CreateInventoryItem` that mints a fresh **settings** item of `kind`
+/// named `name` in `dest`.
+///
+/// The **simulator** creates the item and supplies the default asset for the
+/// kind. That is the reference's `LLSettingsVOBase::createNewInventoryItem`,
+/// which calls `create_inventory_settings` and nothing else; its
+/// `onInventoryItemCreated` then says so outright — *"The item was created as
+/// new with no settings passed in. Simulator should have given it the default
+/// for the type… no need to upload asset."*
+///
+/// # Why not an upload
+///
+/// This was an `UploadAsset` (`NewFileAgentInventory`) until it was driven
+/// against a grid, and that cap has **no settings arm on either grid**:
+///
+/// - OpenSim's `UploadCompleteHandler` declares `sbyte assType = 0; sbyte inType
+///   = 0;` and then matches the type string against *sound, snapshot, animation,
+///   animset, wearable, object* — nothing sets them for `"settings"`, so the
+///   item is filed as a **Texture** and no settings surface can see it again.
+/// - Second Life creates nothing at all.
+///
+/// Both failures are silent, which is what made this take a live run to find.
+///
+/// # The subtype rides the wearable-type field
+///
+/// `wearable_type` is the wire's generic **subtype byte**, not specifically a
+/// wearable slot: `create_inventory_settings` puts `static_cast<U8>(settype)`
+/// there. Because the simulator stamps the item's `flags` from it, a settings
+/// item needs no follow-up `ChangeInventoryItemFlags` — unlike the wearable
+/// creators above, which mint their item through an upload and must stamp it
+/// afterwards on [`PendingItemCreations`].
+///
+/// A function rather than a branch of the private `dispatch_create` because two
+/// surfaces mint these — the inventory's create menus and the My Environments
+/// library window's add row — and two copies would be two places for the
+/// permission mask or the subtype byte to drift.
+#[must_use]
+pub fn new_settings_item(kind: SettingsKind, name: &str, dest: InventoryFolderKey) -> Command {
+    Command::CreateInventoryItem(NewInventoryItem {
+        folder_id: dest,
+        // Nil: no asset of ours is being associated with the item, which is the
+        // whole point — the simulator authors the default one.
+        transaction_id: Uuid::nil(),
+        next_owner_mask: NEXT_OWNER_DEFAULT,
+        asset_type: AssetType::Settings,
+        inv_type: InventoryType::Settings,
+        wearable_type: WearableType::from_code(kind.subtype()),
+        name: name.to_owned(),
+        description: String::new(),
+    })
 }
 
 /// Issue the create commands for a New Folder / Script / Notecard / Gesture
@@ -2609,7 +2745,8 @@ fn dispatch_create(
     dest: InventoryFolderKey,
     own_agent: Option<AgentKey>,
     params: Option<&VisualParams>,
-    pending_wearables: &mut PendingWearableUploads,
+    pending_creations: &mut PendingItemCreations,
+    settings_creations: &mut PendingSettingsCreations,
     commands: &mut MessageWriter<SlCommand>,
     ui_actions: &mut MessageWriter<crate::inventory::InventoryUiAction>,
     rename: &mut crate::inventory::InlineRename,
@@ -2635,7 +2772,20 @@ fn dispatch_create(
             expected_upload_cost: 0,
             data: text.into_bytes(),
         }));
-        pending_wearables.enqueue(slot, dest);
+        pending_creations.enqueue(u32::from(slot.to_code()), dest);
+        return true;
+    }
+    // The settings creators. Shared with the My Environments library window,
+    // which mints the same items from its own add row — see
+    // [`new_settings_item`]. No `pending_creations` entry: the simulator stamps
+    // a settings item's subtype from the create itself.
+    if let Some((kind, name)) = settings_kind_of(action) {
+        commands.write(SlCommand(new_settings_item(kind, name, dest)));
+        // No body: the point of this path is the default asset the simulator
+        // authors. The entry still rides the queue so every settings creation
+        // passes through it in order.
+        settings_creations.enqueue(kind, None);
+        query_folder_page(dest, commands);
         return true;
     }
     match action {
@@ -2708,7 +2858,8 @@ fn handle_inventory_add_actions(
     selection: Res<InventorySelection>,
     identity: Res<SlIdentity>,
     library: Option<Res<crate::avatar_assets::AvatarAssetLibrary>>,
-    mut pending_wearables: ResMut<PendingWearableUploads>,
+    mut pending_creations: ResMut<PendingItemCreations>,
+    mut settings_creations: ResMut<PendingSettingsCreations>,
     mut rename: ResMut<crate::inventory::InlineRename>,
     mut ui_actions: MessageWriter<crate::inventory::InventoryUiAction>,
     mut commands: MessageWriter<SlCommand>,
@@ -2733,7 +2884,8 @@ fn handle_inventory_add_actions(
             dest,
             identity.agent_id,
             library.as_ref().map(|lib| lib.params()),
-            &mut pending_wearables,
+            &mut pending_creations,
+            &mut settings_creations,
             &mut commands,
             &mut ui_actions,
             &mut rename,
@@ -2807,10 +2959,12 @@ impl Plugin for InventoryActionsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<InventoryMenuTarget>()
             .init_resource::<InventoryClipboard>()
+            .init_resource::<PendingSettingsCreations>()
+            .add_message::<SettingsItemCreated>()
             .init_resource::<WornAttachments>()
             .init_resource::<ActiveGestures>()
             .init_resource::<PendingShare>()
-            .init_resource::<PendingWearableUploads>()
+            .init_resource::<PendingItemCreations>()
             .add_systems(
                 Update,
                 (
@@ -2818,7 +2972,8 @@ impl Plugin for InventoryActionsPlugin {
                     handle_inventory_menu_actions,
                     handle_inventory_add_actions,
                     handle_share_picks,
-                    handle_wearable_uploads,
+                    handle_item_creations,
+                    handle_settings_creations,
                     seed_worn_from_cof,
                 )
                     .chain(),
@@ -2922,17 +3077,99 @@ mod tests {
         FOLDER_HAS_WORN, FolderMenuFacts, GESTURE_ACTIVE, GESTURE_INACTIVE, IN_TRASH,
         INVENTORY_FOLDER_MENU, INVENTORY_ITEM_MENU, IS_CLOTHING, IS_LANDMARK, IS_OBJECT,
         IS_TRASH_FOLDER, IS_WEARABLE, ItemMenuFacts, MenuTarget, NOT_IN_TRASH, NOT_WORN, WORN,
-        folder_conditions, is_worn, item_conditions, outfit_add_commands, outfit_remove_commands,
-        paste_commands, take_off_set, wear_set,
+        folder_conditions, is_worn, item_conditions, new_settings_item, outfit_add_commands,
+        outfit_remove_commands, paste_commands, take_off_set, wear_set,
     };
     use crate::menu::{MenuDef, MenuItemDef};
+    use crate::world_api::PendingSettingsCreations;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{
         AgentKey, AssetType, Command, FolderInfo, FolderState, FolderType, InventoryFolderKey,
-        InventoryKey, InventoryType, ItemInfo, Permissions, Permissions5, Uuid, Wearable,
-        WearableType,
+        InventoryKey, InventoryType, ItemInfo, Permissions, Permissions5, SettingsKind, Uuid,
+        Wearable, WearableType,
     };
     use std::collections::HashSet;
+
+    /// **A settings item is created by the simulator, and its kind rides the
+    /// subtype byte.**
+    ///
+    /// This is pinned because getting it wrong fails *silently on every grid*:
+    /// the previous implementation uploaded through `NewFileAgentInventory`,
+    /// which has no settings arm — OpenSim filed the item as a **Texture** (its
+    /// `UploadCompleteHandler` leaves `assType`/`inType` at `0`) and Second Life
+    /// created nothing at all. Neither said so, and no test noticed, because
+    /// nothing here had ever asserted what goes on the wire.
+    ///
+    /// The subtype byte is the whole of how the simulator learns a settings
+    /// item's kind — it stamps the item's `flags` from it — so a wrong byte is a
+    /// sky filed as a water, and a `WearableType` that does not round-trip
+    /// through `to_code` would be a kind lost on the way to the encoder.
+    #[test]
+    fn a_new_settings_item_asks_the_simulator_and_carries_its_subtype() {
+        let dest = InventoryFolderKey::from(Uuid::from_u128(0x5E));
+        for kind in [
+            SettingsKind::Sky,
+            SettingsKind::Water,
+            SettingsKind::DayCycle,
+        ] {
+            let Command::CreateInventoryItem(new) = new_settings_item(kind, "New Thing", dest)
+            else {
+                unreachable!("a settings item is minted by CreateInventoryItem");
+            };
+            assert_eq!(new.folder_id, dest);
+            assert_eq!(new.asset_type, AssetType::Settings);
+            assert_eq!(new.inv_type, InventoryType::Settings);
+            assert_eq!(
+                new.wearable_type.to_code(),
+                kind.subtype(),
+                "{kind:?} lost its subtype byte"
+            );
+            // Nil: no asset of ours is associated, which is what tells the
+            // simulator to author the default one for the kind.
+            assert_eq!(new.transaction_id, Uuid::nil());
+            assert_eq!(new.name, "New Thing");
+        }
+    }
+
+    /// **A Save As body is written onto the item the simulator made, not
+    /// uploaded.**
+    ///
+    /// The queue is what carries the body across the gap between asking for the
+    /// item and being told its id, and it is *one* queue for the whole viewer
+    /// on purpose: the library window's New Sky and an editor's Save As land in
+    /// the same untagged reply stream, so two queues would each pop on the
+    /// other's creation and a Save As would write its frame onto somebody
+    /// else's fresh item. Order is the whole of the correlation, so this pins
+    /// it: interleave a bodyless creation with an authored one and each has to
+    /// come back out as it went in.
+    #[test]
+    fn the_settings_creation_queue_keeps_its_bodies_in_order()
+    -> Result<(), Box<dyn core::error::Error>> {
+        let mut queue = PendingSettingsCreations::default();
+        queue.enqueue(SettingsKind::Sky, None);
+        queue.enqueue(SettingsKind::Water, Some(b"a water frame".to_vec()));
+        queue.enqueue(SettingsKind::DayCycle, None);
+
+        let first = queue.take_next().ok_or("the sky was asked for first")?;
+        assert_eq!(first.kind, SettingsKind::Sky);
+        assert!(
+            first.body.is_none(),
+            "New Sky keeps the simulator's default"
+        );
+
+        let second = queue.take_next().ok_or("the water was asked for second")?;
+        assert_eq!(second.kind, SettingsKind::Water);
+        assert_eq!(second.body.as_deref(), Some(b"a water frame".as_slice()));
+
+        let third = queue
+            .take_next()
+            .ok_or("the day cycle was asked for last")?;
+        assert_eq!(third.kind, SettingsKind::DayCycle);
+        assert!(third.body.is_none());
+
+        assert!(queue.take_next().is_none(), "nothing else was asked for");
+        Ok(())
+    }
 
     /// A minimal item of the given types, owned with the given owner mask.
     fn item(id: u128, inv_type: InventoryType, asset_type: AssetType, owner_mask: u32) -> ItemInfo {
@@ -3089,6 +3326,7 @@ mod tests {
             ("Bottom Right", "attach-point-38"),
             ("Touch", "touch"),
             ("Detach From Yourself", "detach"),
+            ("Edit", "edit-settings"),
             ("Apply Only To Myself", "settings-apply-local"),
             ("Apply To Parcel", "settings-apply-parcel"),
         ];

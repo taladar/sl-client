@@ -553,6 +553,7 @@ pub(crate) fn world_app_with_ui_and_inventory() -> Result<App, Box<dyn core::err
     app.add_message::<crate::inventory::OpenWearableEditor>();
     app.add_message::<crate::inventory::OpenMaterialEditor>();
     app.add_message::<crate::inventory::OpenAboutLandmark>();
+    app.add_message::<crate::world_api::OpenSettingsEditor>();
     // The drop-into-a-notecard branch's output; the editor that answers it is
     // another floater this fold leaves out.
     app.add_message::<crate::inventory::AddEmbeddedItem>();

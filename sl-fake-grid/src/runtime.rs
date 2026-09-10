@@ -36,6 +36,7 @@ use crate::neighbours::NeighbourPolicy;
 use crate::scenario::Scenario;
 use crate::terrain::TerrainFixture;
 use crate::time::{Now, system_clock};
+use crate::uploads::UpdateCompletionItem;
 use crate::voice::VoiceBackend;
 use crate::world::AVATAR_CENTRE_ABOVE_GROUND_M;
 
@@ -416,6 +417,9 @@ pub(crate) struct GridCore {
     /// two live grids on the opposite sides of one half of it and agreeing on
     /// the other.
     pub(crate) upload_announcements: UploadAnnouncements,
+    /// Whether an update capability's completion names the item it rewrote
+    /// ([`UpdateCompletionItem`]).
+    pub(crate) update_completion_item: UpdateCompletionItem,
     /// Who composites this grid's avatars ([`BakePolicy`]): the appearance
     /// service, the central-bake protocol bit, the `AppearanceData` block and
     /// the `UpdateAvatarAppearance` capability all follow it.
@@ -617,6 +621,7 @@ impl GridCore {
         let mut sim = SimSession::new(region.handle(), now);
         sim.set_secure_session_id(ids.secure_session_id);
         sim.set_region_id(region.region_id);
+        sim.set_update_completion_names_item(self.update_completion_item.names_item());
         if let Some(arrival) = arrival {
             sim.set_arrival_position(arrival.position, arrival.look_at);
         } else {
@@ -1178,6 +1183,9 @@ pub struct FakeGridBuilder {
     /// How the deprecated UDP inventory fetch is answered, or `None` to follow
     /// [`imitates`](Self::imitates).
     legacy_udp_inventory: Option<LegacyUdpInventory>,
+    /// Whether an update completion names the item it rewrote, or `None` to
+    /// follow [`imitates`](Self::imitates).
+    update_completion_item: Option<UpdateCompletionItem>,
     /// How a created inventory item is announced, or `None` to follow
     /// [`imitates`](Self::imitates).
     inventory_announcement: Option<InventoryAnnouncement>,
@@ -1282,6 +1290,7 @@ impl FakeGridBuilder {
             open_sim_extras: None,
             voice_backend: None,
             legacy_udp_inventory: None,
+            update_completion_item: None,
             inventory_announcement: None,
             upload_announcements: None,
             bakes: None,
@@ -1460,6 +1469,21 @@ impl FakeGridBuilder {
     #[must_use]
     pub const fn legacy_udp_inventory(mut self, policy: LegacyUdpInventory) -> Self {
         self.legacy_udp_inventory = Some(policy);
+        self
+    }
+
+    /// Overrides whether an update capability's completion names the item it
+    /// rewrote, which otherwise follows [`imitates`](Self::imitates): OpenSim
+    /// echoes it, Second Life answers with `new_asset` alone.
+    ///
+    /// Second Life's is the stricter answer and the default, because a client
+    /// that works against a grid which never echoes works against both — and one
+    /// that depends on the echo has to fail here rather than in front of a
+    /// person. Set it to [`UpdateCompletionItem::Echoed`] to be the lenient grid
+    /// on purpose, which is what a run imitating OpenSim wants.
+    #[must_use]
+    pub const fn update_completion_item(mut self, policy: UpdateCompletionItem) -> Self {
+        self.update_completion_item = Some(policy);
         self
     }
 
@@ -1649,6 +1673,9 @@ impl FakeGridBuilder {
             legacy_udp_inventory: self
                 .legacy_udp_inventory
                 .unwrap_or_else(|| self.imitates.legacy_udp_inventory()),
+            update_completion_item: self
+                .update_completion_item
+                .unwrap_or_else(|| self.imitates.update_completion_item()),
             inventory_announcement: self
                 .inventory_announcement
                 .unwrap_or_else(|| self.imitates.inventory_announcement()),

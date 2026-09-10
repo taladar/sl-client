@@ -24,6 +24,10 @@ image = { version = "0.25.10", default-features = false, features = [
   "png",
   "tga",
 ] }
+# The personal environment is written to (and read back from) one account
+# setting as JSON, so a locally-overridden sky survives a relog.
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 sl-avatar = { workspace = true }
 sl-client-bevy = { workspace = true, features = [
   "bevy_pbr",

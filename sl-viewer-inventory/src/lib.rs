@@ -45,3 +45,4 @@ pub mod inventory_drag;
 pub mod inventory_filters;
 pub mod inventory_gallery;
 pub mod inventory_properties;
+pub mod settings_index;

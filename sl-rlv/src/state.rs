@@ -27,13 +27,14 @@
 //! Nothing here does I/O, and nothing here obeys anything: the answers are data
 //! the Bevy viewer, a headless bot, or a test can act on.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use uuid::Uuid;
 
 use crate::actions::{RlvActionSource, RlvActions};
 use crate::behaviour::{RlvBehaviour, RlvEntry, RlvLocalModifier};
 use crate::command::{RlvCommand, RlvParam, RlvParamKind};
+use crate::environment::{RlvEnvResult, RlvEnvSource};
 use crate::extension::{RlvDebugSetting, RlvExtResult, RlvExtSource};
 use crate::locks::{RlvLocks, RlvObjectAttachment};
 use crate::modifier::{DEFAULT_FIELD_OF_VIEW, RlvModifier, RlvModifierState, RlvModifierValue};
@@ -108,6 +109,12 @@ pub enum RlvOutcome {
     /// [`FailedOption`](Self::FailedOption) on purpose: the object is told the
     /// viewer shares nothing, not that its path was wrong.
     FailedNoSharedRoot,
+    /// The keyword is one the **user** has taken out of the language
+    /// (`RLV_RET_FAILED_DISABLED`) — see
+    /// [`RlvState::set_behaviour_blocked`]. Distinct from
+    /// [`FailedParam`](Self::FailedParam) on purpose: the object is told this
+    /// viewer will not do it, not that it misspelled it.
+    FailedDisabled,
     /// A command this state machine does not own: an action to perform
     /// (`=force`) or a query to answer (`=<channel>`). The consumer dispatches
     /// it.
@@ -280,6 +287,10 @@ pub struct RlvState {
     modifiers: RlvModifierState,
     /// Whether the RLVa experimental command set is enabled.
     experimental: bool,
+    /// The dictionary rows the user has taken out of the language
+    /// (`BHVR_BLOCKED`), as `(keyword, param kind)` — the reference's dictionary
+    /// key, because that is what its flag is a property of.
+    blocked: BTreeSet<(&'static str, RlvParamKind)>,
     /// Who asked to be told about every change (`@notify`).
     notify: RlvNotifyRegistry,
     /// The notifications produced but not yet taken by the consumer.
@@ -303,6 +314,7 @@ impl Default for RlvState {
             modifiers: RlvModifierState::new(),
             // The reference ships `RLVaExperimentalCommands` on.
             experimental: true,
+            blocked: BTreeSet::new(),
             notify: RlvNotifyRegistry::default(),
             pending: Vec::new(),
             attachments: BTreeMap::new(),
@@ -339,9 +351,129 @@ impl RlvState {
 
     /// The `@getcommand` answer: every keyword containing `filter`, of `kind`
     /// (or of any kind for `None`), that this state machine would accept.
+    ///
+    /// A [blocked](Self::set_behaviour_blocked) keyword is still listed, as it
+    /// is by the reference (`RlvBehaviourDictionary::getCommands` reads no
+    /// flags, `rlvhelper.cpp:468`): the row exists and the dictionary says so —
+    /// what it will not do is obey it.
     #[must_use]
     pub fn known_commands(&self, filter: &str, kind: Option<RlvParamKind>) -> Vec<String> {
         RlvEntry::commands_matching(filter, kind, self.experimental)
+    }
+
+    // ------------------------------------------------------- blocked keywords
+
+    /// Take one dictionary row out of the language, or give it back
+    /// (`RlvBehaviourInfo::BHVR_BLOCKED`, `rlvhelper.h:52`).
+    ///
+    /// A blocked row's keyword is refused outright — [`RlvState::apply`] answers
+    /// [`RlvOutcome::FailedDisabled`] ahead of anything else it would do with
+    /// the command, in the reference's own position (`rlvhandler.cpp:472`). The
+    /// row is identified the way the reference's dictionary is keyed, by
+    /// `(keyword, param kind)`: `("setenv", AddRem)` is `@setenv=n` and
+    /// `@setenv=y` and nothing else, so the `@setenv_*` **force** commands —
+    /// which are a different keyword and a different kind — keep working.
+    ///
+    /// Answers whether such a row exists; a keyword the dictionary does not
+    /// declare for that kind blocks nothing, exactly as the reference's
+    /// `toggleBehaviourFlag` silently does nothing for one.
+    ///
+    /// # This is a user setting, and it moves *now*
+    ///
+    /// The reference sets the flag once, while it builds the dictionary, from a
+    /// setting it reads at startup (`rlvhelper.cpp:358`) — so there the setting
+    /// needs a relog and there is never a held restriction to reconcile. Here
+    /// the flag is state beside the table rather than part of it, and blocking a
+    /// row **releases what objects are already holding through it**: otherwise
+    /// turning the setting on would only bite the objects that had not asked
+    /// yet, and the collar that got in first would keep the sky.
+    ///
+    /// Those releases are silent. `@notify` reports what an object did, and no
+    /// object did this — the reference's own internal lifting is skipped by its
+    /// notify hook for the same reason (`rlvhandler.cpp:640`).
+    pub fn set_behaviour_blocked(
+        &mut self,
+        keyword: &str,
+        kind: RlvParamKind,
+        blocked: bool,
+    ) -> bool {
+        let Some(entry) = RlvEntry::lookup(keyword, kind) else {
+            return false;
+        };
+        if blocked {
+            self.blocked.insert((entry.keyword, entry.kind));
+            self.release_blocked();
+        } else {
+            self.blocked.remove(&(entry.keyword, entry.kind));
+        }
+        true
+    }
+
+    /// Whether this row is blocked.
+    #[must_use]
+    pub fn is_behaviour_blocked(&self, keyword: &str, kind: RlvParamKind) -> bool {
+        RlvEntry::lookup(keyword, kind)
+            .is_some_and(|entry| self.blocked.contains(&(entry.keyword, entry.kind)))
+    }
+
+    /// Every blocked row, as [`set_behaviour_blocked`](Self::set_behaviour_blocked)
+    /// takes them.
+    ///
+    /// A consumer that resets the state machine — the viewer's `RestrainedLove`
+    /// master switch does — has to carry these across it: they are the *user's*
+    /// settings, not anything an object held.
+    pub fn blocked_behaviours(&self) -> impl Iterator<Item = (&'static str, RlvParamKind)> {
+        self.blocked.iter().copied()
+    }
+
+    /// Whether this command names a blocked row.
+    ///
+    /// A row the experimental gate has taken out is not one that can be
+    /// blocked — the reference never registered it, so there is nothing there to
+    /// carry the flag, and the command is refused as unknown instead.
+    fn is_command_blocked(&self, command: &RlvCommand) -> bool {
+        command.entry.is_some_and(|entry| {
+            (self.experimental || !entry.flags.is_experimental())
+                && self.blocked.contains(&(entry.keyword, entry.kind))
+        })
+    }
+
+    /// Lift every held restriction whose row has since been blocked.
+    ///
+    /// Held through the same `=y` path an object's own lifting takes, so the
+    /// reference counts, the exceptions and the modifier slots come down exactly
+    /// as they would have.
+    fn release_blocked(&mut self) {
+        // Borrowed out of `self` before the walk, because the removals below
+        // need it back mutably.
+        let blocked = &self.blocked;
+        let doomed: Vec<(Uuid, RlvHeldCommand, &'static RlvEntry)> = self
+            .objects
+            .iter()
+            .flat_map(|(&object, held_by)| {
+                held_by.commands.iter().filter_map(move |held| {
+                    // Resolved rather than matched by text, so a `_sec` spelling
+                    // of a blocked keyword is the same row and goes too.
+                    let entry = RlvBehaviour::resolve(&held.keyword, RlvParamKind::AddRem).entry?;
+                    blocked
+                        .contains(&(entry.keyword, entry.kind))
+                        .then(|| (object, held.clone(), entry))
+                })
+            })
+            .collect();
+        for (object, held, entry) in doomed {
+            let command = RlvCommand {
+                keyword: held.keyword,
+                behaviour: held.behaviour,
+                strict: held.strict,
+                modifier: None,
+                option: held.option,
+                param: RlvParam::Remove,
+                param_text: "y".to_owned(),
+                entry: Some(entry),
+            };
+            self.remove(object, &command);
+        }
     }
 
     // ----------------------------------------------------------------- apply
@@ -356,8 +488,17 @@ impl RlvState {
     /// An `=n` / `=y` also feeds `@notify`
     /// ([`RlvState::take_notifications`]) — whatever it answers, because the
     /// reference reports a command that failed just as it reports one that
-    /// took (`rlvhandler.cpp:585`).
+    /// took (`rlvhandler.cpp:585`) — but a
+    /// [blocked](RlvState::set_behaviour_blocked) keyword is not reported at
+    /// all, because the reference returns above its notify hook rather than
+    /// through it (`rlvhandler.cpp:472`). A keyword this viewer does not speak
+    /// tells the listening object nothing about what the wearer is holding.
     pub fn apply(&mut self, object: Uuid, command: &RlvCommand) -> RlvOutcome {
+        // Ahead of everything else, in the reference's own position — a blocked
+        // keyword is not a command this viewer has, whatever it would have meant.
+        if self.is_command_blocked(command) {
+            return RlvOutcome::FailedDisabled;
+        }
         let outcome = self.apply_silently(object, command);
         // `@clear` announces itself from inside `clear`, which is also where a
         // detach reaches, so only the add/remove pair is announced from here.
@@ -1364,6 +1505,54 @@ impl RlvState {
         crate::extension::run(self, issuer, command, source)
     }
 
+    /// Run a command the behaviour dictionary did not claim through the
+    /// **environment** handler: `@getenv_*` and `@setenv_*`.
+    ///
+    /// The sibling of [`run_extension`](Self::run_extension), and the second
+    /// link in the same chain: the reference registers `RlvEnvironment` and
+    /// `RlvExtGetSet` as two independent `RlvExtCommandHandler`s and offers an
+    /// unknown keyword to each in turn. `None` means the command is not one of
+    /// this family either.
+    ///
+    /// It takes the state by shared reference because nothing here changes it:
+    /// the only thing it asks is whether some *other* object holds `@setenv`.
+    ///
+    /// ```
+    /// # use sl_rlv::{RlvCommand, RlvEnvRequest, RlvEnvSource, RlvSkyBody, RlvSkyField,
+    /// #             RlvSkyValue, RlvState};
+    /// # use uuid::Uuid;
+    /// struct Viewer;
+    /// impl RlvEnvSource for Viewer {
+    ///     fn sky_value(&self, field: RlvSkyField) -> Option<RlvSkyValue> {
+    ///         (field == RlvSkyField::Ambient).then_some(RlvSkyValue::Color([0.75, 1.5, 3.0]))
+    ///     }
+    ///     fn set_sky_value(&mut self, _: RlvSkyField, _: RlvSkyValue) -> bool { false }
+    ///     fn sky_direction(&self, _: RlvSkyBody) -> Option<[f32; 3]> { None }
+    ///     fn set_sky_angles(&mut self, _: RlvSkyBody, _: f32, _: f32) -> bool { false }
+    ///     fn apply_environment(&mut self, _: &RlvEnvRequest) -> bool { false }
+    ///     fn has_fixed_sky(&self) -> bool { false }
+    /// }
+    ///
+    /// # fn main() -> Result<(), Box<dyn core::error::Error>> {
+    /// let state = RlvState::new();
+    /// let command = RlvCommand::parse_field("getenv_ambient=2222")?;
+    /// let result = state
+    ///     .run_environment(Uuid::from_u128(1), &command, &mut Viewer)
+    ///     .ok_or("not an environment command")?;
+    /// // The ambient colour is answered at a third of the sky's own value.
+    /// assert_eq!(result.reply.ok_or("no reply")?.message, "0.250000/0.500000/1.000000");
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn run_environment(
+        &self,
+        issuer: Uuid,
+        command: &RlvCommand,
+        source: &mut impl RlvEnvSource,
+    ) -> Option<RlvEnvResult> {
+        crate::environment::run(self, issuer, command, source)
+    }
+
     /// What a script has written into the pseudo debug setting `setting`, if
     /// anything.
     #[must_use]
@@ -1463,6 +1652,7 @@ mod tests {
     };
     use crate::behaviour::{RlvBehaviour, RlvEntry, RlvLocalModifier};
     use crate::command::{RlvCommand, RlvParamKind};
+    use crate::environment::can_change_environment;
     use crate::modifier::{
         DEFAULT_FIELD_OF_VIEW, FARTOUCH_DEFAULT, IMG_DEFAULT, RlvModifier, RlvModifierValue,
     };
@@ -2369,6 +2559,157 @@ mod tests {
         assert_eq!(plain.restricting_objects().count(), 0);
         // A non-experimental command still works.
         ok(&mut plain, COLLAR, "showloc=n")?;
+        Ok(())
+    }
+
+    /// The row `RestrainedLoveNoSetEnv` blocks, and the only one anything
+    /// blocks today.
+    const SETENV: (&str, RlvParamKind) = ("setenv", RlvParamKind::AddRem);
+
+    #[test]
+    fn a_blocked_keyword_is_refused_in_both_directions() -> Result<(), TestError> {
+        let mut state = RlvState::new();
+        assert!(
+            state.set_behaviour_blocked(SETENV.0, SETENV.1, true),
+            "`@setenv` is a restriction the dictionary declares"
+        );
+        assert!(state.is_behaviour_blocked(SETENV.0, SETENV.1));
+
+        assert_eq!(
+            apply(&mut state, COLLAR, "setenv=n")?,
+            RlvOutcome::FailedDisabled
+        );
+        assert_eq!(
+            apply(&mut state, COLLAR, "setenv=y")?,
+            RlvOutcome::FailedDisabled,
+            "the reference's flag is on the ADDREM row, so it takes both"
+        );
+        assert!(
+            can_change_environment(&state),
+            "nothing was held, so the user keeps their own environment"
+        );
+        assert_eq!(state.restricting_objects().count(), 0);
+
+        // Everything else is untouched, including the neighbouring keyword the
+        // one-object limit shares its shape with.
+        ok(&mut state, COLLAR, "fly=n")?;
+        ok(&mut state, COLLAR, "setdebug=n")?;
+        Ok(())
+    }
+
+    #[test]
+    fn blocking_a_keyword_releases_what_objects_hold_through_it() -> Result<(), TestError> {
+        let mut state = RlvState::new();
+        ok(&mut state, COLLAR, "setenv=n")?;
+        ok(&mut state, COLLAR, "fly=n")?;
+        assert!(!can_change_environment(&state));
+
+        assert!(state.set_behaviour_blocked(SETENV.0, SETENV.1, true));
+        assert_eq!(
+            state.count(RlvBehaviour::Setenv),
+            0,
+            "the collar that got in first must lose the sky, or the setting \
+             would only bite the objects that had not asked yet"
+        );
+        assert!(can_change_environment(&state));
+        // Only what the block names: the collar keeps everything else, and is
+        // still a restricting object.
+        assert!(state.has_behaviour(RlvBehaviour::Fly));
+        assert_eq!(
+            state.restricting_objects().collect::<Vec<_>>(),
+            vec![COLLAR]
+        );
+        assert_eq!(
+            state
+                .restrictions_of(COLLAR)
+                .iter()
+                .map(|held| held.as_string())
+                .collect::<Vec<_>>(),
+            vec!["fly".to_owned()]
+        );
+
+        // And an object that held nothing else is forgotten entirely.
+        let mut lone = RlvState::new();
+        ok(&mut lone, CUFFS, "setenv=n")?;
+        assert!(lone.set_behaviour_blocked(SETENV.0, SETENV.1, true));
+        assert_eq!(lone.restricting_objects().count(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn releasing_a_blocked_keyword_tells_notify_nothing() -> Result<(), TestError> {
+        let mut state = RlvState::new();
+        ok(&mut state, COLLAR, "notify:2222=add")?;
+        ok(&mut state, CUFFS, "setenv=n")?;
+        forget_notifications(&mut state);
+
+        assert!(state.set_behaviour_blocked(SETENV.0, SETENV.1, true));
+        assert!(
+            notifications(&mut state).is_empty(),
+            "no object lifted this, so there is nothing to report to one"
+        );
+        // Nor is the refusal itself reported, because the reference returns
+        // above its notify hook rather than through it.
+        assert_eq!(
+            apply(&mut state, CUFFS, "setenv=n")?,
+            RlvOutcome::FailedDisabled
+        );
+        assert!(notifications(&mut state).is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn unblocking_gives_the_keyword_back() -> Result<(), TestError> {
+        let mut state = RlvState::new();
+        assert!(state.set_behaviour_blocked(SETENV.0, SETENV.1, true));
+        assert!(state.set_behaviour_blocked(SETENV.0, SETENV.1, false));
+        assert!(!state.is_behaviour_blocked(SETENV.0, SETENV.1));
+        ok(&mut state, COLLAR, "setenv=n")?;
+        assert!(!can_change_environment(&state));
+        assert_eq!(
+            state.blocked_behaviours().count(),
+            0,
+            "and nothing is left for a consumer to carry across a reset"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn blocking_setenv_leaves_the_force_family_alone() -> Result<(), TestError> {
+        // The obvious reading of `RestrainedLoveNoSetEnv` is the wrong one: what
+        // it refuses is an object *taking* the environment, not repainting it.
+        let mut state = RlvState::new();
+        assert!(state.set_behaviour_blocked(SETENV.0, SETENV.1, true));
+        assert_eq!(
+            apply(&mut state, COLLAR, "setenv_ambient:1;1;1=force")?,
+            RlvOutcome::NotAStateChange,
+            "a `@setenv_*` force command is a different keyword of a different \
+             kind, and still reaches the consumer that carries it out"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_row_the_dictionary_does_not_declare_blocks_nothing() {
+        let mut state = RlvState::new();
+        assert!(
+            !state.set_behaviour_blocked("setenv", RlvParamKind::Force, true),
+            "`@setenv` is declared for one kind only, and blocking is per row"
+        );
+        assert!(!state.set_behaviour_blocked("nosuchbehaviour", RlvParamKind::AddRem, true));
+        assert!(!state.is_behaviour_blocked("nosuchbehaviour", RlvParamKind::AddRem));
+        assert_eq!(state.blocked_behaviours().count(), 0);
+    }
+
+    #[test]
+    fn a_blocked_keyword_is_still_a_keyword_getcommand_lists() -> Result<(), TestError> {
+        let mut state = RlvState::new();
+        assert!(state.set_behaviour_blocked(SETENV.0, SETENV.1, true));
+        assert_eq!(
+            state.known_commands("setenv", None),
+            vec!["setenv".to_owned()],
+            "the dictionary row exists and says so; what it will not do is obey it"
+        );
         Ok(())
     }
 

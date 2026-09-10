@@ -76,6 +76,46 @@ use crate::assets::GridAssets;
 use crate::inventory::{UploadAnnouncement, UploadAnnouncements};
 use crate::world::RegionWorld;
 
+/// Whether an **update** capability's completion names the item it rewrote.
+///
+/// The two real grids disagree, and only one of them is safe to model by
+/// default:
+///
+/// - **OpenSim echoes it** — `UpdateItemAsset.cs` answers
+///   `uploadComplete.new_inventory_item = m_inventoryItemID`.
+/// - **Second Life does not**, and the reference client never asks it to:
+///   `LLBufferedAssetUploadInfo::finishUpload` — the update path — reads
+///   `result["new_asset"]` and takes the item from `getItemId()`, the id it sent
+///   in the request. Only the *create* path (`LLResourceUploadInfo::finishUpload`)
+///   reads `new_inventory_item`.
+///
+/// A client may therefore never depend on the echo, and a grid imitating Second
+/// Life must not offer it — a client that does depend on it has to fail against
+/// this grid rather than in front of a person. Modelling the lenient answer
+/// unconditionally is what let the viewer's settings editor match its save on
+/// the echoed item, pass every offline test, and then report "Saving…" forever
+/// against the real grid.
+///
+/// A **create** names its item under either grid: it minted the id, so the
+/// client cannot know it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum UpdateCompletionItem {
+    /// `new_asset` alone — Second Life, and the stricter of the two.
+    #[default]
+    Omitted,
+    /// `new_asset` and the rewritten item — OpenSim.
+    Echoed,
+}
+
+impl UpdateCompletionItem {
+    /// Whether the completion names the item, for
+    /// [`SimSession::set_update_completion_names_item`](sl_proto::SimSession::set_update_completion_names_item).
+    #[must_use]
+    pub const fn names_item(self) -> bool {
+        matches!(self, Self::Echoed)
+    }
+}
+
 /// Folds one drained [`ServerEvent`] into the grid's asset store and the
 /// inventory that names it, and tells the client what changed.
 ///

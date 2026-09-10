@@ -68,6 +68,10 @@ const DISABLED_BACKGROUND: Color = Color::srgba(0.12, 0.12, 0.14, 1.0);
 /// A disabled combo's border.
 const DISABLED_BORDER: Color = Color::srgba(0.28, 0.28, 0.32, 1.0);
 
+/// A [separator](ComboRow::Separator) row's rule — the menu popups' divider
+/// colour, since a combo popover and a menu popup are the same surface.
+const SEPARATOR_COLOR: Color = Color::srgb(0.30, 0.34, 0.42);
+
 /// The dropdown arrow glyph.
 const ARROW_GLYPH: &str = "\u{25be}";
 
@@ -98,6 +102,57 @@ impl ComboSpec<'_> {
     /// The clamped active index, so a combo is never spawned with nothing shown.
     fn resolved_active(&self) -> usize {
         self.active.min(self.labels.len().saturating_sub(1))
+    }
+}
+
+/// What one row of a combo's list *is* — the reference's per-item enabled flag
+/// (`LLScrollListItem::setEnabled`, driven by
+/// `FloaterQuickPrefs::setDefaultPresetsEnabled`) and its separator rows
+/// (`LLComboBox::addSeparator`).
+///
+/// A [`Disabled`](Self::Disabled) row is the one that makes this worth a type
+/// rather than a filter: the environment combos *show* "Region default" as the
+/// current selection while refusing to let the user pick it, so a row that
+/// cannot be chosen still has to be able to be displayed. Dropping such rows
+/// from the list instead would leave the combo with nothing to show for a state
+/// it is in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ComboRow {
+    /// An ordinary option: hoverable, and picking it moves the selection.
+    #[default]
+    Selectable,
+    /// Shown (and selectable *programmatically*, so it can display a state) but
+    /// greyed and inert under the pointer.
+    Disabled,
+    /// A divider between groups of options. Draws a rule, shows no label, and
+    /// takes an index like any other row so a selection index means the same
+    /// thing whether or not separators are present.
+    Separator,
+}
+
+impl ComboRow {
+    /// Whether a **user** may pick this row.
+    #[must_use]
+    pub const fn is_selectable(self) -> bool {
+        matches!(self, Self::Selectable)
+    }
+}
+
+/// Per-row states for a combo's options, in option order — absent, or shorter
+/// than the label list, means [`ComboRow::Selectable`] for the rows it does not
+/// cover.
+///
+/// Held on the anchor beside the option labels, and replaced wholesale by
+/// [`SetComboOptions`] so the labels and the states can never disagree about
+/// which row index is a separator.
+#[derive(Component, Debug, Clone, Default, PartialEq, Eq)]
+pub struct ComboRowStates(pub Vec<ComboRow>);
+
+impl ComboRowStates {
+    /// The state of row `index` — [`ComboRow::Selectable`] past the end.
+    #[must_use]
+    pub fn get(&self, index: usize) -> ComboRow {
+        self.0.get(index).copied().unwrap_or_default()
     }
 }
 
@@ -147,11 +202,12 @@ struct ComboOption {
 /// re-enumerates while visible (the preferences audio tab's output-device
 /// list). Applied by `apply_set_combo_options`: an equal list is a no-op,
 /// the closed value text re-resolves, an out-of-range selection clamps, and
-/// the update is **skipped while that combo's popover is open** so the rows
-/// are never yanked out from under the pointer — the sender's next refresh
-/// lands after it closes. The anchor itself is never respawned (the
-/// build-once rule); the popover always rebuilds from `ComboOptions` on
-/// open, so the next open shows the new list.
+/// the update is **deferred while that combo's popover is open** so the rows
+/// are never yanked out from under the pointer — it is re-queued each frame
+/// until the list closes, rather than dropped, so a sender that publishes only
+/// on a change does not lose its one update. The anchor itself is never
+/// respawned (the build-once rule); the popover always rebuilds from
+/// `ComboOptions` on open, so the next open shows the new list.
 #[derive(Message, Debug, Clone)]
 pub struct SetComboOptions {
     /// The anchor combo entity.
@@ -159,6 +215,23 @@ pub struct SetComboOptions {
     /// The new option labels, in order (Fluent keys where the combo
     /// translates; a key no bundle defines renders as itself).
     pub labels: Vec<String>,
+    /// The new per-row states, in order — empty for a list of ordinary options.
+    /// Carried in the same message as the labels on purpose: a separator whose
+    /// index no longer matches its label is a row the user can click by mistake.
+    pub rows: Vec<ComboRow>,
+}
+
+impl SetComboOptions {
+    /// A plain list of ordinary selectable options — every combo but the
+    /// environment ones.
+    #[must_use]
+    pub const fn new(combo: Entity, labels: Vec<String>) -> Self {
+        Self {
+            combo,
+            labels,
+            rows: Vec::new(),
+        }
+    }
 }
 
 /// Emitted when the **user** picks a different option (not on a programmatic
@@ -284,7 +357,7 @@ fn seed_value_text(commands: &mut Commands, value: Entity, spec: &ComboSpec, act
 /// the press so opening does not immediately trip the root dismiss observer.
 fn toggle_combo_popover(
     mut press: On<Pointer<Press>>,
-    anchors: Query<&ComboOptions>,
+    anchors: Query<(&ComboOptions, Option<&ComboRowStates>)>,
     disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
     popovers: Query<(Entity, &ComboPopover)>,
     mut claim: ResMut<sl_viewer_ui_core::ui::UiPointerClaim>,
@@ -306,7 +379,7 @@ fn toggle_combo_popover(
         disabled = disabled.contains(press.entity),
         open_popovers = popovers.iter().count(),
         mine_open = popovers.iter().any(|(_entity, marker)| marker.combo == press.entity),
-        options = anchors.get(press.entity).map(|options| options.labels.len()).ok(),
+        options = anchors.get(press.entity).map(|(options, _rows)| options.labels.len()).ok(),
         "combo press"
     );
     // A disabled combo does not open — it consumes the press so the click lands
@@ -329,15 +402,20 @@ fn toggle_combo_popover(
     if had_open {
         return;
     }
-    let Ok(options) = anchors.get(anchor) else {
+    let Ok((options, states)) = anchors.get(anchor) else {
         return;
     };
     tracing::debug!(rows = options.labels.len(), "building a combo popover");
-    build_combo_popover(&mut commands, anchor, options);
+    build_combo_popover(&mut commands, anchor, options, states);
 }
 
 /// Build the popover list of option rows anchored to `anchor`.
-fn build_combo_popover(commands: &mut Commands, anchor: Entity, options: &ComboOptions) {
+fn build_combo_popover(
+    commands: &mut Commands,
+    anchor: Entity,
+    options: &ComboOptions,
+    states: Option<&ComboRowStates>,
+) {
     let popup = commands
         .spawn((
             Node {
@@ -378,6 +456,11 @@ fn build_combo_popover(commands: &mut Commands, anchor: Entity, options: &ComboO
         ))
         .id();
     for (index, label) in options.labels.iter().enumerate() {
+        let state = states.map_or(ComboRow::Selectable, |states| states.get(index));
+        // Every row keeps its address and consumes its own press, whatever it
+        // is: a press that fell through a separator would bubble to the anchor
+        // and close the list, which reads as the list dismissing itself when a
+        // user's aim lands a pixel off the row they wanted.
         let row_entity = commands
             .spawn((
                 Node {
@@ -395,19 +478,44 @@ fn build_combo_popover(commands: &mut Commands, anchor: Entity, options: &ComboO
                 ChildOf(popup),
             ))
             .observe(select_combo_option)
-            .observe(hover_combo_option)
-            .observe(unhover_combo_option)
             .id();
-        let text = commands
-            .spawn((
-                Text::default(),
-                UiFont::Sans.at(options.font_size),
-                TextColor(TEXT_COLOR),
-                ClassList::new_with_classes([VALUE_CLASS]),
+        if state.is_selectable() {
+            commands
+                .entity(row_entity)
+                .observe(hover_combo_option)
+                .observe(unhover_combo_option);
+        }
+        if state == ComboRow::Separator {
+            commands.spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Px(1.0),
+                    ..Default::default()
+                },
+                BackgroundColor(SEPARATOR_COLOR),
                 Pickable::IGNORE,
                 ChildOf(row_entity),
-            ))
-            .id();
+            ));
+            continue;
+        }
+        let mut row_text = commands.spawn((
+            Text::default(),
+            UiFont::Sans.at(options.font_size),
+            TextColor(if state.is_selectable() {
+                TEXT_COLOR
+            } else {
+                DISABLED_TEXT_COLOR
+            }),
+            Pickable::IGNORE,
+            ChildOf(row_entity),
+        ));
+        // The skin class carries `--text-primary`, which would repaint a
+        // disabled row in the ordinary option colour and undo the greying — so
+        // a disabled row is deliberately outside the skin's reach here.
+        if state.is_selectable() {
+            row_text.insert(ClassList::new_with_classes([VALUE_CLASS]));
+        }
+        let text = row_text.id();
         if options.translate {
             commands.entity(text).insert(Translated::new(label.clone()));
         } else {
@@ -441,7 +549,7 @@ fn unhover_combo_option(
 fn select_combo_option(
     mut press: On<Pointer<Press>>,
     rows: Query<&ComboOption>,
-    mut combos: Query<&mut ComboSelection>,
+    mut combos: Query<(&mut ComboSelection, Option<&ComboRowStates>)>,
     popovers: Query<(Entity, &ComboPopover)>,
     mut changed: MessageWriter<ComboChanged>,
     mut claim: ResMut<sl_viewer_ui_core::ui::UiPointerClaim>,
@@ -458,9 +566,19 @@ fn select_combo_option(
     let Ok(option) = rows.get(press.entity) else {
         return;
     };
-    if let Ok(mut selection) = combos.get_mut(option.combo)
-        && selection.active != option.index
+    let Ok((mut selection, states)) = combos.get_mut(option.combo) else {
+        return;
+    };
+    // A separator or a disabled row swallows the press and leaves the list open:
+    // the user has not chosen anything yet, and closing on a stray click would
+    // make them re-open the list to try again.
+    if !states
+        .map_or(ComboRow::Selectable, |states| states.get(option.index))
+        .is_selectable()
     {
+        return;
+    }
+    if selection.active != option.index {
         selection.active = option.index;
         changed.write(ComboChanged {
             combo: option.combo,
@@ -480,17 +598,59 @@ fn select_combo_option(
 /// against the new labels the same frame.
 fn apply_set_combo_options(
     mut events: MessageReader<SetComboOptions>,
-    mut anchors: Query<(&mut ComboOptions, &mut ComboSelection)>,
+    mut anchors: Query<(
+        &mut ComboOptions,
+        &mut ComboSelection,
+        Option<&mut ComboRowStates>,
+    )>,
     popovers: Query<&ComboPopover>,
+    mut held_back: Local<Vec<SetComboOptions>>,
+    mut commands: Commands,
 ) {
-    for event in events.read() {
-        if event.labels.is_empty() || popovers.iter().any(|popover| popover.combo == event.combo) {
+    // Whatever an open list held back last run, ahead of this run's arrivals, so
+    // a newer update for the same combo is the one that ends up applied. A
+    // `Local` queue rather than re-queuing onto the message channel: reading and
+    // writing one message type in a single system is a parameter conflict Bevy
+    // refuses to build.
+    let mut queue: Vec<SetComboOptions> = core::mem::take(&mut held_back);
+    queue.extend(events.read().cloned());
+    for event in queue {
+        if event.labels.is_empty() {
             continue;
         }
-        let Ok((mut options, mut selection)) = anchors.get_mut(event.combo) else {
+        if popovers.iter().any(|popover| popover.combo == event.combo) {
+            // Held back rather than dropped: a sender that publishes a list only
+            // when it *changes* has no second chance, and losing the one update
+            // would leave the widget showing rows the sender has already moved
+            // on from — and, once row states are in play, a separator at an
+            // index that is now an option. One update per combo is kept, and it
+            // lands as soon as the list closes.
+            held_back.retain(|waiting| waiting.combo != event.combo);
+            held_back.push(event);
+            continue;
+        }
+        let Ok((mut options, mut selection, states)) = anchors.get_mut(event.combo) else {
             continue;
         };
-        if options.labels == event.labels {
+        let states_match = match states {
+            Some(mut held) => {
+                let same = held.0 == event.rows;
+                if !same {
+                    held.0.clone_from(&event.rows);
+                }
+                same
+            }
+            None => {
+                let same = event.rows.iter().all(|row| row.is_selectable());
+                if !same {
+                    commands
+                        .entity(event.combo)
+                        .insert(ComboRowStates(event.rows.clone()));
+                }
+                same
+            }
+        };
+        if options.labels == event.labels && states_match {
             continue;
         }
         options.labels.clone_from(&event.labels);
@@ -709,10 +869,61 @@ mod tests {
         let combo = app.world().resource::<TestCombo>().0;
         app.world_mut()
             .resource_mut::<Messages<super::SetComboOptions>>()
+            .write(super::SetComboOptions::new(
+                combo,
+                new_labels.iter().map(|label| (*label).to_owned()).collect(),
+            ));
+    }
+
+    /// The row states the combo currently holds.
+    fn row_states(app: &App) -> Vec<super::ComboRow> {
+        let combo = app.world().resource::<TestCombo>().0;
+        app.world()
+            .entity(combo)
+            .get::<super::ComboRowStates>()
+            .map(|states| states.0.clone())
+            .unwrap_or_default()
+    }
+
+    /// [`super::SetComboOptions`] carries the row states with the labels, so a
+    /// separator's index can never lag the list it separates: the anchor gains
+    /// the states component on the first list that needs one.
+    #[test]
+    fn set_options_carries_the_row_states() -> Result<(), TestError> {
+        let mut app = options_app(0);
+        assert!(row_states(&app).is_empty(), "a plain combo holds no states");
+        let combo = app.world().resource::<TestCombo>().0;
+        app.world_mut()
+            .resource_mut::<Messages<super::SetComboOptions>>()
             .write(super::SetComboOptions {
                 combo,
-                labels: new_labels.iter().map(|label| (*label).to_owned()).collect(),
+                labels: vec!["Default".to_owned(), String::new(), "Mine".to_owned()],
+                rows: vec![
+                    super::ComboRow::Disabled,
+                    super::ComboRow::Separator,
+                    super::ComboRow::Selectable,
+                ],
             });
+        app.update();
+        assert_eq!(
+            row_states(&app),
+            vec![
+                super::ComboRow::Disabled,
+                super::ComboRow::Separator,
+                super::ComboRow::Selectable,
+            ]
+        );
+        Ok(())
+    }
+
+    /// A state past the end of the list is [`super::ComboRow::Selectable`], so a
+    /// consumer that supplies states for a prefix of the rows does not have to
+    /// pad the tail.
+    #[test]
+    fn row_states_default_past_the_end() {
+        let states = super::ComboRowStates(vec![super::ComboRow::Disabled]);
+        assert_eq!(states.get(0), super::ComboRow::Disabled);
+        assert_eq!(states.get(7), super::ComboRow::Selectable);
     }
 
     /// [`super::SetComboOptions`] replaces the labels in place and clamps a
@@ -731,19 +942,35 @@ mod tests {
         Ok(())
     }
 
-    /// The update is skipped while the combo's popover is open, so the rows
-    /// are never replaced under the pointer.
+    /// The update is deferred while the combo's popover is open, so the rows
+    /// are never replaced under the pointer — and **deferred, not dropped**: it
+    /// lands as soon as the list closes.
+    ///
+    /// The difference matters because a sender that publishes its list only when
+    /// it changes has no second chance. The environment preset combos are one:
+    /// the inventory walk finishes once, and losing that one update would leave
+    /// the list showing the placeholder for the rest of the session — with a
+    /// separator at an index the sender now thinks is a preset.
     #[test]
-    fn set_options_skipped_while_popover_open() -> Result<(), TestError> {
+    fn set_options_deferred_while_popover_open() -> Result<(), TestError> {
         let mut app = options_app(0);
         let combo = app.world().resource::<TestCombo>().0;
-        app.world_mut().spawn(super::ComboPopover { combo });
+        let popover = app.world_mut().spawn(super::ComboPopover { combo }).id();
         set_options(&mut app, &["Other"]);
         app.update();
         assert_eq!(
             labels(&app),
             vec!["Low".to_owned(), "Medium".to_owned(), "High".to_owned()],
-            "an open popover defers the update"
+            "an open popover holds the update back"
+        );
+
+        // Close the list; the held update applies without the sender resending.
+        app.world_mut().entity_mut(popover).despawn();
+        app.update();
+        assert_eq!(
+            labels(&app),
+            vec!["Other".to_owned()],
+            "the deferred update lands once the list closes"
         );
         Ok(())
     }
@@ -941,6 +1168,52 @@ mod tests {
             assert!(!is_open(&mut app), "an outside press dismisses the list");
             assert_eq!(selected(&mut app), Some(0), "and changes nothing");
             assert_eq!(drain::<ComboChanged>(&mut app).len(), 0);
+            Ok(())
+        }
+
+        /// **A row the user may not pick stays put and keeps the list open.**
+        ///
+        /// The two sentinel rows the environment combos prepend are shown as
+        /// the current state and refused as a choice, and the separator between
+        /// them and the inventory presets is not a choice either. Both are
+        /// clickable *boxes* — they lay out like any row — so the only thing
+        /// standing between a user's aim and a nonsense selection is this
+        /// refusal, and a press that fell through either of them would bubble to
+        /// the anchor and shut the list.
+        #[test]
+        fn a_disabled_row_and_a_separator_refuse_the_pick() -> Result<(), TestError> {
+            let mut app = combo_app(2);
+            let anchor = find_by_name(&mut app, ANCHOR).ok_or("no anchor")?;
+            app.world_mut()
+                .entity_mut(anchor)
+                .insert(crate::ui_combo::ComboRowStates(vec![
+                    crate::ui_combo::ComboRow::Disabled,
+                    crate::ui_combo::ComboRow::Separator,
+                    crate::ui_combo::ComboRow::Selectable,
+                ]));
+            interact::click_node(&mut app, ANCHOR)?;
+            settle(&mut app);
+            let _opening = drain::<ComboChanged>(&mut app);
+
+            interact::click_node(&mut app, "combo-option:0")?;
+            settle(&mut app);
+            assert_eq!(selected(&mut app), Some(2), "a disabled row is not a pick");
+            assert!(is_open(&mut app), "and does not put the list away");
+
+            interact::click_node(&mut app, "combo-option:1")?;
+            settle(&mut app);
+            assert_eq!(selected(&mut app), Some(2), "nor is a separator");
+            assert!(is_open(&mut app));
+            assert_eq!(
+                drain::<ComboChanged>(&mut app).len(),
+                0,
+                "neither announced a change"
+            );
+
+            // The selectable row beside them still works.
+            interact::click_node(&mut app, "combo-option:2")?;
+            settle(&mut app);
+            assert!(!is_open(&mut app), "an ordinary row still closes the list");
             Ok(())
         }
 

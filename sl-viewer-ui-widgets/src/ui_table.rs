@@ -977,9 +977,21 @@ fn column_cell_node(column: &TableColumn, column_gap: f32) -> Node {
         ..default()
     };
     match column.width {
+        // `flex_basis: 0` — **not** the default `auto`. With `auto` a cell's
+        // base size is its content, which puts the cell's own width downstream
+        // of what is in it, and the ellipsis marker is inside it: showing the
+        // marker widened the cell's basis, which widened the clip, which made
+        // the value fit, which hid the marker, which narrowed it again — a
+        // per-frame flip, visible as a neighbouring column's text jumping in and
+        // out from under its ellipsis. `ellipsis_wanted` compensates for the
+        // marker taking room *inside a cell of fixed width*; it cannot
+        // compensate for the marker changing that width. Basing the split on the
+        // grow factors alone is what a declared column layout means anyway: two
+        // `Flex(1.0)` columns are half the slack each, whatever they hold.
         TableColumnWidth::Flex(grow) => Node {
             flex_grow: grow,
             flex_shrink: 1.0,
+            flex_basis: Val::Px(0.0),
             min_width: Val::Px(0.0),
             ..base
         },
