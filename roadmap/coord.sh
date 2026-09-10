@@ -24,6 +24,17 @@
 # subprocesses with it. Running the build in its own transient scope makes the
 # build the candidate and the only casualty.
 #
+# AND WHY IT HAS TO BE REAPED. That independence cuts both ways: a scope is
+# owned by systemd, not by the shell that asked for it, so killing the wrapper
+# leaves the compiler running with nobody watching it, while the slot -- an
+# `flock` on that shell's file descriptor -- goes free the instant it dies. The
+# pool then hands the slot straight back out with gigabytes of orphaned build
+# still resident, and the next taker fails outright on the per-slot unit name.
+# `acquire` therefore stops any scope still running on a slot it has just been
+# granted, and `reap` sweeps the idle ones: holding a slot's lock *is* the proof
+# that nobody is left watching what runs in its scope. See
+# `reclaim_orphaned_scope`.
+#
 # Every command is safe to run from any worktree and any directory inside it.
 # State mutations are serialised with flock(1).
 set -eu
@@ -384,6 +395,60 @@ exclusive_is_held() {
   return 0
 }
 
+# Take back the RAM of a build whose launcher is gone, and the unit name with it.
+#
+# THE LEAK. A slot is an `flock` held by the wrapper shell, and the kernel drops
+# it the instant that process dies. The scope, by contrast, is owned by systemd,
+# so the compiler inside it runs on. SIGKILL the wrapper -- which is what killing
+# an agent's background task does when SIGTERM is not enough, and SIGTERM alone
+# never reaches the trap here anyway, because a POSIX shell defers a handler
+# while it waits on a foreground child -- and the pool is left believing the slot
+# is free while several gigabytes of unwatched build are still resident. The next
+# taker of that slot then fails outright, because the per-slot unit name is still
+# in use:
+#
+#   Failed to start transient scope unit: Unit roadmap-coord-<pool>-1.scope
+#   was already loaded or has a fragment file.
+#
+# THE PROOF THAT IT IS AN ORPHAN. Called with slot `$1`'s lock **held**. That
+# lock is the one thing a live wrapper keeps for exactly as long as its build
+# runs, so a scope still active on a slot we have just been granted has nobody
+# left watching it. No cgroup-emptiness test is involved -- an orphan is usually
+# very much non-empty, which is the whole problem -- and no race is possible,
+# because the lock in hand is the mutex.
+#
+# WHY NOT JUST COUNT IT. Treating the orphan as occupancy and waiting is
+# strictly worse: the memory is gone either way, and the slot would then be
+# blocked on work nobody is ever going to look at.
+reclaim_orphaned_scope() {
+  [ "${USE_SCOPE}" = "1" ] || return 0
+  command -v systemctl >/dev/null 2>&1 || return 0
+  systemctl --user is-active --quiet "${unit_prefix}-$1.scope" 2>/dev/null || return 0
+  note "reclaiming slot $1: a build whose launcher is gone still holds its scope"
+  systemctl --user stop "${unit_prefix}-$1.scope" >/dev/null 2>&1 || true
+}
+
+# Stop every orphaned build the pool is still paying for -- `reap`'s half of the
+# job above, for the slots nobody is about to take.
+#
+# An orphan is only noticed at the moment its slot is next acquired, which can be
+# a long time on an idle pool. This is the sweep that does not wait for that: for
+# each slot, take the lock; succeeding *is* the proof that no wrapper holds it,
+# so any scope still active on it is orphaned. The lock is dropped again
+# immediately -- this reserves nothing, it only asks a question.
+sweep_orphaned_scopes() {
+  [ "${USE_SCOPE}" = "1" ] || return 0
+  command -v systemctl >/dev/null 2>&1 || return 0
+  ensure_state
+  _so_n=1
+  while [ "${_so_n}" -le "${SLOTS}" ]; do
+    if ! slot_is_held "${_so_n}"; then
+      reclaim_orphaned_scope "${_so_n}"
+    fi
+    _so_n=$((_so_n + 1))
+  done
+}
+
 release_slot() {
   if [ -n "${held_slot}" ]; then
     rm -f "${SLOT_DIR}/slot.${held_slot}.owner"
@@ -435,6 +500,7 @@ acquire() {
       flock -x 7
     fi
     held_slot='exclusive'
+    reclaim_orphaned_scope 'exclusive'
     wait_for_memory "${MIN_AVAIL_EXCLUSIVE_MB}"
     return 0
   fi
@@ -451,6 +517,9 @@ acquire() {
       exec 8>"${SLOT_DIR}/slot.${_aq_n}"
       if flock -n -x 8; then
         held_slot=${_aq_n}
+        # Before the memory gate, not after: an orphan's gigabytes are exactly
+        # what would otherwise keep us waiting at it.
+        reclaim_orphaned_scope "${_aq_n}"
         wait_for_memory "${MIN_AVAIL_MB}"
         return 0
       fi
@@ -692,7 +761,8 @@ Usage: roadmap/coord.sh <command> [options]
                            claim a roadmap item for this worktree
   release                  drop this worktree's claim
   unmerged                 refresh this worktree's unmerged-work summary
-  reap                     drop agents whose process is gone
+  reap                     drop agents whose process is gone, and stop any
+                           build whose launcher is gone but whose scope is not
   heavy [--label T] [--exclusive] -- <command...>
                            run a build/test/commit under the semaphore
   hook-pretooluse          Claude Code PreToolUse hook (reads JSON on stdin)
@@ -781,6 +851,7 @@ unmerged)
   ;;
 reap)
   with_lock reap_dead
+  sweep_orphaned_scopes
   ;;
 heavy)
   heavy_label=''
