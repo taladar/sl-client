@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 322 |
 | blocked | 42 |
 | in-progress | 21 |
-| bugs | 52 |
-| done | 1073 |
+| bugs | 51 |
+| done | 1074 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1652** |
@@ -1185,7 +1185,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (52)
+## bugs (51)
 
 ### viewer
 
@@ -1263,9 +1263,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   groups
 - [`viewer-hair-dome-stays-grey`](bugs/viewer-hair-dome-stays-grey.md) — The
   default hair dome intermittently stays grey for a whole session
-- [`viewer-hover-text-colour-change-not-redrawn`](bugs/viewer-hover-text-colour-change-not-redrawn.md)
-  — A floating text that only changes colour keeps the old colour until its text
-  changes
 - [`viewer-hover-tooltip-202ms-frame-spike`](bugs/viewer-hover-tooltip-202ms-frame-spike.md)
   — update_hover_tooltip spikes to 202 ms on a single frame
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
@@ -1309,7 +1306,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1073)
+## done (1074)
 
 ### protocol
 
@@ -1882,6 +1879,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-audio-backend` (done))
 - [`viewer-hover-text`](done/viewer-hover-text.md) — Object hover text
   (llSetText floating text)
+- [`viewer-hover-text-colour-change-not-redrawn`](done/viewer-hover-text-colour-change-not-redrawn.md)
+  — A floating text that only changes colour keeps the old colour until its text
+  changes
 - [`viewer-hover-tooltips`](done/viewer-hover-tooltips.md) — In-world hover
   tooltips (object / avatar / land inspectors)
 - [`viewer-hud-attachments-not-composited`](done/viewer-hud-attachments-not-composited.md)

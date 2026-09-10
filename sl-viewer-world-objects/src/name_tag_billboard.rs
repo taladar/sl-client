@@ -405,6 +405,11 @@ fn tag_line_height(font_size: f32) -> LineHeight {
 /// entities are updated in place so span count churn only happens when the
 /// line count changes; excess spans despawn, missing ones append (appending
 /// keeps [`Children`] order = line order).
+///
+/// A line whose **colour alone** moved additionally marks the tag's
+/// [`TextLayoutInfo`] changed, because that is what makes [`build_tag_meshes`]
+/// re-pour the vertex colours it bakes the text with — nothing else would
+/// (`viewer-hover-text-colour-change-not-redrawn`).
 pub(crate) fn sync_tag_spans(
     mut commands: Commands,
     changed: Query<(Entity, &TagContent, Option<&Children>), Changed<TagContent>>,
@@ -414,8 +419,12 @@ pub(crate) fn sync_tag_spans(
         &mut TextColor,
         &mut LineHeight,
     )>,
+    mut layouts: Query<&mut TextLayoutInfo>,
 ) {
     for (root, content, children) in &changed {
+        // Whether any existing span's colour actually moved — the one kind of
+        // change that reaches no further on its own (see the rebuild below).
+        let mut recoloured = false;
         let last_index = content.lines.len().saturating_sub(1);
         let desired: Vec<(String, f32, Color)> = content
             .lines
@@ -458,6 +467,7 @@ pub(crate) fn sync_tag_spans(
             }
             if text_color.0 != color {
                 text_color.0 = color;
+                recoloured = true;
             }
             let wanted_height = tag_line_height(size);
             if *line_height != wanted_height {
@@ -476,6 +486,22 @@ pub(crate) fn sync_tag_spans(
                 ))
                 .id();
             commands.entity(root).add_child(span);
+        }
+
+        // A **colour-only** change reaches nothing on its own, and the tag keeps
+        // its old colour until something else disturbs it
+        // (`viewer-hover-text-colour-change-not-redrawn`: `llSetText` re-run with
+        // the same string in a new colour stayed the old colour until the string
+        // changed too). The colour is baked into the mesh's vertex colours by
+        // [`build_tag_meshes`], which runs on `Changed<TextLayoutInfo>` — and a
+        // colour moves no glyph, so neither `layout_tag_text` nor bevy_text's own
+        // dirty flag has any reason to fire. Mark the layout changed, the same
+        // rebuild lever [`apply_name_tag_settings`] pulls for a bubble-opacity
+        // change. It costs the mesh pour and **not** the shaping:
+        // `layout_tag_text` gates on the text, the block, the bounds and the
+        // hinting, never on this flag.
+        if recoloured && let Ok(mut layout) = layouts.get_mut(root) {
+            layout.set_changed();
         }
     }
 }
@@ -1993,6 +2019,7 @@ mod tests {
         unpack_overlap_offset, viewport_size_changed, write_page_mesh,
     };
     use bevy::prelude::*;
+    use bevy::text::TextLayoutInfo;
     use pretty_assertions::{assert_eq, assert_ne};
 
     /// Both of a tag's render bundles carry [`WorldTextOverlay`] — the marker the
@@ -2122,6 +2149,80 @@ mod tests {
                 .map(|(text, _, _)| text)
                 .collect::<Vec<_>>(),
             vec!["Tester Title\n".to_owned(), "Renamed Tester".to_owned()],
+        );
+    }
+
+    /// A **colour-only** content change marks the tag's [`TextLayoutInfo`]
+    /// changed, which is the one thing that makes `build_tag_meshes` re-pour the
+    /// vertex colours the text is drawn with
+    /// (`viewer-hover-text-colour-change-not-redrawn`: `llSetText` re-run with the
+    /// same string in a new colour stayed the old colour until the string changed
+    /// too). A frame that changes nothing must not mark it, or every tag would
+    /// rebuild its mesh forever.
+    #[test]
+    fn a_colour_only_change_marks_the_layout_for_a_rebuild() {
+        /// How many tags a `Changed<TextLayoutInfo>` observer saw this frame —
+        /// the same filter `build_tag_meshes` is gated on.
+        #[derive(Resource, Default)]
+        struct Rebuilds(usize);
+
+        let mut app = App::new();
+        app.init_resource::<Rebuilds>();
+        app.add_systems(
+            Update,
+            (
+                sync_tag_spans,
+                |mut rebuilds: ResMut<Rebuilds>, changed: Query<(), Changed<TextLayoutInfo>>| {
+                    rebuilds.0 = changed.iter().count();
+                },
+            )
+                .chain(),
+        );
+        let root = app
+            .world_mut()
+            .spawn((
+                TagText::default(),
+                two_line_content(),
+                TextLayoutInfo::default(),
+            ))
+            .id();
+        // First frame: everything is new, so the count says nothing yet.
+        app.update();
+
+        // A frame that changes nothing must leave the layout alone.
+        app.update();
+        assert_eq!(
+            app.world().resource::<Rebuilds>().0,
+            0,
+            "an unchanged tag must not ask for a mesh rebuild",
+        );
+
+        // Recolour one line, leaving every string, size and line count alone.
+        if let Some(mut content) = app.world_mut().get_mut::<TagContent>(root)
+            && let Some(line) = content.lines.get_mut(1)
+        {
+            line.color = Color::srgb(1.0, 0.0, 0.0);
+        }
+        app.update();
+        assert_eq!(
+            app.world().resource::<Rebuilds>().0,
+            1,
+            "a recoloured line must mark the tag's layout for a mesh rebuild",
+        );
+        assert_eq!(
+            span_rows(&mut app, root)
+                .into_iter()
+                .map(|(_, _, color)| color)
+                .collect::<Vec<_>>(),
+            vec![Color::srgb(0.9, 0.9, 0.9), Color::srgb(1.0, 0.0, 0.0)],
+        );
+
+        // …and settle again: the rebuild is one-shot, not a treadmill.
+        app.update();
+        assert_eq!(
+            app.world().resource::<Rebuilds>().0,
+            0,
+            "the recolour rebuild must not repeat every frame",
         );
     }
 
