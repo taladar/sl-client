@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 323 |
 | blocked | 46 |
 | in-progress | 20 |
-| bugs | 56 |
+| bugs | 57 |
 | done | 1041 |
 | deferred | 25 |
 | wont-do | 16 |
-| **total** | **1629** |
+| **total** | **1630** |
 
 ## ideas (102)
 
@@ -1197,7 +1197,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (56)
+## bugs (57)
 
 ### viewer
 
@@ -1205,6 +1205,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Add Friend sends the offer silently — no message dialog, no feedback
 - [`viewer-animesh-intermittent-render`](bugs/viewer-animesh-intermittent-render.md)
   — Animesh intermittently fails to render (timing race, not deterministic)
+- [`viewer-asset-root-needs-an-env-var`](bugs/viewer-asset-root-needs-an-env-var.md)
+  — The viewer binary finds no icons, skin or locales unless BEVY_ASSET_ROOT is
+  set
 - [`viewer-audio-tests-open-real-devices`](bugs/viewer-audio-tests-open-real-devices.md)
   — Unit tests open real audio devices on the developer's machine
 - [`viewer-audit-about-land-row-rebuild`](bugs/viewer-audit-about-land-row-rebuild.md)
