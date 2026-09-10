@@ -65,7 +65,7 @@ use sl_wire::messages::{
     UpdateCreateInventoryItemInventoryDataBlock,
 };
 use sl_wire::{Direction, GlobalCoordinates};
-use sl_wire::{Llsd, SkeletonFolder, parse_llsd_binary, parse_llsd_notation, parse_llsd_xml};
+use sl_wire::{Llsd, LlsdEncoding, SkeletonFolder, parse_llsd_serialized, to_llsd_serialized};
 use sl_wire::{Permissions, Permissions5};
 
 use crate::asset_keys::AssetKey;
@@ -903,11 +903,6 @@ pub fn environment_asset_from_bytes(name: &str, bytes: &[u8]) -> Option<Environm
     day_cycle_from_asset(name, &llsd).map(|cycle| EnvironmentAsset::DayCycle(Box::new(cycle)))
 }
 
-/// The header line the reference writes above a settings asset's body
-/// (`LLSDSerialize::serialize` with `LLSD_NOTATION`, which is what
-/// `LLSettingsVOBase::createInventoryItem` uploads).
-const SETTINGS_ASSET_HEADER: &[u8] = b"<? llsd/notation ?>\n";
-
 /// Encode an [`EnvironmentAsset`] as the `AT_SETTINGS` asset bytes a grid
 /// serves and the reference viewer uploads — the inverse of
 /// [`environment_asset_from_bytes`].
@@ -925,64 +920,68 @@ pub fn environment_asset_to_bytes(asset: &EnvironmentAsset) -> Vec<u8> {
         EnvironmentAsset::Water(water) => water_settings_to_llsd(water),
         EnvironmentAsset::DayCycle(cycle) => day_cycle_to_llsd(cycle),
     };
-    let mut bytes = SETTINGS_ASSET_HEADER.to_vec();
-    bytes.extend_from_slice(&llsd.to_llsd_notation());
-    bytes
+    to_llsd_serialized(&llsd, LlsdEncoding::Notation)
 }
 
-/// Parse a settings-asset payload into LLSD, handling the encodings one can arrive
-/// in — XML (self-describing), or binary / notation behind an optional
-/// `<? LLSD/… ?>` header line.
+/// Overlay the LLSD `values` an **experience** pushed onto `sky`, returning the
+/// frame that results — the reference's `LLSettingsInjected::injectExperienceValues`
+/// (one `injectSetting` per key) followed by `applyInjections`, which assigns
+/// each override into a clone of the source settings map before reloading it.
 ///
-/// The header line, when there is one, *names* the encoding
-/// (`LLSDSerialize::deserialize` dispatches on it), so it is honoured rather
-/// than guessed: notation and binary are not mutually exclusive by sight — a
-/// notation map opens with `{`, which is also binary LLSD's map marker — so
-/// sniffing alone would hand a notation asset to the binary parser. Without a
-/// header each encoding is tried in turn.
-fn settings_asset_llsd(bytes: &[u8]) -> Option<Llsd> {
-    // XML carries its own `<?xml …?>` / `<llsd>` opening the parser expects.
-    if let Ok(text) = std::str::from_utf8(bytes) {
-        let start = text.trim_start();
-        if (start.starts_with("<?xml") || start.starts_with("<llsd"))
-            && let Ok(llsd) = parse_llsd_xml(text)
-        {
-            return Some(llsd);
-        }
-    }
-    let (header, payload) = split_llsd_header_line(bytes);
-    // A `<? … ?>` line naming an encoding settles it. The reference's markers
-    // are `LLSD/Binary`, `LLSD/XML` and `llsd/notation`, matched case-insensitively
-    // because grids have shipped both spellings.
-    let header = header.map(|line| String::from_utf8_lossy(line).to_lowercase());
-    match header.as_deref() {
-        Some(line) if line.contains("notation") => return parse_llsd_notation(payload).ok(),
-        Some(line) if line.contains("binary") => return parse_llsd_binary(payload).ok(),
-        Some(line) if line.contains("xml") => {
-            return std::str::from_utf8(payload)
-                .ok()
-                .and_then(|text| parse_llsd_xml(text).ok());
-        }
-        _other => {}
-    }
-    if let Ok(llsd) = parse_llsd_binary(payload) {
-        return Some(llsd);
-    }
-    parse_llsd_notation(payload).ok()
+/// The overlay is **shallow**, exactly as the reference's `settings[key] = value`
+/// is. That has one consequence worth knowing about rather than discovering: the
+/// seven legacy-haze values are read out of the frame's `legacy_haze` sub-map
+/// first (`get_color` / `get_float`, `llsettingssky.cpp`), so a push naming
+/// `ambient` at the top level is shadowed by the sub-map an EEP sky always
+/// carries and changes nothing. The reference behaves the same way; injecting a
+/// whole replacement `legacy_haze` map is what works on both.
+///
+/// `values` that is not a map leaves `sky` unchanged — a push that carries no
+/// keys asks for nothing.
+#[must_use]
+pub fn sky_with_pushed_values(sky: &SkySettings, values: &Llsd) -> SkySettings {
+    let Some(overrides) = values.as_map() else {
+        return sky.clone();
+    };
+    let mut frame = sky_settings_to_llsd(sky);
+    overlay_llsd_map(&mut frame, overrides);
+    sky_settings_from_llsd(&sky.name, &frame)
 }
 
-/// Split `bytes` at a leading `<? … ?>` LLSD header line into that line and the
-/// payload after it, or `(None, bytes)` when there is none. An `<?xml` prolog is
-/// left in place — it is XML the caller parses whole, not an LLSD header.
-fn split_llsd_header_line(bytes: &[u8]) -> (Option<&[u8]>, &[u8]) {
-    if bytes.starts_with(b"<?")
-        && !bytes.starts_with(b"<?xml")
-        && let Some(newline) = bytes.iter().position(|&byte| byte == b'\n')
-        && let Some(payload) = bytes.get(newline.saturating_add(1)..)
-    {
-        return (bytes.get(..newline), payload);
+/// [`sky_with_pushed_values`] for a water frame — the same shallow overlay, over
+/// `LLSettingsWater`'s own keys.
+#[must_use]
+pub fn water_with_pushed_values(water: &WaterSettings, values: &Llsd) -> WaterSettings {
+    let Some(overrides) = values.as_map() else {
+        return water.clone();
+    };
+    let mut frame = water_settings_to_llsd(water);
+    overlay_llsd_map(&mut frame, overrides);
+    water_settings_from_llsd(&water.name, &frame)
+}
+
+/// Assign each entry of `overrides` into `target`, replacing whatever was there.
+/// A no-op when `target` is not a map.
+fn overlay_llsd_map(target: &mut Llsd, overrides: &HashMap<String, Llsd>) {
+    let Llsd::Map(entries) = target else {
+        return;
+    };
+    for (key, value) in overrides {
+        drop(entries.insert(key.clone(), value.clone()));
     }
-    (None, bytes)
+}
+
+/// Parse a settings-asset payload into LLSD, in whichever of the three
+/// encodings it arrives in — [`parse_llsd_serialized`], which is the
+/// reference's `LLSDSerialize::deserialize`.
+///
+/// A settings asset is one of the payloads whose surrounding protocol does not
+/// say how it is encoded, so it carries an optional `<? … ?>` header line and
+/// the reader honours it. `None` here for a payload that decodes as none of
+/// them: the caller's next step is to ask what *kind* of settings it holds, and
+/// there is nothing to ask.
+fn settings_asset_llsd(bytes: &[u8]) -> Option<Llsd> {
+    parse_llsd_serialized(bytes).ok()
 }
 
 /// Parses a day-cycle `OSDMap` into a [`DayCycle`]: its tracks (track 0 water, the

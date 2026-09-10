@@ -55,10 +55,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use sl_proto::{
-    ArrivalPlacement, AvatarAppearance, ChatSource, ChatType, EnvironmentSettings, InstantMessage,
-    Object, ParcelInfo, PlayingAnimation, RegionLimits, RegionLocalObjectId, RegionLocalParcelId,
-    RegionStats, SequenceNumber, ServerEvent, SimSession, SimulatorTime,
-    attachment_state_from_point,
+    ArrivalPlacement, AvatarAppearance, ChatSource, ChatType, EnvironmentSettings,
+    ExperienceEnvironmentPush, InstantMessage, Object, ParcelInfo, PlayingAnimation, RegionLimits,
+    RegionLocalObjectId, RegionLocalParcelId, RegionStats, SequenceNumber, ServerEvent, SimSession,
+    SimulatorTime, attachment_state_from_point,
 };
 use sl_types::key::InventoryKey;
 use sl_types::lsl::Vector;
@@ -286,12 +286,26 @@ pub enum Action {
     /// the sky" pairs this with [`ConfigureRegion`](Self::ConfigureRegion),
     /// which is what sends that `RegionInfo`.
     ///
-    /// The one environment change that *is* pushed is a different feature:
-    /// `PushExpEnvironment`, an experience's `llSetEnvironment` injection,
-    /// which travels as a `GenericMessage` and layers over the region's
-    /// settings rather than replacing them. Neither end of it exists here yet —
-    /// the roadmap item is `protocol-experience-environment-push`.
+    /// The one environment change that *is* pushed is a different action:
+    /// [`PushExperienceEnvironment`](Self::PushExperienceEnvironment).
     SetEnvironment(Box<EnvironmentSettings>),
+    /// Pushes an environment at the viewer as an **experience** does
+    /// (`llSetEnvironment`) — the only live environment change in the protocol.
+    ///
+    /// Unlike [`SetEnvironment`](Self::SetEnvironment) this needs no
+    /// [`ConfigureRegion`](Self::ConfigureRegion) beside it and changes nothing
+    /// the region serves: it reaches the viewer at once, layers over the
+    /// region's settings, and the
+    /// [`Clear`](sl_proto::EnvironmentPushAction::Clear) case takes the layer
+    /// away again — at which point the region's own sky is back with no
+    /// refetch. A scenario that wants the *estate* to have changed its sky
+    /// still wants `SetEnvironment` + `ConfigureRegion`.
+    ///
+    /// A [`Full`](sl_proto::EnvironmentPushAction::Full) push names a settings
+    /// **asset** by id, which the viewer fetches over `ViewerAsset` — so the
+    /// scenario has to have put those bytes in the grid's asset store
+    /// (`environment_asset_to_bytes`) or the push resolves to nothing.
+    PushExperienceEnvironment(Box<ExperienceEnvironmentPush>),
     /// Edits the region's own configuration and sends the `RegionInfo` that
     /// announces it — the estate floater's Region tab, saved by nobody.
     ///
@@ -374,6 +388,11 @@ impl std::fmt::Debug for Action {
             Self::Chat { message, .. } => f.debug_tuple("Chat").field(message).finish(),
             Self::Im(im) => f.debug_tuple("Im").field(&im.message).finish(),
             Self::SetEnvironment(_) => f.write_str("SetEnvironment(<settings>)"),
+            Self::PushExperienceEnvironment(push) => f
+                .debug_struct("PushExperienceEnvironment")
+                .field("experience", &push.experience_id)
+                .field("action", &push.action.name())
+                .finish_non_exhaustive(),
             Self::ConfigureRegion { .. } => f.write_str("ConfigureRegion(<edit>)"),
             Self::ChangeParcel { local_id, .. } => f
                 .debug_struct("ChangeParcel")
@@ -885,6 +904,18 @@ async fn execute(
             let environment = (**environment).clone();
             shared
                 .with_sim(move |sim| sim.set_environment(environment))
+                .await;
+        }
+        Action::PushExperienceEnvironment(push) => {
+            let push = (**push).clone();
+            shared
+                .with_sim(move |sim| {
+                    if let Err(error) = sim.send_experience_environment_push(&push, now) {
+                        tracing::warn!(
+                            "a scripted experience environment push failed to send: {error}"
+                        );
+                    }
+                })
                 .await;
         }
         Action::ConfigureRegion { edit } => {

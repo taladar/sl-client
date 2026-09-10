@@ -41,6 +41,7 @@ use sl_types::map::RegionCoordinates;
 use sl_wire::AgentPreferences;
 use sl_wire::AttachmentResourcesReport;
 use sl_wire::DisplayName;
+use sl_wire::ExperienceEnvironmentPush;
 use sl_wire::ExperienceInfo;
 use sl_wire::LandResourcesUrls;
 use sl_wire::LslSyntax;
@@ -191,6 +192,18 @@ pub enum Event {
     /// or a parcel, parsed from the `ExtEnvironment` capability (the reply to
     /// [`Command::RequestEnvironment`](crate::Command::RequestEnvironment)).
     Environment(Box<EnvironmentSettings>),
+    /// An **experience** has pushed an environment at the agent — the
+    /// `PushExpEnvironment` generic message an `llSetEnvironment` script sends,
+    /// decoded by [`sl_wire::parse_environment_push`].
+    ///
+    /// Unlike [`Environment`](Self::Environment) this is not an answer to
+    /// anything the client asked: it is the one *live* environment change in the
+    /// protocol. The settings it carries layer **over** the region's rather than
+    /// replacing them, and the
+    /// [`Clear`](sl_wire::EnvironmentPushAction::Clear) case takes them away
+    /// again — at which point the region's own environment is in force once more
+    /// without a refetch.
+    ExperienceEnvironmentPush(Box<ExperienceEnvironmentPush>),
     /// The agent's L$ balance, parsed from a `MoneyBalanceReply` (a reply to
     /// [`Session::request_money_balance`](crate::Session::request_money_balance),
     /// or pushed by the simulator after a transaction changes the balance).

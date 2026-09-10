@@ -1858,8 +1858,8 @@ of the script was not written for a world where it never happened.
 The `Action` is anything a simulator does unprompted: `RezObject`,
 `MoveObject`, `UpdateObject`, `KillObject`, `Attach` / `Detach`,
 `AnimateAvatar`, `SetAppearance`, `Chat`, `Im`, `SetEnvironment`,
-`ConfigureRegion`, `ChangeParcel`, `Teleport`, `CrossRegion`, `SimStats`,
-`SimulatorTime`, `Marker`, and `Custom` for a hook.
+`PushExperienceEnvironment`, `ConfigureRegion`, `ChangeParcel`, `Teleport`,
+`CrossRegion`, `SimStats`, `SimulatorTime`, `Marker`, and `Custom` for a hook.
 
 `SetEnvironment` and `ConfigureRegion` go together, and the pairing is a
 protocol fact rather than an inconvenience. Nothing carries new environment
@@ -1873,13 +1873,22 @@ otherwise: a `RegionInfo` carries no environment fields at all. So an estate
 that changes only the sky saves the Region tab without moving a limit, and a
 script says the same thing with an empty `ConfigureRegion` edit.
 
-The one environment change that really is *pushed* is a different feature —
-`PushExpEnvironment`, an experience's `llSetEnvironment`, which travels as a
-`GenericMessage` and layers over the region's settings. Neither end of it exists
-in this workspace yet. The world-changing ones go through the
-region's shared store and publish to its change stream, so a second avatar
-standing there is told as well — a scripted rez is a rez, not a picture
-painted on one circuit.
+The one environment change that really is *pushed* is a different action —
+`PushExperienceEnvironment`, an experience's `llSetEnvironment`, which travels
+as a `GenericMessage` (`PushExpEnvironment`) and needs no `ConfigureRegion`
+beside it. It layers **over** the region's settings rather than replacing them,
+so its `Clear` case puts the region's own sky back with no refetch — the
+settings underneath were never overwritten, only covered. Its three cases are
+the reference's own: `Clear` releases one experience (or, with a nil experience
+id, every one of them), `Full` names a settings **asset** by id — which the
+viewer fetches over `ViewerAsset`, so the scenario has to have put those bytes
+in the grid's asset store — and `Partial` carries a sky and/or water fragment
+whose keys are overlaid on whatever is in force. The experience id rides in the
+message's invoice, not in the parameter list.
+
+The world-changing ones go through the region's shared store and publish to its
+change stream, so a second avatar standing there is told as well — a scripted
+rez is a rez, not a picture painted on one circuit.
 
 Every wait is a `tokio` sleep and every stamp comes from the grid's
 injected clock, so a test that pauses tokio's timer pauses the script with

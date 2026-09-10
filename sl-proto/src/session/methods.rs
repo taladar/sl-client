@@ -312,6 +312,41 @@ impl Session {
         });
     }
 
+    /// Decodes a `PushExpEnvironment` parameter list and queues the resulting
+    /// [`Event::ExperienceEnvironmentPush`]; `large` says which envelope it
+    /// arrived in, for the diagnostic.
+    ///
+    /// A push that will not decode is **not** silently dropped and is **not**
+    /// swallowed either: it comes back out as the raw
+    /// [`Event::GenericMessage`] it arrived as, beside a warning naming the
+    /// reason. A consumer that cannot render an environment it cannot parse can
+    /// at least tell the user an experience tried to change their sky.
+    fn push_environment_push(&mut self, invoice: Uuid, params: Vec<Vec<u8>>, large: bool) {
+        let experience_id = ExperienceKey::from(invoice);
+        match sl_wire::parse_environment_push(experience_id, &params) {
+            Ok(push) => self
+                .events
+                .push_back(Event::ExperienceEnvironmentPush(Box::new(push))),
+            Err(error) => {
+                tracing::warn!(
+                    error = %error,
+                    experience = %experience_id,
+                    "an experience environment push failed to parse; forwarding it raw"
+                );
+                let generic = GenericMessage {
+                    method: sl_wire::PUSH_EXP_ENVIRONMENT_METHOD.to_owned(),
+                    invoice: InvoiceId::from(invoice),
+                    params,
+                };
+                self.events.push_back(if large {
+                    Event::LargeGenericMessage(generic)
+                } else {
+                    Event::GenericMessage(generic)
+                });
+            }
+        }
+    }
+
     /// Sets the draw distance (metres) advertised in keep-alive `AgentUpdate`s.
     /// A larger value makes the simulator enable more neighbouring regions
     /// (surfaced as [`Event::NeighborDiscovered`]). Takes effect on the next
@@ -4700,6 +4735,35 @@ impl Session {
                 if trimmed_string(&generic.method_data.method) == "emptymutelist" =>
             {
                 self.events.push_back(Event::MuteList(Vec::new()));
+            }
+            // An experience pushing an environment at this agent
+            // (`llSetEnvironment`) — the one live environment change in the
+            // protocol, and the only `GenericMessage` feature here that both
+            // envelopes carry: the reference dispatches `GenericMessage` and
+            // `LargeGenericMessage` through one handler, and a partial push
+            // carrying a whole sky fragment is exactly the payload the large
+            // envelope exists for.
+            AnyMessage::GenericMessage(generic)
+                if trimmed_string(&generic.method_data.method)
+                    == sl_wire::PUSH_EXP_ENVIRONMENT_METHOD =>
+            {
+                let params: Vec<Vec<u8>> = generic
+                    .param_list
+                    .iter()
+                    .map(|block| block.parameter.clone())
+                    .collect();
+                self.push_environment_push(generic.method_data.invoice, params, false);
+            }
+            AnyMessage::LargeGenericMessage(generic)
+                if trimmed_string(&generic.method_data.method)
+                    == sl_wire::PUSH_EXP_ENVIRONMENT_METHOD =>
+            {
+                let params: Vec<Vec<u8>> = generic
+                    .param_list
+                    .iter()
+                    .map(|block| block.parameter.clone())
+                    .collect();
+                self.push_environment_push(generic.method_data.invoice, params, true);
             }
             // A generic method-name + parameter envelope used for a grab-bag of
             // loosely-coupled features keyed by `Method` (the feature-specific

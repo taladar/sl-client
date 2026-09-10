@@ -243,6 +243,7 @@ const fn event_name(event: &Event) -> &'static str {
         Event::GroupNames(..) => "group_names",
         Event::DisplayNames(..) => "display_names",
         Event::Environment(..) => "environment",
+        Event::ExperienceEnvironmentPush(..) => "experience_environment_push",
         Event::MoneyBalance(..) => "money_balance",
         Event::EconomyData(..) => "economy_data",
         Event::ParcelProperties(..) => "parcel_properties",

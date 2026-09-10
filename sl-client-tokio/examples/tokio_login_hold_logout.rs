@@ -550,6 +550,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::ParcelDetails(_)
             | Event::RemoteParcelId(_)
             | Event::Environment(_)
+            | Event::ExperienceEnvironmentPush(_)
             | Event::MoneyBalance(_)
             | Event::EconomyData(_)
             | Event::ParcelProperties(_)

@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 42 |
 | in-progress | 21 |
 | bugs | 52 |
-| done | 1072 |
+| done | 1073 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1651** |
+| **total** | **1652** |
 
 ## ideas (100)
 
@@ -266,8 +266,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Session and SimSession are god objects with 12k-line impl blocks
 - [`protocol-audit-wire-error-contract`](ready/protocol-audit-wire-error-contract.md)
   — sl-wire's public parse surface has five different failure disciplines
-- [`protocol-experience-environment-push`](ready/protocol-experience-environment-push.md)
-  — An experience can set the sky, and nothing in this stack can say so
+- [`protocol-experience-parcel-recheck`](ready/protocol-experience-parcel-recheck.md)
+  — An experience's sky follows you off its land, and nothing takes it back
 - [`protocol-sl-llsd-serde`](ready/protocol-sl-llsd-serde.md) — serde
   Serialize/Deserialize derives for sl-llsd (Llsd) types
 - [`protocol-sl-lsl-serde`](ready/protocol-sl-lsl-serde.md) — serde support for
@@ -1308,7 +1308,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1072)
+## done (1073)
 
 ### protocol
 
@@ -1480,6 +1480,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-audit-tokio-caps-refetch`](done/protocol-audit-tokio-caps-refetch.md)
   — The tokio region-change caps fetch stalls the UDP pump, then swallows its
   failure
+- [`protocol-experience-environment-push`](done/protocol-experience-environment-push.md)
+  — An experience can set the sky, and nothing in this stack can say so
 - [`protocol-lsl-syntax`](done/protocol-lsl-syntax.md) — LSLSyntax capability —
   fetch, cache and decode the grid's language definition
 - [`protocol-sim-caps-agent-comms`](done/protocol-sim-caps-agent-comms.md) —

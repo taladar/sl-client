@@ -2,13 +2,14 @@
 id: protocol-experience-environment-push
 title: An experience can set the sky, and nothing in this stack can say so
 topic: protocol
-status: ready
+status: done
 origin: reading the reference while scoping the environment leg of test-fake-grid-timeline (2026-09-09)
 points: 3
 refs:
   [
     viewer-environment-not-refetched-on-region-info,
     test-fake-grid-timeline,
+    protocol-experience-parcel-recheck,
   ]
 ---
 
@@ -65,6 +66,52 @@ whatever the region says without a refetch.
 - **`sl-fake-grid`**: a `timeline::Action` for it, so a scenario can push an
   experience environment and take it away again
   ([[test-fake-grid-timeline]] already carries every other scripted action).
+
+## Done (2026-09-10)
+
+All three, plus the LLSD groundwork the parameter needed.
+
+- **`sl-llsd`**: `parse_llsd_serialized` / `to_llsd_serialized` /
+  `LlsdEncoding` — the reference's `LLSDSerialize::deserialize` / `serialize`,
+  header line and all. Parameter 0 of the push is exactly one of those
+  self-describing payloads, and so is an EEP settings asset: `sl-proto`'s own
+  private copy of that reader (`settings_asset_llsd`) is now a delegation.
+- **`sl-wire`** (`environment_push.rs`): `ExperienceEnvironmentPush`,
+  `EnvironmentPushAction` (`Clear` / `Full { asset_id }` / `Partial { sky,
+  water }`), `build_environment_push_params` / `parse_environment_push`. The
+  experience id rides in the message **invoice**, not the parameter list, which
+  the round-trip test pins. An `action` naming none of the three is *rejected*,
+  not tolerated.
+- **`sl-proto`**: `Event::ExperienceEnvironmentPush`, decoded off both
+  `GenericMessage` and `LargeGenericMessage` (the reference dispatches both
+  through one handler); a push that will not decode is forwarded raw rather
+  than dropped. Server side, `SimSession::send_experience_environment_push`.
+  Also `sky_with_pushed_values` / `water_with_pushed_values` — the shallow
+  per-key overlay `LLSettingsInjected::injectExperienceValues` does.
+- **The viewer**: `PushedEnvironment` in
+  `sl-viewer-world-scene/src/environment.rs` — the reference's `ENV_PUSH`,
+  above the parcel's settings and below the local layer, with every injected
+  value filed under the experience that pushed it so one release leaves
+  another's standing. Per-key injections are folded into *every frame* of the
+  cycle in force rather than pinning the sampled one, so the day keeps
+  animating. `ingest_experience_environment_push` runs the events and holds a
+  `Full` push until its settings asset resolves.
+- **`sl-fake-grid`**: `Action::PushExperienceEnvironment`, with a timeline test
+  driving the real client through a push and its release.
+
+Two things deliberately left, both filed as
+[[protocol-experience-parcel-recheck]]: the reference re-checks on every parcel
+change whether each injecting experience is still allowed there
+(`DayInjection::testExperiencesOnParcel`, over an `ExperienceQuery`
+capability this workspace does not have), and it blends *per key* over the
+transition rather than cross-fading the whole environment as this does.
+
+One reference behaviour worth not "fixing": the overlay is shallow, so a push
+naming a legacy-haze key (`ambient`, `blue_horizon`, …) at the top level is
+shadowed by the `legacy_haze` sub-map every EEP sky carries and changes
+nothing. `get_color` / `get_float` in `llsettingssky.cpp` read the sub-map
+first, so the reference does the same; a script that means it pushes a whole
+replacement `legacy_haze` map.
 
 ## Why it is worth doing
 

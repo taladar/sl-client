@@ -110,7 +110,8 @@ pub use session::{
     offline_messages_to_llsd, open_region_info_to_llsd, parcel_info_to_llsd,
     required_voice_version_to_llsd, server_appearance_update_to_llsd, session_history_to_llsd,
     set_display_name_reply_to_llsd, sim_console_response_to_llsd, sky_settings_from_asset,
-    teleport_finish_to_llsd, water_settings_from_asset, windlight_refresh_to_llsd,
+    sky_with_pushed_values, teleport_finish_to_llsd, water_settings_from_asset,
+    water_with_pushed_values, windlight_refresh_to_llsd,
 };
 pub use sim_caps::{
     CapHandler, CapsDispatch, CapsRequest, CapsResponse, LLSD_XML_CONTENT_TYPE, SimCaps,
@@ -212,8 +213,9 @@ pub use sl_wire::{
     AVATAR_PICKER_PAGE_SIZE, AbuseReport, AbuseReportType, AgentPreferences, AisCategoryCreate,
     AisItemUpdate, AisUpdate, AnimatedObjects, AnyMessage, AssetUploadResponse, AttachmentLocation,
     AttachmentResourcesReport, CircuitCode, ControlFlags, CreateInventoryCategoryRequest,
-    Direction, DisplayName, EventQueueEvent, EventQueueRequest, EventQueueResponse, ExperienceInfo,
-    ExperiencePermission, ExperienceProperties, ExperienceUpdate, FaceMaterialPut, FakeParcelId,
+    Direction, DisplayName, EnvironmentPushAction, EventQueueEvent, EventQueueRequest,
+    EventQueueResponse, ExperienceEnvironmentPush, ExperienceInfo, ExperiencePermission,
+    ExperienceProperties, ExperienceUpdate, FaceMaterialPut, FakeParcelId,
     GLTF_MATERIAL_OVERRIDE_METHOD, GestureEntry, GlobalCoordinates, GlobalTextures,
     GltfMaterialOverride, HomeLocation, IceCandidate, InitialOutfit, LSL_SYNTAX_VERSION,
     LandResourcesUrls, LandmarkAsset as WireLandmarkAsset, LegacyMaterial, Llsd, LoginCategory,

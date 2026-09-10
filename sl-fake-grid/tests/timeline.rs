@@ -11,7 +11,10 @@ mod test {
     use std::time::Duration;
 
     use pretty_assertions::assert_eq;
-    use sl_client_tokio::{Client, Command, Event, LoginParams, LoginRequest, StartLocation};
+    use sl_client_tokio::{
+        Client, Command, EnvironmentPushAction, Event, ExperienceEnvironmentPush, ExperienceKey,
+        Llsd, LoginParams, LoginRequest, StartLocation,
+    };
     use sl_fake_grid::scenario::STOCK_SCRIPTED_OBJECT_LOCAL_ID;
     use sl_fake_grid::{
         AccountConfig, Action, At, FakeAgent, FakeGrid, FakeGridBuilder, RegionConfig, Scenario,
@@ -152,6 +155,72 @@ mod test {
                 _ => {}
             }
         }
+
+        drop(command_tx);
+        run.abort();
+        grid.shutdown();
+        Ok(())
+    }
+
+    /// **A script pushes an experience environment, and takes it away again.**
+    ///
+    /// The push is the one live environment change in the protocol, and the
+    /// claim here is that both halves of it reach the *client* as typed events:
+    /// the partial injection with the keys it named, and the release naming the
+    /// same experience. Ordering matters as much as arrival — a release the
+    /// client saw before the push it releases would leave the sky changed
+    /// forever.
+    #[tokio::test]
+    async fn a_script_pushes_and_releases_an_experience_environment() -> Result<(), TestError> {
+        let experience = ExperienceKey::from(uuid::Uuid::from_u128(0xE_1234));
+        let injected = ExperienceEnvironmentPush {
+            experience_id: experience,
+            action: EnvironmentPushAction::Partial {
+                sky: Some(Llsd::Map(std::collections::HashMap::from([(
+                    "cloud_shadow".to_owned(),
+                    Llsd::Real(0.75),
+                )]))),
+                water: None,
+            },
+            transition_time: 2.0,
+            owner_id: uuid::Uuid::from_u128(0x00AA),
+            object_name: "Weather Machine".to_owned(),
+            parcel_name: "The Back Forty".to_owned(),
+        };
+        let released = ExperienceEnvironmentPush {
+            action: EnvironmentPushAction::Clear,
+            ..injected.clone()
+        };
+        let timeline = Timeline::new()
+            .then(
+                At::AfterArrival(LEAD_IN),
+                Action::PushExperienceEnvironment(Box::new(injected.clone())),
+            )
+            .after(
+                Duration::ZERO,
+                Action::PushExperienceEnvironment(Box::new(released.clone())),
+            );
+        let (grid, client, _agent) = start(timeline, Vec::new()).await?;
+
+        let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
+        let (command_tx, command_rx) = mpsc::channel::<Command>(8);
+        let (diag_tx, _diag_rx) = mpsc::channel(16);
+        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+
+        let mut seen = Vec::new();
+        while seen.len() < 2 {
+            let event = tokio::time::timeout(WAIT, event_rx.recv())
+                .await?
+                .ok_or("client event stream ended early")?;
+            if let Event::ExperienceEnvironmentPush(push) = event {
+                seen.push(*push);
+            }
+        }
+        assert_eq!(
+            seen,
+            vec![injected, released],
+            "both halves of the push must reach the client, in the order the script wrote them"
+        );
 
         drop(command_tx);
         run.abort();

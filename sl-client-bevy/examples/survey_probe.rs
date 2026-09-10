@@ -351,7 +351,8 @@ fn on_events(
             | SlSessionEvent::MarketplaceListingGone(_)
             | SlSessionEvent::MarketplaceError { .. }
             | SlSessionEvent::Ping { .. }
-            | SlSessionEvent::Environment(_) => {}
+            | SlSessionEvent::Environment(_)
+            | SlSessionEvent::ExperienceEnvironmentPush(_) => {}
             SlSessionEvent::TeleportFailed { reason, .. } => warn!("teleport failed: {reason}"),
             SlSessionEvent::RegionChanged {
                 region_handle, sim, ..

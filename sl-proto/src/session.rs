@@ -1988,7 +1988,8 @@ pub use conversions::{
     offline_messages_to_llsd, open_region_info_to_llsd, parcel_info_to_llsd,
     required_voice_version_to_llsd, server_appearance_update_to_llsd, session_history_to_llsd,
     set_display_name_reply_to_llsd, sim_console_response_to_llsd, sky_settings_from_asset,
-    teleport_finish_to_llsd, water_settings_from_asset, windlight_refresh_to_llsd,
+    sky_with_pushed_values, teleport_finish_to_llsd, water_settings_from_asset,
+    water_with_pushed_values, windlight_refresh_to_llsd,
 };
 pub(crate) use conversions::{
     ZERO_VECTOR, build_task_inventory, environment_update_from_llsd, full_update_block,

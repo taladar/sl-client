@@ -15,10 +15,14 @@
 //! stores, and logs — the sky / atmosphere rendering (P22.2), water (P23), and
 //! shadows (P24) consume the stored settings.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use bevy::prelude::*;
 use sl_client_bevy::{
-    AssetKey, Command, DayCycle, DayCycleFrame, EnvironmentAsset, EnvironmentSettings,
-    SettingsKind, SkySettings, SlCommand, SlEvent, SlSessionEvent, Uuid, WaterSettings,
+    AssetKey, Command, DayCycle, DayCycleFrame, EnvironmentAsset, EnvironmentPushAction,
+    EnvironmentSettings, ExperienceEnvironmentPush, ExperienceKey, Llsd, SettingsKind, SkySettings,
+    SlCommand, SlEvent, SlSessionEvent, Uuid, WaterSettings, sky_with_pushed_values,
+    water_with_pushed_values,
 };
 use sl_settings::SettingValue;
 use sl_viewer_settings::ViewerSettings;
@@ -150,6 +154,188 @@ impl LocalEnvironment {
     }
 }
 
+/// The **pushed** environment layer: the settings *experiences* have injected
+/// over the region's (`llSetEnvironment`) — the reference's `ENV_PUSH`, held by
+/// its `DayInjection` (`indra/newview/llenvironment.cpp`).
+///
+/// It sits above the region's and the parcel's settings and **below** the local
+/// layer, which is the reference's own order (`ENV_EDIT`, `ENV_LOCAL`,
+/// `ENV_PUSH`, `ENV_PARCEL`, `ENV_REGION`, `ENV_DEFAULT`): an experience
+/// overrides the land, and the user overrides the experience.
+///
+/// Every injected value is filed under the experience that pushed it, because
+/// that is the granularity a release has:
+/// [`EnvironmentPushAction::Clear`] names one experience (or, with a nil id,
+/// all of them) and must leave any other experience's injections standing.
+/// Taking the last one away restores the region's environment with **no
+/// refetch** — the settings underneath were never overwritten, only covered.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PushedEnvironment {
+    /// A whole day cycle an experience installed, and which one did — a
+    /// [`Full`](EnvironmentPushAction::Full) push whose asset turned out to be a
+    /// day cycle.
+    day: Option<(ExperienceKey, Box<DayCycle>)>,
+    /// A fixed sky frame an experience installed.
+    sky: Option<(ExperienceKey, Box<SkySettings>)>,
+    /// A fixed water frame an experience installed.
+    water: Option<(ExperienceKey, WaterSettings)>,
+    /// Per-key sky overrides from
+    /// [`Partial`](EnvironmentPushAction::Partial) pushes, each tagged with the
+    /// experience that last wrote it — the reference's `mOverrideValues` /
+    /// `mOverrideExps`, which are per **key** and not per push, so two
+    /// experiences can each own part of the sky.
+    sky_values: BTreeMap<String, (ExperienceKey, Llsd)>,
+    /// The water counterpart of [`sky_values`](Self::sky_values).
+    water_values: BTreeMap<String, (ExperienceKey, Llsd)>,
+}
+
+impl PushedEnvironment {
+    /// Whether no experience is holding any part of the environment — the
+    /// reference's `!hasInjections()`, which is what makes it drop the whole
+    /// `ENV_PUSH` instance.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.day.is_none()
+            && self.sky.is_none()
+            && self.water.is_none()
+            && self.sky_values.is_empty()
+            && self.water_values.is_empty()
+    }
+
+    /// Every experience currently holding some part of the environment — the
+    /// reference's `mActiveExperiences`, and what a surface telling the user
+    /// *who* changed their sky reads.
+    #[must_use]
+    pub fn experiences(&self) -> BTreeSet<ExperienceKey> {
+        let tracks = [
+            self.day.as_ref().map(|(experience, _)| *experience),
+            self.sky.as_ref().map(|(experience, _)| *experience),
+            self.water.as_ref().map(|(experience, _)| *experience),
+        ];
+        tracks
+            .into_iter()
+            .flatten()
+            .chain(
+                self.sky_values
+                    .values()
+                    .chain(self.water_values.values())
+                    .map(|(experience, _)| *experience),
+            )
+            .collect()
+    }
+
+    /// Install a whole settings asset for `experience` — the reference's
+    /// `setInjectedDay` / `setInjectedSky` / `setInjectedWater`.
+    ///
+    /// A day cycle clears the fixed sky and water it animates, exactly as a day
+    /// cycle does in the local layer; a sky or a water frame replaces only its
+    /// own track.
+    fn install(&mut self, experience: ExperienceKey, asset: EnvironmentAsset) {
+        match asset {
+            EnvironmentAsset::Sky(sky) => self.sky = Some((experience, sky)),
+            EnvironmentAsset::Water(water) => self.water = Some((experience, water)),
+            EnvironmentAsset::DayCycle(day) => {
+                self.day = Some((experience, day));
+                self.sky = None;
+                self.water = None;
+            }
+        }
+    }
+
+    /// Overlay the sky and/or water keys of a
+    /// [`Partial`](EnvironmentPushAction::Partial) push — the reference's
+    /// `injectSkySettings` / `injectWaterSettings`, one `injectSetting` per key.
+    ///
+    /// A push carrying neither is the reference's own special case: with both
+    /// maps undefined `setExperienceEnvironment` *clears* this experience
+    /// instead, so a script that pushes nothing releases what it held.
+    fn inject(&mut self, experience: ExperienceKey, sky: Option<&Llsd>, water: Option<&Llsd>) {
+        if sky.is_none() && water.is_none() {
+            self.clear(Some(experience));
+            return;
+        }
+        overlay_pushed_values(&mut self.sky_values, experience, sky);
+        overlay_pushed_values(&mut self.water_values, experience, water);
+    }
+
+    /// Drop everything `experience` is holding, or — for `None`, the nil
+    /// experience id the reference reads as "all" — the whole layer.
+    fn clear(&mut self, experience: Option<ExperienceKey>) {
+        let Some(experience) = experience else {
+            *self = Self::default();
+            return;
+        };
+        if held_by(self.day.as_ref(), experience) {
+            self.day = None;
+        }
+        if held_by(self.sky.as_ref(), experience) {
+            self.sky = None;
+        }
+        if held_by(self.water.as_ref(), experience) {
+            self.water = None;
+        }
+        self.sky_values.retain(|_, (owner, _)| *owner != experience);
+        self.water_values
+            .retain(|_, (owner, _)| *owner != experience);
+    }
+
+    /// Apply the per-key injections to every frame of the cycle being composed.
+    ///
+    /// Per **frame** rather than to the sampled result, which reaches the same
+    /// pixels by a route that keeps the day animating: the reference overrides
+    /// the keys of a sky it recomputes each tick, and overriding both ends of an
+    /// interpolation gives the same value at every point between them. Pinning
+    /// the sampled frame instead would freeze the sky the moment an experience
+    /// nudged one cloud setting.
+    fn apply_values(&self, settings: &mut EnvironmentSettings) {
+        if !self.sky_values.is_empty() {
+            let values = llsd_map_of(&self.sky_values);
+            for frame in settings.day_cycle.sky_frames.values_mut() {
+                *frame = sky_with_pushed_values(frame, &values);
+            }
+        }
+        if !self.water_values.is_empty() {
+            let values = llsd_map_of(&self.water_values);
+            for frame in settings.day_cycle.water_frames.values_mut() {
+                *frame = water_with_pushed_values(frame, &values);
+            }
+        }
+    }
+}
+
+/// Whether `track` is held by `experience` — one line, but written once because
+/// the three whole-asset tracks hold three different settings types and a
+/// closure would be monomorphised to whichever it was first called with.
+fn held_by<T>(track: Option<&(ExperienceKey, T)>, experience: ExperienceKey) -> bool {
+    track.is_some_and(|(owner, _)| *owner == experience)
+}
+
+/// Record each key of `values` as owned by `experience`, replacing whatever
+/// experience owned it before — the reference's `injectSetting` at an instant
+/// transition. A `values` that is not a map contributes nothing.
+fn overlay_pushed_values(
+    target: &mut BTreeMap<String, (ExperienceKey, Llsd)>,
+    experience: ExperienceKey,
+    values: Option<&Llsd>,
+) {
+    let Some(Llsd::Map(entries)) = values else {
+        return;
+    };
+    for (key, value) in entries {
+        drop(target.insert(key.clone(), (experience, value.clone())));
+    }
+}
+
+/// The owned per-key overrides as the plain LLSD map the settings overlay takes.
+fn llsd_map_of(values: &BTreeMap<String, (ExperienceKey, Llsd)>) -> Llsd {
+    Llsd::Map(
+        values
+            .iter()
+            .map(|(key, (_, value))| (key.clone(), value.clone()))
+            .collect(),
+    )
+}
+
 /// Where the current [`EnvironmentState::settings`] came from — and, as
 /// [`EnvironmentSource::of_reply`], the scope an incoming reply describes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -178,6 +364,12 @@ impl EnvironmentSource {
         }
     }
 }
+
+/// A transition time at or below which a change is an instant cut rather than a
+/// fade — the reference's own threshold in `LLSettingsInjected::injectSetting`,
+/// which writes a value straight through under `0.1` seconds instead of
+/// scheduling a blend.
+const INSTANT_TRANSITION: f32 = 0.1;
 
 /// How many times to (re)request the region environment before giving up and
 /// rendering with the legacy WindLight defaults.
@@ -430,6 +622,10 @@ pub struct EnvironmentState {
     /// arbitrary sky asset is not an answer to. The water and day tracks are
     /// nobody else's, so a pinned preset leaves them alone.
     local: LocalEnvironment,
+    /// The **pushed** layer: what experiences have injected over the region's
+    /// settings, above the parcel's and below the local one. See
+    /// [`PushedEnvironment`].
+    push: PushedEnvironment,
     /// The decoded sky for a pinned **Modern** selection, once its `KNOWN_SKY_*`
     /// asset resolves (see [`resolve_modern_environment`]), keyed by the time so a
     /// stale one is ignored after the selection changes. Until it resolves, a
@@ -509,6 +705,7 @@ impl Default for EnvironmentState {
             shared_source: EnvironmentSource::Default,
             fixed: None,
             local: LocalEnvironment::default(),
+            push: PushedEnvironment::default(),
             modern_sky: None,
             parcel: None,
             parcel_id: None,
@@ -689,6 +886,63 @@ impl EnvironmentState {
         &self.edit
     }
 
+    /// The pushed layer — what experiences have injected, if anything.
+    #[must_use]
+    pub const fn pushed(&self) -> &PushedEnvironment {
+        &self.push
+    }
+
+    /// Carry out one `PushExpEnvironment` whose settings are already in hand:
+    /// [`Clear`](EnvironmentPushAction::Clear) releases the experience,
+    /// [`Partial`](EnvironmentPushAction::Partial) overlays its keys, and
+    /// [`Full`](EnvironmentPushAction::Full) installs `asset` — which the caller
+    /// has fetched by the id the push named, and passes as `None` while it is
+    /// still in flight or turned out not to be settings at all.
+    ///
+    /// The cross-fade is the **push's** transition time, not the viewer's
+    /// manual one: an experience states how long its change should take, and
+    /// that number is as much a part of the push as the sky is.
+    pub fn apply_environment_push(
+        &mut self,
+        push: &ExperienceEnvironmentPush,
+        asset: Option<EnvironmentAsset>,
+    ) {
+        self.begin_transition_over(push.transition_time);
+        match &push.action {
+            EnvironmentPushAction::Clear => {
+                // A nil experience id is the reference's "every experience".
+                self.push
+                    .clear((!push.experience_id.uuid().is_nil()).then_some(push.experience_id));
+            }
+            EnvironmentPushAction::Partial { sky, water } => {
+                self.push
+                    .inject(push.experience_id, sky.as_ref(), water.as_ref());
+            }
+            EnvironmentPushAction::Full { asset_id } => {
+                let Some(asset) = asset else {
+                    debug!(
+                        "experience {} pushed settings asset {asset_id}, which is not in hand yet",
+                        push.experience_id
+                    );
+                    self.transition = None;
+                    return;
+                };
+                self.push.install(push.experience_id, asset);
+            }
+        }
+        self.apply();
+    }
+
+    /// Drop everything the pushed layer holds — every experience at once, as a
+    /// `ClearEnvironment` with a nil experience id does.
+    pub fn clear_pushed(&mut self) {
+        if self.push.is_empty() {
+            return;
+        }
+        self.push = PushedEnvironment::default();
+        self.apply();
+    }
+
     /// Empty the local layer, falling back to whatever the menu has pinned
     /// (nothing, usually) and then to the shared environment.
     pub fn clear_local(&mut self) {
@@ -753,6 +1007,25 @@ impl EnvironmentState {
             from,
             elapsed: 0.0,
             duration: self.manual_transition_seconds,
+        });
+    }
+
+    /// Start a cross-fade of `seconds`, whatever the manual transition time
+    /// says — what a push that states its own transition time gets.
+    ///
+    /// Anything at or under [`INSTANT_TRANSITION`] is no fade at all, matching
+    /// the reference's own threshold (`injectSetting` writes the value straight
+    /// through rather than blending it).
+    fn begin_transition_over(&mut self, seconds: f32) {
+        if seconds <= INSTANT_TRANSITION {
+            self.transition = None;
+            return;
+        }
+        let from = Box::new(self.displayed_environment());
+        self.transition = Some(EnvironmentTransition {
+            from,
+            elapsed: 0.0,
+            duration: seconds,
         });
     }
 
@@ -930,6 +1203,24 @@ impl EnvironmentState {
             self.settings.env_version = parcel.env_version;
             self.source = EnvironmentSource::Parcel;
         }
+        // The **pushed** layer, over the land and under the user: what an
+        // experience inside this parcel has injected. Its whole-asset tracks
+        // stack the way the local layer's do (a cycle, then a fixed sky, then a
+        // fixed water frame); its per-key injections are folded into every frame
+        // of whichever cycle came out of that, so the day keeps animating.
+        if let Some((_, day)) = &self.push.day {
+            self.settings.day_cycle = (**day).clone();
+        }
+        if let Some((_, sky)) = &self.push.sky {
+            let name = sky.name.clone();
+            let settings = (**sky).clone();
+            self.pin_sky(settings, name);
+        }
+        if let Some((_, water)) = &self.push.water {
+            let name = water.name.clone();
+            pin_water_into(&mut self.settings, water.clone(), name);
+        }
+        self.push.apply_values(&mut self.settings);
         if let Some(day) = &self.local.day {
             self.settings.day_cycle = (*day.settings).clone();
         }
@@ -1515,6 +1806,70 @@ pub fn ingest_environment(mut events: MessageReader<SlEvent>, mut state: ResMut<
     }
 }
 
+/// Fold each incoming [`SlSessionEvent::ExperienceEnvironmentPush`] into the
+/// pushed layer of [`EnvironmentState`] — an experience's `llSetEnvironment`.
+///
+/// `Clear` and `Partial` land the frame they arrive; a `Full` push names a
+/// settings **asset**, so it is held here until
+/// [`EnvironmentAssetManager`] resolves it (and dropped, with a warning, once
+/// the manager says it never will). Held as a queue rather than one slot
+/// because two experiences may each be waiting on an asset, and a second one
+/// must not cancel the first.
+pub fn ingest_experience_environment_push(
+    mut events: MessageReader<SlEvent>,
+    mut state: ResMut<EnvironmentState>,
+    mut assets: ResMut<EnvironmentAssetManager>,
+    mut pending: Local<Vec<(ExperienceEnvironmentPush, AssetKey)>>,
+) {
+    for event in events.read() {
+        let SlSessionEvent::ExperienceEnvironmentPush(push) = &event.0 else {
+            continue;
+        };
+        info!(
+            "experience {} pushed {} at this viewer from {:?} on {:?} (transition {}s)",
+            push.experience_id,
+            push.action.name(),
+            push.object_name,
+            push.parcel_name,
+            push.transition_time,
+        );
+        // A release cancels whatever that experience was still waiting on: the
+        // asset it asked for is no longer wanted, and installing it after the
+        // clear would put back exactly what the clear took away.
+        if matches!(push.action, EnvironmentPushAction::Clear) {
+            let released = push.experience_id;
+            let all = released.uuid().is_nil();
+            pending.retain(|(waiting, _)| !all && waiting.experience_id != released);
+        }
+        if let EnvironmentPushAction::Full { asset_id } = push.action {
+            pending.push(((**push).clone(), AssetKey::from(asset_id)));
+            continue;
+        }
+        state.apply_environment_push(push, None);
+    }
+
+    // Whatever is waiting on an asset: request it (idempotent), then install it
+    // the frame it decodes.
+    pending.retain(|(push, key)| {
+        assets.request(*key);
+        if let Some(asset) = assets.get(*key) {
+            let asset = asset.as_ref().clone();
+            state.apply_environment_push(push, Some(asset));
+            return false;
+        }
+        if assets.is_unavailable(*key) {
+            warn!(
+                "experience {} pushed settings asset {}, which cannot be fetched or decoded; \
+                 the sky is unchanged",
+                push.experience_id,
+                key.uuid()
+            );
+            return false;
+        }
+        true
+    });
+}
+
 /// Carry out whatever the RLV `@setenv_*` family has queued in
 /// [`RlvEnvironmentSlot`], and tell it what the sky looks like now.
 ///
@@ -1594,8 +1949,9 @@ mod tests {
     use sl_client_bevy::{Command, SlCommand, SlEvent, SlSessionEvent};
 
     use super::{
-        DayPositionPin, EnvironmentAsset, EnvironmentSettings, EnvironmentSource, EnvironmentState,
-        FixedEnvironment, SavedEnvironment, SkySettings, Uuid,
+        DayPositionPin, EnvironmentAsset, EnvironmentPushAction, EnvironmentSettings,
+        EnvironmentSource, EnvironmentState, ExperienceEnvironmentPush, ExperienceKey,
+        FixedEnvironment, Llsd, SavedEnvironment, SkySettings, Uuid,
     };
     use crate::sky_presets::FixedSky;
     use sl_client_bevy::WaterSettings;
@@ -2558,6 +2914,280 @@ mod tests {
         assert_ne!(
             sampled.name, "script",
             "the script's own sky is not what a position samples"
+        );
+    }
+
+    /// An experience's push, as the wire carries one.
+    fn push(
+        experience: ExperienceKey,
+        action: EnvironmentPushAction,
+        transition_time: f32,
+    ) -> ExperienceEnvironmentPush {
+        ExperienceEnvironmentPush {
+            experience_id: experience,
+            action,
+            transition_time,
+            owner_id: Uuid::from_u128(0xAA),
+            object_name: "Weather Machine".to_owned(),
+            parcel_name: "The Back Forty".to_owned(),
+        }
+    }
+
+    /// A one-key sky fragment, the shape a `PushPartialEnvironment` carries.
+    fn sky_fragment(key: &str, value: f64) -> Llsd {
+        Llsd::Map(std::collections::HashMap::from([(
+            key.to_owned(),
+            Llsd::Real(value),
+        )]))
+    }
+
+    /// The whole point of the layer: taking the push away puts the region's own
+    /// environment back **without asking the grid again**, because the region's
+    /// settings were only ever covered.
+    #[test]
+    fn releasing_an_experience_restores_the_region_without_a_refetch() {
+        let experience = ExperienceKey::from(Uuid::from_u128(0xE1));
+        let mut state = EnvironmentState::default();
+        assert_eq!(
+            state.ingest_reply(reply(-1, 1234)),
+            EnvironmentSource::Region
+        );
+        let region_sky = state.rendered_sky();
+        assert!(region_sky.is_some(), "the region has a sky to go back to");
+
+        state.apply_environment_push(
+            &push(
+                experience,
+                EnvironmentPushAction::Full {
+                    asset_id: Uuid::from_u128(0x5117),
+                },
+                0.0,
+            ),
+            Some(EnvironmentAsset::Sky(Box::new(script_sky()))),
+        );
+        assert_eq!(
+            state.rendered_sky().map(|sky| sky.name),
+            Some("script".to_owned()),
+            "the pushed sky is what renders"
+        );
+        assert!(!state.pushed().is_empty());
+
+        state.apply_environment_push(&push(experience, EnvironmentPushAction::Clear, 0.0), None);
+
+        assert!(state.pushed().is_empty(), "the release emptied the layer");
+        assert_eq!(
+            state.rendered_sky(),
+            region_sky,
+            "the region's own sky is back, and nothing was re-requested"
+        );
+        assert_eq!(state.settings.day_length, 1234);
+    }
+
+    /// The user outranks the experience: `ENV_LOCAL` sits above `ENV_PUSH`.
+    #[test]
+    fn a_local_pin_outranks_a_pushed_sky() {
+        let experience = ExperienceKey::from(Uuid::from_u128(0xE1));
+        let mut state = EnvironmentState::default();
+        state.apply_environment_push(
+            &push(
+                experience,
+                EnvironmentPushAction::Full {
+                    asset_id: Uuid::from_u128(0x5117),
+                },
+                0.0,
+            ),
+            Some(EnvironmentAsset::Sky(Box::new(script_sky()))),
+        );
+        state.set_fixed(Some(FixedEnvironment::Legacy(FixedSky::Midnight)));
+
+        assert_eq!(
+            state.rendered_sky().map(|sky| sky.name),
+            Some(FixedSky::Midnight.frame_name().to_owned()),
+            "the menu's pin renders over the experience's sky"
+        );
+        assert!(
+            !state.pushed().is_empty(),
+            "the experience still holds its layer — it is covered, not released"
+        );
+    }
+
+    /// A partial push overlays only the keys it names, and leaves the day cycle
+    /// animating rather than freezing it on one frame.
+    #[test]
+    fn a_partial_push_changes_one_key_and_keeps_the_cycle() {
+        let experience = ExperienceKey::from(Uuid::from_u128(0xE2));
+        let mut state = EnvironmentState::default();
+        state.ingest_shared(two_frame_region_cycle(), EnvironmentSource::Region);
+        let before_gamma = state.sky_at(0.0, 0.0).map(|sky| sky.gamma.to_bits());
+        assert!(
+            before_gamma.is_some(),
+            "the region cycle has a ground sky to compare against"
+        );
+
+        state.apply_environment_push(
+            &push(
+                experience,
+                EnvironmentPushAction::Partial {
+                    sky: Some(sky_fragment("cloud_shadow", 0.75)),
+                    water: None,
+                },
+                0.0,
+            ),
+            None,
+        );
+
+        let dawn = state.sky_at(0.0, 0.0);
+        let dusk = state.sky_at(0.0, 0.5);
+        assert_eq!(
+            dawn.as_ref().map(|sky| sky.cloud_shadow.to_bits()),
+            Some(0.75_f32.to_bits())
+        );
+        assert_eq!(
+            dusk.as_ref().map(|sky| sky.cloud_shadow.to_bits()),
+            Some(0.75_f32.to_bits()),
+            "the override rides every frame of the cycle"
+        );
+        assert_ne!(
+            dawn.as_ref().map(|sky| sky.name.clone()),
+            dusk.as_ref().map(|sky| sky.name.clone()),
+            "the cycle still schedules two skies — the push did not pin one"
+        );
+        assert_eq!(
+            dawn.as_ref().map(|sky| sky.gamma.to_bits()),
+            before_gamma,
+            "a key the push did not name is untouched"
+        );
+    }
+
+    /// Two experiences hold different parts of the sky, and releasing one leaves
+    /// the other's standing — the reason every injection is filed by experience.
+    #[test]
+    fn releasing_one_experience_leaves_the_others_injection() {
+        let first = ExperienceKey::from(Uuid::from_u128(0xE1));
+        let second = ExperienceKey::from(Uuid::from_u128(0xE2));
+        let mut state = EnvironmentState::default();
+        state.apply_environment_push(
+            &push(
+                first,
+                EnvironmentPushAction::Partial {
+                    sky: Some(sky_fragment("cloud_shadow", 0.75)),
+                    water: None,
+                },
+                0.0,
+            ),
+            None,
+        );
+        state.apply_environment_push(
+            &push(
+                second,
+                EnvironmentPushAction::Partial {
+                    sky: Some(sky_fragment("star_brightness", 3.0)),
+                    water: None,
+                },
+                0.0,
+            ),
+            None,
+        );
+        assert_eq!(state.pushed().experiences().len(), 2);
+
+        state.apply_environment_push(&push(first, EnvironmentPushAction::Clear, 0.0), None);
+
+        let sky = state.rendered_sky();
+        assert_eq!(
+            sky.as_ref().map(|sky| sky.star_brightness.to_bits()),
+            Some(3.0_f32.to_bits()),
+            "the second experience still holds its key"
+        );
+        assert_ne!(
+            sky.as_ref().map(|sky| sky.cloud_shadow.to_bits()),
+            Some(0.75_f32.to_bits()),
+            "the released experience's key is gone"
+        );
+        assert_eq!(
+            state.pushed().experiences().into_iter().collect::<Vec<_>>(),
+            vec![second]
+        );
+    }
+
+    /// A `ClearEnvironment` with a nil experience id is the reference's "every
+    /// experience", not "the experience whose id is nil".
+    #[test]
+    fn a_nil_experience_clear_releases_every_experience() {
+        let first = ExperienceKey::from(Uuid::from_u128(0xE1));
+        let second = ExperienceKey::from(Uuid::from_u128(0xE2));
+        let mut state = EnvironmentState::default();
+        for experience in [first, second] {
+            state.apply_environment_push(
+                &push(
+                    experience,
+                    EnvironmentPushAction::Partial {
+                        sky: Some(sky_fragment("cloud_shadow", 0.5)),
+                        water: None,
+                    },
+                    0.0,
+                ),
+                None,
+            );
+        }
+
+        state.apply_environment_push(
+            &push(
+                ExperienceKey::from(Uuid::nil()),
+                EnvironmentPushAction::Clear,
+                0.0,
+            ),
+            None,
+        );
+
+        assert!(state.pushed().is_empty());
+    }
+
+    /// A push states how long its change takes; that number, not the viewer's
+    /// manual transition time, is what fades.
+    #[test]
+    fn a_push_fades_over_its_own_transition_time() {
+        let experience = ExperienceKey::from(Uuid::from_u128(0xE1));
+        let mut state = EnvironmentState::default();
+        assert_eq!(state.manual_transition_seconds.to_bits(), 0.0_f32.to_bits());
+
+        state.apply_environment_push(
+            &push(
+                experience,
+                EnvironmentPushAction::Partial {
+                    sky: Some(sky_fragment("cloud_shadow", 0.5)),
+                    water: None,
+                },
+                4.0,
+            ),
+            None,
+        );
+
+        assert!(
+            state.is_transitioning(),
+            "a manual transition time of zero must not suppress the push's own fade"
+        );
+    }
+
+    /// The personal environment is the user's; an experience's push is not part
+    /// of it and must not be written to the account.
+    #[test]
+    fn a_pushed_environment_is_never_saved() {
+        let experience = ExperienceKey::from(Uuid::from_u128(0xE1));
+        let mut state = EnvironmentState::default();
+        state.apply_environment_push(
+            &push(
+                experience,
+                EnvironmentPushAction::Full {
+                    asset_id: Uuid::from_u128(0x5117),
+                },
+                0.0,
+            ),
+            Some(EnvironmentAsset::Sky(Box::new(script_sky()))),
+        );
+
+        assert!(
+            state.saved_environment().is_none(),
+            "a sky an experience imposed is not a personal environment"
         );
     }
 }

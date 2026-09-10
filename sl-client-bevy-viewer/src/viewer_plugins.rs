@@ -547,6 +547,11 @@ impl Plugin for ViewerWorldPlugins {
                     crate::environment::track_agent_parcel,
                     crate::environment::request_parcel_environment,
                     ingest_environment,
+                    // An experience's `llSetEnvironment` push, into the layer
+                    // above the region's. After the ingest, so a region reply
+                    // landing this frame is underneath the push rather than
+                    // over it.
+                    crate::environment::ingest_experience_environment_push,
                     // Fetch + swap in a pinned Modern (`KNOWN_SKY_*`) sky once its
                     // asset decodes; after `ingest_environment` so the shared
                     // environment (the Modern placeholder) is current.

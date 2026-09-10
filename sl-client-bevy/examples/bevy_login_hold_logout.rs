@@ -285,6 +285,7 @@ fn on_events(
             | SlSessionEvent::ParcelDetails(_)
             | SlSessionEvent::RemoteParcelId(_)
             | SlSessionEvent::Environment(_)
+            | SlSessionEvent::ExperienceEnvironmentPush(_)
             | SlSessionEvent::MoneyBalance(_)
             | SlSessionEvent::EconomyData(_)
             | SlSessionEvent::ParcelProperties(_)
