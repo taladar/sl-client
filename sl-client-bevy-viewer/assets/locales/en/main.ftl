@@ -719,12 +719,14 @@ volume-panel-music = Music
 volume-panel-media = Media
 volume-panel-voice = Voice
 
-## The Stand Up / Stop flycam state button (viewer-sit-target-and-stand-button) —
-## the reference's combined stand / stop-flying panel, in the toolbar's reserved
-## leading slot. Only one is ever shown: Stand while seated, Stop flycam in flycam.
+## The Stand Up / Stop flycam / Stop Flying state button
+## (viewer-sit-target-and-stand-button) — the reference's combined stand /
+## stop-flying panel, in the toolbar's reserved leading slot. Only one is ever
+## shown: Stand while seated, Stop flycam in flycam, Stop Flying while flying.
 
 stand-button-stand = Stand Up
 stand-button-stop-flycam = Stop flycam
+stand-button-stop-flying = Stop Flying
 ## The inventory filters floater (viewer-inventory-advanced-filters).
 
 inventory-filters-title = Inventory Filters

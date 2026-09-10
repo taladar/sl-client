@@ -99,12 +99,13 @@ const BUTTON_GAP: f32 = 4.0;
 
 /// The fixed width of the reserved **state slot** at the bar's leading edge (and
 /// the matching trailing spacer that balances it), in logical pixels. Wide enough
-/// for the "Stand Up" / "Stop flycam" state button ([`crate::stand_stop_button`])
-/// it hosts on **one line** (the longer "Stop flycam" plus the button's padding).
-/// A fixed width — occupied or empty — so the button appearing or disappearing
-/// never reflows the centred toolbar buttons, and the trailing spacer keeps that
-/// centre truly centred rather than nudged by the leading slot.
-const STATE_SLOT_WIDTH: f32 = 140.0;
+/// for the **two** "Stand Up" / "Stop flycam" / "Stop Flying" state buttons
+/// ([`crate::stand_stop_button`]) that can be shown at once, side by side on
+/// **one line** — the two longest labels plus their padding and the gap between
+/// them. A fixed width — occupied or empty — so a button appearing or
+/// disappearing never reflows the centred toolbar buttons, and the trailing
+/// spacer keeps that centre truly centred rather than nudged by the leading slot.
+const STATE_SLOT_WIDTH: f32 = 230.0;
 
 /// The bar strip's fallback background, used when no skin is loaded — the skin's
 /// `.sk-toolbar-bar` (`var(--surface-bg)`) overrides it. A dark, mostly-opaque
@@ -456,7 +457,7 @@ fn spawn_bottom_toolbar(mut commands: Commands, root: Res<UiRoot>) {
     // group's leading edge, then the toolbar buttons, then a trailing spacer of the
     // same fixed width. The two fixed-width bookends keep the centred buttons truly
     // centred and stop the state button (which appears / disappears with the seated
-    // / flycam state) from ever reflowing the row.
+    // / flycam / flying state) from ever reflowing the row.
     let state_slot = spawn_state_slot(&mut commands, bar);
 
     for (index, def) in TOOLBAR_BUTTONS.iter().enumerate() {
@@ -475,17 +476,17 @@ fn spawn_bottom_toolbar(mut commands: Commands, root: Res<UiRoot>) {
 }
 
 /// Spawn the reserved leading [state slot](STATE_SLOT_WIDTH) under the button bar —
-/// a fixed-width, non-blocking box the Stand Up / Stop flycam state button parents
-/// into. Fixed width so its (dis)appearing occupant never reflows the centred
-/// buttons.
+/// a fixed-width, non-blocking box the Stand Up / Stop flycam / Stop Flying state
+/// buttons parent into. Fixed width so its (dis)appearing occupants never reflow
+/// the centred buttons.
 ///
-/// The button is aligned to the slot's **trailing** edge (`FlexEnd`) — the side
-/// the toolbar buttons sit on — so the gap between it and the first toolbar
-/// button is just the bar's `column_gap`, the same as every inter-button gap.
-/// Centring it instead left the slot's slack (the fixed width less the button's
-/// own width) sitting between the button and its neighbour, a visibly wider gap.
-/// The slack now falls on the leading edge, against the window edge, where there
-/// is no button for it to space away from.
+/// The buttons are aligned to the slot's **trailing** edge (`FlexEnd`) — the side
+/// the toolbar buttons sit on — so the gap between them and the first toolbar
+/// button is just the bar's `column_gap`, the same as every inter-button gap, and
+/// they space each other by that same gap. Centring them instead left the slot's
+/// slack (the fixed width less the shown buttons' width) sitting between them and
+/// their neighbour, a visibly wider gap. The slack now falls on the leading edge,
+/// against the window edge, where there is no button for it to space away from.
 fn spawn_state_slot(commands: &mut Commands, bar: Entity) -> Entity {
     commands
         .spawn((
@@ -494,6 +495,7 @@ fn spawn_state_slot(commands: &mut Commands, bar: Entity) -> Entity {
                 flex_shrink: 0.0,
                 justify_content: JustifyContent::FlexEnd,
                 align_items: AlignItems::Center,
+                column_gap: Val::Px(BUTTON_GAP),
                 ..default()
             },
             // Transparent and non-blocking when empty; the state button itself takes

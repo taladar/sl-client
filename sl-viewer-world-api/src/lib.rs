@@ -6222,9 +6222,16 @@ pub struct AvatarControls {
     pub last_controls: ControlFlags,
     /// Seconds accumulated since the last rotation send, for the turning throttle.
     pub rotation_send_accum: f32,
-    /// Seconds the ascend key has been held while standing and not flying, for the
-    /// P31.16 hold-to-take-off; reset whenever that precondition lapses.
+    /// Seconds the ascend key has been held while not flying, for the P31.16
+    /// hold-to-take-off; reset whenever that precondition lapses. The reference's
+    /// `gKeyboard->getCurKeyElapsedTime()` in `agent_jump`.
     pub ascend_hold_secs: f32,
+    /// Frames the ascend key has been held while not flying, counted alongside
+    /// [`ascend_hold_secs`](Self::ascend_hold_secs) and reset with it. The
+    /// reference's `getCurKeyElapsedFrameCount()`: a take-off needs *both* the
+    /// elapsed time and a handful of frames, so a single very long frame (a
+    /// stutter, a texture-decode hitch) cannot turn a tap into a take-off.
+    pub ascend_hold_frames: u32,
     /// The tap-tap-hold-to-run detector for the walk-forward key.
     pub tap_run_forward: DoubleTapRun,
     /// The tap-tap-hold-to-run detector for the walk-backward key.
@@ -6262,6 +6269,7 @@ impl Default for AvatarControls {
             last_controls: ControlFlags::empty(),
             rotation_send_accum: ROTATION_SEND_INTERVAL_SECS,
             ascend_hold_secs: 0.0,
+            ascend_hold_frames: 0,
             tap_run_forward: DoubleTapRun::default(),
             tap_run_backward: DoubleTapRun::default(),
             forced_heading: None,

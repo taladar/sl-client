@@ -103,8 +103,8 @@ pub(crate) const SETTING_FIRST_PERSON_AVATAR: &str = "FirstPersonAvatarVisible";
 /// `AllowTapTapHoldRun`).
 pub(crate) const SETTING_TAP_TAP_HOLD_RUN: &str = "AllowTapTapHoldRun";
 
-/// Whether holding the ascend key while standing auto-engages flight (the
-/// reference `AutomaticFly`).
+/// Whether holding the ascend key auto-engages flight (the reference
+/// `AutomaticFly`).
 pub(crate) const SETTING_AUTOMATIC_FLY: &str = "AutomaticFly";
 
 /// How fast the ← / → keys turn the avatar, radians per second. Our own

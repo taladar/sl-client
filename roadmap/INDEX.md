@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 46 |
 | in-progress | 20 |
 | bugs | 56 |
-| done | 1040 |
+| done | 1041 |
 | deferred | 25 |
 | wont-do | 16 |
-| **total** | **1628** |
+| **total** | **1629** |
 
 ## ideas (102)
 
@@ -1286,6 +1286,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Mouselook — parts of the own avatar's head render from the inside
 - [`viewer-muted-residents-text-still-shown`](bugs/viewer-muted-residents-text-still-shown.md)
   — A blocked resident's chat and IMs are still shown
+- [`viewer-nametags-refracted-by-distant-water`](bugs/viewer-nametags-refracted-by-distant-water.md)
+  — Water draws over a name tag that stands in front of it, smearing it
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
 - [`viewer-notecard-preview-ignores-unsaved-text`](bugs/viewer-notecard-preview-ignores-unsaved-text.md)
@@ -1307,8 +1309,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   resolved / too many rigged-pending objects
 - [`viewer-sunlit-face-clips-two-channels`](bugs/viewer-sunlit-face-clips-two-channels.md)
   — A sunlit opaque face pins red and green rather than showing its texture
-- [`viewer-takeoff-hold-jumps-instead-of-flying`](bugs/viewer-takeoff-hold-jumps-instead-of-flying.md)
-  — Holding the fly key jumps instead of taking off
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
@@ -1334,7 +1334,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1040)
+## done (1041)
 
 ### protocol
 
@@ -2743,6 +2743,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Sun disc renders grey on aditi (EEP sky needs sky_hdr_scale)
 - [`viewer-table-cell-ellipsis`](done/viewer-table-cell-ellipsis.md) — Truncate
   overflowing table cells with a locale-aware ellipsis
+- [`viewer-takeoff-hold-jumps-instead-of-flying`](done/viewer-takeoff-hold-jumps-instead-of-flying.md)
+  — Holding the fly key jumps instead of taking off
 - [`viewer-teleport-flow-progress`](done/viewer-teleport-flow-progress.md) —
   Teleport flow — progress screen & arrival (blocked by
   `viewer-ui-notification-host` (done))

@@ -17,9 +17,11 @@
 //! - **← / →** — turn the body left / right (client-tracked heading, sent as the
 //!   `AgentUpdate` body rotation the walk direction follows).
 //! - **PageUp / PageDown** — ascend / descend ([`UP_POS`] / [`UP_NEG`], while flying).
-//!   Holding **PageUp** while standing on the ground also *starts* flying (P31.16),
-//!   once held past a short threshold and if the region / parcel permit it — a quick
-//!   tap does not, matching the reference viewer's hold-to-fly.
+//!   Holding **PageUp** also *starts* flying (P31.16), once held past a short
+//!   threshold and if the region / parcel permit it — a quick tap does not,
+//!   matching the reference viewer's hold-to-fly. The hop the simulator answers the
+//!   first ascend bit with does not cancel it: the take-off is decided by the hold
+//!   alone, never by whether the avatar is still on the ground by then.
 //! - **F** — toggle flying ([`ControlFlags::FLY`]). Flight also stops itself on
 //!   landing (P31.11): descending onto the ground with no ascend key held drops
 //!   the fly intent so the avatar stands rather than hovering; **F** takes off again.
@@ -102,11 +104,19 @@ const LANDING_HEIGHT_MARGIN_M: f32 = 0.5;
 /// level low-altitude flight is not mistaken for a descent onto the ground.
 const LANDING_DESCENT_SPEED_MPS: f32 = -0.1;
 
-/// How long (seconds) the ascend key must be held while standing before flight
-/// auto-engages (P31.16), matching the reference viewer's `FLY_TIME` — a quick tap
-/// is a jump / hop, a sustained hold takes off. It also debounces the take-off
-/// from the P31.11 auto-land, so a landing does not instantly re-launch.
+/// How long (seconds) the ascend key must be held before flight auto-engages
+/// (P31.16), matching the reference viewer's `FLY_TIME` — a quick tap is a jump /
+/// hop, a sustained hold takes off. It also debounces the take-off from the
+/// P31.11 auto-land, so a landing does not instantly re-launch.
 const TAKE_OFF_HOLD_SECS: f32 = 0.5;
+
+/// How many frames the ascend key must have been held, on top of
+/// [`TAKE_OFF_HOLD_SECS`], before flight auto-engages — the reference's
+/// `FLY_FRAMES`, which `agent_jump` tests alongside `FLY_TIME`. At an ordinary
+/// frame rate the seconds threshold is the binding one; the frame count is what
+/// keeps a single stalled frame longer than `FLY_TIME` from turning a tap into a
+/// take-off.
+const TAKE_OFF_HOLD_FRAMES: u32 = 4;
 
 /// The window (seconds) within which a second tap of the same walk key counts as
 /// a double-tap for tap-tap-hold-to-run. Deliberately its own constant — the
@@ -129,7 +139,7 @@ pub struct MovementTuning {
     /// Whether double-tapping and holding a walk key runs — the reference's
     /// `AllowTapTapHoldRun`.
     pub allow_tap_tap_hold_run: bool,
-    /// Whether holding the ascend key while standing auto-engages flight
+    /// Whether holding the ascend key auto-engages flight
     /// (P31.16) — the reference's `AutomaticFly`. Off, only the explicit fly
     /// toggle starts flying; auto-land (P31.11) stays on either way, as the
     /// reference does.
@@ -306,26 +316,27 @@ pub(crate) fn drive_avatar_controls(
             controls.flying = !controls.flying;
         }
 
-        // Auto-take-off (P31.16): holding ascend while standing engages flight once
-        // held past the threshold, if flying is permitted here. A quick tap does not
-        // (that is a jump); the hold also keeps the P31.11 auto-land from firing.
-        if !controls.flying && ascend {
-            controls.ascend_hold_secs += dt;
-        } else {
-            controls.ascend_hold_secs = 0.0;
-        }
-        let grounded = own_motion.is_none_or(|motion| {
-            crate::physics::avatar_at_ground_floor(motion, &terrain, LANDING_HEIGHT_MARGIN_M)
-        });
+        // Auto-take-off (P31.16): holding ascend engages flight once held past the
+        // threshold, if flying is permitted here. A quick tap does not (that is a
+        // jump); the hold also keeps the P31.11 auto-land from firing.
+        let (hold_secs, hold_frames) = advance_ascend_hold(
+            controls.ascend_hold_secs,
+            controls.ascend_hold_frames,
+            !controls.flying && ascend,
+            dt,
+        );
+        controls.ascend_hold_secs = hold_secs;
+        controls.ascend_hold_frames = hold_frames;
         if should_take_off(
             tuning.automatic_fly,
             controls.flying,
-            grounded,
             controls.ascend_hold_secs,
+            controls.ascend_hold_frames,
             agent.can_fly,
         ) {
             controls.flying = true;
             controls.ascend_hold_secs = 0.0;
+            controls.ascend_hold_frames = 0;
         }
 
         // Auto-stop flying on landing (P31.11): descending onto the ground with no
@@ -346,6 +357,7 @@ pub(crate) fn drive_avatar_controls(
         // starts from a clean slate.
         controls.flying = false;
         controls.ascend_hold_secs = 0.0;
+        controls.ascend_hold_frames = 0;
     }
 
     // Assemble the control-flag set from the currently-held actions (releasing an
@@ -513,29 +525,50 @@ fn should_auto_stop_flying(
     flying && !ascend_key && descending && at_ground_floor
 }
 
+/// Advance the ascend key's hold by one frame: `holding` (the key down with
+/// flight not already engaged) accumulates the elapsed seconds and frames the
+/// P31.16 take-off is decided from, and anything else clears both. The reference
+/// reads the same two numbers straight off the keyboard
+/// (`getCurKeyElapsedTime` / `getCurKeyElapsedFrameCount`), which reset when the
+/// key comes up; this driver tracks them itself because the ascend *action* can
+/// come from a key or the SpaceNavigator's up axis.
+#[must_use]
+fn advance_ascend_hold(secs: f32, frames: u32, holding: bool, dt: f32) -> (f32, u32) {
+    if holding {
+        (secs + dt, frames.saturating_add(1))
+    } else {
+        (0.0, 0)
+    }
+}
+
 /// Whether the auto-take-off rule (P31.16) fires this frame: the feature is on
 /// (`automatic_fly`, the user preference), the avatar is not already `flying`,
-/// is `grounded` (standing on the ground), flying is permitted here (`can_fly`
-/// — the region + parcel decision from the session), and the ascend key has
-/// been held for at least [`TAKE_OFF_HOLD_SECS`]. The hold requirement is what
-/// makes a quick tap a jump but a sustained press a take-off, and debounces it
-/// from the P31.11 auto-land. Pure so the decision is unit-testable without a
-/// live terrain / avatar.
+/// flying is permitted here (`can_fly` — the region + parcel decision from the
+/// session), and the ascend key has been held for at least
+/// [`TAKE_OFF_HOLD_SECS`] *and* [`TAKE_OFF_HOLD_FRAMES`] frames. The hold
+/// requirement is what makes a quick tap a jump but a sustained press a
+/// take-off, and debounces it from the P31.11 auto-land. Pure so the decision is
+/// unit-testable without a live terrain / avatar.
+///
+/// Deliberately **not** gated on standing on the ground, which is what made a
+/// held key hop instead of fly: the simulator jumps on the very first
+/// `AGENT_CONTROL_UP_POS` — the reference sends it too — so by the time the hold
+/// matures the avatar is airborne and a grounded gate can never fire. The
+/// reference's `agent_jump` has no such gate either; a fall caught by holding the
+/// key is a take-off there, and now here.
 #[must_use]
-#[expect(
-    clippy::fn_params_excessive_bools,
-    reason = "the take-off decision is a conjunction of independent binary conditions — the \
-              preference, flying, grounded, and fly permission — that read clearest as the flags \
-              they are"
-)]
 fn should_take_off(
     automatic_fly: bool,
     flying: bool,
-    grounded: bool,
     ascend_held_secs: f32,
+    ascend_held_frames: u32,
     can_fly: bool,
 ) -> bool {
-    automatic_fly && !flying && grounded && can_fly && ascend_held_secs >= TAKE_OFF_HOLD_SECS
+    automatic_fly
+        && !flying
+        && can_fly
+        && ascend_held_secs >= TAKE_OFF_HOLD_SECS
+        && ascend_held_frames > TAKE_OFF_HOLD_FRAMES
 }
 
 /// Wrap an angle (radians) into `(-π, π]`, keeping the tracked heading bounded over
@@ -554,24 +587,34 @@ fn wrap_angle(angle: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        LANDING_DESCENT_SPEED_MPS, TAKE_OFF_HOLD_SECS, rotation_from_yaw, should_auto_stop_flying,
-        should_take_off, wrap_angle,
+        LANDING_DESCENT_SPEED_MPS, TAKE_OFF_HOLD_FRAMES, TAKE_OFF_HOLD_SECS, rotation_from_yaw,
+        should_auto_stop_flying, should_take_off, wrap_angle,
     };
+    use pretty_assertions::assert_eq;
     use sl_client_bevy::Rotation;
 
-    /// Holding the ascend key past the threshold while standing with fly permission
-    /// takes off; a short hold, being airborne, no permission, already flying, or
-    /// the preference switched off does not.
+    /// Frames comfortably past [`TAKE_OFF_HOLD_FRAMES`], so a case that is about
+    /// the *seconds* threshold is not accidentally decided by the frame one.
+    const HELD_FRAMES: u32 = TAKE_OFF_HOLD_FRAMES + 1;
+
+    /// Holding the ascend key past the threshold with fly permission takes off; a
+    /// short hold, no permission, already flying, or the preference switched off
+    /// does not.
     #[test]
-    fn auto_take_off_needs_a_sustained_grounded_permitted_ascend() {
-        // Enabled, not flying, grounded, permitted, held past the threshold → take
-        // off.
-        assert!(should_take_off(true, false, true, TAKE_OFF_HOLD_SECS, true));
+    fn auto_take_off_needs_a_sustained_permitted_ascend() {
+        // Enabled, not flying, permitted, held past the threshold → take off.
         assert!(should_take_off(
             true,
             false,
+            TAKE_OFF_HOLD_SECS,
+            HELD_FRAMES,
+            true
+        ));
+        assert!(should_take_off(
             true,
+            false,
             TAKE_OFF_HOLD_SECS + 1.0,
+            HELD_FRAMES,
             true
         ));
 
@@ -579,26 +622,24 @@ mod tests {
         assert!(!should_take_off(
             true,
             false,
-            true,
             TAKE_OFF_HOLD_SECS - 0.01,
+            HELD_FRAMES,
             true
         ));
         // Flying disallowed here (region / parcel) → no take-off.
         assert!(!should_take_off(
             true,
             false,
-            true,
             TAKE_OFF_HOLD_SECS,
+            HELD_FRAMES,
             false
         ));
         // Already flying → nothing to start.
-        assert!(!should_take_off(true, true, true, TAKE_OFF_HOLD_SECS, true));
-        // Airborne (not standing) → the hold-to-fly is a standing gesture.
         assert!(!should_take_off(
             true,
-            false,
-            false,
+            true,
             TAKE_OFF_HOLD_SECS,
+            HELD_FRAMES,
             true
         ));
         // The `AutomaticFly` preference off → an arbitrarily long hold never takes
@@ -606,10 +647,72 @@ mod tests {
         assert!(!should_take_off(
             false,
             false,
-            true,
             TAKE_OFF_HOLD_SECS + 60.0,
+            HELD_FRAMES,
             true
         ));
+    }
+
+    /// The frame count is a second, independent gate (the reference's
+    /// `FLY_FRAMES`): a hold that has outlasted [`TAKE_OFF_HOLD_SECS`] in too few
+    /// frames — one enormous stalled frame — is still a tap, and takes off only
+    /// once the frames catch up.
+    #[test]
+    fn auto_take_off_also_needs_the_frames() {
+        for frames in 0..=TAKE_OFF_HOLD_FRAMES {
+            assert!(
+                !should_take_off(true, false, TAKE_OFF_HOLD_SECS + 10.0, frames, true),
+                "{frames} frame(s) of hold is still a tap"
+            );
+        }
+        assert!(should_take_off(
+            true,
+            false,
+            TAKE_OFF_HOLD_SECS,
+            TAKE_OFF_HOLD_FRAMES + 1,
+            true
+        ));
+    }
+
+    /// The gesture frame by frame, as the driver runs it: holding the ascend key
+    /// hops for the first [`TAKE_OFF_HOLD_SECS`] (the simulator jumps on the
+    /// `AGENT_CONTROL_UP_POS` the hold is already sending) and then takes off —
+    /// *while the avatar is airborne from that very jump*, which is what the old
+    /// grounded gate made impossible. Releasing the key clears the hold, so the
+    /// next tap starts a fresh one.
+    #[test]
+    fn holding_ascend_takes_off_after_the_jump_it_started() {
+        use super::advance_ascend_hold;
+
+        let dt = 1.0 / 60.0;
+        let (mut secs, mut frames) = (0.0, 0);
+        let mut flying = false;
+        let mut took_off_at = None;
+
+        // Hold the key for a second of frames. Nothing flies until the threshold;
+        // then it does, on the frame the hold matures.
+        for _frame in 0..60 {
+            (secs, frames) = advance_ascend_hold(secs, frames, !flying, dt);
+            if should_take_off(true, flying, secs, frames, true) {
+                flying = true;
+                took_off_at = Some(secs);
+            }
+        }
+        // The hop lasted exactly as long as the reference's `FLY_TIME`, not a frame
+        // more.
+        assert!(
+            took_off_at
+                .is_some_and(|at| at >= TAKE_OFF_HOLD_SECS && at - TAKE_OFF_HOLD_SECS <= 2.0 * dt),
+            "a sustained hold takes off at the threshold, not {took_off_at:?}s in"
+        );
+
+        // Releasing clears the hold, so a later tap is a jump again rather than
+        // resuming where the last one left off.
+        flying = false;
+        (secs, frames) = advance_ascend_hold(secs, frames, false, dt);
+        assert_eq!((secs, frames), (0.0_f32, 0_u32));
+        (secs, frames) = advance_ascend_hold(secs, frames, true, dt);
+        assert!(!should_take_off(true, flying, secs, frames, true));
     }
 
     /// The tap-tap-hold-to-run gesture: a second tap within the window latches a
