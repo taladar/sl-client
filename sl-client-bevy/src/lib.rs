@@ -56,9 +56,9 @@ use sl_proto::{
 // Bevy's `Event` derive.
 pub use sl_proto::{
     ActiveGroup, AgentKey, AgentOrObjectKey, AgentPreferences, AnimatedObjects, AnimationKey,
-    AnyMessage, AssetKey, AssetUpdateLocation, AssociateInventory, AttachmentMode, AttachmentPoint,
-    AvatarAppearance, AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarName,
-    AvatarPick, AvatarPickerResult, AvatarProperties, Camera, CameraError, ChatAudible,
+    AnyMessage, Arrival, AssetKey, AssetUpdateLocation, AssociateInventory, AttachmentMode,
+    AttachmentPoint, AvatarAppearance, AvatarClassified, AvatarGroupMembership, AvatarInterests,
+    AvatarName, AvatarPick, AvatarPickerResult, AvatarProperties, Camera, CameraError, ChatAudible,
     ChatChannel, ChatLogConfig, ChatMessage, ChatSessionKind, ChatSource, ChatSourceType, ChatType,
     ChatTypeNotAVolume, Child, CircuitCode, CircuitId, ClassifiedCategory, ClassifiedInfo,
     ClassifiedKey, ClassifiedUpdate, ClickAction, ClientDirectories, ClockStyle, CoarseLocation,

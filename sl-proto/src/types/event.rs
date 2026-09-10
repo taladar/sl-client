@@ -64,6 +64,44 @@ use crate::{
     ServerHistoryMessage, SessionMessage,
 };
 
+/// How the agent came to be in the region an [`Event::AgentArrived`] reports —
+/// whether anything **re-placed** it there, and whether the world it arrived in
+/// is a fresh one.
+///
+/// Both questions are asked of the same arrival and have different answers: a
+/// teleport always re-places the agent (the simulator turns it to the requested
+/// facing), but only a *distant* one throws the previous region's world away.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Arrival {
+    /// The initial login, or a region **crossing**: nothing re-placed the agent.
+    /// It walked over the border carrying its facing — the simulator does not
+    /// turn it (OpenSim's `m_gotCrossUpdate` suppresses its `RotateToLookAt`) —
+    /// and the world was re-based rather than replaced.
+    Continued,
+    /// A **teleport that kept the world**: the destination was already a child
+    /// circuit or positionally adjacent, so its scene was re-based and the
+    /// source region demoted to a child, exactly as a crossing does. The agent
+    /// *was* re-placed (apply the stated facing), but everything anchored to the
+    /// old scene — a camera framing the destination, a focused object — still
+    /// means what it meant.
+    NearTeleport,
+    /// A **distant teleport**: a fresh circuit to an unconnected region, with
+    /// the session's world caches cleared (the [`Event::RegionChanged`]
+    /// `world_reset`). Nothing that referred to the old scene survives it, and
+    /// region-local coordinates carry no meaning across the jump.
+    DistantTeleport,
+}
+
+impl Arrival {
+    /// Whether this arrival **re-placed** the agent — a teleport of either
+    /// reach, which the simulator answers with a facing of its own choosing
+    /// rather than the one the avatar walked in with.
+    #[must_use]
+    pub const fn is_teleport(self) -> bool {
+        matches!(self, Self::NearTeleport | Self::DistantTeleport)
+    }
+}
+
 /// A high-level event surfaced to the driver/application.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
@@ -437,12 +475,12 @@ pub enum Event {
     /// where the avatar stands and which way it faces, before any `ObjectUpdate`
     /// echoes either back.
     ///
-    /// Emitted at login, after a region crossing, and after a teleport handover
-    /// (`teleport`). A consumer that renders the avatar should apply the arrival
-    /// facing **immediately** on a teleport — the reference viewer slams its agent
-    /// frame to it (`process_agent_movement_complete` → `gAgentCamera.slamLookAt`)
-    /// rather than letting the avatar stand at its pre-teleport facing until the
-    /// destination's first `ObjectUpdate` turns it.
+    /// Emitted at login, after a region crossing, and after a teleport handover;
+    /// `arrival` says which. A consumer that renders the avatar should apply the
+    /// arrival facing **immediately** on a teleport — the reference viewer slams
+    /// its agent frame to it (`process_agent_movement_complete` →
+    /// `gAgentCamera.slamLookAt`) rather than letting the avatar stand at its
+    /// pre-teleport facing until the destination's first `ObjectUpdate` turns it.
     AgentArrived {
         /// The region the agent arrived in (`Data.RegionHandle`).
         region_handle: RegionHandle,
@@ -454,12 +492,9 @@ pub enum Event {
         /// fixed east-ish default when it has no facing to state, and a simulator
         /// that never tracked one sends zero.
         look_at: Vector,
-        /// Whether this arrival completed a **teleport** (the destination
-        /// confirmed on its own child circuit), rather than the initial login or a
-        /// region *crossing*. Only a teleport re-places the agent: a crossing
-        /// carries the facing over the border, so the reference viewer applies the
-        /// stated `look_at` on a teleport alone.
-        teleport: bool,
+        /// How the agent came to be here — whether anything re-placed it, and
+        /// whether the world it arrived in is a fresh one.
+        arrival: Arrival,
     },
     /// Local chat was received (`ChatFromSimulator`): a nearby agent or object
     /// spoke, or the region/system sent a message. Sent in response to nearby

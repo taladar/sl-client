@@ -446,7 +446,7 @@ pub use environment::{
     DayCycle, DayCycleFrame, EnvironmentAsset, EnvironmentSettings, EnvironmentUpdate, Glow, Scale,
     SkySettings, WaterSettings, azimuth_altitude_to_rotation,
 };
-pub use event::Event;
+pub use event::{Arrival, Event};
 pub use generic::{GenericMessage, GenericStreamingMessage};
 pub use group::{
     ActiveGroup, CreateGroupParams, GroupAccountDetails, GroupAccountDetailsEntry,

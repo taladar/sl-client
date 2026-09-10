@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 46 |
 | in-progress | 20 |
 | bugs | 56 |
-| done | 1039 |
+| done | 1040 |
 | deferred | 25 |
 | wont-do | 16 |
-| **total** | **1627** |
+| **total** | **1628** |
 
 ## ideas (102)
 
@@ -1334,7 +1334,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (1039)
+## done (1040)
 
 ### protocol
 
@@ -1721,6 +1721,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-camera-mouselook`](done/viewer-camera-mouselook.md) — Mouselook
   (first-person) camera (blocked by `viewer-camera-third-person-orbit` (done),
   `viewer-input-focus-contexts` (done))
+- [`viewer-camera-reset-on-distant-teleport`](done/viewer-camera-reset-on-distant-teleport.md)
+  — A distant teleport leaves the camera at coordinates that mean nothing in the
+  new region
 - [`viewer-camera-third-person-orbit`](done/viewer-camera-third-person-orbit.md)
   — Camera mode machine + third-person orbit (blocked by
   `viewer-input-action-map` (done))

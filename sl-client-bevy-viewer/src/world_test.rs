@@ -3995,8 +3995,8 @@ mod movement_tests {
     use pretty_assertions::assert_eq;
 
     use sl_client_bevy::{
-        AgentKey, Command, ControlFlags, ObjectKey, RegionCoordinates, RegionHandle, Rotation,
-        SlAgentParcel, SlEvent, SlIdentity, SlSessionEvent as SessionEvent, Uuid, Vector,
+        AgentKey, Arrival, Command, ControlFlags, ObjectKey, RegionCoordinates, RegionHandle,
+        Rotation, SlAgentParcel, SlEvent, SlIdentity, SlSessionEvent as SessionEvent, Uuid, Vector,
     };
     use sl_viewer_testkit::interact;
 
@@ -4215,7 +4215,9 @@ mod movement_tests {
                     y: 1.0,
                     z: 0.0,
                 },
-                teleport: true,
+                // A near teleport: the facing is applied, and the camera —
+                // which may well be framing the destination — is left alone.
+                arrival: Arrival::NearTeleport,
             }));
 
         // One frame — the claim under test is that the *authoritative* facing is

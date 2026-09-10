@@ -64,7 +64,7 @@ use crate::scoped_id::{CircuitId, ScopedObjectId, ScopedParcelId};
 use crate::terrain;
 use crate::types::EventId;
 use crate::types::{
-    AlertInfo, AssetType, AttachmentMode, AttachmentPoint, AvatarClassified, AvatarPick,
+    AlertInfo, Arrival, AssetType, AttachmentMode, AttachmentPoint, AvatarClassified, AvatarPick,
     AvatarPickerResult, Camera, ChatType, Child, ClassifiedCategory, ClassifiedUpdate, ClickAction,
     CoarseLocation, CreateGroupParams, DeRezDestination, DetachOrder, Diagnostic,
     DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
@@ -1380,7 +1380,15 @@ impl Session {
             region_handle,
             position: pose.position,
             look_at: pose.look_at,
-            teleport: true,
+            // Which reach of teleport this was is the same question the
+            // `RegionChanged` above answers with `world_reset`: a neighbour /
+            // already-connected destination kept the world, a distant one threw
+            // it away.
+            arrival: if pending.world_reset {
+                Arrival::DistantTeleport
+            } else {
+                Arrival::NearTeleport
+            },
         });
     }
 
@@ -2906,7 +2914,7 @@ impl Session {
                     region_handle: pose.region_handle,
                     position: pose.position,
                     look_at: pose.look_at,
-                    teleport: false,
+                    arrival: Arrival::Continued,
                 });
                 // Surface the root region simulator's version/channel string
                 // (About-window data).

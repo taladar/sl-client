@@ -56,7 +56,7 @@ use sl_proto::{
 // alone.
 pub use sl_proto::{
     ActiveGroup, AgentKey, AgentOrObjectKey, AgentPreferences, AnimatedObjects, AnimationKey,
-    AnyMessage, Asset, AssetKey, AssetType, AssetUpdateLocation, AssociateInventory,
+    AnyMessage, Arrival, Asset, AssetKey, AssetType, AssetUpdateLocation, AssociateInventory,
     AttachmentMode, AttachmentPoint, AvatarClassified, AvatarGroupMembership, AvatarInterests,
     AvatarPick, AvatarProperties, Camera, CameraError, ChatAudible, ChatChannel, ChatLifecycleView,
     ChatLogConfig, ChatMessage, ChatSessionInfo, ChatSessionKind, ChatSource, ChatSourceType,

@@ -7,8 +7,8 @@ mod test {
 
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_tokio::{
-        ChatChannel, ChatType, Client, Command, Event, LoginParams, LoginRequest, StartLocation,
-        VoiceProvisionRequest,
+        Arrival, ChatChannel, ChatType, Client, Command, Event, LoginParams, LoginRequest,
+        StartLocation, VoiceProvisionRequest,
     };
     use sl_fake_grid::{
         AccountConfig, FakeAgent, FakeGrid, FakeGridBuilder, ImitatedGrid, RegionConfig,
@@ -1221,6 +1221,20 @@ mod test {
             world_reset,
             "a distant teleport to an unannounced region resets the world"
         );
+        // The same reach, as the arrival states it: what the camera framed is
+        // gone with the world, so this is the one arrival that resets it
+        // (viewer-camera-reset-on-distant-teleport).
+        let arrival = running
+            .wait_for(|event| match event {
+                Event::AgentArrived { arrival, .. } => Some(*arrival),
+                _ => None,
+            })
+            .await?;
+        assert_eq!(
+            arrival,
+            Arrival::DistantTeleport,
+            "a teleport that threw the world away arrives as the distant reach"
+        );
 
         // The destination greeted the circuit the client opened for the
         // handover, and the arrival world burst follows the promotion.
@@ -1950,6 +1964,19 @@ mod test {
             world_reset,
             Some(false),
             "a teleport next door re-bases the scene it has; it does not throw it away"
+        );
+        // …and the arrival says the same, which is what keeps the camera the
+        // user aimed at the destination from being reset out from under them.
+        let arrival = running
+            .wait_for(|event| match event {
+                Event::AgentArrived { arrival, .. } => Some(*arrival),
+                _ => None,
+            })
+            .await?;
+        assert_eq!(
+            arrival,
+            Arrival::NearTeleport,
+            "a teleport that kept the world arrives as the near reach"
         );
 
         let notice = tokio::time::timeout(WAIT, teleports.recv()).await??;

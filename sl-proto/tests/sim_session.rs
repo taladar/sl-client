@@ -10,9 +10,9 @@ mod test {
 
     use pretty_assertions::assert_eq;
     use sl_proto::{
-        AbuseReport, AbuseReportType, AgentKey, AlertInfo, AnimationKey, AssetKey, AssetType,
-        AttachmentMode, AttachmentPoint, AvatarName, AvatarPickerResult, ChatChannel, ChatSource,
-        ChatType, ClassifiedCategory, ClassifiedKey, CoarseLocation, ControlFlags,
+        AbuseReport, AbuseReportType, AgentKey, AlertInfo, AnimationKey, Arrival, AssetKey,
+        AssetType, AttachmentMode, AttachmentPoint, AvatarName, AvatarPickerResult, ChatChannel,
+        ChatSource, ChatType, ClassifiedCategory, ClassifiedKey, CoarseLocation, ControlFlags,
         DeRezDestination, DetachOrder, DirClassifiedResult, DirEventResult, DirFindFlags,
         DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, DirectoryVisibility,
         DisplayName, DisplayNameUpdate, EjectAction, EstateCovenant, Event, EventId, EventInfo,
@@ -7331,7 +7331,10 @@ mod test {
                     region_handle,
                     position,
                     look_at,
-                    teleport: true,
+                    // The destination was a pre-opened child circuit, so the
+                    // teleport kept and re-based the world rather than clearing
+                    // it — the near reach.
+                    arrival: Arrival::NearTeleport,
                 } if *region_handle == RegionHandle(DEST_HANDLE)
                     && *position == RegionCoordinates::new(64.0, 96.0, 30.0)
                     && (look_at.x - arrival_look_at.x).abs() < f32::EPSILON
