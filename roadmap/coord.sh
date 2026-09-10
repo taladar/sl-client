@@ -72,6 +72,23 @@ BASE_BRANCH=''
 # `git push` is network-bound and deliberately absent -- making it wait for a
 # build slot buys nothing and delays the one command that publishes work.
 HEAVY_PATTERNS='(^|[;&|[:space:]])(cargo|git[[:space:]]+commit|make|ninja)([[:space:]]|$)'
+# Command heads the hook will approve without a prompt once they are inside the
+# coordinator, so that wrapping a build is cheaper for an agent than not
+# wrapping it. An allow-list of *heads*, not a pattern over the whole string,
+# so a new verb has to be added here on purpose. Keep it in step with
+# HEAVY_PATTERNS: a build named there but missing here is one an agent must
+# wrap *and* then sit at a prompt for, which is the worst of both. The tail of
+# the list is the text filters a build line ends in. Anything unrecognised --
+# including anything this cannot parse -- falls through to a normal prompt.
+WRAPPED_ALLOW_HEADS='cargo make ninja rumdl typos mdbook shellcheck set cd pwd true echo printf cat tail head grep rg wc sort uniq cut date sleep'
+# Outranks the allow-list, and applied twice: at command-head position, where
+# it covers the wrappers stepped over below so `timeout 60 rm -rf x` cannot
+# slip past as a `timeout`, and again against the payload as flat text, where
+# it catches a word the operator-split failed to expose as a head at all.
+# `git` is here whole: a commit is heavy, so it *is* wrapped, and committing is
+# the one step in a build worth a human glance. The rest publish, delete or
+# reach the network. Shell names are head-only -- see hook_wrapped_verdict.
+WRAPPED_VETO='git rm mv cp ln install mkdir rmdir chmod chown dd curl wget ssh scp rsync sudo systemctl pkill kill xargs find sed awk tee python python3 sh bash zsh perl ruby node'
 # Refuse to start a heavy command below this much available memory (MiB).
 MIN_AVAIL_MB=0
 MIN_AVAIL_EXCLUSIVE_MB=0
@@ -620,6 +637,132 @@ do_status() {
 # is not already wrapped. A hook cannot rewrite the command, and it cannot hold
 # a lock past its own exit, so denying with an instruction is the only shape
 # that actually serialises anything.
+# Decide whether an already-wrapped command can skip its permission prompt.
+# Prints "allow" or "ask". Silence is never allow: every path that cannot make
+# sense of the payload prints "ask", so a parse this does not understand costs
+# a prompt rather than granting one.
+#
+# Why a hook and not an allow-rule: permission rules match a command *prefix*,
+# and the payload sits after `heavy [--exclusive] [--label "..."] --`. With a
+# free-text label in between there is no prefix that admits `-- cargo build`
+# while excluding `-- git commit`, and both shapes are in daily use.
+hook_wrapped_verdict() {
+  _hwv_cmd=$1
+
+  # The payload is everything after the wrapper's own `--`. Shortest-prefix
+  # removal takes the *first* one, so a `cargo test -- --nocapture` keeps its
+  # second `--` inside the payload where it belongs.
+  case "${_hwv_cmd}" in
+  *' -- '*) _hwv_payload=${_hwv_cmd#* -- } ;;
+  *)
+    # `heavy` with no `--` never runs anything; let the normal flow handle it.
+    printf 'ask\n'
+    return
+    ;;
+  esac
+
+  # Command substitution runs a command this cannot see, in a position this
+  # does not inspect: `cargo build \`rm -rf x\`` reads as a plain cargo build.
+  # Nothing wrapped needs it, so refuse to judge a payload containing one.
+  # SC2016 is a false positive: these are case *patterns* matching the literal
+  # characters, not text to expand.
+  # shellcheck disable=SC2016
+  case "${_hwv_payload}" in
+  *'`'* | *'$('*)
+    printf 'ask\n'
+    return
+    ;;
+  esac
+
+  # Second layer: a veto word *anywhere* in the payload, not only at a command
+  # head. The head check below trusts a split on shell operators, and a heredoc
+  # or an odd quote can hide a command from that split; this does not care
+  # where the word sits. Checked against every wrapped invocation on record it
+  # refuses nothing the head check was going to allow, so the belt costs no
+  # braces. Shells are exempt: `sh -c` is the documented way to wrap a
+  # pipeline and is stepped over on purpose, so it is policed at head position
+  # only. The boundaries keep a path like ~/git/x or a test named git_foo from
+  # tripping it.
+  _hwv_veto_re=$(printf '%s' "${WRAPPED_VETO}" | tr ' ' '\n' |
+    grep -vxE 'sh|bash|zsh' | paste -sd'|' -)
+  if printf '%s' "${_hwv_payload}" |
+    grep -Eq "(^|[^[:alnum:]_/-])(${_hwv_veto_re})([^[:alnum:]_-]|\$)"; then
+    printf 'ask\n'
+    return
+  fi
+
+  printf '%s' "${_hwv_payload}" | awk -v allow="${WRAPPED_ALLOW_HEADS}" \
+    -v veto="${WRAPPED_VETO}" '
+    # A VAR=value in front of a command belongs to it. The value may be quoted
+    # and contain spaces, so it cannot be dropped as "one whitespace token".
+    function strip_assignments(s) {
+      while (s ~ /^[A-Za-z_][A-Za-z0-9_]*=/) {
+        if (!sub(/^[A-Za-z_][A-Za-z0-9_]*=('"'"'[^'"'"']*'"'"'|"[^"]*"|[^ \t]*)[ \t]*/, "", s)) break
+      }
+      return s
+    }
+    BEGIN {
+      n = split(allow, A, " "); for (i = 1; i <= n; i++) ok[A[i]] = 1
+      n = split(veto,  V, " "); for (i = 1; i <= n; i++) bad[V[i]] = 1
+      verdict = "allow"; seen = 0
+    }
+    { buf = buf $0 "\n" }
+    END {
+      # Split on every operator that starts a new command. Everything left in a
+      # piece is then argv, and its first word is a command head.
+      s = buf
+      gsub(/&&/, "\n", s); gsub(/\|\|/, "\n", s)
+      gsub(/\|/, "\n", s); gsub(/;/, "\n", s)
+      n = split(s, seg, "\n")
+      for (i = 1; i <= n && verdict == "allow"; i++) {
+        t = seg[i]
+        gsub(/^[ \t]+|[ \t]+$/, "", t)
+        if (t == "") continue
+
+        # A redirect that leaves the tree is not something to run unattended.
+        # `2>&1` lands here too and is fine: its target reads as "1".
+        rest = t
+        while (match(rest, />[ \t&]*[^ \t]+/)) {
+          tgt = substr(rest, RSTART, RLENGTH)
+          rest = substr(rest, RSTART + RLENGTH)
+          sub(/^>[ \t&]*/, "", tgt)
+          if (tgt ~ /^~/ || tgt ~ /\.\./ ||
+              (tgt ~ /^\// && tgt !~ /^\/tmp\// && tgt != "/dev/null")) {
+            verdict = "ask"; break
+          }
+        }
+        if (verdict != "allow") break
+
+        t = strip_assignments(t)
+        # Step over transparent wrappers and judge what they actually run. A
+        # pipeline or a redirect has to be handed to a shell explicitly, so
+        # `sh -c` is one of them; its script was split into these same pieces
+        # above, so only the opening quote is left to drop. `sh` without -c is
+        # not a wrapper and stays vetoed.
+        while (t ~ /^(timeout|env|nice|ionice)([ \t]|$)/ ||
+               t ~ /^(sh|bash)[ \t]+-c([ \t]|$)/) {
+          if (t ~ /^(sh|bash)[ \t]+-c([ \t]|$)/) {
+            sub(/^(sh|bash)[ \t]+-c[ \t]*/, "", t)
+            sub(/^['"'"'"]/, "", t)
+          } else {
+            sub(/^[^ \t]+[ \t]*/, "", t)
+            while (t ~ /^(-|[0-9])/) sub(/^[^ \t]+[ \t]*/, "", t)
+          }
+          t = strip_assignments(t)
+        }
+        if (t == "") continue
+
+        split(t, w, /[ \t]+/); h = w[1]; sub(/^.*\//, "", h)
+        if (h in bad || !(h in ok)) { verdict = "ask"; break }
+        seen++
+      }
+      # A payload that produced no command at all is not one to approve.
+      if (seen == 0) verdict = "ask"
+      print verdict
+    }
+  '
+}
+
 do_hook() {
   if [ "${ROADMAP_COORD_BYPASS:-0}" = "1" ]; then
     exit 0
@@ -630,9 +773,18 @@ do_hook() {
   _dh_cmd=$(printf '%s' "${_dh_payload}" | jq -r '.tool_input.command // ""')
   [ -n "${_dh_cmd}" ] || exit 0
 
-  # Already wrapped, or is the wrapper itself.
+  # Already wrapped, or is the wrapper itself. A wrapped build is worth
+  # approving outright -- it is the shape this script exists to encourage, and
+  # leaving it to prompt is what makes an agent sit on `heavy -- cargo test`
+  # all night. A wrapped `git commit` deliberately does not qualify.
   case "${_dh_cmd}" in
-  *coord.sh*heavy*) exit 0 ;;
+  *coord.sh*heavy*)
+    if [ "$(hook_wrapped_verdict "${_dh_cmd}")" = 'allow' ]; then
+      jq -n --arg reason 'Wrapped in the build coordinator; payload is a build command.' \
+        '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "allow", permissionDecisionReason: $reason}}'
+    fi
+    exit 0
+    ;;
   *ROADMAP_COORD_BYPASS=1*) exit 0 ;;
   esac
 
