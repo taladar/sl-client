@@ -22,8 +22,9 @@ use sl_viewer_ui_core::i18n::Translated;
 use sl_viewer_ui_core::ui::{LogicalInset, LogicalRect, column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
 use sl_viewer_ui_widgets::ui_color_picker::spawn_color_swatch;
+use sl_viewer_ui_widgets::ui_trackball::{TrackballAim, TrackballPlugin, spawn_trackball};
 
-use crate::knobs::{ColorKnob, TextureKnob, label_key};
+use crate::knobs::{AimKnobs, ColorKnob, SkyKnob, TextureKnob, label_key};
 use crate::style::{
     ACTION_BACKGROUND, CONTROL_BORDER, DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, THUMB_FILL,
     TRACK_FILL,
@@ -210,6 +211,128 @@ pub fn spawn_texture_row(
     swatch
 }
 
+// ---------------------------------------------------------------------------
+// The trackball, and the two sliders it shares a body with.
+// ---------------------------------------------------------------------------
+
+/// A trackball in an environment window, and which body's knobs it writes.
+///
+/// The `scope` is the window's element prefix. Three windows draw a sun and a
+/// moon trackball, and every one of them is in the same world at once — so a
+/// control only ever drives a control that names the same window.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct AimTrackball {
+    /// The window's element prefix.
+    pub scope: &'static str,
+    /// The pair the control writes.
+    pub knobs: AimKnobs,
+}
+
+/// One of the two sliders a trackball shares a body with.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct AimSlider {
+    /// The window's element prefix.
+    pub scope: &'static str,
+    /// Which of the pair this slider is.
+    pub knob: SkyKnob,
+    /// The pair it belongs to.
+    pub knobs: AimKnobs,
+}
+
+/// Tag a freshly spawned sky slider as one half of a body's aim, if its knob is
+/// one — which is what puts it in step with the trackball above it.
+///
+/// Called by every window's slider spawner rather than by [`spawn_slider`]
+/// itself, because that one takes a slug and a range and deliberately knows
+/// nothing about knobs.
+pub fn tag_aim_slider(commands: &mut Commands, slider: Entity, scope: &'static str, knob: SkyKnob) {
+    if let Some(knobs) = AimKnobs::of(knob) {
+        commands
+            .entity(slider)
+            .insert(AimSlider { scope, knob, knobs });
+    }
+}
+
+/// A labelled trackball for one body. Returns it, for the caller's observer —
+/// what the control writes into is the window's business, exactly as a slider's
+/// is.
+pub fn spawn_trackball_row(
+    commands: &mut Commands,
+    parent: Entity,
+    element: &'static str,
+    knobs: AimKnobs,
+    tab: &mut i32,
+) -> Entity {
+    let (block, _caption) = spawn_labelled_block(commands, parent, label_key(knobs.slug()));
+    let trackball = spawn_trackball(
+        commands,
+        block,
+        element,
+        knobs.body,
+        *tab,
+        TrackballAim::ZENITH,
+    );
+    commands.entity(trackball).insert(AimTrackball {
+        scope: element,
+        knobs,
+    });
+    *tab = tab.saturating_add(1);
+    trackball
+}
+
+/// A slider moved: aim the trackball beside it the same way.
+///
+/// The value travels straight from the widget rather than back out of the sky
+/// it was just written into, and that is the whole point: a body sitting
+/// exactly at a pole has no azimuth stored, so a re-read would hand the compass
+/// back a zero the user did not type.
+fn aim_sliders_drive_trackballs(
+    sliders: Query<(&AimSlider, &SliderValue), Changed<SliderValue>>,
+    mut trackballs: Query<(&AimTrackball, &mut TrackballAim)>,
+) {
+    for (slider, value) in &sliders {
+        for (trackball, mut aim) in &mut trackballs {
+            if trackball.scope != slider.scope || trackball.knobs != slider.knobs {
+                continue;
+            }
+            let wanted = slider.knobs.with(*aim, slider.knob, value.0);
+            if *aim != wanted {
+                *aim = wanted;
+            }
+        }
+    }
+}
+
+/// The trackball moved: put its two sliders on the same two angles.
+///
+/// The pair settles in one further frame — the inserts below mark the sliders
+/// changed, [`aim_sliders_drive_trackballs`] reads them back and finds the
+/// trackball already holding what they say, and writes nothing.
+fn trackballs_drive_aim_sliders(
+    trackballs: Query<(&AimTrackball, &TrackballAim), Changed<TrackballAim>>,
+    sliders: Query<(Entity, &AimSlider, &SliderRange, &SliderValue)>,
+    mut commands: Commands,
+) {
+    for (trackball, aim) in &trackballs {
+        for (entity, slider, range, value) in &sliders {
+            if slider.scope != trackball.scope || slider.knobs != trackball.knobs {
+                continue;
+            }
+            let Some(wanted) = trackball.knobs.value_of(*aim, slider.knob) else {
+                continue;
+            };
+            let wanted = range.clamp(wanted);
+            // `SliderValue` is immutable, so a new value is inserted rather than
+            // assigned — and an insert marks the component changed whether or
+            // not it carries a new number, which is what would keep the two
+            // controls writing to each other forever.
+            if value.0.to_bits() != wanted.to_bits() {
+                commands.entity(entity).insert(SliderValue(wanted));
+            }
+        }
+    }
+}
+
 /// An action button with a translated label, named `{element}-{slug}:button`.
 /// Returns it, for the caller's marker component and observer.
 pub fn spawn_action_button(
@@ -255,7 +378,23 @@ pub struct RowsPlugin;
 
 impl Plugin for RowsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, sync_slider_rows);
+        if !app.is_plugin_added::<TrackballPlugin>() {
+            app.add_plugins(TrackballPlugin);
+        }
+        app.add_systems(
+            Update,
+            // Ordered: a slider drag has to reach the trackball and the
+            // trackball's own drag has to reach the sliders in the frame it
+            // happened, and `sync_slider_rows` draws whatever the pair settled
+            // on — an unordered tuple would leave one of the two a frame behind
+            // the hand.
+            (
+                aim_sliders_drive_trackballs,
+                trackballs_drive_aim_sliders,
+                sync_slider_rows,
+            )
+                .chain(),
+        );
     }
 }
 
@@ -300,5 +439,248 @@ fn write_readout(readout: Entity, value: f32, decimals: usize, texts: &mut Query
         if text.0 != wanted {
             text.0 = wanted;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy::prelude::*;
+    use bevy::ui_widgets::{SliderRange, SliderValue};
+    use pretty_assertions::assert_eq;
+
+    use super::{AimSlider, AimTrackball, RowsPlugin};
+    use crate::knobs::{AimKnobs, SkyKnob};
+    use sl_viewer_ui_widgets::ui_trackball::TrackballAim;
+
+    /// A boxed error so tests can use `?` instead of the disallowed
+    /// `unwrap` / `expect`.
+    type TestError = Box<dyn core::error::Error>;
+
+    /// One window's element prefix.
+    const WINDOW: &str = "one-window";
+
+    /// A second window's, open at the same time — which is the ordinary case:
+    /// the Personal Lighting floater, the sky editor and the day-cycle editor
+    /// all draw a sun trackball, and all three can be on screen at once.
+    const OTHER: &str = "another-window";
+
+    /// An app carrying only the row systems — the pair's wiring needs no
+    /// layout, and the sliders here are bare values rather than laid-out
+    /// widgets.
+    fn rows_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_plugins(RowsPlugin);
+        app
+    }
+
+    /// Spawn a bare aim slider for `knob` in `scope`, or `None` if `knob` is not
+    /// one of the four angles a trackball drives — which is the lookup every
+    /// window's slider spawner makes, so a test that asked for a knob outside it
+    /// would be testing nothing.
+    fn slider(app: &mut App, scope: &'static str, knob: SkyKnob, value: f32) -> Option<Entity> {
+        let knobs = AimKnobs::of(knob)?;
+        let (min, max) = knob.range();
+        Some(
+            app.world_mut()
+                .spawn((
+                    AimSlider { scope, knob, knobs },
+                    SliderValue(value),
+                    SliderRange::new(min, max),
+                ))
+                .id(),
+        )
+    }
+
+    /// Spawn a bare trackball for `knobs` in `scope`.
+    fn trackball(app: &mut App, scope: &'static str, knobs: AimKnobs, aim: TrackballAim) -> Entity {
+        app.world_mut()
+            .spawn((AimTrackball { scope, knobs }, aim))
+            .id()
+    }
+
+    /// A slider's value.
+    fn value_of(app: &App, slider: Entity) -> Option<f32> {
+        app.world().get::<SliderValue>(slider).map(|value| value.0)
+    }
+
+    /// A trackball's aim.
+    fn aim_of(app: &App, trackball: Entity) -> Option<TrackballAim> {
+        app.world().get::<TrackballAim>(trackball).copied()
+    }
+
+    /// **A slider drag reaches the trackball beside it**, and moves only the
+    /// angle it is.
+    #[test]
+    fn a_slider_aims_its_trackball() -> Result<(), TestError> {
+        let mut app = rows_app();
+        let ball = trackball(
+            &mut app,
+            WINDOW,
+            AimKnobs::SUN,
+            TrackballAim {
+                azimuth: 10.0,
+                elevation: 20.0,
+            },
+        );
+        let azimuth =
+            slider(&mut app, WINDOW, SkyKnob::SunAzimuth, 10.0).ok_or("not an aim knob")?;
+        app.update();
+
+        app.world_mut()
+            .entity_mut(azimuth)
+            .insert(SliderValue(250.0));
+        app.update();
+
+        assert_eq!(
+            aim_of(&app, ball),
+            Some(TrackballAim {
+                azimuth: 250.0,
+                elevation: 20.0,
+            }),
+            "the compass moved and the height did not"
+        );
+        Ok(())
+    }
+
+    /// **A trackball reaches both its sliders**, and each takes the angle it
+    /// shows.
+    #[test]
+    fn a_trackball_drives_both_its_sliders() -> Result<(), TestError> {
+        let mut app = rows_app();
+        let ball = trackball(&mut app, WINDOW, AimKnobs::MOON, TrackballAim::ZENITH);
+        let azimuth =
+            slider(&mut app, WINDOW, SkyKnob::MoonAzimuth, 0.0).ok_or("not an aim knob")?;
+        let elevation =
+            slider(&mut app, WINDOW, SkyKnob::MoonElevation, 0.0).ok_or("not an aim knob")?;
+        app.update();
+
+        app.world_mut().entity_mut(ball).insert(TrackballAim {
+            azimuth: 123.0,
+            elevation: -45.0,
+        });
+        app.update();
+
+        assert_eq!(value_of(&app, azimuth), Some(123.0));
+        assert_eq!(value_of(&app, elevation), Some(-45.0));
+        Ok(())
+    }
+
+    /// **A body's controls leave the other body's alone.** One column carries a
+    /// sun trackball and a moon trackball and four sliders between them; the
+    /// pairing is what keeps a sun drag off the moon.
+    #[test]
+    fn the_sun_does_not_drive_the_moon() -> Result<(), TestError> {
+        let mut app = rows_app();
+        let sun = trackball(&mut app, WINDOW, AimKnobs::SUN, TrackballAim::ZENITH);
+        let moon_azimuth =
+            slider(&mut app, WINDOW, SkyKnob::MoonAzimuth, 7.0).ok_or("not an aim knob")?;
+        app.update();
+
+        app.world_mut().entity_mut(sun).insert(TrackballAim {
+            azimuth: 200.0,
+            elevation: 5.0,
+        });
+        app.update();
+
+        assert_eq!(
+            value_of(&app, moon_azimuth),
+            Some(7.0),
+            "the sun wrote the moon's slider"
+        );
+        Ok(())
+    }
+
+    /// **Two windows showing the same body do not drive each other.** Three
+    /// windows in this crate draw a sun trackball, and any two of them can be
+    /// open at once over completely different skies — one holding an inventory
+    /// asset, the other the sky the user is standing under.
+    #[test]
+    fn one_window_does_not_drive_another() -> Result<(), TestError> {
+        let mut app = rows_app();
+        let mine = trackball(&mut app, WINDOW, AimKnobs::SUN, TrackballAim::ZENITH);
+        let theirs = slider(&mut app, OTHER, SkyKnob::SunAzimuth, 11.0).ok_or("not an aim knob")?;
+        let theirs_ball = trackball(
+            &mut app,
+            OTHER,
+            AimKnobs::SUN,
+            TrackballAim {
+                azimuth: 11.0,
+                elevation: 3.0,
+            },
+        );
+        app.update();
+
+        app.world_mut().entity_mut(mine).insert(TrackballAim {
+            azimuth: 300.0,
+            elevation: -60.0,
+        });
+        app.update();
+
+        assert_eq!(value_of(&app, theirs), Some(11.0), "the other window moved");
+        assert_eq!(
+            aim_of(&app, theirs_ball),
+            Some(TrackballAim {
+                azimuth: 11.0,
+                elevation: 3.0,
+            })
+        );
+        Ok(())
+    }
+
+    /// **The pair settles.** Each control writes the other, so the one thing
+    /// this wiring must not do is keep writing: a trackball that moved its
+    /// sliders must find, on the next frame, that they are telling it exactly
+    /// what it already holds.
+    #[test]
+    fn the_pair_stops_writing_once_it_agrees() -> Result<(), TestError> {
+        let mut app = rows_app();
+        let ball = trackball(&mut app, WINDOW, AimKnobs::SUN, TrackballAim::ZENITH);
+        let azimuth =
+            slider(&mut app, WINDOW, SkyKnob::SunAzimuth, 0.0).ok_or("not an aim knob")?;
+        let elevation =
+            slider(&mut app, WINDOW, SkyKnob::SunElevation, 0.0).ok_or("not an aim knob")?;
+        app.update();
+        app.world_mut().entity_mut(ball).insert(TrackballAim {
+            azimuth: 42.0,
+            elevation: 17.0,
+        });
+        for _ in 0..3_u8 {
+            app.update();
+        }
+        // A frame with nothing in it: if either half were still writing, one of
+        // the three components below would be marked changed by it.
+        app.update();
+        let changed = |app: &mut App, entity: Entity| -> bool {
+            app.world_mut()
+                .query_filtered::<Entity, Or<(Changed<SliderValue>, Changed<TrackballAim>)>>()
+                .iter(app.world())
+                .any(|touched| touched == entity)
+        };
+        assert!(!changed(&mut app, ball), "the trackball is still writing");
+        assert!(!changed(&mut app, azimuth), "the azimuth slider is");
+        assert!(!changed(&mut app, elevation), "the elevation slider is");
+        assert_eq!(value_of(&app, azimuth), Some(42.0));
+        assert_eq!(value_of(&app, elevation), Some(17.0));
+        Ok(())
+    }
+
+    /// **A slider's range is what a trackball's angle lands in.** The azimuth
+    /// slider stops a hair short of a full turn, so a trackball aimed past that
+    /// point must not hand it a value it cannot show.
+    #[test]
+    fn a_trackballs_angle_is_clamped_to_the_sliders_range() -> Result<(), TestError> {
+        let mut app = rows_app();
+        let ball = trackball(&mut app, WINDOW, AimKnobs::SUN, TrackballAim::ZENITH);
+        let azimuth =
+            slider(&mut app, WINDOW, SkyKnob::SunAzimuth, 0.0).ok_or("not an aim knob")?;
+        app.update();
+        app.world_mut().entity_mut(ball).insert(TrackballAim {
+            azimuth: 359.999,
+            elevation: 0.0,
+        });
+        app.update();
+        let (_min, max) = SkyKnob::SunAzimuth.range();
+        assert_eq!(value_of(&app, azimuth), Some(max));
+        Ok(())
     }
 }

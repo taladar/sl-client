@@ -217,6 +217,15 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
         spawn: crate::ui_radio::spawn_radio_column,
     },
     UiElement {
+        id: "sun-moon-trackball",
+        summary: "The sun / moon trackball (`crate::ui_trackball`): a compass disc showing where a \
+                  celestial body is, dragged to aim it. Two of them here — a sun above the horizon \
+                  and a moon below it, which is the state the hollow marker carries. Every \
+                  environment editor hosts a pair beside the azimuth and elevation sliders that \
+                  write the same two angles.",
+        spawn: crate::ui_trackball::spawn_trackball_pair,
+    },
+    UiElement {
         id: "combo-box",
         summary: "A combo / dropdown (`crate::ui_combo`): a bordered value button that opens a \
                   popover list of options and emits the chosen one. The Texture tab's bumpiness / \

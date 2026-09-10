@@ -60,6 +60,7 @@
 
 use std::collections::VecDeque;
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui_widgets::{SliderRange, SliderValue, ValueChange};
@@ -85,13 +86,17 @@ use sl_viewer_ui_widgets::ui_tab::{
     DEFAULT_ELLIPSIS, TabPlacement, TabSpec, fill_tab_container, spawn_tab_container,
 };
 use sl_viewer_ui_widgets::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
+use sl_viewer_ui_widgets::ui_trackball::TrackballAim;
 use sl_viewer_world_api::{
     OpenSettingsEditor, PendingSettingsCreations, SettingsItemCreated, TexturePicked,
 };
 use sl_viewer_world_scene::environment::EnvironmentState;
 
 use crate::knobs::{ColorKnob, SkyKnob, TextureKnob, WaterKnob};
-use crate::rows::{spawn_action_button, spawn_color_row, spawn_slider, spawn_texture_row};
+use crate::rows::{
+    AimTrackball, spawn_action_button, spawn_color_row, spawn_slider, spawn_texture_row,
+    spawn_trackball_row, tag_aim_slider,
+};
 use crate::style::{DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR};
 use crate::tabs::{SKY_TABS, TabPage, WATER_TABS};
 
@@ -563,6 +568,15 @@ fn build_editor_content(editor: EditorKind, handle: FloaterHandle, commands: &mu
                 spawn_texture_knob(commands, *swatches, editor, *knob, &mut tab);
             }
         }
+        // A body's trackball opens the column its two angle sliders are in, as
+        // the reference's sun-and-moon panel opens with them.
+        for (index, knobs) in page.aims.iter().enumerate() {
+            let Some(parent) = slider_columns.get(index) else {
+                continue;
+            };
+            let trackball = spawn_trackball_row(commands, *parent, element, *knobs, &mut tab);
+            commands.entity(trackball).observe(on_editor_trackball);
+        }
         // The sliders fill the columns in order, evenly — the reference's own
         // multi-column sky panels, and the only arrangement that does not need
         // a per-tab layout table to go with the knob table.
@@ -676,6 +690,7 @@ fn spawn_sky_knob(
         .entity(track)
         .insert(EditorSkySlider(knob))
         .observe(on_editor_sky_slider);
+    tag_aim_slider(commands, track, editor.element(), knob);
 }
 
 /// One texture swatch, tagged for this window.
@@ -866,6 +881,27 @@ fn open_settings_editor(
     }
 }
 
+/// The two swatch kinds a re-seed paints.
+///
+/// One parameter rather than two because they are written identically and read
+/// the same pair of frames — and because the trackballs pushed the re-seed past
+/// Bevy's seven-parameter shape, which is the nudge to group what belongs
+/// together rather than to raise a limit.
+#[derive(SystemParam)]
+struct EditorSwatches<'w, 's> {
+    /// The colour swatches.
+    colors: Query<'w, 's, (&'static EditorColorSwatch, &'static mut ColorSwatchValue)>,
+    /// The texture swatches.
+    textures: Query<
+        'w,
+        's,
+        (
+            &'static EditorTextureSwatch,
+            &'static mut TextureSwatchValue,
+        ),
+    >,
+}
+
 /// Seed a window whose asset has arrived — or give up on one that will not.
 fn poll_pending_open(
     mut editors: ResMut<SettingsEditors>,
@@ -943,6 +979,31 @@ fn on_editor_sky_slider(
         && let Some(sky) = session.sky_mut()
     {
         row_info.0.write(sky, clamped);
+        session.dirty = true;
+        session.modified = true;
+    }
+}
+
+/// A trackball was aimed: write the body's whole direction into the sky the
+/// window is editing. Only the sky window has one, and the two sliders under it
+/// are put back in step by the shared [`crate::rows`] systems.
+fn on_editor_trackball(
+    change: On<ValueChange<Vec2>>,
+    trackballs: Query<&AimTrackball>,
+    mut editors: ResMut<SettingsEditors>,
+) {
+    let Ok(trackball) = trackballs.get(change.source) else {
+        return;
+    };
+    let aim = TrackballAim {
+        azimuth: change.value.x,
+        elevation: change.value.y,
+    };
+    let state = editors.get_mut(EditorKind::Sky);
+    if let Some(session) = state.session.as_mut()
+        && let Some(sky) = session.sky_mut()
+    {
+        trackball.knobs.write(sky, aim);
         session.dirty = true;
         session.modified = true;
     }
@@ -1052,9 +1113,9 @@ fn reseed_editor_widgets(
     mut editors: ResMut<SettingsEditors>,
     sky_sliders: Query<(Entity, &EditorSkySlider, &SliderRange, &SliderValue)>,
     water_sliders: Query<(Entity, &EditorWaterSlider, &SliderRange, &SliderValue)>,
-    mut colors: Query<(&EditorColorSwatch, &mut ColorSwatchValue)>,
-    mut textures: Query<(&EditorTextureSwatch, &mut TextureSwatchValue)>,
+    mut swatches: EditorSwatches,
     mut fields: Query<(&EditorNameField, &mut EditableText)>,
+    mut trackballs: Query<(&AimTrackball, &mut TrackballAim)>,
 ) {
     for editor in [EditorKind::Sky, EditorKind::Water] {
         let state = editors.get_mut(editor);
@@ -1086,6 +1147,19 @@ fn reseed_editor_widgets(
                     commands.entity(entity).insert(SliderValue(wanted));
                 }
             }
+            // The trackballs are seeded here rather than left to the slider
+            // sync, which only fires on a slider that *changed*: a sky whose sun
+            // happens to sit at its two sliders' current values would otherwise
+            // leave the marker where the last item put it.
+            for (trackball, mut aim) in &mut trackballs {
+                if trackball.scope != editor.element() {
+                    continue;
+                }
+                let wanted = trackball.knobs.read(sky);
+                if *aim != wanted {
+                    *aim = wanted;
+                }
+            }
         }
         if let Some(water) = water.as_ref() {
             for (entity, row_info, range, value) in &water_sliders {
@@ -1097,12 +1171,12 @@ fn reseed_editor_widgets(
         }
         let sky_frame = sky.unwrap_or_else(|| SkySettings::legacy_windlight_default("scratch"));
         let water_frame = water.unwrap_or_else(|| WaterSettings::legacy_default("scratch"));
-        for (swatch, mut value) in &mut colors {
+        for (swatch, mut value) in &mut swatches.colors {
             if swatch.editor == editor {
                 value.0 = swatch.knob.read(&sky_frame, &water_frame);
             }
         }
-        for (swatch, mut value) in &mut textures {
+        for (swatch, mut value) in &mut swatches.textures {
             if swatch.editor == editor {
                 value.0 = swatch.knob.read(&sky_frame, &water_frame);
             }

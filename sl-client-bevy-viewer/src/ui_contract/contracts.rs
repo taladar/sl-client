@@ -50,6 +50,7 @@
 use super::{ElementContract, Gesture, NodeContract, Probe, Row};
 use bevy::input_focus::InputFocus;
 use bevy::prelude::{App, Name};
+use sl_viewer_ui_widgets::ui_trackball::{SPECIMEN_MOON_AIM, SPECIMEN_SUN_AIM, TrackballAim};
 
 /// The named node this probe asks about, since a [`Probe`] is handed the app
 /// and not the address it was declared under.
@@ -71,6 +72,91 @@ const CLICK_TAKES_THE_CARET: Probe = Probe {
             .get::<Name>(focused)
             .is_some_and(|name| name.as_str() == FOCUSED_FIELD)
     },
+};
+
+/// The gallery specimen's sun trackball.
+const SUN_TRACKBALL: &str = "gallery-sun:trackball";
+
+/// Its moon.
+const MOON_TRACKBALL: &str = "gallery-moon:trackball";
+
+/// The aim the named trackball is holding, or `None` if this element has none.
+fn aim_of(app: &mut App, node: &str) -> Option<TrackballAim> {
+    let mut query = app.world_mut().query::<(&Name, &TrackballAim)>();
+    query
+        .iter(app.world())
+        .find(|(name, _aim)| name.as_str() == node)
+        .map(|(_name, aim)| *aim)
+}
+
+/// Whether the named trackball is aimed at the **zenith** — what a click on the
+/// centre of the disc means, and the reaction that emits nothing at all.
+fn aimed_at_the_zenith(app: &mut App, node: &str) -> bool {
+    aim_of(app, node).is_some_and(|aim| (aim.elevation.abs() - 90.0).abs() < 0.5)
+}
+
+/// Whether the named trackball has moved off the aim it was spawned with.
+fn aim_moved(app: &mut App, node: &str, from: TrackballAim) -> bool {
+    aim_of(app, node).is_some_and(|aim| aim != from)
+}
+
+/// Whether the named trackball is aimed somewhere between the pole and the
+/// horizon — where a drag across the disc leaves it.
+///
+/// The sweep's drag starts at the centre and ends far outside the rim, and the
+/// two ends bracket the two things worth pinning: the press aims at the zenith,
+/// and the part of the travel that is still *on* the disc keeps aiming, so the
+/// control ends up neither where the press put it nor pinned to the horizon by
+/// the part that left. That last is the widget's deliberate refusal to clamp —
+/// the reference's `pointInTouchCircle` guard.
+fn aimed_off_both_ends(app: &mut App, node: &str) -> bool {
+    aim_of(app, node).is_some_and(|aim| {
+        let height = aim.elevation.abs();
+        height > 0.5 && height < 89.5
+    })
+}
+
+/// A click on the sun disc's centre aims the sun straight up.
+///
+/// The whole of the trackball's reaction is a component nobody records: it
+/// emits `ValueChange`, not a `UiAction`, so without these probes every gesture
+/// on it would sweep as "inert" and a control that had quietly stopped aiming
+/// would pass.
+const SUN_CLICK_AIMS_UP: Probe = Probe {
+    what: "the clicked sun trackball is aimed at the zenith",
+    check: |app: &mut App| aimed_at_the_zenith(app, SUN_TRACKBALL),
+};
+
+/// The same for the moon — which keeps its hemisphere, so "the zenith" there is
+/// the nadir, and the check is on the magnitude.
+const MOON_CLICK_AIMS_UP: Probe = Probe {
+    what: "the clicked moon trackball is aimed straight up or straight down",
+    check: |app: &mut App| aimed_at_the_zenith(app, MOON_TRACKBALL),
+};
+
+/// A drag across the sun's disc leaves it aimed where the pointer last was on
+/// the disc.
+const SUN_DRAG_AIMS: Probe = Probe {
+    what: "the dragged sun trackball is aimed off both the zenith and the horizon",
+    check: |app: &mut App| aimed_off_both_ends(app, SUN_TRACKBALL),
+};
+
+/// The same for the moon, which keeps its own hemisphere throughout.
+const MOON_DRAG_AIMS: Probe = Probe {
+    what: "the dragged moon trackball is aimed off both the pole and the horizon",
+    check: |app: &mut App| aimed_off_both_ends(app, MOON_TRACKBALL),
+};
+
+/// An arrow key steps the sun's aim off where it was spawned.
+const SUN_ARROW_STEPS: Probe = Probe {
+    what: "an arrow key moved the sun trackball's aim",
+    check: |app: &mut App| aim_moved(app, SUN_TRACKBALL, SPECIMEN_SUN_AIM),
+};
+
+/// The same for the moon.
+const MOON_ARROW_STEPS: Probe = Probe {
+    what: "an arrow key moved the moon trackball's aim",
+    check: |app: &mut App| aim_moved(app, MOON_TRACKBALL, SPECIMEN_MOON_AIM),
 };
 
 /// Every element's contract, keyed by `UiElement::id`.
@@ -596,6 +682,35 @@ pub(crate) const CONTRACTS: &[ElementContract] = &[
                 Row::emits(Gesture::ArrowRight, &["select-radio"]),
             ],
         )],
+    },
+    ElementContract {
+        element: "sun-moon-trackball",
+        nodes: &[
+            NodeContract::new(
+                SUN_TRACKBALL,
+                &[
+                    Row::leaves(Gesture::PrimaryClick, SUN_CLICK_AIMS_UP),
+                    Row::leaves(Gesture::DoubleClick, SUN_CLICK_AIMS_UP),
+                    Row::leaves(Gesture::DragAcross, SUN_DRAG_AIMS),
+                    Row::leaves(Gesture::ArrowUp, SUN_ARROW_STEPS),
+                    Row::leaves(Gesture::ArrowDown, SUN_ARROW_STEPS),
+                    Row::leaves(Gesture::ArrowLeft, SUN_ARROW_STEPS),
+                    Row::leaves(Gesture::ArrowRight, SUN_ARROW_STEPS),
+                ],
+            ),
+            NodeContract::new(
+                MOON_TRACKBALL,
+                &[
+                    Row::leaves(Gesture::PrimaryClick, MOON_CLICK_AIMS_UP),
+                    Row::leaves(Gesture::DoubleClick, MOON_CLICK_AIMS_UP),
+                    Row::leaves(Gesture::DragAcross, MOON_DRAG_AIMS),
+                    Row::leaves(Gesture::ArrowUp, MOON_ARROW_STEPS),
+                    Row::leaves(Gesture::ArrowDown, MOON_ARROW_STEPS),
+                    Row::leaves(Gesture::ArrowLeft, MOON_ARROW_STEPS),
+                    Row::leaves(Gesture::ArrowRight, MOON_ARROW_STEPS),
+                ],
+            ),
+        ],
     },
     ElementContract {
         element: "script-dialog-textbox-toast",

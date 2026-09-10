@@ -1313,6 +1313,13 @@ color-picker-preview = Preview
 color-picker-original = Original
 color-picker-ok = OK
 color-picker-cancel = Cancel
+# The virtual trackball's compass ring: the four cardinal points, drawn round
+# the disc a sun or moon is aimed on. Single letters in English; a translation
+# uses whatever its own compass does (German O for east, not E).
+trackball-north = N
+trackball-east = E
+trackball-south = S
+trackball-west = W
 texture-picker-title = Pick: Texture
 texture-picker-title-material = Pick: Material
 texture-picker-search = Search
@@ -3818,7 +3825,11 @@ env-knob-cloud-density-d = Cloud density
 env-knob-cloud-detail-x = Cloud detail X
 env-knob-cloud-detail-y = Cloud detail Y
 env-knob-cloud-detail-d = Cloud detail
-# Where the sun and the moon sit, and how they glow.
+# Where the sun and the moon sit, and how they glow. The two "position" labels
+# are the trackballs — one control aiming a whole body — over the azimuth and
+# elevation sliders that say the same thing in numbers.
+env-knob-sun-position = Sun position
+env-knob-moon-position = Moon position
 env-knob-sun-azimuth = Sun azimuth
 env-knob-sun-elevation = Sun elevation
 env-knob-sun-scale = Sun scale

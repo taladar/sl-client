@@ -10,7 +10,7 @@
 //! - [`menu`] — the menu bar's dropdowns and the line-based context menu, and
 //!   [`menu_accel`] — the accelerator each entry draws, dispatched to it.
 //! - [`ui_text_input`], [`ui_search`], [`ui_combo`], [`ui_radio`],
-//!   [`ui_color_picker`] — the input controls.
+//!   [`ui_color_picker`], [`ui_trackball`] — the input controls.
 //! - [`ui_tab`], [`ui_table`] — tab strips and the sortable, virtualized table.
 //! - [`settings_binding`] — the two-way binding that makes a control read and
 //!   write a settings-store value directly.
@@ -54,3 +54,4 @@ pub mod ui_search;
 pub mod ui_tab;
 pub mod ui_table;
 pub mod ui_text_input;
+pub mod ui_trackball;

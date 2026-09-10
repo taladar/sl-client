@@ -12,9 +12,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 322 |
+| ready | 321 |
 | blocked | 42 |
-| in-progress | 21 |
+| in-progress | 22 |
 | bugs | 52 |
 | done | 1072 |
 | deferred | 26 |
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (322)
+## ready (321)
 
 ### protocol
 
@@ -936,9 +936,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-styling-interaction-tests`](ready/viewer-ui-styling-interaction-tests.md)
   — bevy_flair state styling under synthetic hover and focus (blocked by
   `viewer-ui-interaction-harness` (done))
-- [`viewer-ui-virtual-trackball`](ready/viewer-ui-virtual-trackball.md) —
-  Virtual trackball widget (sun / moon direction) (blocked by
-  `viewer-ui-widget-scaffold` (done))
 - [`viewer-underwater-alpha-fog-remaining-materials`](ready/viewer-underwater-alpha-fog-remaining-materials.md)
   — The particle billboards do not carry the water fog
 - [`viewer-url-context-menus`](ready/viewer-url-context-menus.md) — Right-click
@@ -1127,7 +1124,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (21)
+## in-progress (22)
 
 ### viewer
 
@@ -1177,6 +1174,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Upstream PR — parley: honour the emoji presentation selector (VS16)
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
+- [`viewer-ui-virtual-trackball`](in-progress/viewer-ui-virtual-trackball.md) —
+  Virtual trackball widget (sun / moon direction) (blocked by
+  `viewer-ui-widget-scaffold` (done))
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 

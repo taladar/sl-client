@@ -57,6 +57,7 @@
 //! Reference (Firestorm, read-only): `llfloatereditextdaycycle.cpp`,
 //! `floater_edit_ext_day_cycle.xml`, `llsettingsdaycycle.cpp`.
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui_widgets::{SliderRange, SliderValue, ValueChange};
@@ -87,6 +88,7 @@ use sl_viewer_ui_widgets::ui_tab::{
     DEFAULT_ELLIPSIS, TabPlacement, TabSpec, fill_tab_container, spawn_tab_container,
 };
 use sl_viewer_ui_widgets::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
+use sl_viewer_ui_widgets::ui_trackball::TrackballAim;
 use sl_viewer_world_api::{
     OpenSettingsEditor, OpenSettingsPicker, PendingSettingsCreations, SettingsItemCreated,
     SettingsPicked, TexturePicked,
@@ -94,7 +96,10 @@ use sl_viewer_world_api::{
 use sl_viewer_world_scene::environment::EnvironmentState;
 
 use crate::knobs::{ColorKnob, SkyKnob, TextureKnob, WaterKnob};
-use crate::rows::{spawn_action_button, spawn_color_row, spawn_slider, spawn_texture_row};
+use crate::rows::{
+    AimTrackball, spawn_action_button, spawn_color_row, spawn_slider, spawn_texture_row,
+    spawn_trackball_row, tag_aim_slider,
+};
 use crate::settings_editor::EditedItem;
 use crate::style::{
     CONTROL_BORDER, DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, THUMB_FILL, TRACK_FILL,
@@ -1000,6 +1005,15 @@ fn spawn_pages(
                 commands.entity(swatch).insert(DayTextureSwatch(*knob));
             }
         }
+        // A body's trackball opens the column its two angle sliders are in, as
+        // the reference's sun-and-moon panel opens with them.
+        for (index, knobs) in page.aims.iter().enumerate() {
+            let Some(column_entity) = slider_columns.get(index) else {
+                continue;
+            };
+            let trackball = spawn_trackball_row(commands, *column_entity, element, *knobs, tab);
+            commands.entity(trackball).observe(on_day_trackball);
+        }
         for (index, knob) in page.sky.iter().enumerate() {
             let Some(column_entity) = slider_column(slider_columns, index, page.sky.len()) else {
                 continue;
@@ -1017,6 +1031,7 @@ fn spawn_pages(
                 .entity(track)
                 .insert(DaySkySlider(*knob))
                 .observe(on_day_sky_slider);
+            tag_aim_slider(commands, track, element, *knob);
         }
         for (index, knob) in page.water.iter().enumerate() {
             let Some(column_entity) = slider_column(slider_columns, index, page.water.len()) else {
@@ -1519,6 +1534,34 @@ fn on_day_sky_slider(
     }
 }
 
+/// A trackball was aimed: write the body's whole direction into the keyframe
+/// the window is showing. The two sliders under it are put back in step by the
+/// shared [`crate::rows`] systems.
+fn on_day_trackball(
+    change: On<ValueChange<Vec2>>,
+    trackballs: Query<&AimTrackball>,
+    mut state: ResMut<DayCycleEditorState>,
+) {
+    let Ok(trackball) = trackballs.get(change.source) else {
+        return;
+    };
+    let aim = TrackballAim {
+        azimuth: change.value.x,
+        elevation: change.value.y,
+    };
+    let Some(session) = state.session.as_mut() else {
+        return;
+    };
+    let Some(name) = writable_frame(session) else {
+        return;
+    };
+    if let Some(sky) = session.edited.sky_frames.get_mut(&name) {
+        trackball.knobs.write(sky, aim);
+        session.dirty = true;
+        session.modified = true;
+    }
+}
+
 /// A water slider moved.
 fn on_day_water_slider(
     change: On<ValueChange<f32>>,
@@ -1630,15 +1673,29 @@ fn read_day_name(
     }
 }
 
+/// The two swatch kinds a re-seed paints.
+///
+/// One parameter rather than two because they are written identically and read
+/// the same pair of frames — and because the trackballs pushed the re-seed past
+/// Bevy's seven-parameter shape, which is the nudge to group what belongs
+/// together rather than to raise a limit.
+#[derive(SystemParam)]
+struct DaySwatches<'w, 's> {
+    /// The colour swatches.
+    colors: Query<'w, 's, (&'static DayColorSwatch, &'static mut ColorSwatchValue)>,
+    /// The texture swatches.
+    textures: Query<'w, 's, (&'static DayTextureSwatch, &'static mut TextureSwatchValue)>,
+}
+
 /// Seed every knob from the frame the window is showing.
 fn reseed_day_widgets(
     mut commands: Commands,
     mut state: ResMut<DayCycleEditorState>,
     sky_sliders: Query<(Entity, &DaySkySlider, &SliderRange, &SliderValue)>,
     water_sliders: Query<(Entity, &DayWaterSlider, &SliderRange, &SliderValue)>,
-    mut colors: Query<(&DayColorSwatch, &mut ColorSwatchValue)>,
-    mut textures: Query<(&DayTextureSwatch, &mut TextureSwatchValue)>,
+    mut swatches: DaySwatches,
     mut fields: Query<&mut EditableText, With<DayNameField>>,
+    mut trackballs: Query<(&AimTrackball, &mut TrackballAim)>,
 ) {
     let Some(session) = state.session.as_mut() else {
         return;
@@ -1664,6 +1721,16 @@ fn reseed_day_widgets(
                 commands.entity(entity).insert(SliderValue(wanted));
             }
         }
+        // The trackballs are seeded here rather than left to the slider sync,
+        // which only fires on a slider that *changed*: a keyframe whose sun
+        // happens to sit at its two sliders' current values would otherwise
+        // leave the marker where the last keyframe put it.
+        for (trackball, mut aim) in &mut trackballs {
+            let wanted = trackball.knobs.read(sky);
+            if *aim != wanted {
+                *aim = wanted;
+            }
+        }
     }
     if let Some(water) = water.as_ref() {
         for (entity, row_info, range, value) in &water_sliders {
@@ -1675,10 +1742,10 @@ fn reseed_day_widgets(
     }
     let sky_frame = sky.unwrap_or_else(|| SkySettings::legacy_windlight_default("scratch"));
     let water_frame = water.unwrap_or_else(|| WaterSettings::legacy_default("scratch"));
-    for (swatch, mut value) in &mut colors {
+    for (swatch, mut value) in &mut swatches.colors {
         value.0 = swatch.0.read(&sky_frame, &water_frame);
     }
-    for (swatch, mut value) in &mut textures {
+    for (swatch, mut value) in &mut swatches.textures {
         value.0 = swatch.0.read(&sky_frame, &water_frame);
     }
     for mut editable in &mut fields {

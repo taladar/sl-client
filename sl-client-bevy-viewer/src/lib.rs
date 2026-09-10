@@ -349,6 +349,7 @@ pub(crate) use sl_viewer_ui_widgets::ui_radio;
 pub(crate) use sl_viewer_ui_widgets::ui_search;
 pub(crate) use sl_viewer_ui_widgets::ui_tab;
 pub(crate) use sl_viewer_ui_widgets::ui_table;
+pub(crate) use sl_viewer_ui_widgets::ui_trackball;
 #[cfg(test)]
 mod ui_test;
 pub(crate) use sl_viewer_audio::volume_panel;
@@ -1233,6 +1234,11 @@ fn run_session(
     // group's selection, so a click and an external write (the Build Tools
     // floater's tool sync) drive the same visual path.
     .add_plugins(crate::ui_radio::RadioWidgetPlugin)
+    // The sun / moon trackball's drawing half (viewer-ui-virtual-trackball):
+    // places each marker from the aim its window wrote and paints the
+    // below-horizon state. The environment editors' `RowsPlugin` adds it too,
+    // guarded, so a host that takes only those windows still draws them.
+    .add_plugins(crate::ui_trackball::TrackballPlugin)
     // The reusable combo / dropdown widget (viewer-ui-combo-widget): the closed
     // value reconcile, the ComboChanged message, and the outside-press dismiss.
     .add_plugins(crate::ui_combo::ComboWidgetPlugin)

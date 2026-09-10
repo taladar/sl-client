@@ -36,10 +36,10 @@
 //!   wants the fog colour or the wave directions to the full settings editor.
 //!   The knobs are the same ones, and they are as local and as reversible as the
 //!   sky's, so they are here.
-//! - **The sun and moon get azimuth / elevation sliders and no trackball.** The
-//!   reference offers both, reading one out of the other. The two sliders are
-//!   the whole of the state; a trackball is a second way to drive them and can
-//!   be added over the same fields whenever there is a trackball widget.
+//! - **The sun and moon get a trackball *and* their two angle sliders**, as the
+//!   reference does, each writing the other. The two angles are the whole of the
+//!   state; the trackball is a second, spatial way to drive them
+//!   ([`sl_viewer_ui_widgets::ui_trackball`]).
 //! - **There are no sun / moon beacon checkboxes.** They belong to the beacons
 //!   feature ([[viewer-beacons-control]]), not to this window's state, and the
 //!   reference only puts them here for convenience.
@@ -59,12 +59,16 @@ use sl_viewer_ui_widgets::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater,
 };
 use sl_viewer_ui_widgets::ui_color_picker::{ColorPicked, ColorSwatchValue};
+use sl_viewer_ui_widgets::ui_trackball::TrackballAim;
 use sl_viewer_world_api::TexturePicked;
 use sl_viewer_world_scene::environment::EnvironmentState;
 use sl_viewer_world_scene::sky::day_position;
 
-use crate::knobs::{ColorKnob, SkyKnob, TextureKnob, WaterKnob};
-use crate::rows::{spawn_action_button, spawn_color_row, spawn_slider, spawn_texture_row};
+use crate::knobs::{AimKnobs, ColorKnob, SkyKnob, TextureKnob, WaterKnob};
+use crate::rows::{
+    AimTrackball, spawn_action_button, spawn_color_row, spawn_slider, spawn_texture_row,
+    spawn_trackball_row, tag_aim_slider,
+};
 use crate::style::{DIM_LABEL_COLOR, HEADING_SIZE};
 
 /// The element-id prefix every control in this window is named by — the window
@@ -188,9 +192,10 @@ pub fn personal_lighting_floater_spec() -> FloaterSpec {
         position: Vec2::new(120.0, 120.0),
         // Four columns side by side, as the reference lays it out — a tall
         // single column would need a scroll view for a window whose whole point
-        // is that every knob is under the hand at once. The water column is the
-        // long one at fourteen knobs, and sets the height.
-        default_size: Some(Vec2::new(660.0, 540.0)),
+        // is that every knob is under the hand at once. The sun-and-moon column
+        // is the long one now that it opens each body with a trackball, and it
+        // sets the height; the water column's fourteen knobs are shorter.
+        default_size: Some(Vec2::new(660.0, 620.0)),
         min_size: Some(Vec2::new(320.0, 240.0)),
         dock_host: None,
         caps: FloaterCaps {
@@ -230,17 +235,18 @@ const ATMOSPHERE_KNOBS: &[SkyKnob] = &[
     SkyKnob::Gamma,
 ];
 
-/// The third column: where the sun and the moon are, and how they glow.
-const SUN_MOON_KNOBS: &[SkyKnob] = &[
+/// The third column, above the moon's: where the sun is and how it glows.
+const SUN_KNOBS: &[SkyKnob] = &[
     SkyKnob::SunAzimuth,
     SkyKnob::SunElevation,
     SkyKnob::SunScale,
     SkyKnob::GlowFocus,
     SkyKnob::GlowSize,
     SkyKnob::StarBrightness,
-    SkyKnob::MoonAzimuth,
-    SkyKnob::MoonElevation,
 ];
+
+/// The rest of that column: where the moon is.
+const MOON_KNOBS: &[SkyKnob] = &[SkyKnob::MoonAzimuth, SkyKnob::MoonElevation];
 
 /// The fourth column: the water.
 const WATER_KNOBS: &[WaterKnob] = &[
@@ -305,8 +311,16 @@ fn build_personal_lighting_content(In(handle): In<FloaterHandle>, mut commands: 
         spawn_sky_slider(&mut commands, atmosphere, *knob, &mut tab);
     }
 
+    // Each body opens with its trackball and is followed by the sliders that
+    // say the same thing in numbers — the reference's arrangement, and the one
+    // that makes it obvious the two drive each other.
     let bodies = spawn_column(&mut commands, content, "personal-lighting-sun-moon");
-    for knob in SUN_MOON_KNOBS {
+    spawn_aim_trackball(&mut commands, bodies, AimKnobs::SUN, &mut tab);
+    for knob in SUN_KNOBS {
+        spawn_sky_slider(&mut commands, bodies, *knob, &mut tab);
+    }
+    spawn_aim_trackball(&mut commands, bodies, AimKnobs::MOON, &mut tab);
+    for knob in MOON_KNOBS {
         spawn_sky_slider(&mut commands, bodies, *knob, &mut tab);
     }
 
@@ -353,6 +367,13 @@ fn spawn_sky_slider(commands: &mut Commands, parent: Entity, knob: SkyKnob, tab:
         .entity(track)
         .insert(SkySliderRow(knob))
         .observe(on_sky_slider_change);
+    tag_aim_slider(commands, track, ELEMENT, knob);
+}
+
+/// One body's trackball, over the two sliders under it.
+fn spawn_aim_trackball(commands: &mut Commands, parent: Entity, knobs: AimKnobs, tab: &mut i32) {
+    let trackball = spawn_trackball_row(commands, parent, ELEMENT, knobs, tab);
+    commands.entity(trackball).observe(on_trackball_aim);
 }
 
 /// One water-knob slider row.
@@ -471,6 +492,29 @@ fn on_sky_slider_change(
     }
 }
 
+/// A trackball was aimed: write the body's whole direction into the buffer.
+///
+/// The two sliders under it are put back in step by the shared
+/// [`crate::rows`] systems, which read the widget's own aim rather than this
+/// buffer — so nothing here has to think about what a sky can and cannot store.
+fn on_trackball_aim(
+    change: On<ValueChange<Vec2>>,
+    trackballs: Query<&AimTrackball>,
+    mut edit: ResMut<PersonalLightingEdit>,
+) {
+    let Ok(trackball) = trackballs.get(change.source) else {
+        return;
+    };
+    let aim = TrackballAim {
+        azimuth: change.value.x,
+        elevation: change.value.y,
+    };
+    if let Some(sky) = edit.sky.as_deref_mut() {
+        trackball.knobs.write(sky, aim);
+        edit.dirty = true;
+    }
+}
+
 /// A water slider moved.
 fn on_water_slider_change(
     change: On<ValueChange<f32>>,
@@ -542,6 +586,7 @@ fn reseed_personal_widgets(
     water_sliders: Query<(Entity, &WaterSliderRow, &SliderRange, &SliderValue)>,
     mut colors: Query<(&ColorSwatchKnob, &mut ColorSwatchValue)>,
     mut textures: Query<(&TextureSwatchKnob, &mut TextureSwatchValue)>,
+    mut trackballs: Query<(&AimTrackball, &mut TrackballAim)>,
 ) {
     if !edit.reseed {
         return;
@@ -583,6 +628,19 @@ fn reseed_personal_widgets(
     }
     for (knob, mut value) in &mut textures {
         value.0 = knob.0.read(sky, water);
+    }
+    // Seeded here rather than left to the slider sync: the sliders only reach
+    // the trackball when one of them *changes*, and a sky whose sun happens to
+    // sit at the two sliders' starting values would leave the marker at the
+    // zenith it was spawned pointing at.
+    for (trackball, mut aim) in &mut trackballs {
+        if trackball.scope != ELEMENT {
+            continue;
+        }
+        let wanted = trackball.knobs.read(sky);
+        if *aim != wanted {
+            *aim = wanted;
+        }
     }
 }
 
