@@ -114,6 +114,95 @@ pub struct DayCycle {
     pub water_frames: BTreeMap<String, WaterSettings>,
 }
 
+/// How many **sky** tracks a day cycle carries: the surface track plus the three
+/// altitude tracks above it (the reference's `LLSettingsDay::TRACK_MAX` minus the
+/// water track).
+pub const SKY_TRACK_COUNT: usize = 4;
+
+/// Two keyframes closer together than this are the *same* keyframe as far as a
+/// day cycle is concerned: an insert refuses, and a nearby-lookup answers with
+/// the existing one. The reference's `LLSettingsDay::DEFAULT_FRAME_SLOP_FACTOR`.
+pub const KEYFRAME_SLOP: f32 = 0.02501;
+
+/// Which track of a [`DayCycle`] a keyframe belongs to.
+///
+/// The reference numbers its five tracks `0..=4` with water at zero, while
+/// [`DayCycle::sky_tracks`] is a list of the sky tracks alone — so a bare index
+/// means two different tracks depending on which side of that boundary wrote it.
+/// This is that boundary, named once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DayTrack {
+    /// The single region-wide water track (the reference's track 0).
+    Water,
+    /// One of the [`SKY_TRACK_COUNT`] sky tracks, indexed from the ground up:
+    /// `0` is the surface track (the reference's track 1), and the rest take
+    /// effect above the matching
+    /// [`EnvironmentSettings::track_altitudes`] breakpoint.
+    Sky(usize),
+}
+
+impl DayTrack {
+    /// The surface sky track — where a day cycle with no altitude bands lives.
+    pub const GROUND: Self = Self::Sky(0);
+
+    /// Every track, water first, in the reference's order.
+    #[must_use]
+    pub const fn all() -> [Self; SKY_TRACK_COUNT.saturating_add(1)] {
+        [
+            Self::Water,
+            Self::Sky(0),
+            Self::Sky(1),
+            Self::Sky(2),
+            Self::Sky(3),
+        ]
+    }
+
+    /// The [`DayCycle::sky_tracks`] index this names, or `None` for the water
+    /// track.
+    #[must_use]
+    pub const fn sky_index(self) -> Option<usize> {
+        match self {
+            Self::Water => None,
+            Self::Sky(index) => Some(index),
+        }
+    }
+
+    /// The reference's own track number (`0` water, `1..=4` sky), which is what
+    /// its notifications and its saved settings talk in.
+    #[must_use]
+    pub const fn reference_index(self) -> usize {
+        match self {
+            Self::Water => 0,
+            Self::Sky(index) => index.saturating_add(1),
+        }
+    }
+
+    /// The track the reference's number `index` names, or `None` past the last
+    /// sky track.
+    #[must_use]
+    pub const fn from_reference_index(index: usize) -> Option<Self> {
+        match index {
+            0 => Some(Self::Water),
+            _ if index <= SKY_TRACK_COUNT => Some(Self::Sky(index.saturating_sub(1))),
+            _ => None,
+        }
+    }
+
+    /// Whether this track may be emptied completely.
+    ///
+    /// The water track and the surface sky track are what a cycle *is* — the
+    /// reference keeps their first keyframe and clears the rest — while an
+    /// altitude track above them is allowed to hold nothing at all, which is how
+    /// a cycle says "no separate sky up here".
+    #[must_use]
+    pub const fn may_be_empty(self) -> bool {
+        match self {
+            Self::Water | Self::Sky(0) => false,
+            Self::Sky(_other) => true,
+        }
+    }
+}
+
 /// One keyframe within a day-cycle track: a named frame and the time of day it
 /// is reached.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -124,6 +213,352 @@ pub struct DayCycleFrame {
     /// The name of the [`SkySettings`] / [`WaterSettings`] frame applied at this
     /// keyframe (a key into [`DayCycle::sky_frames`] / [`DayCycle::water_frames`]).
     pub name: String,
+}
+
+impl DayCycle {
+    /// The keyframes on `track`, in keyframe order. An altitude track a cycle
+    /// does not carry reads as empty rather than missing, which is what it
+    /// means.
+    #[must_use]
+    pub fn track(&self, track: DayTrack) -> &[DayCycleFrame] {
+        match track.sky_index() {
+            None => &self.water_track,
+            Some(index) => self.sky_tracks.get(index).map_or(&[], Vec::as_slice),
+        }
+    }
+
+    /// The keyframes on `track`, mutably, materialising the sky tracks up to it
+    /// so a cycle that carried only a ground track can grow an altitude one.
+    /// `None` past the last sky track.
+    fn track_mut(&mut self, track: DayTrack) -> Option<&mut Vec<DayCycleFrame>> {
+        match track.sky_index() {
+            None => Some(&mut self.water_track),
+            Some(index) if index < SKY_TRACK_COUNT => {
+                if self.sky_tracks.len() <= index {
+                    self.sky_tracks
+                        .resize_with(index.saturating_add(1), Vec::new);
+                }
+                self.sky_tracks.get_mut(index)
+            }
+            Some(_past_the_end) => None,
+        }
+    }
+
+    /// The index into [`track`](Self::track) of the keyframe within `slop` of
+    /// `position`, nearest first — the reference's `getSettingsNearKeyframe`.
+    ///
+    /// The day wraps, so a keyframe just before midnight is near a position just
+    /// after it.
+    #[must_use]
+    pub fn keyframe_near(&self, track: DayTrack, position: f32, slop: f32) -> Option<usize> {
+        self.track(track)
+            .iter()
+            .enumerate()
+            .map(|(index, frame)| (index, wrapped_distance(frame.keyframe, position)))
+            .filter(|(_index, distance)| *distance <= slop)
+            .min_by(|(_a, left), (_b, right)| left.total_cmp(right))
+            .map(|(index, _distance)| index)
+    }
+
+    /// A frame name no frame in this cycle already answers to, derived from
+    /// `base` (`"Sunrise"`, `"Sunrise (2)"`, …).
+    ///
+    /// One namespace, not two: the sky frames and the water frames share a
+    /// single `frames` map on the wire (see [`DayCycle`]), so a water frame named
+    /// like a sky frame is a frame that does not survive being saved.
+    #[must_use]
+    pub fn unique_frame_name(&self, base: &str) -> String {
+        let taken =
+            |name: &str| self.sky_frames.contains_key(name) || self.water_frames.contains_key(name);
+        let base = if base.is_empty() { "Frame" } else { base };
+        if !taken(base) {
+            return base.to_owned();
+        }
+        // Bounded by the number of frames plus one, so some candidate in the
+        // sequence is always free.
+        let ceiling = self
+            .sky_frames
+            .len()
+            .saturating_add(self.water_frames.len())
+            .saturating_add(2);
+        for suffix in 2..=ceiling {
+            let candidate = format!("{base} ({suffix})");
+            if !taken(&candidate) {
+                return candidate;
+            }
+        }
+        base.to_owned()
+    }
+
+    /// Put `sky` on sky `track` at `position`, under a fresh name derived from
+    /// its own. Returns the name it was filed under, or `None` when the track is
+    /// the water track, does not exist, or already holds a keyframe within
+    /// [`KEYFRAME_SLOP`].
+    pub fn insert_sky_keyframe(
+        &mut self,
+        track: DayTrack,
+        position: f32,
+        sky: SkySettings,
+    ) -> Option<String> {
+        if track.sky_index().is_none()
+            || self.keyframe_near(track, position, KEYFRAME_SLOP).is_some()
+        {
+            return None;
+        }
+        let name = self.unique_frame_name(&sky.name);
+        let mut sky = sky;
+        name.clone_into(&mut sky.name);
+        drop(self.sky_frames.insert(name.clone(), sky));
+        self.insert_at(track, position, &name)?;
+        Some(name)
+    }
+
+    /// Put `water` on the water track at `position`, under a fresh name derived
+    /// from its own. `None` for a sky track or a position already taken.
+    pub fn insert_water_keyframe(
+        &mut self,
+        track: DayTrack,
+        position: f32,
+        water: WaterSettings,
+    ) -> Option<String> {
+        if track.sky_index().is_some()
+            || self.keyframe_near(track, position, KEYFRAME_SLOP).is_some()
+        {
+            return None;
+        }
+        let name = self.unique_frame_name(&water.name);
+        let mut water = water;
+        name.clone_into(&mut water.name);
+        drop(self.water_frames.insert(name.clone(), water));
+        self.insert_at(track, position, &name)?;
+        Some(name)
+    }
+
+    /// File a keyframe naming `frame` at `position`, keeping the track sorted.
+    fn insert_at(&mut self, track: DayTrack, position: f32, frame: &str) -> Option<()> {
+        let keyframes = self.track_mut(track)?;
+        let at = keyframes
+            .iter()
+            .position(|existing| existing.keyframe > position)
+            .unwrap_or(keyframes.len());
+        keyframes.insert(
+            at,
+            DayCycleFrame {
+                keyframe: position.clamp(0.0, 1.0),
+                name: frame.to_owned(),
+            },
+        );
+        Some(())
+    }
+
+    /// Move the `index`-th keyframe of `track` to `position`, keeping the track
+    /// sorted. Refuses a move onto another keyframe (within [`KEYFRAME_SLOP`]),
+    /// and answers with where the keyframe ended up.
+    pub fn move_keyframe(&mut self, track: DayTrack, index: usize, position: f32) -> Option<usize> {
+        let position = position.clamp(0.0, 1.0);
+        let blocked = self
+            .keyframe_near(track, position, KEYFRAME_SLOP)
+            .is_some_and(|near| near != index);
+        if blocked {
+            return None;
+        }
+        let keyframes = self.track_mut(track)?;
+        let mut moved = keyframes.get(index).cloned()?;
+        moved.keyframe = position;
+        drop(keyframes.remove(index));
+        let at = keyframes
+            .iter()
+            .position(|existing| existing.keyframe > position)
+            .unwrap_or(keyframes.len());
+        keyframes.insert(at, moved);
+        Some(at)
+    }
+
+    /// Take the `index`-th keyframe off `track`, and the frame it named with it
+    /// if nothing else still names it.
+    ///
+    /// Refuses to empty a track that [may not be empty](DayTrack::may_be_empty),
+    /// as the reference refuses: a cycle with no water at all, or no sky at
+    /// ground level, is not a cycle anything can render.
+    pub fn remove_keyframe(&mut self, track: DayTrack, index: usize) -> bool {
+        if !track.may_be_empty() && self.track(track).len() <= 1 {
+            return false;
+        }
+        let Some(keyframes) = self.track_mut(track) else {
+            return false;
+        };
+        if index >= keyframes.len() {
+            return false;
+        }
+        let removed = keyframes.remove(index);
+        self.forget_unreferenced(&removed.name);
+        true
+    }
+
+    /// Empty `track` as far as it is allowed to be emptied: an altitude track
+    /// entirely, the water and ground tracks down to their first keyframe (the
+    /// reference's `onClearTrack`).
+    pub fn clear_track(&mut self, track: DayTrack) {
+        let keep = usize::from(!track.may_be_empty());
+        let Some(keyframes) = self.track_mut(track) else {
+            return;
+        };
+        let dropped: Vec<String> = keyframes
+            .split_off(keep.min(keyframes.len()))
+            .into_iter()
+            .map(|frame| frame.name)
+            .collect();
+        for name in dropped {
+            self.forget_unreferenced(&name);
+        }
+    }
+
+    /// Replace `into`'s keyframes with **copies** of `source`'s `from` track,
+    /// under fresh names — the reference's `cloneTrack`, which clones each frame
+    /// rather than referencing it so editing one track cannot change another.
+    ///
+    /// `source` may be this cycle (copying one of its own tracks) or another one
+    /// loaded from inventory. Sky and water do not mix: a water track copied
+    /// into a sky track would name frames of the wrong kind, and the reference
+    /// refuses it with `TrackLoadMismatch`.
+    pub fn clone_track(&mut self, source: &Self, from: DayTrack, into: DayTrack) -> bool {
+        if from.sky_index().is_none() != into.sky_index().is_none() {
+            return false;
+        }
+        if self.track_mut(into).is_none() {
+            return false;
+        }
+        let copied: Vec<DayCycleFrame> = source.track(from).to_vec();
+        // Clear first: the source can be empty, and a partial overwrite would
+        // leave the destination holding a mixture of both tracks.
+        self.clear_whole_track(into);
+        for frame in copied {
+            match from.sky_index() {
+                Some(_sky) => {
+                    let Some(sky) = source.sky_frames.get(&frame.name).cloned() else {
+                        continue;
+                    };
+                    drop(self.insert_sky_keyframe(into, frame.keyframe, sky));
+                }
+                None => {
+                    let Some(water) = source.water_frames.get(&frame.name).cloned() else {
+                        continue;
+                    };
+                    drop(self.insert_water_keyframe(into, frame.keyframe, water));
+                }
+            }
+        }
+        true
+    }
+
+    /// Give the `index`-th keyframe of `track` a frame of its own, when the one
+    /// it names is shared with another keyframe.
+    ///
+    /// A frame is referenced *by name*, and one asset may legally name the same
+    /// frame from two keyframes — so an editor writing a knob into "the selected
+    /// keyframe's frame" would silently change the other one too. Splitting is
+    /// what makes a keyframe editable in isolation. Answers with the name the
+    /// keyframe holds afterwards, whether or not it had to change.
+    pub fn split_shared_frame(&mut self, track: DayTrack, index: usize) -> Option<String> {
+        let name = self.track(track).get(index)?.name.clone();
+        if self.references(&name) <= 1 {
+            return Some(name);
+        }
+        let fresh = self.unique_frame_name(&name);
+        match track.sky_index() {
+            Some(_sky) => {
+                let mut sky = self.sky_frames.get(&name)?.clone();
+                fresh.clone_into(&mut sky.name);
+                drop(self.sky_frames.insert(fresh.clone(), sky));
+            }
+            None => {
+                let mut water = self.water_frames.get(&name)?.clone();
+                fresh.clone_into(&mut water.name);
+                drop(self.water_frames.insert(fresh.clone(), water));
+            }
+        }
+        let keyframes = self.track_mut(track)?;
+        fresh.clone_into(&mut keyframes.get_mut(index)?.name);
+        Some(fresh)
+    }
+
+    /// The **blended** sky on sky track `index` at day `position`, the
+    /// day-cycle interpolation [`EnvironmentSettings::blended_sky_settings`]
+    /// renders through once an altitude has chosen the track.
+    #[must_use]
+    pub fn blended_sky(&self, index: usize, position: f32) -> Option<SkySettings> {
+        let blended = self.sky_tracks.get(index).and_then(|track| {
+            let (lower, upper, factor) = bounding_keyframes(track, position)?;
+            let lower_sky = self.sky_frames.get(&lower.name)?;
+            // If the upper frame is missing, hold the lower one rather than
+            // falling through to an unrelated frame.
+            match self.sky_frames.get(&upper.name) {
+                Some(upper_sky) => Some(lower_sky.blend(upper_sky, factor)),
+                None => Some(lower_sky.clone()),
+            }
+        });
+        blended.or_else(|| self.sky_frames.values().next().cloned())
+    }
+
+    /// The **blended** water at day `position` — the water counterpart of
+    /// [`blended_sky`](Self::blended_sky), on the one region-wide track.
+    #[must_use]
+    pub fn blended_water(&self, position: f32) -> Option<WaterSettings> {
+        let blended =
+            bounding_keyframes(&self.water_track, position).and_then(|(lower, upper, factor)| {
+                let lower_water = self.water_frames.get(&lower.name)?;
+                match self.water_frames.get(&upper.name) {
+                    Some(upper_water) => Some(lower_water.blend(upper_water, factor)),
+                    None => Some(lower_water.clone()),
+                }
+            });
+        blended.or_else(|| self.water_frames.values().next().cloned())
+    }
+
+    /// Empty a track completely, whatever it is — the destination half of a
+    /// clone, which is about to be refilled.
+    fn clear_whole_track(&mut self, track: DayTrack) {
+        let Some(keyframes) = self.track_mut(track) else {
+            return;
+        };
+        let dropped: Vec<String> = std::mem::take(keyframes)
+            .into_iter()
+            .map(|frame| frame.name)
+            .collect();
+        for name in dropped {
+            self.forget_unreferenced(&name);
+        }
+    }
+
+    /// How many keyframes, across every track, name `frame`.
+    fn references(&self, frame: &str) -> usize {
+        DayTrack::all()
+            .into_iter()
+            .map(|track| {
+                self.track(track)
+                    .iter()
+                    .filter(|keyframe| keyframe.name == frame)
+                    .count()
+            })
+            .sum()
+    }
+
+    /// Drop `frame`'s definition when no keyframe names it any more, so a saved
+    /// asset does not grow a frame for every edit ever made.
+    fn forget_unreferenced(&mut self, frame: &str) {
+        if self.references(frame) > 0 {
+            return;
+        }
+        drop(self.sky_frames.remove(frame));
+        drop(self.water_frames.remove(frame));
+    }
+}
+
+/// How far apart two normalised times of day are, the shorter way round the
+/// clock — so `0.99` and `0.01` are `0.02` apart rather than `0.98`.
+fn wrapped_distance(a: f32, b: f32) -> f32 {
+    let raw = (a - b).abs();
+    raw.min(1.0 - raw)
 }
 
 /// One layer of an atmospheric **density profile**: how much of a scattering
@@ -718,19 +1153,8 @@ impl EnvironmentSettings {
     /// the cycle defines no sky frame at all.
     #[must_use]
     pub fn blended_sky_settings(&self, altitude: f32, position: f32) -> Option<SkySettings> {
-        let cycle = &self.day_cycle;
-        let track = cycle.sky_tracks.get(self.sky_track_for_altitude(altitude));
-        let blended = track.and_then(|track| {
-            let (lower, upper, factor) = bounding_keyframes(track, position)?;
-            let lower_sky = cycle.sky_frames.get(&lower.name)?;
-            // If the upper frame is missing, hold the lower one rather than
-            // falling through to an unrelated frame.
-            match cycle.sky_frames.get(&upper.name) {
-                Some(upper_sky) => Some(lower_sky.blend(upper_sky, factor)),
-                None => Some(lower_sky.clone()),
-            }
-        });
-        blended.or_else(|| cycle.sky_frames.values().next().cloned())
+        self.day_cycle
+            .blended_sky(self.sky_track_for_altitude(altitude), position)
     }
 
     /// The active [`WaterSettings`] for a day-cycle `position` (the normalised
@@ -765,18 +1189,7 @@ impl EnvironmentSettings {
     /// to `None` only if the cycle defines no water frame at all.
     #[must_use]
     pub fn blended_water_settings(&self, position: f32) -> Option<WaterSettings> {
-        let cycle = &self.day_cycle;
-        let blended =
-            bounding_keyframes(&cycle.water_track, position).and_then(|(lower, upper, factor)| {
-                let lower_water = cycle.water_frames.get(&lower.name)?;
-                // If the upper frame is missing, hold the lower one rather than
-                // falling through to an unrelated frame.
-                match cycle.water_frames.get(&upper.name) {
-                    Some(upper_water) => Some(lower_water.blend(upper_water, factor)),
-                    None => Some(lower_water.clone()),
-                }
-            });
-        blended.or_else(|| cycle.water_frames.values().next().cloned())
+        self.day_cycle.blended_water(position)
     }
 }
 
@@ -1885,5 +2298,316 @@ mod tests {
         assert_eq!(sky.kind(), SettingsKind::Sky);
         assert_eq!(water.kind(), SettingsKind::Water);
         assert_eq!(day.kind(), SettingsKind::DayCycle);
+    }
+
+    // -----------------------------------------------------------------------
+    // Editing a day cycle (`LLSettingsDay`'s own track operations).
+    // -----------------------------------------------------------------------
+
+    /// A cycle with one sky keyframe on the ground track and one water
+    /// keyframe — the shape the built-in default has, and what every editing
+    /// test below starts from.
+    fn one_frame_cycle() -> super::DayCycle {
+        EnvironmentSettings::legacy_windlight_default().day_cycle
+    }
+
+    /// The reference numbers its tracks `0..=4` with water first; the sky
+    /// tracks here are a list of their own. A round trip through both
+    /// numberings is what keeps a keyframe on the track it was put on.
+    #[test]
+    fn a_track_survives_the_reference_numbering_both_ways() {
+        use super::{DayTrack, SKY_TRACK_COUNT};
+        for track in DayTrack::all() {
+            assert_eq!(
+                DayTrack::from_reference_index(track.reference_index()),
+                Some(track)
+            );
+        }
+        assert_eq!(DayTrack::from_reference_index(0), Some(DayTrack::Water));
+        assert_eq!(DayTrack::from_reference_index(1), Some(DayTrack::GROUND));
+        // Past the last sky track there is no track, rather than a fifth one.
+        assert_eq!(
+            DayTrack::from_reference_index(SKY_TRACK_COUNT.saturating_add(1)),
+            None
+        );
+        assert_eq!(DayTrack::Water.sky_index(), None);
+        assert_eq!(DayTrack::Sky(2).sky_index(), Some(2));
+    }
+
+    /// **An altitude track a cycle does not carry reads as empty**, and writing
+    /// to it grows the list. A day cycle off a grid usually has one sky track;
+    /// the editor lets somebody put a sky at 3000 m on it, and that has to
+    /// materialise rather than be dropped.
+    #[test]
+    fn writing_to_an_absent_altitude_track_materialises_it() {
+        use super::{DayTrack, SkySettings};
+        let mut cycle = one_frame_cycle();
+        assert_eq!(cycle.sky_tracks.len(), 1);
+        assert!(cycle.track(DayTrack::Sky(3)).is_empty());
+        let filed = cycle.insert_sky_keyframe(
+            DayTrack::Sky(3),
+            0.5,
+            SkySettings::legacy_windlight_default("High"),
+        );
+        assert_eq!(filed.as_deref(), Some("High"));
+        assert_eq!(cycle.sky_tracks.len(), 4);
+        assert_eq!(cycle.track(DayTrack::Sky(3)).len(), 1);
+        // The tracks in between exist and are empty, which is what a cycle with
+        // no separate sky in those bands means.
+        assert!(cycle.track(DayTrack::Sky(1)).is_empty());
+    }
+
+    /// **Two keyframes cannot sit on top of each other.** The reference refuses
+    /// an insert within its slop factor because its own timeline widget cannot
+    /// tell two such handles apart — and a pair of keyframes a fraction of a
+    /// percent apart is a discontinuity nobody meant to author.
+    #[test]
+    fn a_keyframe_cannot_be_added_onto_another() {
+        use super::{DayTrack, KEYFRAME_SLOP, SkySettings};
+        let mut cycle = one_frame_cycle();
+        let sky = || SkySettings::legacy_windlight_default("Noon");
+        assert!(
+            cycle
+                .insert_sky_keyframe(DayTrack::GROUND, 0.5, sky())
+                .is_some()
+        );
+        // Inside the slop of the one just added: refused.
+        assert!(
+            cycle
+                .insert_sky_keyframe(DayTrack::GROUND, 0.5 + KEYFRAME_SLOP / 2.0, sky())
+                .is_none()
+        );
+        // Just outside it: allowed, and named apart from its neighbour.
+        let far = cycle.insert_sky_keyframe(DayTrack::GROUND, 0.5 + KEYFRAME_SLOP * 2.0, sky());
+        assert_eq!(far.as_deref(), Some("Noon (2)"));
+        assert_eq!(cycle.track(DayTrack::GROUND).len(), 3);
+    }
+
+    /// The slop lookup goes the short way round midnight, so the last keyframe
+    /// of the day is near the first position of the next one.
+    #[test]
+    fn a_keyframe_before_midnight_is_near_a_position_after_it() {
+        use super::{DayTrack, KEYFRAME_SLOP, SkySettings};
+        let mut cycle = one_frame_cycle();
+        drop(cycle.insert_sky_keyframe(
+            DayTrack::GROUND,
+            0.99,
+            SkySettings::legacy_windlight_default("Midnight"),
+        ));
+        assert!(
+            cycle
+                .keyframe_near(DayTrack::GROUND, 0.005, KEYFRAME_SLOP)
+                .is_some()
+        );
+    }
+
+    /// A keyframe stays sorted when it is dragged past its neighbours, and it
+    /// refuses to land on one.
+    #[test]
+    fn moving_a_keyframe_keeps_the_track_ordered_and_refuses_a_collision() {
+        use super::{DayTrack, SkySettings};
+        let mut cycle = one_frame_cycle();
+        for (position, name) in [(0.25, "Morning"), (0.75, "Evening")] {
+            drop(cycle.insert_sky_keyframe(
+                DayTrack::GROUND,
+                position,
+                SkySettings::legacy_windlight_default(name),
+            ));
+        }
+        // The ground track is now [0.0 default, 0.25 Morning, 0.75 Evening].
+        let moved = cycle.move_keyframe(DayTrack::GROUND, 1, 0.9);
+        assert_eq!(moved, Some(2), "dragging past a neighbour re-sorts");
+        let names: Vec<&str> = cycle
+            .track(DayTrack::GROUND)
+            .iter()
+            .map(|frame| frame.name.as_str())
+            .collect();
+        assert_eq!(names, [super::DEFAULT_SKY_FRAME, "Evening", "Morning"]);
+        // Onto its new neighbour: refused, and nothing moves.
+        assert_eq!(cycle.move_keyframe(DayTrack::GROUND, 2, 0.75), None);
+        assert_eq!(
+            cycle.track(DayTrack::GROUND).get(2).map(|f| f.keyframe),
+            Some(0.9)
+        );
+    }
+
+    /// **Removing the last keyframe of a track that must have one is refused**,
+    /// and removing any other takes its frame definition with it — the asset
+    /// would otherwise grow a frame for every edit ever made and never shrink.
+    #[test]
+    fn removing_a_keyframe_drops_its_frame_but_never_empties_the_ground() {
+        use super::{DayTrack, SkySettings};
+        let mut cycle = one_frame_cycle();
+        drop(cycle.insert_sky_keyframe(
+            DayTrack::GROUND,
+            0.5,
+            SkySettings::legacy_windlight_default("Noon"),
+        ));
+        assert!(cycle.sky_frames.contains_key("Noon"));
+        assert!(cycle.remove_keyframe(DayTrack::GROUND, 1));
+        assert!(
+            !cycle.sky_frames.contains_key("Noon"),
+            "an orphan frame goes"
+        );
+        // One left on the ground track, and it stays.
+        assert!(!cycle.remove_keyframe(DayTrack::GROUND, 0));
+        assert_eq!(cycle.track(DayTrack::GROUND).len(), 1);
+        // The water track is the same: never empty.
+        assert!(!cycle.remove_keyframe(DayTrack::Water, 0));
+        // An altitude track may be emptied completely.
+        drop(cycle.insert_sky_keyframe(
+            DayTrack::Sky(2),
+            0.5,
+            SkySettings::legacy_windlight_default("High"),
+        ));
+        assert!(cycle.remove_keyframe(DayTrack::Sky(2), 0));
+        assert!(cycle.track(DayTrack::Sky(2)).is_empty());
+    }
+
+    /// Clearing follows the same rule: an altitude track goes entirely, the
+    /// water and ground tracks down to their first keyframe.
+    #[test]
+    fn clearing_a_track_keeps_what_a_cycle_cannot_do_without() {
+        use super::{DayTrack, SkySettings};
+        let mut cycle = one_frame_cycle();
+        for (track, position, name) in [
+            (DayTrack::GROUND, 0.3, "Morning"),
+            (DayTrack::GROUND, 0.6, "Evening"),
+            (DayTrack::Sky(1), 0.2, "High A"),
+            (DayTrack::Sky(1), 0.8, "High B"),
+        ] {
+            drop(cycle.insert_sky_keyframe(
+                track,
+                position,
+                SkySettings::legacy_windlight_default(name),
+            ));
+        }
+        cycle.clear_track(DayTrack::Sky(1));
+        assert!(cycle.track(DayTrack::Sky(1)).is_empty());
+        assert!(!cycle.sky_frames.contains_key("High A"));
+
+        cycle.clear_track(DayTrack::GROUND);
+        assert_eq!(cycle.track(DayTrack::GROUND).len(), 1);
+        assert!(!cycle.sky_frames.contains_key("Evening"));
+        // And the one frame the ground track kept is still defined.
+        let kept = cycle
+            .track(DayTrack::GROUND)
+            .first()
+            .map(|frame| frame.name.clone())
+            .unwrap_or_default();
+        assert!(cycle.sky_frames.contains_key(&kept));
+    }
+
+    /// **A cloned track is copies, not references.** The reference clones each
+    /// frame (`buildDerivedClone`) for exactly this reason: editing the sky at
+    /// 2000 m must not reach down and change the one at ground level.
+    #[test]
+    fn cloning_a_track_copies_its_frames_rather_than_sharing_them() {
+        use super::{DayTrack, SkySettings};
+        let mut cycle = one_frame_cycle();
+        drop(cycle.insert_sky_keyframe(
+            DayTrack::GROUND,
+            0.5,
+            SkySettings::legacy_windlight_default("Noon"),
+        ));
+        let source = cycle.clone();
+        assert!(cycle.clone_track(&source, DayTrack::GROUND, DayTrack::Sky(1)));
+        assert_eq!(cycle.track(DayTrack::Sky(1)).len(), 2);
+        // Every keyframe of the copy names a frame of its own.
+        let ground: Vec<&str> = cycle
+            .track(DayTrack::GROUND)
+            .iter()
+            .map(|frame| frame.name.as_str())
+            .collect();
+        for frame in cycle.track(DayTrack::Sky(1)) {
+            assert!(!ground.contains(&frame.name.as_str()), "{}", frame.name);
+        }
+        // Editing the copy leaves the original alone.
+        let copied = cycle
+            .track(DayTrack::Sky(1))
+            .first()
+            .map(|frame| frame.name.clone())
+            .unwrap_or_default();
+        if let Some(frame) = cycle.sky_frames.get_mut(&copied) {
+            frame.haze_density = 9.0;
+        }
+        let original = cycle
+            .track(DayTrack::GROUND)
+            .first()
+            .map(|frame| frame.name.clone())
+            .unwrap_or_default();
+        assert!(
+            cycle
+                .sky_frames
+                .get(&original)
+                .is_some_and(|frame| frame.haze_density < 9.0)
+        );
+        // Water and sky do not mix.
+        assert!(!cycle.clone_track(&source, DayTrack::Water, DayTrack::GROUND));
+        assert!(!cycle.clone_track(&source, DayTrack::GROUND, DayTrack::Water));
+    }
+
+    /// **A frame two keyframes share is split before either is edited.** One
+    /// asset may legally name the same frame twice, and an editor that wrote
+    /// into it would change a keyframe the user never selected.
+    #[test]
+    fn editing_a_shared_frame_gives_the_keyframe_one_of_its_own() {
+        use super::{DayCycleFrame, DayTrack};
+        let mut cycle = one_frame_cycle();
+        let shared = cycle
+            .track(DayTrack::GROUND)
+            .first()
+            .map(|frame| frame.name.clone())
+            .unwrap_or_default();
+        // A second keyframe naming the same frame — what a hand-written asset
+        // (or another viewer) may well contain.
+        if let Some(track) = cycle.sky_tracks.first_mut() {
+            track.push(DayCycleFrame {
+                keyframe: 0.5,
+                name: shared.clone(),
+            });
+        }
+        let split = cycle.split_shared_frame(DayTrack::GROUND, 1);
+        assert!(split.is_some());
+        pretty_assertions::assert_ne!(split.as_deref(), Some(shared.as_str()));
+        assert_eq!(cycle.sky_frames.len(), 2);
+        // Splitting again is a no-op: it is nobody else's frame now.
+        let again = cycle.split_shared_frame(DayTrack::GROUND, 1);
+        assert_eq!(again, split);
+        assert_eq!(cycle.sky_frames.len(), 2);
+    }
+
+    /// The per-track blend the editor previews through is the one the renderer
+    /// uses once an altitude has chosen the track — same function, and a track
+    /// index rather than a height is the whole difference.
+    #[test]
+    fn the_editor_s_blend_and_the_renderer_s_are_the_same_lookup() {
+        use super::DayTrack;
+        let mut settings = EnvironmentSettings::legacy_windlight_default();
+        settings.track_altitudes = [1000.0, 2000.0, 3000.0];
+        let cycle = &mut settings.day_cycle;
+        drop(cycle.insert_sky_keyframe(
+            DayTrack::GROUND,
+            0.5,
+            SkySettings {
+                haze_density: 3.0,
+                ..SkySettings::legacy_windlight_default("Noon")
+            },
+        ));
+        let by_track = settings.day_cycle.blended_sky(0, 0.5);
+        let by_altitude = settings.blended_sky_settings(10.0, 0.5);
+        assert_eq!(
+            by_track.map(|sky| sky.haze_density),
+            by_altitude.map(|sky| sky.haze_density)
+        );
+        assert_eq!(
+            settings
+                .day_cycle
+                .blended_water(0.25)
+                .map(|water| water.name),
+            settings
+                .blended_water_settings(0.25)
+                .map(|water| water.name)
+        );
     }
 }

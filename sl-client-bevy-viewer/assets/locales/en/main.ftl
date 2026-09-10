@@ -3711,7 +3711,6 @@ my-environments-delete-question = delete the selected environment
 # Status-line replies.
 my-environments-applied = Applied to you.
 my-environments-not-modifiable = That item may not be changed.
-my-environments-no-editor = A day cycle has no editor yet.
 my-environments-no-folder = There is nowhere to put a new environment yet.
 my-environments-setenv = An object is holding the environment.
 
@@ -3742,6 +3741,40 @@ settings-editor-tab-clouds = Clouds
 settings-editor-tab-sun-moon = Sun & Moon
 settings-editor-tab-density = Density
 settings-editor-tab-water = Water
+
+## The day-cycle editor, over a day-cycle settings asset in inventory.
+
+day-cycle-editor-title = Day Cycle
+# The five tracks, stacked by altitude with the water below them all. The
+# altitude tracks are numbered rather than named after their breakpoints: the
+# breakpoints belong to a region, and this window edits an inventory item that
+# has not been given to one.
+day-cycle-track-water = Water
+day-cycle-track-ground = Ground Level
+day-cycle-track-sky-2 = Sky 2
+day-cycle-track-sky-3 = Sky 3
+day-cycle-track-sky-4 = Sky 4
+# The keyframe verbs, acting on the selected track at the scrubber.
+day-cycle-add-frame = Add Frame
+day-cycle-load-frame = Load Frame
+day-cycle-delete-frame = Delete Frame
+# The track verbs. Copy takes another track of this cycle; Load takes the
+# matching track of a day cycle in inventory.
+day-cycle-copy-track = Copy Track
+day-cycle-load-track = Load Track
+day-cycle-clear-track = Clear Track
+# The transport: one button whose label says what pressing it does now.
+day-cycle-play = Play
+day-cycle-pause = Pause
+day-cycle-skip-back = Previous
+day-cycle-skip-forward = Next
+# Shown while the scrubber sits between keyframes, where there is nothing a
+# knob could be written into.
+day-cycle-select-a-keyframe = Select a keyframe on the timeline to edit it.
+# The time readout and the timeline's tick labels. Without a day length — no
+# region yet — only the percentage can be said.
+day-cycle-time-percent = { $percent }%
+day-cycle-time = { $percent }% ({ $hours }:{ $minutes })
 
 ## The environment knobs, shared by every window that shows them: the Personal
 ## Lighting floater and the sky / water settings editors.

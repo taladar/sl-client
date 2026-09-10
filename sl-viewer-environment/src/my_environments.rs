@@ -30,8 +30,8 @@
 //!
 //! - **Edit** opens the settings editor for the row's kind — the same
 //!   [`OpenSettingsEditor`] the inventory's Open sends, so there is one route
-//!   into those windows. A day cycle has no editor yet, so the entry is greyed
-//!   rather than absent ([[viewer-environment-day-cycle-editor]]).
+//!   into those windows, and one for each of the three kinds: a sky or water
+//!   frame in the fixed editors, a day cycle in its own.
 //! - **Apply Only To Myself** is the reference's `PARAMETER_LOCAL`: a
 //!   [`LocalEnvironmentPick`], which fetches the asset and installs it in the
 //!   **local** environment layer once it decodes. The window never touches the
@@ -43,8 +43,8 @@
 //!   inventory floater spells them: a rename is a `MoveInventoryItem` into the
 //!   same folder under a new name, and a delete is a `MoveInventoryItem` into the
 //!   Trash — after the reference's `DeleteItems` confirmation.
-//! - **New Sky** / **New Water** mint an item through [`new_settings_item`],
-//!   the same function the inventory's create menus call.
+//! - **New Sky** / **New Water** / **New Day Cycle** mint an item through
+//!   [`new_settings_item`], the same function the inventory's create menus call.
 //!
 //! # Not here
 //!
@@ -57,9 +57,6 @@
 //!   entry that fails on most land.
 //! - **Copy / Paste.** The reference's gear menu forwards them to the inventory
 //!   panel's own clipboard, which this window is not hosting one of.
-//! - **New Day Cycle.** Greyed, as it is in the inventory's create menu and for
-//!   the same reason: an item nothing can open is worse than an entry that says
-//!   so.
 //!
 //! Reference (Firestorm, read-only): `llfloatermyenvironment.cpp`,
 //! `floater_my_environments.xml`, `menu_settings_gear.xml`,
@@ -143,8 +140,13 @@ const DISABLED_BACKGROUND: Color = Color::srgb(0.17, 0.19, 0.23);
 /// A disabled action button's label.
 const DISABLED_LABEL: Color = Color::srgb(0.48, 0.51, 0.57);
 
-/// The two kinds this viewer can mint from nothing, in the add row's order.
-const CREATABLE_KINDS: [SettingsKind; 2] = [SettingsKind::Sky, SettingsKind::Water];
+/// The kinds this viewer can mint from nothing, in the add row's order — all
+/// three, since the day-cycle editor exists to open the third with.
+const CREATABLE_KINDS: [SettingsKind; 3] = [
+    SettingsKind::Sky,
+    SettingsKind::Water,
+    SettingsKind::DayCycle,
+];
 
 // --- Table ----------------------------------------------------------------
 
@@ -199,9 +201,6 @@ static MY_ENVIRONMENTS_TABLE: TableSpec = TableSpec {
 
 // --- Context menu ---------------------------------------------------------
 
-/// Condition: the pressed row has an editor to open (a sky or a water frame).
-const COND_HAS_EDITOR: &str = "my-environments-has-editor";
-
 /// Condition: the pressed row's item may be written to — the owner modify bit,
 /// and not the read-only Library.
 const COND_MODIFIABLE: &str = "my-environments-modifiable";
@@ -210,7 +209,7 @@ const COND_MODIFIABLE: &str = "my-environments-modifiable";
 static MY_ENVIRONMENTS_MENU: MenuDef = MenuDef {
     label: "Environment",
     items: &[
-        MenuItemDef::Command(MenuCommand::new("Edit", "edit").enabled_when(COND_HAS_EDITOR)),
+        MenuItemDef::Command(MenuCommand::new("Edit", "edit")),
         MenuItemDef::Separator,
         MenuItemDef::Command(MenuCommand::new("Apply Only To Myself", "apply-local")),
         MenuItemDef::Separator,
@@ -652,20 +651,6 @@ fn spawn_action_row(commands: &mut Commands, parent: Entity) {
         );
         tab = tab.saturating_add(1);
     }
-    // The third creator is in the row and disabled, as it is in the inventory's
-    // create menu: the entry is where it will be, and says why it is not usable
-    // yet by being greyed rather than missing.
-    let day_cycle = spawn_action_button(
-        commands,
-        holder,
-        MyEnvironmentsButton::New(SettingsKind::DayCycle),
-        tab,
-        true,
-    );
-    commands
-        .entity(day_cycle)
-        .insert(bevy::ui::InteractionDisabled);
-    tab = tab.saturating_add(1);
 
     commands.spawn((
         Node {
@@ -995,11 +980,9 @@ fn on_environment_row_press(
     let Some(entry) = view.rows.iter().find(|row| row.item == item) else {
         return;
     };
+    // Every settings kind opens in an editor now — a sky or water frame in the
+    // fixed editors, a day cycle in its own — so Edit needs no condition.
     let mut conditions: Vec<&'static str> = Vec::new();
-    // A day cycle has no editor yet; the entry stays, greyed.
-    if entry.kind != SettingsKind::DayCycle {
-        conditions.push(COND_HAS_EDITOR);
-    }
     if model
         .as_deref()
         .is_some_and(|model| is_modifiable(model, entry))
@@ -1182,10 +1165,6 @@ fn handle_my_environments_actions(
                 let Some(info) = model.find_item(item) else {
                     continue;
                 };
-                if entry.kind == SettingsKind::DayCycle {
-                    set_message(&mut texts, status, &translator, "my-environments-no-editor");
-                    continue;
-                }
                 editors.write(OpenSettingsEditor {
                     name: entry.name.clone(),
                     asset_id: entry.asset_id,
