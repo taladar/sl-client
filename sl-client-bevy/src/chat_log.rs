@@ -501,8 +501,22 @@ impl ChatLog {
 
     /// Observes one inbound [`Event`](sl_proto::Event), writing the matching
     /// transcript line(s) when that type's logging is enabled. The conference
-    /// roster is pulled from `session` (the sans-IO chat-session registry).
+    /// roster and the mute list are pulled from `session` (the sans-IO
+    /// chat-session registry and [`Session::mutes`]).
+    ///
+    /// A **blocked** resident is filtered here, on the way in, for the same
+    /// reason the display surfaces filter them: the reference's truth table for
+    /// a muted speaker is *DISPLAY No, STORE IN HISTORY No*
+    /// (`fsfloaternearbychat.cpp`'s `chat.mMuted` gate, and an IM from a muted
+    /// sender that never reaches `addMessage` at all). A transcript that kept
+    /// the line would undo the block on the next recall, handing it straight
+    /// back to the pane the live filter just cleared. Lines written *before* a
+    /// block stay on disk, as they do in the reference — a block is not
+    /// retroactive over a transcript already written.
     pub(crate) fn observe_event(&mut self, session: &Session, event: &sl_proto::Event) {
+        if session.mutes().text_muted_event(event) {
+            return;
+        }
         match event {
             sl_proto::Event::ChatReceived(chat) => {
                 // A worn object's `@`-commands are the viewer's traffic, not

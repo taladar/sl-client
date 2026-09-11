@@ -60,6 +60,7 @@ use crate::bookkeeping_ids::{
     TransactionId, TransferId, XferId,
 };
 use crate::error::Error;
+use crate::mute::MuteList;
 use crate::scoped_id::{CircuitId, ScopedObjectId, ScopedParcelId};
 use crate::terrain;
 use crate::types::EventId;
@@ -77,8 +78,8 @@ use crate::types::{
     InventoryItemMove, InventoryOffer, ItemInfo, Kick, LandEdit, LandSearchType, LandStatItem,
     LandStatReportType, LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams, MapItemType,
     Material, Maturity, MeanCollision, MeanCollisionType, MoneyTransactionType, MovementMode,
-    MuteFlags, MuteType, NeighborInfo, NewInventoryItem, NewInventoryLink, NotecardRez, Object,
-    ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectPlayingAnimation,
+    MuteEntry, MuteFlags, MuteType, NeighborInfo, NewInventoryItem, NewInventoryLink, NotecardRez,
+    Object, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectPlayingAnimation,
     ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
     ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelInfo, ParcelMediaCommand,
     ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate,
@@ -214,6 +215,7 @@ impl Session {
             },
             friends: BTreeMap::new(),
             online: BTreeSet::new(),
+            mutes: MuteList::new(),
             chat_sessions: BTreeMap::new(),
             seed_capability: None,
             pending_complete_movement: false,
@@ -3700,7 +3702,7 @@ impl Session {
                 // The mute list changed; download the named file over Xfer.
                 let filename = trimmed_string(&update.mute_data.filename);
                 if filename.is_empty() {
-                    self.events.push_back(Event::MuteList(Vec::new()));
+                    self.note_mute_list(Vec::new());
                 } else {
                     self.start_xfer_download(XferPurpose::MuteList, &filename, now)?;
                 }
@@ -4699,7 +4701,7 @@ impl Session {
                 // The sim NUL-terminates the method name on the wire.
                 if trimmed_string(&generic.method_data.method) == "emptymutelist" =>
             {
-                self.events.push_back(Event::MuteList(Vec::new()));
+                self.note_mute_list(Vec::new());
             }
             // A generic method-name + parameter envelope used for a grab-bag of
             // loosely-coupled features keyed by `Method` (the feature-specific
@@ -8468,8 +8470,7 @@ impl Session {
     ) -> Result<(), Error> {
         match download.purpose {
             XferPurpose::MuteList => {
-                self.events
-                    .push_back(Event::MuteList(parse_mute_list(&download.buffer)?));
+                self.note_mute_list(parse_mute_list(&download.buffer)?);
             }
             XferPurpose::TaskInventory { task, serial } => {
                 self.events.push_back(Event::TaskInventoryContents {
@@ -8694,11 +8695,32 @@ impl Session {
         Ok(())
     }
 
+    /// Records a mute list the simulator served in [`Session::mutes`] and
+    /// surfaces it as [`Event::MuteList`] — the one way a received list enters
+    /// the session, so the model and the event can never disagree (an empty
+    /// list is a list too: it clears whatever was blocked before).
+    fn note_mute_list(&mut self, entries: Vec<MuteEntry>) {
+        self.mutes.replace(entries.clone());
+        self.events.push_back(Event::MuteList(entries));
+    }
+
+    /// The agent's mute (block) list as this session knows it — the received
+    /// list plus every mute/unmute sent since.
+    ///
+    /// The simulator serves the list only when asked, so this is empty until
+    /// [`Session::request_mute_list`] has been called and the reply has
+    /// arrived; a consumer that never asks blocks nothing.
+    #[must_use]
+    pub const fn mutes(&self) -> &MuteList {
+        &self.mutes
+    }
+
     /// Mutes (blocks) an entity (`UpdateMuteListEntry`). `mute_type` selects what
     /// is muted (use [`MuteType::Agent`] for an avatar); `name` is its display
     /// name (required, especially for [`MuteType::ByName`] where `id` is nil);
     /// `flags` are the per-aspect *exceptions* (use [`MuteFlags::default`] to mute
-    /// everything). Re-request the list to see the change.
+    /// everything). The entry is recorded in [`Session::mutes`] as it goes out, so
+    /// a block takes effect here without waiting for a list re-request.
     ///
     /// # Errors
     ///
@@ -8714,11 +8736,18 @@ impl Session {
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_update_mute_list_entry(id, name, mute_type.to_i32(), flags.0, now)?;
+        self.mutes.note_mute(MuteEntry {
+            id,
+            name: name.to_owned(),
+            mute_type,
+            flags,
+        });
         Ok(())
     }
 
     /// Removes a mute (`RemoveMuteListEntry`). `id` and `name` must match the
-    /// existing entry (from [`Event::MuteList`]).
+    /// existing entry (from [`Event::MuteList`]). The entry leaves
+    /// [`Session::mutes`] as the removal goes out.
     ///
     /// # Errors
     ///
@@ -8727,6 +8756,7 @@ impl Session {
     pub fn unmute(&mut self, id: Uuid, name: &str, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_remove_mute_list_entry(id, name, now)?;
+        self.mutes.note_unmute(id, name);
         Ok(())
     }
 

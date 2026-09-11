@@ -28,6 +28,7 @@
 use bevy::prelude::*;
 use sl_client_bevy::{
     AgentKey, ChatMessage, ChatSource, ChatType, SlEvent, SlIdentity, SlSessionEvent,
+    chat_text_muted,
 };
 
 use crate::settings::ViewerSettings;
@@ -38,7 +39,7 @@ use crate::world_api::LocalChatNotice;
 use crate::world_api::rlv::swallows_owner_say;
 use crate::world_api::{
     MuteModel, ObjectState, SETTING_CHAT_FONT_SIZE, SETTING_CHAT_MAX_LINES,
-    SETTING_NEARBY_TOAST_LIFETIME, chat_text_muted,
+    SETTING_NEARBY_TOAST_LIFETIME,
 };
 
 /// The most chat lines the overlay ever shows at once when no
@@ -356,7 +357,7 @@ pub fn update_chat_overlay(
             )
             && !mutes
                 .as_deref()
-                .is_some_and(|mutes| chat_text_muted(mutes, message))
+                .is_some_and(|mutes| chat_text_muted(mutes.list(), message))
         {
             spawn_line(
                 format_chat_line(message),

@@ -2,6 +2,7 @@
 //! keep-alive, and clean logout, driven entirely by passed-in time.
 
 use crate::bookkeeping_ids::{PingId, TransferId, XferId};
+use crate::mute::MuteList;
 use crate::scoped_id::{CircuitId, ScopedObjectId};
 use crate::types::{
     AssetType, Camera, Diagnostic, Event, Friend, ImageCodec, LoginAccount, LoginParams, Object,
@@ -1734,6 +1735,17 @@ pub struct Session {
     /// or not visible", never provably offline (a friend who does not grant us
     /// `CAN_SEE_ONLINE` never generates a notification).
     online: BTreeSet<FriendKey>,
+    /// The agent's mute (block) list, mirrored from the list the simulator
+    /// serves ([`Event::MuteList`](crate::Event::MuteList)) and from the mutes
+    /// this session sends ([`Session::mute`] / [`Session::unmute`]), so a
+    /// locally-issued block takes effect without waiting for a re-request.
+    ///
+    /// Empty until the list is fetched — the simulator volunteers it only in
+    /// answer to a [`Session::request_mute_list`], so a consumer that never
+    /// asks blocks nothing. Grid-level like the buddy cache: it survives
+    /// teleport / region handover, cleared only by a relogin through the
+    /// constructor. Read via [`Session::mutes`].
+    mutes: MuteList,
     /// The chat-session registry: one entry per open IM session (1:1 direct,
     /// group, or ad-hoc conference), keyed by the typed [`ChatSessionKind`] (which
     /// *is* the canonical session id, keeping the three id spaces disjoint). Each

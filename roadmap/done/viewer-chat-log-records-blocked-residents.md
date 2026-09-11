@@ -2,7 +2,7 @@
 id: viewer-chat-log-records-blocked-residents
 title: The disk chat transcript records a blocked resident's lines
 topic: viewer
-status: bugs
+status: done
 origin: found while building [[viewer-muted-residents-text-still-shown]] (2026-09-10)
 refs: [viewer-muted-residents-text-still-shown, viewer-block-list]
 ---

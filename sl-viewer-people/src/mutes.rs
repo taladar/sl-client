@@ -40,11 +40,12 @@
 use bevy::prelude::*;
 
 use sl_client_bevy::{
-    Command, MuteEntry, MuteFlags, MuteType, SlCommand, SlEvent, SlIdentity, SlSessionEvent, Uuid,
+    Command, MUTE_LIST_LIMIT, MuteEntry, MuteFlags, MuteType, SlCommand, SlEvent, SlIdentity,
+    SlSessionEvent, Uuid,
 };
 
 use crate::notifications::ShowNotification;
-use crate::world_api::{MUTE_LIST_LIMIT, MuteModel, RequestBlock};
+use crate::world_api::{MuteModel, RequestBlock};
 
 /// Request the mute list once the session is up (the login handshake has
 /// produced an agent id).

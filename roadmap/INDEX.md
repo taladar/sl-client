@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 322 |
 | blocked | 42 |
 | in-progress | 21 |
-| bugs | 51 |
-| done | 1075 |
+| bugs | 50 |
+| done | 1076 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1653** |
@@ -1185,7 +1185,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (51)
+## bugs (50)
 
 ### viewer
 
@@ -1249,8 +1249,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The world map keeps a second live arboard handle
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
   — Mesh-head brow spikes forward from face-bone shape deformation
-- [`viewer-chat-log-records-blocked-residents`](bugs/viewer-chat-log-records-blocked-residents.md)
-  — The disk chat transcript records a blocked resident's lines
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
   — Check clouds vs the waterline at the horizon against Firestorm
 - [`viewer-combo-stops-opening`](bugs/viewer-combo-stops-opening.md) — A combo
@@ -1306,7 +1304,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1075)
+## done (1076)
 
 ### protocol
 
@@ -1727,6 +1725,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   line history (Ctrl+Up / Ctrl+Down recall)
 - [`viewer-chat-log-grid-key`](done/viewer-chat-log-grid-key.md) — Key the REPL
   binaries' chat logs by grid + avatar, not name alone
+- [`viewer-chat-log-records-blocked-residents`](done/viewer-chat-log-records-blocked-residents.md)
+  — The disk chat transcript records a blocked resident's lines
 - [`viewer-chat-overlay-fade`](done/viewer-chat-overlay-fade.md) — Nearby-chat
   overlay fade / decay
 - [`viewer-chat-sender-name-links`](done/viewer-chat-sender-name-links.md) —

@@ -13,6 +13,7 @@ mod extra_params;
 pub mod j2c;
 mod marketplace;
 pub mod mesh_lod;
+mod mute;
 mod object_update;
 mod particles;
 mod scoped_id;
@@ -55,6 +56,7 @@ pub use marketplace::{
     parse_merchant_status, update_listing_request,
 };
 pub use mesh_lod::{DEFAULT_LOD_FACTOR, MESH_LOD_COUNT, MeshLod};
+pub use mute::{MUTE_LIST_LIMIT, MuteList, chat_text_muted};
 pub use object_update::{
     TerseUpdate, encode_compressed_object, encode_object_motion, encode_terse_object_data,
     encode_terse_texture_entry,

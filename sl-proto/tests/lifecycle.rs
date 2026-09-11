@@ -5786,7 +5786,12 @@ mod test {
             MuteFlags::default(),
             now,
         )?;
+        // The entry is on the session's own list as it goes out, so a block
+        // takes effect here without waiting for the list to be re-downloaded.
+        assert_eq!(session.mutes().is_muted(target), true);
+        assert_eq!(session.mutes().text_muted(target, "Bad Actor"), true);
         session.unmute(target, "Bad Actor", now)?;
+        assert_eq!(session.mutes().is_muted(target), false);
         let sent = drain(&mut session)?;
 
         let request = sent
@@ -5885,6 +5890,17 @@ mod test {
         assert_eq!(second.name, "SpamBot");
         assert_eq!(second.mute_type, MuteType::ByName);
         assert_eq!(second.flags.0, 3);
+
+        // The session keeps the list, not just the event: the agent is blocked
+        // outright, while the by-name entry excepts text chat (flags 3 carries
+        // `ALLOW_TEXT_CHAT`), so what it says is still heard.
+        assert_eq!(session.mutes().entries().len(), 2);
+        assert_eq!(session.mutes().is_muted(muted), true);
+        assert_eq!(session.mutes().text_muted(muted, "Bad Actor"), true);
+        assert_eq!(
+            session.mutes().text_muted(uuid::Uuid::nil(), "SpamBot"),
+            false
+        );
         Ok(())
     }
 

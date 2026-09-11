@@ -29,17 +29,17 @@ use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use sl_client_bevy::{
-    AgentKey, AssetUpdateLocation, AttachmentPoint, AvatarName, BodyPhysics, ChatMessage,
-    ChatSessionKind, ChatSource, Command, ControlFlags, DecodedTexture, DisplayName, Friend,
-    FriendKey, FriendPresence, FriendRights, GroupKey, GroupMembership, ImSessionId,
-    InventoryFolderKey, InventoryKey, JointOverrides, LightData, MAX_FACES, MeshKey, MuteEntry,
-    MuteFlags, MuteType, Object, ObjectExtraParams, ObjectKey, ObjectProperties, ParticleSystem,
-    PrimFaceId, PrimLod, PrimShapeParams, Priority, ReflectionProbe, ReflectionProbeFlags,
-    RegionCoordinates, RegionHandle, RestoreItem, Rotation, ScopedObjectId, ScriptLanguage,
-    ScriptTarget, ScriptUploadLocation, SculptOrMeshKey, SettingsKind, SkeletalDeformations,
-    SlCommand, SurfaceInfo, TaskInventoryKey, TerrainPatch, TextureAnimation, TextureFace,
-    TextureKey, TreeLod, Uuid, Vector, VolumeDeformations, avatar_texture, decode_texture_entry,
-    pcode, texture_face_uv_transform, to_bevy_image,
+    AgentKey, AssetUpdateLocation, AttachmentPoint, AvatarName, BodyPhysics, ChatSessionKind,
+    Command, ControlFlags, DecodedTexture, DisplayName, Friend, FriendKey, FriendPresence,
+    FriendRights, GroupKey, GroupMembership, ImSessionId, InventoryFolderKey, InventoryKey,
+    JointOverrides, LightData, MAX_FACES, MeshKey, MuteEntry, MuteFlags, MuteList, MuteType,
+    Object, ObjectExtraParams, ObjectKey, ObjectProperties, ParticleSystem, PrimFaceId, PrimLod,
+    PrimShapeParams, Priority, ReflectionProbe, ReflectionProbeFlags, RegionCoordinates,
+    RegionHandle, RestoreItem, Rotation, ScopedObjectId, ScriptLanguage, ScriptTarget,
+    ScriptUploadLocation, SculptOrMeshKey, SettingsKind, SkeletalDeformations, SlCommand,
+    SurfaceInfo, TaskInventoryKey, TerrainPatch, TextureAnimation, TextureFace, TextureKey,
+    TreeLod, Uuid, Vector, VolumeDeformations, avatar_texture, decode_texture_entry, pcode,
+    texture_face_uv_transform, to_bevy_image,
 };
 use sl_terrain::TerrainComposition;
 use sl_viewer_kit::coords::{sl_rotation_to_quat, sl_to_bevy_rotation};
@@ -624,26 +624,23 @@ pub enum GridFrame {
     Reference,
 }
 
-/// The most entries the mute list holds — the reference's `MuteListLimit`
-/// debug setting, whose default this matches. A mute past the limit is
-/// refused client-side (the server silently drops it) and reported as
-/// `MuteLimitReached`.
-pub const MUTE_LIST_LIMIT: usize = 1000;
-
-/// The agent's mute list: every muted entry (agents and objects alike — the
-/// tag colouring only ever looks up agent ids).
+/// The agent's mute list as a Bevy resource: the pure [`MuteList`] the session
+/// runtime also keeps, plus the one piece of state only a viewer has — whether
+/// it has already asked the grid for the list.
+///
+/// The matching rules (the by-name fallback, the per-aspect exception bits,
+/// [`chat_text_muted`](sl_client_bevy::chat_text_muted)) live with the list in
+/// `sl-proto`, so the viewer's
+/// surfaces and the runtime's chat-log transcript answer the same question the
+/// same way rather than each spelling it out.
 #[derive(Resource, Debug, Default)]
 pub struct MuteModel {
-    /// The entries, in the order the list was received / mutes were added.
-    entries: Vec<MuteEntry>,
-    /// The non-nil muted ids, derived from [`Self::entries`] — the hot-path
-    /// `is_muted` index.
-    muted: HashSet<Uuid>,
+    /// The list itself, mirrored from the received
+    /// [`MuteList`](sl_client_bevy::SlSessionEvent::MuteList) event and the
+    /// outgoing mute/unmute commands.
+    list: MuteList,
     /// Whether the one-per-session `RequestMuteList` has been sent.
     requested: bool,
-    /// Bumped on every change to [`Self::entries`], so the block-list view
-    /// rebuilds exactly when the list actually moved.
-    revision: u64,
 }
 
 impl MuteModel {
@@ -658,162 +655,88 @@ impl MuteModel {
         true
     }
 
-    /// Whether `id` is on the mute list at all (any aspect).
+    /// The list itself — the whole pure model, for the callers that ask it a
+    /// question this resource does not forward (notably
+    /// [`chat_text_muted`](sl_client_bevy::chat_text_muted)).
+    #[must_use]
+    pub const fn list(&self) -> &MuteList {
+        &self.list
+    }
+
+    /// Whether `id` is on the mute list at all (any aspect)
+    /// ([`MuteList::is_muted`]).
     #[must_use]
     pub fn is_muted(&self, id: Uuid) -> bool {
-        self.muted.contains(&id)
+        self.list.is_muted(id)
     }
 
-    /// Whether the aspect whose *exception* bit is `allow_mask` (one of the
-    /// `MuteFlags::ALLOW_*` constants) is actually muted for `id`: the id is on
-    /// the list **and** the entry does not carry that exception.
+    /// Whether the aspect whose *exception* bit is `allow_mask` is actually
+    /// muted for `id` ([`MuteList::is_muted_aspect`]).
     #[must_use]
     pub fn is_muted_aspect(&self, id: Uuid, allow_mask: u32) -> bool {
-        self.entries
-            .iter()
-            .any(|entry| !entry.id.is_nil() && entry.id == id && !entry.flags.contains(allow_mask))
+        self.list.is_muted_aspect(id, allow_mask)
     }
 
-    /// [`Self::is_muted_aspect`] widened with the reference's **by-name**
-    /// fallback: `LLMuteList::isMuted(id, name, flags)` looks the id up first
-    /// and, failing that, consults the legacy by-name set.
-    ///
-    /// A [`MuteType::ByName`] entry is what the *Block object by name…* dialog
-    /// writes, and it is the only lever there is against a spammy object one
-    /// cannot click — a griefer's rezzer hands out a fresh id per object, so
-    /// matching on the id alone would leave that dialog inert for the very case
-    /// it exists for. An empty `name` never matches, so a caller with no name
-    /// to offer degrades to the id-only test rather than to "mute everything
-    /// blocked by name".
+    /// [`Self::is_muted_aspect`] widened with the reference's by-name fallback
+    /// ([`MuteList::is_muted_aspect_named`]).
     #[must_use]
     pub fn is_muted_aspect_named(&self, id: Uuid, name: &str, allow_mask: u32) -> bool {
-        self.is_muted_aspect(id, allow_mask)
-            || (!name.is_empty()
-                && self.entries.iter().any(|entry| {
-                    entry.id.is_nil()
-                        && entry.name.eq_ignore_ascii_case(name)
-                        && !entry.flags.contains(allow_mask)
-                }))
+        self.list.is_muted_aspect_named(id, name, allow_mask)
     }
 
-    /// The whole list, in display order.
+    /// Whether the resident `id` / `name` names has their text chat blocked
+    /// ([`MuteList::text_muted`]).
+    #[must_use]
+    pub fn text_muted(&self, id: Uuid, name: &str) -> bool {
+        self.list.text_muted(id, name)
+    }
+
+    /// The whole list, in display order ([`MuteList::entries`]).
     #[must_use]
     pub fn entries(&self) -> &[MuteEntry] {
-        &self.entries
+        self.list.entries()
     }
 
     /// The list revision — a view stores the value it last built at and
-    /// rebuilds when it advances.
+    /// rebuilds when it advances ([`MuteList::revision`]).
     #[must_use]
     pub const fn revision(&self) -> u64 {
-        self.revision
+        self.list.revision()
     }
 
-    /// Whether the list is at [`MUTE_LIST_LIMIT`] and refuses further mutes.
+    /// Whether the list is at [`MUTE_LIST_LIMIT`](sl_client_bevy::MUTE_LIST_LIMIT)
+    /// and refuses further mutes ([`MuteList::is_full`]).
     #[must_use]
     pub const fn is_full(&self) -> bool {
-        self.entries.len() >= MUTE_LIST_LIMIT
+        self.list.is_full()
     }
 
-    /// Whether a **by-name** entry already carries `name` (case-insensitively)
-    /// — the duplicate check a by-name block needs, since such entries share a
-    /// nil id and nothing else tells them apart. Entries with an id are not
-    /// consulted: the reference keeps its by-name mutes in a separate set, so
-    /// blocking an object *by name* is allowed even when a same-named avatar is
-    /// blocked by id.
+    /// Whether a **by-name** entry already carries `name`
+    /// ([`MuteList::has_by_name`]).
     #[must_use]
     pub fn has_by_name(&self, name: &str) -> bool {
-        self.entries
-            .iter()
-            .any(|entry| entry.id.is_nil() && entry.name.eq_ignore_ascii_case(name))
+        self.list.has_by_name(name)
     }
 
-    /// The entry matching `id` / `name`, if any (see the module docs for how a
-    /// nil id falls back to the name).
+    /// The entry matching `id` / `name`, if any ([`MuteList::entry`]).
     #[must_use]
     pub fn entry(&self, id: Uuid, name: &str) -> Option<&MuteEntry> {
-        self.entries
-            .iter()
-            .find(|entry| same_target(entry, id, name))
+        self.list.entry(id, name)
     }
 
-    /// Record a locally-issued mute so consumers update without waiting for a
-    /// list re-request. An existing entry for the same target is **replaced**
-    /// (that is how a flag edit lands, since it re-sends the whole entry).
+    /// Record a locally-issued mute ([`MuteList::note_mute`]).
     pub fn note_mute(&mut self, entry: MuteEntry) {
-        if let Some(existing) = self
-            .entries
-            .iter_mut()
-            .find(|candidate| same_target(candidate, entry.id, &entry.name))
-        {
-            *existing = entry;
-        } else {
-            self.entries.push(entry);
-        }
-        self.reindex();
+        self.list.note_mute(entry);
     }
 
-    /// Record a locally-issued unmute (see [`Self::note_mute`]).
+    /// Record a locally-issued unmute ([`MuteList::note_unmute`]).
     pub fn note_unmute(&mut self, id: Uuid, name: &str) {
-        self.entries.retain(|entry| !same_target(entry, id, name));
-        self.reindex();
+        self.list.note_unmute(id, name);
     }
 
-    /// Replace the whole list (a received `MuteList`).
+    /// Replace the whole list, a received `MuteList` ([`MuteList::replace`]).
     pub fn replace(&mut self, entries: Vec<MuteEntry>) {
-        self.entries = entries;
-        self.reindex();
-    }
-
-    /// Rebuild the derived id index and bump the revision.
-    fn reindex(&mut self) {
-        self.muted = self
-            .entries
-            .iter()
-            .map(|entry| entry.id)
-            .filter(|id| !id.is_nil())
-            .collect();
-        self.revision = self.revision.wrapping_add(1);
-    }
-}
-
-/// Whether `entry` is the mute list's record of `id` / `name`: by id when the
-/// id is non-nil, else by case-folded name (a [`MuteType::ByName`] entry).
-fn same_target(entry: &MuteEntry, id: Uuid, name: &str) -> bool {
-    if id.is_nil() {
-        entry.id.is_nil() && entry.name.eq_ignore_ascii_case(name)
-    } else {
-        entry.id == id
-    }
-}
-
-/// Whether a nearby-chat message must be swallowed because its speaker's **text
-/// chat** is blocked — the reference's pair of `flagTextChat` tests in
-/// `LLViewerMessage`'s `process_chat_from_simulator`:
-/// `isMuted(from_id, from_name, flagTextChat) || isMuted(owner_id,
-/// flagTextChat)`.
-///
-/// An object is muted by *either* its own id or its owner's, exactly as a
-/// sound from it is (`world_sounds`' `muted`): blocking the resident who
-/// rezzed a chatspammer has to silence every one of their objects, not just
-/// the one that was clickable. The owner is not consulted for an avatar
-/// speaker — an avatar owns itself, and `owner_id` is `None` there anyway.
-///
-/// The system's own lines are never mutable: they carry no id to block, and
-/// swallowing them would hide region restarts and the viewer's own notices.
-#[must_use]
-pub fn chat_text_muted(mutes: &MuteModel, message: &ChatMessage) -> bool {
-    let by_speaker =
-        |id: Uuid| mutes.is_muted_aspect_named(id, &message.from_name, MuteFlags::ALLOW_TEXT_CHAT);
-    match message.source {
-        ChatSource::Agent(agent) => by_speaker(agent.uuid()),
-        ChatSource::Object(object) => {
-            by_speaker(object.uuid())
-                || message
-                    .owner_id
-                    .is_some_and(|owner| mutes.is_muted_aspect(owner, MuteFlags::ALLOW_TEXT_CHAT))
-        }
-        ChatSource::System | ChatSource::Unknown { .. } => false,
+        self.list.replace(entries);
     }
 }
 
@@ -7163,125 +7086,50 @@ mod tests {
     use std::collections::HashMap;
 
     use super::{
-        MuteModel, PROVISIONAL_ID_CHARS, PatchKey, TerrainState, chat_text_muted,
-        provisional_label, target_for, used_baked_slots,
+        MuteModel, PROVISIONAL_ID_CHARS, PatchKey, TerrainState, provisional_label, target_for,
+        used_baked_slots,
     };
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{
-        AgentKey, ChatAudible, ChatMessage, ChatSource, ChatType, MuteEntry, MuteFlags, MuteType,
-        ObjectKey, RegionCoordinates, RegionHandle, ScriptLanguage, ScriptTarget, TerrainLayerType,
-        TerrainPatch, TextureEntry, TextureFace, TextureKey, Uuid, avatar_texture,
-        encode_texture_entry,
+        AgentKey, MuteEntry, MuteFlags, MuteType, RegionHandle, ScriptLanguage, ScriptTarget,
+        TerrainLayerType, TerrainPatch, TextureEntry, TextureFace, TextureKey, Uuid,
+        avatar_texture, encode_texture_entry,
     };
 
     /// The region and grid position the terrain test patches use.
     const KEY: PatchKey = (RegionHandle(0), 1, 2);
 
-    /// A mute-list entry blocking `id` under `name` as `mute_type`, with the
-    /// given exception bits (`MuteFlags::default()` mutes every aspect).
-    fn mute(id: Uuid, name: &str, mute_type: MuteType, flags: u32) -> MuteEntry {
-        MuteEntry {
-            id,
-            name: name.to_owned(),
-            mute_type,
-            flags: MuteFlags(flags),
-        }
-    }
-
-    /// A received nearby-chat message from `source`, named `from_name`, with an
-    /// optional owner (an object's).
-    fn said(from_name: &str, source: ChatSource, owner_id: Option<Uuid>) -> ChatMessage {
-        ChatMessage {
-            from_name: from_name.to_owned(),
-            source,
-            owner_id,
-            chat_type: ChatType::Normal,
-            audible: ChatAudible::Fully,
-            position: RegionCoordinates::new(0.0, 0.0, 0.0),
-            message: "hello".to_owned(),
-        }
-    }
-
-    /// The text-chat aspect is muted only for a target actually on the list and
-    /// only while that entry does *not* carry the text exception — and a
-    /// **by-name** entry (what *Block object by name…* writes) matches a
-    /// speaker whose id is nowhere on the list, which is the whole point of
-    /// blocking by name.
+    /// The resource forwards to the pure list it wraps: a locally-noted mute
+    /// is visible through every accessor a surface uses, and the revision the
+    /// block-list view rebuilds on advances with it.
     #[test]
-    fn text_mute_honours_the_exception_bit_and_the_by_name_fallback() {
+    fn the_resource_forwards_to_the_list_it_wraps() {
         let troll = Uuid::from_u128(0x11);
-        let quiet = Uuid::from_u128(0x22);
-        let spammer = Uuid::from_u128(0x33);
         let mut model = MuteModel::default();
-        model.replace(vec![
-            mute(troll, "Troll Resident", MuteType::Agent, 0),
-            // Blocked, but text chat excepted — they may still speak.
-            mute(
-                quiet,
-                "Quiet Resident",
-                MuteType::Agent,
-                MuteFlags::ALLOW_TEXT_CHAT,
-            ),
-            mute(Uuid::nil(), "Ad Spammer", MuteType::ByName, 0),
-        ]);
+        let before = model.revision();
+        model.note_mute(MuteEntry {
+            id: troll,
+            name: "Troll Resident".to_owned(),
+            mute_type: MuteType::Agent,
+            flags: MuteFlags::default(),
+        });
 
-        assert!(model.is_muted_aspect_named(troll, "Troll Resident", MuteFlags::ALLOW_TEXT_CHAT));
-        assert!(
-            !model.is_muted_aspect_named(quiet, "Quiet Resident", MuteFlags::ALLOW_TEXT_CHAT),
-            "an entry carrying the text exception is not text-muted"
-        );
-        assert!(
-            model.is_muted_aspect_named(spammer, "ad spammer", MuteFlags::ALLOW_TEXT_CHAT),
-            "a by-name entry matches case-insensitively, whatever the speaker's id"
-        );
-        assert!(
-            !model.is_muted_aspect_named(spammer, "Someone Else", MuteFlags::ALLOW_TEXT_CHAT),
-            "an unblocked speaker stays unblocked"
-        );
-        assert!(
-            !model.is_muted_aspect_named(Uuid::nil(), "", MuteFlags::ALLOW_TEXT_CHAT),
-            "a nil id with no name matches nothing — not every by-name entry at once"
-        );
+        assert_eq!(model.is_muted(troll), true);
+        assert_eq!(model.text_muted(troll, "Troll Resident"), true);
+        assert_eq!(model.entries().len(), 1);
+        assert_eq!(model.entry(troll, "").is_some(), true);
+        assert_eq!(model.is_full(), false);
+        assert_eq!(model.list().is_muted(troll), true);
+        assert_eq!(model.revision() > before, true, "the view must rebuild");
     }
 
-    /// An object's chat is silenced by a block on the object *or* on its owner,
-    /// the same pair of keys a sound from it is silenced by; the system's own
-    /// lines are never blocked.
+    /// The one-per-session `RequestMuteList` latch — the only state the
+    /// resource adds to the list — hands the slot out exactly once.
     #[test]
-    fn object_chat_is_muted_by_object_or_owner() {
-        let owner = Uuid::from_u128(0x44);
-        let object = Uuid::from_u128(0x55);
-        let other = Uuid::from_u128(0x66);
-        let mut owner_blocked = MuteModel::default();
-        owner_blocked.replace(vec![mute(owner, "Rezzer Resident", MuteType::Agent, 0)]);
-        let mut object_blocked = MuteModel::default();
-        object_blocked.replace(vec![mute(object, "Yapping Cube", MuteType::Object, 0)]);
-
-        let chatted = said(
-            "Yapping Cube",
-            ChatSource::Object(ObjectKey::from(object)),
-            Some(owner),
-        );
-        assert!(chat_text_muted(&owner_blocked, &chatted), "owner blocked");
-        assert!(chat_text_muted(&object_blocked, &chatted), "object blocked");
-        assert!(
-            !chat_text_muted(
-                &owner_blocked,
-                &said(
-                    "Innocent Cube",
-                    ChatSource::Object(ObjectKey::from(other)),
-                    Some(other),
-                ),
-            ),
-            "another owner's object is untouched"
-        );
-        assert!(
-            !chat_text_muted(
-                &owner_blocked,
-                &said("Second Life", ChatSource::System, None)
-            ),
-            "the system has no id to block and is never swallowed"
-        );
+    fn the_request_latch_is_claimed_once() {
+        let mut model = MuteModel::default();
+        assert_eq!(model.claim_request(), true);
+        assert_eq!(model.claim_request(), false);
     }
 
     /// A single-patch map for the land patch of the given edge size whose height

@@ -66,7 +66,7 @@ use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;
 use sl_client_bevy::{
     AgentKey, ChatSource, ChatType, Command, GroupKey, ImDialog, ImSessionId, MessageCursor,
-    MuteFlags, ObjectKey, SlCommand, SlEvent, SlIdentity, SlSessionEvent, Uuid,
+    ObjectKey, SlCommand, SlEvent, SlIdentity, SlSessionEvent, Uuid, chat_text_muted,
 };
 
 use crate::chat_input::{ChatInputSpec, ChatInputSubmit, spawn_chat_input};
@@ -87,7 +87,6 @@ use crate::ui_tab::{TabDivider, TabPlacement, TabStrip, TabStripWidth, resize_st
 use crate::world_api::rlv::swallows_owner_say;
 use crate::world_api::{
     AvatarPicked, ConversationKey, MuteModel, OpenAvatarPicker, OpenConversation, StartConference,
-    chat_text_muted,
 };
 
 /// The hosting floater's [`crate::floater::FloaterSpec::id`] — it also keys the
@@ -1765,7 +1764,7 @@ fn ingest_conversation_notices(
 /// must not silence the conversation floater. An empty `name` falls back to
 /// matching by id alone.
 fn text_muted(mutes: Option<&MuteModel>, id: Uuid, name: &str) -> bool {
-    mutes.is_some_and(|mutes| mutes.is_muted_aspect_named(id, name, MuteFlags::ALLOW_TEXT_CHAT))
+    mutes.is_some_and(|mutes| mutes.text_muted(id, name))
 }
 
 /// Fold every relevant inbound event into the model: chat / IM / group /
@@ -1823,7 +1822,7 @@ pub(crate) fn ingest_conversation_events(
                         message.chat_type,
                         &message.message,
                     )
-                    && !mutes.is_some_and(|mutes| chat_text_muted(mutes, message))
+                    && !mutes.is_some_and(|mutes| chat_text_muted(mutes.list(), message))
                 {
                     model.push_nearby(&message.from_name, &message.source, &message.message);
                 }
