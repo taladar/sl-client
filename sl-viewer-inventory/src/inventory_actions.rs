@@ -45,14 +45,14 @@
 use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use sl_client_bevy::{
-    AgentKey, AssetKey, AssetType, AssetUpdateLocation, AttachmentMode, AttachmentPoint, Command,
-    DetachOrder, FolderInfo, FolderType, GestureActivation, InventoryFolderKey,
-    InventoryItemOrFolderKey, InventoryKey, InventoryType, ItemInfo, NewInventoryItem,
-    NewInventoryLink, Permissions, RezAttachment, ScriptLanguage, SettingsKind, SlCommand, SlEvent,
-    SlIdentity, SlSessionEvent, TransactionId, UpdatableAssetType, Uuid, VisualParams, Wearable,
-    WearableType,
+    AgentKey, AssetKey, AssetType, AssetUpdateLocation, AttachmentMode, AttachmentPoint,
+    CAP_UPDATE_SETTINGS_AGENT_INVENTORY, CAP_UPDATE_SETTINGS_TASK_INVENTORY, Command, DetachOrder,
+    FolderInfo, FolderType, GestureActivation, InventoryFolderKey, InventoryItemOrFolderKey,
+    InventoryKey, InventoryType, ItemInfo, NewInventoryItem, NewInventoryLink, Permissions,
+    RezAttachment, ScriptLanguage, SettingsKind, SlCapabilities, SlCommand, SlEvent, SlIdentity,
+    SlSessionEvent, TransactionId, UpdatableAssetType, Uuid, VisualParams, Wearable, WearableType,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::inventory::{
     InlineRename, InventoryModel, InventorySelection, InventoryUi, InventoryView, RowKey,
@@ -170,6 +170,11 @@ pub(crate) const CAN_AUTORESPOND_WITH: &str = "can-autorespond-with";
 /// target folder is writable.
 pub(crate) const CAN_CREATE: &str = "can-create";
 
+/// The **grid** can hold a settings asset at all, so the New Sky / New Water /
+/// New Day Cycle entries may be pressed — [`SettingsInventorySupport`]. Orthogonal
+/// to `CAN_CREATE`, which is about the folder rather than the region.
+pub const CAN_CREATE_SETTINGS: &str = "can-create-settings";
+
 /// The target wearable / attachment is currently worn — enables Take Off /
 /// Detach.
 pub(crate) const WORN: &str = "worn";
@@ -270,14 +275,22 @@ static UPLOAD_MENU: MenuDef = MenuDef {
     ],
 };
 
-/// The + menu's New Settings submenu — environment-settings creation is a
-/// future task, kept greyed in reference order.
+/// The + menu's New Settings submenu — the three settings creators, greyed on a
+/// grid that cannot store a settings asset ([`SettingsInventorySupport`], the
+/// reference's `MyEnvironments.EnvironmentEnabled` / `LLPanelMainInventory`'s
+/// `isInventoryEnabled` enable callback).
 static NEW_SETTINGS_MENU: MenuDef = MenuDef {
     label: "New Settings",
     items: &[
-        MenuItemDef::Command(MenuCommand::new("New Sky", "new-sky")),
-        MenuItemDef::Command(MenuCommand::new("New Water", "new-water")),
-        MenuItemDef::Command(MenuCommand::new("New Day Cycle", "new-daycycle")),
+        MenuItemDef::Command(
+            MenuCommand::new("New Sky", "new-sky").enabled_when(CAN_CREATE_SETTINGS),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("New Water", "new-water").enabled_when(CAN_CREATE_SETTINGS),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("New Day Cycle", "new-daycycle").enabled_when(CAN_CREATE_SETTINGS),
+        ),
     ],
 };
 
@@ -1687,6 +1700,7 @@ fn handle_inventory_menu_actions(
         ResMut<crate::inventory::PendingReveal>,
     ),
     library: Option<Res<crate::avatar_assets::AvatarAssetLibrary>>,
+    settings_support: Res<SettingsInventorySupport>,
     mut settings: ResMut<crate::settings::ViewerSettings>,
     mut system_clipboard: Option<ResMut<bevy::clipboard::Clipboard>>,
     outputs: (
@@ -2011,12 +2025,13 @@ fn handle_inventory_menu_actions(
             | "new-pants" | "new-shoes" | "new-socks" | "new-jacket" | "new-skirt"
             | "new-gloves" | "new-undershirt" | "new-underpants" | "new-alpha" | "new-tattoo"
             | "new-universal" | "new-physics" | "new-shape" | "new-skin" | "new-hair"
-            | "new-eyes" | "new-sky" | "new-water" => {
+            | "new-eyes" | "new-sky" | "new-water" | "new-daycycle" => {
                 dispatch_create(
                     action.action,
                     dest,
                     identity.agent_id,
                     library.as_ref().map(|library| library.params()),
+                    *settings_support,
                     &mut pending_creations,
                     &mut settings_creations,
                     &mut commands,
@@ -2446,6 +2461,80 @@ fn deep_copy_folder(
 // New-wearable creation (viewer-inventory-new-wearables).
 // ---------------------------------------------------------------------------
 
+/// Whether the region the agent is in can **store** a settings asset — the
+/// reference's `LLEnvironment::isInventoryEnabled`, which is exactly
+///
+/// ```cpp
+/// !gAgent.getRegionCapability("UpdateSettingsAgentInventory").empty() &&
+/// !gAgent.getRegionCapability("UpdateSettingsTaskInventory").empty()
+/// ```
+///
+/// Every surface that mints or rewrites a settings item is gated on it: the
+/// inventory's New Settings entries, the My Environments library's creators, the
+/// two settings editors' Save / Save As, the day-cycle editor's, and the
+/// WindLight bulk import. Without the gate those surfaces would issue a create
+/// the grid silently drops.
+///
+/// `false` until the seed capabilities arrive, and re-read on every capability
+/// map — a region cross can move the agent onto a grid half that does not do
+/// settings.
+///
+/// Note what this does **not** catch: OpenSim registers both caps (its
+/// `BunchOfCaps` serves them) and so passes this test while still lacking a
+/// settings arm in some of its upload paths. This is parity for a grid that
+/// genuinely does not do settings, not a guard against one that half does.
+#[derive(Resource, Debug, Default, Clone, Copy)]
+pub struct SettingsInventorySupport {
+    /// Whether the last capability map carried **both** settings caps.
+    supported: bool,
+}
+
+impl SettingsInventorySupport {
+    /// The state a grid that does — or does not — do settings puts this in.
+    ///
+    /// The live viewer never calls this: the capability-map ingest below folds
+    /// every `SlCapabilities` into it instead. It exists for the surfaces *above* this
+    /// crate, whose tests have to stand a window up on one grid or the other
+    /// without a session to get the caps from.
+    #[must_use]
+    pub const fn new(supported: bool) -> Self {
+        Self { supported }
+    }
+
+    /// Whether a settings item may be created or saved here.
+    #[must_use]
+    pub const fn supported(self) -> bool {
+        self.supported
+    }
+}
+
+/// Whether a capability map carries **both** settings caps — the predicate of
+/// the reference's `isInventoryEnabled`, on its own so it can be read (and
+/// tested) without an ECS around it.
+fn settings_caps_present(map: &HashMap<String, String>) -> bool {
+    map.contains_key(CAP_UPDATE_SETTINGS_AGENT_INVENTORY)
+        && map.contains_key(CAP_UPDATE_SETTINGS_TASK_INVENTORY)
+}
+
+/// Fold each capability map into [`SettingsInventorySupport`] — the ingest half
+/// of the reference's `isInventoryEnabled`, which asks the agent's region the
+/// same question on every call.
+fn ingest_settings_capabilities(
+    mut capabilities: MessageReader<SlCapabilities>,
+    mut support: ResMut<SettingsInventorySupport>,
+) {
+    for SlCapabilities(map) in capabilities.read() {
+        let supported = settings_caps_present(map);
+        if supported != support.supported {
+            info!(
+                "this region {} store settings assets",
+                if supported { "can" } else { "cannot" }
+            );
+        }
+        support.supported = supported;
+    }
+}
+
 /// The settings kind (and default item name) a create action names.
 pub(crate) fn settings_kind_of(action: &str) -> Option<(SettingsKind, &'static str)> {
     match action {
@@ -2735,14 +2824,15 @@ pub fn new_settings_item(kind: SettingsKind, name: &str, dest: InventoryFolderKe
 #[expect(
     clippy::too_many_arguments,
     reason = "the shared create dispatcher takes every creation input: the action, the \
-              destination, the identity, the wearable param source, the pending-upload queue \
-              and the three output channels"
+              destination, the identity, the wearable param source, whether the grid does \
+              settings at all, the pending-upload queue and the three output channels"
 )]
 fn dispatch_create(
     action: &str,
     dest: InventoryFolderKey,
     own_agent: Option<AgentKey>,
     params: Option<&VisualParams>,
+    settings: SettingsInventorySupport,
     pending_creations: &mut PendingItemCreations,
     settings_creations: &mut PendingSettingsCreations,
     commands: &mut MessageWriter<SlCommand>,
@@ -2778,6 +2868,15 @@ fn dispatch_create(
     // [`new_settings_item`]. No `pending_creations` entry: the simulator stamps
     // a settings item's subtype from the create itself.
     if let Some((kind, name)) = settings_kind_of(action) {
+        if !settings.supported() {
+            // The entries are greyed on the same predicate, so reaching this is
+            // a race (a menu opened before a region cross took the caps away)
+            // rather than a misuse. Refuse rather than mint an item the grid
+            // will drop — the reference refuses in the same place, inside
+            // `LLSettingsVOBase::createNewInventoryItem`.
+            warn!("the region cannot store settings assets; refusing to create a {kind:?}");
+            return true;
+        }
         commands.write(SlCommand(new_settings_item(kind, name, dest)));
         // No body: the point of this path is the default asset the simulator
         // authors. The entry still rides the queue so every settings creation
@@ -2856,6 +2955,7 @@ fn handle_inventory_add_actions(
     selection: Res<InventorySelection>,
     identity: Res<SlIdentity>,
     library: Option<Res<crate::avatar_assets::AvatarAssetLibrary>>,
+    settings_support: Res<SettingsInventorySupport>,
     mut pending_creations: ResMut<PendingItemCreations>,
     mut settings_creations: ResMut<PendingSettingsCreations>,
     mut rename: ResMut<crate::inventory::InlineRename>,
@@ -2882,6 +2982,7 @@ fn handle_inventory_add_actions(
             dest,
             identity.agent_id,
             library.as_ref().map(|lib| lib.params()),
+            *settings_support,
             &mut pending_creations,
             &mut settings_creations,
             &mut commands,
@@ -2963,9 +3064,14 @@ impl Plugin for InventoryActionsPlugin {
             .init_resource::<ActiveGestures>()
             .init_resource::<PendingShare>()
             .init_resource::<PendingItemCreations>()
+            .init_resource::<SettingsInventorySupport>()
             .add_systems(
                 Update,
                 (
+                    // Ahead of the dispatchers: a create pressed on the same
+                    // frame a region's caps arrive is answered against that
+                    // region, not the one before it.
+                    ingest_settings_capabilities,
                     inventory_hotkeys,
                     handle_inventory_menu_actions,
                     handle_inventory_add_actions,
@@ -3070,23 +3176,24 @@ fn inventory_hotkeys(
 #[cfg(test)]
 mod tests {
     use super::{
-        CAN_COPY, CAN_CREATE, CAN_CUT, CAN_DELETE, CAN_PASTE, CAN_PASTE_LINK, CAN_RENAME,
-        CAN_SHOW_IN_MAIN, ClipboardMode, FOLDER_HAS_CALLING_CARDS, FOLDER_HAS_WEARABLES,
-        FOLDER_HAS_WORN, FolderMenuFacts, GESTURE_ACTIVE, GESTURE_INACTIVE, IN_TRASH,
-        INVENTORY_FOLDER_MENU, INVENTORY_ITEM_MENU, IS_CLOTHING, IS_LANDMARK, IS_OBJECT,
+        CAN_COPY, CAN_CREATE, CAN_CREATE_SETTINGS, CAN_CUT, CAN_DELETE, CAN_PASTE, CAN_PASTE_LINK,
+        CAN_RENAME, CAN_SHOW_IN_MAIN, ClipboardMode, FOLDER_HAS_CALLING_CARDS,
+        FOLDER_HAS_WEARABLES, FOLDER_HAS_WORN, FolderMenuFacts, GESTURE_ACTIVE, GESTURE_INACTIVE,
+        IN_TRASH, INVENTORY_FOLDER_MENU, INVENTORY_ITEM_MENU, IS_CLOTHING, IS_LANDMARK, IS_OBJECT,
         IS_TRASH_FOLDER, IS_WEARABLE, ItemMenuFacts, MenuTarget, NOT_IN_TRASH, NOT_WORN, WORN,
         folder_conditions, is_worn, item_conditions, new_settings_item, outfit_add_commands,
-        outfit_remove_commands, paste_commands, take_off_set, wear_set,
+        outfit_remove_commands, paste_commands, settings_caps_present, take_off_set, wear_set,
     };
     use crate::menu::{MenuDef, MenuItemDef};
     use crate::world_api::PendingSettingsCreations;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{
-        AgentKey, AssetType, Command, FolderInfo, FolderState, FolderType, InventoryFolderKey,
-        InventoryKey, InventoryType, ItemInfo, Permissions, Permissions5, SettingsKind, Uuid,
-        Wearable, WearableType,
+        AgentKey, AssetType, CAP_UPDATE_SETTINGS_AGENT_INVENTORY,
+        CAP_UPDATE_SETTINGS_TASK_INVENTORY, Command, FolderInfo, FolderState, FolderType,
+        InventoryFolderKey, InventoryKey, InventoryType, ItemInfo, Permissions, Permissions5,
+        SettingsKind, Uuid, Wearable, WearableType,
     };
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
 
     /// **A settings item is created by the simulator, and its kind rides the
     /// subtype byte.**
@@ -3425,6 +3532,58 @@ mod tests {
             expected,
             "a + (create) menu entry moved — if intended, bless it by editing this table"
         );
+    }
+
+    /// **Both settings caps, or none of the settings surfaces.**
+    ///
+    /// The reference's `LLEnvironment::isInventoryEnabled` is an `&&` over two
+    /// capability names, and it is the predicate every settings creator and save
+    /// in this viewer is gated on. Pinned because an `||` here would be invisible
+    /// on the grids that grant both and wrong on the ones that do not: the button
+    /// would be live and the create dropped in silence.
+    #[test]
+    fn settings_support_needs_both_capabilities() {
+        let caps = |names: &[&str]| {
+            names
+                .iter()
+                .map(|name| ((*name).to_owned(), "http://example.invalid/".to_owned()))
+                .collect::<HashMap<String, String>>()
+        };
+        assert!(settings_caps_present(&caps(&[
+            CAP_UPDATE_SETTINGS_AGENT_INVENTORY,
+            CAP_UPDATE_SETTINGS_TASK_INVENTORY,
+        ])));
+        assert!(!settings_caps_present(&caps(&[
+            CAP_UPDATE_SETTINGS_AGENT_INVENTORY
+        ])));
+        assert!(!settings_caps_present(&caps(&[
+            CAP_UPDATE_SETTINGS_TASK_INVENTORY
+        ])));
+        assert!(!settings_caps_present(&caps(&[])));
+    }
+
+    /// **The three settings creators are greyed on a grid that cannot hold one.**
+    ///
+    /// The gate has two halves — this condition on the entries, and the refusal
+    /// inside `dispatch_create` — and the second is unreachable from a menu with
+    /// the first in place. Pinned so a later edit to the submenu cannot drop the
+    /// condition and leave a live entry over a create the grid discards.
+    #[test]
+    fn the_settings_creators_are_gated_on_the_grid() {
+        let mut seen = 0;
+        for entry in super::NEW_SETTINGS_MENU.items {
+            let MenuItemDef::Command(command) = entry else {
+                continue;
+            };
+            assert_eq!(
+                command.enabled_when,
+                Some(CAN_CREATE_SETTINGS),
+                "{} must be greyed where settings cannot be stored",
+                command.action
+            );
+            seen += 1;
+        }
+        assert_eq!(seen, 3, "the sky, the water and the day cycle");
     }
 
     /// "Show in Main view" is offered only on the flat membership tabs (Worn /

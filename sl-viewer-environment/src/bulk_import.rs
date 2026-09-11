@@ -66,7 +66,7 @@ use sl_client_bevy::{
     legacy_day_cycle_from_bytes, legacy_preset_from_bytes, legacy_preset_name,
 };
 use sl_viewer_inventory::inventory::InventoryModel;
-use sl_viewer_inventory::inventory_actions::new_settings_item;
+use sl_viewer_inventory::inventory_actions::{SettingsInventorySupport, new_settings_item};
 use sl_viewer_notifications::ShowNotification;
 use sl_viewer_platform::file_dialog::{
     FileDialogClosed, FileDialogOutcome, FileDialogSelection, OpenFileDialog,
@@ -214,10 +214,22 @@ impl core::fmt::Debug for BulkConversionTask {
 fn start_bulk_import(
     mut requests: MessageReader<StartWindlightBulkImport>,
     mut state: ResMut<BulkImportRun>,
+    support: Res<SettingsInventorySupport>,
     mut dialogs: MessageWriter<OpenFileDialog>,
+    mut notify: MessageWriter<ShowNotification>,
     translator: Translator,
 ) {
     for request in requests.read() {
+        if !support.supported() {
+            // Every preset in the folder would be a create the grid drops, so
+            // the run is refused before the chooser rather than after four
+            // hundred silent failures. The reference refuses one item at a time
+            // instead, in `LLSettingsVOBase::createInventoryItem`, with this
+            // same notification — the difference is only how early.
+            warn!("bulk import: the region cannot store settings assets; refusing the run");
+            notify.write(ShowNotification::new("SettingsUnsuported"));
+            continue;
+        }
         if state.run.is_some() {
             // The menu entries are greyed while a run is going, so this is a
             // race rather than a misuse: say so and drop it.
@@ -642,6 +654,10 @@ impl Plugin for WindlightBulkImportPlugin {
             .add_message::<SettingsItemCreated>()
             .add_message::<SlCommand>()
             .init_resource::<PendingSettingsCreations>()
+            // Idempotent likewise: the inventory's actions plugin owns it and
+            // keeps it current from the capability map; a host without one
+            // reads "no settings grid", which refuses the run.
+            .init_resource::<SettingsInventorySupport>()
             .add_systems(
                 Update,
                 (
@@ -670,8 +686,8 @@ mod tests {
 
     use super::{
         BULK_IMPORT_REPLY_TIMEOUT, BulkConversion, BulkFailure, BulkImportRun, RunPhase, RunState,
-        StartWindlightBulkImport, WindlightBulkImportPlugin, bulk_import_purpose, convert_folder,
-        index, sibling_folder,
+        SettingsInventorySupport, StartWindlightBulkImport, WindlightBulkImportPlugin,
+        bulk_import_purpose, convert_folder, index, sibling_folder,
     };
 
     /// A boxed error, so a test can `?` rather than reach for the `panic!` the
@@ -900,6 +916,10 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, WindlightBulkImportPlugin));
         sl_viewer_ui_core::i18n::install_untranslated(&mut app);
+        // A grid that does settings — the state the session's capability map
+        // puts this in. Without it every run below would be refused, which is
+        // what `a_run_is_refused_where_settings_cannot_be_stored` asserts.
+        app.insert_resource(SettingsInventorySupport::new(true));
         app
     }
 
@@ -970,6 +990,43 @@ mod tests {
                 .resource::<Messages<OpenFileDialog>>()
                 .is_empty(),
             "no second chooser while the first run is in flight"
+        );
+    }
+
+    /// **A grid that cannot store a settings asset gets no chooser at all.**
+    ///
+    /// Every preset in the folder would be a create the grid drops, so the run
+    /// is refused up front with the reference's notification rather than after
+    /// four hundred silent failures — and the chooser is never opened, so the
+    /// refusal cannot be mistaken for a cancel.
+    #[test]
+    fn a_run_is_refused_where_settings_cannot_be_stored() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, WindlightBulkImportPlugin));
+        sl_viewer_ui_core::i18n::install_untranslated(&mut app);
+        app.insert_resource(SettingsInventorySupport::new(false));
+        app.world_mut().write_message(StartWindlightBulkImport {
+            kind: SettingsKind::Sky,
+        });
+        app.update();
+        assert!(
+            app.world()
+                .resource::<Messages<OpenFileDialog>>()
+                .is_empty(),
+            "no folder chooser on a grid that cannot hold the result"
+        );
+        assert!(
+            !app.world().resource::<BulkImportRun>().is_running(),
+            "and no run left half started"
+        );
+        let raised = raised(&mut app);
+        assert_eq!(
+            raised
+                .iter()
+                .map(|notification| notification.template)
+                .collect::<Vec<_>>(),
+            vec!["SettingsUnsuported"],
+            "the reference's own notification says why"
         );
     }
 

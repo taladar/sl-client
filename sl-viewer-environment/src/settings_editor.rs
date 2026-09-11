@@ -81,7 +81,7 @@ use sl_client_bevy::{
     legacy_preset_name,
 };
 use sl_viewer_inventory::inventory::InventoryModel;
-use sl_viewer_inventory::inventory_actions::new_settings_item;
+use sl_viewer_inventory::inventory_actions::{SettingsInventorySupport, new_settings_item};
 use sl_viewer_notifications::{NotificationResponse, ShowNotification};
 use sl_viewer_pickers::ui_texture_picker::TextureSwatchValue;
 use sl_viewer_platform::environment_assets::EnvironmentAssetManager;
@@ -112,7 +112,8 @@ use crate::rows::{
     AimTrackball, spawn_action_button, spawn_color_row, spawn_slider, spawn_texture_row,
     spawn_trackball_row, tag_aim_slider,
 };
-use crate::style::{DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR};
+use crate::rows::{ButtonPaint, paint_action_button};
+use crate::style::{ACTION_BACKGROUND, DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, TRACK_FILL};
 use crate::tabs::{SKY_TABS, TabPage, WATER_TABS};
 
 /// The sky editor's floater id.
@@ -409,6 +410,10 @@ impl Plugin for SettingsEditorPlugin {
             // gallery) must still have somewhere for a Save As to enqueue.
             .init_resource::<PendingSettingsCreations>()
             .init_resource::<PendingEditorSaveAs>()
+            // Idempotent likewise: the inventory's actions plugin owns it and
+            // keeps it current from the capability map; a host without one
+            // reads "no settings grid", which greys the two saves.
+            .init_resource::<SettingsInventorySupport>()
             .init_resource::<PendingEditorReplace>()
             // The confirmation channels. Registered here too (idempotent) so
             // these windows stand up in a host that brought no notification
@@ -454,6 +459,7 @@ impl Plugin for SettingsEditorPlugin {
                     report_editor_save_as,
                     confirm_editor_replace,
                     drop_preview_on_close,
+                    sync_editor_buttons,
                 )
                     .chain(),
             );
@@ -1439,6 +1445,7 @@ fn on_editor_button(
     buttons: Query<&EditorButton>,
     disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
     mut editors: ResMut<SettingsEditors>,
+    support: Res<SettingsInventorySupport>,
     mut settings_creations: ResMut<PendingSettingsCreations>,
     mut saving_as: ResMut<PendingEditorSaveAs>,
     mut confirm: ResMut<PendingEditorReplace>,
@@ -1471,6 +1478,20 @@ fn on_editor_button(
     }
     let state = editors.get_mut(button.editor);
     let status = state.ui.status;
+    // The two saves are greyed on the same predicate, so a press that gets here
+    // is the race a region cross leaves behind. The reference refuses in the
+    // same place — inside `LLSettingsVOBase::updateInventoryItem` and
+    // `createInventoryItem`, both of which raise this notification and return.
+    if matches!(button.action, EditorAction::Save | EditorAction::SaveAs) && !support.supported() {
+        warn!("settings editor: the region cannot store settings assets; refusing to save");
+        notify.write(ShowNotification::new("SettingsUnsuported"));
+        set_status(
+            &mut texts,
+            status,
+            "This region cannot store settings assets.",
+        );
+        return;
+    }
     let Some(session) = state.session.as_mut() else {
         set_status(&mut texts, status, "Nothing is open in this editor.");
         return;
@@ -1558,6 +1579,42 @@ fn on_editor_button(
     }
     if let Some(queued) = queued {
         editors.saves.push_back(queued);
+    }
+}
+
+/// Grey **Save** and **Save As** on a grid that cannot store a settings asset —
+/// the reference's `LLFloaterFixedEnvironment::refresh`, whose
+/// `is_inventory_avail` is `LLEnvironment::isInventoryEnabled`
+/// ([`SettingsInventorySupport`]).
+///
+/// Import and Revert are untouched: neither writes anything to the grid, and a
+/// preset imported here is still previewable — it simply has nowhere to be
+/// filed until the agent is somewhere that does settings.
+fn sync_editor_buttons(
+    mut commands: Commands,
+    support: Res<SettingsInventorySupport>,
+    buttons: Query<(Entity, &EditorButton)>,
+    children: Query<&Children>,
+    mut paint: ButtonPaint,
+) {
+    let enabled = support.supported();
+    let colours = if enabled {
+        (ACTION_BACKGROUND, LABEL_COLOR)
+    } else {
+        (TRACK_FILL, DIM_LABEL_COLOR)
+    };
+    for (entity, button) in &buttons {
+        if !matches!(button.action, EditorAction::Save | EditorAction::SaveAs) {
+            continue;
+        }
+        paint_action_button(
+            &mut commands,
+            &children,
+            &mut paint,
+            entity,
+            enabled,
+            colours,
+        );
     }
 }
 

@@ -368,6 +368,65 @@ pub fn spawn_action_button(
     button
 }
 
+/// What [`paint_action_button`] writes through: a button's own background, its
+/// label's colour, and the filter saying whether it is already disabled — so a
+/// button that already looks right is left alone rather than re-marked changed
+/// every frame (which would give the translation sweep and the layout gate work
+/// sixty times a second over a window where nothing moved).
+pub type ButtonPaint<'w, 's> = (
+    Query<'w, 's, &'static mut BackgroundColor>,
+    Query<'w, 's, &'static mut TextColor>,
+    Query<'w, 's, (), With<bevy::ui::InteractionDisabled>>,
+);
+
+/// Mark one action button enabled or disabled, in `background` / `label` when it
+/// is and the caller's dim pair when it is not.
+///
+/// Bevy's `InteractionDisabled` is **advisory**: it stops a window's own press
+/// observer (each one filters on it) and nothing paints it. So the colours are
+/// written here beside it, and both halves are written only when they would
+/// change.
+///
+/// Shared because three windows in this crate grey the same kind of button on
+/// the same kind of predicate, and a copy per window is a place for the disabled
+/// look — or worse, the `InteractionDisabled` half of it — to drift.
+pub fn paint_action_button(
+    commands: &mut Commands,
+    children: &Query<&Children>,
+    paint: &mut ButtonPaint,
+    entity: Entity,
+    enabled: bool,
+    colours: (Color, Color),
+) {
+    let (backgrounds, texts, disabled) = paint;
+    let (background, label) = colours;
+    if let Ok(mut current) = backgrounds.get_mut(entity)
+        && current.0 != background
+    {
+        current.0 = background;
+    }
+    if let Ok(kids) = children.get(entity) {
+        for child in kids.iter() {
+            if let Ok(mut colour) = texts.get_mut(child)
+                && colour.0 != label
+            {
+                colour.0 = label;
+            }
+        }
+    }
+    if disabled.contains(entity) == enabled {
+        if enabled {
+            commands
+                .entity(entity)
+                .remove::<bevy::ui::InteractionDisabled>();
+        } else {
+            commands
+                .entity(entity)
+                .insert(bevy::ui::InteractionDisabled);
+        }
+    }
+}
+
 /// The one system every environment window's sliders share.
 ///
 /// Added by each window's plugin rather than by a plugin group, because the

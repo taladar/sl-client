@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 319 |
+| ready | 318 |
 | blocked | 42 |
 | in-progress | 22 |
 | bugs | 52 |
-| done | 1074 |
+| done | 1075 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1651** |
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (319)
+## ready (318)
 
 ### protocol
 
@@ -485,8 +485,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Render the atmospheric density profiles
 - [`viewer-environment-pause-clouds`](ready/viewer-environment-pause-clouds.md)
   — Pause cloud animation toggle
-- [`viewer-environment-settings-unsupported-gate`](ready/viewer-environment-settings-unsupported-gate.md)
-  — Grey the settings creators on a grid that cannot store settings
 - [`viewer-event-details`](ready/viewer-event-details.md) — Event details
   floater + reminders (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-experience-event-stream`](ready/viewer-experience-event-stream.md) —
@@ -1303,7 +1301,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1074)
+## done (1075)
 
 ### protocol
 
@@ -1812,6 +1810,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-environment-settings-index`](done/viewer-environment-settings-index.md)
   — Settings assets by name — the inventory index the Library Environments
   folder needs
+- [`viewer-environment-settings-unsupported-gate`](done/viewer-environment-settings-unsupported-gate.md)
+  — Grey the settings creators on a grid that cannot store settings
 - [`viewer-experience-permission-body-links`](done/viewer-experience-permission-body-links.md)
   — Experience card name — clickable experience-profile SLURL (blocked by
   `viewer-url-linkification` (done))

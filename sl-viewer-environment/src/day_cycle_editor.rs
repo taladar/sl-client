@@ -66,7 +66,7 @@ use sl_client_bevy::{
     KEYFRAME_SLOP, SKY_TRACK_COUNT, SettingsKind, SkySettings, SlCommand, SlEvent, SlSessionEvent,
     UpdatableAssetType, WaterSettings, environment_asset_to_bytes,
 };
-use sl_viewer_inventory::inventory_actions::new_settings_item;
+use sl_viewer_inventory::inventory_actions::{SettingsInventorySupport, new_settings_item};
 use sl_viewer_notifications::{NotificationResponse, ShowNotification};
 use sl_viewer_pickers::ui_texture_picker::TextureSwatchValue;
 use sl_viewer_platform::environment_assets::EnvironmentAssetManager;
@@ -97,8 +97,8 @@ use sl_viewer_world_scene::environment::EnvironmentState;
 
 use crate::knobs::{ColorKnob, SkyKnob, TextureKnob, WaterKnob};
 use crate::rows::{
-    AimTrackball, spawn_action_button, spawn_color_row, spawn_slider, spawn_texture_row,
-    spawn_trackball_row, tag_aim_slider,
+    AimTrackball, paint_action_button, spawn_action_button, spawn_color_row, spawn_slider,
+    spawn_texture_row, spawn_trackball_row, tag_aim_slider,
 };
 use crate::settings_editor::EditedItem;
 use crate::style::{
@@ -300,15 +300,9 @@ type ChromeWidgets<'w, 's> = (
     Query<'w, 's, &'static Children>,
 );
 
-/// What [`paint_button`] writes through: a button's own background, its label's
-/// colour, and the filter that says whether it is already disabled — so a
-/// button that already looks right is left alone rather than re-marked changed
-/// every frame.
-type ChromePaint<'w, 's> = (
-    Query<'w, 's, &'static mut BackgroundColor>,
-    Query<'w, 's, &'static mut TextColor>,
-    Query<'w, 's, (), With<bevy::ui::InteractionDisabled>>,
-);
+/// What [`paint_button`] writes through — the shared
+/// [`ButtonPaint`](crate::rows::ButtonPaint), named for this window's chrome.
+type ChromePaint<'w, 's> = crate::rows::ButtonPaint<'w, 's>;
 
 // ---------------------------------------------------------------------------
 // State.
@@ -521,6 +515,10 @@ impl Plugin for DayCycleEditorPlugin {
             // `MessageWriter` for an unregistered message panics on its first
             // run rather than quietly doing nothing.
             .init_resource::<PendingSettingsCreations>()
+            // Idempotent likewise: the inventory's actions plugin owns it and
+            // keeps it current from the capability map; a host without one
+            // reads "no settings grid", which greys the two saves.
+            .init_resource::<SettingsInventorySupport>()
             .add_message::<ShowNotification>()
             .add_message::<NotificationResponse>()
             .add_message::<SettingsItemCreated>()
@@ -1854,6 +1852,7 @@ fn on_day_track_button(
 fn sync_day_chrome(
     mut state: ResMut<DayCycleEditorState>,
     environment: Option<Res<EnvironmentState>>,
+    support: Res<SettingsInventorySupport>,
     translator: Translator,
     mut nodes: Query<&mut Node>,
     mut texts: Query<&mut Text>,
@@ -1864,6 +1863,7 @@ fn sync_day_chrome(
 ) {
     let (tracks, buttons, ticks, labels) = widgets;
     let day_length = environment.map_or(0, |environment| environment.settings.day_length);
+    let settings_supported = support.supported();
     // A locale switch re-resolves every `Translated` label through the
     // translation sweep; a hand-formatted string has to ask for it.
     let relocalised = translator.changed();
@@ -1907,7 +1907,7 @@ fn sync_day_chrome(
 
         // The action buttons.
         for (entity, button) in &buttons {
-            let enabled = action_enabled(button.0, session);
+            let enabled = action_enabled(button.0, session, settings_supported);
             paint_button(&mut commands, &labels, &mut paint, entity, enabled, false);
         }
 
@@ -2051,10 +2051,24 @@ fn clock_at(position: f32, day_length: i32) -> Option<(i64, i64)> {
 }
 
 /// Whether `action` can be taken on `session` — the reference's `updateButtons`.
-fn action_enabled(action: DayAction, session: Option<&DaySession>) -> bool {
+///
+/// `settings_supported` is the reference's `is_inventory_avail`
+/// ([`SettingsInventorySupport`]): on a grid that cannot hold a settings asset,
+/// the two saves are the actions that cannot be taken at all, whatever the
+/// session says. (The reference *hides* them there rather than greying them;
+/// greyed is this viewer's convention for an entry that exists but cannot be
+/// used, and it is the one that tells a person the window is not broken.)
+fn action_enabled(
+    action: DayAction,
+    session: Option<&DaySession>,
+    settings_supported: bool,
+) -> bool {
     let Some(session) = session else {
         return false;
     };
+    if matches!(action, DayAction::Save | DayAction::SaveAs) && !settings_supported {
+        return false;
+    }
     // Playing takes the hands off everything that edits, as the reference's
     // `can_manipulate` does; the transport itself stays live.
     let can_edit = session.item.editable && session.playing.is_none();
@@ -2119,10 +2133,9 @@ fn show(nodes: &mut Query<&mut Node>, entity: Option<Entity>, visible: bool) {
     }
 }
 
-/// Mark a button enabled or disabled, and lit or not.
-///
-/// Bevy's `InteractionDisabled` is advisory — it stops this window's own
-/// observers and nothing paints it — so the colours are set here beside it.
+/// Mark a button enabled or disabled, and lit or not — this window's colours
+/// over the shared [`paint_action_button`], which owns the
+/// `InteractionDisabled` half.
 fn paint_button(
     commands: &mut Commands,
     labels: &Query<&Children>,
@@ -2131,7 +2144,6 @@ fn paint_button(
     enabled: bool,
     lit: bool,
 ) {
-    let (backgrounds, texts, disabled) = paint;
     let background = if !enabled {
         TRACK_FILL
     } else if lit {
@@ -2139,36 +2151,19 @@ fn paint_button(
     } else {
         crate::style::ACTION_BACKGROUND
     };
-    if let Ok(mut current) = backgrounds.get_mut(entity)
-        && current.0 != background
-    {
-        current.0 = background;
-    }
     let label = if enabled {
         LABEL_COLOR
     } else {
         DIM_LABEL_COLOR
     };
-    if let Ok(children) = labels.get(entity) {
-        for child in children.iter() {
-            if let Ok(mut colour) = texts.get_mut(child)
-                && colour.0 != label
-            {
-                colour.0 = label;
-            }
-        }
-    }
-    if disabled.contains(entity) == enabled {
-        if enabled {
-            commands
-                .entity(entity)
-                .remove::<bevy::ui::InteractionDisabled>();
-        } else {
-            commands
-                .entity(entity)
-                .insert(bevy::ui::InteractionDisabled);
-        }
-    }
+    paint_action_button(
+        commands,
+        labels,
+        paint,
+        entity,
+        enabled,
+        (background, label),
+    );
 }
 
 /// Point a button's label at a different Fluent key (the Play / Pause swap).
@@ -2216,9 +2211,11 @@ fn on_day_button(
     buttons: Query<&DayButton>,
     disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
     mut state: ResMut<DayCycleEditorState>,
+    support: Res<SettingsInventorySupport>,
     combos: Query<&ComboSelection, With<DayCloneSource>>,
     mut creations: ResMut<PendingSettingsCreations>,
     mut commands: MessageWriter<SlCommand>,
+    mut notify: MessageWriter<ShowNotification>,
     mut pickers: MessageWriter<OpenSettingsPicker>,
     mut texts: Query<&mut Text>,
 ) {
@@ -2232,6 +2229,21 @@ fn on_day_button(
     let status = state.ui.status;
     if state.session.is_none() {
         set_status(&mut texts, status, "Nothing is open in this editor.");
+        return;
+    }
+    // The two saves are greyed on the same predicate, so this is the race a
+    // region cross leaves: the press was made while the grid still did
+    // settings. The reference refuses in the same place —
+    // `LLSettingsVOBase::updateInventoryItem` / `createInventoryItem`, both of
+    // which raise this notification and return.
+    if matches!(button.0, DayAction::Save | DayAction::SaveAs) && !support.supported() {
+        warn!("day-cycle editor: the region cannot store settings assets; refusing to save");
+        notify.write(ShowNotification::new("SettingsUnsuported"));
+        set_status(
+            &mut texts,
+            status,
+            "This region cannot store settings assets.",
+        );
         return;
     }
     let clone_from = combos.iter().next().map_or(0, |selection| selection.active);
@@ -2883,47 +2895,72 @@ mod tests {
             DayAction::PlayPause,
             DayAction::CopyTrack,
         ] {
-            assert!(!action_enabled(action, None), "{action:?} with no session");
+            assert!(
+                !action_enabled(action, None, true),
+                "{action:?} with no session"
+            );
         }
 
         let mut session = open_session(cycle_with(&[0.5]));
         session.select_at(0.5, KEYFRAME_SLOP);
         // On a keyframe there is nothing to add and something to delete.
-        assert!(!action_enabled(DayAction::AddFrame, Some(&session)));
-        assert!(action_enabled(DayAction::DeleteFrame, Some(&session)));
+        assert!(!action_enabled(DayAction::AddFrame, Some(&session), true));
+        assert!(action_enabled(DayAction::DeleteFrame, Some(&session), true));
         // Between keyframes, the other way round.
         session.select_at(0.25, KEYFRAME_SLOP);
-        assert!(action_enabled(DayAction::AddFrame, Some(&session)));
-        assert!(!action_enabled(DayAction::DeleteFrame, Some(&session)));
+        assert!(action_enabled(DayAction::AddFrame, Some(&session), true));
+        assert!(!action_enabled(
+            DayAction::DeleteFrame,
+            Some(&session),
+            true
+        ));
 
         // The ground track cannot be emptied, so with one keyframe left neither
         // Clear nor Delete is on offer.
         let mut bare = open_session(EnvironmentSettings::legacy_windlight_default().day_cycle);
         bare.select_at(0.0, KEYFRAME_SLOP);
-        assert!(!action_enabled(DayAction::ClearTrack, Some(&bare)));
-        assert!(!action_enabled(DayAction::DeleteFrame, Some(&bare)));
+        assert!(!action_enabled(DayAction::ClearTrack, Some(&bare), true));
+        assert!(!action_enabled(DayAction::DeleteFrame, Some(&bare), true));
 
         // Copy needs another sky track with something on it, and the water track
         // never has a sibling to copy from.
-        assert!(!action_enabled(DayAction::CopyTrack, Some(&bare)));
+        assert!(!action_enabled(DayAction::CopyTrack, Some(&bare), true));
         let mut copyable = bare.clone();
         drop(copyable.edited.insert_sky_keyframe(
             DayTrack::Sky(1),
             0.5,
             SkySettings::legacy_windlight_default("High"),
         ));
-        assert!(action_enabled(DayAction::CopyTrack, Some(&copyable)));
+        assert!(action_enabled(DayAction::CopyTrack, Some(&copyable), true));
         copyable.track = DayTrack::Water;
-        assert!(!action_enabled(DayAction::CopyTrack, Some(&copyable)));
+        assert!(!action_enabled(DayAction::CopyTrack, Some(&copyable), true));
 
         // A read-only item is previewed, not edited — but it can still be saved
         // as a copy, which is the whole point of Save As.
         let mut locked = open_session(cycle_with(&[0.5]));
         locked.item.editable = false;
         locked.select_at(0.5, KEYFRAME_SLOP);
-        assert!(!action_enabled(DayAction::Save, Some(&locked)));
-        assert!(!action_enabled(DayAction::DeleteFrame, Some(&locked)));
-        assert!(action_enabled(DayAction::SaveAs, Some(&locked)));
+        assert!(!action_enabled(DayAction::Save, Some(&locked), true));
+        assert!(!action_enabled(DayAction::DeleteFrame, Some(&locked), true));
+        assert!(action_enabled(DayAction::SaveAs, Some(&locked), true));
+
+        // A grid that cannot hold a settings asset takes both saves away —
+        // including the Save As a read-only item could otherwise still do,
+        // since a copy has to be filed somewhere too. Everything that only
+        // edits the open day is untouched: the window keeps working, it simply
+        // has nowhere to put the result.
+        let mut editable = open_session(cycle_with(&[0.5]));
+        editable.select_at(0.5, KEYFRAME_SLOP);
+        assert!(action_enabled(DayAction::Save, Some(&editable), true));
+        assert!(!action_enabled(DayAction::Save, Some(&editable), false));
+        assert!(!action_enabled(DayAction::SaveAs, Some(&editable), false));
+        assert!(action_enabled(DayAction::Revert, Some(&editable), false));
+        assert!(action_enabled(DayAction::PlayPause, Some(&editable), false));
+        assert!(action_enabled(
+            DayAction::DeleteFrame,
+            Some(&editable),
+            false
+        ));
 
         // Playing takes the hands off the editing verbs and leaves the
         // transport alone.
@@ -2932,9 +2969,9 @@ mod tests {
             from: 0.0,
             elapsed: 0.0,
         });
-        assert!(!action_enabled(DayAction::AddFrame, Some(&playing)));
-        assert!(!action_enabled(DayAction::ClearTrack, Some(&playing)));
-        assert!(action_enabled(DayAction::PlayPause, Some(&playing)));
+        assert!(!action_enabled(DayAction::AddFrame, Some(&playing), true));
+        assert!(!action_enabled(DayAction::ClearTrack, Some(&playing), true));
+        assert!(action_enabled(DayAction::PlayPause, Some(&playing), true));
     }
 
     /// A full track offers no more room — the reference's `canAddSliders`, which
@@ -2954,8 +2991,8 @@ mod tests {
         assert_eq!(session.keyframes().len(), MAX_KEYFRAMES);
         // Somewhere with room, so only the count can be refusing.
         session.position = 1.0 / f32::from(2_u8) / f32::from(20_u8);
-        assert!(!action_enabled(DayAction::AddFrame, Some(&session)));
-        assert!(!action_enabled(DayAction::LoadFrame, Some(&session)));
+        assert!(!action_enabled(DayAction::AddFrame, Some(&session), true));
+        assert!(!action_enabled(DayAction::LoadFrame, Some(&session), true));
     }
 
     /// **Play walks a whole day in the reference's minute.** The number is the

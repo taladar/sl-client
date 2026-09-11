@@ -25,8 +25,9 @@ mod test {
         CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST,
         CAP_RENDER_MATERIALS, CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES,
         CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_UPDATE_NOTECARD_AGENT_INVENTORY,
-        CAP_UPDATE_NOTECARD_TASK_INVENTORY, CAP_UPDATE_SCRIPT_AGENT, CAP_UPLOAD_BAKED_TEXTURE,
-        CAP_VIEWER_ASSET, CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
+        CAP_UPDATE_NOTECARD_TASK_INVENTORY, CAP_UPDATE_SCRIPT_AGENT,
+        CAP_UPDATE_SETTINGS_TASK_INVENTORY, CAP_UPLOAD_BAKED_TEXTURE, CAP_VIEWER_ASSET,
+        CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
         CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_FETCH_HISTORY_TAG,
         CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE, CapsDispatch, CapsRequest,
         CapsUploadMetadata, ChatSessionKind, DayCycle, DisplayName, EnvironmentSettings,
@@ -145,13 +146,13 @@ mod test {
         let expected = caps.grant(&requested);
         assert_eq!(granted, expected);
         // Eight agent-comms/framework sim caps, the four asset-delivery caps
-        // (GetTexture/GetMesh/GetMesh2/ViewerAsset), the fifteen content
+        // (GetTexture/GetMesh/GetMesh2/ViewerAsset), the sixteen content
         // upload/materials/MOAP caps, the seven inventory caps (the two
         // descendents fetches, the two per-item fetches, AISv3 agent +
         // Library, CreateInventoryCategory), the nine
         // region/object-information caps, the twelve experience caps, and
         // the three voice signalling caps.
-        assert_eq!(granted.len(), 58);
+        assert_eq!(granted.len(), 59);
         Ok(())
     }
 
@@ -1353,6 +1354,44 @@ mod test {
                     item_id,
                 } => {
                     assert_eq!(cap, CAP_UPDATE_NOTECARD_TASK_INVENTORY);
+                    assert_eq!(task_id, task);
+                    assert_eq!(item_id, item);
+                }
+                other => return Err(format!("expected UpdateTaskItem, got {other:?}").into()),
+            },
+            other => return Err(format!("expected CapsAssetUploaded, got {other:?}").into()),
+        }
+        Ok(())
+    }
+
+    /// `UpdateSettingsTaskInventory` is the settings sibling of the notecard
+    /// task cap, and shares its `{ task_id, item_id }` body.
+    ///
+    /// Requested and served because the **pair** of settings caps is what a
+    /// viewer reads as "this grid does settings at all" (the reference's
+    /// `LLEnvironment::isInventoryEnabled`), which gates every settings creator
+    /// and save. A grid serving only the agent half would grey them all.
+    #[test]
+    fn update_settings_task_item_replaces_asset() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let task = ObjectKey::from(uuid::Uuid::from_u128(0x5e77));
+        let item = InventoryKey::from(uuid::Uuid::from_u128(0x5e78));
+        run_two_stage_upload(
+            &mut caps,
+            &mut sim,
+            CAP_UPDATE_SETTINGS_TASK_INVENTORY,
+            &build_update_task_item_asset_request(task, item),
+            b"task-settings",
+        )?;
+        match sim.poll_event() {
+            Some(ServerEvent::CapsAssetUploaded { metadata, .. }) => match *metadata {
+                CapsUploadMetadata::UpdateTaskItem {
+                    cap,
+                    task_id,
+                    item_id,
+                } => {
+                    assert_eq!(cap, CAP_UPDATE_SETTINGS_TASK_INVENTORY);
                     assert_eq!(task_id, task);
                     assert_eq!(item_id, item);
                 }

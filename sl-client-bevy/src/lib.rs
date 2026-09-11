@@ -157,8 +157,15 @@ pub use sl_proto::{CAP_GET_MESH, CAP_GET_MESH2};
 // [`BevyAssetFetcher`] (used to fetch worn wearable assets for client-side
 // baking).
 pub use sl_proto::CAP_GET_OBJECT_COST;
+// The two `UpdateSettings*Inventory` capability names, so a frontend can ask the
+// question the reference's `LLEnvironment::isInventoryEnabled` asks of an
+// [`SlCapabilities`] map — *does this grid store settings assets at all* — and
+// gate its settings creators and saves on the answer. Neither URL is used
+// directly: the saves go through `Command::UpdateInventoryAsset`, which resolves
+// the cap itself.
 pub use sl_proto::CAP_UPLOAD_BAKED_TEXTURE;
 pub use sl_proto::CAP_VIEWER_ASSET;
+pub use sl_proto::{CAP_UPDATE_SETTINGS_AGENT_INVENTORY, CAP_UPDATE_SETTINGS_TASK_INVENTORY};
 pub use sl_proto::{DisconnectReason as SessionDisconnectReason, Event as SlSessionEvent};
 // The decoding, LOD-aware texture store, re-exported so a Bevy app can build and
 // drive one (`sl_texture::TextureEntry`/`TextureReadLease` stay accessible as

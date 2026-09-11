@@ -72,7 +72,7 @@ use sl_client_bevy::{
     AssetKey, Command, FolderType, InventoryKey, Permissions, SettingsKind, SlCommand,
 };
 use sl_viewer_inventory::inventory::{InventoryModel, query_folder_page};
-use sl_viewer_inventory::inventory_actions::new_settings_item;
+use sl_viewer_inventory::inventory_actions::{SettingsInventorySupport, new_settings_item};
 use sl_viewer_inventory::settings_index::SettingsIndex;
 use sl_viewer_notifications::{NotificationResponse, ShowNotification};
 use sl_viewer_settings::ViewerSettings;
@@ -96,6 +96,7 @@ use sl_viewer_world_api::rlv::{RlvSession, can_change_environment};
 use sl_viewer_world_api::{OpenSettingsEditor, PendingSettingsCreations, SettingsItemCreated};
 use sl_viewer_world_scene::environment::LocalEnvironmentPick;
 
+use crate::rows::{ButtonPaint, paint_action_button};
 use crate::settings_list::{
     FILTER_KINDS, SettingsListFilters, SettingsListRow, kind_key, kind_slug, location_text,
     project, sort_rows, total,
@@ -356,6 +357,12 @@ impl Plugin for MyEnvironmentsPlugin {
             // must still stand up in a host that has neither (the gallery).
             .init_resource::<LocalEnvironmentPick>()
             .init_resource::<SettingsIndex>()
+            // Idempotent likewise: the inventory's actions plugin owns it and
+            // keeps it current from the capability map, but this window reads
+            // it every frame and must stand up in a host that brought neither
+            // (the gallery, where it reads "no settings grid" and the creators
+            // are greyed — a true rendering of "no session").
+            .init_resource::<SettingsInventorySupport>()
             .add_message::<CreateSettingsItem>()
             // The channels this window speaks over. Every one of them is
             // registered by whichever plugin *owns* it as well; registering them
@@ -382,6 +389,7 @@ impl Plugin for MyEnvironmentsPlugin {
                     rebuild_my_environments_view,
                     scroll_to_selected_environment,
                     seed_rename_field,
+                    sync_my_environments_buttons,
                 )
                     .chain()
                     .before(layout_virtual_lists)
@@ -711,6 +719,39 @@ fn spawn_action_button(
         ))
         .observe(on_my_environments_button)
         .id()
+}
+
+/// Grey the window's action buttons on a grid that cannot store a settings
+/// asset — the reference's `refreshButtonStates`, whose `settings_ok` is
+/// [`SettingsInventorySupport`] and gates the creators and the trash alike (a
+/// delete rewrites the library the same grid holds).
+///
+/// The colours are written here because Bevy's `InteractionDisabled` is
+/// advisory: it stops [`on_my_environments_button`] and paints nothing. Only
+/// what changed is written, so a steady state costs nothing downstream.
+fn sync_my_environments_buttons(
+    mut commands: Commands,
+    support: Res<SettingsInventorySupport>,
+    buttons: Query<Entity, With<MyEnvironmentsButton>>,
+    children: Query<&Children>,
+    mut paint: ButtonPaint,
+) {
+    let enabled = support.supported();
+    let colours = if enabled {
+        (ACTION_BACKGROUND, LABEL_COLOR)
+    } else {
+        (DISABLED_BACKGROUND, DISABLED_LABEL)
+    };
+    for entity in &buttons {
+        paint_action_button(
+            &mut commands,
+            &children,
+            &mut paint,
+            entity,
+            enabled,
+            colours,
+        );
+    }
 }
 
 // --- View systems ---------------------------------------------------------
@@ -1075,6 +1116,7 @@ fn handle_my_environments_actions(
         Res<MyEnvironmentsMenuTarget>,
         Res<SelectedEnvironment>,
         Option<Res<RlvSession>>,
+        Res<SettingsInventorySupport>,
     ),
     view: Res<MyEnvironmentsView>,
     model: Option<Res<InventoryModel>>,
@@ -1095,7 +1137,7 @@ fn handle_my_environments_actions(
     ),
     mut texts: Query<&mut Text>,
 ) {
-    let (mut actions, mut creates, target, selected, rlv) = inputs;
+    let (mut actions, mut creates, target, selected, rlv, support) = inputs;
     let (
         ref mut pending_delete,
         ref mut pending_creations,
@@ -1118,6 +1160,16 @@ fn handle_my_environments_actions(
     let status = ui.as_ref().map(|ui| ui.status_text);
 
     for create in creates.read() {
+        if !support.supported() {
+            // The buttons are greyed on the same predicate while the window is
+            // up, so this is the race (a region cross between the press and
+            // this frame) — and the reference answers it in the same place, in
+            // `LLSettingsVOBase::createNewInventoryItem`, with this
+            // notification.
+            warn!("my-environments: the region cannot store settings assets; refusing to create");
+            notify.write(ShowNotification::new("SettingsUnsuported"));
+            continue;
+        }
         let dest = model
             .folder_by_type(FolderType::Settings)
             .or_else(|| model.agent_root());

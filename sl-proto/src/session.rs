@@ -218,6 +218,19 @@ pub const CAP_UPDATE_SCRIPT_TASK: &str = "UpdateScriptTask";
 /// the `item_id`.
 pub const CAP_UPDATE_SETTINGS_AGENT_INVENTORY: &str = "UpdateSettingsAgentInventory";
 
+/// The HTTP capability for replacing the asset of a **settings** item inside an
+/// in-world object's task inventory (`UpdateSettingsTaskInventory`). Two-step
+/// uploader carrying `task_id`/`item_id`, the task sibling of
+/// [`CAP_UPDATE_SETTINGS_AGENT_INVENTORY`].
+///
+/// Requested even though no surface writes a settings item into a prim yet,
+/// because the pair is also what tells a viewer the **grid** does settings at
+/// all: the reference's `LLEnvironment::isInventoryEnabled` is exactly "both of
+/// these caps are granted", and every settings creator and save is gated on it.
+/// A region that grants only one of the two is a region a settings item cannot
+/// round-trip through.
+pub const CAP_UPDATE_SETTINGS_TASK_INVENTORY: &str = "UpdateSettingsTaskInventory";
+
 /// The HTTP capability for the **media-on-a-prim** read/write surface
 /// (`ObjectMedia`): a POST of a `{ verb, object_id, … }` map. A `GET` verb asks
 /// for an object's current per-face media (the simulator replies with an
@@ -662,6 +675,7 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_UPDATE_SCRIPT_AGENT,
     CAP_UPDATE_SCRIPT_TASK,
     CAP_UPDATE_SETTINGS_AGENT_INVENTORY,
+    CAP_UPDATE_SETTINGS_TASK_INVENTORY,
     CAP_OBJECT_ANIMATION,
     CAP_OBJECT_MEDIA,
     CAP_OBJECT_MEDIA_NAVIGATE,
