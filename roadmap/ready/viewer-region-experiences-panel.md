@@ -29,6 +29,13 @@ picker [[viewer-experiences-floater]] grows. The parcel-side experience
 lists stay with [[viewer-parcel-config-missing-writes]] (no per-parcel
 message in our scope enum yet).
 
+**The picker now exists** (2026-09-11): [[viewer-experiences-floater]]'s Search
+tab is `FindExperiences` over a `ui_table`, and its rows open
+`experience_profile`'s keyed window. Reuse that shape rather than building a
+second one — the three estate lists are the same rows with an Add that takes
+the search tab's selection, and `experience_profile::maturity_key` / the
+`experiences-col-*` Fluent keys are already there to share.
+
 Reference (Firestorm, read-only):
 `indra/newview/llfloaterregioninfo.cpp` (LLPanelRegionExperiences),
 `indra/newview/skins/default/xui/en/panel_region_experiences.xml`.

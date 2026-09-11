@@ -82,6 +82,7 @@ environment/EnvironmentPersistAcrossLogin = Bool Bool(true)
 environment/EnvironmentRepeatedTogglesShared = Bool Bool(false)
 environment/SavedPersonalEnvironment = String String("") [editor-hidden]
 experiences/ExperienceLogDays = I32 I32(7)
+experiences/ExperienceSearchMaturity = I32 I32(13)
 experiences/NotifyAllExperienceEvents = Bool Bool(false)
 general/AfkTimeoutSeconds = U32 U32(300)
 general/PreferredMaturity = String String("PG")

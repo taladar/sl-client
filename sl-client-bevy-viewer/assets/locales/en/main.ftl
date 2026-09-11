@@ -3277,26 +3277,84 @@ experience-permission-history = Experience: { $experience }
 experience-scope-grid = grid-wide
 experience-scope-land = land-scoped
 
-# The Experiences floater (viewer-experience-permission-dialog): the manage surface
-# listing the agent's allowed / blocked experiences with a per-row Forget.
+# The Experiences floater (viewer-experiences-floater): the manage surface's
+# seven tabs over the experience capabilities.
 experiences-title = Experiences
 experiences-refresh = Refresh
-experiences-allowed-heading = Allowed experiences
-experiences-blocked-heading = Blocked experiences
-experiences-empty = No experiences.
 experiences-forget = Forget
+experiences-profile = Profile…
+experiences-find = Find
+experiences-search-placeholder = Experience name
+experiences-search-rating = Max rating
+experiences-searching = Searching…
+experiences-search-page = Page { $page }
+experiences-page-previous = ◀ Previous
+experiences-page-next = Next ▶
+
+# The floater's tab labels, in the reference's order.
+experiences-tab-search = Search
+experiences-tab-allowed = Allowed
+experiences-tab-blocked = Blocked
+experiences-tab-admin = Admin
+experiences-tab-contributor = Contributor
+experiences-tab-owned = Owned
+experiences-tab-events = Recent events
+
+# The table column headers shared by the seven lists.
+experiences-col-name = Experience
+experiences-col-rating = Rating
+experiences-col-owner = Owner
+experiences-col-time = Time
+experiences-col-event = Event
+experiences-col-experience = Experience
+experiences-col-object = Object
 
 # The experience event log (viewer-experience-event-stream): the per-account
 # record of what an experience the agent joined actually did to them, and its
-# Events section in the Experiences floater.
-experiences-events-heading = Recent events
-experiences-events-empty = No events.
+# Recent events tab in the Experiences floater.
 experiences-events-clear = Clear
 experiences-events-notify = Notify on every event
-# One row: the local time, how many identical reports it stands for, what was
-# done, which experience did it, and the object it did it with.
-experiences-event-row = { $time } { $event } — { $experience } ({ $object })
-experiences-event-row-repeated = { $time } { $event } ×{ $count } — { $experience } ({ $object })
+# The Event cell when the row stands for more than one identical report.
+experiences-event-kind-repeated = { $event } ×{ $count }
+
+# The content ratings an experience can carry, shared by the profile window's
+# combo and the search tab's filter.
+experience-rating-general = General
+experience-rating-moderate = Moderate
+experience-rating-adult = Adult
+# An experience the grid named with an empty string (the reference's
+# ExperienceNameUntitled).
+experience-name-untitled = (Untitled)
+
+# The Experience Profile window (viewer-experiences-floater): one experience's
+# page, and — for an administrator — its editable fields.
+experience-profile-title = Experience Profile
+experience-profile-loading = (loading)
+experience-profile-rating = Rating
+experience-profile-owner = Owner
+experience-profile-owner-loading = (loading)
+experience-profile-owner-none = (none)
+experience-profile-location = Home location
+experience-profile-location-none = (not set)
+experience-profile-scope-grid = This experience works grid-wide.
+experience-profile-scope-land = This experience works only on its own land.
+experience-profile-privileged = This is a Linden experience; it cannot be blocked.
+experience-profile-allow = Allow
+experience-profile-forget = Forget
+experience-profile-block = Block
+experience-profile-edit = Edit
+experience-profile-save = Save
+experience-profile-cancel = Cancel
+experience-profile-name-caption = Name
+experience-profile-description-caption = Description
+experience-profile-set-location = Set to current location
+experience-profile-clear-location = Clear location
+experience-profile-enabled = Enabled
+experience-profile-private = Private
+experience-profile-saving = Saving…
+experience-profile-saved = Saved.
+experience-profile-not-loaded = This experience has not loaded yet.
+experience-profile-no-location = Your location is not known yet.
 
 # What an experience did, as a notification body reads it (the reference's
 # ExperiencePermission<n> strings).

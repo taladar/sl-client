@@ -61,3 +61,10 @@ family of experience capabilities:
 > - Commands are the `*Experience*` variants in `sl-proto/src/command.rs`;
 >   events the matching ones in `sl-proto/src/types/event.rs`. Worked example:
 >   `sl-client-tokio/examples/experiences.rs`.
+> - The viewer surfaces live in `sl-viewer-notices`: the in-the-moment grant
+>   prompt is `experience_permission.rs`, the per-account log of what a joined
+>   experience did is `experience_log.rs`, the seven-tab manage window (search,
+>   allowed / blocked / admin / contributor / owned, recent events) is
+>   `experiences_floater.rs`, and one experience's own page — with the
+>   administrator's edit column over `UpdateExperience` — is
+>   `experience_profile.rs`, a floater keyed per experience.

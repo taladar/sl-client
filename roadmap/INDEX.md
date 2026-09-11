@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 321 |
+| ready | 322 |
 | blocked | 41 |
 | in-progress | 21 |
 | bugs | 52 |
-| done | 1075 |
+| done | 1076 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1652** |
+| **total** | **1654** |
 
 ## ideas (100)
 
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (321)
+## ready (322)
 
 ### protocol
 
@@ -266,6 +266,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Session and SimSession are god objects with 12k-line impl blocks
 - [`protocol-audit-wire-error-contract`](ready/protocol-audit-wire-error-contract.md)
   — sl-wire's public parse surface has five different failure disciplines
+- [`protocol-experience-search-paging`](ready/protocol-experience-search-paging.md)
+  — Carry the experience search's paging URLs through to the viewer
 - [`protocol-sl-llsd-serde`](ready/protocol-sl-llsd-serde.md) — serde
   Serialize/Deserialize derives for sl-llsd (Llsd) types
 - [`protocol-sl-lsl-serde`](ready/protocol-sl-lsl-serde.md) — serde support for
@@ -489,9 +491,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Grey the settings creators on a grid that cannot store settings
 - [`viewer-event-details`](ready/viewer-event-details.md) — Event details
   floater + reminders (blocked by `viewer-ui-widget-scaffold` (done))
-- [`viewer-experiences-floater`](ready/viewer-experiences-floater.md) —
-  Experiences floater — lists, profile, search (blocked by
-  `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
+- [`viewer-experience-profile-extended-metadata`](ready/viewer-experience-profile-extended-metadata.md)
+  — Experience profile — the marketplace link, the logo, and the owning group
 - [`viewer-floater-update-in-place`](ready/viewer-floater-update-in-place.md) —
   Detail/property floaters — update values in place, don't rebuild structure
 - [`viewer-flycam-avatar-movement-keys`](ready/viewer-flycam-avatar-movement-keys.md)
@@ -1305,7 +1306,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1075)
+## done (1076)
 
 ### protocol
 
@@ -1824,6 +1825,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-experience-permission-dialog`](done/viewer-experience-permission-dialog.md)
   — Experience permission flow (accept / manage) (blocked by
   `viewer-ui-notification-host` (done))
+- [`viewer-experiences-floater`](done/viewer-experiences-floater.md) —
+  Experiences floater — lists, profile, search (blocked by
+  `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
 - [`viewer-f3-overlay-additional-asset-stores`](done/viewer-f3-overlay-additional-asset-stores.md)
   — Extend the F3 pipeline overlay to the asset stores added since it was built
 - [`viewer-f3-overlay-covered-by-menu-bar`](done/viewer-f3-overlay-covered-by-menu-bar.md)

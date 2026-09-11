@@ -79,6 +79,7 @@ pub(crate) const REGISTRARS: &[fn(&mut crate::settings::ViewerSettings)] = &[
     crate::rlv::register_settings,
     crate::environment::register_settings,
     crate::experience_log::register_settings,
+    crate::experiences_floater::register_settings,
 ];
 
 // The leaf toolkit (geometry math, render leaves, small models) is its own
@@ -159,6 +160,7 @@ pub(crate) use sl_viewer_kit::face_material;
 pub(crate) use sl_viewer_kit::flexi;
 pub(crate) use sl_viewer_notices::experience_log;
 pub(crate) use sl_viewer_notices::experience_permission;
+pub(crate) use sl_viewer_notices::experience_profile;
 pub(crate) use sl_viewer_notices::experiences_floater;
 pub(crate) use sl_viewer_platform::environment_assets;
 pub(crate) use sl_viewer_ui_widgets::floater;
@@ -409,6 +411,7 @@ use crate::emoji_complete::ColonCompletePlugin;
 use crate::emoji_picker::EmojiPickerPlugin;
 use crate::experience_log::ExperienceLogPlugin;
 use crate::experience_permission::ExperiencePermissionPlugin;
+use crate::experience_profile::ExperienceProfilePlugin;
 use crate::experiences_floater::ExperiencesPlugin;
 use crate::floater::FloaterPlugin;
 use crate::floater_persist::FloaterPersistPlugin;
@@ -1541,11 +1544,16 @@ fn run_session(
     // requests this host owns) and NotificationHostPlugin (whose shared channel it
     // adopts its card into).
     .add_plugins(ExperiencePermissionPlugin)
-    // The Experiences floater (viewer-experience-permission-dialog): the manage
-    // surface listing the agent's allowed / blocked experiences with a per-row
-    // Forget (Command::SetExperiencePermission Forget); opened from the Avatar
-    // menu. After FloaterPlugin, whose spawn_floater it builds on.
+    // The Experiences floater (viewer-experiences-floater): the manage surface's
+    // seven tabs -- search, the agent's allowed / blocked / admin / contributor
+    // / owned lists, and the event log -- over the experience caps. After
+    // FloaterPlugin, whose spawn_floater it builds on.
     .add_plugins(ExperiencesPlugin)
+    // One experience's own page (viewer-experiences-floater): a keyed window per
+    // experience, carrying the metadata, the allow / forget / block actions and
+    // -- for an administrator -- the editable fields. After ExperiencesPlugin,
+    // whose lists and search results open it.
+    .add_plugins(ExperienceProfilePlugin)
     // The experience event log (viewer-experience-event-stream): the per-account
     // record of what the experiences the agent joined actually did to them, the
     // only signal in the protocol that reports an experience attachment, and the

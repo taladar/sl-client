@@ -321,10 +321,10 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
     },
     UiElement {
         id: "experiences-floater",
-        summary: "The Experiences manage surface (viewer-experience-permission-dialog): the \
-                  Allowed / Blocked headed lists, each row an experience name with a Forget \
-                  button. The live floater (`crate::experiences_floater`) fills the lists from \
-                  the GetExperiences reply; here it is static so the layout is swept.",
+        summary: "The Experiences manage surface (viewer-experiences-floater): the tab labels \
+                  over one list's name / rating rows and its Profile / Forget actions. The live \
+                  floater (`crate::experiences_floater`) fills seven virtualized tables from the \
+                  experience capabilities; here it is static so the layout is swept.",
         spawn: crate::experiences_floater::spawn_experiences_specimen,
     },
     UiElement {
