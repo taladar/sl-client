@@ -5796,6 +5796,20 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "query_parcel_experiences",
+            usage: "<parcel_id> <experiences: id,id,…>",
+            build: |args, ctx| {
+                Ok(Command::QueryParcelExperiences {
+                    parcel_id: args.req_parse(ctx, "parcel_id", 0, "i32")?,
+                    experiences: args
+                        .vec_uuid(ctx, "experiences", 1)?
+                        .into_iter()
+                        .map(ExperienceKey::from)
+                        .collect(),
+                })
+            },
+        },
+        CommandSpec {
             name: "offer_teleport",
             usage: "<targets: id,id,…> [message]",
             build: |args, ctx| {

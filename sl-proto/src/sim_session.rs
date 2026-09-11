@@ -3332,7 +3332,7 @@ pub struct SimSession {
     /// details GET serves ([`SimSession::set_land_resource_details`]).
     /// Driver-populated.
     land_resource_details: Vec<ParcelScriptResources>,
-    /// The experience fixture set the twelve experience capabilities serve
+    /// The experience fixture set the thirteen experience capabilities serve
     /// from. Driver-populated ([`SimSession::experiences_mut`]) like
     /// [`display_names`](Self::display_names), but the three mutating caps
     /// (`ExperiencePreferences`, `UpdateExperience`, the

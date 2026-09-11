@@ -27,6 +27,12 @@
 //! - `UpdateExperience` — POST the editable metadata → the updated experience info.
 //! - `RegionExperiences` — GET, or POST `{ allowed, blocked, trusted }` to update;
 //!   both reply `{ allowed, blocked, trusted }`.
+//! - `ExperienceQuery` — GET `…?parcelid=<id>&experiences=<id>,<id>` → `{
+//!   experiences: { "<id>": bool } }`: of the experiences named, which does that
+//!   parcel admit? Unlike the rest of this family it is a **region** capability
+//!   (`indra/newview/llviewerregion.cpp` requests it beside the other region
+//!   caps), asked whenever an injecting experience's agent steps over a parcel
+//!   line.
 
 use uuid::Uuid;
 
@@ -41,18 +47,18 @@ mod types;
 
 pub use client::{
     build_region_experiences_request, build_set_experience_permission_request,
-    build_update_experience_request, experience_id_query, experience_info_query,
+    build_update_experience_request, experience_id_query, experience_info_query, experience_query,
     find_experience_query, forget_experience_query, group_experiences_query, parse_experience_ids,
-    parse_experience_infos, parse_experience_permissions, parse_experience_status,
-    parse_region_experiences,
+    parse_experience_infos, parse_experience_permissions, parse_experience_query_reply,
+    parse_experience_status, parse_region_experiences,
 };
 pub use server::{
     build_experience_ids_response, build_experience_infos_response,
-    build_experience_permissions_response, build_experience_status_response,
-    build_region_experiences_response, parse_experience_id_query, parse_experience_info_query,
-    parse_find_experience_query, parse_forget_experience_query, parse_group_experiences_query,
-    parse_region_experiences_request, parse_set_experience_permission_request,
-    parse_update_experience_request,
+    build_experience_permissions_response, build_experience_query_response,
+    build_experience_status_response, build_region_experiences_response, parse_experience_id_query,
+    parse_experience_info_query, parse_experience_query, parse_find_experience_query,
+    parse_forget_experience_query, parse_group_experiences_query, parse_region_experiences_request,
+    parse_set_experience_permission_request, parse_update_experience_request,
 };
 pub use types::{
     ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceUpdate,

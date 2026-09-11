@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 322 |
+| ready | 321 |
 | blocked | 42 |
 | in-progress | 21 |
 | bugs | 52 |
-| done | 1073 |
+| done | 1074 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1652** |
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (322)
+## ready (321)
 
 ### protocol
 
@@ -266,8 +266,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Session and SimSession are god objects with 12k-line impl blocks
 - [`protocol-audit-wire-error-contract`](ready/protocol-audit-wire-error-contract.md)
   — sl-wire's public parse surface has five different failure disciplines
-- [`protocol-experience-parcel-recheck`](ready/protocol-experience-parcel-recheck.md)
-  — An experience's sky follows you off its land, and nothing takes it back
 - [`protocol-sl-llsd-serde`](ready/protocol-sl-llsd-serde.md) — serde
   Serialize/Deserialize derives for sl-llsd (Llsd) types
 - [`protocol-sl-lsl-serde`](ready/protocol-sl-lsl-serde.md) — serde support for
@@ -1308,7 +1306,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1073)
+## done (1074)
 
 ### protocol
 
@@ -1482,6 +1480,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   failure
 - [`protocol-experience-environment-push`](done/protocol-experience-environment-push.md)
   — An experience can set the sky, and nothing in this stack can say so
+- [`protocol-experience-parcel-recheck`](done/protocol-experience-parcel-recheck.md)
+  — An experience's sky follows you off its land, and nothing takes it back
 - [`protocol-lsl-syntax`](done/protocol-lsl-syntax.md) — LSLSyntax capability —
   fetch, cache and decode the grid's language definition
 - [`protocol-sim-caps-agent-comms`](done/protocol-sim-caps-agent-comms.md) —

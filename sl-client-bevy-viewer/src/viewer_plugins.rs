@@ -552,6 +552,13 @@ impl Plugin for ViewerWorldPlugins {
                     // landing this frame is underneath the push rather than
                     // over it.
                     crate::environment::ingest_experience_environment_push,
+                    // An experience is admitted per land: ask the region which
+                    // of the injecting ones the parcel just stepped onto still
+                    // allows, and release the ones it does not. After the push
+                    // ingest, so a push landing this frame is in the set the
+                    // query names.
+                    crate::environment::query_parcel_experiences,
+                    crate::environment::ingest_parcel_experiences,
                     // Fetch + swap in a pinned Modern (`KNOWN_SKY_*`) sky once its
                     // asset decodes; after `ingest_environment` so the shared
                     // environment (the Modern placeholder) is current.

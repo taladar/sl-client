@@ -360,6 +360,17 @@ pub const CAP_UPDATE_EXPERIENCE: &str = "UpdateExperience";
 /// [`Event::RegionExperiences`].
 pub const CAP_REGION_EXPERIENCES: &str = "RegionExperiences";
 
+/// The HTTP capability asking which of a set of experiences a **parcel** admits
+/// (`ExperienceQuery`): a GET of `…?parcelid=<id>&experiences=<id>,<id>`
+/// returning `{ experiences: { "<id>": bool } }`. Unlike the rest of the
+/// experience family this is a region capability, and the reference asks it from
+/// inside an injected environment whenever the agent steps over a parcel line —
+/// an experience is admitted per land, so its sky must not follow the agent off
+/// the land that admitted it. Driven by `QueryParcelExperiences`; the runtime
+/// tags the reply [`EXPERIENCE_QUERY_TAG`] with the queried parcel to build
+/// [`Event::ParcelExperiences`].
+pub const CAP_EXPERIENCE_QUERY: &str = "ExperienceQuery";
+
 /// Completing the IM surface (#28): the modern Second Life capability that
 /// returns the agent's stored offline instant messages as an LLSD array (the
 /// legacy path is the UDP `RetrieveInstantMessages` trigger). GET; decoded into
@@ -496,6 +507,16 @@ pub const CAP_AVATAR_PICKER_SEARCH: &str = "AvatarPickerSearch";
 /// as `{ "agents": <array>, "query-id": <uuid> }` under this tag, the same
 /// stamping convention [`CHAT_SESSION_FETCH_HISTORY_TAG`] uses.
 pub const AVATAR_PICKER_SEARCH_TAG: &str = "AvatarPickerSearch/reply";
+
+/// The tag the runtimes attach when forwarding a [`CAP_EXPERIENCE_QUERY`] reply
+/// to [`Session::handle_caps_event`], stamping the queried parcel into the reply
+/// map as `parcelid`. The same synthetic-routing-key convention
+/// [`AVATAR_PICKER_SEARCH_TAG`] uses, and for the same reason: the reply names
+/// only the experiences, so without the stamp an answer could not be told from
+/// one for the parcel the agent has already left — which is exactly the race the
+/// reference guards against by re-reading the agent's parcel when the coroutine
+/// resumes.
+pub const EXPERIENCE_QUERY_TAG: &str = "ExperienceQuery/reply";
 
 /// The HTTP capability that resolves a region location to a grid-wide **parcel
 /// id** (`RemoteParcelRequest`): a POST of `{ location, region_id | region_handle
@@ -683,6 +704,7 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_IS_EXPERIENCE_CONTRIBUTOR,
     CAP_UPDATE_EXPERIENCE,
     CAP_REGION_EXPERIENCES,
+    CAP_EXPERIENCE_QUERY,
     CAP_READ_OFFLINE_MSGS,
     CAP_CHAT_SESSION_REQUEST,
     CAP_ACCEPT_GROUP_INVITE,
@@ -1988,8 +2010,9 @@ pub use conversions::{
     offline_messages_to_llsd, open_region_info_to_llsd, parcel_info_to_llsd,
     required_voice_version_to_llsd, server_appearance_update_to_llsd, session_history_to_llsd,
     set_display_name_reply_to_llsd, sim_console_response_to_llsd, sky_settings_from_asset,
-    sky_with_pushed_values, teleport_finish_to_llsd, water_settings_from_asset,
-    water_with_pushed_values, windlight_refresh_to_llsd,
+    sky_with_blended_values, sky_with_pushed_values, teleport_finish_to_llsd,
+    water_settings_from_asset, water_with_blended_values, water_with_pushed_values,
+    windlight_refresh_to_llsd,
 };
 pub(crate) use conversions::{
     ZERO_VECTOR, build_task_inventory, environment_update_from_llsd, full_update_block,

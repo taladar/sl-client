@@ -2402,6 +2402,20 @@ pub enum Command {
         /// The experiences the region trusts.
         trusted: Vec<ExperienceKey>,
     },
+    /// Ask the region, over the `ExperienceQuery` capability, which of
+    /// `experiences` the parcel `parcel_id` admits. The reply arrives as
+    /// [`Event::ParcelExperiences`](crate::Event::ParcelExperiences).
+    ///
+    /// The reference asks this from inside an injected environment on every
+    /// parcel change, because an experience is admitted per land: the ones the
+    /// parcel answers `false` for have their injections cleared, so an
+    /// experience's sky does not follow the agent off the land that admitted it.
+    QueryParcelExperiences {
+        /// The parcel being stepped onto, as the region numbers them.
+        parcel_id: i32,
+        /// The experiences to test — the ones currently injecting something.
+        experiences: Vec<ExperienceKey>,
+    },
     /// Offer a teleport ("lure") to each `targets` agent (`StartLure`, #28). Each
     /// recipient receives an [`Event::InstantMessageReceived`](crate::Event::InstantMessageReceived) with
     /// [`ImDialog::LureUser`](crate::ImDialog::LureUser).
@@ -3141,6 +3155,7 @@ impl Command {
             Self::UpdateExperience { .. } => "UpdateExperience",
             Self::RequestRegionExperiences => "RequestRegionExperiences",
             Self::SetRegionExperiences { .. } => "SetRegionExperiences",
+            Self::QueryParcelExperiences { .. } => "QueryParcelExperiences",
             Self::OfferTeleport { .. } => "OfferTeleport",
             Self::AcceptTeleportLure { .. } => "AcceptTeleportLure",
             Self::DeclineTeleportLure { .. } => "DeclineTeleportLure",

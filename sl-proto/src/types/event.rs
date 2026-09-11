@@ -1566,6 +1566,21 @@ pub enum Event {
         /// The experiences the region trusts (privileged, key-grid scope).
         trusted: Vec<ExperienceKey>,
     },
+    /// The reply to an `ExperienceQuery` capability GET (the runtime
+    /// [`Command::QueryParcelExperiences`](crate::Command::QueryParcelExperiences)):
+    /// for each queried experience, whether the parcel admits it.
+    ///
+    /// The parcel is echoed from the request — the reply names only the
+    /// experiences — so a viewer that has walked on again can tell this answer
+    /// is about land it has already left and ignore it, as the reference does by
+    /// re-reading the agent's parcel when its coroutine resumes.
+    ParcelExperiences {
+        /// The parcel that was asked about, as the region numbers them.
+        parcel_id: i32,
+        /// Each queried experience and whether that parcel admits it, in id
+        /// order.
+        experiences: Vec<(ExperienceKey, bool)>,
+    },
     /// A decoded terrain (or wind/cloud/water) patch arrived in a `LayerData`
     /// message and was added to or refreshed in the terrain cache. For a
     /// [`Land`](crate::TerrainLayerType::Land) patch the [`values`](TerrainPatch::values)

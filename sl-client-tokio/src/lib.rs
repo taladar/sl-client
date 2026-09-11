@@ -14,8 +14,8 @@ use sl_proto::{
     AVATAR_PICKER_PAGE_SIZE, CAP_ACCEPT_GROUP_INVITE, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES,
     CAP_ATTACHMENT_RESOURCES, CAP_AVATAR_PICKER_SEARCH, CAP_CHAT_SESSION_REQUEST,
     CAP_COPY_INVENTORY_FROM_NOTECARD, CAP_CREATE_INVENTORY_CATEGORY, CAP_DECLINE_GROUP_INVITE,
-    CAP_DIRECT_DELIVERY, CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY,
-    CAP_FETCH_LIBRARY, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
+    CAP_DIRECT_DELIVERY, CAP_EXPERIENCE_PREFERENCES, CAP_EXPERIENCE_QUERY, CAP_EXT_ENVIRONMENT,
+    CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
     CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
     CAP_GET_EXPERIENCES, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_OBJECT_COST,
     CAP_GET_OBJECT_PHYSICS_DATA, CAP_GET_TEXTURE, CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA,
@@ -48,9 +48,9 @@ use sl_proto::{
     build_upload_baked_texture_request, build_user_info_update, build_voice_signaling_request,
     chat_session_agents_body, chat_session_request_body, copy_inventory_from_notecard_body,
     create_listing_request, delete_listing_request, display_names_query, experience_id_query,
-    experience_info_query, find_experience_query, forget_experience_query, group_experiences_query,
-    group_invite_response_body, listing_request, listings_request, merchant_status_request,
-    parse_login_response, update_listing_request,
+    experience_info_query, experience_query, find_experience_query, forget_experience_query,
+    group_experiences_query, group_invite_response_body, listing_request, listings_request,
+    merchant_status_request, parse_login_response, update_listing_request,
 };
 
 // Re-export the core types a consumer needs so they can depend on this crate
@@ -198,8 +198,8 @@ use crate::experiences::{
 use crate::fetch::{fetch_asset_http, fetch_mesh_http, fetch_texture_http};
 use crate::http::{
     delete_caps_llsd, fetch_land_resources, fetch_lsl_syntax, get_avatar_picker_search,
-    get_caps_llsd, patch_caps_llsd, post_caps_oneway, post_chat_session_fetch_history,
-    post_chat_session_request, put_caps_llsd,
+    get_caps_llsd, get_experience_query, patch_caps_llsd, post_caps_oneway,
+    post_chat_session_fetch_history, post_chat_session_request, put_caps_llsd,
 };
 use crate::inventory::{fetch_folder_contents, fetch_group_members, fetch_inventory};
 use crate::inventory_cache::InventoryCache;
@@ -2264,6 +2264,12 @@ impl Client {
                             if let Some(url) = caps.get(CAP_REGION_EXPERIENCES).cloned() {
                                 let body = build_region_experiences_request(&allowed, &blocked, &trusted);
                                 tokio::spawn(post_voice_cap(url, body, CAP_REGION_EXPERIENCES, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::QueryParcelExperiences { parcel_id, experiences }) => {
+                            if let Some(base) = caps.get(CAP_EXPERIENCE_QUERY).cloned() {
+                                let url = format!("{base}{}", experience_query(parcel_id, &experiences));
+                                tokio::spawn(get_experience_query(url, parcel_id, http.clone(), caps_tx.clone()));
                             }
                         }
                         Some(Command::OfferTeleport { targets, message }) => {

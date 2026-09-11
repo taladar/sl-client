@@ -1461,7 +1461,7 @@ fn normalize_rotation(r: Rotation) -> Rotation {
 /// components — `LLSettingsBase::getSlerps`). Takes the shortest arc (negating
 /// the far quaternion when the dot product is negative) and degrades to a
 /// normalised lerp for nearly-parallel inputs to stay numerically stable.
-fn slerp_rotation(a: &Rotation, b: &Rotation, factor: f32) -> Rotation {
+pub(crate) fn slerp_rotation(a: &Rotation, b: &Rotation, factor: f32) -> Rotation {
     // Nearly parallel: the arc is tiny, so a normalised lerp is both stable and
     // visually identical to a slerp.
     const SLERP_LERP_THRESHOLD: f32 = 0.9995;

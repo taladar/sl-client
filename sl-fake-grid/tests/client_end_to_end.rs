@@ -7,8 +7,8 @@ mod test {
 
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_tokio::{
-        Arrival, ChatChannel, ChatType, Client, Command, Event, LoginParams, LoginRequest,
-        StartLocation, VoiceProvisionRequest,
+        Arrival, ChatChannel, ChatType, Client, Command, Event, ExperienceKey, LoginParams,
+        LoginRequest, StartLocation, VoiceProvisionRequest,
     };
     use sl_fake_grid::{
         AccountConfig, FakeAgent, FakeGrid, FakeGridBuilder, ImitatedGrid, RegionConfig,
@@ -574,6 +574,58 @@ mod test {
                 ..environment
             }
         );
+        Ok(())
+    }
+
+    /// **An experience is admitted per land, and the region will say so.**
+    ///
+    /// The `ExperienceQuery` capability is what a viewer holding an injected
+    /// environment asks on every parcel change: of the experiences currently
+    /// pushing a sky at it, which does this parcel still allow? The ones it
+    /// answers `false` for lose their injection, so an experience's sky cannot
+    /// follow an agent off the land that admitted it.
+    ///
+    /// The fixture knob is `SimExperiences::set_parcel_experiences`, driven the
+    /// way every other grid-side change is — through `with_sim`. Declaring a
+    /// parcel is what makes it restrictive: an undeclared parcel admits
+    /// everything, which is what a grid with one region-wide experience looks
+    /// like.
+    #[tokio::test]
+    async fn a_parcel_answers_which_experiences_it_admits() -> Result<(), TestError> {
+        let welcome = ExperienceKey::from(uuid::Uuid::from_u128(0xE1));
+        let weather = ExperienceKey::from(uuid::Uuid::from_u128(0xE2));
+        let mut running = start().await?;
+        running
+            .agent
+            .with_sim(|sim| {
+                sim.experiences_mut()
+                    .set_parcel_experiences(7, vec![welcome]);
+            })
+            .await;
+
+        for (parcel_id, expected) in [
+            (7, vec![(welcome, true), (weather, false)]),
+            // Parcel 8 was never declared, so it is not land-scoped at all.
+            (8, vec![(welcome, true), (weather, true)]),
+        ] {
+            running
+                .commands
+                .send(Command::QueryParcelExperiences {
+                    parcel_id,
+                    experiences: vec![welcome, weather],
+                })
+                .await?;
+            let answered = running
+                .wait_for(|event| match event {
+                    Event::ParcelExperiences {
+                        parcel_id,
+                        experiences,
+                    } => Some((*parcel_id, experiences.clone())),
+                    _ => None,
+                })
+                .await?;
+            assert_eq!(answered, (parcel_id, expected));
+        }
         Ok(())
     }
 

@@ -276,6 +276,7 @@ fn on_events(
             | SlSessionEvent::ExperienceContributorStatus { .. }
             | SlSessionEvent::ExperienceUpdated(_)
             | SlSessionEvent::RegionExperiences { .. }
+            | SlSessionEvent::ParcelExperiences { .. }
             | SlSessionEvent::ConferenceSessionMessage { .. }
             | SlSessionEvent::ConferenceSessionParticipant { .. }
             | SlSessionEvent::ConferenceInvited { .. }

@@ -79,6 +79,26 @@ pub fn parse_experience_id_query(suffix: &str) -> Option<ExperienceKey> {
         .map(ExperienceKey::from)
 }
 
+/// Parses the [`experience_query`](crate::experience_query) URL suffix back into
+/// its `(parcel id, experience ids)` pair, or `None` if it carries no
+/// `parcelid`. An absent `experiences` parameter is an empty list — a viewer
+/// with nothing injected has nothing to ask about — and an id in it that will
+/// not parse is skipped.
+#[must_use]
+pub fn parse_experience_query(suffix: &str) -> Option<(i32, Vec<ExperienceKey>)> {
+    let query = url_query(suffix)?;
+    let parcel_id = query_param(query, "parcelid")?.parse::<i32>().ok()?;
+    let experiences = query_param(query, "experiences")
+        .map(|list| {
+            list.split(',')
+                .filter_map(|id| Uuid::parse_str(id).ok())
+                .map(ExperienceKey::from)
+                .collect()
+        })
+        .unwrap_or_default();
+    Some((parcel_id, experiences))
+}
+
 /// Parses an `ExperiencePreferences` PUT body
 /// (`{ "<id>": { "permission": "Allow"|"Block" } }`) back into its
 /// `(experience id, permission)` pair — the inverse of
@@ -233,6 +253,25 @@ pub fn build_region_experiences_response(
         ("blocked".to_owned(), uuid_array_llsd(blocked)),
         ("trusted".to_owned(), uuid_array_llsd(trusted)),
     ]))
+    .to_llsd_xml()
+}
+
+/// Builds an `ExperienceQuery` reply (`{ experiences: { "<id>": bool, … } }`) —
+/// the inverse of [`parse_experience_query_reply`](crate::parse_experience_query_reply).
+/// The keys are the ids as strings, which is how the reference reads them back
+/// (`LLSD::map_iterator` over `result["experiences"]`, each key parsed as an
+/// `LLUUID`).
+#[must_use]
+pub fn build_experience_query_response(admitted: &[(ExperienceKey, bool)]) -> String {
+    Llsd::Map(HashMap::from([(
+        "experiences".to_owned(),
+        Llsd::Map(
+            admitted
+                .iter()
+                .map(|(id, allowed)| (id.to_string(), Llsd::Boolean(*allowed)))
+                .collect(),
+        ),
+    )]))
     .to_llsd_xml()
 }
 

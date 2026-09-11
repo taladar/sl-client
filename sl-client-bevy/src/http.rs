@@ -8,9 +8,9 @@ use bevy::prelude::*;
 use crossbeam_channel::Sender;
 use sl_proto::{
     AVATAR_PICKER_SEARCH_TAG, CAP_CHAT_SESSION_REQUEST, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX,
-    CHAT_SESSION_FETCH_HISTORY_TAG, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG,
-    LSL_SYNTAX_VERSION, Llsd, ParcelKey, Uuid, build_land_resources_request,
-    parse_land_resources_reply, parse_llsd_xml,
+    CHAT_SESSION_FETCH_HISTORY_TAG, EXPERIENCE_QUERY_TAG, LAND_RESOURCE_DETAIL_TAG,
+    LAND_RESOURCE_SUMMARY_TAG, LSL_SYNTAX_VERSION, Llsd, ParcelKey, Uuid,
+    build_land_resources_request, parse_land_resources_reply, parse_llsd_xml,
 };
 use std::collections::HashMap;
 
@@ -251,6 +251,24 @@ pub(crate) fn run_get_caps_llsd(url: &str, cap: &'static str, caps_tx: &Sender<(
         }
         None => report_caps_failure(caps_tx, cap),
     }
+}
+
+/// GETs the `ExperienceQuery` capability (blocking) and forwards its reply to
+/// `caps_tx` tagged [`EXPERIENCE_QUERY_TAG`], stamping the queried `parcel_id`
+/// into the reply map — the answer names only experiences, so without the stamp
+/// it could not be told from one about a parcel the agent has already walked
+/// off. Mirrors the tokio `get_experience_query`.
+pub(crate) fn run_experience_query(url: &str, parcel_id: i32, caps_tx: &Sender<(String, Llsd)>) {
+    let Some(reply) = blocking_get_llsd(url, EXPERIENCE_QUERY_TAG) else {
+        report_caps_failure(caps_tx, EXPERIENCE_QUERY_TAG);
+        return;
+    };
+    let mut map = match reply {
+        Llsd::Map(map) => map,
+        _other => HashMap::new(),
+    };
+    let _previous = map.insert("parcelid".to_owned(), Llsd::Integer(parcel_id));
+    deliver(caps_tx, (EXPERIENCE_QUERY_TAG.to_owned(), Llsd::Map(map)));
 }
 
 /// GETs the `AvatarPickerSearch` capability (blocking) and forwards its reply to

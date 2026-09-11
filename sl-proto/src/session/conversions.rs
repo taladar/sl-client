@@ -940,11 +940,31 @@ pub fn environment_asset_to_bytes(asset: &EnvironmentAsset) -> Vec<u8> {
 /// keys asks for nothing.
 #[must_use]
 pub fn sky_with_pushed_values(sky: &SkySettings, values: &Llsd) -> SkySettings {
+    sky_with_blended_values(sky, values, &BTreeMap::new())
+}
+
+/// [`sky_with_pushed_values`] with a per-key **mix**: a key listed in `mixes`
+/// lands only `mix` of the way from the frame's own value to the pushed one,
+/// rather than replacing it outright. A key absent from `mixes` is assigned
+/// whole, as [`sky_with_pushed_values`] assigns every key.
+///
+/// This is the reference's `applyInjections` in full: an injection scheduled by
+/// `injectSetting` (a push whose transition is over `0.1` seconds) interpolates
+/// **that key** from the value underneath toward the injected one and lets every
+/// other key alone, rather than cross-fading the whole environment. A mix of
+/// `1.0` is the plain overlay, and a mix of `0.0` leaves the key at the frame's
+/// own value.
+#[must_use]
+pub fn sky_with_blended_values(
+    sky: &SkySettings,
+    values: &Llsd,
+    mixes: &BTreeMap<String, f32>,
+) -> SkySettings {
     let Some(overrides) = values.as_map() else {
         return sky.clone();
     };
     let mut frame = sky_settings_to_llsd(sky);
-    overlay_llsd_map(&mut frame, overrides);
+    overlay_llsd_map(&mut frame, overrides, mixes);
     sky_settings_from_llsd(&sky.name, &frame)
 }
 
@@ -952,23 +972,145 @@ pub fn sky_with_pushed_values(sky: &SkySettings, values: &Llsd) -> SkySettings {
 /// `LLSettingsWater`'s own keys.
 #[must_use]
 pub fn water_with_pushed_values(water: &WaterSettings, values: &Llsd) -> WaterSettings {
+    water_with_blended_values(water, values, &BTreeMap::new())
+}
+
+/// [`sky_with_blended_values`] for a water frame.
+#[must_use]
+pub fn water_with_blended_values(
+    water: &WaterSettings,
+    values: &Llsd,
+    mixes: &BTreeMap<String, f32>,
+) -> WaterSettings {
     let Some(overrides) = values.as_map() else {
         return water.clone();
     };
     let mut frame = water_settings_to_llsd(water);
-    overlay_llsd_map(&mut frame, overrides);
+    overlay_llsd_map(&mut frame, overrides, mixes);
     water_settings_from_llsd(&water.name, &frame)
 }
 
-/// Assign each entry of `overrides` into `target`, replacing whatever was there.
-/// A no-op when `target` is not a map.
-fn overlay_llsd_map(target: &mut Llsd, overrides: &HashMap<String, Llsd>) {
+/// Assign each entry of `overrides` into `target`, replacing whatever was there
+/// — or, for a key `mixes` names, blending that far toward it from what was
+/// there. A no-op when `target` is not a map.
+fn overlay_llsd_map(
+    target: &mut Llsd,
+    overrides: &HashMap<String, Llsd>,
+    mixes: &BTreeMap<String, f32>,
+) {
     let Llsd::Map(entries) = target else {
         return;
     };
     for (key, value) in overrides {
-        drop(entries.insert(key.clone(), value.clone()));
+        let blended = match mixes.get(key) {
+            Some(mix) => entries.get(key).map_or_else(
+                || value.clone(),
+                |from| blend_llsd_value(key, from, value, *mix),
+            ),
+            None => value.clone(),
+        };
+        drop(entries.insert(key.clone(), blended));
     }
+}
+
+/// Past which mix a value that cannot be interpolated switches over — the
+/// reference's `BREAK_POINT` (`llsettingsbase.cpp`).
+const BLEND_BREAK_POINT: f32 = 0.5;
+
+/// Interpolate one settings value `mix` of the way from `from` to `to` — the
+/// reference's `LLSettingsBase::interpolateSDValue`.
+///
+/// Numbers lerp (integers rounding), maps and arrays recurse element-wise, and
+/// anything else — strings, uuids, booleans, a pair whose LLSD kinds disagree —
+/// switches at [`BLEND_BREAK_POINT`], because there is no halfway between two of
+/// them. The two rotation keys slerp rather than lerping their four components,
+/// which is the reference's `getSlerpKeys`: lerping a quaternion's components
+/// walks off the unit sphere and puts the sun somewhere neither end asked for.
+fn blend_llsd_value(key: &str, from: &Llsd, to: &Llsd, mix: f32) -> Llsd {
+    /// Linear interpolation, clamped to the two ends.
+    fn lerp(from: f64, to: f64, mix: f32) -> f64 {
+        from + (to - from) * f64::from(mix.clamp(0.0, 1.0))
+    }
+    /// Rounds a value the caller has already bounded by two `i32`s back to an
+    /// `i32`. There is no `f64 → i32` conversion without a cast, so the cast
+    /// lints are expected here, as they are for the terrain coefficients.
+    #[expect(
+        clippy::as_conversions,
+        clippy::cast_possible_truncation,
+        reason = "the lerp of two i32 endpoints lies between them, so it fits an i32"
+    )]
+    const fn round_to_i32(value: f64) -> i32 {
+        value.round() as i32
+    }
+    match (from, to) {
+        (Llsd::Integer(from), Llsd::Integer(to)) => {
+            Llsd::Integer(round_to_i32(lerp(f64::from(*from), f64::from(*to), mix)))
+        }
+        (Llsd::Real(from), Llsd::Real(to)) => Llsd::Real(lerp(*from, *to, mix)),
+        (Llsd::Array(from), Llsd::Array(to)) if is_slerp_key(key) => {
+            slerp_llsd_rotation(from, to, mix)
+        }
+        (Llsd::Array(from), Llsd::Array(to)) => Llsd::Array(
+            (0..from.len().max(to.len()))
+                .map(|index| match (from.get(index), to.get(index)) {
+                    (Some(from), Some(to)) => blend_llsd_value(key, from, to, mix),
+                    // Only one side has this element; there is nothing to
+                    // interpolate against, so it passes through.
+                    (Some(only), None) | (None, Some(only)) => only.clone(),
+                    (None, None) => Llsd::Undef,
+                })
+                .collect(),
+        ),
+        (Llsd::Map(from), Llsd::Map(to)) => Llsd::Map(
+            from.keys()
+                .chain(to.keys())
+                .map(|key_name| {
+                    let value = match (from.get(key_name), to.get(key_name)) {
+                        (Some(from), Some(to)) => blend_llsd_value(key_name, from, to, mix),
+                        (Some(only), None) | (None, Some(only)) => only.clone(),
+                        (None, None) => Llsd::Undef,
+                    };
+                    (key_name.clone(), value)
+                })
+                .collect(),
+        ),
+        _ => {
+            if mix > BLEND_BREAK_POINT {
+                to.clone()
+            } else {
+                from.clone()
+            }
+        }
+    }
+}
+
+/// Whether `key` names one of the two rotations the reference slerps rather than
+/// lerping component-wise (`LLSettingsSky::getSlerpKeys`).
+fn is_slerp_key(key: &str) -> bool {
+    matches!(key, "sun_rotation" | "moon_rotation")
+}
+
+/// Spherically interpolate two LLSD quaternion arrays (`[x, y, z, w]`), falling
+/// back to the destination for anything that is not one.
+fn slerp_llsd_rotation(from: &[Llsd], to: &[Llsd], mix: f32) -> Llsd {
+    let read = |value: &[Llsd]| -> Option<Rotation> {
+        Some(Rotation {
+            x: value.first()?.as_f32()?,
+            y: value.get(1)?.as_f32()?,
+            z: value.get(2)?.as_f32()?,
+            s: value.get(3)?.as_f32()?,
+        })
+    };
+    let (Some(start), Some(end)) = (read(from), read(to)) else {
+        return Llsd::Array(to.to_vec());
+    };
+    let blended = crate::types::environment::slerp_rotation(&start, &end, mix.clamp(0.0, 1.0));
+    Llsd::Array(vec![
+        Llsd::Real(f64::from(blended.x)),
+        Llsd::Real(f64::from(blended.y)),
+        Llsd::Real(f64::from(blended.z)),
+        Llsd::Real(f64::from(blended.s)),
+    ])
 }
 
 /// Parse a settings-asset payload into LLSD, in whichever of the three

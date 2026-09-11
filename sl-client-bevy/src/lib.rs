@@ -14,8 +14,8 @@ use sl_proto::{
     AVATAR_PICKER_PAGE_SIZE, CAP_ACCEPT_GROUP_INVITE, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES,
     CAP_ATTACHMENT_RESOURCES, CAP_AVATAR_PICKER_SEARCH, CAP_CHAT_SESSION_REQUEST,
     CAP_COPY_INVENTORY_FROM_NOTECARD, CAP_CREATE_INVENTORY_CATEGORY, CAP_DECLINE_GROUP_INVITE,
-    CAP_DIRECT_DELIVERY, CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY,
-    CAP_FETCH_LIBRARY, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
+    CAP_DIRECT_DELIVERY, CAP_EXPERIENCE_PREFERENCES, CAP_EXPERIENCE_QUERY, CAP_EXT_ENVIRONMENT,
+    CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
     CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
     CAP_GET_EXPERIENCES, CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA,
     CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR,
@@ -46,9 +46,9 @@ use sl_proto::{
     build_upload_baked_texture_request, build_user_info_update, build_voice_signaling_request,
     chat_session_agents_body, chat_session_request_body, copy_inventory_from_notecard_body,
     create_listing_request, delete_listing_request, display_names_query, experience_id_query,
-    experience_info_query, find_experience_query, forget_experience_query, group_experiences_query,
-    group_invite_response_body, listing_request, listings_request, merchant_status_request,
-    parse_login_response, update_listing_request,
+    experience_info_query, experience_query, find_experience_query, forget_experience_query,
+    group_experiences_query, group_invite_response_body, listing_request, listings_request,
+    merchant_status_request, parse_login_response, update_listing_request,
 };
 
 // Re-export the core types a consumer needs to configure the plugin, drive the
@@ -125,8 +125,8 @@ pub use sl_proto::{
     avatar_texture, azimuth_altitude_to_rotation, decode_particle_system, decode_texture_anim,
     decode_texture_entry, encode_texture_entry, environment_asset_from_bytes,
     environment_asset_to_bytes, grid_to_handle, group_powers, handle_to_global, handle_to_grid,
-    particle_pattern, pcode, rotation_to_azimuth_altitude, sim_access, sky_with_pushed_values,
-    texture_anim_mode, water_with_pushed_values,
+    particle_pattern, pcode, rotation_to_azimuth_altitude, sim_access, sky_with_blended_values,
+    sky_with_pushed_values, texture_anim_mode, water_with_blended_values, water_with_pushed_values,
 };
 // Linden's four ported WindLight sky presets and the day cycle that schedules
 // them: content both halves of the protocol need, so it lives in `sl-proto`
@@ -390,8 +390,8 @@ use crate::experiences::{run_experience_status, run_group_experiences};
 use crate::fetch::{run_asset_fetch, run_generic_asset_fetch, run_texture_fetch};
 use crate::http::{
     run_avatar_picker_search, run_caps_oneway, run_chat_session_fetch_history,
-    run_chat_session_request, run_delete_caps_llsd, run_fetch_lsl_syntax, run_get_caps_llsd,
-    run_land_resources, run_patch_caps_llsd, run_put_caps_llsd,
+    run_chat_session_request, run_delete_caps_llsd, run_experience_query, run_fetch_lsl_syntax,
+    run_get_caps_llsd, run_land_resources, run_patch_caps_llsd, run_put_caps_llsd,
 };
 use crate::inventory::{
     fetch_folder_contents, run_group_members_fetch, run_inventory_fetch,
@@ -3884,6 +3884,21 @@ fn apply_command(
                 let events_tx = caps.events_tx.clone();
                 std::thread::spawn(move || {
                     run_voice_cap(&url, body, CAP_REGION_EXPERIENCES, &events_tx);
+                });
+            }
+        }
+        Command::QueryParcelExperiences {
+            parcel_id,
+            experiences,
+        } => {
+            if let Some(caps) = caps
+                && let Some(base) = caps.map.get(CAP_EXPERIENCE_QUERY).cloned()
+            {
+                let url = format!("{base}{}", experience_query(*parcel_id, experiences));
+                let parcel_id = *parcel_id;
+                let events_tx = caps.events_tx.clone();
+                std::thread::spawn(move || {
+                    run_experience_query(&url, parcel_id, &events_tx);
                 });
             }
         }

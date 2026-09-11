@@ -563,12 +563,13 @@ codecs); this cluster wired them into dispatch over the new stores.
 
 ### The experience handlers
 
-The experience cluster serves the twelve experience caps from one new
+The experience cluster serves the thirteen experience caps from one new
 driver-populated fixture set, `SimExperiences`
 (`sl-proto/src/sim_experiences.rs`, held as `SimSession::experiences[_mut]`):
 metadata records keyed by public id, the agent's allowed/blocked
 preference lists, the agent's owned/admin/creator id lists, per-group id
-lists, and the region's allowed/blocked/trusted triple. Three caps
+lists, the region's allowed/blocked/trusted triple, and the per-parcel
+admitted-experience table `ExperienceQuery` answers from. Three caps
 mutate — `ExperiencePreferences`, `UpdateExperience` and the
 `RegionExperiences` POST — and their edits apply to the fixture (so
 follow-up reads observe them), each surfacing a `ServerEvent`
@@ -616,6 +617,14 @@ follow-up reads observe them), each surfacing a `ServerEvent`
   triple, POST parses the same-shaped `{ allowed, blocked, trusted }`
   body, replaces the lists wholesale and echoes the stored result, both
   via `build_region_experiences_response`.
+- **`ExperienceQuery`** (GET `?parcelid=…&experiences=<id>,<id>`) answers
+  `{ experiences: { "<id>": bool } }` — per experience, whether that
+  parcel admits it — from the per-parcel table
+  (`SimExperiences::set_parcel_experiences`). **A parcel nothing was
+  declared for admits everything**: declaring one is what makes the
+  fixture land-scoped. This is the cap a viewer holding an injected
+  environment asks on every parcel change, clearing the injections of
+  every experience the new land refuses.
 
 The status contract is the house standard — wrong method `405`,
 malformed body or query `400`, an `UpdateExperience` targeting an

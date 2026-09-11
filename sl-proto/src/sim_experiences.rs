@@ -22,8 +22,8 @@ use sl_wire::{
 use uuid::Uuid;
 
 /// The in-memory experience fixture set: metadata records plus the
-/// agent-scoped, group-scoped and region-scoped id lists the twelve
-/// experience capabilities serve.
+/// agent-scoped, group-scoped, region-scoped and per-parcel id lists the
+/// thirteen experience capabilities serve.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SimExperiences {
     /// Every experience's metadata record, keyed by its public id
@@ -53,6 +53,10 @@ pub struct SimExperiences {
     region_blocked: Vec<ExperienceKey>,
     /// The region's trusted experiences (`RegionExperiences`).
     region_trusted: Vec<ExperienceKey>,
+    /// Which experiences each parcel admits (`ExperienceQuery`), keyed by the
+    /// region-local parcel id. A parcel with **no** entry admits everything —
+    /// see [`parcel_admits`](Self::parcel_admits).
+    parcel_allowed: BTreeMap<i32, BTreeSet<ExperienceKey>>,
 }
 
 impl SimExperiences {
@@ -108,6 +112,49 @@ impl SimExperiences {
         self.region_allowed = allowed;
         self.region_blocked = blocked;
         self.region_trusted = trusted;
+    }
+
+    /// Declares which experiences the parcel `parcel_id` admits
+    /// (`ExperienceQuery`) — the driver/test population API, and the knob a
+    /// scenario turns to walk an avatar off the land that admitted its sky.
+    ///
+    /// Declaring a parcel is what makes it restrictive: until a parcel is
+    /// named here it admits every experience, so a fixture that does not care
+    /// about land scoping answers the way a grid with a single region-wide
+    /// experience does.
+    pub fn set_parcel_experiences(&mut self, parcel_id: i32, ids: Vec<ExperienceKey>) {
+        drop(
+            self.parcel_allowed
+                .insert(parcel_id, ids.into_iter().collect()),
+        );
+    }
+
+    /// Whether `parcel_id` admits `id`. A parcel nothing was declared for
+    /// admits everything (see [`set_parcel_experiences`](Self::set_parcel_experiences)).
+    #[must_use]
+    pub fn parcel_admits(&self, parcel_id: i32, id: ExperienceKey) -> bool {
+        self.parcel_allowed
+            .get(&parcel_id)
+            .is_none_or(|allowed| allowed.contains(&id))
+    }
+
+    /// Serves one `ExperienceQuery`: each requested id paired with whether
+    /// `parcel_id` admits it, in id order — the reply payload, and the exact
+    /// question the reference asks on every parcel change while an experience
+    /// is injecting an environment.
+    #[must_use]
+    pub fn parcel_experiences(
+        &self,
+        parcel_id: i32,
+        ids: &[ExperienceKey],
+    ) -> Vec<(ExperienceKey, bool)> {
+        let mut answered: Vec<(ExperienceKey, bool)> = ids
+            .iter()
+            .map(|id| (*id, self.parcel_admits(parcel_id, *id)))
+            .collect();
+        answered.sort_unstable();
+        answered.dedup();
+        answered
     }
 
     /// Serves one `GetExperienceInfo` lookup: the stored record per
@@ -429,6 +476,32 @@ mod tests {
                 ..update
             }),
             None
+        );
+    }
+
+    /// A parcel admits everything until it is declared; once declared it
+    /// admits exactly what was declared, and the answer comes back in id
+    /// order.
+    #[test]
+    fn parcel_experiences_answers_per_declared_parcel() {
+        let mut store = SimExperiences::default();
+        // Nothing declared: the fixture is not land-scoped, so both pass.
+        assert_eq!(
+            store.parcel_experiences(7, &[key(2), key(1)]),
+            vec![(key(1), true), (key(2), true)]
+        );
+        store.set_parcel_experiences(7, vec![key(1)]);
+        assert_eq!(
+            store.parcel_experiences(7, &[key(2), key(1)]),
+            vec![(key(1), true), (key(2), false)]
+        );
+        // A different parcel is still undeclared, and still admits both.
+        assert_eq!(store.parcel_experiences(8, &[key(2)]), vec![(key(2), true)]);
+        // A parcel declared to admit nothing refuses everything.
+        store.set_parcel_experiences(8, Vec::new());
+        assert_eq!(
+            store.parcel_experiences(8, &[key(1), key(2)]),
+            vec![(key(1), false), (key(2), false)]
         );
     }
 

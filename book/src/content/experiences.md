@@ -41,6 +41,11 @@ family of experience capabilities:
 - **Region** — list and set the experiences allowed on the current land
   (`RequestRegionExperiences` / `SetRegionExperiences` →
   `Event::RegionExperiences`).
+- **Parcel** — which of a set of experiences one parcel admits
+  (`QueryParcelExperiences` → `Event::ParcelExperiences`). An experience is
+  admitted per land, so the viewer asks this whenever an agent holding an
+  experience-pushed environment steps over a parcel line, and releases the sky
+  of every experience the new parcel refuses.
 
 ---
 

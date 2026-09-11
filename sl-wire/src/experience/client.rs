@@ -40,6 +40,24 @@ pub fn group_experiences_query(group_id: Uuid) -> String {
     format!("?{group_id}")
 }
 
+/// Builds the URL suffix for an `ExperienceQuery` GET
+/// (`{cap}?parcelid=<id>&experiences=<id>,<id>,…`) — "of the experiences
+/// currently injecting something, which does this parcel admit?".
+///
+/// The `experiences` parameter is omitted entirely when the list is empty,
+/// which is what the reference's own string building does
+/// (`DayInjection::testExperiencesOnParcelCoro`, `indra/newview/llenvironment.cpp`):
+/// it writes the parameter name only before the *first* id.
+#[must_use]
+pub fn experience_query(parcel_id: i32, experiences: &[ExperienceKey]) -> String {
+    let mut out = format!("?parcelid={parcel_id}");
+    for (index, id) in experiences.iter().enumerate() {
+        out.push_str(if index == 0 { "&experiences=" } else { "," });
+        out.push_str(&id.to_string());
+    }
+    out
+}
+
 /// Builds the URL suffix for an `IsExperienceAdmin` / `IsExperienceContributor`
 /// GET (`{cap}?experience_id=<id>`).
 #[must_use]
@@ -214,6 +232,35 @@ pub fn parse_region_experiences(
             .collect())
     };
     Ok((keys("allowed")?, keys("blocked")?, keys("trusted")?))
+}
+
+/// Decodes the `{ experiences: { "<id>": bool, … } }` of an `ExperienceQuery`
+/// reply: for each queried experience, whether the parcel admits it. Sorted by
+/// id, so a caller comparing two replies compares two identical orders.
+///
+/// An entry whose key is not a UUID, or whose value is not a boolean, is
+/// skipped: the reference reads each entry with `asBoolean()` and acts only on
+/// the ones that say *no*, so an unreadable entry must not become a clear.
+///
+/// # Errors
+///
+/// Returns a [`WireError::Llsd`] if `experiences` is present but not an LLSD
+/// map.
+pub fn parse_experience_query_reply(body: &Llsd) -> Result<Vec<(ExperienceKey, bool)>, WireError> {
+    let Some(entries) = body.field_map("experiences", "experiences")? else {
+        return Ok(Vec::new());
+    };
+    let mut admitted: Vec<(ExperienceKey, bool)> = entries
+        .iter()
+        .filter_map(|(id, allowed)| {
+            Some((
+                ExperienceKey::from(Uuid::parse_str(id.trim()).ok()?),
+                allowed.as_bool()?,
+            ))
+        })
+        .collect();
+    admitted.sort_unstable();
+    Ok(admitted)
 }
 
 /// Decodes the `{ status }` boolean of an `IsExperienceAdmin` /

@@ -149,9 +149,9 @@ mod test {
         // upload/materials/MOAP caps, the seven inventory caps (the two
         // descendents fetches, the two per-item fetches, AISv3 agent +
         // Library, CreateInventoryCategory), the nine
-        // region/object-information caps, the twelve experience caps, and
+        // region/object-information caps, the thirteen experience caps, and
         // the three voice signalling caps.
-        assert_eq!(granted.len(), 58);
+        assert_eq!(granted.len(), 59);
         Ok(())
     }
 

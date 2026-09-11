@@ -21,8 +21,8 @@ use bevy::prelude::*;
 use sl_client_bevy::{
     AssetKey, Command, DayCycle, DayCycleFrame, EnvironmentAsset, EnvironmentPushAction,
     EnvironmentSettings, ExperienceEnvironmentPush, ExperienceKey, Llsd, SettingsKind, SkySettings,
-    SlCommand, SlEvent, SlSessionEvent, Uuid, WaterSettings, sky_with_pushed_values,
-    water_with_pushed_values,
+    SlCommand, SlEvent, SlSessionEvent, Uuid, WaterSettings, sky_with_blended_values,
+    water_with_blended_values,
 };
 use sl_settings::SettingValue;
 use sl_viewer_settings::ViewerSettings;
@@ -184,9 +184,50 @@ pub struct PushedEnvironment {
     /// experience that last wrote it — the reference's `mOverrideValues` /
     /// `mOverrideExps`, which are per **key** and not per push, so two
     /// experiences can each own part of the sky.
-    sky_values: BTreeMap<String, (ExperienceKey, Llsd)>,
+    sky_values: BTreeMap<String, PushedValue>,
     /// The water counterpart of [`sky_values`](Self::sky_values).
-    water_values: BTreeMap<String, (ExperienceKey, Llsd)>,
+    water_values: BTreeMap<String, PushedValue>,
+}
+
+/// One key an experience has pushed, and how far along its own blend it is.
+#[derive(Debug, Clone, PartialEq)]
+struct PushedValue {
+    /// The experience that last wrote this key — the reference's
+    /// `mOverrideExps` entry.
+    experience: ExperienceKey,
+    /// What it wrote.
+    value: Llsd,
+    /// The blend still running for this key, if any.
+    blend: Option<ValueBlend>,
+}
+
+/// A single key's blend — the reference's `LLSettingsInjected::Injection`,
+/// which is scheduled per key rather than per push and interpolates only that
+/// key each tick (`applyInjections`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ValueBlend {
+    /// Seconds still to run.
+    remaining: f32,
+    /// Seconds the blend runs for in total; always `> 0.0`.
+    duration: f32,
+    /// Whether this is the release fading back **out** to the value underneath
+    /// (`mBlendIn == false`), rather than the push fading in. A key on its way
+    /// out is nobody's any more: it does not keep its experience alive.
+    fading_out: bool,
+}
+
+impl ValueBlend {
+    /// How far toward the pushed value this key currently sits, `0.0..=1.0` —
+    /// the reference's `mix`, inverted for a fade-out so the key starts at the
+    /// pushed value and walks back to the one underneath.
+    fn mix(&self) -> f32 {
+        let elapsed = (1.0 - (self.remaining / self.duration)).clamp(0.0, 1.0);
+        if self.fading_out {
+            1.0 - elapsed
+        } else {
+            elapsed
+        }
+    }
 }
 
 impl PushedEnvironment {
@@ -205,6 +246,12 @@ impl PushedEnvironment {
     /// Every experience currently holding some part of the environment — the
     /// reference's `mActiveExperiences`, and what a surface telling the user
     /// *who* changed their sky reads.
+    ///
+    /// A key still fading **out** does not count: the reference erases the
+    /// experience from `mActiveExperiences` and `mOverrideExps` the moment the
+    /// release is asked for, and only the fade itself outlives that. An
+    /// experience whose sky is on its way off screen must not be re-asked about
+    /// on the next parcel line, nor named as one holding the sky.
     #[must_use]
     pub fn experiences(&self) -> BTreeSet<ExperienceKey> {
         let tracks = [
@@ -219,9 +266,42 @@ impl PushedEnvironment {
                 self.sky_values
                     .values()
                     .chain(self.water_values.values())
-                    .map(|(experience, _)| *experience),
+                    .filter(|pushed| !pushed.is_fading_out())
+                    .map(|pushed| pushed.experience),
             )
             .collect()
+    }
+
+    /// Whether any key is still mid-blend — what
+    /// [`advance_environment_transition`] ticks each frame, and the only reason
+    /// the composed environment has to be rebuilt while nothing else changed.
+    #[must_use]
+    pub fn is_blending(&self) -> bool {
+        self.sky_values
+            .values()
+            .chain(self.water_values.values())
+            .any(|pushed| pushed.blend.is_some())
+    }
+
+    /// Advance every running per-key blend by `delta` seconds, completing the
+    /// ones that are done: a fade-in becomes a plain override, a fade-out takes
+    /// its key away. Returns whether anything moved, so the caller only
+    /// recomposes when it did.
+    fn advance_blends(&mut self, delta: f32) -> bool {
+        let mut moved = false;
+        for values in [&mut self.sky_values, &mut self.water_values] {
+            for pushed in values.values_mut() {
+                if let Some(blend) = &mut pushed.blend {
+                    blend.remaining -= delta;
+                    moved = true;
+                    if blend.remaining <= 0.0 && !blend.fading_out {
+                        pushed.blend = None;
+                    }
+                }
+            }
+            values.retain(|_, pushed| !pushed.is_finished_fading_out());
+        }
+        moved
     }
 
     /// Install a whole settings asset for `experience` — the reference's
@@ -249,34 +329,68 @@ impl PushedEnvironment {
     /// A push carrying neither is the reference's own special case: with both
     /// maps undefined `setExperienceEnvironment` *clears* this experience
     /// instead, so a script that pushes nothing releases what it held.
-    fn inject(&mut self, experience: ExperienceKey, sky: Option<&Llsd>, water: Option<&Llsd>) {
+    ///
+    /// `transition` is the push's own transition time: over
+    /// [`INSTANT_TRANSITION`] each key is given its own blend rather than being
+    /// written straight through, which is the reference's `injectSetting`
+    /// threshold and the reason a partial push does **not** cross-fade the whole
+    /// environment.
+    fn inject(
+        &mut self,
+        experience: ExperienceKey,
+        sky: Option<&Llsd>,
+        water: Option<&Llsd>,
+        transition: f32,
+    ) {
         if sky.is_none() && water.is_none() {
-            self.clear(Some(experience));
+            self.clear(Some(experience), transition);
             return;
         }
-        overlay_pushed_values(&mut self.sky_values, experience, sky);
-        overlay_pushed_values(&mut self.water_values, experience, water);
+        overlay_pushed_values(&mut self.sky_values, experience, sky, transition);
+        overlay_pushed_values(&mut self.water_values, experience, water, transition);
     }
 
     /// Drop everything `experience` is holding, or — for `None`, the nil
     /// experience id the reference reads as "all" — the whole layer.
-    fn clear(&mut self, experience: Option<ExperienceKey>) {
-        let Some(experience) = experience else {
-            *self = Self::default();
-            return;
-        };
-        if held_by(self.day.as_ref(), experience) {
+    ///
+    /// Per-key overrides fade back **out** over `transition` rather than
+    /// vanishing (the reference's `removeInjection`, which turns each override
+    /// it takes away into a blend-out injection); whole tracks are dropped at
+    /// once, because the cross-fade that covers those is the whole-environment
+    /// one [`EnvironmentState::apply_environment_push`] starts.
+    fn clear(&mut self, experience: Option<ExperienceKey>, transition: f32) {
+        if let Some(experience) = experience {
+            if held_by(self.day.as_ref(), experience) {
+                self.day = None;
+            }
+            if held_by(self.sky.as_ref(), experience) {
+                self.sky = None;
+            }
+            if held_by(self.water.as_ref(), experience) {
+                self.water = None;
+            }
+        } else {
             self.day = None;
-        }
-        if held_by(self.sky.as_ref(), experience) {
             self.sky = None;
-        }
-        if held_by(self.water.as_ref(), experience) {
             self.water = None;
         }
-        self.sky_values.retain(|_, (owner, _)| *owner != experience);
-        self.water_values
-            .retain(|_, (owner, _)| *owner != experience);
+        for values in [&mut self.sky_values, &mut self.water_values] {
+            release_pushed_values(values, experience, transition);
+        }
+    }
+
+    /// Whether `experience` — or, for `None`, anybody — holds one of the three
+    /// whole-asset tracks. What decides whether releasing it is a
+    /// whole-environment cross-fade or a set of per-key fades.
+    fn holds_a_track(&self, experience: Option<ExperienceKey>) -> bool {
+        match experience {
+            Some(experience) => {
+                held_by(self.day.as_ref(), experience)
+                    || held_by(self.sky.as_ref(), experience)
+                    || held_by(self.water.as_ref(), experience)
+            }
+            None => self.day.is_some() || self.sky.is_some() || self.water.is_some(),
+        }
     }
 
     /// Apply the per-key injections to every frame of the cycle being composed.
@@ -287,19 +401,38 @@ impl PushedEnvironment {
     /// interpolation gives the same value at every point between them. Pinning
     /// the sampled frame instead would freeze the sky the moment an experience
     /// nudged one cloud setting.
+    ///
+    /// A key mid-blend is applied only `mix` of the way from the frame's own
+    /// value, which is what makes a partial push fade **that key** instead of
+    /// cross-fading the whole sky.
     fn apply_values(&self, settings: &mut EnvironmentSettings) {
         if !self.sky_values.is_empty() {
             let values = llsd_map_of(&self.sky_values);
+            let mixes = mixes_of(&self.sky_values);
             for frame in settings.day_cycle.sky_frames.values_mut() {
-                *frame = sky_with_pushed_values(frame, &values);
+                *frame = sky_with_blended_values(frame, &values, &mixes);
             }
         }
         if !self.water_values.is_empty() {
             let values = llsd_map_of(&self.water_values);
+            let mixes = mixes_of(&self.water_values);
             for frame in settings.day_cycle.water_frames.values_mut() {
-                *frame = water_with_pushed_values(frame, &values);
+                *frame = water_with_blended_values(frame, &values, &mixes);
             }
         }
+    }
+}
+
+impl PushedValue {
+    /// Whether this key is on its way back out to the value underneath.
+    fn is_fading_out(&self) -> bool {
+        self.blend.is_some_and(|blend| blend.fading_out)
+    }
+
+    /// Whether this key has finished fading out and can be forgotten.
+    fn is_finished_fading_out(&self) -> bool {
+        self.blend
+            .is_some_and(|blend| blend.fading_out && blend.remaining <= 0.0)
     }
 }
 
@@ -311,29 +444,82 @@ fn held_by<T>(track: Option<&(ExperienceKey, T)>, experience: ExperienceKey) -> 
 }
 
 /// Record each key of `values` as owned by `experience`, replacing whatever
-/// experience owned it before — the reference's `injectSetting` at an instant
-/// transition. A `values` that is not a map contributes nothing.
+/// experience owned it before — the reference's `injectSetting`, which schedules
+/// a per-key blend above its `0.1` second threshold and writes straight through
+/// below it. A `values` that is not a map contributes nothing.
 fn overlay_pushed_values(
-    target: &mut BTreeMap<String, (ExperienceKey, Llsd)>,
+    target: &mut BTreeMap<String, PushedValue>,
     experience: ExperienceKey,
     values: Option<&Llsd>,
+    transition: f32,
 ) {
     let Some(Llsd::Map(entries)) = values else {
         return;
     };
+    let blend = (transition > INSTANT_TRANSITION).then_some(ValueBlend {
+        remaining: transition,
+        duration: transition,
+        fading_out: false,
+    });
     for (key, value) in entries {
-        drop(target.insert(key.clone(), (experience, value.clone())));
+        drop(target.insert(
+            key.clone(),
+            PushedValue {
+                experience,
+                value: value.clone(),
+                blend,
+            },
+        ));
+    }
+}
+
+/// Start every key `experience` (or, for `None`, anybody) owns fading back out
+/// over `transition`, or drop them outright at an instant one — the reference's
+/// `removeInjection`.
+///
+/// A key already fading out is left alone: its fade is the release, and
+/// restarting it would make the second of two clears take longer than the first.
+fn release_pushed_values(
+    target: &mut BTreeMap<String, PushedValue>,
+    experience: Option<ExperienceKey>,
+    transition: f32,
+) {
+    let owned = |pushed: &PushedValue| experience.is_none_or(|id| pushed.experience == id);
+    if transition <= INSTANT_TRANSITION {
+        target.retain(|_, pushed| !owned(pushed));
+        return;
+    }
+    for pushed in target.values_mut() {
+        if !owned(pushed) || pushed.is_fading_out() {
+            continue;
+        }
+        // The value it fades out *from* is the one on screen now, which for a
+        // key still fading in is only part of the way to what was pushed.
+        pushed.blend = Some(ValueBlend {
+            remaining: transition,
+            duration: transition,
+            fading_out: true,
+        });
     }
 }
 
 /// The owned per-key overrides as the plain LLSD map the settings overlay takes.
-fn llsd_map_of(values: &BTreeMap<String, (ExperienceKey, Llsd)>) -> Llsd {
+fn llsd_map_of(values: &BTreeMap<String, PushedValue>) -> Llsd {
     Llsd::Map(
         values
             .iter()
-            .map(|(key, (_, value))| (key.clone(), value.clone()))
+            .map(|(key, pushed)| (key.clone(), pushed.value.clone()))
             .collect(),
     )
+}
+
+/// The per-key mixes of whichever keys are mid-blend — the overlay assigns every
+/// other key whole.
+fn mixes_of(values: &BTreeMap<String, PushedValue>) -> BTreeMap<String, f32> {
+    values
+        .iter()
+        .filter_map(|(key, pushed)| Some((key.clone(), pushed.blend?.mix())))
+        .collect()
 }
 
 /// Where the current [`EnvironmentState::settings`] came from — and, as
@@ -370,6 +556,17 @@ impl EnvironmentSource {
 /// which writes a value straight through under `0.1` seconds instead of
 /// scheduling a blend.
 const INSTANT_TRANSITION: f32 = 0.1;
+
+/// How long the release of an experience the agent has walked away from
+/// cross-fades for, in seconds — the reference's `TRANSITION_FAST`, which is
+/// what `DayInjection::testExperiencesOnParcelCoro` passes to `clearInjections`
+/// for an experience the new parcel does not admit.
+const FAST_TRANSITION: f32 = 1.0;
+
+/// The reference's `TRANSITION_DEFAULT`, in seconds — what it cross-fades over
+/// when it drops every injected environment at a region change
+/// (`LLEnvironment::onRegionChange`).
+const DEFAULT_TRANSITION: f32 = 5.0;
 
 /// How many times to (re)request the region environment before giving up and
 /// rendering with the legacy WindLight defaults.
@@ -653,6 +850,20 @@ pub struct EnvironmentState {
     parcel_env_version: i32,
     /// The parcel-environment request outstanding, if any.
     parcel_req: Option<ParcelRequest>,
+    /// The parcel the agent is **standing** on, whatever its environment
+    /// version says — the reference's `LLViewerParcelMgr::getAgentParcel()
+    /// ->getLocalID()`.
+    ///
+    /// Not [`Self::parcel_id`], which is the parcel whose *environment* is being
+    /// tracked and is `None` wherever a region has per-parcel overrides switched
+    /// off. Where an experience may keep its sky is a question about land, not
+    /// about environment versions, so it has to be answered on a region that
+    /// serves no parcel environments at all.
+    standing_parcel: Option<i32>,
+    /// A parcel the agent has just stepped onto that the injecting experiences
+    /// still have to be tested against, if the query has not gone out yet — the
+    /// arming half of [`query_parcel_experiences`].
+    experience_recheck: Option<i32>,
     /// Seconds a *manual* environment change cross-fades over, mirrored from
     /// [`SETTING_TRANSITION_TIME`] by [`sync_environment_settings`]. Zero — the
     /// declared default — is an instant cut.
@@ -711,6 +922,8 @@ impl Default for EnvironmentState {
             parcel_id: None,
             parcel_env_version: -1,
             parcel_req: None,
+            standing_parcel: None,
+            experience_recheck: None,
             manual_transition_seconds: 0.0,
             transition: None,
             edit: LocalEnvironment::default(),
@@ -798,6 +1011,55 @@ impl EnvironmentState {
         if moved {
             self.apply();
         }
+    }
+
+    /// Mirror the parcel the agent is **standing** on, and arm the experience
+    /// re-check when that is a different parcel from the last one.
+    ///
+    /// An experience is admitted per land, so stepping over a parcel line is the
+    /// moment its injected sky may stop being allowed. The reference hooks
+    /// exactly this signal from inside the injection itself
+    /// (`DayInjection::onParcelChange` → `testExperiencesOnParcel`), which is why
+    /// nothing is asked while no experience is injecting: there is no injection
+    /// to hold the hook.
+    pub fn set_standing_parcel(&mut self, parcel_id: Option<i32>) {
+        if self.standing_parcel == parcel_id {
+            return;
+        }
+        self.standing_parcel = parcel_id;
+        // A parcel the agent has *left* (no parcel known any more) is nothing to
+        // ask a question about; the next one the agent steps onto asks it.
+        if let Some(parcel_id) = parcel_id
+            && !self.push.is_empty()
+        {
+            self.experience_recheck = Some(parcel_id);
+        }
+    }
+
+    /// The parcel the agent is standing on, as the region numbers them — what an
+    /// arriving [`Event::ParcelExperiences`](sl_client_bevy::SlSessionEvent::ParcelExperiences)
+    /// is matched against.
+    #[must_use]
+    pub const fn standing_parcel(&self) -> Option<i32> {
+        self.standing_parcel
+    }
+
+    /// Release everything `experience` has injected, over the reference's
+    /// `TRANSITION_FAST` — what an experience the parcel does not admit gets.
+    ///
+    /// A no-op for an experience holding nothing, so an `ExperienceQuery` reply
+    /// listing several refusals starts one cross-fade per experience that
+    /// actually had a sky here, and none at all for the common answer where every
+    /// injecting experience is still allowed.
+    pub fn release_pushed_experience(&mut self, experience: ExperienceKey) {
+        if !self.push.experiences().contains(&experience) {
+            return;
+        }
+        if self.push.holds_a_track(Some(experience)) {
+            self.begin_transition_over(FAST_TRANSITION);
+        }
+        self.push.clear(Some(experience), FAST_TRANSITION);
+        self.apply();
     }
 
     /// The parcel environment in force, if the parcel the agent stands on has
@@ -899,24 +1161,38 @@ impl EnvironmentState {
     /// has fetched by the id the push named, and passes as `None` while it is
     /// still in flight or turned out not to be settings at all.
     ///
-    /// The cross-fade is the **push's** transition time, not the viewer's
-    /// manual one: an experience states how long its change should take, and
-    /// that number is as much a part of the push as the sky is.
+    /// The fade is the **push's** transition time, not the viewer's manual one:
+    /// an experience states how long its change should take, and that number is
+    /// as much a part of the push as the sky is.
+    ///
+    /// *Which* fade depends on what the push does, exactly as it does in the
+    /// reference. A whole settings asset going in or a whole track coming out is
+    /// a whole-environment cross-fade (`animateSkyChange` /
+    /// `animateWaterChange`); a partial push and its release are **per key**
+    /// (`injectSetting` / `removeInjection`), leaving every key the push does not
+    /// name at the value it already had for the whole of the transition.
     pub fn apply_environment_push(
         &mut self,
         push: &ExperienceEnvironmentPush,
         asset: Option<EnvironmentAsset>,
     ) {
-        self.begin_transition_over(push.transition_time);
         match &push.action {
             EnvironmentPushAction::Clear => {
                 // A nil experience id is the reference's "every experience".
-                self.push
-                    .clear((!push.experience_id.uuid().is_nil()).then_some(push.experience_id));
+                let experience =
+                    (!push.experience_id.uuid().is_nil()).then_some(push.experience_id);
+                if self.push.holds_a_track(experience) {
+                    self.begin_transition_over(push.transition_time);
+                }
+                self.push.clear(experience, push.transition_time);
             }
             EnvironmentPushAction::Partial { sky, water } => {
-                self.push
-                    .inject(push.experience_id, sky.as_ref(), water.as_ref());
+                self.push.inject(
+                    push.experience_id,
+                    sky.as_ref(),
+                    water.as_ref(),
+                    push.transition_time,
+                );
             }
             EnvironmentPushAction::Full { asset_id } => {
                 let Some(asset) = asset else {
@@ -924,9 +1200,9 @@ impl EnvironmentState {
                         "experience {} pushed settings asset {asset_id}, which is not in hand yet",
                         push.experience_id
                     );
-                    self.transition = None;
                     return;
                 };
+                self.begin_transition_over(push.transition_time);
                 self.push.install(push.experience_id, asset);
             }
         }
@@ -934,11 +1210,26 @@ impl EnvironmentState {
     }
 
     /// Drop everything the pushed layer holds — every experience at once, as a
-    /// `ClearEnvironment` with a nil experience id does.
-    pub fn clear_pushed(&mut self) {
+    /// `ClearEnvironment` with a nil experience id does — cross-faded over
+    /// `transition_seconds`.
+    ///
+    /// A **region change** is the other caller: the reference drops every
+    /// injected environment at one, over its `TRANSITION_DEFAULT`
+    /// (`LLEnvironment::onRegionChange`, whose "for now environmental
+    /// experiences do not survive region crossings" is unconditional — the
+    /// capability test beside it is commented out). Without that a script that
+    /// pushed a sky and then lost the agent to a teleport keeps it forever:
+    /// nothing in the destination knows who is holding the sky, and the
+    /// per-parcel re-check ([`set_standing_parcel`](Self::set_standing_parcel))
+    /// only fires where the destination serves an `ExperienceQuery`.
+    pub fn clear_pushed(&mut self, transition_seconds: f32) {
         if self.push.is_empty() {
             return;
         }
+        self.begin_transition_over(transition_seconds);
+        // The whole layer goes at once here, fade and all: a region crossing
+        // replaces the environment underneath as well, so there is nothing for a
+        // per-key fade-out to walk back to.
         self.push = PushedEnvironment::default();
         self.apply();
     }
@@ -1391,16 +1682,25 @@ fn pin_water_into(settings: &mut EnvironmentSettings, water: WaterSettings, name
     settings.day_cycle.water_frames = std::iter::once((name, water)).collect();
 }
 
-/// Advance whichever manual cross-fade is running, and end it when it is done.
+/// Advance whichever fades are running — the whole-environment cross-fade and
+/// each experience-pushed key's own blend — and end them when they are done.
 ///
 /// Reads before it writes on purpose: [`EnvironmentState`] is a change-detected
 /// resource, and a viewer that is not fading anything must not look to anything
 /// downstream as though its environment changed every frame.
 pub fn advance_environment_transition(time: Res<Time>, mut state: ResMut<EnvironmentState>) {
-    if state.transition.is_none() {
+    let blending = state.push.is_blending();
+    if state.transition.is_none() && !blending {
         return;
     }
-    state.advance_transition(time.delta_secs());
+    let delta = time.delta_secs();
+    state.advance_transition(delta);
+    if blending && state.push.advance_blends(delta) {
+        // A per-key blend changes what the composed environment holds, so the
+        // frames have to be rebuilt — unlike the whole-environment cross-fade,
+        // which `sky_at` applies at sample time.
+        state.apply();
+    }
 }
 
 /// Mirror the environment's own settings into [`EnvironmentState`]: today the
@@ -1664,6 +1964,12 @@ pub fn request_environment(
         state.req_attempts = 0;
         state.req_next_retry_at = 0.0;
         if matches!(event.0, SlSessionEvent::RegionHandshakeComplete) {
+            // An experience's injected sky does not cross a region line: the
+            // reference drops the whole `ENV_PUSH` layer here, and there is no
+            // way to keep it honest across the crossing — the destination
+            // region has its own idea of which experiences it admits, and the
+            // script that pushed the sky is back where the agent left it.
+            state.clear_pushed(DEFAULT_TRANSITION);
             // Parcel ids are region-local, so the one being stood on means
             // nothing here any more — and neither does its environment. The
             // next `SlAgentParcel` mirror re-asks for the new region's. Only a
@@ -1673,6 +1979,8 @@ pub fn request_environment(
             state.parcel_id = None;
             state.parcel_env_version = -1;
             state.parcel_req = None;
+            state.standing_parcel = None;
+            state.experience_recheck = None;
             state.apply();
         }
     }
@@ -1720,6 +2028,14 @@ pub fn track_agent_parcel(
         // the whole of the answer.
         return;
     };
+    // Which parcel the agent is *standing* on is a separate question from which
+    // parcel's environment is being tracked: a region with per-parcel overrides
+    // switched off has no parcel environment to ask for, but an experience is
+    // still admitted (or not) per parcel there.
+    let standing = agent.current.as_ref().map(|parcel| parcel.local_id.get());
+    if state.standing_parcel() != standing {
+        state.set_standing_parcel(standing);
+    }
     let parcel = agent.current.as_ref().filter(|parcel| {
         parcel.region_allow_environment_override && parcel.parcel_environment_version >= 0
     });
@@ -1777,6 +2093,78 @@ pub fn request_parcel_environment(
     commands.write(SlCommand(Command::RequestEnvironment {
         parcel_id: Some(request.parcel_id),
     }));
+}
+
+/// Ask the region which of the currently injecting experiences the parcel the
+/// agent has just stepped onto admits (`ExperienceQuery`).
+///
+/// The reference asks this from inside the injection
+/// (`DayInjection::testExperiencesOnParcel`), which is why the question is only
+/// asked while something is injecting — and why nothing is retried: an
+/// unanswered query means the sky stays as it is until the next parcel line,
+/// which is what a region that serves no `ExperienceQuery` at all (every
+/// OpenSim) gets on every crossing.
+pub fn query_parcel_experiences(
+    mut commands: MessageWriter<SlCommand>,
+    mut state: ResMut<EnvironmentState>,
+) {
+    let Some(parcel_id) = state.experience_recheck else {
+        return;
+    };
+    let experiences: Vec<ExperienceKey> = state.pushed().experiences().into_iter().collect();
+    state.experience_recheck = None;
+    if experiences.is_empty() {
+        return;
+    }
+    debug!(
+        "agent stepped onto parcel {parcel_id}; asking which of {} injecting experience(s) it admits",
+        experiences.len()
+    );
+    commands.write(SlCommand(Command::QueryParcelExperiences {
+        parcel_id,
+        experiences,
+    }));
+}
+
+/// Release the injected environment of every experience the parcel the agent
+/// stands on does **not** admit — the answer half of
+/// [`query_parcel_experiences`].
+///
+/// An answer about a parcel the agent has since walked off is discarded rather
+/// than acted on: the reference re-reads the agent's parcel when its coroutine
+/// resumes and returns if it has changed, because clearing an experience the
+/// *previous* parcel refused would take away a sky the current one allows.
+pub fn ingest_parcel_experiences(
+    mut events: MessageReader<SlEvent>,
+    mut state: ResMut<EnvironmentState>,
+) {
+    for event in events.read() {
+        let SlSessionEvent::ParcelExperiences {
+            parcel_id,
+            experiences,
+        } = &event.0
+        else {
+            continue;
+        };
+        if state.standing_parcel() != Some(*parcel_id) {
+            debug!(
+                "experience query answered for parcel {parcel_id}, which the agent has already \
+                 left (now on {:?}); ignoring it",
+                state.standing_parcel()
+            );
+            continue;
+        }
+        for (experience, admitted) in experiences {
+            if *admitted {
+                continue;
+            }
+            info!(
+                "parcel {parcel_id} does not admit experience {experience}; releasing the \
+                 environment it pushed"
+            );
+            state.release_pushed_experience(*experience);
+        }
+    }
 }
 
 /// Fold an incoming [`SlSessionEvent::Environment`] into [`EnvironmentState`],
@@ -3143,7 +3531,8 @@ mod tests {
     }
 
     /// A push states how long its change takes; that number, not the viewer's
-    /// manual transition time, is what fades.
+    /// manual transition time, is what fades. A whole settings asset going in is
+    /// a whole-environment cross-fade, the reference's `animateSkyChange`.
     #[test]
     fn a_push_fades_over_its_own_transition_time() {
         let experience = ExperienceKey::from(Uuid::from_u128(0xE1));
@@ -3153,8 +3542,40 @@ mod tests {
         state.apply_environment_push(
             &push(
                 experience,
+                EnvironmentPushAction::Full {
+                    asset_id: Uuid::from_u128(0x5117),
+                },
+                4.0,
+            ),
+            Some(EnvironmentAsset::Sky(Box::new(script_sky()))),
+        );
+
+        assert!(
+            state.is_transitioning(),
+            "a manual transition time of zero must not suppress the push's own fade"
+        );
+    }
+
+    /// **A partial push fades the key it names, and only that key.**
+    ///
+    /// The reference schedules an `Injection` per key above its `0.1` second
+    /// threshold and interpolates each one on its own each tick; it does *not*
+    /// cross-fade the whole environment, which would drag every other key along
+    /// with the one the script asked for.
+    #[test]
+    fn a_partial_push_blends_per_key_rather_than_cross_fading_the_sky() {
+        let experience = ExperienceKey::from(Uuid::from_u128(0xE1));
+        let mut state = EnvironmentState::default();
+        state.ingest_shared(two_frame_region_cycle(), EnvironmentSource::Region);
+        let before = state.sky_at(0.0, 0.0).map(|sky| sky.cloud_shadow);
+        assert!(before.is_some(), "the region cycle has a sky to blend from");
+        assert_ne!(before, Some(0.75), "…and it does not already say 0.75");
+
+        state.apply_environment_push(
+            &push(
+                experience,
                 EnvironmentPushAction::Partial {
-                    sky: Some(sky_fragment("cloud_shadow", 0.5)),
+                    sky: Some(sky_fragment("cloud_shadow", 0.75)),
                     water: None,
                 },
                 4.0,
@@ -3163,9 +3584,86 @@ mod tests {
         );
 
         assert!(
-            state.is_transitioning(),
-            "a manual transition time of zero must not suppress the push's own fade"
+            !state.is_transitioning(),
+            "a partial push must not cross-fade the whole environment"
         );
+        assert_eq!(
+            state.sky_at(0.0, 0.0).map(|sky| sky.cloud_shadow),
+            before,
+            "at mix zero the key still reads the value underneath it"
+        );
+
+        // Halfway: the key is halfway, and nothing else moved.
+        assert!(state.push.advance_blends(2.0));
+        state.apply();
+        let halfway = state.sky_at(0.0, 0.0).map(|sky| sky.cloud_shadow);
+        let expected = before.map(|before| before + (0.75 - before) * 0.5);
+        assert!(
+            halfway
+                .zip(expected)
+                .is_some_and(|(got, want)| (got - want).abs() < 1e-5),
+            "the key blends toward the pushed value: {halfway:?} against {expected:?}"
+        );
+
+        // Done: the key holds what was pushed and the blend is over.
+        assert!(state.push.advance_blends(2.5));
+        state.apply();
+        assert_eq!(
+            state.sky_at(0.0, 0.0).map(|sky| sky.cloud_shadow),
+            Some(0.75)
+        );
+        assert!(!state.push.is_blending(), "the blend finished");
+    }
+
+    /// **A release fades the key back out rather than snapping it.**
+    ///
+    /// The reference turns each override it takes away into a blend-out
+    /// injection (`removeInjection`), and drops the experience from its active
+    /// set at once — the fade outlives the experience, not the other way round.
+    #[test]
+    fn a_released_key_fades_back_out_and_the_experience_is_gone_at_once() {
+        let experience = ExperienceKey::from(Uuid::from_u128(0xE1));
+        let mut state = EnvironmentState::default();
+        state.ingest_shared(two_frame_region_cycle(), EnvironmentSource::Region);
+        let before = state.sky_at(0.0, 0.0).map(|sky| sky.cloud_shadow);
+
+        state.apply_environment_push(
+            &push(
+                experience,
+                EnvironmentPushAction::Partial {
+                    sky: Some(sky_fragment("cloud_shadow", 0.75)),
+                    water: None,
+                },
+                0.0,
+            ),
+            None,
+        );
+        assert_eq!(
+            state.sky_at(0.0, 0.0).map(|sky| sky.cloud_shadow),
+            Some(0.75),
+            "an instant push writes straight through"
+        );
+
+        state.apply_environment_push(&push(experience, EnvironmentPushAction::Clear, 4.0), None);
+
+        assert!(
+            state.pushed().experiences().is_empty(),
+            "the experience holds nothing the moment it releases"
+        );
+        assert_eq!(
+            state.sky_at(0.0, 0.0).map(|sky| sky.cloud_shadow),
+            Some(0.75),
+            "…but its value is still on screen while the fade runs"
+        );
+
+        assert!(state.push.advance_blends(4.5));
+        state.apply();
+        assert_eq!(
+            state.sky_at(0.0, 0.0).map(|sky| sky.cloud_shadow),
+            before,
+            "the value underneath is back once the fade is over"
+        );
+        assert!(state.pushed().is_empty(), "and the layer is empty again");
     }
 
     /// The personal environment is the user's; an experience's push is not part
@@ -3188,6 +3686,218 @@ mod tests {
         assert!(
             state.saved_environment().is_none(),
             "a sky an experience imposed is not a personal environment"
+        );
+    }
+
+    /// An app running the two experience-recheck systems and nothing else.
+    fn recheck_app() -> App {
+        let mut app = App::new();
+        app.add_message::<SlEvent>();
+        app.add_message::<SlCommand>();
+        app.init_resource::<EnvironmentState>();
+        app.add_systems(
+            Update,
+            (
+                super::query_parcel_experiences,
+                super::ingest_parcel_experiences,
+            )
+                .chain(),
+        );
+        app
+    }
+
+    /// Every `ExperienceQuery` the systems asked for in one run, drained for the
+    /// same reason [`requests`] drains.
+    fn queries(app: &mut App) -> Vec<(i32, Vec<ExperienceKey>)> {
+        app.update();
+        app.world_mut()
+            .resource_mut::<Messages<SlCommand>>()
+            .drain()
+            .filter_map(|command| match command.0 {
+                Command::QueryParcelExperiences {
+                    parcel_id,
+                    experiences,
+                } => Some((parcel_id, experiences)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Install a pushed sky for `experience` in `state`, instantly.
+    fn inject_sky(state: &mut EnvironmentState, experience: ExperienceKey) {
+        state.apply_environment_push(
+            &push(
+                experience,
+                EnvironmentPushAction::Full {
+                    asset_id: Uuid::from_u128(0x5117),
+                },
+                0.0,
+            ),
+            Some(EnvironmentAsset::Sky(Box::new(script_sky()))),
+        );
+    }
+
+    /// **Stepping over a parcel line asks whether the sky may come along.**
+    ///
+    /// An experience is admitted per land, so the parcel change is the moment
+    /// its injection may stop being allowed — and nothing is asked while nothing
+    /// is injecting, because the reference hangs the hook off the injection
+    /// itself.
+    #[test]
+    fn a_parcel_change_asks_about_the_injecting_experiences() {
+        let experience = ExperienceKey::from(Uuid::from_u128(0xE1));
+        let mut app = recheck_app();
+
+        // Standing still on parcel 1 with nothing injected: no question.
+        app.world_mut()
+            .resource_mut::<EnvironmentState>()
+            .set_standing_parcel(Some(1));
+        assert_eq!(queries(&mut app), Vec::new());
+
+        // A push arrives; still no question — the agent has not moved.
+        inject_sky(
+            &mut app.world_mut().resource_mut::<EnvironmentState>(),
+            experience,
+        );
+        assert_eq!(queries(&mut app), Vec::new());
+
+        // Now it walks onto parcel 2.
+        app.world_mut()
+            .resource_mut::<EnvironmentState>()
+            .set_standing_parcel(Some(2));
+        assert_eq!(queries(&mut app), vec![(2, vec![experience])]);
+        // And the question is asked once, not every frame it stands there.
+        assert_eq!(queries(&mut app), Vec::new());
+    }
+
+    /// **A parcel that refuses an experience takes its sky back.**
+    ///
+    /// The region's own environment returns with no refetch, exactly as an
+    /// explicit release does — the settings underneath were only covered.
+    #[test]
+    fn a_refused_experience_loses_its_sky_and_the_region_returns() {
+        let refused = ExperienceKey::from(Uuid::from_u128(0xE1));
+        let allowed = ExperienceKey::from(Uuid::from_u128(0xE2));
+        let mut app = recheck_app();
+        let region_sky = {
+            let mut state = app.world_mut().resource_mut::<EnvironmentState>();
+            assert_eq!(
+                state.ingest_reply(reply(-1, 1234)),
+                EnvironmentSource::Region
+            );
+            let region_sky = state.rendered_sky();
+            state.set_standing_parcel(Some(1));
+            state.apply_environment_push(
+                &push(
+                    allowed,
+                    EnvironmentPushAction::Partial {
+                        sky: Some(sky_fragment("star_brightness", 3.0)),
+                        water: None,
+                    },
+                    0.0,
+                ),
+                None,
+            );
+            inject_sky(&mut state, refused);
+            state.set_standing_parcel(Some(2));
+            region_sky
+        };
+        assert_eq!(
+            queries(&mut app)
+                .into_iter()
+                .map(|(parcel, _)| parcel)
+                .collect::<Vec<_>>(),
+            vec![2]
+        );
+
+        app.world_mut()
+            .write_message(SlEvent(SlSessionEvent::ParcelExperiences {
+                parcel_id: 2,
+                experiences: vec![(refused, false), (allowed, true)],
+            }));
+        app.update();
+
+        let state = app.world().resource::<EnvironmentState>();
+        assert_eq!(
+            state.pushed().experiences().into_iter().collect::<Vec<_>>(),
+            vec![allowed],
+            "only the experience the parcel refused was released"
+        );
+        assert_eq!(
+            state.rendered_sky().map(|sky| sky.name),
+            region_sky.map(|sky| sky.name),
+            "the region's own sky is back under the surviving experience's key"
+        );
+    }
+
+    /// **An answer about land the agent has already left changes nothing.**
+    ///
+    /// The reply names only experiences, so without matching it against the
+    /// parcel the agent is on *now* a refusal from the parcel behind them would
+    /// take away a sky the one they are standing on allows.
+    #[test]
+    fn an_answer_for_a_parcel_already_left_is_ignored() {
+        let experience = ExperienceKey::from(Uuid::from_u128(0xE1));
+        let mut app = recheck_app();
+        {
+            let mut state = app.world_mut().resource_mut::<EnvironmentState>();
+            state.set_standing_parcel(Some(1));
+            inject_sky(&mut state, experience);
+            state.set_standing_parcel(Some(2));
+            // …and straight on again, before the answer for parcel 2 lands.
+            state.set_standing_parcel(Some(3));
+        }
+        let _asked = queries(&mut app);
+
+        app.world_mut()
+            .write_message(SlEvent(SlSessionEvent::ParcelExperiences {
+                parcel_id: 2,
+                experiences: vec![(experience, false)],
+            }));
+        app.update();
+
+        assert!(
+            !app.world()
+                .resource::<EnvironmentState>()
+                .pushed()
+                .is_empty(),
+            "a refusal from the parcel behind the agent must not clear the sky here"
+        );
+    }
+
+    /// **An injected sky does not cross a region line.**
+    ///
+    /// The reference drops every injection at a region change unconditionally,
+    /// and it has to: the script holding the sky is back where the agent left
+    /// it, and the destination has its own idea of which experiences it admits.
+    #[test]
+    fn a_region_change_drops_every_injected_environment() {
+        let experience = ExperienceKey::from(Uuid::from_u128(0xE1));
+        let mut app = env_app();
+        {
+            let mut state = app.world_mut().resource_mut::<EnvironmentState>();
+            assert_eq!(
+                state.ingest_reply(reply(-1, 1234)),
+                EnvironmentSource::Region
+            );
+            state.set_standing_parcel(Some(1));
+            inject_sky(&mut state, experience);
+            assert!(!state.pushed().is_empty());
+        }
+
+        app.world_mut()
+            .write_message(SlEvent(SlSessionEvent::RegionHandshakeComplete));
+        app.update();
+
+        let state = app.world().resource::<EnvironmentState>();
+        assert!(
+            state.pushed().is_empty(),
+            "the experience's sky did not survive the crossing"
+        );
+        assert_eq!(
+            state.standing_parcel(),
+            None,
+            "parcel ids are region-local; the one left behind names nothing here"
         );
     }
 }

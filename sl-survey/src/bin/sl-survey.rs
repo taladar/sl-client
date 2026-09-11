@@ -757,6 +757,7 @@ impl Survey {
             | Event::ExperienceContributorStatus { .. }
             | Event::ExperienceUpdated(_)
             | Event::RegionExperiences { .. }
+            | Event::ParcelExperiences { .. }
             | Event::ConferenceSessionMessage { .. }
             | Event::ConferenceSessionParticipant { .. }
             | Event::ConferenceInvited { .. }

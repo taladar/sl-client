@@ -41,17 +41,18 @@ use super::{
     CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES,
     CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_USER_INFO,
     CHAT_SESSION_FETCH_HISTORY_TAG, ChatLifecycleView, ChatSession, ChatSessionInfo,
-    ChatSessionKind, ChatSessionLifecycle, Circuit, DEFAULT_DRAW_DISTANCE, FolderState,
-    FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION, INVENTORY_FETCH_MAX_ATTEMPTS,
-    Inventory, InventoryOwner, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT,
-    MAX_XFER_DOWNLOAD_BYTES, MessageCursor, OfferedUpload, PING_INTERVAL, PendingHandover,
-    PendingInvite, RELIABLE_REPLY_GRACE, ReliableSeverity, SIT_TIMEOUT, ScriptGrant, ScriptHolder,
-    ServerHistoryFetch, ServerHistoryMessage, ServerHistoryState, Session, SessionMessage,
-    SessionState, SitState, TELEPORT_TIMEOUT, TEXTURE_DOWNLOAD_MAX_ATTEMPTS,
-    TEXTURE_DOWNLOAD_STALL_TIMEOUT, TYPING_TIMEOUT, TakenControls, TeleportPhase, TextureDownload,
-    TransferDownload, TransferProgress, TransferPurpose, VoiceChannelInfo, XFER_OFFER_TIMEOUT,
-    XFER_REFUSED_RESULT, XFER_STALL_TIMEOUT, XFER_TIMEOUT_RESULT, XferDownload, XferPurpose,
-    XferUpload, deadline, merge_deadline,
+    ChatSessionKind, ChatSessionLifecycle, Circuit, DEFAULT_DRAW_DISTANCE, EXPERIENCE_QUERY_TAG,
+    FolderState, FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION,
+    INVENTORY_FETCH_MAX_ATTEMPTS, Inventory, InventoryOwner, LAND_RESOURCE_DETAIL_TAG,
+    LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT, MAX_XFER_DOWNLOAD_BYTES, MessageCursor,
+    OfferedUpload, PING_INTERVAL, PendingHandover, PendingInvite, RELIABLE_REPLY_GRACE,
+    ReliableSeverity, SIT_TIMEOUT, ScriptGrant, ScriptHolder, ServerHistoryFetch,
+    ServerHistoryMessage, ServerHistoryState, Session, SessionMessage, SessionState, SitState,
+    TELEPORT_TIMEOUT, TEXTURE_DOWNLOAD_MAX_ATTEMPTS, TEXTURE_DOWNLOAD_STALL_TIMEOUT,
+    TYPING_TIMEOUT, TakenControls, TeleportPhase, TextureDownload, TransferDownload,
+    TransferProgress, TransferPurpose, VoiceChannelInfo, XFER_OFFER_TIMEOUT, XFER_REFUSED_RESULT,
+    XFER_STALL_TIMEOUT, XFER_TIMEOUT_RESULT, XferDownload, XferPurpose, XferUpload, deadline,
+    merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
@@ -108,11 +109,11 @@ use sl_wire::{
     VoiceAccountInfo, WireError, build_group_notice_bucket, build_login_request, message_name,
     parse_agent_preferences, parse_attachment_resources, parse_avatar_picker_search,
     parse_datagram, parse_display_names, parse_experience_ids, parse_experience_infos,
-    parse_experience_permissions, parse_get_object_cost, parse_get_object_physics_data,
-    parse_gltf_material_override, parse_land_resource_detail, parse_land_resource_summary,
-    parse_land_resources_reply, parse_lsl_syntax, parse_object_physics_properties,
-    parse_region_experiences, parse_remote_parcel_reply, parse_resource_cost_selected,
-    parse_simulator_features, parse_user_info_reply, zero_decode,
+    parse_experience_permissions, parse_experience_query_reply, parse_get_object_cost,
+    parse_get_object_physics_data, parse_gltf_material_override, parse_land_resource_detail,
+    parse_land_resource_summary, parse_land_resources_reply, parse_lsl_syntax,
+    parse_object_physics_properties, parse_region_experiences, parse_remote_parcel_reply,
+    parse_resource_cost_selected, parse_simulator_features, parse_user_info_reply, zero_decode,
 };
 use sl_wire::{
     Direction, GlobalCoordinates, XFER_CHUNK_SIZE, XferPacketId, combine_uuids, decode_xfer_chunk,
@@ -914,6 +915,25 @@ impl Session {
                         allowed,
                         blocked,
                         trusted,
+                    });
+                }
+                Err(error) => self.caps_decode_error(message, &error),
+            },
+            // The reply to an `ExperienceQuery` GET: which of the queried
+            // experiences the parcel admits. The runtime stamps the parcel it
+            // asked about into the reply (the answer names only experiences),
+            // so a viewer that has stepped on again can discard an answer about
+            // land it has already left.
+            EXPERIENCE_QUERY_TAG => match parse_experience_query_reply(body) {
+                Ok(experiences) => {
+                    let parcel_id = body
+                        .field_i32("parcelid", "parcelid")
+                        .ok()
+                        .flatten()
+                        .unwrap_or(-1);
+                    self.events.push_back(Event::ParcelExperiences {
+                        parcel_id,
+                        experiences,
                     });
                 }
                 Err(error) => self.caps_decode_error(message, &error),

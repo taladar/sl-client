@@ -15,7 +15,7 @@ pub(crate) mod directory;
 mod display_name;
 mod economy;
 mod editing;
-mod environment;
+pub(crate) mod environment;
 mod event;
 mod generic;
 mod group;
