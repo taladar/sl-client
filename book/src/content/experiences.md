@@ -27,7 +27,9 @@ family of experience capabilities:
 
 - **Look up** — info for specific experience keys (`RequestExperienceInfo`) and
   search by name (`FindExperiences`), returning `Event::ExperienceInfo` /
-  `ExperienceSearchResults`.
+  `ExperienceSearchResults`. Search is paged, one-based, and the page carries
+  the grid's word on whether another one exists on either side of it
+  (`ExperienceSearchPage::has_next_page` / `has_previous_page`).
 - **Permissions** — the user's allowed/blocked list
   (`RequestExperiencePermissions` → `Event::ExperiencePermissions`) and changing
   one (`SetExperiencePermission`).

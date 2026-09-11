@@ -43,7 +43,6 @@ use sl_wire::AttachmentResourcesReport;
 use sl_wire::DisplayName;
 use sl_wire::ExperienceEnvironmentPush;
 use sl_wire::ExperienceEvent;
-use sl_wire::ExperienceInfo;
 use sl_wire::LandResourcesUrls;
 use sl_wire::LslSyntax;
 use sl_wire::MediaEntry;
@@ -57,6 +56,7 @@ use sl_wire::ResourceSummary;
 use sl_wire::SelectedResourceCost;
 use sl_wire::SimulatorFeatures;
 use sl_wire::VoiceAccountInfo;
+use sl_wire::{ExperienceInfo, ExperienceSearchPage};
 use uuid::Uuid;
 
 use crate::bookkeeping_ids::{InventoryCallbackId, TransactionId, TransferId, XferId};
@@ -1513,8 +1513,11 @@ pub enum Event {
     /// [`missing`](ExperienceInfo::missing) placeholders.
     ExperienceInfo(Vec<ExperienceInfo>),
     /// The reply to a `FindExperienceByName` capability GET (the runtime
-    /// `FindExperiences` command): one page of experiences matching the query.
-    ExperienceSearchResults(Vec<ExperienceInfo>),
+    /// `FindExperiences` command): one page of experiences matching the query,
+    /// with the grid's own word on whether a page follows or precedes it (see
+    /// [`ExperienceSearchPage`]) — a question a page of results cannot answer
+    /// about itself.
+    ExperienceSearchResults(ExperienceSearchPage),
     /// The reply to a `GetExperiences` capability GET or an `ExperiencePreferences`
     /// PUT/DELETE (the runtime `RequestExperiencePermissions` /
     /// `SetExperiencePermission` commands): the agent's per-experience preferences

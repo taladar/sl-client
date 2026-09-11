@@ -86,8 +86,9 @@ profile is its own keyed floater.
   re-querying, as the reference's `filterContent` does — the cap has no rating
   parameter — and it persists the **rating code** rather than the combo index
   the reference's `ExperienceSearchMaturity` stores, so reordering the list
-  cannot silently change a saved filter. Paging is a heuristic until
-  [[protocol-experience-search-paging]] lands; the module docs say so.
+  cannot silently change a saved filter. Paging was a heuristic until
+  [[protocol-experience-search-paging]] landed; the arrows now follow the
+  grid's own `next_page_url` / `previous_page_url` markers.
 - **The profile is a keyed floater**
   (`sl-viewer-notices/src/experience_profile.rs`, `"experience-profile"`,
   keyed by experience id) — the reference's

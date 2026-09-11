@@ -16,7 +16,11 @@
 //!
 //! - `GetExperienceInfo` — GET `…/id/?page_size=N&public_id=<id>&…`, batch metadata
 //!   lookup → `{ experience_keys: [ … ], error_ids: [ … ] }`.
-//! - `FindExperienceByName` — GET `…?page=N&page_size=M&query=<text>` → `{ experience_keys }`.
+//! - `FindExperienceByName` — GET `…?page=N&page_size=M&query=<text>` → `{ experience_keys,
+//!   next_page_url?, previous_page_url? }`. The two URL keys are the *paging* answer: the
+//!   reference enables its arrows from their presence and never fetches either
+//!   (`LLPanelExperiencePicker::processResponse`), so they are decoded as the two booleans of
+//!   [`ExperienceSearchPage`].
 //! - `GetExperiences` — GET, the agent's admitted/blocked experiences → `{ experiences, blocked }`.
 //! - `AgentExperiences` / `GetAdminExperiences` / `GetCreatorExperiences` — GET,
 //!   the experiences the agent owns / administers / created → `{ experience_ids }`.
@@ -50,20 +54,21 @@ pub use client::{
     build_update_experience_request, experience_id_query, experience_info_query, experience_query,
     find_experience_query, forget_experience_query, group_experiences_query, parse_experience_ids,
     parse_experience_infos, parse_experience_permissions, parse_experience_query_reply,
-    parse_experience_status, parse_region_experiences,
+    parse_experience_search_page, parse_experience_status, parse_region_experiences,
 };
 pub use server::{
     build_experience_ids_response, build_experience_infos_response,
     build_experience_permissions_response, build_experience_query_response,
-    build_experience_status_response, build_region_experiences_response, parse_experience_id_query,
-    parse_experience_info_query, parse_experience_query, parse_find_experience_query,
-    parse_forget_experience_query, parse_group_experiences_query, parse_region_experiences_request,
+    build_experience_search_response, build_experience_status_response,
+    build_region_experiences_response, parse_experience_id_query, parse_experience_info_query,
+    parse_experience_query, parse_find_experience_query, parse_forget_experience_query,
+    parse_group_experiences_query, parse_region_experiences_request,
     parse_set_experience_permission_request, parse_update_experience_request,
 };
 pub use types::{
-    ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceUpdate,
-    PROPERTY_DISABLED, PROPERTY_GRID, PROPERTY_INVALID, PROPERTY_PRIVATE, PROPERTY_PRIVILEGED,
-    PROPERTY_SUSPENDED, SEARCH_PAGE_SIZE,
+    ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceSearchPage,
+    ExperienceUpdate, PROPERTY_DISABLED, PROPERTY_GRID, PROPERTY_INVALID, PROPERTY_PRIVATE,
+    PROPERTY_PRIVILEGED, PROPERTY_SUSPENDED, SEARCH_PAGE_SIZE,
 };
 
 /// Reads a UUID-valued LLSD value, accepting either a `uuid` or a `string`.

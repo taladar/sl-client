@@ -12,6 +12,7 @@ mod economy_endpoint;
 pub mod economy_policy;
 pub mod error;
 pub mod estate;
+pub mod experiences;
 pub mod fixtures;
 mod http_answer;
 mod http_service;

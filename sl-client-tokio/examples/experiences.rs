@@ -19,7 +19,7 @@ use std::time::Duration;
 use sl_client_tokio::{
     Client, Command, DisconnectReason, Event, LoginParams, LoginRequest, Throttle,
 };
-use sl_proto::ExperienceKey;
+use sl_proto::{ExperienceInfo, ExperienceKey};
 use tokio::sync::mpsc;
 use tokio::time::sleep;
 use tracing::{info, warn};
@@ -126,21 +126,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 request_info(&command_tx, allowed).await;
                 request_info(&command_tx, trusted).await;
             }
-            Event::ExperienceInfo(infos) | Event::ExperienceSearchResults(infos) => {
-                for info in infos {
-                    if info.missing {
-                        info!("  experience {} could not be resolved", info.public_id);
+            Event::ExperienceSearchResults(page) => {
+                info!(
+                    "experience search page: {} hit(s){}{}",
+                    page.infos.len(),
+                    if page.has_previous_page {
+                        ", a page before it"
                     } else {
-                        info!(
-                            "  experience {}: {:?} (grid={}, maturity={})",
-                            info.public_id,
-                            info.name,
-                            info.properties.is_grid(),
-                            info.maturity,
-                        );
-                    }
-                }
+                        ""
+                    },
+                    if page.has_next_page {
+                        ", a page after it"
+                    } else {
+                        ""
+                    },
+                );
+                log_experience_infos(&page.infos);
             }
+            Event::ExperienceInfo(infos) => log_experience_infos(&infos),
             Event::LoggedOut => {
                 info!("logged out cleanly");
                 break;
@@ -158,6 +161,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     run.await??;
     Ok(())
+}
+
+/// Logs one experience record per line — shared by the `GetExperienceInfo`
+/// reply and the search page, which carry the same records.
+fn log_experience_infos(infos: &[ExperienceInfo]) {
+    for info in infos {
+        if info.missing {
+            info!("  experience {} could not be resolved", info.public_id);
+        } else {
+            info!(
+                "  experience {}: {:?} (grid={}, maturity={})",
+                info.public_id,
+                info.name,
+                info.properties.is_grid(),
+                info.maturity,
+            );
+        }
+    }
 }
 
 /// Requests the metadata for `experience_ids` over `GetExperienceInfo` (a no-op

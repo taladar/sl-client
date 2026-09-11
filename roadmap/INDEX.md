@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 41 |
 | in-progress | 21 |
 | bugs | 52 |
-| done | 1076 |
+| done | 1077 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1654** |
+| **total** | **1655** |
 
 ## ideas (100)
 
@@ -266,8 +266,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Session and SimSession are god objects with 12k-line impl blocks
 - [`protocol-audit-wire-error-contract`](ready/protocol-audit-wire-error-contract.md)
   — sl-wire's public parse surface has five different failure disciplines
-- [`protocol-experience-search-paging`](ready/protocol-experience-search-paging.md)
-  — Carry the experience search's paging URLs through to the viewer
 - [`protocol-sl-llsd-serde`](ready/protocol-sl-llsd-serde.md) — serde
   Serialize/Deserialize derives for sl-llsd (Llsd) types
 - [`protocol-sl-lsl-serde`](ready/protocol-sl-lsl-serde.md) — serde support for
@@ -998,6 +996,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-binary-duplication`](ready/repl-audit-binary-duplication.md) —
   The two REPL binaries share ~400 near-verbatim lines and have already drifted
 
+### server
+
+- [`server-fake-grid-agent-experiences`](ready/server-fake-grid-agent-experiences.md)
+  — Fake grid — the agent's own five experience lists
+
 ## blocked (41)
 
 ### viewer
@@ -1306,7 +1309,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1076)
+## done (1077)
 
 ### protocol
 
@@ -1482,6 +1485,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — An experience can set the sky, and nothing in this stack can say so
 - [`protocol-experience-parcel-recheck`](done/protocol-experience-parcel-recheck.md)
   — An experience's sky follows you off its land, and nothing takes it back
+- [`protocol-experience-search-paging`](done/protocol-experience-search-paging.md)
+  — Carry the experience search's paging URLs through to the viewer
 - [`protocol-lsl-syntax`](done/protocol-lsl-syntax.md) — LSLSyntax capability —
   fetch, cache and decode the grid's language definition
 - [`protocol-sim-caps-agent-comms`](done/protocol-sim-caps-agent-comms.md) —

@@ -300,8 +300,10 @@ pub const CAP_VOICE_SIGNALING: &str = "VoiceSignalingRequest";
 pub const CAP_GET_EXPERIENCE_INFO: &str = "GetExperienceInfo";
 
 /// The HTTP capability for searching experiences by name (`FindExperienceByName`):
-/// a GET of `…?page=N&page_size=M&query=<text>` returning `{ experience_keys }`.
-/// Driven by `FindExperiences`; decoded into [`Event::ExperienceSearchResults`].
+/// a GET of `…?page=N&page_size=M&query=<text>` returning `{ experience_keys }`
+/// plus a `next_page_url` / `previous_page_url` for each neighbouring page that
+/// exists. Driven by `FindExperiences`; decoded into
+/// [`Event::ExperienceSearchResults`].
 pub const CAP_FIND_EXPERIENCE_BY_NAME: &str = "FindExperienceByName";
 
 /// The HTTP capability for the agent's admitted/blocked experiences

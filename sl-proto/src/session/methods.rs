@@ -109,11 +109,12 @@ use sl_wire::{
     VoiceAccountInfo, WireError, build_group_notice_bucket, build_login_request, message_name,
     parse_agent_preferences, parse_attachment_resources, parse_avatar_picker_search,
     parse_datagram, parse_display_names, parse_experience_ids, parse_experience_infos,
-    parse_experience_permissions, parse_experience_query_reply, parse_get_object_cost,
-    parse_get_object_physics_data, parse_gltf_material_override, parse_land_resource_detail,
-    parse_land_resource_summary, parse_land_resources_reply, parse_lsl_syntax,
-    parse_object_physics_properties, parse_region_experiences, parse_remote_parcel_reply,
-    parse_resource_cost_selected, parse_simulator_features, parse_user_info_reply, zero_decode,
+    parse_experience_permissions, parse_experience_query_reply, parse_experience_search_page,
+    parse_get_object_cost, parse_get_object_physics_data, parse_gltf_material_override,
+    parse_land_resource_detail, parse_land_resource_summary, parse_land_resources_reply,
+    parse_lsl_syntax, parse_object_physics_properties, parse_region_experiences,
+    parse_remote_parcel_reply, parse_resource_cost_selected, parse_simulator_features,
+    parse_user_info_reply, zero_decode,
 };
 use sl_wire::{
     Direction, GlobalCoordinates, XFER_CHUNK_SIZE, XferPacketId, combine_uuids, decode_xfer_chunk,
@@ -900,9 +901,11 @@ impl Session {
                 Ok(infos) => self.events.push_back(Event::ExperienceInfo(infos)),
                 Err(error) => self.caps_decode_error(message, &error),
             },
-            // The reply to a `FindExperienceByName` GET: one page of search hits.
-            CAP_FIND_EXPERIENCE_BY_NAME => match parse_experience_infos(body) {
-                Ok(infos) => self.events.push_back(Event::ExperienceSearchResults(infos)),
+            // The reply to a `FindExperienceByName` GET: one page of search
+            // hits, plus the grid's `next_page_url` / `previous_page_url`
+            // markers saying whether there is a page on either side of it.
+            CAP_FIND_EXPERIENCE_BY_NAME => match parse_experience_search_page(body) {
+                Ok(page) => self.events.push_back(Event::ExperienceSearchResults(page)),
                 Err(error) => self.caps_decode_error(message, &error),
             },
             // The reply to a `GetExperiences` GET or an `ExperiencePreferences`

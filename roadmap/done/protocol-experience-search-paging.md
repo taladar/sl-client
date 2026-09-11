@@ -2,7 +2,7 @@
 id: protocol-experience-search-paging
 title: Carry the experience search's paging URLs through to the viewer
 topic: protocol
-status: ready
+status: done
 origin: split out of [[viewer-experiences-floater]] when the search tab was
   built (2026-09-11)
 refs: [viewer-experiences-floater, protocol-27]

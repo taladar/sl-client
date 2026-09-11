@@ -57,13 +57,17 @@
 //!
 //! # Search paging
 //!
-//! `FindExperiences` is paged, and the reference enables its Next / Prev
-//! arrows from the `next_page_url` / `previous_page_url` the cap returns.
-//! Neither our decoder nor the fake grid models those yet
-//! ([[protocol-experience-search-paging]]), so Next is offered while the page
-//! came back **full** ([`SEARCH_PAGE_SIZE`] rows) and Prev while the page number
-//! is above one. That is a heuristic: a result set whose size is an exact
-//! multiple of the page size offers one Next that comes back empty.
+//! `FindExperiences` is paged, and the Next / Prev arrows are enabled from the
+//! grid's own `next_page_url` / `previous_page_url` markers, carried through as
+//! [`ExperienceSearchPage::has_next_page`] / `has_previous_page` — the same two
+//! bits the reference reads (`LLPanelExperiencePicker::processResponse`). Only
+//! the grid can answer "is there another page": it counted the matches this
+//! page was cut from, and the page itself cannot say.
+//!
+//! A grid that sends neither marker therefore offers no paging at all, which is
+//! what the reference does with such a reply — and better than guessing from
+//! the row count, which offers a Next onto nothing whenever the result set is
+//! an exact multiple of the page size.
 //!
 //! # Refusals and divergences
 //!
@@ -92,8 +96,8 @@ use bevy_flair::style::components::ClassList;
 use std::collections::{BTreeMap, BTreeSet};
 
 use sl_client_bevy::{
-    Command, ExperienceInfo, ExperienceKey, ExperiencePermission, OwnerKey, SlCommand, SlEvent,
-    SlSessionEvent,
+    Command, ExperienceInfo, ExperienceKey, ExperiencePermission, ExperienceSearchPage, OwnerKey,
+    SlCommand, SlEvent, SlSessionEvent,
 };
 use sl_l10n::{DateTimeLength, DateTimeStyle};
 use sl_settings::{Scope, SettingValue};
@@ -205,18 +209,6 @@ const CHECK_ON: Color = HEADING_COLOR;
 /// The number of leading hex characters of an experience id shown as a fallback
 /// label while its name is still resolving.
 const SHORT_ID_LEN: usize = 8;
-
-/// The `FindExperienceByName` page size the cap is asked for — the reference's
-/// `LLExperienceCache::SEARCH_PAGE_SIZE`, and the count this window reads a
-/// "there may be another page" from (see the module docs).
-pub const SEARCH_PAGE_SIZE: usize = 30;
-
-/// Whether a returned page was full, which is this window's stand-in for the
-/// `next_page_url` the cap's reply is not decoded to carry (see the module
-/// docs). A page longer than asked for still counts as full.
-const fn page_is_full(rows: usize) -> bool {
-    rows >= SEARCH_PAGE_SIZE
-}
 
 // ---------------------------------------------------------------------------
 // Tables.
@@ -539,12 +531,49 @@ enum SearchProgress {
     Idle,
     /// A query is out.
     Searching,
-    /// A page came back; `filled` is whether it held a whole page, which is
-    /// what offers a Next (see the module docs).
+    /// A page came back, with the grid's word on what lies on either side of
+    /// it — which is what enables the two arrows (see the module docs).
     Done {
-        /// Whether the page came back full.
-        filled: bool,
+        /// Whether the grid offered a page after this one.
+        has_next_page: bool,
+        /// Whether the grid offered a page before this one.
+        has_previous_page: bool,
     },
+}
+
+impl SearchProgress {
+    /// The progress an arrived page puts the search in: done, remembering the
+    /// grid's two paging markers verbatim.
+    const fn from_page(page: &ExperienceSearchPage) -> Self {
+        Self::Done {
+            has_next_page: page.has_next_page,
+            has_previous_page: page.has_previous_page,
+        }
+    }
+
+    /// Whether the Next arrow has somewhere to go. Only a page the grid said
+    /// has a successor does — a search that has not answered yet has none, and
+    /// neither does a grid that sends no markers.
+    const fn offers_next(self) -> bool {
+        matches!(
+            self,
+            Self::Done {
+                has_next_page: true,
+                ..
+            }
+        )
+    }
+
+    /// Whether the Previous arrow has somewhere to go.
+    const fn offers_previous(self) -> bool {
+        matches!(
+            self,
+            Self::Done {
+                has_previous_page: true,
+                ..
+            }
+        )
+    }
 }
 
 /// The floater's data: the five id lists, the resolved-metadata cache, the
@@ -1416,11 +1445,10 @@ fn ingest_experience_events(
                 state.contributor.clone_from(ids);
                 state.touch();
             }
-            SlSessionEvent::ExperienceSearchResults(results) => {
-                let filled = page_is_full(results.len());
-                state.search = results.iter().map(|info| info.public_id).collect();
-                state.progress = SearchProgress::Done { filled };
-                for info in results {
+            SlSessionEvent::ExperienceSearchResults(page) => {
+                state.search = page.infos.iter().map(|info| info.public_id).collect();
+                state.progress = SearchProgress::from_page(page);
+                for info in &page.infos {
                     if !info.missing {
                         state.note_info(info.clone());
                     }
@@ -1795,10 +1823,8 @@ fn paint_experience_actions(
         let enabled = match *button {
             ExperiencesButton::Profile(pane) => selected_row(&ui, &tables, pane).is_some(),
             ExperiencesButton::Forget(tab) => selected_row(&ui, &tables, Pane::List(tab)).is_some(),
-            ExperiencesButton::Page(true) => {
-                matches!(state.progress, SearchProgress::Done { filled: true })
-            }
-            ExperiencesButton::Page(false) => state.page > 1,
+            ExperiencesButton::Page(true) => state.progress.offers_next(),
+            ExperiencesButton::Page(false) => state.progress.offers_previous(),
             _always => true,
         };
         let wanted = if enabled {
@@ -2155,12 +2181,11 @@ fn spawn_specimen_button(
 #[cfg(test)]
 mod tests {
     use super::{
-        ExperienceRow, ExperiencesState, ListTab, Pane, SEARCH_PAGE_SIZE, SHORT_ID_LEN,
-        experience_label, list_index, page_is_full, pane_index, short_experience_id,
-        sort_experience_rows,
+        ExperienceRow, ExperiencesState, ListTab, Pane, SHORT_ID_LEN, SearchProgress,
+        experience_label, list_index, pane_index, short_experience_id, sort_experience_rows,
     };
     use pretty_assertions::{assert_eq, assert_ne};
-    use sl_client_bevy::{ExperienceInfo, ExperienceKey, Uuid};
+    use sl_client_bevy::{ExperienceInfo, ExperienceKey, ExperienceSearchPage, Uuid};
 
     /// A row with just the fields the sort reads.
     fn row(name: &str, rating: &str, owner: &str) -> ExperienceRow {
@@ -2277,14 +2302,34 @@ mod tests {
         );
     }
 
-    /// A full page is what offers a Next; a short one is the end of the results
-    /// (the heuristic the module docs describe).
+    /// The two arrows are enabled from the grid's own markers, not from the
+    /// row count: an empty page whose grid said there is more still offers a
+    /// Next, and a page that fills the table but is the last one does not.
     #[test]
-    fn a_full_page_offers_another() {
-        assert!(page_is_full(SEARCH_PAGE_SIZE));
-        assert!(page_is_full(SEARCH_PAGE_SIZE.saturating_add(1)));
-        assert!(!page_is_full(SEARCH_PAGE_SIZE.saturating_sub(1)));
-        assert!(!page_is_full(0));
+    fn the_arrows_follow_the_grids_markers() {
+        let progress = |has_next_page, has_previous_page| {
+            SearchProgress::from_page(&ExperienceSearchPage {
+                infos: Vec::new(),
+                has_next_page,
+                has_previous_page,
+            })
+        };
+        assert!(progress(true, false).offers_next());
+        assert!(!progress(true, false).offers_previous());
+        assert!(progress(false, true).offers_previous());
+        assert!(!progress(false, true).offers_next());
+        assert!(!progress(false, false).offers_next());
+        assert!(!progress(false, false).offers_previous());
+    }
+
+    /// A search that has not answered offers no paging in either direction —
+    /// there is no page to be on the far side of.
+    #[test]
+    fn an_unanswered_search_offers_no_paging() {
+        for progress in [SearchProgress::Idle, SearchProgress::Searching] {
+            assert!(!progress.offers_next(), "{progress:?}");
+            assert!(!progress.offers_previous(), "{progress:?}");
+        }
     }
 
     /// Only the two preference tabs offer a Forget; the three relationship tabs

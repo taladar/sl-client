@@ -195,6 +195,12 @@ fn uuid_array_llsd(ids: &[ExperienceKey]) -> Llsd {
 /// Built on [`Llsd::to_llsd_xml`], so it round-trips through [`parse_llsd_xml`].
 #[must_use]
 pub fn build_experience_infos_response(infos: &[ExperienceInfo]) -> String {
+    Llsd::Map(experience_infos_map(infos)).to_llsd_xml()
+}
+
+/// The `{ experience_keys, error_ids }` body shared by the `GetExperienceInfo`
+/// and `FindExperienceByName` replies.
+fn experience_infos_map(infos: &[ExperienceInfo]) -> HashMap<String, Llsd> {
     let mut keys = Vec::new();
     let mut errors = Vec::new();
     for info in infos {
@@ -208,6 +214,39 @@ pub fn build_experience_infos_response(infos: &[ExperienceInfo]) -> String {
     let _previous = map.insert("experience_keys".to_owned(), Llsd::Array(keys));
     if !errors.is_empty() {
         let _previous = map.insert("error_ids".to_owned(), Llsd::Array(errors));
+    }
+    map
+}
+
+/// Builds a `FindExperienceByName` reply: the `{ experience_keys, error_ids }`
+/// of [`build_experience_infos_response`], plus a `next_page_url` /
+/// `previous_page_url` for each neighbouring page that exists — the inverse of
+/// [`parse_experience_search_page`](crate::parse_experience_search_page).
+///
+/// A neighbour that does not exist is written as **no key at all**, not as an
+/// empty string: the reference viewer reads these by presence
+/// (`LLPanelExperiencePicker::processResponse` calls `content.has(…)`), so an
+/// empty `next_page_url` would offer a Next onto nothing.
+///
+/// The URL itself is a string (as OpenSim's sibling `AvatarPickerSearch` cap
+/// writes its own `next_page_url`), and its *value* is not load-bearing for any
+/// viewer we know of — none dereference it; they re-query by page number.
+/// Passing the query suffix the client would have to append to the cap keeps it
+/// honest anyway.
+#[must_use]
+pub fn build_experience_search_response(
+    infos: &[ExperienceInfo],
+    next_page_url: Option<&str>,
+    previous_page_url: Option<&str>,
+) -> String {
+    let mut map = experience_infos_map(infos);
+    for (field, url) in [
+        ("next_page_url", next_page_url),
+        ("previous_page_url", previous_page_url),
+    ] {
+        if let Some(url) = url {
+            let _previous = map.insert(field.to_owned(), Llsd::String(url.to_owned()));
+        }
     }
     Llsd::Map(map).to_llsd_xml()
 }

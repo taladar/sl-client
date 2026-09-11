@@ -8,16 +8,16 @@ use super::{
     ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceUpdate, PROPERTY_GRID,
     PROPERTY_INVALID, build_experience_ids_response, build_experience_infos_response,
     build_experience_permissions_response, build_experience_query_response,
-    build_experience_status_response, build_region_experiences_request,
-    build_region_experiences_response, build_set_experience_permission_request,
-    build_update_experience_request, experience_id_query, experience_info_query, experience_query,
-    find_experience_query, forget_experience_query, group_experiences_query,
-    parse_experience_id_query, parse_experience_ids, parse_experience_info_query,
-    parse_experience_infos, parse_experience_permissions, parse_experience_query,
-    parse_experience_query_reply, parse_experience_status, parse_find_experience_query,
-    parse_forget_experience_query, parse_group_experiences_query, parse_region_experiences,
-    parse_region_experiences_request, parse_set_experience_permission_request,
-    parse_update_experience_request,
+    build_experience_search_response, build_experience_status_response,
+    build_region_experiences_request, build_region_experiences_response,
+    build_set_experience_permission_request, build_update_experience_request, experience_id_query,
+    experience_info_query, experience_query, find_experience_query, forget_experience_query,
+    group_experiences_query, parse_experience_id_query, parse_experience_ids,
+    parse_experience_info_query, parse_experience_infos, parse_experience_permissions,
+    parse_experience_query, parse_experience_query_reply, parse_experience_search_page,
+    parse_experience_status, parse_find_experience_query, parse_forget_experience_query,
+    parse_group_experiences_query, parse_region_experiences, parse_region_experiences_request,
+    parse_set_experience_permission_request, parse_update_experience_request,
 };
 use crate::WireError;
 use crate::llsd::parse_llsd_xml;
@@ -438,6 +438,50 @@ fn experience_infos_response_round_trip() -> Result<(), String> {
     };
     assert_eq!(*first, real);
     assert_eq!(*second, missing);
+    Ok(())
+}
+
+/// A `FindExperienceByName` reply round-trips its records *and* its two paging
+/// markers, and a neighbour that does not exist is a key that is not there —
+/// which is the only thing the reference viewer reads.
+#[test]
+fn experience_search_page_round_trips() -> Result<(), String> {
+    let hit = ExperienceInfo {
+        public_id: experience_key("11111111-1111-1111-1111-111111111111")?,
+        name: "Magic Quest".to_owned(),
+        properties: ExperienceProperties(PROPERTY_GRID),
+        maturity: 13,
+        ..ExperienceInfo::default()
+    };
+    let page = |next: Option<&str>, previous: Option<&str>| -> Result<_, String> {
+        let reply = build_experience_search_response(std::slice::from_ref(&hit), next, previous);
+        parse_experience_search_page(&parse_llsd_xml(&reply).map_err(|error| format!("{error:?}"))?)
+            .map_err(|error| format!("{error:?}"))
+    };
+
+    let middle = page(Some("?page=3&page_size=30&query=magic"), Some("?page=1"))?;
+    assert_eq!(middle.infos, vec![hit.clone()]);
+    assert!(middle.has_next_page);
+    assert!(middle.has_previous_page);
+
+    let only = page(None, None)?;
+    assert_eq!(only.infos, vec![hit]);
+    assert!(!only.has_next_page);
+    assert!(!only.has_previous_page);
+    Ok(())
+}
+
+/// A plain `{ experience_keys }` reply — a grid that models no paging at all —
+/// decodes as a page with neither neighbour rather than as an error, so the
+/// viewer simply offers no arrows.
+#[test]
+fn experience_search_page_without_markers_offers_no_paging() -> Result<(), String> {
+    let reply = build_experience_infos_response(&[]);
+    let page = parse_experience_search_page(
+        &parse_llsd_xml(&reply).map_err(|error| format!("{error:?}"))?,
+    )
+    .map_err(|error| format!("{error:?}"))?;
+    assert_eq!(page, crate::ExperienceSearchPage::default());
     Ok(())
 }
 

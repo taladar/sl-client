@@ -2337,7 +2337,11 @@ pub enum Command {
     FindExperiences {
         /// The search text.
         query: String,
-        /// The zero-based result page.
+        /// The result page, **one-based** — the reference's picker starts at
+        /// `mCurrentPage = 1` and clamps its Previous arrow there
+        /// (`LLPanelExperiencePicker::onPage`). A page below 1 is not a page a
+        /// grid is asked for, and [`SimExperiences::find`](crate::SimExperiences::find)
+        /// answers it empty.
         page: i32,
     },
     /// Fetch the agent's per-experience preferences over the `GetExperiences`

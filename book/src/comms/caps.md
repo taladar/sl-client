@@ -583,7 +583,13 @@ follow-up reads observe them), each surfacing a `ServerEvent`
   `SEARCH_PAGE_SIZE` page of records whose name contains the
   percent-decoded text case-insensitively, hiding invalid and
   `PROPERTY_PRIVATE` records (the grid's search lists public experiences
-  only), sorted by name with an id tie-break.
+  only), sorted by name with an id tie-break. The reply also states
+  whether a page exists on either side of this one, as a
+  `next_page_url` / `previous_page_url` written only when it does — the
+  reference viewer enables its paging arrows from those keys' *presence*
+  and never fetches either URL, so the client decodes them into the two
+  booleans of `ExperienceSearchPage`. Only the grid can answer the
+  question: it counted the matches the page was cut from.
 - **`GetExperiences`** (bodyless GET) serves the agent's
   allowed/blocked lists via `build_experience_permissions_response`.
 - **`ExperiencePreferences`** routes on method: PUT parses the

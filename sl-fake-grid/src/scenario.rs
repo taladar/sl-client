@@ -656,6 +656,11 @@ pub(crate) fn default_setup(sim: &mut SimSession, _now: Instant) {
     });
     sim.voice_mut()
         .set_agent_parcel(Some(STOCK_PARCEL_LOCAL_ID));
+    // The experience catalogue the thirteen experience capabilities answer
+    // from. Seeded unconditionally: experiences are a Second Life feature no
+    // OpenSim ships, so this is the only grid the Experiences floater can be
+    // exercised against without an account and a network (`crate::experiences`).
+    crate::experiences::seed_catalogue(sim);
 }
 
 /// Greets the arriving avatar with a system chat line.

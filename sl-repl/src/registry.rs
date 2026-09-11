@@ -5693,11 +5693,12 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "find_experiences",
-            usage: "<query> [page=0]",
+            // One-based, as the reference's picker numbers its pages.
+            usage: "<query> [page=1]",
             build: |args, ctx| {
                 Ok(Command::FindExperiences {
                     query: args.req_str(ctx, "query", 0)?,
-                    page: args.parse_or(ctx, "page", 1, "i32", 0)?,
+                    page: args.parse_or(ctx, "page", 1, "i32", 1)?,
                 })
             },
         },

@@ -35,34 +35,36 @@ use sl_wire::{
     build_create_inventory_category_response, build_display_names_response,
     build_experience_ids_response, build_experience_infos_response,
     build_experience_permissions_response, build_experience_query_response,
-    build_experience_status_response, build_get_object_cost_response,
-    build_get_object_physics_data_response, build_land_resource_detail_response,
-    build_land_resource_summary_response, build_land_resources_response, build_lsl_syntax_document,
+    build_experience_search_response, build_experience_status_response,
+    build_get_object_cost_response, build_get_object_physics_data_response,
+    build_land_resource_detail_response, build_land_resource_summary_response,
+    build_land_resources_response, build_lsl_syntax_document,
     build_modify_material_params_response, build_parcel_voice_info_response,
     build_provision_voice_account_response, build_region_experiences_response,
     build_remote_parcel_response, build_render_materials_response,
     build_resource_cost_selected_response, build_seed_response, build_simulator_features_response,
-    is_ais_current_outfit_links_url, is_ais_orphans_url, parse_agent_preferences,
-    parse_ais_category_children_fetch_url, parse_ais_category_children_subset,
-    parse_ais_category_children_url, parse_ais_category_links_url, parse_ais_category_url,
-    parse_ais_create_category_body, parse_ais_create_category_url, parse_ais_create_link_body,
-    parse_ais_item_url, parse_ais_move_body, parse_ais_rename_category_body,
-    parse_ais_update_item_body, parse_avatar_picker_search_query,
-    parse_create_inventory_category_request, parse_display_names_query, parse_event_queue_request,
-    parse_experience_id_query, parse_experience_info_query, parse_experience_query,
-    parse_fetch_inventory_items_request, parse_fetch_inventory_request,
-    parse_find_experience_query, parse_forget_experience_query, parse_get_object_cost_request,
-    parse_get_object_physics_data_request, parse_group_experiences_query,
-    parse_land_resources_request, parse_llsd_xml, parse_modify_material_params_request,
-    parse_new_file_agent_inventory_request, parse_object_media_navigate_request,
-    parse_object_media_request, parse_provision_voice_account_request,
-    parse_region_experiences_request, parse_remote_parcel_request,
-    parse_render_materials_put_request, parse_render_materials_request,
-    parse_resource_cost_selected_request, parse_seed_request, parse_send_user_report,
-    parse_set_experience_permission_request, parse_update_avatar_appearance_request,
-    parse_update_experience_request, parse_update_item_asset_request,
-    parse_update_script_agent_request, parse_update_script_task_request,
-    parse_update_task_item_asset_request, parse_voice_signaling_request,
+    find_experience_query, is_ais_current_outfit_links_url, is_ais_orphans_url,
+    parse_agent_preferences, parse_ais_category_children_fetch_url,
+    parse_ais_category_children_subset, parse_ais_category_children_url,
+    parse_ais_category_links_url, parse_ais_category_url, parse_ais_create_category_body,
+    parse_ais_create_category_url, parse_ais_create_link_body, parse_ais_item_url,
+    parse_ais_move_body, parse_ais_rename_category_body, parse_ais_update_item_body,
+    parse_avatar_picker_search_query, parse_create_inventory_category_request,
+    parse_display_names_query, parse_event_queue_request, parse_experience_id_query,
+    parse_experience_info_query, parse_experience_query, parse_fetch_inventory_items_request,
+    parse_fetch_inventory_request, parse_find_experience_query, parse_forget_experience_query,
+    parse_get_object_cost_request, parse_get_object_physics_data_request,
+    parse_group_experiences_query, parse_land_resources_request, parse_llsd_xml,
+    parse_modify_material_params_request, parse_new_file_agent_inventory_request,
+    parse_object_media_navigate_request, parse_object_media_request,
+    parse_provision_voice_account_request, parse_region_experiences_request,
+    parse_remote_parcel_request, parse_render_materials_put_request,
+    parse_render_materials_request, parse_resource_cost_selected_request, parse_seed_request,
+    parse_send_user_report, parse_set_experience_permission_request,
+    parse_update_avatar_appearance_request, parse_update_experience_request,
+    parse_update_item_asset_request, parse_update_script_agent_request,
+    parse_update_script_task_request, parse_update_task_item_asset_request,
+    parse_voice_signaling_request,
 };
 use url::Url;
 use uuid::Uuid;
@@ -2054,6 +2056,11 @@ impl SimCaps {
     /// hides invalid and private records). A query missing `page` or
     /// `query` → `400`; wrong method → `405`.
     ///
+    /// A neighbouring page that exists is named by the `next_page_url` /
+    /// `previous_page_url` the reference viewer enables its paging arrows
+    /// from — written as the query suffix that would fetch it, which is the
+    /// request this very handler would answer.
+    ///
     /// [`SimExperiences::find`]: crate::SimExperiences::find
     fn dispatch_experience_search(sim: &SimSession, request: &CapsRequest<'_>) -> CapsResponse {
         if request.method != "GET" {
@@ -2062,8 +2069,14 @@ impl SimCaps {
         let Some((text, page)) = parse_find_experience_query(&ais_suffix(request)) else {
             return CapsResponse::bad_request();
         };
-        CapsResponse::llsd_xml(build_experience_infos_response(
-            &sim.experiences().find(&text, page),
+        let found = sim.experiences().find(&text, page);
+        let neighbour = |offered: bool, step: i32| {
+            offered.then(|| find_experience_query(&text, page.saturating_add(step)))
+        };
+        CapsResponse::llsd_xml(build_experience_search_response(
+            &found.infos,
+            neighbour(found.has_next_page, 1).as_deref(),
+            neighbour(found.has_previous_page, -1).as_deref(),
         ))
     }
 

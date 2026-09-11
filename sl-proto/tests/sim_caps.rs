@@ -3412,6 +3412,9 @@ mod test {
     const EXP_UNKNOWN: u128 = 0x0EFF;
     /// The group that owns [`EXP_C`].
     const EXP_GROUP: u128 = 0x0E60;
+    /// The id base of the filler records that make a search spill onto a
+    /// second page, far enough from the named ones not to collide.
+    const EXP_SEARCH_FILLER_BASE: u128 = 0x0E10_0000;
 
     /// The [`ExperienceKey`] for one of the `EXP_*` constants.
     fn exp_key(id: u128) -> ExperienceKey {
@@ -3504,7 +3507,9 @@ mod test {
     }
 
     /// The `FindExperienceByName` GET matches case-insensitively, hides the
-    /// private record, and answers an empty second page.
+    /// private record, and answers an empty second page. The paging markers
+    /// come through the fold too: a single-page result offers neither
+    /// neighbour, and page 2 offers only the way back.
     #[test]
     fn find_experience_by_name_pages_and_hides_private() -> Result<(), TestError> {
         let mut caps = new_caps()?;
@@ -3513,7 +3518,8 @@ mod test {
         let now = Instant::now();
         let mut client = new_client()?;
         let cap_path = granted_cap_path(&caps, CAP_FIND_EXPERIENCE_BY_NAME)?;
-        for (page, expected) in [(1, vec![exp_key(EXP_A)]), (2, Vec::new())] {
+        for (page, expected, previous) in [(1, vec![exp_key(EXP_A)], false), (2, Vec::new(), true)]
+        {
             let suffix = find_experience_query("mAgIc", page);
             let (path, query) = split_suffix(&cap_path, &suffix);
             let events = fold_into_client(
@@ -3525,12 +3531,68 @@ mod test {
                 now,
             )?;
             match events.as_slice() {
-                [Event::ExperienceSearchResults(infos)] => {
+                [Event::ExperienceSearchResults(found)] => {
                     assert_eq!(
-                        infos.iter().map(|info| info.public_id).collect::<Vec<_>>(),
+                        found
+                            .infos
+                            .iter()
+                            .map(|info| info.public_id)
+                            .collect::<Vec<_>>(),
                         expected,
                         "page {page}"
                     );
+                    assert!(!found.has_next_page, "page {page} offered a next page");
+                    assert_eq!(found.has_previous_page, previous, "page {page}");
+                }
+                other => {
+                    return Err(format!("expected ExperienceSearchResults, got {other:?}").into());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// A result set that fills a page and spills offers a Next on page 1 and
+    /// a Previous on page 2, over the full client↔grid round trip — the
+    /// markers survive the reply's LLSD and the client's decode.
+    #[test]
+    fn find_experience_by_name_offers_the_pages_it_has() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let overflow = usize::try_from(sl_wire::SEARCH_PAGE_SIZE)
+            .unwrap_or_default()
+            .saturating_add(1);
+        {
+            let experiences = sim.experiences_mut();
+            for n in 1..=overflow {
+                experiences.insert(ExperienceInfo {
+                    public_id: ExperienceKey::from(uuid::Uuid::from_u128(
+                        EXP_SEARCH_FILLER_BASE
+                            .saturating_add(u128::try_from(n).unwrap_or_default()),
+                    )),
+                    name: format!("Trial {n:02}"),
+                    ..ExperienceInfo::default()
+                });
+            }
+        }
+        let now = Instant::now();
+        let mut client = new_client()?;
+        let cap_path = granted_cap_path(&caps, CAP_FIND_EXPERIENCE_BY_NAME)?;
+        for (page, next, previous) in [(1, true, false), (2, false, true)] {
+            let suffix = find_experience_query("trial", page);
+            let (path, query) = split_suffix(&cap_path, &suffix);
+            let events = fold_into_client(
+                &mut caps,
+                &mut sim,
+                &mut client,
+                &get(&path, query.as_deref()),
+                CAP_FIND_EXPERIENCE_BY_NAME,
+                now,
+            )?;
+            match events.as_slice() {
+                [Event::ExperienceSearchResults(found)] => {
+                    assert_eq!(found.has_next_page, next, "page {page} next");
+                    assert_eq!(found.has_previous_page, previous, "page {page} previous");
                 }
                 other => {
                     return Err(format!("expected ExperienceSearchResults, got {other:?}").into());

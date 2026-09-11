@@ -2255,9 +2255,39 @@ sit in "connecting" — the signalling, not the audio, is what this
 exercises. Chat-session channels can be gated with
 `set_channel_credentials(channel, credentials)`.
 
+## The experience catalogue
+
+Experiences are a Second Life feature — stock OpenSim ships no experience
+module — so a viewer's Experiences floater has, historically, had exactly one
+grid it could be pointed at, and that grid costs an account, a login and a
+network. `default_setup` seeds the offline other one (`sl-fake-grid`'s
+`experiences` module): a set of records the `GetExperienceInfo`,
+`FindExperienceByName` and `UpdateExperience` capabilities answer from, owned
+by a fixture resident whose display name is registered beside them so the
+viewer's Owner column resolves to a name.
+
+It is deliberately bigger than the handful of hand-written records it needs to
+cover the corners of the record (grid-wide, privileged, group-owned, and one
+**private** one, which is in the catalogue precisely to be absent from search
+results). `FindExperienceByName` is paged, and its reply states whether there
+is a page on either side of the one it carries — a catalogue small enough to
+fit one page can never make the grid say *yes* to that, so it can never
+exercise a viewer's paging arrows. The filler records therefore number one more
+than a whole page, so a search for them spills onto a short second page and the
+boundary is visible from both sides.
+
+What the catalogue does **not** seed is the agent's own five relationships —
+allowed, blocked, owned, admin, contributor. A scenario's `setup` hook runs
+before the circuit is open, so the session does not know the agent id yet, and
+a fixture claiming the agent owns an experience would have to name somebody
+else as that experience's owner. Those five tabs therefore come back empty for
+now; see the `server-fake-grid-agent-experiences` roadmap item.
+
+## What is deliberately still small
+
 The stock `Scenario` is intentionally small (an inventory skeleton, a library
 of the twelve textures above, one parcel, one box, a chat greeting, WebRTC
-voice signalling). A real viewer
+voice signalling, the experience catalogue above). A real viewer
 will ask for much more — terrain, appearance, textures — and renders a login
 into a nearly empty world; growing the default scenario against what a viewer
 actually requests is expected iteration, not a bug. Firestorm's seed-request

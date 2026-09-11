@@ -16,8 +16,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use sl_types::key::ExperienceKey;
 use sl_wire::{
-    ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceUpdate, PROPERTY_INVALID,
-    SEARCH_PAGE_SIZE,
+    ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceSearchPage,
+    ExperienceUpdate, PROPERTY_INVALID, SEARCH_PAGE_SIZE,
 };
 use uuid::Uuid;
 
@@ -186,10 +186,17 @@ impl SimExperiences {
     /// with an id tie-break, paged 1-based by [`SEARCH_PAGE_SIZE`] (the
     /// reference viewer's picker starts at page 1). A page below 1 answers
     /// empty.
+    ///
+    /// The answer carries the two paging markers as well
+    /// ([`ExperienceSearchPage`]), because only the grid can state them: it has
+    /// counted the matches this page was cut from, and the page itself cannot
+    /// say whether anything came after it. `has_previous_page` is simply
+    /// "`page` is not the first one" — the page a client would go back to
+    /// exists whether or not this one has any rows on it.
     #[must_use]
-    pub fn find(&self, text: &str, page: i32) -> Vec<ExperienceInfo> {
+    pub fn find(&self, text: &str, page: i32) -> ExperienceSearchPage {
         if page < 1 {
-            return Vec::new();
+            return ExperienceSearchPage::default();
         }
         let needle = text.to_lowercase();
         let mut matches: Vec<&ExperienceInfo> = self
@@ -203,12 +210,19 @@ impl SimExperiences {
         let skipped = usize::try_from(page.saturating_sub(1))
             .unwrap_or_default()
             .saturating_mul(page_size);
-        matches
-            .into_iter()
-            .skip(skipped)
-            .take(page_size)
-            .cloned()
-            .collect()
+        // One past the last match this page carries — anything beyond it is the
+        // next page, which is the whole of what `next_page_url` states.
+        let end = matches.len().min(skipped.saturating_add(page_size));
+        ExperienceSearchPage {
+            infos: matches
+                .iter()
+                .skip(skipped)
+                .take(page_size)
+                .map(|info| (*info).clone())
+                .collect(),
+            has_next_page: matches.len() > end,
+            has_previous_page: page > 1,
+        }
     }
 
     /// The agent's `(allowed, blocked)` preference lists, in id order — the
@@ -394,16 +408,20 @@ mod tests {
         store.insert(record(4, "Tour Guide"));
         let hits = store.find("mAgIc", 1);
         assert_eq!(
-            hits.iter().map(|info| info.public_id).collect::<Vec<_>>(),
+            hits.infos
+                .iter()
+                .map(|info| info.public_id)
+                .collect::<Vec<_>>(),
             vec![key(1)]
         );
-        assert_eq!(store.find("magic", 2), Vec::new());
-        assert_eq!(store.find("magic", 0), Vec::new());
-        assert_eq!(store.find("magic", -3), Vec::new());
+        assert_eq!(store.find("magic", 2).infos, Vec::new());
+        assert_eq!(store.find("magic", 0), ExperienceSearchPage::default());
+        assert_eq!(store.find("magic", -3), ExperienceSearchPage::default());
     }
 
     /// A full first page spills the remainder onto page 2, sorted by name
-    /// with an id tie-break.
+    /// with an id tie-break, and the two paging markers say so: page 1 has a
+    /// next and no previous, page 2 the other way round.
     #[test]
     fn find_pages_past_the_page_size() {
         let mut store = SimExperiences::default();
@@ -412,13 +430,43 @@ mod tests {
         }
         let page_size = usize::try_from(SEARCH_PAGE_SIZE).unwrap_or_default();
         let first = store.find("quest", 1);
-        assert_eq!(first.len(), page_size);
-        assert_eq!(first.first().map(|info| info.public_id), Some(key(1)));
+        assert_eq!(first.infos.len(), page_size);
+        assert_eq!(first.infos.first().map(|info| info.public_id), Some(key(1)));
+        assert!(first.has_next_page);
+        assert!(!first.has_previous_page);
         let second = store.find("quest", 2);
         assert_eq!(
-            second.iter().map(|info| info.public_id).collect::<Vec<_>>(),
+            second
+                .infos
+                .iter()
+                .map(|info| info.public_id)
+                .collect::<Vec<_>>(),
             vec![key(31)]
         );
+        assert!(!second.has_next_page);
+        assert!(second.has_previous_page);
+    }
+
+    /// A result set whose size is an exact multiple of the page size is the
+    /// case the viewer's old "was the page full?" guess got wrong: the last
+    /// full page offers no next, because the grid counted the matches rather
+    /// than measuring the page.
+    #[test]
+    fn find_does_not_offer_a_next_page_onto_nothing() {
+        let mut store = SimExperiences::default();
+        let page_size = usize::try_from(SEARCH_PAGE_SIZE).unwrap_or_default();
+        for n in 1..=u128::try_from(page_size).unwrap_or_default() {
+            store.insert(record(n, &format!("Quest {n:02}")));
+        }
+        let only = store.find("quest", 1);
+        assert_eq!(only.infos.len(), page_size);
+        assert!(!only.has_next_page);
+        // Asking for the page past the end answers empty, and still offers the
+        // way back.
+        let past = store.find("quest", 2);
+        assert_eq!(past.infos, Vec::new());
+        assert!(!past.has_next_page);
+        assert!(past.has_previous_page);
     }
 
     /// Allow / Block move an id between the two lists; Forget removes it

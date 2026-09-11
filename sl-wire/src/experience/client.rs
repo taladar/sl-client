@@ -1,8 +1,8 @@
 //! Client side: experience cap request builders and response parsers.
 
 use super::{
-    ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceUpdate, PROPERTY_INVALID,
-    SEARCH_PAGE_SIZE, uuid_array,
+    ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceSearchPage,
+    ExperienceUpdate, PROPERTY_INVALID, SEARCH_PAGE_SIZE, uuid_array,
 };
 use crate::WireError;
 use crate::llsd::{Llsd, push_escaped};
@@ -174,6 +174,26 @@ pub fn parse_experience_infos(body: &Llsd) -> Result<Vec<ExperienceInfo>, WireEr
         });
     }
     Ok(infos)
+}
+
+/// Decodes a `FindExperienceByName` reply into one [`ExperienceSearchPage`]:
+/// the `experience_keys` records ([`parse_experience_infos`]) plus the
+/// `next_page_url` / `previous_page_url` markers, read — as the reference reads
+/// them — by presence alone.
+///
+/// # Errors
+///
+/// Returns a [`WireError::Llsd`] if a decoded LLSD field has the wrong kind.
+pub fn parse_experience_search_page(body: &Llsd) -> Result<ExperienceSearchPage, WireError> {
+    // `Undef` is how an LLSD-XML `<undef/>` arrives, and the reference's
+    // `has()` is false for a key that is not in the map at all; a key present
+    // but undefined names no page either, so both count as absent.
+    let offered = |field: &str| !matches!(body.get(field), None | Some(Llsd::Undef));
+    Ok(ExperienceSearchPage {
+        infos: parse_experience_infos(body)?,
+        has_next_page: offered("next_page_url"),
+        has_previous_page: offered("previous_page_url"),
+    })
 }
 
 /// Decodes the `experience_ids` array of an `AgentExperiences` /
