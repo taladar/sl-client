@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 322 |
+| ready | 323 |
 | blocked | 42 |
 | in-progress | 21 |
 | bugs | 44 |
 | done | 1082 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1653** |
+| **total** | **1654** |
 
 ## ideas (100)
 
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (322)
+## ready (323)
 
 ### protocol
 
@@ -792,6 +792,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-r17a`](ready/viewer-r17a-verify-the-shoe-lift-on-a-shod-avatar.md) —
   Verify the shoe lift live on a shod avatar
+- [`viewer-recent-people`](ready/viewer-recent-people.md) — Recent People — the
+  list of residents you just dealt with, and its tab
 - [`viewer-region-debug-console`](ready/viewer-region-debug-console.md) — Region
   (sim) debug console (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-region-entry-maturity-gate`](ready/viewer-region-entry-maturity-gate.md)

@@ -98,7 +98,8 @@ carry the shown label rather than an agent SLURL (a notification body is plain
 text here, not linkified).
 
 Not carried over: the reference also files the target under **Recent People**,
-which this viewer has no model for.
+which this viewer has no model for — [[viewer-recent-people]] is that gap,
+with the other ten sites the reference files from.
 
 Tests (`add_friend.rs`): the ask happens before any send and the typed message
 is what goes on the wire; Cancel and a button-less dismissal send nothing and

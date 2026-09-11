@@ -23,6 +23,10 @@
 //! 4. **Say it happened** with the reference's `FriendshipOffered` notice, so a
 //!    working offer never again looks like a dead button.
 //!
+//! A fifth thing the reference does here — filing the target under **Recent
+//! People** — waits on [[viewer-recent-people]], which is that whole model and
+//! the ten other places the reference files from.
+//!
 //! # One prompt, however many residents
 //!
 //! A multi-selection (the radar's, the minimap's) is **one**
