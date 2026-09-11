@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 322 |
+| ready | 321 |
 | blocked | 41 |
 | in-progress | 21 |
 | bugs | 52 |
-| done | 1077 |
+| done | 1078 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1655** |
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (322)
+## ready (321)
 
 ### protocol
 
@@ -996,11 +996,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-binary-duplication`](ready/repl-audit-binary-duplication.md) —
   The two REPL binaries share ~400 near-verbatim lines and have already drifted
 
-### server
-
-- [`server-fake-grid-agent-experiences`](ready/server-fake-grid-agent-experiences.md)
-  — Fake grid — the agent's own five experience lists
-
 ## blocked (41)
 
 ### viewer
@@ -1309,7 +1304,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1077)
+## done (1078)
 
 ### protocol
 
@@ -3663,6 +3658,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   inbound UDP messages (SimStats, SimulatorViewerTimeMessage) log warnings
 - [`aditi-3`](done/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
+
+### server
+
+- [`server-fake-grid-agent-experiences`](done/server-fake-grid-agent-experiences.md)
+  — Fake grid — the agent's own five experience lists
 
 ## deferred (26)
 

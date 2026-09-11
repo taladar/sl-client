@@ -1858,9 +1858,9 @@ of the script was not written for a world where it never happened.
 The `Action` is anything a simulator does unprompted: `RezObject`,
 `MoveObject`, `UpdateObject`, `KillObject`, `Attach` / `Detach`,
 `AnimateAvatar`, `SetAppearance`, `Chat`, `Im`, `SetEnvironment`,
-`PushExperienceEnvironment`, `ReportExperienceEvent`, `ConfigureRegion`,
-`ChangeParcel`, `Teleport`, `CrossRegion`, `SimStats`, `SimulatorTime`,
-`Marker`, and `Custom` for a hook.
+`PushExperienceEnvironment`, `ReportExperienceEvent`,
+`SetExperiencePreference`, `ConfigureRegion`, `ChangeParcel`, `Teleport`,
+`CrossRegion`, `SimStats`, `SimulatorTime`, `Marker`, and `Custom` for a hook.
 
 `SetEnvironment` and `ConfigureRegion` go together, and the pairing is a
 protocol fact rather than an inconvenience. Nothing carries new environment
@@ -2276,12 +2276,40 @@ exercise a viewer's paging arrows. The filler records therefore number one more
 than a whole page, so a search for them spills onto a short second page and the
 boundary is visible from both sides.
 
-What the catalogue does **not** seed is the agent's own five relationships —
-allowed, blocked, owned, admin, contributor. A scenario's `setup` hook runs
-before the circuit is open, so the session does not know the agent id yet, and
-a fixture claiming the agent owns an experience would have to name somebody
-else as that experience's owner. Those five tabs therefore come back empty for
-now; see the `server-fake-grid-agent-experiences` roadmap item.
+### The agent's own five lists, and the hook they need
+
+The agent's five relationships — allowed, blocked, owned, admin, contributor —
+are statements about *who is logged in*, and a scenario's `setup` hook runs
+before the circuit is open, so the session does not know the agent id yet: a
+fixture claiming the agent owns an experience would have to name somebody else
+as that experience's owner, which is the one lie an "owned by you" list must
+not tell.
+
+So a `Scenario` has a second seeding hook, `setup_for_agent`, run immediately
+after `setup` with the `AvatarIdentity` the login was matched to. That is the
+first place a fixture can state a relationship *to the agent* — an experience
+it owns, and by extension anything later that needs the same (a parcel it
+holds, a group it is in). `default_agent_setup` uses it for the experience
+half: two records the agent owns, built with the real agent id rather than
+stored under a placeholder and corrected afterwards.
+
+The five lists are seeded **distinct**, because three of the floater's tabs are
+otherwise indistinguishable — the agent owns two experiences, administers those
+two *and* the group-owned one, and contributes to one it neither owns nor
+administers. A fixture where owned == admin == contributor cannot show that a
+viewer has wired each tab to its own capability. Two more shapes are
+deliberate: one of the agent's own records is **private**, so the Owned tab
+lists something search will not, and the blocked list holds the fixture
+resident's private record, because a preference is the agent's own keyed entry
+rather than a search result.
+
+`Action::SetExperiencePreference` moves one id between the allowed and blocked
+lists from a timeline, the way the `ExperiencePreferences` capability does. It
+sends nothing — the protocol has no message that tells a viewer its own
+preferences moved, since the only thing that ever moves them is that viewer —
+so it stands for the agent having decided somewhere else; a test that wants the
+round trip a floater's Allow button makes drives the client's own
+`SetExperiencePermission`.
 
 ## What is deliberately still small
 

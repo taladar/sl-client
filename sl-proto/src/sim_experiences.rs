@@ -294,7 +294,13 @@ impl SimExperiences {
     /// removes it from both. Any id is accepted — a preference is the
     /// agent's own keyed entry, not a record lookup (viewers can block ids
     /// they have never resolved).
-    pub(crate) fn set_preference(&mut self, id: ExperienceKey, permission: ExperiencePermission) {
+    ///
+    /// Public as the single-id counterpart to
+    /// [`set_agent_permissions`](Self::set_agent_permissions)'s wholesale
+    /// replacement: a driver moving one experience between the two lists is
+    /// doing what the capability does, and should not have to re-state both
+    /// lists to say so.
+    pub fn set_preference(&mut self, id: ExperienceKey, permission: ExperiencePermission) {
         match permission {
             ExperiencePermission::Allow => {
                 self.blocked.remove(&id);

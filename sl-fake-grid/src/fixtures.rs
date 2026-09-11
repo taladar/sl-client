@@ -165,6 +165,11 @@ impl RegionFixture {
                     sim.set_environment(stamped_for(environment, sim.region_id()));
                 }
             }),
+            // The identity half of the stock seeding, for the same reason the
+            // setup above layers on `default_setup`: a fixture describes a
+            // region's objects, not what the account logging in owns, so the
+            // agent's own experience lists are the stock ones here too.
+            setup_for_agent: Some(Arc::new(crate::scenario::default_agent_setup)),
             assets,
             world: self.world,
             timeline: self.timeline,

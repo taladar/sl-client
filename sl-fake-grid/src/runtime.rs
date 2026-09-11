@@ -697,6 +697,20 @@ impl GridCore {
             sim.set_environment(stamped);
         }
         (region.scenario.setup)(&mut sim, now);
+        // The identity half of the seeding, run here because here is the first
+        // place that knows who logged in: the scenario's `setup` above ran
+        // against a session whose circuit is not open, so `SimSession::agent_id`
+        // is still `None` there and a fixture stating a relationship *to the
+        // agent* would have to invent the agent. The login has been matched to
+        // an account by now, so it does not have to.
+        let avatar = crate::world::AvatarIdentity::new(
+            account.agent_id,
+            &account.config.first_name,
+            &account.config.last_name,
+        );
+        if let Some(setup_for_agent) = region.scenario.setup_for_agent.as_ref() {
+            setup_for_agent(&mut sim, &avatar, now);
+        }
         // The parcel covers the `RemoteParcelRequest` capability resolves a
         // location against, one per parcel the scene's fixtures carry a
         // grid-wide listing for. Registered here rather than stated by the
@@ -797,11 +811,7 @@ impl GridCore {
                 estate_manager: account.config.estate_manager,
                 legacy_udp_inventory: self.legacy_udp_inventory,
             },
-            avatar: crate::world::AvatarIdentity {
-                agent_id: account.agent_id,
-                first_name: account.config.first_name.clone(),
-                last_name: account.config.last_name.clone(),
-            },
+            avatar,
             selection: crate::object_edits::Selection::new(),
             seq,
             region: region_index,

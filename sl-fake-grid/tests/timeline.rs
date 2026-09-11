@@ -13,7 +13,8 @@ mod test {
     use pretty_assertions::assert_eq;
     use sl_client_tokio::{
         Client, Command, EnvironmentPushAction, Event, ExperienceEnvironmentPush, ExperienceEvent,
-        ExperienceEventPermission, ExperienceKey, Llsd, LoginParams, LoginRequest, StartLocation,
+        ExperienceEventPermission, ExperienceKey, ExperiencePermission, Llsd, LoginParams,
+        LoginRequest, StartLocation,
     };
     use sl_fake_grid::scenario::STOCK_SCRIPTED_OBJECT_LOCAL_ID;
     use sl_fake_grid::{
@@ -284,6 +285,74 @@ mod test {
             seen,
             vec![attached, seated],
             "both reports must reach the client, in the order the script wrote them"
+        );
+
+        drop(command_tx);
+        run.abort();
+        grid.shutdown();
+        Ok(())
+    }
+
+    /// **A script moves the agent's experience preference, and the next fetch
+    /// says so.**
+    ///
+    /// `SetExperiencePreference` is the one scripted action that sends nothing:
+    /// the protocol has no message telling a viewer its own preferences moved,
+    /// because the only thing that ever moves them is that viewer. So the claim
+    /// a test can make is the one a re-opened floater makes — the *next*
+    /// `GetExperiences` answers differently — and the marker is what says the
+    /// step has run, since nothing else would.
+    ///
+    /// The id is one no record carries, which is legal and deliberate: a
+    /// preference is the agent's own keyed entry, not a record lookup.
+    #[tokio::test]
+    async fn a_script_moves_an_experience_preference() -> Result<(), TestError> {
+        let experience = ExperienceKey::from(uuid::Uuid::from_u128(0xE_9ABC));
+        let timeline = Timeline::new()
+            .then(
+                At::AfterArrival(LEAD_IN),
+                Action::SetExperiencePreference {
+                    experience_id: experience,
+                    permission: ExperiencePermission::Block,
+                },
+            )
+            .after(Duration::ZERO, Action::Marker("blocked".to_owned()));
+        let (grid, client, _agent) = start(timeline, Vec::new()).await?;
+
+        let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
+        let (command_tx, command_rx) = mpsc::channel::<Command>(8);
+        let (diag_tx, _diag_rx) = mpsc::channel(16);
+        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+
+        loop {
+            let event = tokio::time::timeout(WAIT, event_rx.recv())
+                .await?
+                .ok_or("client event stream ended early")?;
+            if let Event::GenericMessage(generic) = &event
+                && sl_fake_grid::marker_name(generic).as_deref() == Some("blocked")
+            {
+                break;
+            }
+        }
+
+        command_tx
+            .send(Command::RequestExperiencePermissions)
+            .await?;
+        let blocked = loop {
+            let event = tokio::time::timeout(WAIT, event_rx.recv())
+                .await?
+                .ok_or("client event stream ended early")?;
+            if let Event::ExperiencePermissions { blocked, .. } = event {
+                break blocked;
+            }
+        };
+        assert!(
+            blocked.contains(&experience),
+            "the scripted preference did not reach the blocked list"
+        );
+        assert!(
+            blocked.len() > 1,
+            "the scripted preference replaced the seeded blocked list instead of joining it"
         );
 
         drop(command_tx);

@@ -7,8 +7,8 @@ mod test {
 
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_tokio::{
-        Arrival, ChatChannel, ChatType, Client, Command, Event, ExperienceKey, LoginParams,
-        LoginRequest, StartLocation, VoiceProvisionRequest,
+        Arrival, ChatChannel, ChatType, Client, Command, Event, ExperienceKey,
+        ExperiencePermission, LoginParams, LoginRequest, StartLocation, VoiceProvisionRequest,
     };
     use sl_fake_grid::{
         AccountConfig, FakeAgent, FakeGrid, FakeGridBuilder, ImitatedGrid, RegionConfig,
@@ -626,6 +626,124 @@ mod test {
                 .await?;
             assert_eq!(answered, (parcel_id, expected));
         }
+        Ok(())
+    }
+
+    /// **The agent arrives with five experience relationships, not five empty
+    /// lists — and a preference it changes stays changed.**
+    ///
+    /// Five of the Experiences floater's tabs read five different capabilities,
+    /// and a grid that answers every one of them with an empty array cannot
+    /// show whether the viewer wired each tab to its own. The fake grid seeds
+    /// them from the scenario's `setup_for_agent` hook, which is the first
+    /// place that knows who logged in — so the records the Owned tab lists can
+    /// name the agent as their owner, which is checked here through
+    /// `GetExperienceInfo` rather than taken on trust from the list.
+    ///
+    /// The last half is the round trip a floater's Allow / Block button makes:
+    /// `ExperiencePreferences` moves one id between the two lists, and the
+    /// grid's own reply is what says so.
+    #[tokio::test]
+    async fn the_agent_has_five_experience_lists_and_can_move_a_preference() -> Result<(), TestError>
+    {
+        let mut running = start().await?;
+        let agent_id = running.agent.agent_id();
+
+        running
+            .commands
+            .send(Command::RequestExperiencePermissions)
+            .await?;
+        let (allowed, blocked) = running
+            .wait_for(|event| match event {
+                Event::ExperiencePermissions { allowed, blocked } => {
+                    Some((allowed.clone(), blocked.clone()))
+                }
+                _ => None,
+            })
+            .await?;
+        assert!(!allowed.is_empty(), "the agent admitted no experience");
+        assert!(!blocked.is_empty(), "the agent blocked no experience");
+
+        let mut lists = Vec::new();
+        for (command, name) in [
+            (Command::RequestOwnedExperiences, "owned"),
+            (Command::RequestAdminExperiences, "admin"),
+            (Command::RequestCreatorExperiences, "contributor"),
+        ] {
+            running.commands.send(command).await?;
+            let ids = running
+                .wait_for(|event| match event {
+                    Event::OwnedExperiences(ids)
+                    | Event::AdminExperiences(ids)
+                    | Event::CreatorExperiences(ids) => Some(ids.clone()),
+                    _ => None,
+                })
+                .await?;
+            assert!(!ids.is_empty(), "the {name} list came back empty");
+            lists.push((name, ids));
+        }
+        for (index, (name, ids)) in lists.iter().enumerate() {
+            for (other_name, other) in lists.iter().skip(index.saturating_add(1)) {
+                assert_ne!(ids, other, "the {name} and {other_name} lists are equal");
+            }
+        }
+
+        // The Owned tab lists records that really are the agent's: the owner
+        // field is the one thing a fixture seeded before the login could not
+        // have got right.
+        let owned = lists
+            .first()
+            .map(|(_name, ids)| ids.clone())
+            .ok_or("no owned list")?;
+        running
+            .commands
+            .send(Command::RequestExperienceInfo {
+                experience_ids: owned.clone(),
+            })
+            .await?;
+        let infos = running
+            .wait_for(|event| match event {
+                Event::ExperienceInfo(infos) => Some(infos.clone()),
+                _ => None,
+            })
+            .await?;
+        assert_eq!(infos.len(), owned.len());
+        for info in &infos {
+            assert!(!info.missing, "{} resolved to nothing", info.public_id);
+            assert_eq!(
+                info.owner,
+                Some(sl_types::key::OwnerKey::Agent(agent_id)),
+                "{} is in the agent's owned list and owned by somebody else",
+                info.name
+            );
+        }
+
+        // Block one of the admitted experiences: the reply carries both lists,
+        // with the id moved across.
+        let target = allowed.first().copied().ok_or("no admitted experience")?;
+        running
+            .commands
+            .send(Command::SetExperiencePermission {
+                experience_id: target,
+                permission: ExperiencePermission::Block,
+            })
+            .await?;
+        let (allowed_after, blocked_after) = running
+            .wait_for(|event| match event {
+                Event::ExperiencePermissions { allowed, blocked } => {
+                    Some((allowed.clone(), blocked.clone()))
+                }
+                _ => None,
+            })
+            .await?;
+        assert!(
+            !allowed_after.contains(&target),
+            "the blocked experience is still admitted"
+        );
+        assert!(
+            blocked_after.contains(&target),
+            "the blocked experience did not reach the blocked list"
+        );
         Ok(())
     }
 

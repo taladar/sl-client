@@ -5,7 +5,10 @@
 //! in this crate is protocol glue. The `setup` closure runs against a fresh
 //! [`SimSession`] before the login response is built, populating the fixture
 //! stores the CAPS and UDP surfaces serve (inventory, parcels, simulator
-//! features, display names, …); the `on_agent_arrived` closure runs right
+//! features, display names, …); the `setup_for_agent` closure runs immediately
+//! after it with the avatar the session belongs to, for the fixtures that have
+//! to name the logged-in agent (which `setup` cannot: the circuit is not open
+//! yet, so the session has no agent); the `on_agent_arrived` closure runs right
 //! after the agent's movement completes and the arrival world burst went
 //! out (content pushed at the arriving client); the asset store backs the binary asset-delivery caps
 //! (`GetTexture`, `GetMesh`, `ViewerAsset`) and every save that lands in
@@ -30,7 +33,7 @@ use sl_types::key::{AgentKey, InventoryFolderKey, InventoryKey, ObjectKey, Owner
 
 use crate::timeline::Timeline;
 use crate::udp_assets::UdpAssetFixtures;
-use crate::world::{SceneFixtures, TaskInventory, box_prim, region_wide_parcel};
+use crate::world::{AvatarIdentity, SceneFixtures, TaskInventory, box_prim, region_wide_parcel};
 
 /// A hook run under the session lock against the machine (fixture setup,
 /// on-arrival content pushes), stamped with the grid's clock
@@ -43,11 +46,28 @@ pub type SimHook = Arc<dyn Fn(&mut SimSession, Instant) + Send + Sync>;
 /// stock behaviour used.
 pub type SimEventHook = Arc<dyn Fn(&mut SimSession, &ServerEvent, Instant) + Send + Sync>;
 
+/// A hook run under the session lock right after [`Scenario::setup`], with the
+/// **avatar this session belongs to** — the fixture seeding that cannot be
+/// written down until the grid knows who logged in.
+///
+/// [`setup`](Scenario::setup) runs against a session that has no agent yet:
+/// [`SimSession::agent_id`](sl_proto::SimSession::agent_id) is `None` until the
+/// circuit opens, so a fixture that states a *relationship* between the agent
+/// and something — an experience it owns, a parcel it holds, a group it is in —
+/// has nothing to name on either side. This hook is the same seeding, one step
+/// later: the login has been matched to an account, so the identity is real,
+/// and a fixture written here can put the logged-in avatar's own id in the
+/// record rather than a stand-in's.
+pub type AgentHook = Arc<dyn Fn(&mut SimSession, &AvatarIdentity, Instant) + Send + Sync>;
+
 /// The scripted content for one region.
 #[derive(Clone)]
 pub struct Scenario {
     /// Seeds a fresh session's fixture stores before login completes.
     pub setup: SimHook,
+    /// Seeds the part of the fixture set that names the **agent**, right after
+    /// [`setup`](Self::setup) — see [`AgentHook`].
+    pub setup_for_agent: Option<AgentHook>,
     /// Runs after the arrival world burst when the agent's movement completes.
     pub on_agent_arrived: Option<SimHook>,
     /// Runs for every drained [`ServerEvent`], after the stock behaviour.
@@ -78,6 +98,10 @@ impl std::fmt::Debug for Scenario {
         f.debug_struct("Scenario")
             .field("setup", &"<closure>")
             .field(
+                "setup_for_agent",
+                &self.setup_for_agent.as_ref().map(|_| "<closure>"),
+            )
+            .field(
                 "on_agent_arrived",
                 &self.on_agent_arrived.as_ref().map(|_| "<closure>"),
             )
@@ -95,6 +119,7 @@ impl Scenario {
     pub fn empty() -> Self {
         Self {
             setup: Arc::new(|_, _| {}),
+            setup_for_agent: None,
             on_agent_arrived: None,
             on_event: None,
             assets: sl_proto::InMemoryAssetSource::new(),
@@ -107,13 +132,15 @@ impl Scenario {
 
 impl Default for Scenario {
     /// The stock scenario: a small standard inventory and library, one
-    /// region-wide parcel, a chat greeting on arrival, the stock assets
+    /// region-wide parcel, the agent's own experience relationships
+    /// (`default_agent_setup`), a chat greeting on arrival, the stock assets
     /// ([`default_assets`]), the stock UDP asset fixtures
     /// ([`default_udp_assets`]), and the stock world ([`default_world`]: the
     /// region-wide parcel's record and the scripted object as a visible box).
     fn default() -> Self {
         Self {
             setup: Arc::new(default_setup),
+            setup_for_agent: Some(Arc::new(default_agent_setup)),
             on_agent_arrived: Some(Arc::new(default_arrival)),
             on_event: None,
             assets: default_assets(),
@@ -661,6 +688,15 @@ pub(crate) fn default_setup(sim: &mut SimSession, _now: Instant) {
     // OpenSim ships, so this is the only grid the Experiences floater can be
     // exercised against without an account and a network (`crate::experiences`).
     crate::experiences::seed_catalogue(sim);
+}
+
+/// Seeds the fixtures that name the logged-in avatar: its five experience
+/// relationships, and the experiences it owns (`crate::experiences`).
+///
+/// This is the identity half of [`default_setup`] — see [`AgentHook`] for why
+/// it cannot be done there.
+pub(crate) fn default_agent_setup(sim: &mut SimSession, agent: &AvatarIdentity, _now: Instant) {
+    crate::experiences::seed_for_agent(sim, agent);
 }
 
 /// Greets the arriving avatar with a system chat line.

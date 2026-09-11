@@ -56,11 +56,12 @@ use std::time::{Duration, Instant};
 
 use sl_proto::{
     ArrivalPlacement, AvatarAppearance, ChatSource, ChatType, EnvironmentSettings,
-    ExperienceEnvironmentPush, ExperienceEvent, InstantMessage, Object, ParcelInfo,
-    PlayingAnimation, RegionLimits, RegionLocalObjectId, RegionLocalParcelId, RegionStats,
-    SequenceNumber, ServerEvent, SimSession, SimulatorTime, attachment_state_from_point,
+    ExperienceEnvironmentPush, ExperienceEvent, ExperiencePermission, InstantMessage, Object,
+    ParcelInfo, PlayingAnimation, RegionLimits, RegionLocalObjectId, RegionLocalParcelId,
+    RegionStats, SequenceNumber, ServerEvent, SimSession, SimulatorTime,
+    attachment_state_from_point,
 };
-use sl_types::key::InventoryKey;
+use sl_types::key::{ExperienceKey, InventoryKey};
 use sl_types::lsl::Vector;
 use sl_types::map::{RegionCoordinates, TeleportFlags};
 use tokio::sync::{broadcast, watch};
@@ -320,6 +321,22 @@ pub enum Action {
     /// real region accompanies with one of these, and this grid leaves to the
     /// scenario so a test can have either half alone.
     ReportExperienceEvent(Box<ExperienceEvent>),
+    /// Moves one experience between the agent's allowed and blocked lists, as
+    /// the `ExperiencePreferences` capability does.
+    ///
+    /// It changes what a **fetch** answers and sends nothing: the protocol has
+    /// no message that tells a viewer its own preferences moved, because the
+    /// only thing that ever moves them is that same viewer. So this is the
+    /// scripted stand-in for the agent having decided elsewhere — a second
+    /// viewer, the web profile — and a test drives the *client's* own
+    /// [`SetExperiencePermission`](sl_proto::Command::SetExperiencePermission)
+    /// when it wants the round trip a floater's Allow button makes.
+    SetExperiencePreference {
+        /// Which experience the preference is about.
+        experience_id: ExperienceKey,
+        /// Allow, block, or forget it — `Forget` clears it from both lists.
+        permission: ExperiencePermission,
+    },
     /// Edits the region's own configuration and sends the `RegionInfo` that
     /// announces it — the estate floater's Region tab, saved by nobody.
     ///
@@ -411,6 +428,14 @@ impl std::fmt::Debug for Action {
                 .debug_struct("ReportExperienceEvent")
                 .field("experience", &event.experience_id)
                 .field("permission", &event.permission)
+                .finish_non_exhaustive(),
+            Self::SetExperiencePreference {
+                experience_id,
+                permission,
+            } => f
+                .debug_struct("SetExperiencePreference")
+                .field("experience", experience_id)
+                .field("permission", permission)
                 .finish_non_exhaustive(),
             Self::ConfigureRegion { .. } => f.write_str("ConfigureRegion(<edit>)"),
             Self::ChangeParcel { local_id, .. } => f
@@ -944,6 +969,18 @@ async fn execute(
                     if let Err(error) = sim.send_experience_event(&event, now) {
                         tracing::warn!("a scripted experience event failed to send: {error}");
                     }
+                })
+                .await;
+        }
+        Action::SetExperiencePreference {
+            experience_id,
+            permission,
+        } => {
+            let (experience_id, permission) = (*experience_id, *permission);
+            shared
+                .with_sim(move |sim| {
+                    sim.experiences_mut()
+                        .set_preference(experience_id, permission);
                 })
                 .await;
         }
