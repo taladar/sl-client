@@ -86,7 +86,7 @@ use sl_viewer_notifications::{NotificationResponse, ShowNotification};
 use sl_viewer_pickers::ui_texture_picker::TextureSwatchValue;
 use sl_viewer_platform::environment_assets::EnvironmentAssetManager;
 use sl_viewer_platform::file_dialog::{
-    FileDialogClosed, FileDialogFilter, FileDialogOutcome, OpenFileDialog,
+    FileDialogClosed, FileDialogFilter, FileDialogOutcome, FileDialogSelection, OpenFileDialog,
 };
 use sl_viewer_ui_core::i18n::{Translated, Translator};
 use sl_viewer_ui_core::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
@@ -1031,6 +1031,7 @@ fn import_dialog_request(editor: EditorKind, translator: &Translator) -> OpenFil
             },
         ],
         start_dir: None,
+        selection: FileDialogSelection::File,
     }
 }
 

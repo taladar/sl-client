@@ -1970,8 +1970,9 @@ pub use chat_session::{
 pub use inventory::{FolderState, InventoryOwner};
 pub use inventory_cache::INVENTORY_CACHE_VERSION;
 pub use legacy_preset::{
-    LegacyPresetError, legacy_preset_from_bytes, legacy_preset_name,
-    sky_settings_from_legacy_preset, water_settings_from_legacy_preset,
+    LEGACY_DAY_SKY_FRAME_PREFIX, LEGACY_DAY_WATER_FRAME_PREFIX, LEGACY_DAY_WATER_PRESET,
+    LegacyDayCycleError, LegacyPresetError, legacy_day_cycle_from_bytes, legacy_preset_from_bytes,
+    legacy_preset_name, sky_settings_from_legacy_preset, water_settings_from_legacy_preset,
 };
 
 pub(crate) use chat_session::SERVER_HISTORY_CAP;

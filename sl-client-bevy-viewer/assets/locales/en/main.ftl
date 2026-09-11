@@ -2385,6 +2385,13 @@ notification-auto-adjust-hdr-sky = You are editing a non-HDR sky that has been a
 notification-enable-auto-fps-warning = You are about to enable AutoFPS. All unsaved graphics settings will be lost. Would you like to save them first?
 notification-no-valid-env-setting-found = No valid environment setting selected. Please note that "Shared Environment" and "Day cycle based" cannot be selected!
 notification-windlight-bulk-import-finished = Bulk import of Windlights has finished.
+# The reference says this in a modal "please wait" dialog for the length of the
+# run; a tip says it once and leaves the viewer usable.
+notification-windlight-bulk-import-started = Importing [COUNT] Windlight presets…
+# Not in the reference, which reports only that a bulk import finished and
+# raises one modal WLImportFail per file that did not — a notification storm on
+# a folder where nothing converts. This says the same thing once.
+notification-windlight-bulk-import-summary = Bulk import of Windlights has finished: [FILED] imported, [FAILED] not. [REASONS]
 
 ## Friends & people (viewer-notification-catalogue-friends-people). Bodies follow
 ## the reference notifications.xml with the standard trims (KB URLs,
@@ -3750,6 +3757,18 @@ settings-editor-import-sky-title = Import a WindLight sky preset
 settings-editor-import-water-title = Import a WindLight water preset
 settings-editor-import-filter-preset = WindLight preset (.xml)
 settings-editor-import-filter-all = All files
+# World > Environment > Bulk Import: the titles of the folder chooser each of
+# the three entries puts up, and the lines a run's summary is built from.
+bulk-import-skies-title = Choose a folder of WindLight sky presets
+bulk-import-water-title = Choose a folder of WindLight water presets
+bulk-import-days-title = Choose a folder of WindLight day cycles
+bulk-import-no-settings-folder = There is no Settings folder to file the presets in yet.
+bulk-import-never-answered =
+    { $count ->
+        [one] { $count } item was never confirmed by the region.
+       *[other] { $count } items were never confirmed by the region.
+    }
+bulk-import-and-more = … and { $count } more.
 # The sky editor's tabs, and the water editor's one.
 settings-editor-tab-atmosphere = Atmosphere
 settings-editor-tab-clouds = Clouds

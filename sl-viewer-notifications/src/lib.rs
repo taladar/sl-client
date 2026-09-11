@@ -12868,6 +12868,44 @@ pub const NOTIFICATIONS: &[NotificationTemplate] = &[
         form: NO_FORM,
         input: None,
     },
+    // **Not a reference template**, but the reference's own progress report in
+    // a shape that does not take the screen: Firestorm puts up a modal
+    // `LLUploadDialog` saying "Importing Windlights..." for the length of a run
+    // that may be hundreds of uploads long. A tip says the same thing and
+    // leaves the viewer usable.
+    NotificationTemplate {
+        name: "WindlightBulkImportStarted",
+        kind: NotificationKind::Tip,
+        message_key: "notification-windlight-bulk-import-started",
+        title_key: None,
+        priority: NotificationPriority::Low,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignore: NotificationIgnore::None,
+        ignore_key: None,
+        form: NO_FORM,
+        input: None,
+    },
+    // **Not a reference template.** Firestorm's bulk import raises one modal
+    // `WLImportFail` per file it could not convert and then the tip above, so a
+    // folder of four hundred files of the wrong kind is four hundred modals.
+    // This is that report given once, and it is an alert rather than a tip
+    // because it is the only place the failures are named.
+    NotificationTemplate {
+        name: "WindlightBulkImportSummary",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-windlight-bulk-import-summary",
+        title_key: None,
+        priority: NotificationPriority::Normal,
+        persist: true,
+        log_to_chat: false,
+        unique: false,
+        ignore: NotificationIgnore::None,
+        ignore_key: None,
+        form: OK_FORM,
+        input: None,
+    },
     // ---- Friends & people (viewer-notification-catalogue-friends-people). ----
     NotificationTemplate {
         name: "GrantModifyRights",

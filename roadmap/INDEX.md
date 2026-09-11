@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 320 |
+| ready | 319 |
 | blocked | 42 |
 | in-progress | 22 |
 | bugs | 52 |
-| done | 1073 |
+| done | 1074 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1651** |
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (320)
+## ready (319)
 
 ### protocol
 
@@ -949,9 +949,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wearable-favorites`](ready/viewer-wearable-favorites.md) — Wearable
   favorites floater (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-ui-virtualized-list` (done))
-- [`viewer-windlight-bulk-import`](ready/viewer-windlight-bulk-import.md) —
-  Legacy Windlight bulk import (blocked by `viewer-environment-fixed-editor`
-  (done))
 - [`viewer-window-title-unread-count`](ready/viewer-window-title-unread-count.md)
   — Unread IM/chat count in the window title
 - [`viewer-world-map-tracking-teleport`](ready/viewer-world-map-tracking-teleport.md)
@@ -1306,7 +1303,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1073)
+## done (1074)
 
 ### protocol
 
@@ -2915,6 +2912,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   website auto-login (OpenID cookie) in the in-viewer browser
 - [`viewer-widget-any-mouse-button-activates`](done/viewer-widget-any-mouse-button-activates.md)
   — A secondary or middle click presses every button in the viewer
+- [`viewer-windlight-bulk-import`](done/viewer-windlight-bulk-import.md) —
+  Legacy Windlight bulk import (blocked by `viewer-environment-fixed-editor`
+  (done))
 - [`viewer-world-drag-drop-reactions`](done/viewer-world-drag-drop-reactions.md)
   — Inventory drag&drop onto the world (blocked by
   `viewer-ui-interaction-harness` (done), `viewer-world-test-harness` (done))

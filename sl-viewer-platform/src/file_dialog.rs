@@ -1,4 +1,5 @@
-//! Asking the **desktop** to pick a file: the viewer's one file-open dialog.
+//! Asking the **desktop** to pick a file — or a folder: the viewer's one
+//! file-open dialog.
 //!
 //! Every "… from disk" the viewer will ever grow — importing a legacy WindLight
 //! preset, uploading a texture or a mesh, loading a notecard — needs the host's
@@ -72,10 +73,30 @@ pub struct OpenFileDialog {
     pub title: String,
     /// The file-type filters offered, most specific first. Each is a label and
     /// the extensions it covers, written **without** a leading dot (`"xml"`).
+    ///
+    /// Ignored for [`FileDialogSelection::Folder`], which has no file types to
+    /// filter.
     pub filters: Vec<FileDialogFilter>,
     /// Where to open, when nothing has been picked under this purpose yet. The
     /// remembered directory wins over this once there is one.
     pub start_dir: Option<PathBuf>,
+    /// Whether the user is picking a file or a whole directory.
+    pub selection: FileDialogSelection,
+}
+
+/// What a file dialog asks the user to choose.
+///
+/// Both answer with one [`PathBuf`], because a directory is a path like any
+/// other; what differs is what the chooser lets the user point at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FileDialogSelection {
+    /// One file (`rfd`'s `pick_file`) — the default, and what every "… from
+    /// disk" wants.
+    #[default]
+    File,
+    /// One directory (`rfd`'s `pick_folder`), for a bulk operation that works
+    /// on a folder's worth of files rather than on one the user named.
+    Folder,
 }
 
 /// One entry of a file-open dialog's type filter.
@@ -121,6 +142,11 @@ pub struct FileDialogState {
     /// one such directory for the whole viewer; one per purpose is the same
     /// idea told apart, and matters because the sky and the water presets live
     /// in sibling folders.
+    ///
+    /// It is the picked path's **parent** either way, so a
+    /// [`FileDialogSelection::Folder`] purpose reopens looking *at* the folder
+    /// it chose last time rather than inside it — which is what a second bulk
+    /// import of a sibling folder wants.
     last_dir: HashMap<Box<str>, PathBuf>,
 }
 
@@ -200,11 +226,13 @@ fn spawn_dialog(request: &OpenFileDialog, directory: Option<PathBuf>) -> Task<Op
     if let Some(directory) = directory {
         dialog = dialog.set_directory(directory);
     }
+    let selection = request.selection;
     IoTaskPool::get().spawn(async move {
-        dialog
-            .pick_file()
-            .await
-            .map(|handle| handle.path().to_path_buf())
+        let picked = match selection {
+            FileDialogSelection::File => dialog.pick_file().await,
+            FileDialogSelection::Folder => dialog.pick_folder().await,
+        };
+        picked.map(|handle| handle.path().to_path_buf())
     })
 }
 
@@ -262,7 +290,8 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::{
-        FileDialogClosed, FileDialogOutcome, FileDialogPlugin, FileDialogState, OpenFileDialog,
+        FileDialogClosed, FileDialogOutcome, FileDialogPlugin, FileDialogSelection,
+        FileDialogState, OpenFileDialog,
     };
 
     /// A boxed error, so a test can `?` rather than reach for the `panic!` the
@@ -276,6 +305,7 @@ mod tests {
             title: "Pick a file".to_owned(),
             filters: Vec::new(),
             start_dir: None,
+            selection: FileDialogSelection::File,
         }
     }
 

@@ -124,8 +124,8 @@ pub use sl_proto::{
     avatar_texture, azimuth_altitude_to_rotation, decode_particle_system, decode_texture_anim,
     decode_texture_entry, encode_texture_entry, environment_asset_from_bytes,
     environment_asset_to_bytes, grid_to_handle, group_powers, handle_to_global, handle_to_grid,
-    legacy_preset_from_bytes, legacy_preset_name, particle_pattern, pcode,
-    rotation_to_azimuth_altitude, sim_access, texture_anim_mode,
+    legacy_day_cycle_from_bytes, legacy_preset_from_bytes, legacy_preset_name, particle_pattern,
+    pcode, rotation_to_azimuth_altitude, sim_access, texture_anim_mode,
 };
 // Linden's four ported WindLight sky presets and the day cycle that schedules
 // them: content both halves of the protocol need, so it lives in `sl-proto`

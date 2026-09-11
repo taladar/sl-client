@@ -163,6 +163,19 @@ const CAN_REDO: &str = "can-redo";
 /// menu (and, in the reference, the environment editors) away from the user.
 const CAN_CHANGE_ENVIRONMENT: &str = "can-change-environment";
 
+/// The Bulk Import request for one preset kind — named once so the three menu
+/// arms below read as the one action they are.
+const fn start_bulk_import(
+    kind: sl_client_bevy::SettingsKind,
+) -> crate::bulk_import::StartWindlightBulkImport {
+    crate::bulk_import::StartWindlightBulkImport { kind }
+}
+
+/// Condition key: no WindLight bulk import is running, so the World ▸
+/// Environment ▸ Bulk Import entries may be pressed (the reference's
+/// `File.EnableImportWindlightBulk`, which is `!bulk_windlight_import_active`).
+const BULK_IMPORT_IDLE: &str = "bulk-import-idle";
+
 /// The condition keys that hold while the matching World ▸ Environment fixed
 /// environment is pinned — one per group × time (Day Cycle / Legacy / Modern ×
 /// Sunrise / Midday / Sunset / Midnight), plus the shared-environment default.
@@ -405,6 +418,30 @@ static ENV_MODERN_MENU: MenuDef = MenuDef {
     ],
 };
 
+/// The World ▸ Environment ▸ **Bulk Import** submenu — a whole folder of
+/// pre-EEP WindLight presets converted into settings assets in inventory, one
+/// entry per kind because a legacy preset file does not say which kind it is
+/// (the reference's `File.ImportWindlightBulk`, whose `parameter` is the
+/// `LLSettingsType` the folder is read as).
+///
+/// Every entry is greyed while a run is going, as the reference's
+/// `File.EnableImportWindlightBulk` greys them: there is one ordered reply queue
+/// behind the item creations, so two runs could not tell their items apart.
+static ENV_BULK_IMPORT_MENU: MenuDef = MenuDef {
+    label: "Bulk Import",
+    items: &[
+        MenuItemDef::Command(
+            MenuCommand::new("Days…", "bulk-import-days").enabled_when(BULK_IMPORT_IDLE),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Skies…", "bulk-import-skies").enabled_when(BULK_IMPORT_IDLE),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Water…", "bulk-import-water").enabled_when(BULK_IMPORT_IDLE),
+        ),
+    ],
+};
+
 /// The World ▸ Environment submenu — three groups of the four fixed times of day
 /// (**Day Cycle** the region's own EEP frozen per time, **Legacy** the Linden
 /// `A-*` presets, **Modern** the fetched `KNOWN_SKY_*` EEP library skies) plus the
@@ -439,6 +476,10 @@ static ENVIRONMENT_MENU: MenuDef = MenuDef {
             "My Environments…",
             "toggle-my-environments",
         )),
+        MenuItemDef::Separator,
+        // Reading presets off disk and filing them in inventory: inventory work
+        // like the library window's, so not gated on `@setenv` either.
+        MenuItemDef::Submenu(&ENV_BULK_IMPORT_MENU),
     ],
 };
 
@@ -736,14 +777,21 @@ pub(crate) struct TopMenuBarPlugin;
 
 impl Plugin for TopMenuBarPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Startup,
-            spawn_top_menu_bar.after(UiScaffoldSystems::SpawnRoot),
-        )
-        .add_systems(
-            Update,
-            (update_top_menu_conditions, handle_top_menu_actions),
-        );
+        app
+            // Registered by the environment plugins as well; registering it
+            // here too (idempotent) is what lets a test fold take the bar
+            // without them — a `MessageWriter` for an unregistered message is a
+            // system that panics on its first frame, not one that quietly does
+            // nothing.
+            .add_message::<crate::bulk_import::StartWindlightBulkImport>()
+            .add_systems(
+                Startup,
+                spawn_top_menu_bar.after(UiScaffoldSystems::SpawnRoot),
+            )
+            .add_systems(
+                Update,
+                (update_top_menu_conditions, handle_top_menu_actions),
+            );
     }
 }
 
@@ -801,7 +849,7 @@ fn spawn_top_menu_bar(mut commands: Commands, root: Res<UiRoot>, asset_server: R
               the fan-in of every condition the bar's check marks and enable gates read: the \
               floaters, the environment, the selection and edit tool, the settings, the \
               presence modes, the RLV state that can take the environment menu away, the \
-              panel-shown query, and the bar itself"
+              WindLight bulk importer's run state, the panel-shown query, and the bar itself"
 )]
 fn update_top_menu_conditions(
     floaters: Query<(Entity, &crate::floater::Floater)>,
@@ -811,6 +859,7 @@ fn update_top_menu_conditions(
     settings: Res<crate::settings::ViewerSettings>,
     presence: Option<Res<crate::world_api::PresenceState>>,
     rlv_session: Option<Res<crate::world_api::rlv::RlvSession>>,
+    bulk_import: Option<Res<crate::bulk_import::BulkImportRun>>,
     panels: Query<&UiPanelShown>,
     mut bars: Query<&mut MenuConditions, With<TopMenuBar>>,
 ) {
@@ -1001,6 +1050,12 @@ fn update_top_menu_conditions(
     {
         wanted.push(CAN_CHANGE_ENVIRONMENT);
     }
+    // No resource means no importer scheduled (a smaller host), and an entry
+    // that cannot do anything is better enabled than greyed for a reason the
+    // user cannot see — the press then says so.
+    if bulk_import.is_none_or(|state| !state.is_running()) {
+        wanted.push(BULK_IMPORT_IDLE);
+    }
     for mut conditions in &mut bars {
         if conditions.0 != wanted {
             conditions.0.clone_from(&wanted);
@@ -1059,6 +1114,7 @@ fn handle_top_menu_actions(
     mut presence: Option<ResMut<crate::world_api::PresenceState>>,
     mut notify: MessageWriter<crate::notifications::ShowNotification>,
     mut quit: MessageWriter<crate::session::QuitRequested>,
+    mut bulk_import: MessageWriter<crate::bulk_import::StartWindlightBulkImport>,
 ) {
     use crate::environment::FixedEnvironment;
     use crate::sky_presets::FixedSky;
@@ -1330,6 +1386,18 @@ fn handle_top_menu_actions(
                     crate::my_environments::MY_ENVIRONMENTS_FLOATER_ID,
                 );
             }
+            // World > Environment > Bulk Import. The kind is the entry, because
+            // a legacy preset file carries no type tag — which folder it came
+            // out of is the only thing that says what it is.
+            "bulk-import-days" => {
+                bulk_import.write(start_bulk_import(sl_client_bevy::SettingsKind::DayCycle));
+            }
+            "bulk-import-skies" => {
+                bulk_import.write(start_bulk_import(sl_client_bevy::SettingsKind::Sky));
+            }
+            "bulk-import-water" => {
+                bulk_import.write(start_bulk_import(sl_client_bevy::SettingsKind::Water));
+            }
             "toggle-rlv-console" => {
                 toggle_floater(
                     &floaters,
@@ -1545,6 +1613,18 @@ mod tests {
             ("World > Environment".to_owned(), "env-shared"),
             ("World > Environment".to_owned(), "toggle-personal-lighting"),
             ("World > Environment".to_owned(), "toggle-my-environments"),
+            (
+                "World > Environment > Bulk Import".to_owned(),
+                "bulk-import-days",
+            ),
+            (
+                "World > Environment > Bulk Import".to_owned(),
+                "bulk-import-skies",
+            ),
+            (
+                "World > Environment > Bulk Import".to_owned(),
+                "bulk-import-water",
+            ),
             ("Build".to_owned(), "toggle-build-tools"),
             ("Build".to_owned(), "undo-objects"),
             ("Build".to_owned(), "redo-objects"),

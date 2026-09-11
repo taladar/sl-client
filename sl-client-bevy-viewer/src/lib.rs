@@ -259,6 +259,7 @@ pub(crate) use sl_viewer_world_scene::particles;
 pub(crate) use sl_viewer_world_scene::probes;
 pub(crate) use sl_viewer_world_view::physics;
 pub mod render_gallery;
+pub(crate) use sl_viewer_environment::bulk_import;
 pub(crate) use sl_viewer_environment::day_cycle_editor;
 pub(crate) use sl_viewer_environment::my_environments;
 pub(crate) use sl_viewer_environment::personal_lighting;

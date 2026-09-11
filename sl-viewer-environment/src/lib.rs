@@ -20,6 +20,10 @@
 //!   and delete, and the three creators that mint a fresh sky, water or day.
 //! - [`settings_picker`] — the chooser another panel summons for one settings
 //!   field, over the same list narrowed to one kind.
+//! - [`bulk_import`] — World ▸ Environment ▸ Bulk Import: a whole folder of
+//!   pre-EEP WindLight presets converted and filed as settings assets in one
+//!   go. No window of its own — a folder chooser, a progress-free run, and a
+//!   summary.
 //!
 //! The rows those last two draw are one projection ([`settings_list`]): the
 //! library and the picker differ in their chrome and in what a pick does, and
@@ -53,6 +57,7 @@
               find it — so the repetition is the protocol, not an accident of naming"
 )]
 
+pub mod bulk_import;
 pub mod day_cycle_editor;
 pub mod knobs;
 pub mod my_environments;
@@ -119,7 +124,8 @@ impl Plugin for EnvironmentUiPlugins {
             .add_plugins(settings_editor::SettingsEditorPlugin)
             .add_plugins(day_cycle_editor::DayCycleEditorPlugin)
             .add_plugins(my_environments::MyEnvironmentsPlugin)
-            .add_plugins(settings_picker::SettingsPickerPlugin);
+            .add_plugins(settings_picker::SettingsPickerPlugin)
+            .add_plugins(bulk_import::WindlightBulkImportPlugin);
     }
 }
 
