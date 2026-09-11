@@ -36,6 +36,10 @@
 //! - one PUT per **track** whose asset was picked, each scoped with that
 //!   track's `trackno`.
 //!
+//! A cycle authored in the day-cycle editor rides as an inline `day_cycle`
+//! rather than a `day_asset`, which is the only way to publish one that is not
+//! in inventory — and the shape a grid that resolves assets itself serves back.
+//!
 //! **Use Default Settings** / **Use Region Settings** is the DELETE
 //! ([`Command::ResetEnvironment`]), behind the reference's own confirmation:
 //! a region falls back to the grid default, a parcel to its region.
@@ -60,11 +64,12 @@
 //! - **A track's picker is filtered to that track's kind.** The reference's
 //!   drop targets take anything and let the simulator sort it out; a water
 //!   track being handed a sky is not a choice worth offering.
-//! - **No in-place day-cycle editor.** The reference's "Customize Day Cycle"
-//!   opens the day-cycle editor on the land's own cycle and takes its commit
-//!   back. That needs the editor to hold a cycle that is not an inventory
-//!   item, which is [`crate::day_cycle_editor`]'s to grow; until it does, a
-//!   cycle is authored in inventory and published here.
+//! - **Customize Day Cycle hands back rather than publishing.** The reference's
+//!   Edit opens the day-cycle editor on the land's own cycle and its commit
+//!   goes straight to the wire. Here the commit lands in this panel's *draft*
+//!   ([`LandDayCycleEdited`]) and Apply publishes it — so the one edit that
+//!   arrives from another window is as undoable as every other, and there is
+//!   still exactly one path to the capability.
 //!
 //! Reference (Firestorm, read-only): `llpanelenvironment.cpp`,
 //! `panel_region_environment.xml`, `llfloaterregioninfo.cpp`
@@ -79,7 +84,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui_widgets::{SliderRange, SliderValue, ValueChange};
 use sl_client_bevy::{
-    Command, EnvironmentSettings, EnvironmentUpdate, LandArea, Permissions, SettingsKind,
+    Command, DayCycle, EnvironmentSettings, EnvironmentUpdate, LandArea, Permissions, SettingsKind,
     SlCommand, SlEvent, SlSessionEvent, TRACK_MAX, Uuid,
 };
 use sl_viewer_inventory::inventory::InventoryModel;
@@ -219,6 +224,40 @@ impl Default for LandEnvironmentSubject {
     }
 }
 
+/// Open the day-cycle editor on a **land's own** day cycle — the reference's
+/// "Customize Day Cycle" (`LLPanelEnvironmentInfo::onBtnEdit`).
+///
+/// The cycle travels in the message rather than being fetched: the panel
+/// already holds the land's whole `EnvironmentSettings`, and a region running
+/// an inline cycle (which is what a grid that resolves `day_asset` itself
+/// always serves) has no asset id to fetch by.
+#[derive(Message, Debug, Clone)]
+pub struct OpenLandDayCycle {
+    /// The panel to answer with [`LandDayCycleEdited`].
+    pub panel: Entity,
+    /// The cycle to edit.
+    pub cycle: Box<DayCycle>,
+    /// What to call the land in the editor's status line.
+    pub label: String,
+    /// Whether the agent may change this land's environment. A read-only
+    /// panel opens a read-only editor rather than one whose Save fails.
+    pub editable: bool,
+}
+
+/// The day-cycle editor handing an edited cycle back to the panel that opened
+/// it — the reference's `setEditCommitSignal` / `onEditCommitted`.
+///
+/// It lands in the panel's **draft**, not on the wire: publishing is Apply's
+/// job, and a commit that went straight out would be the one edit on this
+/// panel that Revert could not undo.
+#[derive(Message, Debug, Clone)]
+pub struct LandDayCycleEdited {
+    /// The panel that opened the editor.
+    pub panel: Entity,
+    /// The edited cycle.
+    pub cycle: Box<DayCycle>,
+}
+
 /// The Region / Estate floater is asked to set the estate's
 /// `ALLOW_ENVIRONMENT_OVERRIDE` flag.
 ///
@@ -304,7 +343,9 @@ struct ChosenSettings {
 }
 
 /// The edit in progress: what Apply publishes and Revert throws away.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+///
+/// (Not `Eq`: an authored day cycle ultimately holds `f32` settings.)
+#[derive(Debug, Clone, Default, PartialEq)]
 struct LandDraft {
     /// The day length in seconds.
     day_length: i32,
@@ -314,6 +355,10 @@ struct LandDraft {
     altitudes: [i32; 3],
     /// A whole day cycle picked for the land, if any.
     day: Option<ChosenSettings>,
+    /// A day cycle authored in the day-cycle editor and handed back
+    /// ([`LandDayCycleEdited`]), carried **inline** rather than by asset id —
+    /// which is the only way to publish a cycle that is not in inventory.
+    inline: Option<Box<DayCycle>>,
     /// Per-track assets picked, indexed by wire `trackno`.
     tracks: [Option<ChosenSettings>; TRACK_MAX],
 }
@@ -355,6 +400,7 @@ impl LandEnvironmentState {
             day_offset: settings.day_offset,
             altitudes,
             day: None,
+            inline: None,
             tracks: Default::default(),
         };
         self.seeded = self.draft.clone();
@@ -399,6 +445,8 @@ struct PickerButton {
 enum LandAction {
     /// Drop the stored settings (the DELETE), behind a confirmation.
     UseDefault,
+    /// Open the day-cycle editor on this land's own cycle.
+    Edit,
     /// Put the three breakpoints back to 1000 / 2000 / 3000.
     ResetAltitudes,
     /// Publish the draft.
@@ -476,6 +524,8 @@ impl Plugin for LandEnvironmentPlugin {
         }
         app.init_resource::<LandEnvironmentConfirm>()
             .add_message::<AllowEnvironmentOverrideRequested>()
+            .add_message::<OpenLandDayCycle>()
+            .add_message::<LandDayCycleEdited>()
             .add_message::<OpenSettingsPicker>()
             .add_message::<SettingsPicked>()
             .add_message::<ShowNotification>()
@@ -491,6 +541,7 @@ impl Plugin for LandEnvironmentPlugin {
                     request_land_environment,
                     ingest_land_environment,
                     take_land_settings_pick,
+                    take_land_day_cycle_edit,
                     read_altitude_fields,
                     reseed_land_widgets,
                     paint_land_controls,
@@ -576,6 +627,15 @@ pub fn spawn_land_environment_panel(
         panel,
         None,
         SettingsKind::DayCycle,
+        &mut tab,
+    );
+    spawn_land_action(
+        commands,
+        select_row,
+        panel,
+        "edit",
+        "land-env-edit",
+        LandAction::Edit,
         &mut tab,
     );
     if kind.owns_altitudes() {
@@ -1011,11 +1071,37 @@ fn track_name(
 /// Whether `track` schedules no keyframes at all — the reference's
 /// `isTrackEmpty`, which is how a day cycle says a track is not its business.
 fn track_is_empty(settings: &EnvironmentSettings, track: i32) -> bool {
+    track_is_empty_in(&settings.day_cycle, track)
+}
+
+/// The cycle the editor should open on for `settings`: the land's own when it
+/// schedules anything, and the built-in default when it does not.
+///
+/// The reference's `onBtnEdit` makes the same choice
+/// (`setEditDayCycle` against `setEditDefaultDayCycle`), and it is the case
+/// that matters most here: a parcel with no override of its own answers the
+/// capability with an `is_default` map carrying **no** day cycle, so "edit this
+/// parcel's environment" would otherwise open an editor on nothing at all.
+fn cycle_to_edit(settings: &EnvironmentSettings) -> DayCycle {
+    let empty = settings.day_cycle.sky_frames.is_empty()
+        || (0..TRACK_MAX)
+            .filter_map(|track| i32::try_from(track).ok())
+            .all(|track| track_is_empty(settings, track));
+    if empty {
+        EnvironmentSettings::legacy_windlight_default().day_cycle
+    } else {
+        settings.day_cycle.clone()
+    }
+}
+
+/// [`track_is_empty`] over a bare cycle, for one the panel is holding as a
+/// draft rather than having been sent.
+fn track_is_empty_in(cycle: &DayCycle, track: i32) -> bool {
     match track {
-        0 => settings.day_cycle.water_track.is_empty(),
+        0 => cycle.water_track.is_empty(),
         sky => usize::try_from(sky.saturating_sub(1))
             .ok()
-            .and_then(|index| settings.day_cycle.sky_tracks.get(index))
+            .and_then(|index| cycle.sky_tracks.get(index))
             .is_none_or(Vec::is_empty),
     }
 }
@@ -1070,7 +1156,14 @@ fn publish_requests(
         environment.track_altitudes = Some(altitudes);
         whole = true;
     }
-    if let Some(day) = &draft.day {
+    // An authored cycle outranks a picked asset, as the reference's
+    // `coroUpdateEnvironment` puts `day_cycle` ahead of `day_asset`: the two
+    // are alternatives on the wire, and the one the user just edited is the
+    // one they mean.
+    if let Some(cycle) = &draft.inline {
+        environment.day_cycle = Some((**cycle).clone());
+        whole = true;
+    } else if let Some(day) = &draft.day {
         environment.day_asset = Some(day.asset_id);
         environment.day_name = Some(day.name.clone());
         environment.flags = day.flags;
@@ -1270,6 +1363,30 @@ fn take_land_settings_pick(
     }
 }
 
+/// Take an edited cycle back from the day-cycle editor into the draft.
+///
+/// It lands beside the other pending edits rather than going out on the wire,
+/// so Apply publishes it with the day length and offset in one request and
+/// Revert throws it away with them — which is what makes the editor's Save
+/// undoable at all.
+fn take_land_day_cycle_edit(
+    mut edits: MessageReader<LandDayCycleEdited>,
+    mut panels: Query<&mut LandEnvironmentState>,
+) {
+    for edit in edits.read() {
+        let Ok(mut state) = panels.get_mut(edit.panel) else {
+            continue;
+        };
+        state.draft.inline = Some(edit.cycle.clone());
+        // A whole authored cycle replaces every track, so the picks made before
+        // it are no longer anybody's choice — the same rule a whole-cycle pick
+        // follows.
+        state.draft.day = None;
+        state.draft.tracks = Default::default();
+        state.reseed = true;
+    }
+}
+
 /// Mirror the three altitude fields into the draft.
 fn read_altitude_fields(
     fields: Query<(&PanelOf, &AltitudeField, &EditableText)>,
@@ -1415,12 +1532,25 @@ fn reseed_land_widgets(
                 .get(index)
                 .and_then(Option::as_ref)
                 .or(state.draft.day.as_ref());
-            let name = match (picked, state.current.as_deref()) {
-                (Some(chosen), _) => chosen.name.clone(),
-                (None, Some(settings)) => {
+            let authored = state.draft.inline.as_ref();
+            let name = match (picked, authored, state.current.as_deref()) {
+                (Some(chosen), _, _) => chosen.name.clone(),
+                // An authored cycle fills every track it schedules, and says
+                // nothing about the ones it leaves empty.
+                (None, Some(cycle), _) => {
+                    if track_is_empty_in(cycle, row_spec.track) {
+                        match *kind {
+                            LandPanelKind::Region => empty.clone(),
+                            LandPanelKind::Parcel => region.clone(),
+                        }
+                    } else {
+                        cycle.name.clone()
+                    }
+                }
+                (None, None, Some(settings)) => {
                     track_name(settings, *kind, row_spec.track, &empty, &region)
                 }
-                (None, None) => loading.clone(),
+                (None, None, None) => loading.clone(),
             };
             set_text(&mut texts, node, &name);
         }
@@ -1512,6 +1642,13 @@ fn paint_land_controls(
 }
 
 /// An action button was pressed.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy observer's parameters are its injected resources: the button pool and its \
+              disabled filter, the panel's kind / subject / state, the one confirmation slot, \
+              and the notification / command / editor-open outputs the four actions write \
+              between them"
+)]
 fn on_land_action(
     mut press: On<Pointer<Press>>,
     buttons: Query<(&PanelOf, &LandAction)>,
@@ -1524,6 +1661,8 @@ fn on_land_action(
     mut confirm: ResMut<LandEnvironmentConfirm>,
     mut notify: MessageWriter<ShowNotification>,
     mut commands: MessageWriter<SlCommand>,
+    mut edits: MessageWriter<OpenLandDayCycle>,
+    translator: Translator,
 ) {
     if press.button != PointerButton::Primary || disabled.contains(press.entity) {
         return;
@@ -1547,6 +1686,30 @@ fn on_land_action(
                 });
                 notify.write(ShowNotification::new(RESET_CONFIRM));
             }
+        }
+        LandAction::Edit => {
+            // Whatever the panel is currently showing: the cycle handed back
+            // by a previous edit if there is one, else the grid's own. A pick
+            // is deliberately *not* a source — the asset behind it has not been
+            // fetched here, and editing "the cycle you just chose" would mean
+            // editing whatever this panel last had instead.
+            let Some(cycle) = state
+                .draft
+                .inline
+                .clone()
+                .or_else(|| state.current.as_deref().map(cycle_to_edit).map(Box::new))
+            else {
+                return;
+            };
+            edits.write(OpenLandDayCycle {
+                panel: *panel,
+                cycle,
+                label: translator.get(match kind {
+                    LandPanelKind::Region => "land-env-label-region",
+                    LandPanelKind::Parcel => "land-env-label-parcel",
+                }),
+                editable: subject.editable,
+            });
         }
         LandAction::ResetAltitudes => {
             let step = ALTITUDE_DEFAULT_STEP;
@@ -1752,9 +1915,9 @@ mod tests {
     use sl_client_bevy::LandArea;
 
     use super::{
-        LandDraft, LandEnvironmentSubject, LandPanelKind, apparent_time_of_day,
-        offset_hours_to_seconds, offset_seconds_to_hours, publish_requests, restriction_flags,
-        track_name, unavailable_reason,
+        ChosenSettings, LandDraft, LandEnvironmentSubject, LandPanelKind, apparent_time_of_day,
+        cycle_to_edit, offset_hours_to_seconds, offset_seconds_to_hours, publish_requests,
+        restriction_flags, track_name, unavailable_reason,
     };
 
     /// A live, editable subject with a big-enough parcel — the case every other
@@ -2020,6 +2183,85 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    /// **An authored cycle publishes inline, and outranks a picked asset.**
+    ///
+    /// `day_cycle` and `day_asset` are alternatives on the wire — the
+    /// reference's `coroUpdateEnvironment` writes the first and only falls
+    /// through to the second — so a panel holding both has to send the one the
+    /// user just edited. Sending the asset instead would publish the cycle
+    /// they started from and silently throw the edit away.
+    #[test]
+    fn an_authored_cycle_publishes_inline_over_a_picked_asset() {
+        let seeded = LandDraft {
+            day_length: 14400,
+            ..LandDraft::default()
+        };
+        let mut cycle = DayCycle {
+            name: "Authored".to_owned(),
+            water_track: Vec::new(),
+            sky_tracks: Vec::new(),
+            sky_frames: std::collections::BTreeMap::new(),
+            water_frames: std::collections::BTreeMap::new(),
+        };
+        cycle.sky_tracks.push(vec![DayCycleFrame {
+            keyframe: 0.0,
+            name: "Noon".to_owned(),
+        }]);
+        let mut draft = seeded.clone();
+        draft.day = Some(ChosenSettings {
+            asset_id: Uuid::from_u128(0xb1),
+            name: "A Picked Day".to_owned(),
+            flags: 0,
+        });
+        draft.inline = Some(Box::new(cycle.clone()));
+        let requests = publish_requests(LandPanelKind::Region, None, &seeded, &draft);
+        assert_eq!(requests.len(), 1);
+        let published = requests.first().and_then(|request| match request {
+            Command::SetEnvironment { update, .. } => {
+                Some((update.day_cycle.clone(), update.day_asset))
+            }
+            _ => None,
+        });
+        assert_eq!(published, Some((Some(cycle), None)));
+    }
+
+    /// **An unedited panel with nothing authored still publishes nothing.**
+    ///
+    /// The inline slot is the one draft field with no "seeded" counterpart to
+    /// compare against — it is `None` until somebody edits — so it is worth
+    /// pinning that its emptiness is not mistaken for a change.
+    #[test]
+    fn an_empty_inline_slot_is_not_a_change() {
+        let draft = LandDraft {
+            day_length: 14400,
+            altitudes: [1000, 2000, 3000],
+            ..LandDraft::default()
+        };
+        assert!(publish_requests(LandPanelKind::Region, None, &draft, &draft).is_empty());
+    }
+
+    /// **Editing a land with no environment of its own opens on a real
+    /// cycle.**
+    ///
+    /// A parcel that has not overridden the region answers the capability with
+    /// an `is_default` map carrying no day cycle at all, so "edit this parcel's
+    /// environment" has nothing to open on — the reference falls back to its
+    /// default day (`setEditDefaultDayCycle`) and so does this.
+    #[test]
+    fn an_empty_environment_is_edited_as_the_default_day() {
+        let mut settings = EnvironmentSettings::legacy_windlight_default();
+        settings.day_cycle.sky_tracks = Vec::new();
+        settings.day_cycle.water_track = Vec::new();
+        let opened = cycle_to_edit(&settings);
+        assert!(
+            !opened.sky_tracks.is_empty() && !opened.sky_frames.is_empty(),
+            "an empty environment should open on the built-in default day"
+        );
+        // A land that *does* schedule something is opened on its own cycle.
+        let named = ground_only(DayNames::Unnamed);
+        assert_eq!(cycle_to_edit(&named).name, "Whole Day");
     }
 
     /// **Publishing a no-transfer item marks the environment no-transfer.**

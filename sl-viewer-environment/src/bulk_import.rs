@@ -62,8 +62,8 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, futures_lite::future::poll_once};
 use sl_client_bevy::{
-    FolderType, InventoryFolderKey, SettingsKind, SlCommand, environment_asset_to_bytes,
-    legacy_day_cycle_from_bytes, legacy_preset_from_bytes, legacy_preset_name,
+    SettingsKind, SlCommand, environment_asset_to_bytes, legacy_day_cycle_from_bytes,
+    legacy_preset_from_bytes, legacy_preset_name,
 };
 use sl_viewer_inventory::inventory::InventoryModel;
 use sl_viewer_inventory::inventory_actions::{SettingsInventorySupport, new_settings_item};
@@ -328,7 +328,7 @@ fn file_converted_presets(
         for failure in &run.failed {
             warn!("bulk import: {} — {}", failure.file, failure.reason);
         }
-        let folder_id = inventory.as_deref().and_then(settings_destination);
+        let folder_id = inventory.as_deref().and_then(crate::settings_destination);
         let Some(folder_id) = folder_id else {
             // The reference's `findCategoryUUIDForType(FT_SETTINGS)`, which it
             // uses without checking; there is nowhere to put an item until the
@@ -442,14 +442,6 @@ fn expire_quiet_bulk_import(
     });
     report(&mut notify, &translator, run);
     state.run = None;
-}
-
-/// The folder a fresh settings item goes in: the Settings system folder, or the
-/// agent's root when the skeleton has no such folder.
-fn settings_destination(inventory: &InventoryModel) -> Option<InventoryFolderKey> {
-    inventory
-        .folder_by_type(FolderType::Settings)
-        .or_else(|| inventory.agent_root())
 }
 
 /// Raise the run's summary: the reference's own tip when every file worked, and

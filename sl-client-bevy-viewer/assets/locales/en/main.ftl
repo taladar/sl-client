@@ -676,7 +676,12 @@ land-env-select-heading = Select Environment
 land-env-use-default = Use Default Settings
 land-env-use-region = Use Region Settings
 land-env-use-inventory = Use Inventory…
+land-env-edit = Customize Day Cycle…
 land-env-allow-override = Parcel Owners May Override
+
+# What the day-cycle editor calls the land it was opened from.
+land-env-label-region = this region
+land-env-label-parcel = this parcel
 
 # The day the land runs on.
 land-env-day-heading = Day Settings

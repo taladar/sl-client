@@ -73,6 +73,22 @@ pub mod settings_picker;
 pub mod tabs;
 
 use bevy::prelude::*;
+use sl_client_bevy::{FolderType, InventoryFolderKey};
+use sl_viewer_inventory::inventory::InventoryModel;
+
+/// The folder a fresh settings item goes in: the Settings system folder, or
+/// the agent's root when the skeleton has no such folder.
+///
+/// Crate-level because two unrelated surfaces mint settings items into it —
+/// the WindLight bulk importer ([`bulk_import`]) and the day-cycle editor's
+/// Save As when the cycle it is holding belongs to *land* rather than to an
+/// item ([`day_cycle_editor`]) — and a second copy is a place for the two to
+/// disagree about where a new environment lands.
+pub(crate) fn settings_destination(inventory: &InventoryModel) -> Option<InventoryFolderKey> {
+    inventory
+        .folder_by_type(FolderType::Settings)
+        .or_else(|| inventory.agent_root())
+}
 
 /// The shared palette and geometry the environment editors are drawn with — the
 /// values the sibling floaters already use, kept in one place so the family

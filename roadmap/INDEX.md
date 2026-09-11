@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 318 |
+| ready | 317 |
 | blocked | 42 |
 | in-progress | 22 |
 | bugs | 52 |
-| done | 1076 |
+| done | 1077 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1652** |
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (318)
+## ready (317)
 
 ### protocol
 
@@ -483,8 +483,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-object-selection-core` (done))
 - [`viewer-environment-density-profiles`](ready/viewer-environment-density-profiles.md)
   — Render the atmospheric density profiles
-- [`viewer-environment-land-day-cycle-edit`](ready/viewer-environment-land-day-cycle-edit.md)
-  — Edit a land's day cycle in place
 - [`viewer-environment-pause-clouds`](ready/viewer-environment-pause-clouds.md)
   — Pause cloud animation toggle
 - [`viewer-event-details`](ready/viewer-event-details.md) — Event details
@@ -1299,7 +1297,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1076)
+## done (1077)
 
 ### protocol
 
@@ -1800,6 +1798,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-environment-import-legacy-presets`](done/viewer-environment-import-legacy-presets.md)
   — Import a legacy WindLight preset from disk
+- [`viewer-environment-land-day-cycle-edit`](done/viewer-environment-land-day-cycle-edit.md)
+  — Edit a land's day cycle in place
 - [`viewer-environment-my-environments`](done/viewer-environment-my-environments.md)
   — My Environments library (blocked by `viewer-environment-fixed-editor`
   (done))
