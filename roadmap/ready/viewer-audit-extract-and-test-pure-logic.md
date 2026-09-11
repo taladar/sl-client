@@ -52,7 +52,7 @@ actual permission-mask decode is uncovered.
 
 **Feature crates**: `InventoryFilter::passes` (`inventory_filters.rs`, 861 lines
 / 4 tests — the single most testable predicate in the group),
-`Page::set_results` (`search.rs:640`), `WorldMapTiles::{request,drain,state}`,
+`Page::append_reply` (`search.rs:730`), `WorldMapTiles::{request,drain,state}`,
 `tile_level` / `tile_corner`, the parcel-audio autoplay decision, `expiry_text`
 / `parcel_owner_label` / `day_cycle_summary` (`about_land.rs`, 3309 lines / 0
 tests), `prettify` and the `wearable_permissions` to-text round-trip

@@ -13,11 +13,21 @@ filtering them is the caller's job, as it is the reference viewer's:
 - a page is **100** results, and a grid with more to give answers with
   **101** — the last entry means only "there is more", and is not a result to
   display (`llpaneldirbrowser.cpp`, `showNextButton`). So "there is a next
-  page" is `len() > 100`, not `>= 100`; a reply of exactly 100 is the end of
-  the results.
+  page" is `> 100` blocks, not `>= 100`; exactly 100 is the end of the
+  results.
+- one page is **not** one packet. A `Dir*Reply` carries at most 255 variable
+  blocks and the simulator is free to answer a single query with several
+  replies, each echoing the same `query_id`. A client must therefore
+  accumulate: clear the list on the first reply of a query, append every
+  later one, and run both the 100-block trim and the `> 100` test over the
+  *running* total — the reference's `mResultsReceived`. A page the grid sends
+  as 60 + 41 is one 101-block page, not a 60-result page followed by a stale
+  reply. There is no end-of-page marker on the wire; the reference never
+  decides a page is complete either — the next query simply resets the list.
 - blocks whose subject id is **nil** are padding, in every category — a nil
   `AgentID`, `GroupID`, `ParcelID`, `OwnerID` or `ClassifiedID` is skipped
-  rather than rendered as a blank row.
+  rather than rendered as a blank row. The trim to 100 is positional and comes
+  first, so a full page can show fewer than 100 rows.
 
 This chapter covers the directory searches (`Dir*Query`), the avatar-name
 autocomplete (`AvatarPickerRequest`), and the land-holdings lookup

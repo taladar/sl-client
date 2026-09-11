@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 42 |
 | in-progress | 21 |
 | bugs | 44 |
-| done | 1083 |
+| done | 1084 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1655** |
+| **total** | **1656** |
 
 ## ideas (100)
 
@@ -1281,10 +1281,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rigged-attachments-wearer-not-resolved`](bugs/viewer-rigged-attachments-wearer-not-resolved.md)
   — Worn rigged attachments (e.g. own shoes) don't render — wearer never
   resolved / too many rigged-pending objects
-- [`viewer-search-multi-packet-page`](bugs/viewer-search-multi-packet-page.md) —
-  A search page split over several packets shows only the first packet
 - [`viewer-sunlit-face-clips-two-channels`](bugs/viewer-sunlit-face-clips-two-channels.md)
   — A sunlit opaque face pins red and green rather than showing its texture
+- [`viewer-table-scrollbar-overlays-last-column`](bugs/viewer-table-scrollbar-overlays-last-column.md)
+  — A scrolling table's scrollbar is painted over its last column
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
@@ -1294,7 +1294,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1083)
+## done (1084)
 
 ### protocol
 
@@ -2695,6 +2695,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   purge)
 - [`viewer-search-floater`](done/viewer-search-floater.md) — Search floater —
   directory search UI (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-search-multi-packet-page`](done/viewer-search-multi-packet-page.md) —
+  A search page split over several packets shows only the first packet
 - [`viewer-seated-avatar-vehicle-rubberband`](done/viewer-seated-avatar-vehicle-rubberband.md)
   — Seated avatar rubber-bands behind the vehicle it sits on instead of rigidly
   parenting

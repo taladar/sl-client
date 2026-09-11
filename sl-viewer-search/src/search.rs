@@ -665,34 +665,23 @@ impl DirRow for DirClassifiedResult {
     }
 }
 
-/// Trim a directory reply to one page, dropping the entry past it and every
-/// nil-id placeholder; returns whether the reply reached past the page (so a
-/// **Next** is meaningful).
-///
-/// The grid answers a full page with `PAGE_SIZE + 1` entries, the last of which
-/// means only "there is more" — the reference drops it rather than showing it
-/// (`llpaneldirbrowser.cpp:1179` `showNextButton`, `rows -= (mResultsReceived -
-/// mResultsPerPage)`). The trim is by *position* on the raw blocks, and only
-/// then are the nil ids dropped, so a page can show fewer than `PAGE_SIZE`
-/// rows — same as the reference, which trims the block count first and skips
-/// nil ids inside the loop.
-fn strip_sentinel<T: DirRow>(results: &mut Vec<T>) -> bool {
-    let has_more = results.len() > PAGE_SIZE_USIZE;
-    results.truncate(PAGE_SIZE_USIZE);
-    results.retain(|row| !row.is_placeholder());
-    has_more
-}
-
 /// One category's live results and paging state.
 #[derive(Debug)]
 struct Page<T> {
     /// The 0-based paging offset of the current page.
     query_start: i32,
-    /// The in-flight query id, so a stale reply is ignored.
+    /// The in-flight query id, so a stale reply is ignored. It stays set until
+    /// another query replaces it: one page can arrive as several replies, and
+    /// every one of them echoes this id.
     pending: Option<QueryId>,
+    /// How many raw blocks the pending query has answered with so far, `None`
+    /// until its first reply arrives. This is the reference's
+    /// `mResultsReceived`: it counts blocks as sent, padding and sentinel
+    /// included, which is what the page trim and the **Next** test are about.
+    received: Option<usize>,
     /// The results currently shown.
     results: Vec<T>,
-    /// Whether the last reply reached past a whole page (so a Next is
+    /// Whether the replies so far reached past a whole page (so a Next is
     /// meaningful).
     filled: bool,
     /// Bumped whenever `results` changes, driving the row rebind + count.
@@ -705,6 +694,7 @@ impl<T> Default for Page<T> {
         Self {
             query_start: 0,
             pending: None,
+            received: None,
             results: Vec::new(),
             filled: false,
             revision: 0,
@@ -713,24 +703,59 @@ impl<T> Default for Page<T> {
 }
 
 impl<T: DirRow> Page<T> {
-    /// Fold a fresh reply in, dropping the "there is more" sentinel and the
-    /// nil-id placeholders (see [`strip_sentinel`]).
-    fn set_results(&mut self, mut results: Vec<T>) {
-        self.filled = strip_sentinel(&mut results);
-        self.results = results;
+    /// Arm the page for a freshly sent query: replies echoing `query_id`
+    /// accumulate into it, and the first of them replaces what is shown.
+    const fn begin_query(&mut self, query_id: QueryId) {
+        self.pending = Some(query_id);
+        self.received = None;
+    }
+
+    /// Fold one reply of the pending query in, dropping the "there is more"
+    /// sentinel and the nil-id placeholders.
+    ///
+    /// A page is not one packet. A `Dir*Reply` carries at most 255 variable
+    /// blocks and the grid is free to answer one query with several of them, so
+    /// the reference accumulates across the packets of a page
+    /// (`llpaneldirbrowser.cpp`, every `process*Reply`): the list is cleared on
+    /// the first reply only, `mResultsReceived` runs across all of them, and
+    /// `showNextButton` compares that running total against the page size.
+    ///
+    /// The grid answers a full page with `PAGE_SIZE + 1` entries, the last of
+    /// which means only "there is more" — the reference drops it rather than
+    /// showing it (`llpaneldirbrowser.cpp:1179` `showNextButton`, `rows -=
+    /// (mResultsReceived - mResultsPerPage)`). The trim is by *position* in the
+    /// running total of raw blocks, and only then are the nil ids dropped, so a
+    /// page can show fewer than `PAGE_SIZE` rows — same as the reference, which
+    /// trims the block count first and skips nil ids inside the loop.
+    fn append_reply(&mut self, mut results: Vec<T>) {
+        let before = match self.received {
+            Some(count) => count,
+            // The first reply of this query owns the list.
+            None => {
+                self.results.clear();
+                0
+            }
+        };
+        let total = before.saturating_add(results.len());
+        self.received = Some(total);
+        self.filled = total > PAGE_SIZE_USIZE;
+        results.truncate(PAGE_SIZE_USIZE.saturating_sub(before));
+        results.retain(|row| !row.is_placeholder());
+        self.results.append(&mut results);
         self.revision = self.revision.wrapping_add(1);
     }
 
-    /// Fold a fresh reply in and order the page by `compare`.
+    /// Fold one reply of the pending query in and order the page by `compare`.
     ///
     /// The sentinel is positional, so it must be dropped *before* the sort —
-    /// sorting first can move it out of last place.
-    fn set_results_sorted_by(
+    /// sorting first can move it out of last place. The sort then runs over the
+    /// whole accumulated page, not over the packet that just arrived.
+    fn append_reply_sorted_by(
         &mut self,
         results: Vec<T>,
         compare: impl FnMut(&T, &T) -> core::cmp::Ordering,
     ) {
-        self.set_results(results);
+        self.append_reply(results);
         self.results.sort_by(compare);
     }
 }
@@ -2115,7 +2140,7 @@ fn dispatch_query(
             if setting_bool(settings, SETTING_ONLINE_ONLY, false) {
                 flags = flags.union(DirFindFlags::ONLINE);
             }
-            state.people.pending = Some(query_id);
+            state.people.begin_query(query_id);
             commands.write(SlCommand(Command::DirFindQuery {
                 query_id,
                 query_text,
@@ -2124,7 +2149,7 @@ fn dispatch_query(
             }));
         }
         SearchCategory::Groups => {
-            state.groups.pending = Some(query_id);
+            state.groups.begin_query(query_id);
             commands.write(SlCommand(Command::DirFindQuery {
                 query_id,
                 query_text,
@@ -2142,7 +2167,7 @@ fn dispatch_query(
                 category_number,
                 &query_text,
             );
-            state.events.pending = Some(query_id);
+            state.events.begin_query(query_id);
             commands.write(SlCommand(Command::DirFindQuery {
                 query_id,
                 query_text: text,
@@ -2152,7 +2177,7 @@ fn dispatch_query(
         }
         SearchCategory::Places => {
             let places_category = state.places_category;
-            state.places.pending = Some(query_id);
+            state.places.begin_query(query_id);
             commands.write(SlCommand(Command::DirPlacesQuery {
                 query_id,
                 query_text,
@@ -2178,7 +2203,7 @@ fn dispatch_query(
                 flags = flags.union(DirFindFlags::LIMIT_BY_AREA);
             }
             let search_type = state.land_sale.to_search_type();
-            state.land.pending = Some(query_id);
+            state.land.begin_query(query_id);
             commands.write(SlCommand(Command::DirLandQuery {
                 query_id,
                 flags,
@@ -2190,7 +2215,7 @@ fn dispatch_query(
         }
         SearchCategory::Classifieds => {
             let classified_category = state.classified_category;
-            state.classifieds.pending = Some(query_id);
+            state.classifieds.begin_query(query_id);
             commands.write(SlCommand(Command::DirClassifiedQuery {
                 query_id,
                 query_text,
@@ -2381,6 +2406,10 @@ fn on_paging_press(
 }
 
 /// Fold a directory reply into its category's page (Places sorted dwell-desc).
+///
+/// One page can arrive as several replies, so `pending` stays set until another
+/// query replaces it and each matching reply appends — see
+/// [`Page::append_reply`].
 fn ingest_search_replies(mut events: MessageReader<SlEvent>, mut state: ResMut<SearchState>) {
     for event in events.read() {
         match &event.0 {
@@ -2396,40 +2425,34 @@ fn ingest_search_replies(mut events: MessageReader<SlEvent>, mut state: ResMut<S
             SlSessionEvent::DirPeopleReply { query_id, results }
                 if pending_matches(state.people.pending, *query_id) =>
             {
-                state.people.pending = None;
-                state.people.set_results(results.clone());
+                state.people.append_reply(results.clone());
             }
             SlSessionEvent::DirGroupsReply { query_id, results }
                 if pending_matches(state.groups.pending, *query_id) =>
             {
-                state.groups.pending = None;
-                state.groups.set_results(results.clone());
+                state.groups.append_reply(results.clone());
             }
             SlSessionEvent::DirEventsReply {
                 query_id, results, ..
             } if pending_matches(state.events.pending, *query_id) => {
-                state.events.pending = None;
-                state.events.set_results(results.clone());
+                state.events.append_reply(results.clone());
             }
             SlSessionEvent::DirPlacesReply {
                 query_id, results, ..
             } if pending_matches(state.places.pending, *query_id) => {
-                state.places.pending = None;
                 state
                     .places
-                    .set_results_sorted_by(results.clone(), |a, b| b.dwell.total_cmp(&a.dwell));
+                    .append_reply_sorted_by(results.clone(), |a, b| b.dwell.total_cmp(&a.dwell));
             }
             SlSessionEvent::DirLandReply { query_id, results }
                 if pending_matches(state.land.pending, *query_id) =>
             {
-                state.land.pending = None;
-                state.land.set_results(results.clone());
+                state.land.append_reply(results.clone());
             }
             SlSessionEvent::DirClassifiedReply {
                 query_id, results, ..
             } if pending_matches(state.classifieds.pending, *query_id) => {
-                state.classifieds.pending = None;
-                state.classifieds.set_results(results.clone());
+                state.classifieds.append_reply(results.clone());
             }
             _other => {}
         }
@@ -3201,7 +3224,7 @@ mod tests {
     use super::{
         AgentKey, CATEGORY_ORDER, ClassifiedKey, DirClassifiedResult, DirEventResult,
         DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, DirRow, EventId,
-        EventsMode, GroupKey, LandSaleFilter, LandSort, PAGE_SIZE_USIZE, Page, ParcelKey,
+        EventsMode, GroupKey, LandSaleFilter, LandSort, PAGE_SIZE_USIZE, Page, ParcelKey, QueryId,
         SearchCategory, SearchTab, Uuid, build_sl_search_url, events_query_text,
     };
     use pretty_assertions::assert_eq;
@@ -3228,6 +3251,11 @@ mod tests {
             reply.push(person(id));
         }
         reply
+    }
+
+    /// A query id, distinct per `n`, for arming a page.
+    fn query(n: u128) -> QueryId {
+        QueryId::from(Uuid::from_u128(n))
     }
 
     /// A places result for `id` with the given dwell.
@@ -3268,18 +3296,21 @@ mod tests {
         let mut page: Page<DirPeopleResult> = Page::default();
 
         // A short page: everything shown, no Next.
-        page.set_results(people(PAGE_SIZE_USIZE - 1));
+        page.begin_query(query(1));
+        page.append_reply(people(PAGE_SIZE_USIZE - 1));
         assert_eq!(page.results.len(), PAGE_SIZE_USIZE - 1);
         assert!(!page.filled);
 
         // Exactly one page: everything shown, still no Next.
-        page.set_results(people(PAGE_SIZE_USIZE));
+        page.begin_query(query(2));
+        page.append_reply(people(PAGE_SIZE_USIZE));
         assert_eq!(page.results.len(), PAGE_SIZE_USIZE);
         assert!(!page.filled);
 
         // One past the page: the sentinel is dropped, and Next is offered. The
         // ids run 1..=101, so the last row kept is the 100th.
-        page.set_results(people(PAGE_SIZE_USIZE + 1));
+        page.begin_query(query(3));
+        page.append_reply(people(PAGE_SIZE_USIZE + 1));
         assert_eq!(page.results.len(), PAGE_SIZE_USIZE);
         assert!(page.filled);
         assert_eq!(
@@ -3288,10 +3319,73 @@ mod tests {
         );
 
         // An empty reply is not a full page either.
-        page.set_results(Vec::new());
+        page.begin_query(query(4));
+        page.append_reply(Vec::new());
         assert!(page.results.is_empty());
         assert!(!page.filled);
         assert_eq!(page.revision, 4);
+    }
+
+    /// A page the grid splits over several replies is accumulated, not
+    /// replaced: 60 + 41 blocks are one 101-block page, so 100 rows show and
+    /// **Next** is offered.
+    #[test]
+    fn a_page_split_over_several_replies_accumulates() {
+        let mut page: Page<DirPeopleResult> = Page::default();
+        page.begin_query(query(1));
+
+        page.append_reply(people(60));
+        assert_eq!(page.results.len(), 60);
+        // 60 blocks is short of a page, so nothing says there is more *yet*.
+        assert!(!page.filled);
+
+        page.append_reply(people(41));
+        assert_eq!(page.results.len(), PAGE_SIZE_USIZE);
+        assert!(page.filled);
+
+        // A page that lands exactly on the page size still offers no Next.
+        let mut exact: Page<DirPeopleResult> = Page::default();
+        exact.begin_query(query(2));
+        exact.append_reply(people(60));
+        exact.append_reply(people(40));
+        assert_eq!(exact.results.len(), PAGE_SIZE_USIZE);
+        assert!(!exact.filled);
+    }
+
+    /// The sentinel is positional in the *running* total, so a reply that
+    /// starts past the page contributes nothing — and one that straddles the
+    /// boundary contributes only the part inside it.
+    #[test]
+    fn the_page_trim_runs_over_the_accumulated_total() {
+        let mut page: Page<DirPeopleResult> = Page::default();
+        page.begin_query(query(1));
+        page.append_reply(people(PAGE_SIZE_USIZE - 5));
+        // 95 + 10 = 105: five rows fit, the sentinel and the rest do not.
+        page.append_reply(people(10));
+        assert_eq!(page.results.len(), PAGE_SIZE_USIZE);
+        assert!(page.filled);
+        // A further packet is entirely past the page.
+        page.append_reply(people(7));
+        assert_eq!(page.results.len(), PAGE_SIZE_USIZE);
+        assert!(page.filled);
+    }
+
+    /// Arming a new query makes its first reply replace the page rather than
+    /// append to it — which is what a Prev / Next step and a fresh search both
+    /// do.
+    #[test]
+    fn a_new_query_replaces_the_page() {
+        let mut page: Page<DirPeopleResult> = Page::default();
+        page.begin_query(query(1));
+        page.append_reply(people(60));
+        page.append_reply(people(41));
+        assert_eq!(page.results.len(), PAGE_SIZE_USIZE);
+        assert!(page.filled);
+
+        page.begin_query(query(2));
+        page.append_reply(people(3));
+        assert_eq!(page.results.len(), 3);
+        assert!(!page.filled);
     }
 
     /// A nil-id block is padding, not a result — in every category.
@@ -3352,11 +3446,12 @@ mod tests {
         let mut page: Page<DirPeopleResult> = Page::default();
         // 98 results and 2 padding blocks fill the page; the 101st entry is
         // the sentinel.
+        page.begin_query(query(1));
         let mut reply = people(PAGE_SIZE_USIZE - 2);
         reply.push(person(0));
         reply.push(person(0));
         reply.push(person(4242));
-        page.set_results(reply);
+        page.append_reply(reply);
         assert_eq!(page.results.len(), PAGE_SIZE_USIZE - 2);
         assert!(page.filled);
         assert!(!page.results.iter().any(DirRow::is_placeholder));
@@ -3368,6 +3463,7 @@ mod tests {
     #[test]
     fn places_drop_the_sentinel_before_sorting_by_dwell() {
         let mut page: Page<DirPlaceResult> = Page::default();
+        page.begin_query(query(1));
         let mut reply = Vec::with_capacity(PAGE_SIZE_USIZE + 1);
         let mut id = 0_u32;
         while reply.len() < PAGE_SIZE_USIZE {
@@ -3376,7 +3472,7 @@ mod tests {
         }
         // The sentinel, with the highest dwell in the reply.
         reply.push(place(0xdead, 9999.0));
-        page.set_results_sorted_by(reply, |a, b| b.dwell.total_cmp(&a.dwell));
+        page.append_reply_sorted_by(reply, |a, b| b.dwell.total_cmp(&a.dwell));
         assert_eq!(page.results.len(), PAGE_SIZE_USIZE);
         assert!(page.filled);
         assert!(
@@ -3391,8 +3487,9 @@ mod tests {
     #[test]
     fn places_are_ordered_by_dwell_descending() {
         let mut page: Page<DirPlaceResult> = Page::default();
+        page.begin_query(query(1));
         let reply = vec![place(1, 3.0), place(2, 42.0), place(3, 7.0)];
-        page.set_results_sorted_by(reply, |a, b| b.dwell.total_cmp(&a.dwell));
+        page.append_reply_sorted_by(reply, |a, b| b.dwell.total_cmp(&a.dwell));
         assert_eq!(
             page.results
                 .iter()
