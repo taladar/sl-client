@@ -8,9 +8,10 @@ use bevy::prelude::*;
 use crossbeam_channel::Sender;
 use sl_proto::{
     AVATAR_PICKER_SEARCH_TAG, CAP_CHAT_SESSION_REQUEST, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX,
-    CHAT_SESSION_FETCH_HISTORY_TAG, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG,
-    LSL_SYNTAX_VERSION, Llsd, ParcelKey, Uuid, build_land_resources_request,
-    parse_land_resources_reply, parse_llsd_xml,
+    CAP_REMOTE_PARCEL_REQUEST, CHAT_SESSION_FETCH_HISTORY_TAG, LAND_RESOURCE_DETAIL_TAG,
+    LAND_RESOURCE_SUMMARY_TAG, LSL_SYNTAX_VERSION, Llsd, ParcelKey, RemoteParcelRequest, Uuid,
+    build_land_resources_request, build_remote_parcel_request, parse_land_resources_reply,
+    parse_llsd_xml, stamp_remote_parcel_request,
 };
 use std::collections::HashMap;
 
@@ -275,6 +276,57 @@ pub(crate) fn run_avatar_picker_search(
     deliver(
         caps_tx,
         (AVATAR_PICKER_SEARCH_TAG.to_owned(), Llsd::Map(map)),
+    );
+}
+
+/// POSTs the `RemoteParcelRequest` capability (blocking) and forwards its reply
+/// to `caps_tx` tagged [`CAP_REMOTE_PARCEL_REQUEST`], stamping the `request` it
+/// answers into the reply map.
+///
+/// The grid answers a bare `{ parcel_id }`, which names neither the location nor
+/// the region asked about; two resolves in flight would be indistinguishable,
+/// and handing a caller the wrong parcel is worse than handing it none. The
+/// capability is a per-request POST, so this thread **holds** the question
+/// across it and [`stamp_remote_parcel_request`] writes it back into the answer
+/// — the same trick `run_avatar_picker_search` plays with its query id. Mirrors
+/// the tokio `post_remote_parcel_request`.
+pub(crate) fn run_remote_parcel_request(
+    cap_url: &str,
+    request: RemoteParcelRequest,
+    caps_tx: &Sender<(String, Llsd)>,
+) {
+    let body =
+        build_remote_parcel_request(request.location, request.region_id, request.region_handle);
+    let Ok(http) = crate::http_proxy::blocking_client_builder()
+        .timeout(EVENT_QUEUE_TIMEOUT)
+        .build()
+    else {
+        report_caps_failure(caps_tx, CAP_REMOTE_PARCEL_REQUEST);
+        return;
+    };
+    let Ok(response) = http
+        .post(cap_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body)
+        .send()
+    else {
+        report_caps_failure(caps_tx, CAP_REMOTE_PARCEL_REQUEST);
+        return;
+    };
+    let Ok(text) = response.text() else {
+        report_caps_failure(caps_tx, CAP_REMOTE_PARCEL_REQUEST);
+        return;
+    };
+    let Ok(reply) = parse_llsd_xml(&text) else {
+        report_caps_failure(caps_tx, CAP_REMOTE_PARCEL_REQUEST);
+        return;
+    };
+    deliver(
+        caps_tx,
+        (
+            CAP_REMOTE_PARCEL_REQUEST.to_owned(),
+            stamp_remote_parcel_request(reply, &request),
+        ),
     );
 }
 

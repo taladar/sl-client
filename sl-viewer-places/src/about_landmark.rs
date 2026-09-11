@@ -126,20 +126,17 @@ struct AboutLandmarkUi {
 ///
 /// # Correlation
 ///
-/// The `RemoteParcelRequest` reply ([`SlSessionEvent::RemoteParcelId`])
-/// carries **only** the parcel id — no echo of the requested region /
-/// position — so a reply cannot be matched to its request by content. With one
-/// window that was merely untidy ("the newest open wins"); with a window per
-/// landmark it would be wrong, since two windows can await different parcels
-/// at once.
+/// [`SlSessionEvent::RemoteParcelId`] carries the **question it answers** — the
+/// location and region the resolve asked about — alongside the parcel id. The
+/// grid's own reply does not: it is a bare `{ parcel_id }`, and the runtime
+/// stamps the question it held across the POST back into it. So a window
+/// recognises its own answer by what it asked, and windows resolve
+/// concurrently: two landmarks open at once neither wait on each other nor risk
+/// taking each other's parcel.
 ///
-/// So the resolves are **serialised**: [`ParcelResolveQueue`] holds the windows
-/// that have asked, one request is in flight at a time, and each reply belongs
-/// to the window at the head of the queue. A window whose
-/// [`deadline`](Self::deadline) passes leaves the queue and the next request
-/// goes out. The real fix is a protocol-level echo (the capability is a
-/// per-request POST, so the answer *could* carry its question) — filed as
-/// `viewer-remote-parcel-id-uncorrelated`.
+/// This used to be serialised — one request in flight, the reply belonging to
+/// the window at the head of a queue — which was correct but made one
+/// unanswered request stall every window behind it for the timeout.
 #[derive(Component, Debug, Default)]
 struct AboutLandmarkState {
     /// The item shown (as last received / edited).
@@ -172,53 +169,32 @@ struct AboutLandmarkState {
 #[derive(Debug)]
 pub struct AboutLandmarkPlugin;
 
-/// The windows waiting on a `RemoteParcelRequest`, oldest first.
-///
-/// The capability's reply names no request (see [`AboutLandmarkState`]), so
-/// only one is allowed in flight and the answer belongs to the window at the
-/// head. A window that times out or closes leaves the queue, and the next
-/// window's request goes out.
-#[derive(Resource, Debug, Default)]
-struct ParcelResolveQueue {
-    /// The waiting windows, oldest first; the head owns the next reply.
-    waiting: std::collections::VecDeque<Entity>,
-    /// Whether the head's request has gone out and its answer is still due.
-    in_flight: bool,
-}
-
 impl Plugin for AboutLandmarkPlugin {
-    /// Register the message, the resolve queue and the systems.
+    /// Register the message and the systems.
     ///
     /// Nothing spawns at `Startup`: a window exists only while a landmark is
     /// open, so `open_about_landmark` spawns the instance and builds it.
     fn build(&self, app: &mut App) {
-        app.init_resource::<ParcelResolveQueue>()
-            .add_message::<OpenAboutLandmark>()
-            .add_systems(
-                Update,
+        app.add_message::<OpenAboutLandmark>().add_systems(
+            Update,
+            (
+                // After the manager's command pass — see `FloaterSystems`:
+                // the inventory row that opens a landmark also raises the
+                // window it sits in, and the later raise wins.
+                open_about_landmark.after(FloaterSystems::Commands),
                 (
-                    // After the manager's command pass — see `FloaterSystems`:
-                    // the inventory row that opens a landmark also raises the
-                    // window it sits in, and the later raise wins.
-                    open_about_landmark.after(FloaterSystems::Commands),
-                    // The resolve queue is folded before it is driven: an
-                    // answer (or a timeout) frees the head, and the window
-                    // behind it asks its question on the same frame rather
-                    // than waiting one out.
-                    (
-                        ingest_landmark_asset,
-                        ingest_parcel_replies,
-                        expire_resolve,
-                        drive_parcel_resolves,
-                        poll_snapshot,
-                        refresh_names,
-                        commit_landmark_edits,
-                    )
-                        .chain()
-                        .run_if(any_with_component::<AboutLandmarkState>),
+                    ingest_landmark_asset,
+                    ingest_parcel_replies,
+                    expire_resolve,
+                    poll_snapshot,
+                    refresh_names,
+                    commit_landmark_edits,
                 )
-                    .chain(),
-            );
+                    .chain()
+                    .run_if(any_with_component::<AboutLandmarkState>),
+            )
+                .chain(),
+        );
     }
 }
 
@@ -586,9 +562,10 @@ fn fill_landmark_content(
 fn ingest_landmark_asset(
     mut events: MessageReader<SlEvent>,
     mut windows: Query<(Entity, &mut AboutLandmarkState, &AboutLandmarkUi)>,
-    mut queue: ResMut<ParcelResolveQueue>,
     translator: Translator,
+    time: Res<Time>,
     mut texts: Query<&mut Text>,
+    mut sl_commands: MessageWriter<SlCommand>,
 ) {
     // Collected once and replayed per window: a reader is consumed by the first
     // pass over it, so with two landmarks open the second would see nothing.
@@ -596,7 +573,7 @@ fn ingest_landmark_asset(
     if frame.is_empty() {
         return;
     }
-    for (window, mut state, ui) in &mut windows {
+    for (_window, mut state, ui) in &mut windows {
         for event in &frame {
             let SlSessionEvent::AssetReceived(asset) = &event.0 else {
                 continue;
@@ -621,48 +598,17 @@ fn ingest_landmark_asset(
             );
             state.landmark = Some(landmark);
             state.awaiting_remote = true;
-            // Join the resolve queue rather than asking now: the capability's reply
-            // names no request, so exactly one may be in flight
-            // (`ParcelResolveQueue`). The deadline starts when the request actually
-            // goes out, in `drive_parcel_resolves`.
-            queue.waiting.push_back(window);
+            // Asked immediately, with no queue in the way: the reply names the
+            // location and region it answers, so this window will recognise its
+            // own however many other resolves are in flight.
+            let (x, y, z) = landmark.position;
+            sl_commands.write(SlCommand(Command::RequestRemoteParcelId {
+                location: RegionCoordinates::new(x, y, z),
+                region_id: landmark.region_id,
+                region_handle: RegionHandle::new(0),
+            }));
+            state.deadline = Some(time.elapsed_secs_f64() + RESOLVE_TIMEOUT_SECONDS);
         }
-    }
-}
-
-/// Send the head of the resolve queue's `RemoteParcelRequest`, one at a time.
-///
-/// The capability answers with a bare parcel id, so a second request in flight
-/// would make the reply ambiguous between two windows. The head owns the
-/// answer; its deadline starts here, when the question is actually asked.
-fn drive_parcel_resolves(
-    mut queue: ResMut<ParcelResolveQueue>,
-    mut windows: Query<&mut AboutLandmarkState>,
-    time: Res<Time>,
-    mut sl_commands: MessageWriter<SlCommand>,
-) {
-    if queue.in_flight {
-        return;
-    }
-    // Drop any head that has gone away (a closed window) before asking.
-    while let Some(&head) = queue.waiting.front() {
-        let Ok(mut state) = windows.get_mut(head) else {
-            let _gone = queue.waiting.pop_front();
-            continue;
-        };
-        let Some(landmark) = state.landmark else {
-            let _unresolvable = queue.waiting.pop_front();
-            continue;
-        };
-        let (x, y, z) = landmark.position;
-        sl_commands.write(SlCommand(Command::RequestRemoteParcelId {
-            location: RegionCoordinates::new(x, y, z),
-            region_id: landmark.region_id,
-            region_handle: RegionHandle::new(0),
-        }));
-        state.deadline = Some(time.elapsed_secs_f64() + RESOLVE_TIMEOUT_SECONDS);
-        queue.in_flight = true;
-        return;
     }
 }
 
@@ -678,7 +624,6 @@ fn drive_parcel_resolves(
 fn ingest_parcel_replies(
     mut events: MessageReader<SlEvent>,
     mut windows: Query<(Entity, &mut AboutLandmarkState, &AboutLandmarkUi)>,
-    mut queue: ResMut<ParcelResolveQueue>,
     avatars: Res<AvatarState>,
     groups: Res<GroupsModel>,
     translator: Translator,
@@ -693,30 +638,44 @@ fn ingest_parcel_replies(
     }
     for event in &frame {
         match &event.0 {
-            // One reply, one window. The capability's answer names no request,
-            // so it belongs to the window at the head of the queue — the only
-            // one that has asked (`ParcelResolveQueue`) — and is consumed
-            // there. Offering it to every window in turn would let the window
-            // behind the head, which becomes the head the moment the first is
-            // answered, take the same answer as its own.
-            SlSessionEvent::RemoteParcelId(parcel_id) => {
-                let Some(&head) = queue.waiting.front() else {
-                    continue;
-                };
-                let Ok((_window, mut state, _ui)) = windows.get_mut(head) else {
-                    continue;
-                };
-                if !state.awaiting_remote {
-                    continue;
+            // The answer names its question — the location and region the
+            // resolve asked about — so every window that asked exactly that
+            // takes it, and no window that asked something else can. Two
+            // landmarks in the same spot are one question answered once; two in
+            // different regions never see each other's parcel.
+            SlSessionEvent::RemoteParcelId {
+                parcel_id,
+                location,
+                region_id,
+                region_handle: _,
+            } => {
+                let mut asked = false;
+                for (_window, mut state, _ui) in &mut windows {
+                    if !state.awaiting_remote {
+                        continue;
+                    }
+                    let Some(landmark) = state.landmark else {
+                        continue;
+                    };
+                    let (x, y, z) = landmark.position;
+                    if landmark.region_id != *region_id
+                        || RegionCoordinates::new(x, y, z) != *location
+                    {
+                        continue;
+                    }
+                    state.awaiting_remote = false;
+                    state.parcel_id = Some(*parcel_id);
+                    state.deadline = Some(time.elapsed_secs_f64() + RESOLVE_TIMEOUT_SECONDS);
+                    asked = true;
                 }
-                let _answered = queue.waiting.pop_front();
-                queue.in_flight = false;
-                state.awaiting_remote = false;
-                state.parcel_id = Some(*parcel_id);
-                state.deadline = Some(time.elapsed_secs_f64() + RESOLVE_TIMEOUT_SECONDS);
-                sl_commands.write(SlCommand(Command::RequestParcelInfo {
-                    parcel_id: *parcel_id,
-                }));
+                // One `ParcelInfoRequest` however many windows the answer
+                // reached: the details name their parcel, so the one reply
+                // fills all of them.
+                if asked {
+                    sl_commands.write(SlCommand(Command::RequestParcelInfo {
+                        parcel_id: *parcel_id,
+                    }));
+                }
             }
             // Details, unlike the resolve, name the parcel they are about, so
             // every window waiting on that parcel takes them — two landmarks in
@@ -942,12 +901,11 @@ fn commit_landmark_edits(
 /// asset-derived rows, Teleport and the title / notes editing keep working.
 fn expire_resolve(
     mut windows: Query<(Entity, &mut AboutLandmarkState, &AboutLandmarkUi)>,
-    mut queue: ResMut<ParcelResolveQueue>,
     translator: Translator,
     time: Res<Time>,
     mut texts: Query<&mut Text>,
 ) {
-    for (window, mut state, ui) in &mut windows {
+    for (_window, mut state, ui) in &mut windows {
         let Some(deadline) = state.deadline else {
             continue;
         };
@@ -956,12 +914,8 @@ fn expire_resolve(
         }
         state.deadline = None;
         state.awaiting_remote = false;
-        // A timed-out head frees the resolve slot, so the next window's
-        // request can go out (`ParcelResolveQueue`).
-        if queue.waiting.front() == Some(&window) {
-            let _expired = queue.waiting.pop_front();
-            queue.in_flight = false;
-        }
+        // Only this window gives up: with the answers correlated there is no
+        // shared slot for an unanswered request to hold.
         info!("about landmark: parcel resolve timed out");
         set_text(
             &mut texts,
@@ -1260,11 +1214,9 @@ mod tests {
     }
 
     /// **One window per landmark** (`viewer-keyed-floater-audit`), and the
-    /// serialised parcel resolve the keying forced.
+    /// correlated parcel resolve that lets the windows run concurrently.
     mod instances {
-        use super::super::{
-            AboutLandmarkPlugin, AboutLandmarkState, ParcelResolveQueue, landmark_key,
-        };
+        use super::super::{AboutLandmarkPlugin, AboutLandmarkState, landmark_key};
         use crate::floater::{Floater, FloaterCommand, FloaterOp, FloaterPlugin};
         use crate::inventory::OpenAboutLandmark;
         use crate::ui::UiRoot;
@@ -1273,8 +1225,8 @@ mod tests {
         use pretty_assertions::assert_eq;
         use sl_client_bevy::{
             AgentKey, Asset, AssetType, Command, InventoryFolderKey, InventoryKey, InventoryType,
-            ItemInfo, OwnerKey, ParcelKey, Permissions5, SaleInfo, SlCommand, SlEvent, SlIdentity,
-            SlSessionEvent, Uuid,
+            ItemInfo, OwnerKey, ParcelKey, Permissions5, RegionCoordinates, RegionHandle, SaleInfo,
+            SlCommand, SlEvent, SlIdentity, SlSessionEvent, Uuid,
         };
 
         /// A boxed error so tests use `?` rather than the disallowed
@@ -1375,8 +1327,8 @@ mod tests {
             .into_bytes()
         }
 
-        /// Hand both windows their landmark assets, so both join the resolve
-        /// queue on the same frame.
+        /// Hand both windows their landmark assets, so both ask their question
+        /// on the same frame.
         fn deliver_assets(app: &mut App, items: &[&ItemInfo]) {
             for item in items {
                 app.world_mut()
@@ -1398,12 +1350,42 @@ mod tests {
                 .count()
         }
 
-        /// **Only one parcel resolve is in flight.** The capability's reply
-        /// names no request, so a second question would make the answer
-        /// ambiguous between two windows; the queue asks in turn, and the
-        /// reply lands on the window that asked.
+        /// The destination a landmark body points at, as the resolve asks for
+        /// it: `landmark_body` puts the region id in and the position at
+        /// 128/128/25.
+        fn destination(item: &ItemInfo) -> (Uuid, RegionCoordinates) {
+            (
+                Uuid::from_u128(item.asset_id.as_u128()),
+                RegionCoordinates::new(128.0, 128.0, 25.0),
+            )
+        }
+
+        /// The answer the capability gives for `item`'s destination, as the
+        /// runtime delivers it — the parcel id with the question stamped on.
+        fn answer(item: &ItemInfo, parcel: ParcelKey) -> SlEvent {
+            let (region_id, location) = destination(item);
+            SlEvent(SlSessionEvent::RemoteParcelId {
+                parcel_id: parcel,
+                location,
+                region_id,
+                region_handle: RegionHandle::new(0),
+            })
+        }
+
+        /// The window showing `item`, or an error.
+        fn window_for(app: &mut App, item: &ItemInfo) -> Result<Entity, TestError> {
+            windows(app)
+                .into_iter()
+                .find_map(|(window, shown)| (shown == Some(item.item_id)).then_some(window))
+                .ok_or_else(|| TestError::from("no window for that landmark"))
+        }
+
+        /// **Both windows ask at once.** The answer names its question, so
+        /// there is no reason to make one landmark wait on the other — which is
+        /// what the old one-at-a-time queue did, for the whole timeout when a
+        /// request went unanswered.
         #[test]
-        fn parcel_resolves_are_serialised() -> Result<(), TestError> {
+        fn parcel_resolves_run_concurrently() -> Result<(), TestError> {
             let (first, second) = (landmark(0xA1, "Home"), landmark(0xB2, "Shop"));
             let mut app = landmark_app();
             open(&mut app, &first);
@@ -1412,33 +1394,105 @@ mod tests {
 
             assert_eq!(
                 resolves_sent(&app),
-                1,
-                "both windows asked the capability at once"
+                2,
+                "one window is still waiting its turn"
             );
-            let queue = app.world().resource::<ParcelResolveQueue>();
-            assert!(queue.in_flight, "the head's question is not marked asked");
-            assert_eq!(queue.waiting.len(), 2, "the second window left the queue");
-            let head = *queue.waiting.front().ok_or("the queue emptied itself")?;
+            Ok(())
+        }
 
-            // The one answer the capability gives belongs to the head — and the
-            // window behind it then gets its turn.
-            let parcel = ParcelKey::from(Uuid::from_u128(0xC3));
+        /// **An answer reaches the window that asked, whatever order answers
+        /// arrive in.** The second landmark is answered first; the correlation
+        /// is the only thing that can route it, since arrival order would hand
+        /// it to the first window — and a plausible wrong parcel (someone
+        /// else's name, owner and traffic) is worse than none.
+        #[test]
+        fn an_out_of_order_answer_reaches_the_window_that_asked() -> Result<(), TestError> {
+            let (first, second) = (landmark(0xA1, "Home"), landmark(0xB2, "Shop"));
+            let mut app = landmark_app();
+            open(&mut app, &first);
+            open(&mut app, &second);
+            deliver_assets(&mut app, &[&first, &second]);
+            let (first_window, second_window) = (
+                window_for(&mut app, &first)?,
+                window_for(&mut app, &second)?,
+            );
+
+            let second_parcel = ParcelKey::from(Uuid::from_u128(0xC2));
             app.world_mut()
-                .write_message(SlEvent(SlSessionEvent::RemoteParcelId(parcel)));
+                .write_message(answer(&second, second_parcel));
             app.update();
 
-            let answered = app
-                .world()
-                .get::<AboutLandmarkState>(head)
-                .ok_or("the head window vanished")?;
-            assert_eq!(answered.parcel_id, Some(parcel));
             assert_eq!(
-                resolves_sent(&app),
-                1,
-                "the next window's question did not go out once the head was answered"
+                app.world()
+                    .get::<AboutLandmarkState>(second_window)
+                    .ok_or("the second window vanished")?
+                    .parcel_id,
+                Some(second_parcel),
+                "the window that asked did not take its own answer"
             );
-            let queue = app.world().resource::<ParcelResolveQueue>();
-            assert_eq!(queue.waiting.len(), 1, "the answered window stayed queued");
+            assert_eq!(
+                app.world()
+                    .get::<AboutLandmarkState>(first_window)
+                    .ok_or("the first window vanished")?
+                    .parcel_id,
+                None,
+                "a window took an answer to a question it never asked"
+            );
+
+            // And the first window is still resolvable afterwards — nothing
+            // about the out-of-order answer consumed its turn.
+            let first_parcel = ParcelKey::from(Uuid::from_u128(0xC1));
+            app.world_mut().write_message(answer(&first, first_parcel));
+            app.update();
+            assert_eq!(
+                app.world()
+                    .get::<AboutLandmarkState>(first_window)
+                    .ok_or("the first window vanished")?
+                    .parcel_id,
+                Some(first_parcel)
+            );
+            Ok(())
+        }
+
+        /// **Two landmarks in the same place are one question.** Both windows
+        /// take the answer, and exactly one `ParcelInfoRequest` follows: the
+        /// details name their parcel, so one reply fills both.
+        #[test]
+        fn one_answer_fills_every_window_that_asked_it() -> Result<(), TestError> {
+            let first = landmark(0xA1, "Home");
+            // A second item whose *asset* is the first's, so both landmarks
+            // point at the same region and position.
+            let mut second = landmark(0xB2, "Home again");
+            second.asset_id = first.asset_id;
+            let mut app = landmark_app();
+            open(&mut app, &first);
+            open(&mut app, &second);
+            deliver_assets(&mut app, &[&first]);
+
+            let parcel = ParcelKey::from(Uuid::from_u128(0xC3));
+            app.world_mut().write_message(answer(&first, parcel));
+            app.update();
+
+            for item in [&first, &second] {
+                let window = window_for(&mut app, item)?;
+                assert_eq!(
+                    app.world()
+                        .get::<AboutLandmarkState>(window)
+                        .ok_or("a window vanished")?
+                        .parcel_id,
+                    Some(parcel),
+                    "a window waiting on that very parcel did not take the answer"
+                );
+            }
+            assert_eq!(
+                app.world()
+                    .resource::<Messages<SlCommand>>()
+                    .iter_current_update_messages()
+                    .filter(|command| matches!(command.0, Command::RequestParcelInfo { .. }))
+                    .count(),
+                1,
+                "the same parcel was asked about once per window"
+            );
             Ok(())
         }
 

@@ -154,9 +154,21 @@ impl GridTest for ParcelInfoDwell {
                     region_handle,
                 })
                 .await?;
+            // The answer carries the question, so this accepts only the reply to
+            // the location just asked about rather than whichever resolve
+            // happens to land first.
             let parcel_key = session
                 .wait_for(REPLY_TIMEOUT, |event| match event {
-                    Event::RemoteParcelId(parcel_id) => Some(*parcel_id),
+                    Event::RemoteParcelId {
+                        parcel_id,
+                        location,
+                        region_id: _,
+                        region_handle: answered,
+                    } if *location == RegionCoordinates::new(REGION_CENTRE, REGION_CENTRE, 0.0)
+                        && *answered == region_handle =>
+                    {
+                        Some(*parcel_id)
+                    }
                     _ => None,
                 })
                 .await?;

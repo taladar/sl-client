@@ -253,7 +253,7 @@ const fn event_name(event: &Event) -> &'static str {
         Event::ParcelAccessList { .. } => "parcel_access_list",
         Event::ParcelObjectOwners { .. } => "parcel_object_owners",
         Event::ParcelDetails(..) => "parcel_details",
-        Event::RemoteParcelId(..) => "remote_parcel_id",
+        Event::RemoteParcelId { .. } => "remote_parcel_id",
         Event::SimulatorFeatures(..) => "simulator_features",
         Event::LslSyntax(..) => "lsl_syntax",
         Event::AgentPreferences(..) => "agent_preferences",

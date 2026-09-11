@@ -13618,22 +13618,51 @@ mod test {
         drain(&mut session)?;
         drain_events(&mut session);
 
-        let body = parse_llsd_xml(concat!(
+        let reply = parse_llsd_xml(concat!(
             "<llsd><map><key>parcel_id</key>",
             "<uuid>00000000-0000-0000-0000-000000c0ffee</uuid></map></llsd>",
         ))?;
+        // What the runtime delivers: the grid's bare answer with the question it
+        // answers stamped in. The grid names neither the location nor the
+        // region, so without the stamp two resolves in flight could not be told
+        // apart.
+        let asked = sl_proto::RemoteParcelRequest {
+            location: sl_proto::RegionCoordinates::new(128.0, 64.0, 22.0),
+            region_id: uuid::Uuid::from_u128(0x1E6),
+            region_handle: sl_proto::RegionHandle::new(0),
+        };
+        let body = sl_proto::stamp_remote_parcel_request(reply.clone(), &asked);
         session.handle_caps_event(sl_proto::CAP_REMOTE_PARCEL_REQUEST, &body, now)?;
 
-        let parcel_id = drain_events(&mut session)
+        let answer = drain_events(&mut session)
             .into_iter()
             .find_map(|event| match event {
-                Event::RemoteParcelId(parcel_id) => Some(parcel_id),
+                Event::RemoteParcelId {
+                    parcel_id,
+                    location,
+                    region_id,
+                    region_handle,
+                } => Some((parcel_id, location, region_id, region_handle)),
                 _ => None,
             })
             .ok_or("expected a RemoteParcelId event")?;
         assert_eq!(
-            parcel_id,
+            answer.0,
             ParcelKey::from(uuid::Uuid::from_u128(0x00C0_FFEE))
+        );
+        assert_eq!(answer.1, asked.location);
+        assert_eq!(answer.2, asked.region_id);
+        assert_eq!(answer.3, asked.region_handle);
+
+        // The same reply *without* the stamp is rejected rather than surfaced
+        // with a defaulted origin, which every waiting caller would match
+        // equally well.
+        session.handle_caps_event(sl_proto::CAP_REMOTE_PARCEL_REQUEST, &reply, now)?;
+        assert!(
+            drain_events(&mut session)
+                .iter()
+                .all(|event| !matches!(event, Event::RemoteParcelId { .. })),
+            "an unstamped reply must not surface a correlation-free parcel id"
         );
         Ok(())
     }

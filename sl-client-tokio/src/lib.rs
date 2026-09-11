@@ -40,8 +40,7 @@ use sl_proto::{
     build_modify_material_params_request, build_new_file_agent_inventory_request,
     build_object_media_navigate_request, build_object_media_update_request,
     build_parcel_voice_info_request, build_provision_voice_account_request,
-    build_region_experiences_request, build_remote_parcel_request,
-    build_resource_cost_selected_request, build_send_user_report,
+    build_region_experiences_request, build_resource_cost_selected_request, build_send_user_report,
     build_set_experience_permission_request, build_update_experience_request,
     build_update_item_asset_request, build_update_script_agent_request,
     build_update_script_task_request, build_update_task_item_asset_request,
@@ -100,21 +99,21 @@ pub use sl_proto::{
     ProposalVoteId, QueryId, ReflectionProbe, ReflectionProbeFlags, RegionChatSettings,
     RegionCombatSettings, RegionCoordinates, RegionDebugUpdate, RegionFlags, RegionHandle,
     RegionIdentity, RegionInfoUpdate, RegionLimits, RegionLocalObjectId, RegionLocalParcelId,
-    RegionName, RegionTerrainComposition, RegionTerrainUpdate, Reliability, RenderMaterialEntry,
-    RenderMaterialRef, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation,
-    SaleType, ScopedObjectId, ScopedParcelId, ScriptCompileError, ScriptControl,
-    ScriptControlAction, ScriptDialog, ScriptLanguage, ScriptPermissionRequest, ScriptPermissions,
-    ScriptTarget, ScriptTeleportRequest, ScriptUploadLocation, SculptData, SculptOrMeshKey,
-    SequenceNumber, SessionMessage, SetDisplayNameReply, SimulatorFeatures, SkySettings,
-    SoundFlags, SoundPreload, StartLocation, StartLocationParseError, StartLocationSlot,
-    TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TerraformArea, TerrainLayerType,
-    TerrainPatch, Texture, TextureAnimation, TextureEntry, TextureFace, TextureKey, Throttle,
-    ThrottleBuilder, ThrottleError, TimestampFormat, TransactionId, TransferId, TransferStatus,
-    Transmit, UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER, UI_SOUND_INVALID_OP,
-    UI_SOUND_MONEY_DOWN, UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT, UI_SOUND_SNAPSHOT,
-    UI_SOUND_TELEPORT_OUT, UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE, UI_SOUND_WINDOW_OPEN,
-    UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, UserInfo, Uuid, Vector,
-    VoiceAccountInfo, VoiceProvisionRequest, WaterSettings, Wearable, WearableType, XferId,
+    RegionName, RegionTerrainComposition, RegionTerrainUpdate, Reliability, RemoteParcelRequest,
+    RenderMaterialEntry, RenderMaterialRef, RestoreItem, RezAttachment, RezObjectParams,
+    RezScriptParams, Rotation, SaleType, ScopedObjectId, ScopedParcelId, ScriptCompileError,
+    ScriptControl, ScriptControlAction, ScriptDialog, ScriptLanguage, ScriptPermissionRequest,
+    ScriptPermissions, ScriptTarget, ScriptTeleportRequest, ScriptUploadLocation, SculptData,
+    SculptOrMeshKey, SequenceNumber, SessionMessage, SetDisplayNameReply, SimulatorFeatures,
+    SkySettings, SoundFlags, SoundPreload, StartLocation, StartLocationParseError,
+    StartLocationSlot, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TerraformArea,
+    TerrainLayerType, TerrainPatch, Texture, TextureAnimation, TextureEntry, TextureFace,
+    TextureKey, Throttle, ThrottleBuilder, ThrottleError, TimestampFormat, TransactionId,
+    TransferId, TransferStatus, Transmit, UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER,
+    UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN, UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT,
+    UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT, UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE,
+    UI_SOUND_WINDOW_OPEN, UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, UserInfo, Uuid,
+    Vector, VoiceAccountInfo, VoiceProvisionRequest, WaterSettings, Wearable, WearableType, XferId,
     avatar_texture, decode_particle_system, decode_texture_anim, decode_texture_entry,
     encode_texture_entry, grid_to_handle, group_powers, handle_to_global, handle_to_grid, j2c,
     particle_pattern, pcode, sim_access, texture_anim_mode,
@@ -198,7 +197,7 @@ use crate::fetch::{fetch_asset_http, fetch_mesh_http, fetch_texture_http};
 use crate::http::{
     delete_caps_llsd, fetch_land_resources, fetch_lsl_syntax, get_avatar_picker_search,
     get_caps_llsd, patch_caps_llsd, post_caps_oneway, post_chat_session_fetch_history,
-    post_chat_session_request, put_caps_llsd,
+    post_chat_session_request, post_remote_parcel_request, put_caps_llsd,
 };
 use crate::inventory::{fetch_folder_contents, fetch_group_members, fetch_inventory};
 use crate::inventory_cache::InventoryCache;
@@ -2133,9 +2132,11 @@ impl Client {
                         }
                         Some(Command::RequestRemoteParcelId { location, region_id, region_handle }) => {
                             if let Some(url) = caps.get(CAP_REMOTE_PARCEL_REQUEST).cloned() {
-                                let body =
-                                    build_remote_parcel_request(location, region_id, region_handle);
-                                tokio::spawn(post_voice_cap(url, body, CAP_REMOTE_PARCEL_REQUEST, http.clone(), caps_tx.clone()));
+                                // Not `post_voice_cap`: the reply names no
+                                // question, so the request rides along to be
+                                // stamped into the answer.
+                                let request = RemoteParcelRequest { location, region_id, region_handle };
+                                tokio::spawn(post_remote_parcel_request(url, request, http.clone(), caps_tx.clone()));
                             }
                         }
                         Some(Command::RequestSimulatorFeatures) => {

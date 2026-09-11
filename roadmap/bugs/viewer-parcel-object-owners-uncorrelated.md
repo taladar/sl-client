@@ -65,3 +65,12 @@ Keying the window is what makes the gap real.
 Open About Land on two parcels with different object owners: each Objects tab
 must show its own parcel's tally, and neither may show the other's — including
 after pressing **Refresh** in both.
+
+## Note (2026-09-11)
+
+[[viewer-remote-parcel-id-uncorrelated]] is fixed, and **this is not fixed with
+it**. That one was a capability: a per-request POST, so the runtime holds the
+question across it and stamps it into the answer. This one is UDP, and a
+`ParcelObjectOwnersReply` has nowhere to put a question — so the queue and its
+one-at-a-time rule stay until there is a capability to ask instead, and the
+"make the wait visible" half above is the cheap part that can be done first.

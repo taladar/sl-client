@@ -185,8 +185,9 @@ pub use region_handle::RegionHandle;
 pub use region_local_id::{RegionLocalObjectId, RegionLocalParcelId};
 pub use region_name::{region_name_from_wire, region_name_to_wire};
 pub use remote_parcel::{
-    RemoteParcelRequest, build_remote_parcel_request, build_remote_parcel_response,
-    parse_remote_parcel_reply, parse_remote_parcel_request,
+    RemoteParcelAnswer, RemoteParcelRequest, build_remote_parcel_request,
+    build_remote_parcel_response, parse_remote_parcel_answer, parse_remote_parcel_reply,
+    parse_remote_parcel_request, stamp_remote_parcel_request,
 };
 pub use resource_report::{
     AttachmentLocation, AttachmentResourcesReport, LandResourcesUrls, ParcelScriptResources,

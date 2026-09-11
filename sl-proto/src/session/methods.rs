@@ -112,7 +112,7 @@ use sl_wire::{
     parse_experience_permissions, parse_get_object_cost, parse_get_object_physics_data,
     parse_gltf_material_override, parse_land_resource_detail, parse_land_resource_summary,
     parse_land_resources_reply, parse_lsl_syntax, parse_object_physics_properties,
-    parse_region_experiences, parse_remote_parcel_reply, parse_resource_cost_selected,
+    parse_region_experiences, parse_remote_parcel_answer, parse_resource_cost_selected,
     parse_simulator_features, parse_user_info_reply, zero_decode,
 };
 use sl_wire::{
@@ -712,8 +712,19 @@ impl Session {
             },
             // The reply to a `RemoteParcelRequest` POST: the grid-wide parcel id
             // covering the requested region location (feeds a `ParcelInfoRequest`).
-            CAP_REMOTE_PARCEL_REQUEST => match parse_remote_parcel_reply(body) {
-                Ok(Some(parcel_id)) => self.events.push_back(Event::RemoteParcelId(parcel_id)),
+            // The grid's answer names no question, so the runtime stamps the one
+            // it holds across the POST into the reply — the same trick
+            // `AvatarPickerSearch` plays with its query id — and the event
+            // carries it, so two resolves in flight are told apart by what they
+            // asked rather than by arrival order. An unstamped reply is a decode
+            // error, not a defaulted origin every waiting caller would match.
+            CAP_REMOTE_PARCEL_REQUEST => match parse_remote_parcel_answer(body) {
+                Ok(Some(answer)) => self.events.push_back(Event::RemoteParcelId {
+                    parcel_id: answer.parcel_id,
+                    location: answer.request.location,
+                    region_id: answer.request.region_id,
+                    region_handle: answer.request.region_handle,
+                }),
                 Ok(None) => self.caps_decode_failed(message),
                 Err(error) => self.caps_decode_error(message, &error),
             },

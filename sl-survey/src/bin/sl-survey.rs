@@ -783,7 +783,7 @@ impl Survey {
             | Event::GroupVoteHistory { .. }
             | Event::ParcelObjectOwners { .. }
             | Event::ParcelDetails(_)
-            | Event::RemoteParcelId(_)
+            | Event::RemoteParcelId { .. }
             | Event::EstateCovenant(_)
             | Event::TelehubInfo(_)
             | Event::AlertMessage { .. }

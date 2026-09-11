@@ -107,6 +107,83 @@ pub fn parse_remote_parcel_reply(body: &Llsd) -> Result<Option<ParcelKey>, WireE
         .map(ParcelKey::from))
 }
 
+/// A `RemoteParcelRequest` answer as the client sees it: the resolved parcel id
+/// **and the question it answers**.
+///
+/// The grid's reply is a bare `{ parcel_id }` — it names neither the location
+/// nor the region asked about, so two resolves in flight cannot be told apart by
+/// content, and handing a window the wrong id is worse than handing it none: it
+/// would fill with a different parcel's name, owner and traffic, all of it
+/// plausible. The capability is a per-request POST, though, so the runtime
+/// *holds* the question while the answer arrives, and
+/// [`stamp_remote_parcel_request`] writes it into the reply map before the reply
+/// leaves the runtime. This is the same trick `AvatarPickerSearch` plays with
+/// its `query-id`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct RemoteParcelAnswer {
+    /// The grid-wide parcel id covering [`request.location`](RemoteParcelRequest::location).
+    pub parcel_id: ParcelKey,
+    /// The question this answers, as the client asked it.
+    pub request: RemoteParcelRequest,
+}
+
+/// Writes the question a `RemoteParcelRequest` POST asked into its reply map, so
+/// the answer can be matched to the window that asked.
+///
+/// Called by the runtimes, which hold the request across the POST; the grid
+/// never sends these keys. They are the request body's own keys
+/// (`location` / `region_id` / `region_handle`), so
+/// [`parse_remote_parcel_request`] reads the echo straight back — one vocabulary
+/// for the question whichever direction it travels. Both region fields are
+/// written even when only one was sent, so the echo round-trips the request
+/// exactly (the unsent one is nil / zero, which is what it was).
+///
+/// A `reply` that is not a map (a malformed or empty answer) becomes a map
+/// holding only the echo: the parcel id is then absent, which
+/// [`parse_remote_parcel_answer`] reports as an unresolved location rather than
+/// as a correlation failure.
+#[must_use]
+pub fn stamp_remote_parcel_request(reply: Llsd, request: &RemoteParcelRequest) -> Llsd {
+    let mut map = match reply {
+        Llsd::Map(map) => map,
+        _other => HashMap::new(),
+    };
+    let _previous = map.insert(
+        "location".to_owned(),
+        Llsd::Array(vec![
+            Llsd::Real(f64::from(request.location.x())),
+            Llsd::Real(f64::from(request.location.y())),
+            Llsd::Real(f64::from(request.location.z())),
+        ]),
+    );
+    let _previous = map.insert("region_id".to_owned(), Llsd::Uuid(request.region_id));
+    let _previous = map.insert(
+        "region_handle".to_owned(),
+        Llsd::Binary(u64_to_be(request.region_handle.0).to_vec()),
+    );
+    Llsd::Map(map)
+}
+
+/// Decodes a stamped `RemoteParcelRequest` reply into the parcel id **and** the
+/// question it answers, or [`None`] when the body lacks a `parcel_id` (the grid
+/// could not resolve the location — the question is still known, but there is no
+/// answer to correlate).
+///
+/// # Errors
+/// Returns [`LlsdError::MissingField`] when the reply carries no `location`,
+/// which means it was never stamped: a correlation-free answer is not something
+/// to guess at, since every window waiting would match a defaulted origin
+/// equally well. Returns [`LlsdError::MalformedField`] if a present field is of
+/// the wrong LLSD kind.
+pub fn parse_remote_parcel_answer(body: &Llsd) -> Result<Option<RemoteParcelAnswer>, WireError> {
+    if body.field_array("location", "location")?.is_none() {
+        return Err(LlsdError::MissingField { field: "location" }.into());
+    }
+    let request = parse_remote_parcel_request(body)?;
+    Ok(parse_remote_parcel_reply(body)?.map(|parcel_id| RemoteParcelAnswer { parcel_id, request }))
+}
+
 // ---------------------------------------------------------------------------
 // Server side — the inverse: the request parser and reply builder.
 // ---------------------------------------------------------------------------
@@ -174,10 +251,12 @@ mod tests {
     use uuid::Uuid;
 
     use super::{
-        ParcelKey, build_remote_parcel_request, build_remote_parcel_response,
-        parse_remote_parcel_reply, parse_remote_parcel_request,
+        ParcelKey, RemoteParcelRequest, build_remote_parcel_request, build_remote_parcel_response,
+        parse_remote_parcel_answer, parse_remote_parcel_reply, parse_remote_parcel_request,
+        stamp_remote_parcel_request,
     };
-    use crate::llsd::parse_llsd_xml;
+    use crate::WireError;
+    use crate::llsd::{Llsd, LlsdError, parse_llsd_xml};
     use crate::region_handle::RegionHandle;
     use sl_types::map::RegionCoordinates;
 
@@ -230,5 +309,79 @@ mod tests {
                 .map_err(|e| format!("{e:?}"))?;
         assert_eq!(parsed, Some(parcel));
         Ok(())
+    }
+
+    /// The stamp puts the question into the grid's bare answer, and the answer
+    /// parser reads both back — which is the whole point: two resolves in flight
+    /// are told apart by the location and region they name, not by arrival
+    /// order.
+    #[test]
+    fn a_stamped_reply_carries_its_question_back() -> Result<(), String> {
+        let parcel = ParcelKey::from(uuid("33333333-3333-3333-3333-333333333333")?);
+        let request = RemoteParcelRequest {
+            location: RegionCoordinates::new(200.0, 12.25, 30.5),
+            region_id: uuid("44444444-4444-4444-4444-444444444444")?,
+            region_handle: RegionHandle(0),
+        };
+        let reply =
+            parse_llsd_xml(&build_remote_parcel_response(parcel)).map_err(|e| format!("{e:?}"))?;
+        let stamped = stamp_remote_parcel_request(reply, &request);
+        let answer = parse_remote_parcel_answer(&stamped)
+            .map_err(|e| format!("{e:?}"))?
+            .ok_or("expected a resolved parcel id")?;
+        assert_eq!(answer.parcel_id, parcel);
+        assert_eq!(answer.request, request);
+        Ok(())
+    }
+
+    /// A request that named its region by handle is echoed as one: the stamp
+    /// writes both region fields, so the unsent one comes back nil / zero rather
+    /// than as a different question.
+    #[test]
+    fn the_stamp_round_trips_a_handle_request() -> Result<(), String> {
+        let parcel = ParcelKey::from(uuid("55555555-5555-5555-5555-555555555555")?);
+        let request = RemoteParcelRequest {
+            location: RegionCoordinates::new(0.0, 0.0, 0.0),
+            region_id: Uuid::nil(),
+            region_handle: RegionHandle(0x0003_F480_0003_F480_u64),
+        };
+        let reply =
+            parse_llsd_xml(&build_remote_parcel_response(parcel)).map_err(|e| format!("{e:?}"))?;
+        let answer = parse_remote_parcel_answer(&stamp_remote_parcel_request(reply, &request))
+            .map_err(|e| format!("{e:?}"))?
+            .ok_or("expected a resolved parcel id")?;
+        assert_eq!(answer.request, request);
+        Ok(())
+    }
+
+    /// An unresolved location still answers `{}`. Stamped, that is a known
+    /// question with no answer — `None`, not an error, and not a correlation
+    /// failure.
+    #[test]
+    fn an_unresolved_stamped_reply_is_none() -> Result<(), String> {
+        let request = RemoteParcelRequest::default();
+        let stamped =
+            stamp_remote_parcel_request(Llsd::Map(std::collections::HashMap::new()), &request);
+        let answer = parse_remote_parcel_answer(&stamped).map_err(|e| format!("{e:?}"))?;
+        assert_eq!(answer, None);
+        Ok(())
+    }
+
+    /// An *unstamped* reply is rejected rather than defaulted. Every window
+    /// waiting would match a defaulted origin equally well, so guessing here is
+    /// how the wrong parcel's name, owner and traffic end up in a window — the
+    /// failure this whole correlation exists to prevent.
+    #[test]
+    fn an_unstamped_reply_is_an_error() -> Result<(), String> {
+        let parcel = ParcelKey::from(uuid("66666666-6666-6666-6666-666666666666")?);
+        let reply =
+            parse_llsd_xml(&build_remote_parcel_response(parcel)).map_err(|e| format!("{e:?}"))?;
+        match parse_remote_parcel_answer(&reply) {
+            Err(WireError::Llsd(LlsdError::MissingField { field })) => {
+                assert_eq!(field, "location");
+                Ok(())
+            }
+            other => Err(format!("expected a missing-location error, got {other:?}")),
+        }
     }
 }

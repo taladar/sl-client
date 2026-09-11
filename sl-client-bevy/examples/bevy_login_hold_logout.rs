@@ -283,7 +283,7 @@ fn on_events(
             | SlSessionEvent::GroupVoteHistory { .. }
             | SlSessionEvent::ParcelObjectOwners { .. }
             | SlSessionEvent::ParcelDetails(_)
-            | SlSessionEvent::RemoteParcelId(_)
+            | SlSessionEvent::RemoteParcelId { .. }
             | SlSessionEvent::Environment(_)
             | SlSessionEvent::MoneyBalance(_)
             | SlSessionEvent::EconomyData(_)

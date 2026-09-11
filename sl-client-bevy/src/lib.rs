@@ -38,15 +38,15 @@ use sl_proto::{
     build_modify_material_params_request, build_object_media_navigate_request,
     build_object_media_update_request, build_parcel_voice_info_request,
     build_provision_voice_account_request, build_region_experiences_request,
-    build_remote_parcel_request, build_render_materials_put_request,
-    build_resource_cost_selected_request, build_send_user_report,
-    build_set_experience_permission_request, build_update_experience_request,
-    build_update_item_asset_request, build_update_script_agent_request,
-    build_update_script_task_request, build_update_task_item_asset_request,
-    build_upload_baked_texture_request, build_user_info_update, build_voice_signaling_request,
-    chat_session_agents_body, chat_session_request_body, copy_inventory_from_notecard_body,
-    create_listing_request, delete_listing_request, display_names_query, experience_id_query,
-    experience_info_query, find_experience_query, forget_experience_query, group_experiences_query,
+    build_render_materials_put_request, build_resource_cost_selected_request,
+    build_send_user_report, build_set_experience_permission_request,
+    build_update_experience_request, build_update_item_asset_request,
+    build_update_script_agent_request, build_update_script_task_request,
+    build_update_task_item_asset_request, build_upload_baked_texture_request,
+    build_user_info_update, build_voice_signaling_request, chat_session_agents_body,
+    chat_session_request_body, copy_inventory_from_notecard_body, create_listing_request,
+    delete_listing_request, display_names_query, experience_id_query, experience_info_query,
+    find_experience_query, forget_experience_query, group_experiences_query,
     group_invite_response_body, listing_request, listings_request, merchant_status_request,
     parse_login_response, update_listing_request,
 };
@@ -105,26 +105,27 @@ pub use sl_proto::{
     QueryId, ReflectionProbe, ReflectionProbeFlags, RegionChatSettings, RegionCombatSettings,
     RegionCoordinates, RegionDebugUpdate, RegionFlags, RegionHandle, RegionIdentity,
     RegionInfoUpdate, RegionLimits, RegionLocalObjectId, RegionLocalParcelId, RegionName,
-    RegionTerrainComposition, RegionTerrainUpdate, Reliability, RenderMaterialEntry,
-    RenderMaterialRef, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation,
-    SKY_TRACK_COUNT, SaleInfo, SaleType, Scale, ScopedObjectId, ScopedParcelId, ScriptCompileError,
-    ScriptControl, ScriptControlAction, ScriptDialog, ScriptLanguage, ScriptPermissionRequest,
-    ScriptPermissions, ScriptTarget, ScriptTeleportRequest, ScriptUploadLocation, SculptData,
-    SculptOrMeshKey, SequenceNumber, ServerHistoryMessage, SetDisplayNameReply, SettingsKind,
-    SimulatorFeatures, SkySettings, SoundFlags, SoundPreload, StartLocation,
-    StartLocationParseError, StartLocationSlot, SurfaceInfo, TaskInventoryItem, TaskInventoryKey,
-    TaskInventoryReply, TerrainLayerType, TerrainPatch, TextureAnimation, TextureEntry,
-    TextureFace, TextureKey, Throttle, ThrottleBuilder, ThrottleError, TimestampFormat,
-    TransactionId, TransferId, Transmit, UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER,
-    UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN, UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT,
-    UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT, UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE,
-    UI_SOUND_WINDOW_OPEN, UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, UserInfo, Uuid,
-    Vector, ViewerEffect, ViewerEffectData, ViewerEffectType, VoiceAccountInfo,
-    VoiceProvisionRequest, WaterSettings, Wearable, WearableType, WireError, XferId,
-    avatar_texture, azimuth_altitude_to_rotation, chat_text_muted, decode_particle_system,
-    decode_texture_anim, decode_texture_entry, encode_texture_entry, environment_asset_from_bytes,
-    environment_asset_to_bytes, grid_to_handle, group_powers, handle_to_global, handle_to_grid,
-    particle_pattern, pcode, rotation_to_azimuth_altitude, sim_access, texture_anim_mode,
+    RegionTerrainComposition, RegionTerrainUpdate, Reliability, RemoteParcelRequest,
+    RenderMaterialEntry, RenderMaterialRef, RestoreItem, RezAttachment, RezObjectParams,
+    RezScriptParams, Rotation, SKY_TRACK_COUNT, SaleInfo, SaleType, Scale, ScopedObjectId,
+    ScopedParcelId, ScriptCompileError, ScriptControl, ScriptControlAction, ScriptDialog,
+    ScriptLanguage, ScriptPermissionRequest, ScriptPermissions, ScriptTarget,
+    ScriptTeleportRequest, ScriptUploadLocation, SculptData, SculptOrMeshKey, SequenceNumber,
+    ServerHistoryMessage, SetDisplayNameReply, SettingsKind, SimulatorFeatures, SkySettings,
+    SoundFlags, SoundPreload, StartLocation, StartLocationParseError, StartLocationSlot,
+    SurfaceInfo, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TerrainLayerType,
+    TerrainPatch, TextureAnimation, TextureEntry, TextureFace, TextureKey, Throttle,
+    ThrottleBuilder, ThrottleError, TimestampFormat, TransactionId, TransferId, Transmit,
+    UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER, UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN,
+    UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT, UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT,
+    UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE, UI_SOUND_WINDOW_OPEN, UpdatableAssetType,
+    UpdateGroupInfoParams, UpdateListing, UserInfo, Uuid, Vector, ViewerEffect, ViewerEffectData,
+    ViewerEffectType, VoiceAccountInfo, VoiceProvisionRequest, WaterSettings, Wearable,
+    WearableType, WireError, XferId, avatar_texture, azimuth_altitude_to_rotation, chat_text_muted,
+    decode_particle_system, decode_texture_anim, decode_texture_entry, encode_texture_entry,
+    environment_asset_from_bytes, environment_asset_to_bytes, grid_to_handle, group_powers,
+    handle_to_global, handle_to_grid, particle_pattern, pcode, rotation_to_azimuth_altitude,
+    sim_access, texture_anim_mode,
 };
 // Linden's four ported WindLight sky presets and the day cycle that schedules
 // them: content both halves of the protocol need, so it lives in `sl-proto`
@@ -389,7 +390,7 @@ use crate::fetch::{run_asset_fetch, run_generic_asset_fetch, run_texture_fetch};
 use crate::http::{
     run_avatar_picker_search, run_caps_oneway, run_chat_session_fetch_history,
     run_chat_session_request, run_delete_caps_llsd, run_fetch_lsl_syntax, run_get_caps_llsd,
-    run_land_resources, run_patch_caps_llsd, run_put_caps_llsd,
+    run_land_resources, run_patch_caps_llsd, run_put_caps_llsd, run_remote_parcel_request,
 };
 use crate::inventory::{
     fetch_folder_contents, run_group_members_fetch, run_inventory_fetch,
@@ -3618,10 +3619,16 @@ fn apply_command(
             if let Some(caps) = caps
                 && let Some(url) = caps.map.get(CAP_REMOTE_PARCEL_REQUEST).cloned()
             {
-                let body = build_remote_parcel_request(*location, *region_id, *region_handle);
+                // Not `run_voice_cap`: the reply names no question, so the
+                // request rides along to be stamped into the answer.
+                let request = RemoteParcelRequest {
+                    location: *location,
+                    region_id: *region_id,
+                    region_handle: *region_handle,
+                };
                 let events_tx = caps.events_tx.clone();
                 std::thread::spawn(move || {
-                    run_voice_cap(&url, body, CAP_REMOTE_PARCEL_REQUEST, &events_tx);
+                    run_remote_parcel_request(&url, request, &events_tx);
                 });
             }
         }

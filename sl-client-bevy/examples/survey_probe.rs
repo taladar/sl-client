@@ -302,7 +302,7 @@ fn on_events(
             | SlSessionEvent::GroupVoteHistory { .. }
             | SlSessionEvent::ParcelObjectOwners { .. }
             | SlSessionEvent::ParcelDetails(_)
-            | SlSessionEvent::RemoteParcelId(_)
+            | SlSessionEvent::RemoteParcelId { .. }
             | SlSessionEvent::EstateCovenant(_)
             | SlSessionEvent::TelehubInfo(_)
             | SlSessionEvent::AlertMessage { .. }

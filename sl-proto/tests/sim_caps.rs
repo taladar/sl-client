@@ -37,21 +37,21 @@ mod test {
         LegacyMaterial, LoginParams, LslKeyword, LslSyntax, MaterialOverrideUpdate, MediaEntry,
         ObjectCost, ObjectKey, ObjectMediaState, ObjectPhysicsData, OwnerKey, ParcelKey,
         ParcelScriptResources, Permissions5, PhysicsShapeType, REQUESTED_CAPABILITIES,
-        RegionCoordinates, RegionHandle, RegionLocalParcelId, ResourceAmount, ResourceSummary,
-        ScriptedObjectInfo, ScriptedObjectResources, SelectedCostKind, SelectedResourceCost,
-        ServerEvent, ServerHistoryMessage, Session, SimCaps, SimChatSessionKind, SimParcel,
-        SimSession, SimulatorFeatures, StartLocation, TextureKey, VoiceChannel,
-        VoiceProvisionOutcome, VoiceProvisionRefusal, WebRtcStub, avatar_picker_search_query,
-        build_environment_update_request, build_event_queue_request, build_get_object_cost_request,
-        build_get_object_physics_data_request, build_land_resources_request,
-        build_region_experiences_request, build_remote_parcel_request,
-        build_resource_cost_selected_request, build_seed_request,
+        RegionCoordinates, RegionHandle, RegionLocalParcelId, RemoteParcelRequest, ResourceAmount,
+        ResourceSummary, ScriptedObjectInfo, ScriptedObjectResources, SelectedCostKind,
+        SelectedResourceCost, ServerEvent, ServerHistoryMessage, Session, SimCaps,
+        SimChatSessionKind, SimParcel, SimSession, SimulatorFeatures, StartLocation, TextureKey,
+        VoiceChannel, VoiceProvisionOutcome, VoiceProvisionRefusal, WebRtcStub,
+        avatar_picker_search_query, build_environment_update_request, build_event_queue_request,
+        build_get_object_cost_request, build_get_object_physics_data_request,
+        build_land_resources_request, build_region_experiences_request,
+        build_remote_parcel_request, build_resource_cost_selected_request, build_seed_request,
         build_set_experience_permission_request, build_update_experience_request,
         chat_session_agents_body, chat_session_request_body, copy_inventory_from_notecard_body,
         enable_simulator_to_caps_llsd, experience_id_query, experience_info_query,
         find_experience_query, forget_experience_query, group_experiences_query,
         parse_event_queue_response, parse_experience_ids, parse_experience_infos,
-        parse_experience_status, parse_seed_response,
+        parse_experience_status, parse_seed_response, stamp_remote_parcel_request,
     };
     use sl_wire::PROPERTY_PRIVATE;
     use sl_wire::{
@@ -2706,6 +2706,26 @@ mod test {
         Ok(drain_client(client))
     }
 
+    /// POSTs `asked` to the `RemoteParcelRequest` capability, stamps the
+    /// question into the sim's reply the way a runtime would, and folds the
+    /// result into the client.
+    fn resolve_remote_parcel(
+        caps: &mut SimCaps,
+        sim: &mut SimSession,
+        client: &mut Session,
+        path: &str,
+        asked: RemoteParcelRequest,
+        now: Instant,
+    ) -> Result<Vec<Event>, TestError> {
+        let body =
+            build_remote_parcel_request(asked.location, asked.region_id, asked.region_handle);
+        let (status, reply) = respond(caps, sim, &post(path, &body))?;
+        assert_eq!(status, 200);
+        let stamped = stamp_remote_parcel_request(parse_llsd_xml(&reply)?, &asked);
+        client.handle_caps_event(CAP_REMOTE_PARCEL_REQUEST, &stamped, now)?;
+        Ok(drain_client(client))
+    }
+
     /// The `SimulatorFeatures` GET serves the stored document through the
     /// client's own parser, and its `lsl_syntax_id` matches the id
     /// `set_lsl_syntax` advertised — the cross-cap consistency invariant.
@@ -2986,6 +3006,13 @@ mod test {
     /// The `RemoteParcelRequest` lookup resolves a covered location by region
     /// id and by region handle; a foreign region or an uncovered location
     /// answers the empty "could not resolve" map (no client event).
+    ///
+    /// The fold goes through [`stamp_remote_parcel_request`] rather than
+    /// [`fold_into_client`], because that is what a runtime delivers: the grid's
+    /// reply is a bare `{ parcel_id }` naming neither the location nor the
+    /// region, so the runtime stamps the question it held across the POST into
+    /// the answer. The event then carries both, and the echo asserted here is
+    /// what lets two resolves in flight be told apart.
     #[test]
     fn remote_parcel_request_resolves_the_covering_parcel() -> Result<(), TestError> {
         let mut caps = new_caps()?;
@@ -2996,69 +3023,60 @@ mod test {
         let path = granted_cap_path(&caps, CAP_REMOTE_PARCEL_REQUEST)?;
 
         // By region id: (64, 100) falls in the first (western) rectangle.
-        let body = build_remote_parcel_request(
-            RegionCoordinates::new(64.0, 100.0, 0.0),
-            uuid::Uuid::from_u128(0x1e6),
-            RegionHandle(0),
-        );
-        let events = fold_into_client(
-            &mut caps,
-            &mut sim,
-            &mut client,
-            &post(&path, &body),
-            CAP_REMOTE_PARCEL_REQUEST,
-            now,
-        )?;
+        let asked = RemoteParcelRequest {
+            location: RegionCoordinates::new(64.0, 100.0, 0.0),
+            region_id: uuid::Uuid::from_u128(0x1e6),
+            region_handle: RegionHandle(0),
+        };
+        let events = resolve_remote_parcel(&mut caps, &mut sim, &mut client, &path, asked, now)?;
         assert_eq!(
             events,
-            vec![Event::RemoteParcelId(ParcelKey::from(
-                uuid::Uuid::from_u128(0xACE1)
-            ))]
+            vec![Event::RemoteParcelId {
+                parcel_id: ParcelKey::from(uuid::Uuid::from_u128(0xACE1)),
+                location: asked.location,
+                region_id: asked.region_id,
+                region_handle: asked.region_handle,
+            }]
         );
 
         // By region handle: (200, 10) falls in the second (eastern) one.
-        let body = build_remote_parcel_request(
-            RegionCoordinates::new(200.0, 10.0, 0.0),
-            uuid::Uuid::nil(),
-            RegionHandle(REGION_HANDLE),
-        );
-        let events = fold_into_client(
-            &mut caps,
-            &mut sim,
-            &mut client,
-            &post(&path, &body),
-            CAP_REMOTE_PARCEL_REQUEST,
-            now,
-        )?;
+        let asked = RemoteParcelRequest {
+            location: RegionCoordinates::new(200.0, 10.0, 0.0),
+            region_id: uuid::Uuid::nil(),
+            region_handle: RegionHandle(REGION_HANDLE),
+        };
+        let events = resolve_remote_parcel(&mut caps, &mut sim, &mut client, &path, asked, now)?;
         assert_eq!(
             events,
-            vec![Event::RemoteParcelId(ParcelKey::from(
-                uuid::Uuid::from_u128(0xACE2)
-            ))]
+            vec![Event::RemoteParcelId {
+                parcel_id: ParcelKey::from(uuid::Uuid::from_u128(0xACE2)),
+                location: asked.location,
+                region_id: asked.region_id,
+                region_handle: asked.region_handle,
+            }]
         );
 
         // A foreign region and an uncovered location both answer `{}`; the
         // client's fold treats that as a failed resolve and surfaces no
-        // typed event.
-        for body in [
-            build_remote_parcel_request(
-                RegionCoordinates::new(64.0, 100.0, 0.0),
-                uuid::Uuid::from_u128(0xbad),
-                RegionHandle(0),
-            ),
-            build_remote_parcel_request(
-                RegionCoordinates::new(64.0, 300.0, 0.0),
-                uuid::Uuid::from_u128(0x1e6),
-                RegionHandle(0),
-            ),
+        // typed event — the question is known, there is simply no answer.
+        for asked in [
+            RemoteParcelRequest {
+                location: RegionCoordinates::new(64.0, 100.0, 0.0),
+                region_id: uuid::Uuid::from_u128(0xbad),
+                region_handle: RegionHandle(0),
+            },
+            RemoteParcelRequest {
+                location: RegionCoordinates::new(64.0, 300.0, 0.0),
+                region_id: uuid::Uuid::from_u128(0x1e6),
+                region_handle: RegionHandle(0),
+            },
         ] {
-            let (status, reply) = respond(&mut caps, &mut sim, &post(&path, &body))?;
-            assert_eq!(status, 200);
-            client.handle_caps_event(CAP_REMOTE_PARCEL_REQUEST, &parse_llsd_xml(&reply)?, now)?;
+            let events =
+                resolve_remote_parcel(&mut caps, &mut sim, &mut client, &path, asked, now)?;
             assert!(
-                drain_client(&mut client)
+                events
                     .iter()
-                    .all(|event| !matches!(event, Event::RemoteParcelId(..)))
+                    .all(|event| !matches!(event, Event::RemoteParcelId { .. }))
             );
         }
         Ok(())

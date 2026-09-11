@@ -548,7 +548,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::GroupVoteHistory { .. }
             | Event::ParcelObjectOwners { .. }
             | Event::ParcelDetails(_)
-            | Event::RemoteParcelId(_)
+            | Event::RemoteParcelId { .. }
             | Event::Environment(_)
             | Event::MoneyBalance(_)
             | Event::EconomyData(_)

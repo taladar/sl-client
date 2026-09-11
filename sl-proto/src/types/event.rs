@@ -261,7 +261,30 @@ pub enum Event {
     /// `RemoteParcelRequest` capability reply to the runtimes'
     /// [`Command::RequestRemoteParcelId`](crate::Command::RequestRemoteParcelId).
     /// Feed it to [`Session::request_parcel_info`](crate::Session::request_parcel_info).
-    RemoteParcelId(ParcelKey),
+    ///
+    /// The event carries the **question as asked** alongside the answer. The
+    /// grid's reply is a bare `{ parcel_id }`, so with two resolves in flight
+    /// nothing in it says which is being answered — and giving a caller the
+    /// wrong id is worse than giving it none, since a different parcel's name,
+    /// owner and traffic are all perfectly plausible. The capability is a
+    /// per-request POST, so the runtime holds the question across it and stamps
+    /// it into the reply ([`stamp_remote_parcel_request`](crate::stamp_remote_parcel_request));
+    /// callers match on [`location`](Self::RemoteParcelId::location) and
+    /// [`region_id`](Self::RemoteParcelId::region_id) /
+    /// [`region_handle`](Self::RemoteParcelId::region_handle) rather than
+    /// serialising their requests.
+    RemoteParcelId {
+        /// The resolved grid-wide parcel id.
+        parcel_id: ParcelKey,
+        /// The region-local position that was asked about.
+        location: RegionCoordinates,
+        /// The region id that was asked about (nil when the request named the
+        /// region by handle instead).
+        region_id: Uuid,
+        /// The region handle that was asked about (zero when the request named
+        /// the region by id instead).
+        region_handle: RegionHandle,
+    },
     /// The region's feature flags and limits, from a `SimulatorFeatures`
     /// capability GET. The runtimes fetch this automatically once the capability
     /// map is known (at login and on each region change), and on demand via

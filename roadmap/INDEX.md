@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 322 |
 | blocked | 42 |
 | in-progress | 21 |
-| bugs | 46 |
-| done | 1080 |
+| bugs | 45 |
+| done | 1081 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1653** |
@@ -1185,7 +1185,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (46)
+## bugs (45)
 
 ### viewer
 
@@ -1280,8 +1280,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 - [`viewer-region-push-discards-pending-edits`](bugs/viewer-region-push-discards-pending-edits.md)
   — A region push throws away the estate manager's unapplied edits
-- [`viewer-remote-parcel-id-uncorrelated`](bugs/viewer-remote-parcel-id-uncorrelated.md)
-  — A resolved parcel id names no question, so two askers cannot be told apart
 - [`viewer-rigged-attachments-wearer-not-resolved`](bugs/viewer-rigged-attachments-wearer-not-resolved.md)
   — Worn rigged attachments (e.g. own shoes) don't render — wearer never
   resolved / too many rigged-pending objects
@@ -1296,7 +1294,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1080)
+## done (1081)
 
 ### protocol
 
@@ -2616,6 +2614,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-region-options-general`](done/viewer-region-options-general.md) —
   Region / Estate floater — region (general) tab (blocked by
   `viewer-region-options-debug` (done))
+- [`viewer-remote-parcel-id-uncorrelated`](done/viewer-remote-parcel-id-uncorrelated.md)
+  — A resolved parcel id names no question, so two askers cannot be told apart
 - [`viewer-remove-attachment-message-is-a-no-op`](done/viewer-remove-attachment-message-is-a-no-op.md)
   — '`Command::RemoveAttachment` sends a message no grid handles'
 - [`viewer-render-fixtures-vendored-assets`](done/viewer-render-fixtures-vendored-assets.md)
