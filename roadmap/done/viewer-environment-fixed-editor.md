@@ -146,7 +146,9 @@ because the reference does not read them at all.
 
 - **No Import.** The reference's `Import` reads a legacy WindLight `.xml` preset
   off disk, which is the legacy-preset importer's job rather than this window's.
-  Filed as [[viewer-environment-import-legacy-presets]].
+  Filed as [[viewer-environment-import-legacy-presets]] — **landed 2026-09-11**,
+  which is also when `EditSession::item` became optional, since an imported
+  preset is a frame with no inventory item behind it.
 - **No day-cycle creator.** New Day Cycle stays greyed out: an item nothing can
   open is worse than a menu entry that says so. It comes with
   [[viewer-environment-day-cycle-editor]].

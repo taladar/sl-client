@@ -25,6 +25,13 @@ bevy = { version = "0.19.0" }
 directories = { version = "6.0.0" }
 fs-err = { workspace = true }
 regex = { version = "1.13.1" }
+# The host's file-open dialog. `xdg-portal` only: under Wayland the chooser has
+# to come from `org.freedesktop.portal.FileChooser` (with a `zenity` fallback),
+# and on Windows / macOS `rfd` uses the native dialog regardless of this
+# feature. The default `wayland` feature is off because it only serves
+# `set_parent`, which this workspace cannot call — Bevy hands out a window
+# handle through an `unsafe fn` and `unsafe_code` is forbidden here.
+rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
 sl-audio = { path = "../sl-audio", version = "0.1.0" }
 sl-client-bevy = { workspace = true }
 tracing = { workspace = true }

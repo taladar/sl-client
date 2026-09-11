@@ -159,6 +159,7 @@ pub(crate) use sl_viewer_kit::flexi;
 pub(crate) use sl_viewer_notices::experience_permission;
 pub(crate) use sl_viewer_notices::experiences_floater;
 pub(crate) use sl_viewer_platform::environment_assets;
+pub(crate) use sl_viewer_platform::file_dialog;
 pub(crate) use sl_viewer_ui_widgets::floater;
 #[cfg(test)]
 mod floater_chrome;
@@ -1223,6 +1224,10 @@ fn run_session(
     .add_plugins(crate::linkified_text::LinkifiedTextPlugin)
     // Shared OS-clipboard handle for the "Copy SLURL" affordances.
     .add_plugins(crate::clipboard::ClipboardPlugin)
+    // The host's file-open dialog (the XDG FileChooser portal on Linux), for
+    // every "… from disk": the settings editors' Import today, the uploaders
+    // when they land.
+    .add_plugins(crate::file_dialog::FileDialogPlugin)
     // Routes a clicked / command-line SLURL to its handler (profile, IM,
     // teleport, world map): viewer-slurl-parse-dispatch.
     .add_plugins(crate::slurl_dispatch::SlurlDispatchPlugin)

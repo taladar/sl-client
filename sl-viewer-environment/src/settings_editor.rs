@@ -47,11 +47,21 @@
 //! frame that carries no profile at all materialises the reference's default
 //! profile first, rather than storing one term beside four zeroes.
 //!
-//! # Not done here
+//! # Import reads a preset that was never an asset
 //!
-//! - **No Import.** The reference's `Import` reads a legacy WindLight `.xml`
-//!   preset off disk. That is the legacy-preset importer's job, not this
-//!   window's (`viewer-environment-import-legacy-presets`).
+//! **Import** puts the host's file chooser up
+//! ([`sl_viewer_platform::file_dialog`]) and converts the legacy WindLight
+//! `.xml` preset it comes back with
+//! ([`legacy_preset_from_bytes`]). What lands in the window is a frame with
+//! **no inventory item behind it** — the reference's
+//! `loadInventoryItem(LLUUID::null)` — so the session's `item` is `None`, Save
+//! has nothing to write onto and says so, and a **Save As** is what files it
+//! (in the Settings folder, where a brand-new settings item goes). The session
+//! starts *modified*, because the frame on screen exists nowhere else.
+//!
+//! The confirmation for throwing unsaved work away is raised **before** the
+//! dialog, as the reference's `onButtonImport` does: being asked whether you
+//! meant it after picking a file is the wrong order.
 //!
 //! Reference (Firestorm, read-only): `llfloaterfixedenvironment.cpp`,
 //! `panel_settings_sky_atmos.xml`, `panel_settings_sky_clouds.xml`,
@@ -65,15 +75,20 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui_widgets::{SliderRange, SliderValue, ValueChange};
 use sl_client_bevy::{
-    AssetKey, AssetUpdateLocation, Command, EnvironmentAsset, InventoryFolderKey, InventoryKey,
-    SettingsKind, SkySettings, SlCommand, SlEvent, SlSessionEvent, TextureKey, UpdatableAssetType,
-    WaterSettings, environment_asset_to_bytes,
+    AssetKey, AssetUpdateLocation, Command, EnvironmentAsset, FolderType, InventoryFolderKey,
+    InventoryKey, SettingsKind, SkySettings, SlCommand, SlEvent, SlSessionEvent, TextureKey,
+    UpdatableAssetType, WaterSettings, environment_asset_to_bytes, legacy_preset_from_bytes,
+    legacy_preset_name,
 };
+use sl_viewer_inventory::inventory::InventoryModel;
 use sl_viewer_inventory::inventory_actions::new_settings_item;
 use sl_viewer_notifications::{NotificationResponse, ShowNotification};
 use sl_viewer_pickers::ui_texture_picker::TextureSwatchValue;
 use sl_viewer_platform::environment_assets::EnvironmentAssetManager;
-use sl_viewer_ui_core::i18n::Translated;
+use sl_viewer_platform::file_dialog::{
+    FileDialogClosed, FileDialogFilter, FileDialogOutcome, OpenFileDialog,
+};
+use sl_viewer_ui_core::i18n::{Translated, Translator};
 use sl_viewer_ui_core::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
 use sl_viewer_ui_widgets::floater::{
@@ -210,6 +225,8 @@ struct EditorTextureSwatch {
 /// What a chrome button does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EditorAction {
+    /// Read a legacy WindLight preset off disk into this window.
+    Import,
     /// Save the asset back onto the item it came from.
     Save,
     /// Save a copy as a new inventory item.
@@ -256,11 +273,16 @@ struct EditorUi {
 )]
 #[derive(Debug, Clone)]
 struct EditSession {
-    /// The inventory item this asset came from. Always one: a settings frame
-    /// reaches these windows by being opened, and a frame created from nothing
-    /// is the inventory's New Sky / New Water, which files the item first and
-    /// opens it after.
-    item: EditedItem,
+    /// The inventory item this asset came from, or `None` for a frame that has
+    /// never been filed.
+    ///
+    /// Almost always there is one: a settings frame reaches these windows by
+    /// being opened, and a frame created from nothing is the inventory's New Sky
+    /// / New Water, which files the item first and opens it after. The exception
+    /// is an **imported** legacy WindLight preset, which is a frame off disk
+    /// with nothing behind it — the reference's `loadInventoryItem(LLUUID::null)`
+    /// — so Save has nothing to write onto and a Save As is what files it.
+    item: Option<EditedItem>,
     /// The name shown in the field and written into the asset.
     name: String,
     /// The frame as loaded — what Revert restores.
@@ -396,6 +418,13 @@ impl Plugin for SettingsEditorPlugin {
             .add_message::<NotificationResponse>()
             .add_message::<SettingsItemCreated>()
             .add_message::<OpenSettingsEditor>()
+            // The Import half. Idempotent for the same reason as the
+            // confirmation channels above: a host that stands these windows up
+            // without the platform layer's dialog service (the gallery) must
+            // still have somewhere for the request to go and somewhere for the
+            // reply to be read from.
+            .add_message::<OpenFileDialog>()
+            .add_message::<FileDialogClosed>()
             .add_systems(
                 Startup,
                 spawn_settings_editors.after(UiScaffoldSystems::SpawnRoot),
@@ -412,6 +441,10 @@ impl Plugin for SettingsEditorPlugin {
                     // the window the row was clicked in.
                     open_settings_editor.after(FloaterSystems::Commands),
                     poll_pending_open,
+                    // Before the re-seed and the preview push below, so an
+                    // imported frame reaches the widgets and the edit layer in
+                    // the frame the dialog closed.
+                    apply_imported_preset,
                     apply_editor_color_picks,
                     apply_editor_texture_picks,
                     read_editor_names,
@@ -752,8 +785,8 @@ fn spawn_name_row(commands: &mut Commands, parent: Entity, editor: EditorKind, t
     *tab = tab.saturating_add(1);
 }
 
-/// The Save / Save As / Revert row and the status line under it. Returns the
-/// status text entity.
+/// The Import / Save / Save As / Revert row and the status line under it.
+/// Returns the status text entity.
 fn spawn_button_row(
     commands: &mut Commands,
     parent: Entity,
@@ -772,6 +805,9 @@ fn spawn_button_row(
         ))
         .id();
     for (action, slug, key) in [
+        // Import leads, as it does in the reference's own button row: it is the
+        // one action that does not need something already open.
+        (EditorAction::Import, "import", "settings-editor-import"),
         (EditorAction::Save, "save", "settings-editor-save"),
         (EditorAction::SaveAs, "save-as", "settings-editor-save-as"),
         (EditorAction::Revert, "revert", "settings-editor-revert"),
@@ -847,7 +883,7 @@ fn open_settings_editor(
                 .session
                 .as_ref()
                 .map_or_else(String::new, |session| session.name.clone());
-            confirm.0 = Some(open.clone());
+            confirm.0 = Some(HeldReplacement::Open(open.clone()));
             notify.write(
                 ShowNotification::new("SettingsConfirmLoss")
                     .arg("TYPE", settings_kind_word(editor.settings_kind()))
@@ -933,11 +969,11 @@ fn poll_pending_open(
             }
             state.pending = None;
             state.session = Some(EditSession {
-                item: EditedItem {
+                item: Some(EditedItem {
                     item_id: pending.request.item_id,
                     folder_id: pending.request.folder_id,
                     editable: pending.request.editable,
-                },
+                }),
                 name: pending.request.name.clone(),
                 original: asset.clone(),
                 edited: asset,
@@ -954,6 +990,153 @@ fn poll_pending_open(
                 state.ui.status,
                 "That settings asset could not be loaded.",
             );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Importing a legacy WindLight preset.
+// ---------------------------------------------------------------------------
+
+/// The file-dialog purpose an editor's Import asks under — also the key its
+/// last-used directory is remembered by, so the sky editor reopens where the
+/// skies are and the water editor where the water is (`windlight/skies` and
+/// `windlight/water` are siblings, and a shared memory would keep dragging each
+/// one into the other's folder).
+const fn import_purpose(editor: EditorKind) -> &'static str {
+    match editor {
+        EditorKind::Sky => "settings-editor-import-sky",
+        EditorKind::Water => "settings-editor-import-water",
+    }
+}
+
+/// The file-open dialog an editor's Import puts up: legacy WindLight presets are
+/// LLSD-XML files, so `.xml` and "everything" are the two filters, as in the
+/// reference (`FFLOAD_XML`).
+fn import_dialog_request(editor: EditorKind, translator: &Translator) -> OpenFileDialog {
+    OpenFileDialog {
+        purpose: import_purpose(editor).into(),
+        title: translator.get(match editor {
+            EditorKind::Sky => "settings-editor-import-sky-title",
+            EditorKind::Water => "settings-editor-import-water-title",
+        }),
+        filters: vec![
+            FileDialogFilter {
+                label: translator.get("settings-editor-import-filter-preset"),
+                extensions: vec!["xml".to_owned()],
+            },
+            FileDialogFilter {
+                label: translator.get("settings-editor-import-filter-all"),
+                extensions: vec!["*".to_owned()],
+            },
+        ],
+        start_dir: None,
+    }
+}
+
+/// Start an Import: ask the desktop for a file, or ask the user first if what is
+/// on screen would be thrown away.
+///
+/// The confirmation comes **before** the dialog, not after the file is chosen —
+/// the reference's `onButtonImport` wraps the whole of `doImportFromDisk` in
+/// `checkAndConfirmSettingsLoss`, and the other order would have the user pick a
+/// file only to be asked whether they meant it.
+fn begin_import(
+    editor: EditorKind,
+    editors: &mut SettingsEditors,
+    confirm: &mut PendingEditorReplace,
+    notify: &mut MessageWriter<ShowNotification>,
+    dialogs: &mut MessageWriter<OpenFileDialog>,
+    translator: &Translator,
+) {
+    let state = editors.get_mut(editor);
+    if let Some(session) = state.session.as_ref()
+        && session.modified
+    {
+        let name = session.name.clone();
+        confirm.0 = Some(HeldReplacement::Import(editor));
+        notify.write(
+            ShowNotification::new("SettingsConfirmLoss")
+                .arg("TYPE", settings_kind_word(editor.settings_kind()))
+                .arg("NAME", name),
+        );
+        return;
+    }
+    dialogs.write(import_dialog_request(editor, translator));
+}
+
+/// Take the file an Import dialog came back with: read it, convert it, and make
+/// it the frame this window is editing.
+///
+/// The read is on the frame thread. A WindLight preset is a few kilobytes of XML
+/// — the reference reads one with a plain `llifstream` on its own main thread —
+/// and the expensive, unbounded part of picking a file (the user deciding) has
+/// already happened out of process by the time this runs.
+fn apply_imported_preset(
+    mut closed: MessageReader<FileDialogClosed>,
+    mut editors: ResMut<SettingsEditors>,
+    mut notify: MessageWriter<ShowNotification>,
+    mut texts: Query<&mut Text>,
+) {
+    for reply in closed.read() {
+        let Some(editor) = [EditorKind::Sky, EditorKind::Water]
+            .into_iter()
+            .find(|&editor| *reply.purpose == *import_purpose(editor))
+        else {
+            // Somebody else's dialog.
+            continue;
+        };
+        let FileDialogOutcome::Picked(ref path) = reply.outcome else {
+            // Cancelled, or refused because another dialog was up: either way
+            // the window keeps whatever it was holding, and says nothing.
+            continue;
+        };
+        let state = editors.get_mut(editor);
+        let status = state.ui.status;
+        let file = path.display().to_string();
+        // The preset's *name* is its filename, percent-unescaped — the old
+        // viewer escaped a name to make it a filename, and nothing inside the
+        // file records what it was called.
+        let name = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .map_or_else(String::new, legacy_preset_name);
+        let imported = fs_err::read(path)
+            .map_err(|error| error.to_string())
+            .and_then(|bytes| {
+                legacy_preset_from_bytes(editor.settings_kind(), &name, &bytes)
+                    .map_err(|error| error.to_string())
+            });
+        match imported {
+            Ok(asset) => {
+                state.session = Some(EditSession {
+                    // Nothing behind it: a Save As is what files it.
+                    item: None,
+                    name: name.clone(),
+                    // A Revert goes back to the preset as imported, which is the
+                    // only baseline there is — there is no stored asset to
+                    // return to.
+                    original: asset.clone(),
+                    edited: asset,
+                    dirty: true,
+                    // Dirty from the start, as the reference's `setDirtyFlag()`
+                    // after an import: the frame on screen exists nowhere else,
+                    // so replacing it really would lose something.
+                    modified: true,
+                    reseed: true,
+                    saving: false,
+                });
+                set_status(&mut texts, status, &format!("Imported {name}."));
+            }
+            Err(reason) => {
+                set_status(&mut texts, status, &format!("Import failed: {reason}"));
+                notify.write(
+                    ShowNotification::new("WLImportFail")
+                        .arg("NAME", name)
+                        .arg("FILE", file)
+                        .arg("REASONS", reason),
+                );
+            }
         }
     }
 }
@@ -1241,12 +1424,14 @@ fn drop_preview_on_close(
 // Saving.
 // ---------------------------------------------------------------------------
 
-/// A chrome button press: Save (over the item), Save As (a new item), Revert.
+/// A chrome button press: Import (a preset off disk), Save (over the item),
+/// Save As (a new item), Revert.
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy observer's parameters are its injected resources: the button pool and its \
-              disabled filter, the session state, the two creation queues a Save As writes, and \
-              the command and status channels"
+              disabled filter, the session state, the two creation queues a Save As writes, the \
+              inventory mirror an unfiled frame needs a folder out of, the confirmation stash and \
+              file-dialog channel an Import uses, and the command and status channels"
 )]
 fn on_editor_button(
     press: On<Pointer<Press>>,
@@ -1255,6 +1440,11 @@ fn on_editor_button(
     mut editors: ResMut<SettingsEditors>,
     mut settings_creations: ResMut<PendingSettingsCreations>,
     mut saving_as: ResMut<PendingEditorSaveAs>,
+    mut confirm: ResMut<PendingEditorReplace>,
+    mut notify: MessageWriter<ShowNotification>,
+    mut dialogs: MessageWriter<OpenFileDialog>,
+    inventory: Option<Res<InventoryModel>>,
+    translator: Translator,
     mut commands: MessageWriter<SlCommand>,
     mut texts: Query<&mut Text>,
 ) {
@@ -1264,6 +1454,20 @@ fn on_editor_button(
     let Ok(button) = buttons.get(press.entity).copied() else {
         return;
     };
+    // Import is the one action that does not need something open — it is how a
+    // window with nothing in it gets a frame — so it is handled before the
+    // session guard rather than inside it.
+    if button.action == EditorAction::Import {
+        begin_import(
+            button.editor,
+            &mut editors,
+            &mut confirm,
+            &mut notify,
+            &mut dialogs,
+            &translator,
+        );
+        return;
+    }
     let state = editors.get_mut(button.editor);
     let status = state.ui.status;
     let Some(session) = state.session.as_mut() else {
@@ -1273,8 +1477,19 @@ fn on_editor_button(
     // Recorded here and pushed after the session borrow ends.
     let mut queued: Option<PendingSave> = None;
     match button.action {
+        // Handled above, before the session guard.
+        EditorAction::Import => {}
         EditorAction::Save => {
-            let item = session.item;
+            // An imported preset has no item to write onto; the reference greys
+            // its Save for the same reason (`mInventoryId.isNull()`).
+            let Some(item) = session.item else {
+                set_status(
+                    &mut texts,
+                    status,
+                    "This preset is not in your inventory yet — use Save As.",
+                );
+                return;
+            };
             if !item.editable {
                 set_status(&mut texts, status, "That item may not be modified.");
                 return;
@@ -1295,7 +1510,26 @@ fn on_editor_button(
             });
         }
         EditorAction::SaveAs => {
-            let folder_id = session.item.folder_id;
+            // An imported preset has no folder of its own, so the copy goes
+            // where a brand-new settings item goes: the Settings system folder,
+            // falling back to the agent's root — the reference's
+            // `findCategoryUUIDForType(FT_SETTINGS)`.
+            let folder_id = match session.item {
+                Some(item) => Some(item.folder_id),
+                None => inventory.as_ref().and_then(|model| {
+                    model
+                        .folder_by_type(FolderType::Settings)
+                        .or_else(|| model.agent_root())
+                }),
+            };
+            let Some(folder_id) = folder_id else {
+                set_status(
+                    &mut texts,
+                    status,
+                    "There is no Settings folder to file a copy in yet.",
+                );
+                return;
+            };
             let name = session.name.clone();
             let data = environment_asset_to_bytes(&named(&session.edited, &name));
             let kind = button.editor.settings_kind();
@@ -1372,7 +1606,23 @@ fn report_editor_save(
 /// response carries the template name rather than the raise's own id, so this is
 /// what tells our confirmation from anybody else's.
 #[derive(Resource, Debug, Default)]
-struct PendingEditorReplace(Option<OpenSettingsEditor>);
+struct PendingEditorReplace(Option<HeldReplacement>);
+
+/// What a window is waiting for permission to replace its unsaved frame with.
+///
+/// Both arms raise the same `SettingsConfirmLoss` — they are the same question
+/// (may the work on screen go?) asked by the two things that would throw it
+/// away, which is exactly how the reference groups them: `onButtonImport` and
+/// its load-from-inventory both go through `checkAndConfirmSettingsLoss`.
+#[derive(Debug, Clone)]
+enum HeldReplacement {
+    /// An inventory item the user asked to open, replayed once confirmed.
+    Open(OpenSettingsEditor),
+    /// An Import the user pressed: the dialog has not been opened yet, because
+    /// asking for a file and *then* asking whether the answer may be used gets
+    /// the order wrong.
+    Import(EditorKind),
+}
 
 /// The reference's `getSettingsType()` word, for the confirmation's `[TYPE]`.
 const fn settings_kind_word(kind: SettingsKind) -> &'static str {
@@ -1383,33 +1633,45 @@ const fn settings_kind_word(kind: SettingsKind) -> &'static str {
     }
 }
 
-/// Carry out (or drop) an open the user was asked to confirm.
+/// Carry out (or drop) the replacement the user was asked to confirm.
 ///
 /// Replaying the original [`OpenSettingsEditor`] rather than opening by hand
 /// keeps one route into these windows: the confirmed open takes the same path an
 /// unconfirmed one does, and the session it replaces is gone by the time it runs.
+/// A confirmed Import goes the same way — the session is dropped and the file
+/// dialog is asked for, which is what an unconfirmed press does.
 fn confirm_editor_replace(
     mut responses: MessageReader<NotificationResponse>,
     mut confirm: ResMut<PendingEditorReplace>,
     mut editors: ResMut<SettingsEditors>,
     mut opens: MessageWriter<OpenSettingsEditor>,
+    mut dialogs: MessageWriter<OpenFileDialog>,
+    translator: Translator,
 ) {
     for response in responses.read() {
         if response.template != "SettingsConfirmLoss" {
             continue;
         }
-        let Some(open) = confirm.0.take() else {
+        let Some(held) = confirm.0.take() else {
             continue;
         };
         if response.button != Some("OK") {
             continue;
         }
-        // Drop the session *before* replaying, or the open would find it still
-        // modified and ask again.
-        if let Some(editor) = EditorKind::of_settings(open.kind) {
-            editors.get_mut(editor).session = None;
+        match held {
+            HeldReplacement::Open(open) => {
+                // Drop the session *before* replaying, or the open would find it
+                // still modified and ask again.
+                if let Some(editor) = EditorKind::of_settings(open.kind) {
+                    editors.get_mut(editor).session = None;
+                }
+                opens.write(open);
+            }
+            HeldReplacement::Import(editor) => {
+                editors.get_mut(editor).session = None;
+                dialogs.write(import_dialog_request(editor, &translator));
+            }
         }
-        opens.write(open);
     }
 }
 
@@ -1451,12 +1713,12 @@ fn report_editor_save_as(
         let state = editors.get_mut(editor);
         let status = state.ui.status;
         if let Some(session) = state.session.as_mut() {
-            session.item = EditedItem {
+            session.item = Some(EditedItem {
                 item_id: item.item,
                 folder_id: item.folder,
                 // Freshly minted by this agent, so modifiable by definition.
                 editable: true,
-            };
+            });
             session.modified = false;
             session.original = session.edited.clone();
         }
@@ -1578,9 +1840,17 @@ fn set_status(texts: &mut Query<&mut Text>, status: Option<Entity>, message: &st
 
 #[cfg(test)]
 mod tests {
-    use super::{EditorKind, frame_name, named, settings_kind_word};
+    use bevy::ecs::system::RunSystemOnce as _;
+    use bevy::prelude::*;
+    use sl_viewer_platform::file_dialog::{FileDialogClosed, FileDialogOutcome};
+
+    use super::{
+        EditSession, EditorKind, HeldReplacement, OpenFileDialog, PendingEditorReplace,
+        SettingsEditors, Translator, apply_imported_preset, begin_import, frame_name,
+        import_purpose, named, settings_kind_word,
+    };
     use crate::knobs::SkyKnob;
-    use pretty_assertions::assert_eq;
+    use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_bevy::{
         DensityLayer, EnvironmentAsset, SettingsKind, SkySettings, WaterSettings,
         environment_asset_from_bytes, environment_asset_to_bytes,
@@ -1712,6 +1982,273 @@ mod tests {
                 .first()
                 .and_then(|layer| layer.anisotropy),
             Some(0.8)
+        );
+        Ok(())
+    }
+
+    /// A unique throwaway directory under the system temp dir (the crate has no
+    /// `tempfile` dependency; this mirrors the helper sl-settings' tests use).
+    fn tempdir(label: &str) -> Result<std::path::PathBuf, TestError> {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "{}-{label}-{nanos}-{:?}",
+            env!("CARGO_PKG_NAME"),
+            std::thread::current().id()
+        ));
+        fs_err::create_dir_all(&dir)?;
+        Ok(dir)
+    }
+
+    /// The stock pre-EEP `Default.xml` water preset, enough of it to convert.
+    const LEGACY_WATER: &str = r"<llsd>
+    <map>
+    <key>blurMultiplier</key>
+        <real>0.25</real>
+    <key>fresnelOffset</key>
+        <real>0.75</real>
+    <key>waterFogDensity</key>
+        <real>16</real>
+    </map>
+</llsd>
+";
+
+    /// An app with just the pieces `apply_imported_preset` reads and writes —
+    /// the window state it seeds and the notification channel it reports a
+    /// failure on. The window's widgets are not needed: the session is what an
+    /// import produces, and the re-seed that paints it is tested elsewhere.
+    fn import_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<SettingsEditors>()
+            .add_message::<FileDialogClosed>()
+            .add_message::<sl_viewer_notifications::ShowNotification>()
+            .add_systems(Update, apply_imported_preset);
+        app
+    }
+
+    /// Announce a closed dialog as if the platform layer had.
+    fn picked(app: &mut App, purpose: &str, path: &std::path::Path) {
+        app.world_mut().write_message(FileDialogClosed {
+            purpose: purpose.into(),
+            outcome: FileDialogOutcome::Picked(path.to_path_buf()),
+        });
+        app.update();
+    }
+
+    /// **The two editors' dialogs are told apart.** They share one reply
+    /// stream, so a sky import must not be answered with the file the water
+    /// editor asked for — and the purposes are also the keys the remembered
+    /// directories hang on.
+    #[test]
+    fn each_editor_imports_under_its_own_purpose() {
+        assert_ne!(
+            import_purpose(EditorKind::Sky),
+            import_purpose(EditorKind::Water),
+            "one reply stream, two askers"
+        );
+    }
+
+    /// **An imported preset has no item behind it, and is dirty from the
+    /// start.** Those two facts are what make Save refuse, Save As the way to
+    /// file it, and a following Import ask before throwing it away.
+    #[test]
+    fn importing_a_preset_seeds_an_unfiled_modified_session() -> Result<(), TestError> {
+        let dir = tempdir("import")?;
+        let file = dir.join("%5BTOR%5D%20Bayouette.xml");
+        fs_err::write(&file, LEGACY_WATER)?;
+        let mut app = import_app();
+        picked(&mut app, import_purpose(EditorKind::Water), &file);
+
+        let editors = app.world().resource::<SettingsEditors>();
+        let session = editors
+            .water
+            .session
+            .as_ref()
+            .ok_or("the import seeds the water window")?;
+        assert_eq!(
+            session.name, "[TOR] Bayouette",
+            "the frame is named after the unescaped file stem"
+        );
+        assert!(session.item.is_none(), "nothing filed it yet");
+        assert!(session.modified, "the frame exists nowhere but this window");
+        assert!(session.reseed, "and the widgets have to be repainted");
+        let EnvironmentAsset::Water(ref water) = session.edited else {
+            return Err("a water editor imports water".into());
+        };
+        assert!(
+            (water.fresnel_offset - 0.75).abs() < 0.001,
+            "the preset's values, not the defaults"
+        );
+        assert_eq!(
+            frame_name(&session.original),
+            session.name,
+            "a revert goes back to the preset as imported"
+        );
+        fs_err::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    /// **A file that is not a preset of this kind is refused, loudly.** The
+    /// window keeps what it had and the reference's `WLImportFail` is raised —
+    /// silently leaving the old frame on screen would read as "imported".
+    #[test]
+    fn a_file_that_is_not_this_kind_of_preset_is_refused() -> Result<(), TestError> {
+        let dir = tempdir("import-wrong")?;
+        let file = dir.join("Not a preset.xml");
+        fs_err::write(
+            &file,
+            "<llsd><map><key>nope</key><real>1</real></map></llsd>",
+        )?;
+        let mut app = import_app();
+        picked(&mut app, import_purpose(EditorKind::Sky), &file);
+
+        assert!(
+            app.world()
+                .resource::<SettingsEditors>()
+                .sky
+                .session
+                .is_none(),
+            "the window is left as it was"
+        );
+        let raised: Vec<sl_viewer_notifications::ShowNotification> = app
+            .world_mut()
+            .resource_mut::<Messages<sl_viewer_notifications::ShowNotification>>()
+            .drain()
+            .collect();
+        let first = raised.first().ok_or("a failure is reported")?;
+        assert_eq!(first.template, "WLImportFail", "the reference's own alert");
+        fs_err::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    /// **A reply for somebody else's dialog is left alone.** Every file-open
+    /// reply in the viewer comes down one stream, so the uploaders (when they
+    /// land) must not be able to seed a settings editor by accident.
+    #[test]
+    fn another_window_s_file_is_not_imported() -> Result<(), TestError> {
+        let dir = tempdir("import-other")?;
+        let file = dir.join("Water.xml");
+        fs_err::write(&file, LEGACY_WATER)?;
+        let mut app = import_app();
+        picked(&mut app, "upload-image", &file);
+
+        let editors = app.world().resource::<SettingsEditors>();
+        assert!(editors.sky.session.is_none(), "the sky window is untouched");
+        assert!(
+            editors.water.session.is_none(),
+            "and so is the water window"
+        );
+        fs_err::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    /// Drive [`begin_import`] for the sky window inside a real system, since
+    /// its outputs are message writers.
+    fn run_begin_import(app: &mut App) {
+        app.world_mut()
+            .run_system_once(
+                |mut editors: ResMut<SettingsEditors>,
+                 mut confirm: ResMut<PendingEditorReplace>,
+                 mut notify: MessageWriter<sl_viewer_notifications::ShowNotification>,
+                 mut dialogs: MessageWriter<OpenFileDialog>,
+                 translator: Translator| {
+                    begin_import(
+                        EditorKind::Sky,
+                        &mut editors,
+                        &mut confirm,
+                        &mut notify,
+                        &mut dialogs,
+                        &translator,
+                    );
+                },
+            )
+            .ok();
+    }
+
+    /// An app with the i18n resources `begin_import` reads its dialog title
+    /// out of, and the two channels it writes to. The strings resolve to their
+    /// own keys (`install_untranslated`), which is all these tests need — what
+    /// they assert is the purpose and the confirmation, not the wording.
+    fn begin_import_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        sl_viewer_ui_core::i18n::install_untranslated(&mut app);
+        app.init_resource::<SettingsEditors>()
+            .init_resource::<PendingEditorReplace>()
+            .add_message::<OpenFileDialog>()
+            .add_message::<sl_viewer_notifications::ShowNotification>();
+        app
+    }
+
+    /// **Import needs nothing open.** It is how an empty window gets a frame at
+    /// all, so pressing it with no session must reach the file chooser rather
+    /// than the "nothing is open" refusal every other button gets.
+    #[test]
+    fn importing_with_nothing_open_goes_straight_to_the_chooser() -> Result<(), TestError> {
+        let mut app = begin_import_app();
+        run_begin_import(&mut app);
+        let asked: Vec<OpenFileDialog> = app
+            .world_mut()
+            .resource_mut::<Messages<OpenFileDialog>>()
+            .drain()
+            .collect();
+        let first = asked.first().ok_or("the chooser is asked for")?;
+        assert_eq!(
+            &*first.purpose,
+            import_purpose(EditorKind::Sky),
+            "under the sky window's own purpose"
+        );
+        assert!(
+            app.world().resource::<PendingEditorReplace>().0.is_none(),
+            "and nothing was held back for a confirmation"
+        );
+        Ok(())
+    }
+
+    /// **Unsaved work is asked about before the file is picked, not after.**
+    /// The reference wraps the whole of `doImportFromDisk` in
+    /// `checkAndConfirmSettingsLoss`; asking afterwards would have the user
+    /// choose a file only to be told it might not be used.
+    #[test]
+    fn importing_over_unsaved_work_asks_before_opening_the_chooser() -> Result<(), TestError> {
+        let mut app = begin_import_app();
+        let sky = SkySettings::legacy_windlight_default("Held sky");
+        let asset = EnvironmentAsset::Sky(Box::new(sky));
+        app.world_mut()
+            .resource_mut::<SettingsEditors>()
+            .sky
+            .session = Some(EditSession {
+            item: None,
+            name: "Held sky".to_owned(),
+            original: asset.clone(),
+            edited: asset,
+            dirty: false,
+            modified: true,
+            reseed: false,
+            saving: false,
+        });
+        run_begin_import(&mut app);
+
+        assert!(
+            app.world()
+                .resource::<Messages<OpenFileDialog>>()
+                .is_empty(),
+            "no chooser until the user says the work can go"
+        );
+        let raised: Vec<sl_viewer_notifications::ShowNotification> = app
+            .world_mut()
+            .resource_mut::<Messages<sl_viewer_notifications::ShowNotification>>()
+            .drain()
+            .collect();
+        let first = raised.first().ok_or("the loss confirmation is raised")?;
+        assert_eq!(first.template, "SettingsConfirmLoss");
+        let held = app.world().resource::<PendingEditorReplace>();
+        assert!(
+            matches!(held.0, Some(HeldReplacement::Import(EditorKind::Sky))),
+            "and the import is what a yes will carry out: {:?}",
+            held.0
         );
         Ok(())
     }

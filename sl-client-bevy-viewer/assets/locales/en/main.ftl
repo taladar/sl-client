@@ -3739,9 +3739,17 @@ settings-picker-cancel = Cancel
 settings-editor-sky-title = Sky Settings
 settings-editor-water-title = Water Settings
 settings-editor-name = Name
+# Reads a pre-EEP WindLight preset off disk into the editor.
+settings-editor-import = Import
 settings-editor-save = Save
 settings-editor-save-as = Save As
 settings-editor-revert = Revert
+# The titles and filters of the file-open dialog Import puts up. A legacy
+# WindLight preset is an LLSD XML document, hence the .xml filter.
+settings-editor-import-sky-title = Import a WindLight sky preset
+settings-editor-import-water-title = Import a WindLight water preset
+settings-editor-import-filter-preset = WindLight preset (.xml)
+settings-editor-import-filter-all = All files
 # The sky editor's tabs, and the water editor's one.
 settings-editor-tab-atmosphere = Atmosphere
 settings-editor-tab-clouds = Clouds

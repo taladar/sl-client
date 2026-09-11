@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 321 |
+| ready | 320 |
 | blocked | 42 |
 | in-progress | 22 |
 | bugs | 52 |
-| done | 1072 |
+| done | 1073 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1651** |
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (321)
+## ready (320)
 
 ### protocol
 
@@ -483,8 +483,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-object-selection-core` (done))
 - [`viewer-environment-density-profiles`](ready/viewer-environment-density-profiles.md)
   — Render the atmospheric density profiles
-- [`viewer-environment-import-legacy-presets`](ready/viewer-environment-import-legacy-presets.md)
-  — Import a legacy WindLight preset from disk
 - [`viewer-environment-pause-clouds`](ready/viewer-environment-pause-clouds.md)
   — Pause cloud animation toggle
 - [`viewer-environment-settings-unsupported-gate`](ready/viewer-environment-settings-unsupported-gate.md)
@@ -1308,7 +1306,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1072)
+## done (1073)
 
 ### protocol
 
@@ -1807,6 +1805,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-environment-fixed-editor`](done/viewer-environment-fixed-editor.md) —
   Environment editors — sky & water settings assets (blocked by
   `viewer-ui-widget-scaffold` (done))
+- [`viewer-environment-import-legacy-presets`](done/viewer-environment-import-legacy-presets.md)
+  — Import a legacy WindLight preset from disk
 - [`viewer-environment-my-environments`](done/viewer-environment-my-environments.md)
   — My Environments library (blocked by `viewer-environment-fixed-editor`
   (done))

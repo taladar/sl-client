@@ -3188,7 +3188,7 @@ pub(crate) fn direction_from_llsd(value: Option<&Llsd>) -> Direction {
 }
 
 /// Reads a two-component vector (`[x, y]` reals) from an LLSD array as `[f32; 2]`.
-fn vec2_from_llsd(value: Option<&Llsd>) -> [f32; 2] {
+pub(crate) fn vec2_from_llsd(value: Option<&Llsd>) -> [f32; 2] {
     let component = |index: usize| {
         value
             .and_then(|vector| vector.index(index))
@@ -3199,31 +3199,31 @@ fn vec2_from_llsd(value: Option<&Llsd>) -> [f32; 2] {
 }
 
 /// Reads an RGBA [`ColorAlpha`] from an LLSD `[r, g, b, a]` real array.
-fn color_alpha_from_llsd(value: Option<&Llsd>) -> ColorAlpha {
+pub(crate) fn color_alpha_from_llsd(value: Option<&Llsd>) -> ColorAlpha {
     let [red, green, blue, alpha] = vec4_from_llsd(value);
     ColorAlpha::new(red, green, blue, alpha)
 }
 
 /// Reads an RGB [`Color`] from an LLSD `[r, g, b]` real array.
-fn color_from_llsd(value: Option<&Llsd>) -> Color {
+pub(crate) fn color_from_llsd(value: Option<&Llsd>) -> Color {
     let (red, green, blue) = vec3_from_llsd(value);
     Color::new(red, green, blue)
 }
 
 /// Reads a [`Scale`] from an LLSD `[x, y, z]` real array.
-fn scale_from_llsd(value: Option<&Llsd>) -> Scale {
+pub(crate) fn scale_from_llsd(value: Option<&Llsd>) -> Scale {
     let (x, y, z) = vec3_from_llsd(value);
     Scale::new(x, y, z)
 }
 
 /// Reads a [`Glow`] from an LLSD `[size, reserved, focus]` real array.
-fn glow_from_llsd(value: Option<&Llsd>) -> Glow {
+pub(crate) fn glow_from_llsd(value: Option<&Llsd>) -> Glow {
     let (size, reserved, focus) = vec3_from_llsd(value);
     Glow::new(size, reserved, focus)
 }
 
 /// Reads a [`CloudPosDensity`] from an LLSD `[x, y, density]` real array.
-fn cloud_pos_density_from_llsd(value: Option<&Llsd>) -> CloudPosDensity {
+pub(crate) fn cloud_pos_density_from_llsd(value: Option<&Llsd>) -> CloudPosDensity {
     let (position_x, position_y, density) = vec3_from_llsd(value);
     CloudPosDensity::new(position_x, position_y, density)
 }

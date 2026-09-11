@@ -32,3 +32,18 @@ Reference (Firestorm, read-only): `File.ImportWindlightBulk`
 
 Builds on: the fixed environment editor (blocked task) — it owns the
 settings-asset create/upload path this import feeds.
+
+## Half the conversion already exists (2026-09-11)
+
+[[viewer-environment-import-legacy-presets]] landed the **sky and water**
+converters as `sl_proto::legacy_preset_from_bytes`, with the value-range and
+renamed-parameter mismatches this task warns about already handled (the scalars
+out of their four-real arrays, the cloud scroll rate's bias of ten, star
+brightness × 250, the sun's clockwise east angle). It also landed the file
+dialog, in `sl_viewer_platform::file_dialog`.
+
+What is left for this task: the **day cycle** (`days/*.xml`), which
+`legacy_preset_from_bytes` refuses outright — its keyframes name sky presets
+that live in sibling files, so converting one needs a whole folder rather than
+one file, which is what a bulk import has anyway. Plus the folder walk, the
+per-file upload, and the success/failure summary.
