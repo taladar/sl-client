@@ -4,8 +4,10 @@
 //! A single `arboard` handle is opened lazily and **kept alive** in a resource:
 //! on Linux (X11 / Wayland) the clipboard offer is served by the owning process,
 //! so dropping the handle can drop the copied selection before the user pastes.
-//! The world map keeps its own handle for historical reasons; new "Copy" sites
-//! share this one.
+//! That is also why there is exactly one: a second live handle in the same
+//! process is a second selection owner, and which of the two the compositor
+//! asks for the bytes is not the viewer's to decide. Every "Copy" site shares
+//! this handle.
 
 use std::sync::Mutex;
 

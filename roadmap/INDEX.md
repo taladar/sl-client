@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 322 |
 | blocked | 42 |
 | in-progress | 21 |
-| bugs | 47 |
-| done | 1079 |
+| bugs | 46 |
+| done | 1080 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1653** |
@@ -1185,7 +1185,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (47)
+## bugs (46)
 
 ### viewer
 
@@ -1241,8 +1241,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Align planar faces does not propagate to the normal and specular transforms
 - [`viewer-audit-ui-texture-poll-leak`](bugs/viewer-audit-ui-texture-poll-leak.md)
   — Eight copied texture-poll systems each leak Image assets for the session
-- [`viewer-audit-world-map-clipboard`](bugs/viewer-audit-world-map-clipboard.md)
-  — The world map keeps a second live arboard handle
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
   — Mesh-head brow spikes forward from face-bone shape deformation
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
@@ -1298,7 +1296,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1079)
+## done (1080)
 
 ### protocol
 
@@ -1621,6 +1619,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The recycling virtual list re-binds every pooled row on a one-row scroll
 - [`viewer-audit-water-state-purge`](done/viewer-audit-water-state-purge.md) —
   WaterState is not purged on a teleport, and leaks spawned water planes
+- [`viewer-audit-world-map-clipboard`](done/viewer-audit-world-map-clipboard.md)
+  — The world map keeps a second live arboard handle
 - [`viewer-audit-world-reset-purge-completeness`](done/viewer-audit-world-reset-purge-completeness.md)
   — The world-reset purge is a hand-maintained list of five, and several stores
   are missing

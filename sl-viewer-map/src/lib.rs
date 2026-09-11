@@ -22,6 +22,7 @@
 pub(crate) use sl_viewer_kit::coords;
 pub(crate) use sl_viewer_kit::minimap_math;
 pub(crate) use sl_viewer_kit::world_map_math;
+pub(crate) use sl_viewer_platform::clipboard;
 pub(crate) use sl_viewer_platform::paths;
 pub(crate) use sl_viewer_settings as settings;
 pub(crate) use sl_viewer_ui_core::i18n;

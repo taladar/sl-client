@@ -48,6 +48,7 @@ use sl_client_bevy::{
 };
 use sl_settings::{Scope, SettingValue};
 
+use crate::clipboard::{ViewerClipboard, copy_to_clipboard};
 use crate::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater,
 };
@@ -191,11 +192,6 @@ pub struct OpenWorldMap {
     /// Global metres north of the point to centre on.
     pub north: f64,
 }
-
-/// The OS clipboard handle for Copy SLURL, kept alive so the copied selection
-/// survives on Linux (dropping the handle can drop the offered selection).
-#[derive(Resource, Default)]
-struct WorldMapClipboard(std::sync::Mutex<Option<arboard::Clipboard>>);
 
 /// A layer-filter checkbox's fill node: which setting it mirrors.
 #[derive(Component)]
@@ -384,7 +380,11 @@ impl Plugin for WorldMapPlugin {
         app.init_resource::<WorldMapState>()
             .init_resource::<WorldMapModel>()
             .init_resource::<WorldMapTiles>()
-            .init_resource::<WorldMapClipboard>()
+            // The shared handle, which the viewer's `ClipboardPlugin` also
+            // registers: `init_resource` is idempotent, and doing it here keeps
+            // `handle_world_map_actions` — which reads it — from being skipped
+            // for a missing parameter wherever this plugin stands alone.
+            .init_resource::<ViewerClipboard>()
             .add_message::<OpenWorldMap>()
             .add_systems(Startup, spawn_world_map.after(UiScaffoldSystems::SpawnRoot))
             .add_systems(
@@ -2680,7 +2680,7 @@ fn handle_world_map_actions(
     mut state: ResMut<WorldMapState>,
     mut settings: ResMut<ViewerSettings>,
     model: Res<WorldMapModel>,
-    clipboard: Res<WorldMapClipboard>,
+    clipboard: Res<ViewerClipboard>,
     mut commands: MessageWriter<SlCommand>,
     mut begin: MessageWriter<BeginTeleportFlow>,
 ) {
@@ -2770,28 +2770,6 @@ fn selection_slurl(state: &WorldMapState, model: &WorldMapModel) -> Option<Strin
         .and_then(|info| info.name.clone())?;
     let (x, y, z) = state.selected_local;
     Some(sl_types::map::Location::new(name, x, y, z.min(4095)).as_maps_url())
-}
-
-/// Offer text on the OS clipboard, initialising the kept-alive handle on
-/// first use; a clipboard failure only logs (headless / portal-less setups).
-fn copy_to_clipboard(clipboard: &WorldMapClipboard, text: &str) {
-    let Ok(mut holder) = clipboard.0.lock() else {
-        return;
-    };
-    if holder.is_none() {
-        match arboard::Clipboard::new() {
-            Ok(handle) => *holder = Some(handle),
-            Err(error) => {
-                warn!("world map: no clipboard available: {error}");
-                return;
-            }
-        }
-    }
-    if let Some(handle) = holder.as_mut()
-        && let Err(error) = handle.set_text(text.to_owned())
-    {
-        warn!("world map: could not copy to the clipboard: {error}");
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2895,10 +2873,15 @@ pub fn spawn_world_map_specimen(commands: &mut Commands, parent: Entity, _cx: El
 
 #[cfg(test)]
 mod tests {
-    use super::{MenuDef, MenuItemDef, WORLD_MAP_MENU, effective_base_url, search_results};
+    use bevy::prelude::App;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{MapRegionInfo, Maturity, RegionHandle, Uuid};
     use sl_types::map::GridCoordinates;
+
+    use super::{
+        MenuDef, MenuItemDef, ViewerClipboard, WORLD_MAP_MENU, WorldMapPlugin, effective_base_url,
+        search_results,
+    };
 
     /// Collect every action string reachable from a menu.
     fn collect_actions(menu: &MenuDef, out: &mut Vec<&'static str>) {
@@ -2943,6 +2926,23 @@ mod tests {
                 "menu action {action:?} has no handler arm"
             );
         }
+    }
+
+    /// The map used to open a second `arboard` handle of its own. It now shares
+    /// the viewer's, which is a resource of another crate's plugin — so this
+    /// pins that the map still registers it. Without the resource, Bevy would
+    /// not fail loudly: it would skip [`super::handle_world_map_actions`] for an
+    /// unresolved parameter, and with it every world-map menu pick, not just
+    /// Copy SLURL.
+    #[test]
+    fn the_plugin_registers_the_shared_clipboard() {
+        let mut app = App::new();
+        app.add_plugins(WorldMapPlugin);
+        assert!(
+            app.world().contains_resource::<ViewerClipboard>(),
+            "WorldMapPlugin must register the shared clipboard its action \
+             handler reads"
+        );
     }
 
     #[test]

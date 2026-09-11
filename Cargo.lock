@@ -9249,7 +9249,6 @@ dependencies = [
 name = "sl-viewer-map"
 version = "0.1.0"
 dependencies = [
- "arboard",
  "bevy",
  "crossbeam-channel",
  "fs-err",
