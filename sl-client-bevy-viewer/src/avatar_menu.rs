@@ -31,9 +31,11 @@
 //!   unless you are sitting), gated on [`SELF_SITTING`] / [`SELF_STANDING`].
 //! - **Mute** (other) → a guarded [`crate::world_api::RequestBlock`] for the picked
 //!   agent.
-//! - **Add as Friend** (other) → [`Command::OfferFriendship`], disabled via
-//!   [`TARGET_NOT_FRIEND`] when the agent already is a friend, matching the
-//!   reference's `on_enable`.
+//! - **Add as Friend** (other) → a prompted
+//!   [`crate::world_api::RequestFriendship`] for the picked agent (the dialog
+//!   that asks for the offer's message, `sl_viewer_people::add_friend`),
+//!   disabled via [`TARGET_NOT_FRIEND`] when the agent already is a friend,
+//!   matching the reference's `on_enable`.
 //! - **Profile** (self and other) → opens the avatar profile floater
 //!   ([`crate::world_api::OpenAvatarProfile`]).
 //! - **More ▸ Derender ▸ Blacklist / Temporary** (other) → a guarded
@@ -108,6 +110,7 @@ use crate::world_api::AvatarState;
 use crate::world_api::DerenderKind;
 use crate::world_api::OpenAvatarProfile;
 use crate::world_api::RequestBlock;
+use crate::world_api::RequestFriendship;
 use crate::world_api::on_hud_layer;
 use crate::world_api::pointer_over_blocking_ui;
 use crate::world_api::{ConversationKey, OpenConversation};
@@ -1272,6 +1275,7 @@ fn handle_avatar_menu_actions(
     mut ground_sit: ResMut<SelfGroundSit>,
     mut commands: MessageWriter<SlCommand>,
     mut blocks: MessageWriter<RequestBlock>,
+    mut friendships: MessageWriter<RequestFriendship>,
     mut derenders: MessageWriter<RequestDerender>,
     mut exceptions: MessageWriter<crate::avatar_render_settings::RequestRenderException>,
     mut conversations: MessageWriter<OpenConversation>,
@@ -1349,10 +1353,9 @@ fn handle_avatar_menu_actions(
                 blocks.write(RequestBlock::new(agent.uuid(), name, MuteType::Agent));
             }
             "add-friend" => {
-                commands.write(SlCommand(Command::OfferFriendship {
-                    to_agent_id: agent,
-                    message: String::new(),
-                }));
+                // The prompted path (`sl_viewer_people::add_friend`) asks for
+                // the offer's message and confirms the send.
+                friendships.write(RequestFriendship::one(agent));
             }
             // File this person under one of the user's own contact sets
             // (`viewer-contact-sets`) — the floater asks which, since the pie

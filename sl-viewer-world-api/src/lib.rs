@@ -1471,6 +1471,40 @@ impl RequestBlock {
     }
 }
 
+/// A request to offer friendship to one or more residents: the single
+/// **prompted** entry point every Add Friend surface writes instead of putting
+/// a `Command::OfferFriendship` on the wire itself.
+///
+/// `sl_viewer_people::add_friend` answers it the way the reference's
+/// `LLAvatarActions::requestFriendshipDialog` does — refuse the agent itself,
+/// ask for the accompanying message, and only then send — so the avatar pie,
+/// the radar, the minimap, the profile, the inspector, search and a
+/// `secondlife:///…/requestfriend` link all gain the prompt and the
+/// confirmation at once, rather than each sending an empty offer in silence.
+#[derive(Message, Debug, Clone)]
+pub struct RequestFriendship {
+    /// The residents to offer friendship to. A multi-selection is **one**
+    /// request: it asks once and offers the typed message to each, the way the
+    /// multi-avatar menus already treat one action over a list.
+    pub targets: Vec<AgentKey>,
+}
+
+impl RequestFriendship {
+    /// Offer friendship to one resident — what a single-subject surface writes.
+    #[must_use]
+    pub fn one(agent: AgentKey) -> Self {
+        Self {
+            targets: vec![agent],
+        }
+    }
+
+    /// Offer friendship to every resident in a selection.
+    #[must_use]
+    pub const fn many(targets: Vec<AgentKey>) -> Self {
+        Self { targets }
+    }
+}
+
 /// Open the profile floater on an avatar (from the pie menu's Profile slice,
 /// the People list, or a repaint after an edit).
 #[derive(Message, Debug, Clone, Copy)]

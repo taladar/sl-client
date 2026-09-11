@@ -81,6 +81,7 @@ use crate::world_api::FriendsModel;
 use crate::world_api::GroupsModel;
 use crate::world_api::OpenGroupProfile;
 use crate::world_api::RequestBlock;
+use crate::world_api::RequestFriendship;
 use crate::world_api::{BoostTexture, DecodedTextures};
 use crate::world_api::{ConversationKey, OpenAvatarProfile, OpenConversation};
 
@@ -2584,6 +2585,7 @@ fn on_profile_action(
     clipboard: Res<crate::clipboard::ViewerClipboard>,
     mut sl_commands: MessageWriter<SlCommand>,
     mut blocks: MessageWriter<RequestBlock>,
+    mut friendships: MessageWriter<RequestFriendship>,
     mut conversations: MessageWriter<OpenConversation>,
     mut contact_sets: MessageWriter<crate::world_api::OpenAddToContactSet>,
 ) {
@@ -2618,10 +2620,10 @@ fn on_profile_action(
             }));
         }
         ProfileAction::AddFriend => {
-            sl_commands.write(SlCommand(Command::OfferFriendship {
-                to_agent_id: target,
-                message: String::new(),
-            }));
+            // The prompted path (`crate::add_friend`) asks for the offer's
+            // message and confirms the send; writing the command here would be
+            // the silent offer the bug records.
+            friendships.write(RequestFriendship::one(target));
         }
         ProfileAction::AddToContactSet => {
             contact_sets.write(crate::world_api::OpenAddToContactSet::one(

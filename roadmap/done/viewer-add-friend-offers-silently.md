@@ -2,7 +2,7 @@
 id: viewer-add-friend-offers-silently
 title: Add Friend sends the offer silently — no message dialog, no feedback
 topic: viewer
-status: bugs
+status: done
 origin: seen on aditi while live-checking [[viewer-conference-start-ui]]
   (2026-08-21)
 refs: [viewer-social-profiles, viewer-notification-catalogue-friends-people,
@@ -63,3 +63,50 @@ they can confirm the offer *arrives* (as above) but not the accept half.
 Reference (Firestorm, read-only): `llavataractions.cpp`
 (`requestFriendshipDialog`, `callbackAddFriendWithMessage`),
 `notifications.xml` (`AddFriendWithMessage`, `AddSelfFriend`).
+
+## Done (2026-09-11)
+
+Every Add Friend affordance now writes a **`RequestFriendship`**
+(`sl-viewer-world-api`, beside `RequestBlock`) instead of the wire command, and
+`sl_viewer_people::add_friend` is the one place that answers it: it refuses the
+agent itself with `AddSelfFriend`, raises `AddFriendWithMessage`, sends
+`Command::OfferFriendship` carrying what was typed, and confirms with
+`FriendshipOffered`. Seven call sites moved onto it — the avatar / attachment
+pie (`avatar_menu.rs`), the radar, the minimap, the profile floater, the
+inspector popup, search, and a `secondlife:///…/requestfriend` link
+(`slurl_dispatch.rs`).
+
+`FriendshipOffered` was **not** in the catalogue (the coverage TSV had it as
+`done` under [[viewer-dialog-offers-invites]], which handles the *incoming*
+offers). It is ported now, with `notification-friendship-offered` in the English
+bundle; the TSV row moved to `ported` under this task.
+
+**One prompt at a time, and nothing dropped.** A `NotificationResponse` names
+the template it answers, not the raise, so two live `AddFriendWithMessage`
+dialogs would be indistinguishable and the first answer would offer friendship
+to the second's residents. `FriendshipOfferQueue` therefore keeps one batch
+outstanding and queues the rest — a click that arrives while a dialog is up
+waits its turn rather than being discarded. Answering frees the slot and raises
+the next dialog in the same frame (the send system runs before the ask).
+
+**A multi-selection is one request.** The radar's per-agent loop (and its
+already-a-friend filter) moved into the shared path: one dialog names the whole
+selection, and the typed message goes to each. Two deviations from the
+reference, which never offers to more than one resident: the dialog body and the
+confirmation name several residents comma-joined, and `[NAME]` / `[TO_NAME]`
+carry the shown label rather than an agent SLURL (a notification body is plain
+text here, not linkified).
+
+Not carried over: the reference also files the target under **Recent People**,
+which this viewer has no model for.
+
+Tests (`add_friend.rs`): the ask happens before any send and the typed message
+is what goes on the wire; Cancel and a button-less dismissal send nothing and
+free the prompt; self-friendship raises the tip instead; a selection asks once,
+offers each, and drops an existing friend; a second request waits for the first
+dialog and is answered with its own message. The radar and avatar-pie tests now
+assert the request rather than the command, and the pie is checked for sending
+*nothing* on the wire itself.
+
+Still live-unverified (needs a second avatar that can accept): that the typed
+message arrives with the offer on the receiving side.

@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 322 |
 | blocked | 42 |
 | in-progress | 21 |
-| bugs | 45 |
-| done | 1081 |
+| bugs | 44 |
+| done | 1082 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1653** |
@@ -1185,12 +1185,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (45)
+## bugs (44)
 
 ### viewer
 
-- [`viewer-add-friend-offers-silently`](bugs/viewer-add-friend-offers-silently.md)
-  — Add Friend sends the offer silently — no message dialog, no feedback
 - [`viewer-animesh-intermittent-render`](bugs/viewer-animesh-intermittent-render.md)
   — Animesh intermittently fails to render (timing race, not deterministic)
 - [`viewer-audio-tests-open-real-devices`](bugs/viewer-audio-tests-open-real-devices.md)
@@ -1294,7 +1292,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1081)
+## done (1082)
 
 ### protocol
 
@@ -1530,6 +1528,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   About Land floater — Options tab
 - [`viewer-about-landmark-floater`](done/viewer-about-landmark-floater.md) —
   About Landmark floater — full detail view
+- [`viewer-add-friend-offers-silently`](done/viewer-add-friend-offers-silently.md)
+  — Add Friend sends the offer silently — no message dialog, no feedback
 - [`viewer-ais3-inventory-mutations-and-cof-reconverge`](done/viewer-ais3-inventory-mutations-and-cof-reconverge.md)
   — Route inventory mutations through AIS3 on SL + reconverge the COF on wear
 - [`viewer-appearance-editor-bodyparts`](done/viewer-appearance-editor-bodyparts.md)

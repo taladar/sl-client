@@ -744,7 +744,7 @@ TeleportOfferSent	teleport	ported	viewer-notification-catalogue-teleport
 TeleportRequest	teleport	ported	viewer-notification-catalogue-teleport
 GotoURL	web-browser	ported	viewer-notification-catalogue-web-browser
 OfferFriendship	friends-people	done	viewer-dialog-offers-invites
-FriendshipOffered	friends-people	done	viewer-dialog-offers-invites
+FriendshipOffered	friends-people	ported	viewer-add-friend-offers-silently
 OfferFriendshipNoMessage	friends-people	ported	viewer-notification-catalogue-friends-people
 FriendshipAccepted	friends-people	ported	viewer-notification-catalogue-friends-people
 FriendshipDeclined	friends-people	ported	viewer-notification-catalogue-friends-people

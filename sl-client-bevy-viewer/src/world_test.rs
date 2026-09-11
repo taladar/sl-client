@@ -4684,7 +4684,7 @@ mod pie_dispatch_tests {
     use crate::ui_element::UiAction;
     use crate::world_api::{
         ConversationKey, DerenderKind, EditToolState, OpenAddToContactSet, OpenAvatarProfile,
-        OpenConversation, RequestBlock, SelectionSet, SelfGroundSit,
+        OpenConversation, RequestBlock, RequestFriendship, SelectionSet, SelfGroundSit,
     };
 
     /// A boxed error so tests can use `?` instead of the disallowed
@@ -4729,6 +4729,7 @@ mod pie_dispatch_tests {
     /// others stayed empty.
     fn record_effects(app: &mut App) {
         sl_viewer_testkit::record::<RequestBlock>(app);
+        sl_viewer_testkit::record::<RequestFriendship>(app);
         sl_viewer_testkit::record::<RequestDerender>(app);
         sl_viewer_testkit::record::<RequestRenderException>(app);
         sl_viewer_testkit::record::<RefetchAvatarTextures>(app);
@@ -5205,27 +5206,31 @@ mod pie_dispatch_tests {
         Ok(())
     }
 
-    /// **Add as Friend goes on the wire, and Block goes through the guard
-    /// under the name the grid resolved**: the two avatar slices that name a
-    /// person to something outside the viewer.
+    /// **Add as Friend goes through the prompted path, and Block goes through
+    /// the guard under the name the grid resolved**: the two avatar slices that
+    /// name a person to something outside the viewer.
+    ///
+    /// The pie writes a `RequestFriendship` rather than the wire command: the
+    /// dialog that asks for the offer's message
+    /// (`sl_viewer_people::add_friend`) is what puts `OfferFriendship` on the
+    /// wire, and a pie that sent it here would be the silent offer
+    /// [[viewer-add-friend-offers-silently]] records.
     #[test]
     fn add_friend_offers_and_block_carries_the_resolved_name() -> Result<(), TestError> {
         let (mut app, other) = other_avatar_world()?;
         commit(&mut app, AVATAR_MENU_ELEMENT, "add-friend");
-        let offers: Vec<_> = drain_commands(&mut app)
-            .into_iter()
-            .filter_map(|command| match command {
-                Command::OfferFriendship {
-                    to_agent_id,
-                    message,
-                } => Some((to_agent_id, message)),
-                _other => None,
-            })
-            .collect();
         assert_eq!(
-            offers,
-            vec![(other, String::new())],
-            "Add as Friend must offer to the clicked agent, with the pie's empty message"
+            sl_viewer_testkit::drain::<RequestFriendship>(&mut app)
+                .into_iter()
+                .map(|request| request.targets)
+                .collect::<Vec<_>>(),
+            vec![vec![other]],
+            "Add as Friend must ask to befriend the clicked agent"
+        );
+        assert_eq!(
+            command_names(&mut app),
+            Vec::<&str>::new(),
+            "and must not put the offer on the wire itself"
         );
 
         commit(&mut app, AVATAR_MENU_ELEMENT, "mute");
@@ -5441,17 +5446,13 @@ mod pie_dispatch_tests {
         );
 
         commit(&mut app, ATTACHMENT_MENU_ELEMENT, "add-friend");
-        let offers: Vec<_> = drain_commands(&mut app)
-            .into_iter()
-            .filter_map(|command| match command {
-                Command::OfferFriendship { to_agent_id, .. } => Some(to_agent_id),
-                _other => None,
-            })
-            .collect();
         assert_eq!(
-            offers,
-            vec![wearer],
-            "an attachment pie's Add as Friend must offer to the wearer"
+            sl_viewer_testkit::drain::<RequestFriendship>(&mut app)
+                .into_iter()
+                .map(|request| request.targets)
+                .collect::<Vec<_>>(),
+            vec![vec![wearer]],
+            "an attachment pie's Add as Friend must ask to befriend the wearer"
         );
         Ok(())
     }

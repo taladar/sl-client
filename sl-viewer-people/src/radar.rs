@@ -95,6 +95,7 @@ use crate::world_api::MuteModel;
 use crate::world_api::OpenAddToContactSet;
 use crate::world_api::OpenAvatarProfile;
 use crate::world_api::RequestBlock;
+use crate::world_api::RequestFriendship;
 use crate::world_api::StartConference;
 use crate::world_api::TerrainState;
 use crate::world_api::{ConversationKey, OpenConversation};
@@ -1961,6 +1962,7 @@ fn handle_radar_actions(
     mut marks: ResMut<MinimapMarks>,
     mut sl_commands: MessageWriter<SlCommand>,
     mut blocks: MessageWriter<RequestBlock>,
+    mut friendships: MessageWriter<RequestFriendship>,
     mut derenders: MessageWriter<RequestDerender>,
     mut conferences: MessageWriter<StartConference>,
     mut profiles: MessageWriter<OpenAvatarProfile>,
@@ -2033,16 +2035,11 @@ fn handle_radar_actions(
                 }));
             }
             "add-friend" => {
-                for agent in agents.iter().filter(|agent| {
-                    !friends
-                        .as_deref()
-                        .is_some_and(|friends| friends.is_friend(**agent))
-                }) {
-                    sl_commands.write(SlCommand(Command::OfferFriendship {
-                        to_agent_id: *agent,
-                        message: String::new(),
-                    }));
-                }
+                // One prompt naming the whole selection, the way the teleport
+                // offer above is one message naming it: `crate::add_friend`
+                // asks for the accompanying message, drops the rows that are
+                // already friends, and confirms what it sent.
+                friendships.write(RequestFriendship::many(agents.to_vec()));
             }
             "remove-friend" => {
                 for agent in agents.iter().filter(|agent| {
@@ -2132,8 +2129,8 @@ mod tests {
         MenuItemDef, MinimapMarks, MuteModel, OpenAddToContactSet, OpenAvatarProfile,
         OpenConversation, PaymentInfo, RADAR_ELEMENT, RADAR_MENU, RADAR_MULTI_MENU,
         RadarMenuTarget, RadarRow, RadarSelection, RadarState, RadarView, RequestBlock,
-        RequestDerender, RequestRenderException, SLOT_PROFILES, StartConference, UiAction,
-        handle_radar_actions, handle_radar_profile_picks,
+        RequestDerender, RequestFriendship, RequestRenderException, SLOT_PROFILES, StartConference,
+        UiAction, handle_radar_actions, handle_radar_profile_picks,
     };
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
@@ -2298,6 +2295,7 @@ mod tests {
         app.add_message::<UiAction>()
             .add_message::<SlCommand>()
             .add_message::<RequestBlock>()
+            .add_message::<RequestFriendship>()
             .add_message::<RequestDerender>()
             .add_message::<OpenConversation>()
             .add_message::<StartConference>()
@@ -2384,6 +2382,17 @@ mod tests {
             filed,
             vec![selection.clone()],
             "the add-to-set floater is asked once, for the whole selection"
+        );
+
+        pick(&mut app, "add-friend");
+        let asked: Vec<Vec<AgentKey>> = drain::<RequestFriendship>(&app)
+            .into_iter()
+            .map(|request| request.targets)
+            .collect();
+        assert_eq!(
+            asked,
+            vec![selection.clone()],
+            "several rows are one prompted friendship request naming them all"
         );
 
         pick(&mut app, "mark-red");

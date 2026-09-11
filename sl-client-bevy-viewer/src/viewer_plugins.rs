@@ -476,6 +476,12 @@ impl Plugin for ViewerWorldPlugins {
         app.init_resource::<AppearanceApplyBudget>();
         app.init_resource::<world_api::MuteModel>();
         app.add_message::<world_api::RequestBlock>();
+        // The prompted friendship-offer channel, for the same reason: the world
+        // layer's avatar pie writes it, and an unregistered `Messages<T>` fails
+        // that system's param validation the moment a slice is picked. The
+        // feature that answers it (`add_friend::AddFriendPlugin`) registers it
+        // too — `add_message` is idempotent.
+        app.add_message::<world_api::RequestFriendship>();
         app.init_resource::<name_tag_content::NameTagStatuses>();
         app.init_resource::<AvatarRuntimeMorphs>();
         app.init_resource::<look_at::LookAtTargets>();

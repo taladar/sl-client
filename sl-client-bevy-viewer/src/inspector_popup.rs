@@ -62,6 +62,7 @@ use crate::url_linkify::LinkTarget;
 use crate::world_api::AvatarState;
 use crate::world_api::OpenAvatarProfile;
 use crate::world_api::RequestBlock;
+use crate::world_api::RequestFriendship;
 use crate::world_api::{ConversationKey, OpenConversation};
 
 /// The card's fixed width, in logical pixels.
@@ -399,12 +400,11 @@ fn open_avatar_inspector(
     )
     .observe(
         move |_activate: On<Activate>,
-              mut sl: MessageWriter<SlCommand>,
+              mut friendships: MessageWriter<RequestFriendship>,
               mut close: MessageWriter<CloseInspector>| {
-            sl.write(SlCommand(Command::OfferFriendship {
-                to_agent_id: agent,
-                message: String::new(),
-            }));
+            // The prompted path (`sl_viewer_people::add_friend`) asks for the
+            // offer's message and confirms the send.
+            friendships.write(RequestFriendship::one(agent));
             close.write(CloseInspector);
         },
     );

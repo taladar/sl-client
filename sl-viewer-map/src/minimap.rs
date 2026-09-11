@@ -68,6 +68,7 @@ use crate::world_api::ObjectState;
 use crate::world_api::OpenAddToContactSet;
 use crate::world_api::OpenAvatarProfile;
 use crate::world_api::RequestBlock;
+use crate::world_api::RequestFriendship;
 use crate::world_api::TerrainState;
 use crate::world_api::{CameraMode, ViewerCamera};
 use crate::world_api::{ConversationKey, OpenConversation};
@@ -3215,6 +3216,7 @@ fn handle_minimap_actions(
     avatars: Res<AvatarState>,
     mut commands: MessageWriter<SlCommand>,
     mut blocks: MessageWriter<RequestBlock>,
+    mut friendships: MessageWriter<RequestFriendship>,
     mut conversations: MessageWriter<OpenConversation>,
     mut profiles: MessageWriter<OpenAvatarProfile>,
     mut contact_sets: MessageWriter<OpenAddToContactSet>,
@@ -3239,10 +3241,9 @@ fn handle_minimap_actions(
             }
             "add-friend" => {
                 if let Some(agent) = agent {
-                    commands.write(SlCommand(Command::OfferFriendship {
-                        to_agent_id: agent,
-                        message: String::new(),
-                    }));
+                    // The prompted path (`sl_viewer_people::add_friend`) asks
+                    // for the offer's message and confirms the send.
+                    friendships.write(RequestFriendship::one(agent));
                 }
             }
             "offer-teleport" => {

@@ -2404,6 +2404,9 @@ notification-offered-card = You have offered a calling card to [NAME].
 notification-calling-card-accepted = Your calling card was accepted.
 notification-calling-card-declined = Your calling card was declined.
 notification-offer-friendship-no-message = [NAME_SLURL] is offering friendship. (By default, you will be able to see each other's online status.)
+# The reference names the recipient with an agent SLURL; a notification body is
+# plain text here, so [TO_NAME] is the resident's shown label.
+notification-friendship-offered = You have offered friendship to [TO_NAME]
 notification-friendship-accepted = [NAME] accepted your friendship offer.
 notification-friendship-declined = [NAME] declined your friendship offer.
 notification-friendship-accepted-by-me = Friendship offer accepted.

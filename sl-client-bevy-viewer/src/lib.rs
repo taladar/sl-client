@@ -29,6 +29,7 @@
 //! was.
 
 mod about_floater;
+pub(crate) use sl_viewer_people::add_friend;
 pub(crate) use sl_viewer_places::about_land;
 pub(crate) use sl_viewer_places::about_landmark;
 pub(crate) use sl_viewer_places::about_region;
@@ -1551,6 +1552,14 @@ fn run_session(
     // NotificationHostPlugin, whose shared channel it adopts its card into, and
     // InventoryPlugin, whose folders the accept replies file into.
     .add_plugins(OffersInvitesPlugin)
+    // The friendship-offer path (viewer-add-friend-offers-silently): the one
+    // prompted way an Add Friend affordance — the avatar pie, the radar, the
+    // minimap, the profile, the inspector, search, a secondlife:///…/requestfriend
+    // link — reaches the wire, asking for the offer's message the way the
+    // reference's AddFriendWithMessage dialog does, refusing self-friendship and
+    // confirming what was sent. After NotificationHostPlugin, whose dialog it
+    // raises and whose answer it reads.
+    .add_plugins(crate::add_friend::AddFriendPlugin)
     // The presence modes (viewer-do-not-disturb-away): Away / auto-AFK, Do Not
     // Disturb and the two autorespond modes, their signalled-animation wire
     // writes, and the canned IM replies they send. After the conversations

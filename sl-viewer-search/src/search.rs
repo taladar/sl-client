@@ -69,6 +69,7 @@ use crate::virtual_list::{VirtualList, VirtualRow};
 use crate::world_api::AVATAR_BOOST_PRIORITY;
 use crate::world_api::OpenAvatarProfile;
 use crate::world_api::OpenGroupProfile;
+use crate::world_api::RequestFriendship;
 use crate::world_api::{BoostTexture, DecodedTextures};
 use crate::world_api::{ConversationKey, OpenConversation};
 use crate::world_map::OpenWorldMap;
@@ -2900,6 +2901,7 @@ fn on_detail_action(
     actions: Query<&DetailAction>,
     mut detail: ResMut<SearchDetail>,
     mut sl_commands: MessageWriter<SlCommand>,
+    mut friendships: MessageWriter<RequestFriendship>,
     mut avatar_profiles: MessageWriter<OpenAvatarProfile>,
     mut group_profiles: MessageWriter<OpenGroupProfile>,
     mut conversations: MessageWriter<OpenConversation>,
@@ -2930,10 +2932,9 @@ fn on_detail_action(
         }
         DetailAction::AddFriend => {
             if let DetailSubject::Person { agent, .. } = &detail.subject {
-                sl_commands.write(SlCommand(Command::OfferFriendship {
-                    to_agent_id: *agent,
-                    message: String::new(),
-                }));
+                // The prompted path (`sl_viewer_people::add_friend`) asks for
+                // the offer's message and confirms the send.
+                friendships.write(RequestFriendship::one(*agent));
             }
         }
         DetailAction::JoinChat => {

@@ -7,7 +7,8 @@
 //! [`radar`] for who is nearby, [`avatar_profile`] and [`group_profile`] for
 //! who they are, [`contact_sets`] and [`contact_sets_panel`] for the user's
 //! own grouping of them, [`mutes`] and [`auto_reject`] for who is refused,
-//! [`offers_invites`] and [`group_notice`] for what they send, and
+//! [`offers_invites`] and [`group_notice`] for what they send,
+//! [`add_friend`] for the one prompted way to offer friendship back, and
 //! [`presence`] for how the agent appears back.
 //!
 //! They move together because they are literally one floater: the panes are
@@ -77,6 +78,7 @@ pub(crate) use sl_viewer_world_avatar::derender;
 pub(crate) use sl_viewer_world_avatar::name_tag_content;
 pub(crate) use sl_viewer_world_view::session;
 
+pub mod add_friend;
 pub mod auto_reject;
 pub mod avatar_profile;
 pub mod blocked;

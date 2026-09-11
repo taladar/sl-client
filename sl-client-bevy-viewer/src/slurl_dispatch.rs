@@ -76,6 +76,7 @@ use crate::world_api::OpenAvatarProfile;
 use crate::world_api::OpenGroupProfile;
 use crate::world_api::OpenWebBrowser;
 use crate::world_api::RequestBlock;
+use crate::world_api::RequestFriendship;
 use crate::world_api::{BeginTeleportFlow, TeleportTarget, issue_teleport};
 use crate::world_api::{ConversationKey, OpenConversation};
 use crate::world_map::OpenWorldMap;
@@ -234,11 +235,13 @@ struct DispatchOut<'w> {
     conversations: MessageWriter<'w, OpenConversation>,
     /// Raise a confirmation (the teleport-SLURL guard).
     notifications: MessageWriter<'w, ShowNotification>,
-    /// Send a protocol command (unmute, friendship offer, name / map / parcel
-    /// requests).
+    /// Send a protocol command (unmute, name / map / parcel requests).
     commands: MessageWriter<'w, SlCommand>,
     /// Ask for a block — the guarded channel every Block affordance uses.
     blocks: MessageWriter<'w, RequestBlock>,
+    /// Ask to offer friendship — the prompted channel every Add Friend
+    /// affordance uses.
+    friendships: MessageWriter<'w, RequestFriendship>,
     /// Open the embedded web browser (a trusted web SLURL from an external
     /// source).
     browsers: MessageWriter<'w, OpenWebBrowser>,
@@ -328,10 +331,9 @@ fn route_agent(agent: AgentKey, action: &str, out: &mut DispatchOut, avatars: &A
             }));
         }
         "requestfriend" => {
-            out.commands.write(SlCommand(Command::OfferFriendship {
-                to_agent_id: agent,
-                message: String::new(),
-            }));
+            // The prompted path (`sl_viewer_people::add_friend`) asks for the
+            // offer's message and confirms the send.
+            out.friendships.write(RequestFriendship::one(agent));
         }
         "mute" => {
             let name = avatars
