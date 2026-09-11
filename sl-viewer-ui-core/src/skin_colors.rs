@@ -96,6 +96,28 @@ pub const SETTING_NAME_TAG_DISTANCE_SHOUT: &str = "NameTagDistanceColorShout";
 /// `NameTagBeyondShoutDistanceColor`).
 pub const SETTING_NAME_TAG_DISTANCE_BEYOND: &str = "NameTagDistanceColorBeyond";
 
+/// The base minimap avatar-dot colour (reference `MapAvatarColor`).
+pub const SETTING_MINIMAP_AVATAR: &str = "MinimapColorAvatar";
+
+/// A friend's minimap dot (reference `MapAvatarFriendColor`).
+pub const SETTING_MINIMAP_AVATAR_FRIEND: &str = "MinimapColorAvatarFriend";
+
+/// A blocked resident's minimap dot (reference `MapAvatarMutedColor`).
+pub const SETTING_MINIMAP_AVATAR_MUTED: &str = "MinimapColorAvatarMuted";
+
+/// The own-avatar minimap marker (reference `MapAvatarSelfColor`).
+pub const SETTING_MINIMAP_AVATAR_SELF: &str = "MinimapColorAvatarSelf";
+
+/// A Linden / grid-staff minimap dot (reference `MapAvatarLindenColor`).
+pub const SETTING_MINIMAP_AVATAR_LINDEN: &str = "MinimapColorAvatarLinden";
+
+/// The map tracking beacon (reference `MapTrackColor`).
+///
+/// Tunable alongside the dot colours on purpose: the beacon is only legible as
+/// a beacon while it wears a colour no avatar dot does, so whoever retunes one
+/// needs the other in front of them.
+pub const SETTING_MINIMAP_TRACK: &str = "MinimapColorTrack";
+
 /// One user-tunable colour: its setting name, the skin CSS custom property
 /// that supplies its default, and the built-in fallback used until (or in
 /// place of) a skin value.
@@ -222,6 +244,47 @@ pub const COLOR_TOKENS: &[ColorTokenDef] = &[
         css_var: "name-tag-distance-beyond",
         fallback: [1.0, 0.0, 0.0],
         comment: "Distance-band tag colour beyond shout range (skin --name-tag-distance-beyond)",
+    },
+    // The minimap dot palette. Every fallback here is the reference Vintage
+    // skin's value for the matching `MapAvatar*Color` / `MapTrackColor`, and
+    // `minimap_math`'s `COLOR_*` constants hold the same numbers as `Rgba` —
+    // `sl-viewer-map` has a test pinning the two together, because a skin that
+    // defines only some of these leaves the rest resolving to what is here.
+    ColorTokenDef {
+        setting: SETTING_MINIMAP_AVATAR,
+        css_var: "minimap-avatar",
+        fallback: [0.0, 1.0, 0.0],
+        comment: "Minimap dot colour of other avatars (skin --minimap-avatar)",
+    },
+    ColorTokenDef {
+        setting: SETTING_MINIMAP_AVATAR_FRIEND,
+        css_var: "minimap-avatar-friend",
+        fallback: [1.0, 1.0, 0.0],
+        comment: "Minimap dot colour of friends (skin --minimap-avatar-friend)",
+    },
+    ColorTokenDef {
+        setting: SETTING_MINIMAP_AVATAR_MUTED,
+        css_var: "minimap-avatar-muted",
+        fallback: [0.4, 0.4, 0.4],
+        comment: "Minimap dot colour of blocked residents (skin --minimap-avatar-muted)",
+    },
+    ColorTokenDef {
+        setting: SETTING_MINIMAP_AVATAR_SELF,
+        css_var: "minimap-avatar-self",
+        fallback: [1.0, 1.0, 0.0],
+        comment: "Minimap marker colour of my own avatar (skin --minimap-avatar-self)",
+    },
+    ColorTokenDef {
+        setting: SETTING_MINIMAP_AVATAR_LINDEN,
+        css_var: "minimap-avatar-linden",
+        fallback: [0.0, 0.0, 1.0],
+        comment: "Minimap dot colour of grid staff (skin --minimap-avatar-linden)",
+    },
+    ColorTokenDef {
+        setting: SETTING_MINIMAP_TRACK,
+        css_var: "minimap-track",
+        fallback: [0.729, 0.0, 0.121],
+        comment: "Minimap and world-map tracking-beacon colour (skin --minimap-track)",
     },
 ];
 

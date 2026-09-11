@@ -3616,7 +3616,7 @@ preferences-row-clear-inventory-cache = Delete the saved inventory snapshots
 preferences-clear-inventory-cache = Clear inventory cache
 
 # The colors & skins tab (viewer-preferences-colors-skins-tab): the UI skin /
-# theme choice and the user-tunable colour palette (chat, name tags).
+# theme choice and the user-tunable colour palette (chat, name tags, minimap).
 preferences-section-skin = Skin & theme
 preferences-row-skin = UI skin
 preferences-row-theme = Color scheme
@@ -3643,6 +3643,13 @@ preferences-row-name-tag-distance-whisper = Whisper range
 preferences-row-name-tag-distance-chat = Chat range
 preferences-row-name-tag-distance-shout = Shout range
 preferences-row-name-tag-distance-beyond = Beyond shout range
+preferences-section-minimap-colors = Minimap colors
+preferences-row-minimap-color-avatar = Other avatars
+preferences-row-minimap-color-avatar-friend = Friends
+preferences-row-minimap-color-avatar-muted = Blocked
+preferences-row-minimap-color-avatar-self = My dot
+preferences-row-minimap-color-avatar-linden = Grid staff (Lindens)
+preferences-row-minimap-color-track = Tracking beacon
 
 ## The Quick Preferences panel (viewer-quick-preferences): the small
 ## bottom-right floater of the settings reached-for hourly.

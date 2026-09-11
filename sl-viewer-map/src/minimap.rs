@@ -50,17 +50,19 @@ use crate::menu::{
     MenuCommand, MenuDef, MenuDynamicPick, MenuItemDef, OpenContextMenu, SetMenuDynamicLabels,
 };
 use crate::minimap_math::{
-    self, COLOR_AVATAR, COLOR_AVATAR_FRIEND, COLOR_AVATAR_LINDEN, COLOR_AVATAR_SELF,
-    COLOR_CHAT_RING, COLOR_FRUSTUM, COLOR_PARCEL_LINE, COLOR_SHOUT_RING, COLOR_TRACK,
-    COLOR_WHISPER_RING, DoubleClickAction, LayerRaster, MapView, ObjectAccents, ParcelCell, Rgba,
-    Surface,
+    self, COLOR_AVATAR, COLOR_AVATAR_FRIEND, COLOR_AVATAR_LINDEN, COLOR_AVATAR_MUTED,
+    COLOR_AVATAR_SELF, COLOR_CHAT_RING, COLOR_FRUSTUM, COLOR_PARCEL_LINE, COLOR_SHOUT_RING,
+    COLOR_TRACK, COLOR_WHISPER_RING, DoubleClickAction, LayerRaster, MapView, ObjectAccents,
+    ParcelCell, Rgba, Surface,
 };
 use crate::settings::ViewerSettings;
+use crate::skin_colors;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::water::WaterState;
 use crate::world_api::AvatarState;
+use crate::world_api::MuteModel;
 use crate::world_api::ObjectDebugInfo;
 use crate::world_api::ObjectState;
 use crate::world_api::OpenAddToContactSet;
@@ -542,6 +544,84 @@ struct CompositeStamp {
     toggles: (bool, bool, bool),
     /// The avatar-mark revision the dot colours were taken at.
     marks: u64,
+    /// The friend-list and mute-list revisions the dot colours were taken at.
+    /// Both classify dots, so both have to be able to force a repaint —
+    /// befriending or blocking someone recolours their dot and moves nothing
+    /// else in this stamp.
+    classifications: (u64, u64),
+    /// The palette the dot colours were taken from, so a skin switch, a hot
+    /// reload or a per-account override repaints rather than waiting for the
+    /// camera to move.
+    palette: DotPalette,
+}
+
+/// The resolved minimap dot palette: one colour per avatar classification, plus
+/// the tracking beacon's.
+///
+/// Read through the skin-colour bridge ([`crate::skin_colors`]), so a skin, a
+/// theme overlay or a per-account override retunes it; the built-in fallbacks
+/// are [`minimap_math`]'s reference constants, and a test pins the two
+/// together.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DotPalette {
+    /// Any other avatar (reference `MapAvatarColor`).
+    base: Rgba,
+    /// A friend (reference `MapAvatarFriendColor`).
+    friend: Rgba,
+    /// A blocked resident (reference `MapAvatarMutedColor`).
+    muted: Rgba,
+    /// The own-avatar marker (reference `MapAvatarSelfColor`).
+    own: Rgba,
+    /// Grid staff (reference `MapAvatarLindenColor`).
+    linden: Rgba,
+    /// The tracking beacon (reference `MapTrackColor`).
+    track: Rgba,
+}
+
+impl Default for DotPalette {
+    /// The reference constants, for a composite with no settings store behind
+    /// it (the gallery, early startup, tests).
+    fn default() -> Self {
+        Self {
+            base: COLOR_AVATAR,
+            friend: COLOR_AVATAR_FRIEND,
+            muted: COLOR_AVATAR_MUTED,
+            own: COLOR_AVATAR_SELF,
+            linden: COLOR_AVATAR_LINDEN,
+            track: COLOR_TRACK,
+        }
+    }
+}
+
+impl DotPalette {
+    /// Resolve every entry from the settings store: a per-account override
+    /// first, else the active skin's token, else the built-in fallback.
+    fn from_settings(settings: Option<&ViewerSettings>) -> Self {
+        let color = |name: &str| opaque_rgba(skin_colors::setting_color(settings, name));
+        Self {
+            base: color(skin_colors::SETTING_MINIMAP_AVATAR),
+            friend: color(skin_colors::SETTING_MINIMAP_AVATAR_FRIEND),
+            muted: color(skin_colors::SETTING_MINIMAP_AVATAR_MUTED),
+            own: color(skin_colors::SETTING_MINIMAP_AVATAR_SELF),
+            linden: color(skin_colors::SETTING_MINIMAP_AVATAR_LINDEN),
+            track: color(skin_colors::SETTING_MINIMAP_TRACK),
+        }
+    }
+}
+
+/// The resolved tracking-beacon colour, for the world map — which draws the
+/// same beacon from the same [`MapTracking`] target and must not disagree with
+/// the minimap about what colour it is.
+pub(crate) fn track_color(settings: Option<&ViewerSettings>) -> Rgba {
+    DotPalette::from_settings(settings).track
+}
+
+/// A composite-surface colour from a palette entry. The palette is sRGB triples
+/// — every dot in the reference is fully opaque — so the alpha is the one this
+/// adds.
+fn opaque_rgba(color: Color) -> Rgba {
+    let [red, green, blue, _] = color.to_srgba().to_u8_array();
+    [red, green, blue, u8::MAX]
 }
 
 /// A per-avatar map mark set from a context menu (colours the dot).
@@ -952,11 +1032,12 @@ fn location_reached(agent_east: f64, agent_north: f64, east: f64, north: f64) ->
 ///
 /// A double-click-to-teleport on the minimap sets this beacon at the destination
 /// ([`on_minimap_click`], "unless already tracking"); without an arrival-clear it
-/// lingers as a **red** map dot at the spot after the agent arrives (and
-/// teleports on again) — a stale "ghost" that looks exactly like an avatar dot,
-/// because [`COLOR_TRACK`] is byte-identical to
-/// the avatar-dot red. An **avatar** track is left alone (it follows its avatar
-/// until stopped from the menu).
+/// lingers as a stale "ghost" mark at the spot after the agent arrives (and
+/// teleports on again), in the same crimson the avatar dots use — [`COLOR_TRACK`]
+/// is byte-identical to [`COLOR_AVATAR`], as it is in the reference skin. Only
+/// the beacon's ring shape keeps the ghost from reading as a resident standing
+/// there. An **avatar** track is left alone (it follows its avatar until stopped
+/// from the menu).
 pub(crate) fn clear_reached_location_track(
     mut tracking: ResMut<MapTracking>,
     identity: Res<SlIdentity>,
@@ -1718,6 +1799,9 @@ struct CompositeJob {
     dots: Vec<ResolvedDot>,
     /// The tracking beacon surface position, when tracking.
     tracking_view: Option<Vec2>,
+    /// The resolved palette, for the two marks whose colour is not already
+    /// baked into a [`ResolvedDot`]: the self marker and the beacon.
+    palette: DotPalette,
 }
 
 /// Gather the composite inputs on the main thread and, when they changed since
@@ -1742,6 +1826,7 @@ fn composite_minimap(
     identity: Res<SlIdentity>,
     avatars: Res<AvatarState>,
     friends: Option<Res<FriendsModel>>,
+    mutes: Option<Res<MuteModel>>,
     marks: Res<MinimapMarks>,
     tracking: Res<MapTracking>,
     ranges: Res<ChatRanges>,
@@ -1798,6 +1883,8 @@ fn composite_minimap(
         altitudes.push(up - state.camera.2);
     }
 
+    let palette = DotPalette::from_settings(Some(&settings));
+
     let stamp = CompositeStamp {
         camera: (
             quantise(state.camera.0, 16.0),
@@ -1847,6 +1934,11 @@ fn composite_minimap(
         }),
         toggles: (show_objects, show_lines, rings_on),
         marks: marks.revision(),
+        classifications: (
+            friends.as_deref().map_or(0, FriendsModel::revision),
+            mutes.as_deref().map_or(0, MuteModel::revision),
+        ),
+        palette,
     };
 
     // Keep the hit-test dots current every frame regardless of the render path.
@@ -1909,7 +2001,14 @@ fn composite_minimap(
         .zip(altitudes.iter())
         .map(|(dot, altitude)| ResolvedDot {
             view: dot.view,
-            color: avatar_color(dot.agent, friends.as_deref(), &avatars, &marks),
+            color: avatar_color(
+                dot.agent,
+                friends.as_deref(),
+                mutes.as_deref(),
+                &avatars,
+                &marks,
+                &palette,
+            ),
             glyph: minimap_math::height_glyph(*altitude, dot.altitude_unknown, state.camera.2),
         })
         .collect();
@@ -1955,6 +2054,7 @@ fn composite_minimap(
         dot_radius,
         dots: resolved_dots,
         tracking_view,
+        palette,
     };
 
     state.dots = dots;
@@ -2096,7 +2196,7 @@ fn render_minimap_surface(job: &CompositeJob) -> Vec<u8> {
 
     // The tracking beacon.
     if let Some(position) = job.tracking_view {
-        minimap_math::draw_tracking(&mut surface, position, COLOR_TRACK);
+        minimap_math::draw_tracking(&mut surface, position, job.palette.track);
     }
 
     // The self marker: a yellow dot with a white outline, at the avatar.
@@ -2114,7 +2214,7 @@ fn render_minimap_surface(job: &CompositeJob) -> Vec<u8> {
             self_view.x,
             self_view.y,
             job.dot_radius,
-            COLOR_AVATAR_SELF,
+            job.palette.own,
         );
     }
 
@@ -2200,26 +2300,36 @@ fn region_tint(color: Rgba, factor: f32) -> Rgba {
 }
 
 /// The dot colour for an avatar: a context-menu mark wins, then Linden /
-/// friend classification, then the base colour. (Muted-avatar grey is a
-/// follow-up: the viewer holds no mute-list mirror yet.)
+/// friend, then blocked, then Linden classification, then the base colour.
+///
+/// The order is the reference's `LGGContactSets::colorize`, which tests friend
+/// before blocked and blocked before Linden, and applies a context-menu mark
+/// last of all (so a mark wins over every classification — here that is the
+/// early return). Blocking someone the viewer also classifies as a Linden
+/// therefore greys their dot; befriending them keeps it green.
 fn avatar_color(
     agent: AgentKey,
     friends: Option<&FriendsModel>,
+    mutes: Option<&MuteModel>,
     avatars: &AvatarState,
     marks: &MinimapMarks,
+    palette: &DotPalette,
 ) -> Rgba {
     if let Some(mark) = marks.color_of(agent) {
         return mark;
     }
+    if friends.is_some_and(|friends| friends.is_friend(agent)) {
+        return palette.friend;
+    }
+    if mutes.is_some_and(|mutes| mutes.is_muted(agent.uuid())) {
+        return palette.muted;
+    }
     if let Some(name) = avatars.name_of(agent)
         && name.ends_with(" Linden")
     {
-        return COLOR_AVATAR_LINDEN;
+        return palette.linden;
     }
-    if friends.is_some_and(|friends| friends.is_friend(agent)) {
-        return COLOR_AVATAR_FRIEND;
-    }
-    COLOR_AVATAR
+    palette.base
 }
 
 // ---------------------------------------------------------------------------
@@ -3418,17 +3528,19 @@ pub fn spawn_minimap_specimen(commands: &mut Commands, parent: Entity, _cx: Elem
 #[cfg(test)]
 mod tests {
     use super::{
-        COMPASS_MINOR, COMPASS_POINTS, COND_MANY_AVATARS, COND_ONE_AVATAR, MARK_COLORS,
-        MINIMAP_ELEMENT, MINIMAP_MENU, MenuDef, MenuDynamicPick, MenuItemDef, MinimapState,
-        ObjectLayerInput, ObjectPose, ObjectSample, SLOT_PROFILES, grid_index_at,
-        handle_minimap_profile_picks, location_reached, phantom_alpha, range_metres,
+        COMPASS_MINOR, COMPASS_POINTS, COND_MANY_AVATARS, COND_ONE_AVATAR, DotPalette, MARK_COLORS,
+        MINIMAP_ELEMENT, MINIMAP_MENU, MenuDef, MenuDynamicPick, MenuItemDef, MinimapMarks,
+        MinimapState, ObjectLayerInput, ObjectPose, ObjectSample, SLOT_PROFILES, avatar_color,
+        grid_index_at, handle_minimap_profile_picks, location_reached, phantom_alpha, range_metres,
         region_handle_at,
     };
     use crate::minimap_math::{FLAG_YOU_OWNER, ObjectAccents};
-    use crate::world_api::OpenAvatarProfile;
+    use crate::world_api::{AvatarState, FriendsModel, MuteModel, OpenAvatarProfile};
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
-    use sl_client_bevy::{AgentKey, Uuid};
+    use sl_client_bevy::{
+        AgentKey, Friend, FriendKey, FriendRights, MuteEntry, MuteFlags, MuteType, Uuid,
+    };
 
     /// A tracked location is "reached" only within the arrival radius (3 m),
     /// horizontally — the trigger to clear a double-click-teleport beacon so it
@@ -3442,6 +3554,95 @@ mod tests {
         // Beyond 3 m is not reached (a beacon a few metres away stays lit).
         assert!(!location_reached(1005.0, 1000.0, 1000.0, 1000.0));
         assert!(!location_reached(1000.0, 1000.0, 1010.0, 1010.0));
+    }
+
+    /// The palette's built-in fallbacks and [`minimap_math`]'s reference
+    /// constants are the same six colours. They live apart because the colour
+    /// bridge is in `sl-viewer-ui-core` and the map maths in `sl-viewer-kit`,
+    /// neither of which depends on the other; this crate sees both, so this is
+    /// where the two can be held together. A skin that defines only some of the
+    /// tokens leaves the rest resolving to the bridge's fallback, which is the
+    /// case that would otherwise drift unnoticed.
+    #[test]
+    fn the_palette_fallbacks_are_the_reference_constants() {
+        // No settings store: every entry resolves to its table fallback.
+        let fallbacks = DotPalette::from_settings(None);
+        assert_eq!(fallbacks, DotPalette::default());
+    }
+
+    /// The dot colour follows the reference's classification order: a
+    /// context-menu mark first, then friend, then blocked, then Linden, then the
+    /// base colour. Blocking someone is the branch the minimap had no answer
+    /// for until the viewer mirrored the mute list.
+    #[test]
+    fn a_blocked_resident_greys_their_dot_unless_they_are_a_friend() {
+        let stranger = AgentKey::from(Uuid::from_u128(0x5747));
+        let linden = AgentKey::from(Uuid::from_u128(0x11DE));
+        let friend = AgentKey::from(Uuid::from_u128(0xF11E));
+        let marked = AgentKey::from(Uuid::from_u128(0x3A4C));
+
+        let mut avatars = AvatarState::default();
+        avatars.note_legacy_name(linden, "Helpful Linden");
+
+        let mut friends = FriendsModel::default();
+        friends.note_friends(&[Friend {
+            id: FriendKey::from(friend.uuid()),
+            rights_granted: FriendRights(0),
+            rights_received: FriendRights(0),
+        }]);
+
+        // Everyone above is blocked, so each assertion below measures its own
+        // branch against the grey rather than against an absent mute list.
+        let mut mutes = MuteModel::default();
+        mutes.replace(
+            [stranger, linden, friend, marked]
+                .into_iter()
+                .map(|agent| MuteEntry {
+                    id: agent.uuid(),
+                    name: String::new(),
+                    mute_type: MuteType::Agent,
+                    flags: MuteFlags::default(),
+                })
+                .collect(),
+        );
+
+        let mut marks = MinimapMarks::default();
+        marks.mark(&[marked], [1, 2, 3, 255]);
+
+        // A palette whose entries are distinguishable from one another, so a
+        // wrong branch cannot pass by coincidence — and deliberately not the
+        // reference values, which would let the classification silently read a
+        // hardcoded constant instead of the palette it was handed.
+        let palette = DotPalette {
+            base: [10, 0, 0, 255],
+            friend: [20, 0, 0, 255],
+            muted: [30, 0, 0, 255],
+            own: [40, 0, 0, 255],
+            linden: [50, 0, 0, 255],
+            track: [60, 0, 0, 255],
+        };
+
+        let color = |agent| {
+            avatar_color(
+                agent,
+                Some(&friends),
+                Some(&mutes),
+                &avatars,
+                &marks,
+                &palette,
+            )
+        };
+        assert_eq!(color(stranger), palette.muted, "blocked stranger");
+        assert_eq!(color(linden), palette.muted, "blocked before Linden");
+        assert_eq!(color(friend), palette.friend, "friend before blocked");
+        assert_eq!(color(marked), [1, 2, 3, 255], "a mark wins over every one");
+
+        // Without a mute list at all, the same avatars keep their old colours —
+        // so the grey above is the block and not a mislaid classification.
+        let unblocked =
+            |agent| avatar_color(agent, Some(&friends), None, &avatars, &marks, &palette);
+        assert_eq!(unblocked(stranger), palette.base);
+        assert_eq!(unblocked(linden), palette.linden);
     }
 
     /// Collect every action string reachable from a menu.

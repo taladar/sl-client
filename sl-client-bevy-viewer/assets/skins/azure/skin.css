@@ -75,4 +75,14 @@
   --name-tag-distance-chat: #2fbf71;
   --name-tag-distance-shout: #ffd166;
   --name-tag-distance-beyond: #e05252;
+
+  /* Minimap dots and the tracking beacon. Cooler variants, as above — but the
+   * beacon stays clear of every dot colour, which is the one constraint this
+   * group is not free to restyle away. */
+  --minimap-avatar: #2fbf71;
+  --minimap-avatar-friend: #ffd166;
+  --minimap-avatar-muted: #6f89a4;
+  --minimap-avatar-self: #eaf3ff;
+  --minimap-avatar-linden: #38bdf8;
+  --minimap-track: #e05252;
 }

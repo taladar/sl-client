@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 322 |
 | blocked | 42 |
 | in-progress | 21 |
-| bugs | 49 |
-| done | 1077 |
+| bugs | 48 |
+| done | 1078 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1653** |
@@ -1185,7 +1185,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (49)
+## bugs (48)
 
 ### viewer
 
@@ -1268,8 +1268,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   oracle at scale)
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
   Some worn mesh hair does not render (visible in Firestorm)
-- [`viewer-minimap-avatar-dot-color`](bugs/viewer-minimap-avatar-dot-color.md) —
-  Minimap other-avatar dots are red, not green like the reference
 - [`viewer-mouselook-own-head-visible-from-inside`](bugs/viewer-mouselook-own-head-visible-from-inside.md)
   — Mouselook — parts of the own avatar's head render from the inside
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
@@ -1302,7 +1300,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1077)
+## done (1078)
 
 ### protocol
 
@@ -2023,6 +2021,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-minimap`](done/viewer-minimap.md) — Minimap (net map) — floater,
   surface, zoom, rotation, frustum (blocked by `viewer-ui-widget-scaffold`
   (done))
+- [`viewer-minimap-avatar-dot-color`](done/viewer-minimap-avatar-dot-color.md) —
+  Minimap other-avatar dots are red, not green like the reference
 - [`viewer-minimap-avatar-dots`](done/viewer-minimap-avatar-dots.md) — Minimap
   avatar dots — colours, height cues, hover, chat rings (blocked by
   `viewer-minimap` (done))

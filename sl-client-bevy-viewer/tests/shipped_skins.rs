@@ -16,6 +16,7 @@
 mod test {
     use std::path::PathBuf;
 
+    use pretty_assertions::assert_ne;
     use sl_viewer_ui_core::skin::{SKINS, THEMES, scan_banned_properties};
     use sl_viewer_ui_core::skin_colors::COLOR_TOKENS;
 
@@ -105,5 +106,57 @@ mod test {
             }
         }
         Ok(())
+    }
+
+    /// No skin may paint the map's tracking beacon in a colour it also gives an
+    /// avatar dot.
+    ///
+    /// This is the bug the minimap palette was written to close
+    /// (`viewer-minimap-avatar-dot-color`): the beacon a double-click teleport
+    /// leaves at its destination is indistinguishable from somebody standing
+    /// there once the two share a colour. Shape distinguishes them too — the
+    /// beacon is a ring where a dot is a disc — but a skin is free to retune
+    /// colours and not free to reshape the marks, so the constraint has to be
+    /// checked here, against the real stylesheets.
+    #[test]
+    fn no_skin_gives_the_map_beacon_an_avatar_dot_colour() -> Result<(), TestError> {
+        for skin in SKINS {
+            let path = skins_dir().join(skin).join("skin.css");
+            let css = fs_err::read_to_string(&path)?;
+            let track = declared_value(&css, "minimap-track");
+            assert!(
+                track.is_some(),
+                "{} does not define --minimap-track",
+                path.display()
+            );
+            for dot in [
+                "minimap-avatar",
+                "minimap-avatar-friend",
+                "minimap-avatar-muted",
+                "minimap-avatar-self",
+                "minimap-avatar-linden",
+            ] {
+                assert_ne!(
+                    declared_value(&css, dot),
+                    track,
+                    "{}: --{dot} is the tracking beacon's colour",
+                    path.display()
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// The value a stylesheet declares for one custom property, lowercased and
+    /// trimmed. `None` when the property is not declared at all.
+    ///
+    /// Deliberately exact-matches `--<name>:` so `--minimap-avatar` does not
+    /// also pick up `--minimap-avatar-friend`.
+    fn declared_value(css: &str, name: &str) -> Option<String> {
+        let needle = format!("--{name}:");
+        css.lines().find_map(|line| {
+            let rest = line.trim().strip_prefix(&needle)?;
+            Some(rest.trim().trim_end_matches(';').trim().to_lowercase())
+        })
     }
 }

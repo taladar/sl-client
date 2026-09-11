@@ -740,20 +740,52 @@ pub fn minor_directions_visible(label_height: f32, surface: Vec2) -> bool {
 // Avatar dots.
 // ---------------------------------------------------------------------------
 
-/// The base avatar dot colour (`MapAvatarColor`): red.
-pub const COLOR_AVATAR: Rgba = [255, 0, 0, 255];
+// Every colour below is the **Vintage** skin's, which is the skin this viewer
+// follows throughout. Vintage's `colors.xml` overrides only two of the map
+// family — `MapAvatarColor` and `MapAvatarFriendColor` — and the rest fall
+// through to the default skin it is layered over, so each entry below records
+// which file it was read from. Two traps live here: the skin names a colour
+// (`reference="Green"`) rather than giving its channels, and the default
+// skin's named `Red` is a crimson rather than a pure red.
 
-/// The friend dot colour (`MapAvatarFriendColor`): green.
-pub const COLOR_AVATAR_FRIEND: Rgba = [0, 255, 0, 255];
+/// The base avatar dot colour (`MapAvatarColor`): Vintage's named `Green`,
+/// `0 1 0 1`.
+///
+/// Notably **not** red. Red belongs to [`COLOR_TRACK`], and giving the two one
+/// colour makes a tracked location and a nearby resident the same mark.
+pub const COLOR_AVATAR: Rgba = [0, 255, 0, 255];
 
-/// The self marker colour (`MapAvatarSelfColor`): yellow.
+/// The friend dot colour (`MapAvatarFriendColor`): Vintage's named `Yellow`,
+/// `1 1 0 1`.
+///
+/// Vintage moves *friends* off the default skin's green, which is what keeps
+/// them distinct once [`COLOR_AVATAR`] is green.
+pub const COLOR_AVATAR_FRIEND: Rgba = [255, 255, 0, 255];
+
+/// The muted-resident dot colour (`MapAvatarMutedColor`): `0.4 0.4 0.4 1`, a
+/// mid grey, from the default skin — Vintage does not override it.
+///
+/// The reference greys a blocked resident's dot ahead of the Linden colouring
+/// and behind the friend colouring — see the branch order in
+/// `LGGContactSets::colorize`.
+pub const COLOR_AVATAR_MUTED: Rgba = [102, 102, 102, 255];
+
+/// The self marker colour (`MapAvatarSelfColor`): the named `Yellow`, `1 1 0 1`,
+/// from the default skin.
+///
+/// Vintage shares it with [`COLOR_AVATAR_FRIEND`]; the self marker's white
+/// outline ring, not its fill, is what sets it apart there — as in the
+/// reference.
 pub const COLOR_AVATAR_SELF: Rgba = [255, 255, 0, 255];
 
-/// The Linden dot colour (`MapAvatarLindenColor`): blue.
+/// The Linden dot colour (`MapAvatarLindenColor`): the named `Blue`, `0 0 1 1`,
+/// from the default skin.
 pub const COLOR_AVATAR_LINDEN: Rgba = [0, 0, 255, 255];
 
-/// The tracking-beacon colour (`MapTrackColor`): red.
-pub const COLOR_TRACK: Rgba = [255, 0, 0, 255];
+/// The tracking-beacon colour (`MapTrackColor`): the default skin's named
+/// `Red`, `0.729 0 0.121 1` — a **crimson**, not the pure red a from-memory
+/// transcription gives it. Vintage does not override it.
+pub const COLOR_TRACK: Rgba = [186, 0, 31, 255];
 
 /// The camera frustum wedge colour: white at 0.1 alpha (`MapFrustumColor`).
 pub const COLOR_FRUSTUM: Rgba = [255, 255, 255, 26];
@@ -989,9 +1021,21 @@ pub fn draw_disc(surface: &mut Surface<'_>, cx: f32, cy: f32, radius: f32, color
     }
 }
 
+/// The unknown-altitude glyph's stem half-width, as a fraction of the dot
+/// radius: the reference's `map_avatar_unknown.tga` keeps a 10-column stem in
+/// a 32-column box.
+const UNKNOWN_STEM_HALF_WIDTH: f32 = 0.312_5;
+
+/// The inner edge of the unknown-altitude glyph's two crossbars, as a fraction
+/// of the dot radius (the reference texture's rows 18..27 of 32, mirrored).
+const UNKNOWN_BAR_INNER: f32 = 0.125;
+
+/// The outer edge of those crossbars, same units.
+const UNKNOWN_BAR_OUTER: f32 = 0.687_5;
+
 /// Draw one avatar glyph at surface position (`cx`, `cy`): a disc for a level
-/// avatar, an up- / down-pointing chevron triangle for above / below, and a
-/// hollow ring for unknown altitude.
+/// avatar, an up- / down-pointing chevron triangle for above / below, and the
+/// reference's crossed-bars mark for unknown altitude.
 pub fn draw_avatar_glyph(
     surface: &mut Surface<'_>,
     cx: f32,
@@ -1002,7 +1046,7 @@ pub fn draw_avatar_glyph(
 ) {
     match glyph {
         HeightGlyph::Level => draw_disc(surface, cx, cy, radius, color),
-        HeightGlyph::Unknown => draw_ring(surface, cx, cy, radius, 2.0, color),
+        HeightGlyph::Unknown => draw_unknown_glyph(surface, cx, cy, radius, color),
         HeightGlyph::Above | HeightGlyph::Below => {
             // A filled triangle pointing up (screen -y) or down.
             let up = matches!(glyph, HeightGlyph::Above);
@@ -1029,15 +1073,68 @@ pub fn draw_avatar_glyph(
     }
 }
 
-/// Draw the tracking beacon: a dot when on the surface, otherwise a small
-/// triangle on the surface edge pointing toward the target.
+/// Draw the unknown-altitude avatar mark: a full-height stem crossed by two
+/// full-width bars, the shape of the reference's `map_avatar_unknown.tga`.
+///
+/// It is deliberately **not** a ring: [`draw_tracking`] draws the tracking
+/// beacon as one, and two marks that differ only in colour are exactly the
+/// confusion this glyph set exists to avoid.
+fn draw_unknown_glyph(surface: &mut Surface<'_>, cx: f32, cy: f32, radius: f32, color: Rgba) {
+    if radius <= 0.0 {
+        return;
+    }
+    let min_x = round_i32(cx - radius);
+    let max_x = round_i32(cx + radius);
+    let min_y = round_i32(cy - radius);
+    let max_y = round_i32(cy + radius);
+    let stem_half_width = UNKNOWN_STEM_HALF_WIDTH * radius;
+    let bar_inner = UNKNOWN_BAR_INNER * radius;
+    let bar_outer = UNKNOWN_BAR_OUTER * radius;
+    for y in min_y..=max_y {
+        let dy = (i32_to_f32(y) + 0.5 - cy).abs();
+        if dy > radius {
+            continue;
+        }
+        let on_bar = dy >= bar_inner && dy <= bar_outer;
+        for x in min_x..=max_x {
+            let dx = (i32_to_f32(x) + 0.5 - cx).abs();
+            if dx <= radius && (on_bar || dx <= stem_half_width) {
+                surface.blend(x, y, color);
+            }
+        }
+    }
+}
+
+/// The tracking beacon ring's outer radius in surface pixels. The reference
+/// draws `map_track_16.tga` — a 16×16 ring — at that fixed size whatever the
+/// map's zoom, so this does not scale with the dot radius either.
+const TRACK_OUTER_RADIUS: f32 = 8.0;
+
+/// The beacon ring's hole radius: half the outer radius, as in the texture.
+const TRACK_INNER_RADIUS: f32 = 4.0;
+
+/// Draw the tracking beacon: a hollow **ring** when on the surface, otherwise a
+/// small triangle on the surface edge pointing toward the target.
+///
+/// The ring is the reference's own mark, and it is the second line of defence
+/// behind [`COLOR_TRACK`] being a colour no avatar dot wears: a beacon left
+/// behind at a double-click-teleport destination must never read as a resident
+/// standing there, and shape says so even at the sizes where a few pixels of
+/// colour do not.
 pub fn draw_tracking(surface: &mut Surface<'_>, position: Vec2, color: Rgba) {
     let width = u32_to_f32(surface.width);
     let height = u32_to_f32(surface.height);
     let on_surface =
         position.x >= 0.0 && position.y >= 0.0 && position.x < width && position.y < height;
     if on_surface {
-        draw_disc(surface, position.x, position.y, 4.0, color);
+        draw_ring(
+            surface,
+            position.x,
+            position.y,
+            f32::midpoint(TRACK_OUTER_RADIUS, TRACK_INNER_RADIUS),
+            TRACK_OUTER_RADIUS - TRACK_INNER_RADIUS,
+            color,
+        );
         return;
     }
     // Clamp to the edge and draw an arrow-ish triangle pointing outward.
@@ -1196,18 +1293,20 @@ impl DoubleClickAction {
 #[cfg(test)]
 mod tests {
     use super::{
-        COARSE_MAX_Z, COLOR_AUCTION, COLOR_FOR_SALE, COLOR_GROUP_ABOVE, COLOR_OTHER_ABOVE,
-        COLOR_OTHER_BELOW, COLOR_PARCEL_LINE, COLOR_SCRIPTED, COLOR_TEMP_ON_REZ, COLOR_YOU_ABOVE,
-        COLOR_YOU_BELOW, DoubleClickAction, FLAG_GROUP_OWNED, FLAG_SCRIPTED, FLAG_TEMP_ON_REZ,
-        FLAG_YOU_OWNER, HeightGlyph, LayerRaster, MAP_SCALE_MAX, MAP_SCALE_MEDIUM, MAP_SCALE_MIN,
-        MapView, ObjectAccents, ParcelCell, ParcelFill, Surface, auto_center_step, clamp_scale,
-        coarse_altitude_unknown, compass_label_offset, dot_radius, draw_avatar_glyph, height_glyph,
-        layer_raster_size, layer_texels_per_metre, minor_directions_visible, object_map_color,
-        object_map_radius, object_on_map, render_object_point, render_parcel_region, render_point,
-        rescale_pan, rotation_for_camera, wheel_scale, zoom_to_cursor_pan,
+        COARSE_MAX_Z, COLOR_AUCTION, COLOR_AVATAR, COLOR_AVATAR_FRIEND, COLOR_AVATAR_LINDEN,
+        COLOR_AVATAR_MUTED, COLOR_AVATAR_SELF, COLOR_FOR_SALE, COLOR_GROUP_ABOVE,
+        COLOR_OTHER_ABOVE, COLOR_OTHER_BELOW, COLOR_PARCEL_LINE, COLOR_SCRIPTED, COLOR_TEMP_ON_REZ,
+        COLOR_TRACK, COLOR_YOU_ABOVE, COLOR_YOU_BELOW, DoubleClickAction, FLAG_GROUP_OWNED,
+        FLAG_SCRIPTED, FLAG_TEMP_ON_REZ, FLAG_YOU_OWNER, HeightGlyph, LayerRaster, MAP_SCALE_MAX,
+        MAP_SCALE_MEDIUM, MAP_SCALE_MIN, MapView, ObjectAccents, ParcelCell, ParcelFill, Surface,
+        auto_center_step, clamp_scale, coarse_altitude_unknown, compass_label_offset, dot_radius,
+        draw_avatar_glyph, draw_tracking, height_glyph, layer_raster_size, layer_texels_per_metre,
+        minor_directions_visible, object_map_color, object_map_radius, object_on_map,
+        render_object_point, render_parcel_region, render_point, rescale_pan, rotation_for_camera,
+        wheel_scale, zoom_to_cursor_pan,
     };
     use bevy::math::Vec2;
-    use pretty_assertions::assert_eq;
+    use pretty_assertions::{assert_eq, assert_ne};
 
     /// A default 200×200 north-up view at the default scale.
     fn view() -> MapView {
@@ -1612,6 +1711,141 @@ mod tests {
         // The centre pixel is painted for a level dot.
         let offset = (16 * 32 + 16) * 4;
         assert_eq!(data.get(offset..offset + 4), Some(&[255u8, 0, 0, 255][..]));
+    }
+
+    /// The side of the scratch surface the glyph probes paint on.
+    const PROBE_SIDE: usize = 48;
+
+    /// Its centre, in both axes — where every probed glyph is drawn.
+    const PROBE_CENTRE: usize = 24;
+
+    /// Paint one glyph at the centre of a blank [`PROBE_SIDE`]-square surface
+    /// and report whether each of the asked-for offsets from that centre came
+    /// out opaque. An offset that falls off the surface reads as unpainted,
+    /// which is what it looks like on screen too.
+    fn painted_at(
+        draw: impl FnOnce(&mut Surface<'_>, f32, f32),
+        offsets: &[(isize, isize)],
+    ) -> Vec<bool> {
+        let mut data = vec![0u8; PROBE_SIDE * PROBE_SIDE * 4];
+        let mut surface = Surface {
+            width: 48,
+            height: 48,
+            data: &mut data,
+        };
+        let centre = 24.0;
+        draw(&mut surface, centre, centre);
+        offsets
+            .iter()
+            .map(|&(dx, dy)| {
+                let opaque = PROBE_CENTRE
+                    .checked_add_signed(dy)
+                    .and_then(|row| row.checked_mul(PROBE_SIDE))
+                    .and_then(|row| {
+                        PROBE_CENTRE
+                            .checked_add_signed(dx)
+                            .and_then(|column| row.checked_add(column))
+                    })
+                    .and_then(|pixel| pixel.checked_mul(4))
+                    .and_then(|index| index.checked_add(3))
+                    .and_then(|alpha| data.get(alpha));
+                opaque.is_some_and(|alpha| *alpha > 0)
+            })
+            .collect()
+    }
+
+    /// No avatar dot may wear the tracking beacon's colour: that collision is
+    /// what makes a beacon left at a double-click-teleport destination read as
+    /// a resident standing there.
+    #[test]
+    fn no_avatar_dot_wears_the_tracking_beacon_colour() {
+        for (name, color) in [
+            ("base", COLOR_AVATAR),
+            ("friend", COLOR_AVATAR_FRIEND),
+            ("blocked", COLOR_AVATAR_MUTED),
+            ("self", COLOR_AVATAR_SELF),
+            ("Linden", COLOR_AVATAR_LINDEN),
+        ] {
+            assert_ne!(color, COLOR_TRACK, "the {name} dot is the beacon's colour");
+        }
+        // And the classifications stay apart from each other, friend from base
+        // above all: Vintage moves friends to yellow precisely because the base
+        // dot took its green.
+        assert_ne!(COLOR_AVATAR, COLOR_AVATAR_FRIEND);
+        assert_ne!(COLOR_AVATAR, COLOR_AVATAR_MUTED);
+        assert_ne!(COLOR_AVATAR, COLOR_AVATAR_LINDEN);
+    }
+
+    /// The reference also distinguishes the beacon from an avatar dot by
+    /// shape — a hollow ring against a solid disc — which is what survives at
+    /// the sizes where a few pixels of colour do not.
+    #[test]
+    fn the_tracking_beacon_is_a_ring_where_an_avatar_dot_is_solid() {
+        // Centre, two points inside the ring's stroke, and one past its outer
+        // edge — the same four for both marks, so only the shape differs.
+        let probes = [(0, 0), (4, 0), (0, 4), (10, 0)];
+        assert_eq!(
+            painted_at(
+                |surface, x, y| draw_tracking(surface, Vec2::new(x, y), COLOR_TRACK),
+                &probes,
+            ),
+            vec![false, true, true, false],
+            "the beacon is hollow at the centre and empty past its outer edge",
+        );
+        assert_eq!(
+            painted_at(
+                |surface, x, y| draw_avatar_glyph(
+                    surface,
+                    x,
+                    y,
+                    6.0,
+                    HeightGlyph::Level,
+                    COLOR_AVATAR
+                ),
+                &probes,
+            ),
+            vec![true, true, true, false],
+            "a level avatar dot is solid through its centre",
+        );
+    }
+
+    /// The unknown-altitude mark is the reference's crossed bars, so it is not
+    /// a ring either — a ring would be the beacon's shape in the beacon's
+    /// colour.
+    #[test]
+    fn the_unknown_altitude_glyph_is_not_a_ring() {
+        let painted = painted_at(
+            |surface, x, y| {
+                draw_avatar_glyph(surface, x, y, 8.0, HeightGlyph::Unknown, COLOR_AVATAR);
+            },
+            // Centre (on the stem), out along a crossbar, in the gap between
+            // the bars beside the stem, and past the glyph's box.
+            &[(0, 0), (7, 4), (5, 0), (12, 0)],
+        );
+        assert_eq!(painted, vec![true, true, false, false]);
+    }
+
+    /// The dot colours are the **Vintage** skin's — the skin this viewer
+    /// follows — and are read from its `colors.xml` rather than from the colour
+    /// *names* it gives them. Two traps, one in each direction:
+    ///
+    /// - Vintage overrides `MapAvatarColor` to `Green` and
+    ///   `MapAvatarFriendColor` to `Yellow`. Reading these from the *default*
+    ///   skin instead gives red avatars that collide with the beacon.
+    /// - `MapTrackColor` is not overridden, so it is the default skin's named
+    ///   `Red` — `0.729 0 0.121`, a crimson, not `255 0 0`.
+    #[test]
+    fn dot_colours_are_the_vintage_skin_values() {
+        assert_eq!(COLOR_AVATAR, [0, 255, 0, 255], "Vintage MapAvatarColor");
+        assert_eq!(
+            COLOR_AVATAR_FRIEND,
+            [255, 255, 0, 255],
+            "Vintage MapAvatarFriendColor"
+        );
+        assert_eq!(COLOR_TRACK, [186, 0, 31, 255], "default-skin MapTrackColor");
+        assert_eq!(COLOR_AVATAR_MUTED, [102, 102, 102, 255]);
+        assert_eq!(COLOR_AVATAR_SELF, [255, 255, 0, 255]);
+        assert_eq!(COLOR_AVATAR_LINDEN, [0, 0, 255, 255]);
     }
 
     #[test]

@@ -365,6 +365,9 @@ struct WorldMapStamp {
     toggles: u32,
     /// The selected location marker, in quarter-metre steps.
     selected: Option<(i64, i64)>,
+    /// The beacon / selection colour the frame was drawn in, so retuning it in
+    /// the skin (or per account) repaints instead of waiting for a pan.
+    track_color: Rgba,
 }
 
 // ---------------------------------------------------------------------------
@@ -1454,6 +1457,8 @@ struct WorldMapComposeJob {
     agent: Option<(f64, f64)>,
     /// The resolved tile blits (per-tile best resident source).
     tiles: Vec<TileBlit>,
+    /// The resolved beacon / selection colour (the shared minimap token).
+    track_color: Rgba,
 }
 
 /// Kick off a background composite when any input changed. Gathers this
@@ -1489,6 +1494,10 @@ fn spawn_world_map_compose(
         TrackTarget::Location { east, north, .. } => Some((east, north)),
         TrackTarget::Avatar(_) => None,
     });
+    // The world map shares the minimap's beacon token: it is the same beacon,
+    // set from the same places, and two maps disagreeing about its colour would
+    // be a skinning bug rather than a feature.
+    let track_color = crate::minimap::track_color(Some(&settings));
     let stamp = WorldMapStamp {
         center: (quantise(state.center.0), quantise(state.center.1)),
         scale: minimap_math::round_i32(state.scale * 16.0),
@@ -1501,6 +1510,7 @@ fn spawn_world_map_compose(
         tracking: tracked.map(|(east, north)| (quantise(east), quantise(north))),
         toggles,
         selected: selection_global(&state).map(|(east, north)| (quantise(east), quantise(north))),
+        track_color,
     };
     // Coalesce: never queue a second compose while one is in flight, and skip
     // when nothing changed since the last applied frame.
@@ -1518,6 +1528,7 @@ fn spawn_world_map_compose(
         selected: selection_global(&state),
         agent: state.agent,
         tiles: collect_tile_blits(&state.view, tiles.as_mut()),
+        track_color,
     };
     let task = AsyncComputeTaskPool::get().spawn(async move { run_world_map_compose(&job) });
     state.pending = Some(task);
@@ -1563,11 +1574,12 @@ fn run_world_map_compose(job: &WorldMapComposeJob) -> Vec<u8> {
     // The shared tracking beacon (set by the minimap today).
     if let Some((east, north)) = job.tracked {
         let position = job.view.view_from_global(east, north);
-        minimap_math::draw_tracking(&mut surface, position, minimap_math::COLOR_TRACK);
+        minimap_math::draw_tracking(&mut surface, position, job.track_color);
     }
 
-    // The selected-location marker (red ring + dot, the reference's track
-    // circle look).
+    // The selected-location marker: a thin ring with a centre dot, in the
+    // beacon's colour but not the beacon's shape — the beacon is a fat hollow
+    // ring, and the two are told apart the same way an avatar dot is.
     if let Some((east, north)) = job.selected {
         let position = job.view.view_from_global(east, north);
         minimap_math::draw_ring(
@@ -1576,15 +1588,9 @@ fn run_world_map_compose(job: &WorldMapComposeJob) -> Vec<u8> {
             position.y,
             6.0,
             1.8,
-            minimap_math::COLOR_TRACK,
+            job.track_color,
         );
-        minimap_math::draw_disc(
-            &mut surface,
-            position.x,
-            position.y,
-            2.0,
-            minimap_math::COLOR_TRACK,
-        );
+        minimap_math::draw_disc(&mut surface, position.x, position.y, 2.0, job.track_color);
     }
 
     // The own-avatar marker.

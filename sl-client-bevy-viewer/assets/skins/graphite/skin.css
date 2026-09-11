@@ -82,4 +82,20 @@
   --name-tag-distance-chat: #00ff00;
   --name-tag-distance-shout: #ffff00;
   --name-tag-distance-beyond: #ff0000;
+
+  /* Minimap dots (reference: MapAvatarColor / MapAvatarFriendColor /
+   * MapAvatarMutedColor / MapAvatarSelfColor / MapAvatarLindenColor), and the
+   * tracking beacon (MapTrackColor). These are the reference Vintage skin's
+   * own values.
+   *
+   * Keep --minimap-track off every dot colour above. The beacon is drawn as a
+   * ring where a dot is a disc, but on a busy map the colour is what carries at
+   * a glance, and a beacon that reads as an avatar is the bug this palette was
+   * written to close. */
+  --minimap-avatar: #00ff00;
+  --minimap-avatar-friend: #ffff00;
+  --minimap-avatar-muted: #666666;
+  --minimap-avatar-self: #ffff00;
+  --minimap-avatar-linden: #0000ff;
+  --minimap-track: #ba001f;
 }

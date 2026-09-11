@@ -174,6 +174,21 @@ pub(crate) fn build_colors_skins_tab(commands: &mut Commands, panel: Entity) {
     ] {
         spawn_color_row(commands, panel, setting);
     }
+
+    // The beacon sits in this section rather than one of its own: it is only
+    // legible while it wears a colour no dot above it does, so whoever retunes
+    // one wants the other on the same screen.
+    spawn_pref_section(commands, panel, "preferences-section-minimap-colors");
+    for setting in [
+        crate::skin_colors::SETTING_MINIMAP_AVATAR,
+        crate::skin_colors::SETTING_MINIMAP_AVATAR_FRIEND,
+        crate::skin_colors::SETTING_MINIMAP_AVATAR_MUTED,
+        crate::skin_colors::SETTING_MINIMAP_AVATAR_SELF,
+        crate::skin_colors::SETTING_MINIMAP_AVATAR_LINDEN,
+        crate::skin_colors::SETTING_MINIMAP_TRACK,
+    ] {
+        spawn_color_row(commands, panel, setting);
+    }
 }
 
 /// One palette row: an account-bound colour swatch plus its
@@ -211,6 +226,12 @@ fn row_label_key(setting: &str) -> &'static str {
         "NameTagDistanceColorChat" => "preferences-row-name-tag-distance-chat",
         "NameTagDistanceColorShout" => "preferences-row-name-tag-distance-shout",
         "NameTagDistanceColorBeyond" => "preferences-row-name-tag-distance-beyond",
+        "MinimapColorAvatar" => "preferences-row-minimap-color-avatar",
+        "MinimapColorAvatarFriend" => "preferences-row-minimap-color-avatar-friend",
+        "MinimapColorAvatarMuted" => "preferences-row-minimap-color-avatar-muted",
+        "MinimapColorAvatarSelf" => "preferences-row-minimap-color-avatar-self",
+        "MinimapColorAvatarLinden" => "preferences-row-minimap-color-avatar-linden",
+        "MinimapColorTrack" => "preferences-row-minimap-color-track",
         _other => "preferences-row-unknown-color",
     }
 }
@@ -407,6 +428,7 @@ mod tests {
             "preferences-section-chat-colors",
             "preferences-section-name-tag-colors",
             "preferences-section-name-tag-distance-colors",
+            "preferences-section-minimap-colors",
             "preferences-reset-default",
             THEME_BASE_KEY,
         ];
