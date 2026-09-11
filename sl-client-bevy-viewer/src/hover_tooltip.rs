@@ -326,7 +326,7 @@ impl HoverNames<'_> {
     ) -> String {
         match owner {
             OwnerKey::Agent(agent) => {
-                if let Some(name) = self.avatars.name_of(agent) {
+                if let Some(name) = self.avatars.shown_name_of(agent) {
                     name.to_owned()
                 } else {
                     if requested.insert(agent.uuid()) {

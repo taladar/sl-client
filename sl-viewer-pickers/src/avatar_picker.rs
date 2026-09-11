@@ -688,14 +688,11 @@ fn refresh_local_sources(
                         (Some(own_at), Some(at)) => own_at.distance(at),
                         _unknown => f32::MAX,
                     };
-                    let name = avatars
-                        .name_of(agent)
-                        .map_or_else(|| "(resolving)".to_owned(), str::to_owned);
                     (
                         distance,
                         PickerRow {
                             agent,
-                            label: name,
+                            label: avatars.label_text(agent),
                             username: String::new(),
                         },
                     )

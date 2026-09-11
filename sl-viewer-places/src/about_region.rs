@@ -2262,7 +2262,7 @@ fn sync_access_view(
                 .group_name(GroupKey::from(*id))
                 .map_or_else(|| format!("({id})"), str::to_owned)
         } else {
-            name_of(AgentKey::from(*id), avatars)
+            avatars.label_text(AgentKey::from(*id))
         },
         id: *id,
     }));
@@ -2867,13 +2867,6 @@ fn covenant_body(
     } else {
         translator.get("about-region-covenant-none")
     }
-}
-
-/// The display name for an agent, falling back to its id in parentheses.
-fn name_of(agent: AgentKey, avatars: &AvatarState) -> String {
-    avatars
-        .name_of(agent)
-        .map_or_else(|| format!("({agent})"), str::to_owned)
 }
 
 /// The maturity combo index for a rating.

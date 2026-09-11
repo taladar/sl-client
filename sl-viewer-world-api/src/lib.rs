@@ -877,7 +877,12 @@ impl FriendsModel {
 
     /// The name to **show** for an agent: the alias the user gave them, else the
     /// resolved name.
-    pub(crate) fn shown_name_of(&self, id: AgentKey) -> Option<&str> {
+    ///
+    /// Every surface that draws a friend's name wants this one;
+    /// [`Self::name_of`] is the grid's answer, which is what a wire action
+    /// (a mute entry naming the muted avatar) has to carry.
+    #[must_use]
+    pub fn shown_name_of(&self, id: AgentKey) -> Option<&str> {
         self.aliases
             .get(&id)
             .or_else(|| self.names.get(&id))
@@ -944,10 +949,8 @@ impl FriendsModel {
             .map(|id| {
                 let agent = AgentKey::from(*id);
                 let label = self
-                    .names
-                    .get(&agent)
-                    .cloned()
-                    .unwrap_or_else(|| format!("({id})"));
+                    .shown_name_of(agent)
+                    .map_or_else(|| format!("({id})"), ToOwned::to_owned);
                 (agent, label)
             })
             .collect();
@@ -3472,9 +3475,11 @@ impl NameRecord {
         }
     }
 
-    /// The **grid's** own answer, with no alias applied — what a surface shows
-    /// when the person's real identity is the point (a profile), and what a
-    /// name filed in a store must remember.
+    /// The **grid's** own answer, with no alias applied — what a name filed in
+    /// a store must remember, and what an action that names someone on the wire
+    /// has to carry. A drawn name is not this: the reference folds the
+    /// pseudonym into the name cache itself, so every surface that shows a
+    /// resident — the profile included — reads [`Self::preferred_name`].
     #[must_use]
     pub fn grid_name(&self) -> Option<&str> {
         self.display_name.as_deref().or(self.legacy.as_deref())

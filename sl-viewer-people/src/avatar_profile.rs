@@ -946,8 +946,9 @@ fn rebuild_one_profile(
 ) {
     let target = state.target;
     let own = identity.agent_id == Some(target);
-    // Title: the avatar's name once known (a plain string, not a Fluent key).
-    if let Some(name) = avatars.name_of(target)
+    // Title: the avatar's shown name once known (a plain string, not a Fluent
+    // key) — the alias the user gave them, else the display name, else legacy.
+    if let Some(name) = avatars.shown_name_of(target)
         && let Ok(mut text) = texts.get_mut(ui.title_text)
     {
         name.clone_into(&mut text.0);
@@ -1100,15 +1101,6 @@ struct BuildContext<'world> {
     avatars: &'world AvatarState,
     /// Friendship state (Add vs Remove Friend).
     friends: &'world FriendsModel,
-}
-
-impl BuildContext<'_> {
-    /// The display name for an agent, falling back to its id.
-    fn name_of(&self, agent: AgentKey) -> String {
-        self.avatars
-            .name_of(agent)
-            .map_or_else(|| format!("({agent})"), str::to_owned)
-    }
 }
 
 /// Despawn every child of `parent`.
@@ -1369,7 +1361,7 @@ fn fill_second_life_from_properties(
                 if let Some(node) = ui.sl_handles.partner {
                     commands
                         .entity(node)
-                        .insert(Text::new(build.name_of(partner)));
+                        .insert(Text::new(build.avatars.label_text(partner)));
                 }
             }
             None => spawn_key_label(
@@ -1417,10 +1409,18 @@ fn update_second_life(
     texts: &mut Query<&mut Text>,
     groups_model: &GroupsModel,
 ) {
-    set_value_node(texts, ui.sl_handles.name, &build.name_of(build.target));
+    set_value_node(
+        texts,
+        ui.sl_handles.name,
+        &build.avatars.label_text(build.target),
+    );
     fill_second_life_from_properties(commands, build, state, ui, boost);
     if let Some(partner) = state.properties.as_ref().and_then(|props| props.partner_id) {
-        set_value_node(texts, ui.sl_handles.partner, &build.name_of(partner));
+        set_value_node(
+            texts,
+            ui.sl_handles.partner,
+            &build.avatars.label_text(partner),
+        );
     }
     set_check_glyph(
         texts,

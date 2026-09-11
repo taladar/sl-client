@@ -1961,7 +1961,7 @@ fn notify_friend_presence(
                 continue;
             }
             let name = model
-                .name_of(agent)
+                .shown_name_of(agent)
                 .map_or_else(|| short_id(agent.uuid()), ToOwned::to_owned);
             show.write(
                 crate::notifications::ShowNotification::new("FriendOnlineOffline")
@@ -2384,7 +2384,7 @@ fn drive_grant_confirm(
     if let Some(grant) = &pending.0 {
         let agent = AgentKey::from(grant.friend);
         let name = model
-            .name_of(agent)
+            .shown_name_of(agent)
             .map_or_else(|| short_id(agent.uuid()), ToOwned::to_owned);
         let prompt = translator.format(
             GRANT_CONFIRM_PROMPT_KEY,
@@ -2589,6 +2589,34 @@ mod tests {
         assert_eq!(anchor, None, "the anchor went with the row");
         assert_eq!(selection.all(), &[a]);
         assert_eq!(selection.primary(), Some(a));
+    }
+
+    /// Every friend surface draws the user's own pseudonym over the grid's
+    /// name — the roster the avatar picker lists, the rows this pane draws, the
+    /// name an online / offline notification carries — while the wire-facing
+    /// accessor keeps the grid's answer, which is what a mute entry has to
+    /// name (`viewer-audit-display-name-accessor-sweep`).
+    #[test]
+    fn every_friend_surface_draws_the_alias() {
+        let key = FriendKey::from(Uuid::from_u128(1));
+        let agent = AgentKey::from(key);
+        let mut model = FriendsModel::default();
+        model.note_friends(&[friend(1)]);
+        model.note_name(agent, "Ida Vector");
+        assert_eq!(model.roster(), vec![(agent, "Ida Vector".to_owned())]);
+
+        model.set_name_aliases([(agent, "Skipper".to_owned())].into_iter().collect());
+        assert_eq!(model.roster(), vec![(agent, "Skipper".to_owned())]);
+        assert_eq!(model.shown_name_of(agent), Some("Skipper"));
+        assert_eq!(
+            model.rows().first().map(|row| row.name.clone()),
+            Some("Skipper".to_owned())
+        );
+        assert_eq!(
+            model.name_of(agent),
+            Some("Ida Vector"),
+            "a wire action still carries the grid's name"
+        );
     }
 
     /// A login `FriendList` seeds the buddy cache, offline until presence says

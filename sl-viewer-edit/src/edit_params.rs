@@ -2121,16 +2121,16 @@ fn owned_edit_data(objects: &ObjectState, scoped: &ScopedObjectId) -> Option<Own
     })
 }
 
-/// What an unresolved (still-requesting) name displays.
+/// What a still-outstanding answer displays (the land impact while its cost
+/// request is in flight).
 const PENDING_NAME: &str = "…";
 
-/// The display line for an agent: the resolved legacy name, or an ellipsis
-/// while the (deduplicated) name request is in flight.
+/// The display line for an agent: the name the viewer shows everywhere else
+/// (alias, then display name, then legacy), requesting it — deduplicated — as a
+/// side effect so an unresolved creator / owner fills in once the reply lands.
 fn agent_label(agent: AgentKey, avatars: &mut AvatarState) -> String {
     avatars.request_name(agent);
-    avatars
-        .name_of(agent)
-        .map_or_else(|| PENDING_NAME.to_owned(), str::to_owned)
+    avatars.label_text(agent)
 }
 
 /// The display line for a group: its resolved name, else its id — requesting the
@@ -3149,8 +3149,46 @@ mod tests {
         quantize_hollow, quantize_path_scale, quantize_revolutions, quantize_shear,
         quantize_signed, shape_display_value, shape_from_ui, srgb_to_linear_byte,
     };
-    use pretty_assertions::assert_eq;
-    use sl_client_bevy::{HoleType, Material, PrimShapeFloat, PrimShapeParams};
+    use crate::world_api::{AvatarState, NameAlias};
+    use pretty_assertions::{assert_eq, assert_ne};
+    use sl_client_bevy::{
+        AgentKey, DisplayName, HoleType, Material, PrimShapeFloat, PrimShapeParams, Uuid,
+    };
+
+    /// The creator / owner line shows the name the rest of the viewer shows —
+    /// the display name, and the user's own pseudonym over it — and asks for an
+    /// unresolved one exactly once
+    /// (`viewer-audit-display-name-accessor-sweep`).
+    #[test]
+    fn the_creator_line_shows_the_display_name() {
+        let agent = AgentKey::from(Uuid::from_u128(0x7c));
+        let mut avatars = AvatarState::default();
+
+        // Unresolved: a provisional id fragment, and one queued request.
+        let provisional = super::agent_label(agent, &mut avatars);
+        assert_ne!(provisional, String::new());
+        assert!(avatars.pending_name_requests.contains(&agent));
+        avatars.pending_name_requests.clear();
+        assert_eq!(super::agent_label(agent, &mut avatars), provisional);
+        assert!(avatars.pending_name_requests.is_empty());
+
+        assert!(avatars.merge_display_name_record(&DisplayName {
+            id: agent,
+            username: "marina.vector".to_owned(),
+            display_name: "Marina".to_owned(),
+            legacy_first_name: "Marina".to_owned(),
+            legacy_last_name: "Vector".to_owned(),
+            ..DisplayName::default()
+        }));
+        assert_eq!(super::agent_label(agent, &mut avatars), "Marina");
+
+        avatars.set_name_aliases(
+            [(agent, NameAlias::Pseudonym("Skipper".to_owned()))]
+                .into_iter()
+                .collect(),
+        );
+        assert_eq!(super::agent_label(agent, &mut avatars), "Skipper");
+    }
 
     /// A default (unit-box-like) quantized shape.
     fn box_params() -> PrimShapeParams {

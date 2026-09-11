@@ -2467,7 +2467,7 @@ fn update_covenant_tab(
                 handles.estate_owner,
                 &estate_owner_agent(covenant).map_or_else(
                     || translator.get("about-land-none"),
-                    |agent| name_of(agent, &avatars),
+                    |agent| avatars.label_text(agent),
                 ),
             );
             set_value_node(
@@ -2639,7 +2639,7 @@ fn sync_owners_view(
             .iter()
             .map(|owner| {
                 let (kind_key, name) = match owner.owner {
-                    OwnerKey::Agent(agent) => ("about-land-owner-agent", name_of(agent, &avatars)),
+                    OwnerKey::Agent(agent) => ("about-land-owner-agent", avatars.label_text(agent)),
                     OwnerKey::Group(group) => (
                         "about-land-owner-group",
                         groups
@@ -2735,7 +2735,7 @@ fn sync_access_view(
         .iter()
         .map(|entry| AccessRowData {
             id: entry.id,
-            name: name_of(AgentKey::from(entry.id), avatars),
+            name: avatars.label_text(AgentKey::from(entry.id)),
             expiry: expiry_text(entry.time, translator),
         })
         .collect();
@@ -3509,13 +3509,6 @@ fn expiry_text(time: i32, translator: &Translator) -> String {
     } else {
         format_unix_date(i64::from(time))
     }
-}
-
-/// The display name for an agent, falling back to its id in parentheses.
-fn name_of(agent: AgentKey, avatars: &AvatarState) -> String {
-    avatars
-        .name_of(agent)
-        .map_or_else(|| format!("({agent})"), str::to_owned)
 }
 
 // ---------------------------------------------------------------------------

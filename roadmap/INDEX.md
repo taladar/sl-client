@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 322 |
 | blocked | 42 |
 | in-progress | 21 |
-| bugs | 50 |
-| done | 1076 |
+| bugs | 49 |
+| done | 1077 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1653** |
@@ -1185,7 +1185,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (50)
+## bugs (49)
 
 ### viewer
 
@@ -1212,8 +1212,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-collider-settle-treadmill`](bugs/viewer-audit-collider-settle-treadmill.md)
   — A mesh with no physics block rebuilds its collider and the BVH every frame
   forever
-- [`viewer-audit-display-name-accessor-sweep`](bugs/viewer-audit-display-name-accessor-sweep.md)
-  — Ten display sites call the wire-name accessor, so display names are ignored
 - [`viewer-audit-env-overrides-preferences`](bugs/viewer-audit-env-overrides-preferences.md)
   — Environment variables silently override live graphics preferences
 - [`viewer-audit-inventory-delete-guard-parity`](bugs/viewer-audit-inventory-delete-guard-parity.md)
@@ -1304,7 +1302,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1076)
+## done (1077)
 
 ### protocol
 
@@ -1573,6 +1571,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The bevy command dispatcher discards 300 protocol send results with no log
 - [`viewer-audit-diagnostic-stream-unread`](done/viewer-audit-diagnostic-stream-unread.md)
   — The viewer collects protocol diagnostics and drains none of them
+- [`viewer-audit-display-name-accessor-sweep`](done/viewer-audit-display-name-accessor-sweep.md)
+  — Ten display sites call the wire-name accessor, so display names are ignored
 - [`viewer-audit-ellipsis-reveal-latch`](done/viewer-audit-ellipsis-reveal-latch.md)
   — A cell about one ellipsis wide latches a permanent spurious ellipsis
 - [`viewer-audit-environment-parcel-reply`](done/viewer-audit-environment-parcel-reply.md)

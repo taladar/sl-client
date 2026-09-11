@@ -543,21 +543,16 @@ fn build_properties_content(
     }
 
     // Creator / owner / acquired.
-    let name_of = |agent: sl_client_bevy::AgentKey| {
-        avatars
-            .name_of(agent)
-            .map_or_else(|| format!("({agent})"), str::to_owned)
-    };
     let creator_row = spawn_labeled_row(commands, content, "item-properties-creator");
     spawn_value_label(
         commands,
         creator_row,
-        name_of(item.creator_id),
+        avatars.label_text(item.creator_id),
         DIM_LABEL_COLOR,
     );
     let owner_row = spawn_labeled_row(commands, content, "item-properties-owner");
     let owner_label = match item.owner {
-        sl_client_bevy::OwnerKey::Agent(agent) => name_of(agent),
+        sl_client_bevy::OwnerKey::Agent(agent) => avatars.label_text(agent),
         sl_client_bevy::OwnerKey::Group(group) => format!("(group {group})"),
     };
     spawn_value_label(commands, owner_row, owner_label, DIM_LABEL_COLOR);

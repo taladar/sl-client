@@ -450,7 +450,7 @@ fn fill_landmark_content(
     let creator_text = spawn_value(
         commands,
         creator_row,
-        agent_label(item.creator_id, avatars),
+        avatars.label_text(item.creator_id),
         DIM_LABEL_COLOR,
     );
     if avatars.name_of(item.creator_id).is_none() {
@@ -876,7 +876,7 @@ fn refresh_names(
             set_text(
                 &mut texts,
                 ui.creator_text,
-                &agent_label(item.creator_id, &avatars),
+                &avatars.label_text(item.creator_id),
             );
         }
         if let Some(details) = state.details.as_ref() {
@@ -1054,13 +1054,6 @@ fn set_text(texts: &mut Query<&mut Text>, node: Option<Entity>, value: &str) {
     }
 }
 
-/// An agent's display label: the cached name, else the id in parentheses.
-fn agent_label(agent: AgentKey, avatars: &AvatarState) -> String {
-    avatars
-        .name_of(agent)
-        .map_or_else(|| format!("({agent})"), str::to_owned)
-}
-
 /// The parcel owner's display label: the group / agent name per the reply's
 /// group-owned flag, falling back to the raw id while unresolved.
 fn parcel_owner_label(
@@ -1077,7 +1070,7 @@ fn parcel_owner_label(
             .group_name(group)
             .map_or_else(|| format!("({group})"), str::to_owned)
     } else {
-        agent_label(AgentKey::from(details.owner_id), avatars)
+        avatars.label_text(AgentKey::from(details.owner_id))
     }
 }
 
@@ -1161,9 +1154,57 @@ const fn local_coord_u16(value: f32) -> u16 {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_group_owned, landmark_slurl, maturity_key, region_line};
+    use super::{is_group_owned, landmark_slurl, maturity_key, parcel_owner_label, region_line};
+    use crate::world_api::{AvatarState, GroupsModel, NameAlias};
     use pretty_assertions::assert_eq;
-    use sl_client_bevy::{RegionName, Uuid};
+    use sl_client_bevy::{AgentKey, DisplayName, ParcelDetails, RegionName, Uuid};
+
+    /// The owner row shows the name the rest of the viewer shows — the display
+    /// name, and the user's own pseudonym over it — not the grid's legacy name
+    /// (`viewer-audit-display-name-accessor-sweep`).
+    #[test]
+    fn the_owner_row_shows_the_display_name() {
+        let owner = Uuid::from_u128(0x4d);
+        let agent = AgentKey::from(owner);
+        let details = ParcelDetails {
+            owner_id: owner,
+            // No `0x4`: agent-owned, so the avatar cache answers.
+            flags: 0x0,
+            ..ParcelDetails::default()
+        };
+        let groups = GroupsModel::default();
+        let mut avatars = AvatarState::default();
+        avatars.seed_name_fields(
+            agent,
+            Some("Ida".to_owned()),
+            Some("Vector".to_owned()),
+            None,
+        );
+        assert_eq!(
+            parcel_owner_label(&details, &avatars, &groups),
+            "Ida Vector"
+        );
+
+        assert!(avatars.merge_display_name_record(&DisplayName {
+            id: agent,
+            username: "ida.vector".to_owned(),
+            display_name: "Ida the Builder".to_owned(),
+            legacy_first_name: "Ida".to_owned(),
+            legacy_last_name: "Vector".to_owned(),
+            ..DisplayName::default()
+        }));
+        assert_eq!(
+            parcel_owner_label(&details, &avatars, &groups),
+            "Ida the Builder"
+        );
+
+        avatars.set_name_aliases(
+            [(agent, NameAlias::Pseudonym("Landlord".to_owned()))]
+                .into_iter()
+                .collect(),
+        );
+        assert_eq!(parcel_owner_label(&details, &avatars, &groups), "Landlord");
+    }
 
     /// The maturity flag bits map like the reference: adult wins over mature,
     /// no bits means general.

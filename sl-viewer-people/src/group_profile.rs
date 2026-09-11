@@ -1501,11 +1501,10 @@ fn contribution_value(text: &str) -> i64 {
         .unwrap_or(0)
 }
 
-/// A member row's sort key: its resolved name lower-cased, falling back to its id.
+/// A member row's sort key: the name the row **shows**, lower-cased — so the
+/// roster sorts the way it reads, alias and display name included.
 fn member_sort_key(agent: AgentKey, avatars: &AvatarState) -> String {
-    avatars
-        .name_of(agent)
-        .map_or_else(|| agent.to_string(), str::to_lowercase)
+    avatars.label_text(agent).to_lowercase()
 }
 
 /// Rebuild [`NoticesView`] when the notice revision **or the table sort**
@@ -1847,7 +1846,7 @@ fn update_general_values(
     set_value_node(
         texts,
         handles.founder,
-        &name_of(profile.founder_id, avatars),
+        &avatars.label_text(profile.founder_id),
     );
     set_value_node(
         texts,
@@ -2161,7 +2160,7 @@ fn build_member_details(
     avatars: &AvatarState,
 ) {
     let name_row = spawn_labeled_row(commands, area, "group-details-member");
-    spawn_value_label(commands, name_row, name_of(member, avatars), LABEL_COLOR);
+    spawn_value_label(commands, name_row, avatars.label_text(member), LABEL_COLOR);
     if state.has_power(group_powers::MEMBER_EJECT) {
         let row = spawn_button_row(commands, area);
         spawn_action_button(
@@ -2495,7 +2494,7 @@ fn bind_member_rows(
             };
             bound.0 = Some(member_row.agent);
             let selected = state.focus == DetailsFocus::Member(member_row.agent);
-            let name = name_of(member_row.agent, &avatars);
+            let name = avatars.label_text(member_row.agent);
             set_row_cell(&mut texts, cells, 0, &name, member_row.is_owner);
             set_row_cell(&mut texts, cells, 1, &member_row.title, false);
             set_row_cell(&mut texts, cells, 2, &member_row.contribution, false);
@@ -3361,13 +3360,6 @@ fn despawn_children(children: &Query<&Children>, commands: &mut Commands, parent
     }
 }
 
-/// The display name for an agent, falling back to its id in parentheses.
-fn name_of(agent: AgentKey, avatars: &AvatarState) -> String {
-    avatars
-        .name_of(agent)
-        .map_or_else(|| format!("({agent})"), str::to_owned)
-}
-
 // ---------------------------------------------------------------------------
 // Pure helpers.
 // ---------------------------------------------------------------------------
@@ -3407,8 +3399,10 @@ fn role_or_everyone(role_id: Option<GroupRoleKey>) -> GroupRoleKey {
 #[cfg(test)]
 mod tests {
     use super::{
-        GroupMember, MemberRoster, has_power, next_cycle_index, role_or_everyone, split_notice,
+        GroupMember, MemberRoster, has_power, member_sort_key, next_cycle_index, role_or_everyone,
+        split_notice,
     };
+    use crate::world_api::{AvatarState, NameAlias};
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{AgentKey, GroupRoleKey, LandArea, Uuid, group_powers};
 
@@ -3422,6 +3416,42 @@ mod tests {
             title: "Member".to_owned(),
             is_owner: false,
         }
+    }
+
+    /// The member roster sorts by the name it **draws** — the display name, and
+    /// the user's own pseudonym over that — not by the grid's legacy name, so a
+    /// row never sorts under a name nobody can see (`viewer-audit-display-name-
+    /// accessor-sweep`).
+    #[test]
+    fn members_sort_under_the_name_the_row_shows() {
+        let agent = AgentKey::from(Uuid::from_u128(0x9a));
+        let mut avatars = AvatarState::default();
+        avatars.seed_name_fields(
+            agent,
+            Some("Zoe".to_owned()),
+            Some("Zebra".to_owned()),
+            None,
+        );
+        assert_eq!(member_sort_key(agent, &avatars), "zoe zebra");
+
+        assert!(
+            avatars.merge_display_name_record(&sl_client_bevy::DisplayName {
+                id: agent,
+                username: "zoe.zebra".to_owned(),
+                display_name: "Aria".to_owned(),
+                legacy_first_name: "Zoe".to_owned(),
+                legacy_last_name: "Zebra".to_owned(),
+                ..sl_client_bevy::DisplayName::default()
+            })
+        );
+        assert_eq!(member_sort_key(agent, &avatars), "aria");
+
+        avatars.set_name_aliases(
+            [(agent, NameAlias::Pseudonym("Bee".to_owned()))]
+                .into_iter()
+                .collect(),
+        );
+        assert_eq!(member_sort_key(agent, &avatars), "bee");
     }
 
     /// The roster accumulates across replies, deduplicating by agent id and keeping

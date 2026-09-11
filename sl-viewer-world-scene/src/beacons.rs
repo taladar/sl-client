@@ -662,7 +662,7 @@ fn resolve_beacon(
                 BeaconKind::Avatar
             };
             let name = avatars
-                .name_of(agent)
+                .shown_name_of(agent)
                 .map_or_else(|| avatar_fallback_label(agent), str::to_owned);
             (position, kind, name)
         }
