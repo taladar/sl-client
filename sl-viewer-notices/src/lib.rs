@@ -31,9 +31,11 @@ pub(crate) use sl_viewer_ui_core::ui;
 pub(crate) use sl_viewer_ui_core::ui_element;
 pub(crate) use sl_viewer_ui_core::ui_font;
 pub(crate) use sl_viewer_ui_widgets::floater;
+pub(crate) use sl_viewer_ui_widgets::settings_binding;
 pub(crate) use sl_viewer_ui_widgets::ui_text_input;
 pub(crate) use sl_viewer_world_api as world_api;
 
+pub mod experience_log;
 pub mod experience_permission;
 pub mod experiences_floater;
 pub mod linkified_text;

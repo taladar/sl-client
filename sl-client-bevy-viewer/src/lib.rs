@@ -78,6 +78,7 @@ pub(crate) const REGISTRARS: &[fn(&mut crate::settings::ViewerSettings)] = &[
     crate::notification_host::register_settings,
     crate::rlv::register_settings,
     crate::environment::register_settings,
+    crate::experience_log::register_settings,
 ];
 
 // The leaf toolkit (geometry math, render leaves, small models) is its own
@@ -156,6 +157,7 @@ pub(crate) use sl_viewer_chat::emoji_complete;
 pub(crate) use sl_viewer_chat::emoji_picker;
 pub(crate) use sl_viewer_kit::face_material;
 pub(crate) use sl_viewer_kit::flexi;
+pub(crate) use sl_viewer_notices::experience_log;
 pub(crate) use sl_viewer_notices::experience_permission;
 pub(crate) use sl_viewer_notices::experiences_floater;
 pub(crate) use sl_viewer_platform::environment_assets;
@@ -405,6 +407,7 @@ use crate::conversations::ConversationsPlugin;
 use crate::derender::DerenderPlugin;
 use crate::emoji_complete::ColonCompletePlugin;
 use crate::emoji_picker::EmojiPickerPlugin;
+use crate::experience_log::ExperienceLogPlugin;
 use crate::experience_permission::ExperiencePermissionPlugin;
 use crate::experiences_floater::ExperiencesPlugin;
 use crate::floater::FloaterPlugin;
@@ -1543,6 +1546,13 @@ fn run_session(
     // Forget (Command::SetExperiencePermission Forget); opened from the Avatar
     // menu. After FloaterPlugin, whose spawn_floater it builds on.
     .add_plugins(ExperiencesPlugin)
+    // The experience event log (viewer-experience-event-stream): the per-account
+    // record of what the experiences the agent joined actually did to them, the
+    // only signal in the protocol that reports an experience attachment, and the
+    // producer of the ExperienceEvent / ExperienceEventAttachment toasts. Before
+    // ExperiencesPlugin would read it is unnecessary -- the floater's Events
+    // section reads the resource, which exists from plugin build.
+    .add_plugins(ExperienceLogPlugin)
     // The offers & invites toast host (viewer-dialog-offers-invites): pops an
     // accept / decline card when the grid throws an inventory offer, a teleport
     // lure, a friendship offer or a group-membership invitation over IM, wiring

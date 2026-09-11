@@ -10,6 +10,7 @@ mod endian;
 mod environment_push;
 mod error;
 mod experience;
+mod experience_event;
 mod fake_parcel_id;
 mod field;
 mod geometry;
@@ -94,6 +95,10 @@ pub use experience::{
     parse_find_experience_query, parse_forget_experience_query, parse_group_experiences_query,
     parse_region_experiences, parse_region_experiences_request,
     parse_set_experience_permission_request, parse_update_experience_request,
+};
+pub use experience_event::{
+    EXPERIENCE_EVENT_METHOD, ExperienceEvent, ExperienceEventPermission,
+    build_experience_event_params, parse_experience_event,
 };
 pub use fake_parcel_id::FakeParcelId;
 pub use field::{Reader, Writer};

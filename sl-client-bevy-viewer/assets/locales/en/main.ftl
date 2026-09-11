@@ -3286,6 +3286,44 @@ experiences-blocked-heading = Blocked experiences
 experiences-empty = No experiences.
 experiences-forget = Forget
 
+# The experience event log (viewer-experience-event-stream): the per-account
+# record of what an experience the agent joined actually did to them, and its
+# Events section in the Experiences floater.
+experiences-events-heading = Recent events
+experiences-events-empty = No events.
+experiences-events-clear = Clear
+experiences-events-notify = Notify on every event
+# One row: the local time, how many identical reports it stands for, what was
+# done, which experience did it, and the object it did it with.
+experiences-event-row = { $time } { $event } — { $experience } ({ $object })
+experiences-event-row-repeated = { $time } { $event } ×{ $count } — { $experience } ({ $object })
+
+# What an experience did, as a notification body reads it (the reference's
+# ExperiencePermission<n> strings).
+experience-permission-take-controls = take over your controls
+experience-permission-trigger-animation = trigger animations on your avatar
+experience-permission-attach = attach to your avatar
+experience-permission-track-camera = track your camera
+experience-permission-control-camera = control your camera
+experience-permission-teleport = teleport you
+experience-permission-join-experience = automatically accept experience permissions
+experience-permission-force-sit = force your avatar to sit
+experience-permission-change-environment = change your environment settings
+experience-permission-unknown = perform an unknown operation: { $permission }
+
+# The same, as the events list's Event column shows it (the reference's
+# ExperiencePermissionShort<n> strings).
+experience-permission-short-take-controls = Take Controls
+experience-permission-short-trigger-animation = Trigger Animations
+experience-permission-short-attach = Attach
+experience-permission-short-track-camera = Track Camera
+experience-permission-short-control-camera = Control Camera
+experience-permission-short-teleport = Teleport
+experience-permission-short-join-experience = Permission
+experience-permission-short-force-sit = Sit
+experience-permission-short-change-environment = Environment
+experience-permission-short-unknown = Unknown ({ $permission })
+
 # The offers & invites toasts (viewer-dialog-offers-invites): the accept /
 # decline cards the grid throws at the user over IM — an inventory offer, a
 # teleport offer / lure, a friendship offer, and a group-membership invitation.

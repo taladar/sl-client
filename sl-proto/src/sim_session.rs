@@ -154,10 +154,10 @@ use sl_wire::messages::{
 };
 use sl_wire::{
     AnyMessage, CircuitCode, ControlFlags, EventQueueEvent, ExperienceEnvironmentPush,
-    ExperienceInfo, ExperiencePermission, ExperienceUpdate, GlobalCoordinates, Llsd, MessageId,
-    PacketFlags, Permissions, Permissions5, Reader, RegionHandle, RegionLocalObjectId,
-    RegionLocalParcelId, SequenceNumber, WireError, Writer, build_event_queue_response,
-    encode_datagram, parse_datagram, zero_decode,
+    ExperienceEvent, ExperienceInfo, ExperiencePermission, ExperienceUpdate, GlobalCoordinates,
+    Llsd, MessageId, PacketFlags, Permissions, Permissions5, Reader, RegionHandle,
+    RegionLocalObjectId, RegionLocalParcelId, SequenceNumber, WireError, Writer,
+    build_event_queue_response, encode_datagram, parse_datagram, zero_decode,
 };
 use uuid::Uuid;
 
@@ -7190,6 +7190,37 @@ impl SimSession {
                 method: sl_wire::PUSH_EXP_ENVIRONMENT_METHOD.to_owned(),
                 invoice: InvoiceId::from(push.experience_id.uuid()),
                 params: sl_wire::build_environment_push_params(push),
+            },
+            now,
+        )
+    }
+
+    /// Sends an `ExperienceEvent` — the after-the-fact report that an
+    /// **experience** the agent has joined exercised a permission on them, which
+    /// the client surfaces as [`Event::ExperienceEvent`](crate::Event::ExperienceEvent).
+    ///
+    /// An experience's scripts do not ask, so nothing else in the session tells
+    /// the agent what one of them did; this message is the whole of that record,
+    /// and the only place an experience **attachment** is reported at all.
+    ///
+    /// The experience id travels in the message's invoice, which is where the
+    /// reference reads it from — see
+    /// [`build_experience_event_params`](sl_wire::build_experience_event_params).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_experience_event(
+        &mut self,
+        event: &ExperienceEvent,
+        now: Instant,
+    ) -> Result<(), Error> {
+        self.send_generic_message(
+            &GenericMessage {
+                method: sl_wire::EXPERIENCE_EVENT_METHOD.to_owned(),
+                invoice: InvoiceId::from(event.experience_id.uuid()),
+                params: sl_wire::build_experience_event_params(event),
             },
             now,
         )

@@ -42,6 +42,7 @@ use sl_wire::AgentPreferences;
 use sl_wire::AttachmentResourcesReport;
 use sl_wire::DisplayName;
 use sl_wire::ExperienceEnvironmentPush;
+use sl_wire::ExperienceEvent;
 use sl_wire::ExperienceInfo;
 use sl_wire::LandResourcesUrls;
 use sl_wire::LslSyntax;
@@ -204,6 +205,15 @@ pub enum Event {
     /// again — at which point the region's own environment is in force once more
     /// without a refetch.
     ExperienceEnvironmentPush(Box<ExperienceEnvironmentPush>),
+    /// An **experience** the agent has joined exercised a permission on them —
+    /// the `ExperienceEvent` generic message, decoded by
+    /// [`sl_wire::parse_experience_event`].
+    ///
+    /// An experience runs its scripts without asking, so no `ScriptQuestion`
+    /// ever appears for what it does; this is the after-the-fact report that
+    /// replaces it, and the only signal in the protocol that says an experience
+    /// **attached** something to the agent.
+    ExperienceEvent(Box<ExperienceEvent>),
     /// The agent's L$ balance, parsed from a `MoneyBalanceReply` (a reply to
     /// [`Session::request_money_balance`](crate::Session::request_money_balance),
     /// or pushed by the simulator after a transaction changes the balance).

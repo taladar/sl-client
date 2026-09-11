@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 100 |
 | ready | 321 |
-| blocked | 42 |
+| blocked | 41 |
 | in-progress | 21 |
 | bugs | 52 |
-| done | 1074 |
+| done | 1075 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1652** |
@@ -489,8 +489,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Grey the settings creators on a grid that cannot store settings
 - [`viewer-event-details`](ready/viewer-event-details.md) — Event details
   floater + reminders (blocked by `viewer-ui-widget-scaffold` (done))
-- [`viewer-experience-event-stream`](ready/viewer-experience-event-stream.md) —
-  Experience event stream — the ExperienceEvent log and its notifications
 - [`viewer-experiences-floater`](ready/viewer-experiences-floater.md) —
   Experiences floater — lists, profile, search (blocked by
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
@@ -845,6 +843,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-resync-animations`](ready/viewer-resync-animations.md) — Resync
   animations action
+- [`viewer-rlv-blocked-objects`](ready/viewer-rlv-blocked-objects.md) — RLV —
+  the blocked-object list for an unapproved experience's attachment (blocked by
+  `viewer-experience-event-stream` (done), `viewer-rlv-temp-attachment-gate`
+  (done))
 - [`viewer-rlv-enforce-camera`](ready/viewer-rlv-enforce-camera.md) — RLV —
   camera restrictions and vision overlay (blocked by
   `viewer-rlv-restriction-state` (done), `viewer-camera-third-person-orbit`
@@ -995,7 +997,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-binary-duplication`](ready/repl-audit-binary-duplication.md) —
   The two REPL binaries share ~400 near-verbatim lines and have already drifted
 
-## blocked (42)
+## blocked (41)
 
 ### viewer
 
@@ -1065,9 +1067,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   toggle axis — every effect must differ where it should and nowhere else
   (blocked by `viewer-render-context-matrix`, `viewer-render-overrides-resource`
   (done))
-- [`viewer-rlv-blocked-objects`](blocked/viewer-rlv-blocked-objects.md) — RLV —
-  the blocked-object list for an unapproved experience's attachment (blocked by
-  `viewer-experience-event-stream`, `viewer-rlv-temp-attachment-gate` (done))
 - [`viewer-rlv-enforce-forced-actions`](blocked/viewer-rlv-enforce-forced-actions.md)
   — RLV — forced actions and the #RLV inventory sub-protocol (blocked by
   `viewer-rlv-restriction-state` (done), `viewer-sit-stand-actions`,
@@ -1306,7 +1305,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1074)
+## done (1075)
 
 ### protocol
 
@@ -1817,6 +1816,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-environment-settings-index`](done/viewer-environment-settings-index.md)
   — Settings assets by name — the inventory index the Library Environments
   folder needs
+- [`viewer-experience-event-stream`](done/viewer-experience-event-stream.md) —
+  Experience event stream — the ExperienceEvent log and its notifications
 - [`viewer-experience-permission-body-links`](done/viewer-experience-permission-body-links.md)
   — Experience card name — clickable experience-profile SLURL (blocked by
   `viewer-url-linkification` (done))

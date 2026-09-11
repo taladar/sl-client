@@ -12,8 +12,8 @@ mod test {
 
     use pretty_assertions::assert_eq;
     use sl_client_tokio::{
-        Client, Command, EnvironmentPushAction, Event, ExperienceEnvironmentPush, ExperienceKey,
-        Llsd, LoginParams, LoginRequest, StartLocation,
+        Client, Command, EnvironmentPushAction, Event, ExperienceEnvironmentPush, ExperienceEvent,
+        ExperienceEventPermission, ExperienceKey, Llsd, LoginParams, LoginRequest, StartLocation,
     };
     use sl_fake_grid::scenario::STOCK_SCRIPTED_OBJECT_LOCAL_ID;
     use sl_fake_grid::{
@@ -220,6 +220,70 @@ mod test {
             seen,
             vec![injected, released],
             "both halves of the push must reach the client, in the order the script wrote them"
+        );
+
+        drop(command_tx);
+        run.abort();
+        grid.shutdown();
+        Ok(())
+    }
+
+    /// **A script reports what an experience did, twice, and both reach the
+    /// client as typed events.**
+    ///
+    /// An experience's scripts never ask, so this message is the whole of what
+    /// the protocol says about their conduct — and the `Attach` case is the only
+    /// place *any* message says an experience attached something to the agent.
+    /// Two reports are sent because the pair is what proves the decode is not
+    /// reading fields off the envelope: they differ in permission, in
+    /// `is_attachment`, and in object name, and the log that consumes them
+    /// coalesces on exactly those.
+    #[tokio::test]
+    async fn a_script_reports_what_an_experience_did() -> Result<(), TestError> {
+        let experience = ExperienceKey::from(uuid::Uuid::from_u128(0xE_5678));
+        let attached = ExperienceEvent {
+            experience_id: experience,
+            owner_id: uuid::Uuid::from_u128(0x00AA),
+            permission: Some(ExperienceEventPermission::Attach),
+            is_attachment: true,
+            object_name: "Ride Harness".to_owned(),
+            parcel_name: "The Back Forty".to_owned(),
+        };
+        let seated = ExperienceEvent {
+            permission: Some(ExperienceEventPermission::ForceSit),
+            is_attachment: false,
+            object_name: "Ride Controller".to_owned(),
+            ..attached.clone()
+        };
+        let timeline = Timeline::new()
+            .then(
+                At::AfterArrival(LEAD_IN),
+                Action::ReportExperienceEvent(Box::new(attached.clone())),
+            )
+            .after(
+                Duration::ZERO,
+                Action::ReportExperienceEvent(Box::new(seated.clone())),
+            );
+        let (grid, client, _agent) = start(timeline, Vec::new()).await?;
+
+        let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
+        let (command_tx, command_rx) = mpsc::channel::<Command>(8);
+        let (diag_tx, _diag_rx) = mpsc::channel(16);
+        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+
+        let mut seen = Vec::new();
+        while seen.len() < 2 {
+            let event = tokio::time::timeout(WAIT, event_rx.recv())
+                .await?
+                .ok_or("client event stream ended early")?;
+            if let Event::ExperienceEvent(report) = event {
+                seen.push(*report);
+            }
+        }
+        assert_eq!(
+            seen,
+            vec![attached, seated],
+            "both reports must reach the client, in the order the script wrote them"
         );
 
         drop(command_tx);

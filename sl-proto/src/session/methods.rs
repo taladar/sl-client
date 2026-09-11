@@ -348,6 +348,39 @@ impl Session {
         }
     }
 
+    /// Decodes an `ExperienceEvent` parameter list and queues the resulting
+    /// [`Event::ExperienceEvent`]; `large` says which envelope it arrived in.
+    ///
+    /// As with [`push_environment_push`](Self::push_environment_push), a report
+    /// that will not decode comes back out as the raw envelope it arrived in
+    /// rather than vanishing: this is the only record the agent gets of what an
+    /// experience did to them, so an unparsable one is still worth surfacing.
+    fn push_experience_event(&mut self, invoice: Uuid, params: Vec<Vec<u8>>, large: bool) {
+        let experience_id = ExperienceKey::from(invoice);
+        match sl_wire::parse_experience_event(experience_id, &params) {
+            Ok(event) => self
+                .events
+                .push_back(Event::ExperienceEvent(Box::new(event))),
+            Err(error) => {
+                tracing::warn!(
+                    error = %error,
+                    experience = %experience_id,
+                    "an experience event failed to parse; forwarding it raw"
+                );
+                let generic = GenericMessage {
+                    method: sl_wire::EXPERIENCE_EVENT_METHOD.to_owned(),
+                    invoice: InvoiceId::from(invoice),
+                    params,
+                };
+                self.events.push_back(if large {
+                    Event::LargeGenericMessage(generic)
+                } else {
+                    Event::GenericMessage(generic)
+                });
+            }
+        }
+    }
+
     /// Sets the draw distance (metres) advertised in keep-alive `AgentUpdate`s.
     /// A larger value makes the simulator enable more neighbouring regions
     /// (surfaced as [`Event::NeighborDiscovered`]). Takes effect on the next
@@ -4784,6 +4817,32 @@ impl Session {
                     .map(|block| block.parameter.clone())
                     .collect();
                 self.push_environment_push(generic.method_data.invoice, params, true);
+            }
+            // An experience reporting, after the fact, a permission it exercised
+            // on this agent. Like the environment push it is dispatched off both
+            // envelopes, because the reference routes both through the one
+            // `gGenericDispatcher` the handler is registered on.
+            AnyMessage::GenericMessage(generic)
+                if trimmed_string(&generic.method_data.method)
+                    == sl_wire::EXPERIENCE_EVENT_METHOD =>
+            {
+                let params: Vec<Vec<u8>> = generic
+                    .param_list
+                    .iter()
+                    .map(|block| block.parameter.clone())
+                    .collect();
+                self.push_experience_event(generic.method_data.invoice, params, false);
+            }
+            AnyMessage::LargeGenericMessage(generic)
+                if trimmed_string(&generic.method_data.method)
+                    == sl_wire::EXPERIENCE_EVENT_METHOD =>
+            {
+                let params: Vec<Vec<u8>> = generic
+                    .param_list
+                    .iter()
+                    .map(|block| block.parameter.clone())
+                    .collect();
+                self.push_experience_event(generic.method_data.invoice, params, true);
             }
             // A generic method-name + parameter envelope used for a grab-bag of
             // loosely-coupled features keyed by `Method` (the feature-specific

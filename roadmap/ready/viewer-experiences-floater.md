@@ -37,6 +37,22 @@ Builds on: `protocol-27` / `protocol-62` experience surface.
 
 Parity-audit status update: the allowed/blocked lists, forget action,
 name resolution, and the top-menu entry are ALREADY IMPLEMENTED
-(`sl-client-bevy-viewer/src/experiences_floater.rs`). The remaining
+(`sl-viewer-notices/src/experiences_floater.rs`). The remaining
 scope of this task is the experience **profile panel**, **search**,
-the **contributor / owned lists**, and the **events-log tab**.
+and the **contributor / owned lists**.
+
+## Events log: done, and what it left behind (2026-09-11)
+
+The **events-log tab** is done — [[viewer-experience-event-stream]] landed the
+`ExperienceEvent` ingest, the per-account log, its notifications, and a Recent
+events section in this floater.
+
+It also inherited this floater's list mechanism, which is the one the
+build-once-update-in-place rule argues against: all three
+columns (allowed, blocked, events) despawn their rows and respawn them when a
+revision moves, rather than binding a pooled `ui_table` / `VirtualList` in
+place. Three despawn-rebuilding columns in one window is more churn than the two
+that were here before, and the events one is the one that grows without an upper
+bound on rows. Converting **all three** together — one mechanism per window, not
+two — belongs with whichever of the panels above is built first, since the
+contributor / owned lists want the same widget.

@@ -9302,6 +9302,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sl-client-bevy",
+ "sl-l10n",
  "sl-settings",
  "sl-types",
  "sl-viewer-kit",
@@ -9312,6 +9313,7 @@ dependencies = [
  "sl-viewer-ui-core",
  "sl-viewer-ui-widgets",
  "sl-viewer-world-api",
+ "time",
  "tracing",
 ]
 

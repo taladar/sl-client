@@ -56,9 +56,9 @@ use std::time::{Duration, Instant};
 
 use sl_proto::{
     ArrivalPlacement, AvatarAppearance, ChatSource, ChatType, EnvironmentSettings,
-    ExperienceEnvironmentPush, InstantMessage, Object, ParcelInfo, PlayingAnimation, RegionLimits,
-    RegionLocalObjectId, RegionLocalParcelId, RegionStats, SequenceNumber, ServerEvent, SimSession,
-    SimulatorTime, attachment_state_from_point,
+    ExperienceEnvironmentPush, ExperienceEvent, InstantMessage, Object, ParcelInfo,
+    PlayingAnimation, RegionLimits, RegionLocalObjectId, RegionLocalParcelId, RegionStats,
+    SequenceNumber, ServerEvent, SimSession, SimulatorTime, attachment_state_from_point,
 };
 use sl_types::key::InventoryKey;
 use sl_types::lsl::Vector;
@@ -306,6 +306,20 @@ pub enum Action {
     /// scenario has to have put those bytes in the grid's asset store
     /// (`environment_asset_to_bytes`) or the push resolves to nothing.
     PushExperienceEnvironment(Box<ExperienceEnvironmentPush>),
+    /// Reports, as the region does after the fact, that an **experience** the
+    /// agent has joined exercised a permission on them.
+    ///
+    /// This is the whole of what the protocol says about an experience's
+    /// conduct: its scripts never ask, so nothing else in the session mentions
+    /// them, and the
+    /// [`Attach`](sl_proto::ExperienceEventPermission::Attach) case is the only
+    /// message on any path that says an experience attached something to the
+    /// agent. A scenario that wants a viewer's experience *log* populated sends
+    /// these; a scenario that wants the sky to actually change sends
+    /// [`PushExperienceEnvironment`](Self::PushExperienceEnvironment) — which a
+    /// real region accompanies with one of these, and this grid leaves to the
+    /// scenario so a test can have either half alone.
+    ReportExperienceEvent(Box<ExperienceEvent>),
     /// Edits the region's own configuration and sends the `RegionInfo` that
     /// announces it — the estate floater's Region tab, saved by nobody.
     ///
@@ -392,6 +406,11 @@ impl std::fmt::Debug for Action {
                 .debug_struct("PushExperienceEnvironment")
                 .field("experience", &push.experience_id)
                 .field("action", &push.action.name())
+                .finish_non_exhaustive(),
+            Self::ReportExperienceEvent(event) => f
+                .debug_struct("ReportExperienceEvent")
+                .field("experience", &event.experience_id)
+                .field("permission", &event.permission)
                 .finish_non_exhaustive(),
             Self::ConfigureRegion { .. } => f.write_str("ConfigureRegion(<edit>)"),
             Self::ChangeParcel { local_id, .. } => f
@@ -914,6 +933,16 @@ async fn execute(
                         tracing::warn!(
                             "a scripted experience environment push failed to send: {error}"
                         );
+                    }
+                })
+                .await;
+        }
+        Action::ReportExperienceEvent(event) => {
+            let event = (**event).clone();
+            shared
+                .with_sim(move |sim| {
+                    if let Err(error) = sim.send_experience_event(&event, now) {
+                        tracing::warn!("a scripted experience event failed to send: {error}");
                     }
                 })
                 .await;

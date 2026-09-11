@@ -244,6 +244,7 @@ const fn event_name(event: &Event) -> &'static str {
         Event::DisplayNames(..) => "display_names",
         Event::Environment(..) => "environment",
         Event::ExperienceEnvironmentPush(..) => "experience_environment_push",
+        Event::ExperienceEvent(..) => "experience_event",
         Event::MoneyBalance(..) => "money_balance",
         Event::EconomyData(..) => "economy_data",
         Event::ParcelProperties(..) => "parcel_properties",

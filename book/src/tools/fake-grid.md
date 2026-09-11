@@ -1858,8 +1858,9 @@ of the script was not written for a world where it never happened.
 The `Action` is anything a simulator does unprompted: `RezObject`,
 `MoveObject`, `UpdateObject`, `KillObject`, `Attach` / `Detach`,
 `AnimateAvatar`, `SetAppearance`, `Chat`, `Im`, `SetEnvironment`,
-`PushExperienceEnvironment`, `ConfigureRegion`, `ChangeParcel`, `Teleport`,
-`CrossRegion`, `SimStats`, `SimulatorTime`, `Marker`, and `Custom` for a hook.
+`PushExperienceEnvironment`, `ReportExperienceEvent`, `ConfigureRegion`,
+`ChangeParcel`, `Teleport`, `CrossRegion`, `SimStats`, `SimulatorTime`,
+`Marker`, and `Custom` for a hook.
 
 `SetEnvironment` and `ConfigureRegion` go together, and the pairing is a
 protocol fact rather than an inconvenience. Nothing carries new environment
@@ -1885,6 +1886,21 @@ viewer fetches over `ViewerAsset`, so the scenario has to have put those bytes
 in the grid's asset store — and `Partial` carries a sky and/or water fragment
 whose keys are overlaid on whatever is in force. The experience id rides in the
 message's invoice, not in the parameter list.
+
+`ReportExperienceEvent` is the other half of what a region says about an
+experience, and the only half that is *about* the experience rather than about
+the sky. An experience the agent has joined runs its scripts without prompting
+for each permission — that is what joining one buys — so no `ScriptQuestion`
+ever appears for what it does, and nothing else in the session mentions it. The
+region instead reports it afterwards, as an `ExperienceEvent` generic message
+carrying the permission index, the owner, whether the acting object was an
+attachment, and the object and parcel names. It is the only message on any path
+that says an experience **attached** something to the agent, which is why the
+viewer's experience log exists to keep it.
+
+A real region sends one of these beside a `PushExperienceEnvironment`; this grid
+does not, deliberately, so a test can drive either half alone — the sky change
+without the paper trail, or the paper trail without touching the sky.
 
 The world-changing ones go through the region's shared store and publish to its
 change stream, so a second avatar standing there is told as well — a scripted

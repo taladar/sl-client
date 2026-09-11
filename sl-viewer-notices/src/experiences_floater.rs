@@ -21,6 +21,16 @@
 //! [`SlSessionEvent::ExperienceInfo`] arrives — the same request-if-unknown / fold
 //! -in-on-reply shape the group-name cache uses.
 //!
+//! # The events section
+//!
+//! Below the two lists is the **experience event log** — what the experiences
+//! the agent joined have actually *done* to them, which
+//! [`crate::experience_log`] keeps. It is the reference's Events tab of the same
+//! floater (`LLPanelExperienceLog`), rendered as a third section rather than a
+//! tab because this floater has no tab strip. Its rows resolve experience names
+//! through the same `names` cache the two lists use, so an experience that only
+//! appears in the log is looked up like any other.
+//!
 //! A **forget** writes [`Command::SetExperiencePermission`] `Forget` and updates
 //! the list **optimistically** (the row leaves at once). It does **not** wait for a
 //! reply, because on the live grid the `ExperiencePreferences` PUT / DELETE reply
@@ -35,6 +45,7 @@
 
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
+use bevy::ui::Checked;
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
 use std::collections::BTreeMap;
@@ -42,9 +53,14 @@ use std::collections::BTreeMap;
 use sl_client_bevy::{
     Command, ExperienceKey, ExperiencePermission, SlCommand, SlEvent, SlSessionEvent,
 };
+use sl_l10n::{DateTimeLength, DateTimeStyle};
 
+use crate::experience_log::{
+    ExperienceLog, LoggedExperienceEvent, SETTING_NOTIFY_ALL, permission_short,
+};
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
-use crate::i18n::{Translated, Translator};
+use crate::i18n::{TransArgs, Translated, Translator};
+use crate::settings_binding::{SettingBinding, bound_checkbox};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
@@ -89,6 +105,18 @@ const BUTTON_BORDER: Color = Color::srgb(0.40, 0.50, 0.62);
 /// A list column's background tint behind its rows.
 const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
 
+/// The events list's fixed height, in logical pixels (it scrolls past it).
+const EVENTS_HEIGHT: f32 = 120.0;
+
+/// The Notify checkbox's box, in logical pixels.
+const CHECK_SIZE: f32 = 14.0;
+
+/// The checkbox box's fill when unticked.
+const CHECK_OFF: Color = Color::srgba(0.0, 0.0, 0.0, 0.35);
+
+/// The checkbox box's fill when ticked — the same emerald the headings wear.
+const CHECK_ON: Color = HEADING_COLOR;
+
 /// The number of leading hex characters of an experience id shown as a fallback
 /// label while its name is still resolving.
 const SHORT_ID_LEN: usize = 8;
@@ -111,7 +139,9 @@ impl Plugin for ExperiencesPlugin {
                     request_permissions_on_show,
                     ingest_experience_permissions,
                     ingest_experience_names,
+                    request_logged_experience_names,
                     rebuild_lists,
+                    paint_notify_checkbox,
                 )
                     .chain(),
             );
@@ -181,6 +211,8 @@ pub(crate) struct ExperiencesUi {
     allowed_list: Entity,
     /// The blocked-experiences list column.
     blocked_list: Entity,
+    /// The experience-event log's list column ([`crate::experience_log`]).
+    events_list: Entity,
 }
 
 /// The experiences floater's [`FloaterSpec`] — shared with the `FLOATERS`
@@ -241,12 +273,117 @@ fn spawn_experiences_floater(mut commands: Commands, root: Res<UiRoot>) {
 
     let allowed_list = spawn_section(&mut commands, content, "experiences-allowed-heading");
     let blocked_list = spawn_section(&mut commands, content, "experiences-blocked-heading");
+    let events_list = spawn_events_section(&mut commands, content);
 
     commands.insert_resource(ExperiencesUi {
         panel: handle.root,
         allowed_list,
         blocked_list,
+        events_list,
     });
+}
+
+/// Spawn the events section: the heading, the scrolling list the rebuild fills,
+/// and the controls row (the Notify toggle and Clear). Returns the list column.
+fn spawn_events_section(commands: &mut Commands, parent: Entity) -> Entity {
+    commands.spawn((
+        Text::default(),
+        Translated::new("experiences-events-heading"),
+        UiFont::Sans.at(HEADING_FONT_SIZE),
+        TextColor(HEADING_COLOR),
+        ChildOf(parent),
+    ));
+    // Scrolling rather than clipped: the retention window bounds the log by
+    // *time*, not by row count, so a busy week has more rows than fit and the
+    // reference pages through them. Scrolling reaches the same rows without a
+    // pager, and without hiding any of them behind a button that is not there.
+    let list = commands
+        .spawn((
+            Node {
+                height: Val::Px(EVENTS_HEIGHT),
+                overflow: Overflow::scroll_y(),
+                ..column(Val::Px(2.0))
+            },
+            ScrollPosition::default(),
+            BackgroundColor(LIST_BACKGROUND),
+            Name::new("experiences-events-list"),
+            ChildOf(parent),
+        ))
+        .id();
+
+    let controls = commands
+        .spawn((
+            Node {
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::SpaceBetween,
+                ..row(Val::Px(6.0))
+            },
+            ChildOf(parent),
+        ))
+        .id();
+    spawn_notify_checkbox(commands, controls);
+    let clear = spawn_text_button(commands, controls, "experiences-events-clear", 2);
+    commands
+        .entity(clear)
+        .observe(|_activate: On<Activate>, mut log: ResMut<ExperienceLog>| {
+            log.clear();
+        });
+    list
+}
+
+/// The settings-bound "notify on every event" checkbox and its label — the
+/// reference's `notify_all`, which decides whether a recorded event also raises
+/// a toast.
+fn spawn_notify_checkbox(commands: &mut Commands, parent: Entity) {
+    let row_node = commands
+        .spawn((
+            Node {
+                align_items: AlignItems::Center,
+                ..row(Val::Px(5.0))
+            },
+            ChildOf(parent),
+        ))
+        .id();
+    commands.spawn((
+        bound_checkbox(SettingBinding::account(SETTING_NOTIFY_ALL)),
+        Node {
+            width: Val::Px(CHECK_SIZE),
+            height: Val::Px(CHECK_SIZE),
+            border: UiRect::all(Val::Px(2.0)),
+            ..default()
+        },
+        BorderColor::all(BUTTON_BORDER),
+        BackgroundColor(CHECK_OFF),
+        TabIndex(2),
+        NotifyCheckboxBox,
+        Pickable::default(),
+        ChildOf(row_node),
+    ));
+    commands.spawn((
+        Text::default(),
+        Translated::new("experiences-events-notify"),
+        UiFont::Sans.at(FONT_SIZE),
+        TextColor(TEXT_COLOR),
+        Pickable::IGNORE,
+        ChildOf(row_node),
+    ));
+}
+
+/// Marks the Notify checkbox's box so its fill can follow [`Checked`] (the
+/// headless widget carries the state; the visual is ours).
+#[derive(Component, Debug)]
+struct NotifyCheckboxBox;
+
+/// Keep the Notify checkbox's fill agreeing with its [`Checked`] state.
+fn paint_notify_checkbox(
+    mut boxes: Query<(&mut BackgroundColor, Has<Checked>), With<NotifyCheckboxBox>>,
+) {
+    for (mut fill, checked) in &mut boxes {
+        let wanted = if checked { CHECK_ON } else { CHECK_OFF };
+        if fill.0 != wanted {
+            fill.0 = wanted;
+        }
+    }
 }
 
 /// Spawn one headed list section (a heading label above a fixed-height clipped
@@ -350,23 +487,63 @@ fn ingest_experience_names(
     }
 }
 
-/// Rebuild both list columns whenever the state's revision moved: despawn the old
-/// rows and spawn one row (name + Forget) per experience, or an empty note.
+/// Ask the grid for the name of every experience the **log** mentions that the
+/// name cache does not know yet.
+///
+/// The two permission lists get this for free in
+/// [`ingest_experience_permissions`], but a logged event names an experience
+/// that need not be on either list — a forgotten one, or one whose GET has not
+/// come back — and a row showing a bare id would be the only place in the
+/// floater that does.
+fn request_logged_experience_names(
+    log: Res<ExperienceLog>,
+    mut state: ResMut<ExperiencesState>,
+    mut asked: Local<std::collections::BTreeSet<ExperienceKey>>,
+    mut sl: MessageWriter<SlCommand>,
+) {
+    if !log.is_changed() && !state.is_changed() {
+        return;
+    }
+    let unknown: Vec<ExperienceKey> = log
+        .entries()
+        .iter()
+        .map(|entry| entry.experience_id)
+        .filter(|id| !state.names.contains_key(id) && !asked.contains(id))
+        .collect();
+    if unknown.is_empty() {
+        return;
+    }
+    // Remembered so a log that keeps the same unresolved id does not re-ask
+    // every frame the resource is touched; a name that does arrive lands in
+    // `names` and takes the id out of the filter above anyway.
+    asked.extend(unknown.iter().copied());
+    // Touched so the rebuild runs again once the names land.
+    state.touch();
+    sl.write(SlCommand(Command::RequestExperienceInfo {
+        experience_ids: unknown,
+    }));
+}
+
+/// Rebuild the three list columns whenever the state's or the log's revision
+/// moved: despawn the old rows and spawn one row per experience (name + Forget)
+/// or per logged event, or an empty note.
 fn rebuild_lists(
     ui: Option<Res<ExperiencesUi>>,
     state: Res<ExperiencesState>,
+    log: Res<ExperienceLog>,
     translator: Translator,
-    mut last_revision: Local<Option<u64>>,
+    mut last_revision: Local<Option<(u64, u64)>>,
     children: Query<&Children>,
     mut commands: Commands,
 ) {
     let Some(ui) = ui else {
         return;
     };
-    if *last_revision == Some(state.revision) {
+    let revision = (state.revision, log.revision());
+    if *last_revision == Some(revision) {
         return;
     }
-    *last_revision = Some(state.revision);
+    *last_revision = Some(revision);
     rebuild_one(
         &mut commands,
         &children,
@@ -383,6 +560,70 @@ fn rebuild_lists(
         &state.blocked,
         &state,
     );
+    rebuild_events(
+        &mut commands,
+        &children,
+        &translator,
+        &state,
+        &log,
+        ui.events_list,
+    );
+}
+
+/// Rebuild the events column: newest first, one row per logged event, or the
+/// empty note.
+fn rebuild_events(
+    commands: &mut Commands,
+    children: &Query<&Children>,
+    translator: &Translator,
+    state: &ExperiencesState,
+    log: &ExperienceLog,
+    list: Entity,
+) {
+    despawn_rows(commands, children, list);
+    if log.entries().is_empty() {
+        spawn_empty_note(commands, list, &translator.get("experiences-events-empty"));
+        return;
+    }
+    for entry in log.entries().iter().rev() {
+        commands.spawn((
+            Text::new(event_row_text(entry, state, log, translator)),
+            UiFont::Sans.at(FONT_SIZE),
+            TextColor(TEXT_COLOR),
+            Pickable::IGNORE,
+            Name::new("experiences-event-row"),
+            ChildOf(list),
+        ));
+    }
+}
+
+/// One events row's line: when it happened, what was done, which experience did
+/// it, and the object it did it with — with the repeat count folded in when the
+/// entry stands for more than one report.
+fn event_row_text(
+    entry: &LoggedExperienceEvent,
+    state: &ExperiencesState,
+    log: &ExperienceLog,
+    translator: &Translator,
+) -> String {
+    let when = log
+        .civil_local(entry.unix)
+        .map_or_else(String::new, |civil| {
+            translator.datetime(civil, DateTimeStyle::DateTime, DateTimeLength::Short)
+        });
+    let args = TransArgs::new()
+        .text("time", &when)
+        .text("event", &permission_short(entry.permission, translator))
+        .text("experience", &experience_label(state, entry.experience_id))
+        .text("object", &entry.object_name);
+    if entry.count > 1 {
+        translator.format(
+            "experiences-event-row-repeated",
+            &args.int("count", i64::from(entry.count)),
+        )
+    } else {
+        translator.format("experiences-event-row", &args)
+    }
 }
 
 /// Rebuild one list column: despawn its rows and spawn one row per id (or the
@@ -396,19 +637,9 @@ fn rebuild_one(
     ids: &[ExperienceKey],
     state: &ExperiencesState,
 ) {
-    if let Ok(existing) = children.get(list) {
-        for child in existing {
-            commands.entity(*child).despawn();
-        }
-    }
+    despawn_rows(commands, children, list);
     if ids.is_empty() {
-        commands.spawn((
-            Text::new(translator.get("experiences-empty")),
-            UiFont::Sans.at(FONT_SIZE),
-            TextColor(DIM_TEXT_COLOR),
-            Pickable::IGNORE,
-            ChildOf(list),
-        ));
+        spawn_empty_note(commands, list, &translator.get("experiences-empty"));
         return;
     }
     let forget_label = translator.get("experiences-forget");
@@ -428,6 +659,26 @@ fn rebuild_one(
             },
         );
     }
+}
+
+/// Despawn every row currently under a list column, so a rebuild starts clean.
+fn despawn_rows(commands: &mut Commands, children: &Query<&Children>, list: Entity) {
+    if let Ok(existing) = children.get(list) {
+        for child in existing {
+            commands.entity(*child).despawn();
+        }
+    }
+}
+
+/// Spawn a list column's dimmed "nothing here" line.
+fn spawn_empty_note(commands: &mut Commands, list: Entity, note: &str) {
+    commands.spawn((
+        Text::new(note.to_owned()),
+        UiFont::Sans.at(FONT_SIZE),
+        TextColor(DIM_TEXT_COLOR),
+        Pickable::IGNORE,
+        ChildOf(list),
+    ));
 }
 
 /// Build one list row — an experience name and a trailing Forget button — under
@@ -561,6 +812,24 @@ pub fn spawn_experiences_specimen(
     spawn_specimen_heading(commands, root, &cx.text("Blocked experiences"));
     let forget = build_experience_row(commands, root, &cx.text("Spam Kiosk"), &forget_label);
     wire_specimen_forget(commands, forget);
+    // Events section: a heading and two rows, one of them a repeat, so the
+    // sweep sees both row shapes the log renders. The live section's rows come
+    // from a session; these are the same `Text` nodes with the same font and
+    // colour, spawned statically.
+    spawn_specimen_heading(commands, root, &cx.text("Recent events"));
+    for line in [
+        cx.text("11/09/26, 14:32 Attach — Neon Speedway (Ride Harness)"),
+        cx.text("11/09/26, 14:31 Sit ×4 — Neon Speedway (Ride Controller)"),
+    ] {
+        commands.spawn((
+            Text::new(line),
+            UiFont::Sans.at(FONT_SIZE),
+            TextColor(TEXT_COLOR),
+            Pickable::IGNORE,
+            Name::new("experiences-event-row"),
+            ChildOf(root),
+        ));
+    }
     root
 }
 
