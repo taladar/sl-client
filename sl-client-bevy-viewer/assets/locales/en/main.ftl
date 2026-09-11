@@ -534,11 +534,9 @@ about-land-banned = Banned Residents
 # Experiences tab (no per-parcel experience protocol yet).
 about-land-experiences-unavailable = Per-parcel experience lists are not available yet.
 
-# Environment-tab summary.
+# Environment-tab summary, above the shared land-environment panel.
 about-land-env-override = Parcel overrides allowed:
 about-land-env-version = Parcel environment version:
-about-land-env-day-cycle = Active day cycle:
-about-land-env-edit-note = Per-parcel environment editing is a separate feature; this is the current environment.
 
 ## The Region / Estate ("About Region") floater (viewer-region-options-*).
 
@@ -660,9 +658,48 @@ about-region-rating-mature = Moderate
 about-region-rating-adult = Adult
 about-region-rating-unknown = Unknown
 
-# Environment / Experiences placeholder tabs.
-about-region-env-unimplemented = Region environment editing is not implemented yet.
+# Experiences placeholder tab (the Environment tab hosts the shared
+# land-environment panel).
 about-region-experiences-unimplemented = Region experiences are not implemented yet.
+
+## The land-environment panel (viewer-region-environment-panel) — the Region /
+## Estate floater's Environment tab and About Land's.
+
+# Why the panel cannot be used, in the reference's order of precedence.
+land-env-unavailable-cross-region = Environment settings are not available across region boundaries.
+land-env-unavailable-no-parcel = No parcel is selected, so there is no environment to set.
+land-env-unavailable-disallowed = The estate does not allow parcels to override the region environment.
+land-env-unavailable-too-small = A parcel must be at least 128 m² to carry its own environment.
+
+# Choosing what the land holds.
+land-env-select-heading = Select Environment
+land-env-use-default = Use Default Settings
+land-env-use-region = Use Region Settings
+land-env-use-inventory = Use Inventory…
+land-env-allow-override = Parcel Owners May Override
+
+# The day the land runs on.
+land-env-day-heading = Day Settings
+land-env-day-length = Day Length (hours)
+land-env-day-offset = Day Offset (hours)
+land-env-apparent-time = Apparent Time of Day:
+
+# The water track and the four sky tracks, highest first.
+land-env-tracks-heading = Tracks
+land-env-track-sky-4 = Sky 4
+land-env-track-sky-3 = Sky 3
+land-env-track-sky-2 = Sky 2
+land-env-track-ground = Ground
+land-env-track-water = Water
+land-env-reset-altitudes = Reset Altitudes
+
+# Committing, and the placeholders a track shows when it holds nothing of its
+# own.
+land-env-apply = Apply
+land-env-revert = Revert
+land-env-loading = Loading…
+land-env-empty = (empty)
+land-env-region-env = (region environment)
 
 ## The emoji-picker floater (viewer-emoji-picker-floater).
 

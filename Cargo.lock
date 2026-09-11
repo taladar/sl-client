@@ -9406,6 +9406,7 @@ dependencies = [
  "sl-client-bevy",
  "sl-notecard",
  "sl-types",
+ "sl-viewer-environment",
  "sl-viewer-inventory",
  "sl-viewer-map",
  "sl-viewer-notices",
@@ -9414,7 +9415,6 @@ dependencies = [
  "sl-viewer-ui-core",
  "sl-viewer-ui-widgets",
  "sl-viewer-world-api",
- "sl-viewer-world-scene",
  "url",
 ]
 

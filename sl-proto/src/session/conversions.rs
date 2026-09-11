@@ -9,22 +9,22 @@ use crate::types::{
     AccountBenefits, ActiveGroup, AssetType, AvatarAppearance, AvatarAttachment,
     AvatarGroupMembership, AvatarInterests, AvatarName, AvatarPickerResult, AvatarProperties,
     ChatAudible, ChatMessage, ChatSource, ChatType, ClassifiedCategory, ClassifiedInfo,
-    CloudPosDensity, Color, ColorAlpha, DayCycle, DayCycleFrame, DensityLayer, DisplayNameUpdate,
-    EconomyData, EnvironmentAsset, EnvironmentSettings, EnvironmentUpdate, EstateAccessKind,
-    EstateInfo, Event, Friend, FriendRights, Glow, GroupAccountDetails, GroupAccountDetailsEntry,
-    GroupAccountSummary, GroupAccountTransaction, GroupAccountTransactions,
-    GroupActiveProposalItem, GroupMember, GroupMembership, GroupName, GroupNotice, GroupNoticeKey,
-    GroupProfile, GroupRole, GroupTitle, GroupVote, GroupVoteHistoryItem, ImDialog, InstantMessage,
-    InventoryFolder, InventoryItem, InventoryListing, InventoryType, LandingType, MapItem,
-    MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MoneyBalance,
-    MoneyTransaction, MuteEntry, MuteFlags, MuteType, NavMeshBuildStatus, NavMeshStatus,
-    NeighborInfo, Object, ObjectProperties, ObjectTransform, OpenRegionInfo, ParcelCategory,
-    ParcelInfo, ParcelRequestResult, ParcelStatus, PickInfo, PickKey, PlayingAnimation,
-    PrimShapeParams, ProductType, ProposalCandidateId, ProposalVoteId, RegionChatSettings,
-    RegionCombatSettings, RegionIdentity, RegionLimits, RegionTerrainComposition,
-    RequiredVoiceVersion, RestoreItem, SaleType, Scale, ScriptDialog, ScriptPermissionRequest,
-    ScriptPermissions, SetDisplayNameReply, SkySettings, TaskInventoryItem, WaterSettings,
-    avatar_texture,
+    CloudPosDensity, Color, ColorAlpha, DayCycle, DayCycleFrame, DayNames, DensityLayer,
+    DisplayNameUpdate, EconomyData, EnvironmentAsset, EnvironmentSettings, EnvironmentUpdate,
+    EstateAccessKind, EstateInfo, Event, Friend, FriendRights, Glow, GroupAccountDetails,
+    GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
+    GroupAccountTransactions, GroupActiveProposalItem, GroupMember, GroupMembership, GroupName,
+    GroupNotice, GroupNoticeKey, GroupProfile, GroupRole, GroupTitle, GroupVote,
+    GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
+    InventoryListing, InventoryType, LandingType, MapItem, MapItemType, MapLayer, MapRegionInfo,
+    MapRequestFlags, Maturity, MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags, MuteType,
+    NavMeshBuildStatus, NavMeshStatus, NeighborInfo, Object, ObjectProperties, ObjectTransform,
+    OpenRegionInfo, ParcelCategory, ParcelInfo, ParcelRequestResult, ParcelStatus, PickInfo,
+    PickKey, PlayingAnimation, PrimShapeParams, ProductType, ProposalCandidateId, ProposalVoteId,
+    RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionLimits,
+    RegionTerrainComposition, RequiredVoiceVersion, RestoreItem, SaleType, Scale, ScriptDialog,
+    ScriptPermissionRequest, ScriptPermissions, SetDisplayNameReply, SkySettings, TRACK_MAX,
+    TaskInventoryItem, WaterSettings, avatar_texture,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::AgentKey;
@@ -797,7 +797,44 @@ pub(crate) fn environment_from_llsd(body: &Llsd) -> Option<EnvironmentSettings> 
         env_version: i32_member(env, "env_version"),
         track_altitudes: [altitude(0), altitude(1), altitude(2)],
         day_cycle: day_cycle_from_llsd(env.get("day_cycle")),
+        day_asset: env.get("day_asset").and_then(Llsd::as_uuid),
+        day_names: day_names_from_llsd(env.get("day_names")),
     })
+}
+
+/// Parses the `day_names` member of an `ExtEnvironment` reply, which the grid
+/// sends in one of two shapes — a string naming the whole day cycle, or an
+/// array naming each track (the reference's `EnvironmentInfo::extract`).
+fn day_names_from_llsd(names: Option<&Llsd>) -> DayNames {
+    match names {
+        Some(Llsd::String(name)) => DayNames::Cycle(name.clone()),
+        Some(array @ Llsd::Array(_)) => {
+            let mut tracks: [String; TRACK_MAX] = Default::default();
+            for (track, slot) in tracks.iter_mut().enumerate() {
+                if let Some(name) = array.index(track).and_then(Llsd::as_str) {
+                    name.clone_into(slot);
+                }
+            }
+            DayNames::Tracks(tracks)
+        }
+        _ => DayNames::Unnamed,
+    }
+}
+
+/// Serializes a [`DayNames`] back to the `day_names` member, in the shape it
+/// came in. [`DayNames::Unnamed`] has no member at all, which is what a grid
+/// that publishes an inline cycle sends.
+fn day_names_to_llsd(names: &DayNames) -> Option<Llsd> {
+    match names {
+        DayNames::Unnamed => None,
+        DayNames::Cycle(name) => Some(Llsd::String(name.clone())),
+        DayNames::Tracks(tracks) => Some(Llsd::Array(
+            tracks
+                .iter()
+                .map(|name| Llsd::String(name.clone()))
+                .collect(),
+        )),
+    }
 }
 
 /// Parses an `ExtEnvironment` PUT body (the reference viewer's
@@ -5101,7 +5138,7 @@ fn day_cycle_to_llsd(cycle: &DayCycle) -> Llsd {
 /// wrapped with `parcel_id` and `success`.
 #[must_use]
 pub fn environment_to_llsd(env: &EnvironmentSettings) -> Llsd {
-    let environment = llsd_map(vec![
+    let mut members = vec![
         ("parcel_id", Llsd::Integer(env.parcel_id)),
         ("region_id", Llsd::Uuid(env.region_id)),
         ("day_length", Llsd::Integer(env.day_length)),
@@ -5110,12 +5147,41 @@ pub fn environment_to_llsd(env: &EnvironmentSettings) -> Llsd {
         ("env_version", Llsd::Integer(env.env_version)),
         ("track_altitudes", reals_to_llsd(&env.track_altitudes)),
         ("day_cycle", day_cycle_to_llsd(&env.day_cycle)),
-    ]);
+    ];
+    if let Some(day_asset) = env.day_asset {
+        members.push(("day_asset", Llsd::Uuid(day_asset)));
+    }
+    if let Some(day_names) = day_names_to_llsd(&env.day_names) {
+        members.push(("day_names", day_names));
+    }
+    let environment = llsd_map(members);
     llsd_map(vec![
         ("environment", environment),
         ("parcel_id", Llsd::Integer(env.parcel_id)),
         ("success", Llsd::Boolean(true)),
     ])
+}
+
+/// The `ExtEnvironment` URL addressing one scope of one region's environment:
+/// the capability's base with `?parcelid=` for a parcel and `&trackno=` for a
+/// single sky track.
+///
+/// Both are **omitted** when they are not being scoped — the reference builds
+/// the query only for a parcel or a track (`coroRequestEnvironment`,
+/// `coroUpdateEnvironment`, `coroResetEnvironment` all share this shape) — so
+/// a whole-region request is the bare capability URL. A grid that defaults a
+/// missing `parcelid` to `-1` cannot tell the difference, but one that treats
+/// the parameter as a request to look a parcel up can.
+#[must_use]
+pub fn environment_cap_url(base: &str, parcel_id: Option<i32>, track_no: Option<i32>) -> String {
+    match (parcel_id, track_no) {
+        (None, None) => base.to_owned(),
+        (Some(parcel_id), None) => format!("{base}?parcelid={parcel_id}"),
+        (None, Some(track_no)) => format!("{base}?trackno={track_no}"),
+        (Some(parcel_id), Some(track_no)) => {
+            format!("{base}?parcelid={parcel_id}&trackno={track_no}")
+        }
+    }
 }
 
 /// Builds an `ExtEnvironment` PUT body (the reference viewer's

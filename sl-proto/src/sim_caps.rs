@@ -1834,9 +1834,10 @@ impl SimCaps {
     /// the stored result (the `{ environment, success: true }` envelope the
     /// reference viewer reads back); a `day_asset`-only update answers a
     /// graceful `200 { success: false, message }` — the fixture has no
-    /// settings-asset store to resolve the id against. A malformed query or
-    /// body → `400`; other methods (including the reference's DELETE reset,
-    /// out of scope here) → `405`.
+    /// settings-asset store to resolve the id against. DELETE drops the
+    /// stored entry ([`SimSession::reset_environment`]) and echoes what the
+    /// land inherits instead. A malformed query or body → `400`; other
+    /// methods → `405`.
     fn dispatch_environment(sim: &mut SimSession, request: &CapsRequest<'_>) -> CapsResponse {
         let Ok(parcel_id) = parse_parcel_id_query(request.query) else {
             return CapsResponse::bad_request();
@@ -1863,6 +1864,13 @@ impl SimCaps {
                 }
                 let stored = sim.apply_environment_update(parcel_id, track_no, update);
                 CapsResponse::llsd_xml(environment_to_llsd(&stored).to_llsd_xml())
+            }
+            "DELETE" => {
+                let Ok(track_no) = parse_track_no_query(request.query) else {
+                    return CapsResponse::bad_request();
+                };
+                let inherited = sim.reset_environment(parcel_id, track_no);
+                CapsResponse::llsd_xml(environment_to_llsd(&inherited).to_llsd_xml())
             }
             _ => CapsResponse::method_not_allowed(),
         }

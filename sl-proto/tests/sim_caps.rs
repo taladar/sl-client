@@ -9,7 +9,7 @@ mod test {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::time::{Duration, Instant};
 
-    use pretty_assertions::assert_eq;
+    use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
         AVATAR_PICKER_PAGE_SIZE, AVATAR_PICKER_SEARCH_TAG, AbuseReport, AbuseReportType, AgentKey,
         AgentPreferences, AssetKey, CAP_AGENT_EXPERIENCES, CAP_ATTACHMENT_RESOURCES,
@@ -2632,6 +2632,8 @@ mod test {
                 sky_frames: std::collections::BTreeMap::new(),
                 water_frames: std::collections::BTreeMap::new(),
             },
+            day_asset: None,
+            day_names: sl_proto::DayNames::Unnamed,
         });
 
         sim.set_object_cost(
@@ -2981,6 +2983,92 @@ mod test {
             other => return Err(format!("expected Environment, got {other:?}").into()),
         }
         Ok(())
+    }
+
+    /// The `ExtEnvironment` **DELETE** drops a parcel's stored entry, so the
+    /// parcel falls back to the region's environment, and surfaces
+    /// [`ServerEvent::EnvironmentReset`] for the driver.
+    ///
+    /// The fallback is the whole point of the verb and the reason it cannot be
+    /// spelled as a PUT: there is no update body that says "forget what I set
+    /// and inherit again". The region entry is the bottom of that chain, so a
+    /// region-scoped reset *replaces* it with the default rather than removing
+    /// it — a capability with nothing to serve would be worse than a region
+    /// with a default sky.
+    #[test]
+    fn environment_delete_drops_the_stored_entry() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_region_info(&mut sim);
+        let now = Instant::now();
+        let mut client = new_client()?;
+        let path = granted_cap_path(&caps, CAP_EXT_ENVIRONMENT)?;
+
+        // Give parcel 3 an environment of its own, distinguishable by its day
+        // length from the region's.
+        let update_body = build_environment_update_request(&EnvironmentUpdate {
+            day_length: Some(1800),
+            ..EnvironmentUpdate::default()
+        });
+        let (status, _body) = respond(
+            &mut caps,
+            &mut sim,
+            &put(&path, Some("parcelid=3"), &update_body),
+        )?;
+        assert_eq!(status, 200);
+        drop(sim.poll_event());
+
+        let events = fold_into_client(
+            &mut caps,
+            &mut sim,
+            &mut client,
+            &delete(&path, Some("parcelid=3")),
+            CAP_EXT_ENVIRONMENT,
+            now,
+        )?;
+        match events.as_slice() {
+            [Event::Environment(environment)] => {
+                assert_ne!(
+                    environment.day_length, 1800,
+                    "the parcel's own environment survived the reset"
+                );
+                assert_eq!(
+                    environment.day_length,
+                    sim_region_day_length(&mut caps, &mut sim, &path)?,
+                    "a reset parcel should be answered with the region's environment"
+                );
+            }
+            other => return Err(format!("expected Environment, got {other:?}").into()),
+        }
+        match sim.poll_event() {
+            Some(ServerEvent::EnvironmentReset {
+                parcel_id,
+                track_no,
+            }) => {
+                assert_eq!(parcel_id, 3);
+                assert_eq!(track_no, None);
+            }
+            other => return Err(format!("expected EnvironmentReset, got {other:?}").into()),
+        }
+        Ok(())
+    }
+
+    /// The day length the region entry is serving, read back through the
+    /// capability.
+    fn sim_region_day_length(
+        caps: &mut SimCaps,
+        sim: &mut SimSession,
+        path: &str,
+    ) -> Result<i32, TestError> {
+        let (status, body) = respond(caps, sim, &get(path, Some("parcelid=-1")))?;
+        assert_eq!(status, 200);
+        let llsd = parse_llsd_xml(&body)?;
+        let day_length = llsd
+            .get("environment")
+            .and_then(|environment| environment.get("day_length"))
+            .and_then(sl_wire::Llsd::as_i32)
+            .ok_or("the region environment reply carries no day_length")?;
+        Ok(day_length)
     }
 
     /// A `day_asset`-only PUT answers the reference's graceful failure —
@@ -3379,8 +3467,9 @@ mod test {
         }
 
         // ExtEnvironment: a malformed `parcelid` is a bad request, a PUT
-        // without the `environment` envelope is a bad request, and any other
-        // method (the DELETE reset stays unimplemented) is 405.
+        // without the `environment` envelope is a bad request. The three verbs
+        // the capability serves are GET, PUT and DELETE; anything else is 405,
+        // and a malformed query is 400 whichever of them asked.
         let path = granted_cap_path(&caps, CAP_EXT_ENVIRONMENT)?;
         let (status, _) = respond(&mut caps, &mut sim, &get(&path, Some("parcelid=abc")))?;
         assert_eq!(status, 400);
@@ -3390,17 +3479,9 @@ mod test {
             &put(&path, None, "<llsd><map/></llsd>"),
         )?;
         assert_eq!(status, 400);
-        let (status, _) = respond(
-            &mut caps,
-            &mut sim,
-            &CapsRequest {
-                method: "DELETE",
-                path: &path,
-                query: Some("parcelid=-1"),
-                range: None,
-                body: b"",
-            },
-        )?;
+        let (status, _) = respond(&mut caps, &mut sim, &delete(&path, Some("trackno=abc")))?;
+        assert_eq!(status, 400);
+        let (status, _) = respond(&mut caps, &mut sim, &post(&path, "<llsd><map/></llsd>"))?;
         assert_eq!(status, 405);
 
         // LandResources: an unknown sub-path is 404; the follow-up GETs are

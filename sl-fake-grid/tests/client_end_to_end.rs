@@ -549,6 +549,8 @@ mod test {
                 sky_frames: std::collections::BTreeMap::new(),
                 water_frames: std::collections::BTreeMap::new(),
             },
+            day_asset: None,
+            day_names: sl_proto::DayNames::Unnamed,
         };
         let mut running = start_in(vec![RegionConfig {
             environment: Some(environment.clone()),

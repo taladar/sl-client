@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 42 |
 | in-progress | 22 |
 | bugs | 52 |
-| done | 1075 |
+| done | 1076 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1651** |
+| **total** | **1652** |
 
 ## ideas (100)
 
@@ -483,6 +483,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-object-selection-core` (done))
 - [`viewer-environment-density-profiles`](ready/viewer-environment-density-profiles.md)
   — Render the atmospheric density profiles
+- [`viewer-environment-land-day-cycle-edit`](ready/viewer-environment-land-day-cycle-edit.md)
+  — Edit a land's day cycle in place
 - [`viewer-environment-pause-clouds`](ready/viewer-environment-pause-clouds.md)
   — Pause cloud animation toggle
 - [`viewer-event-details`](ready/viewer-event-details.md) — Event details
@@ -792,10 +794,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (sim) debug console (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-region-entry-maturity-gate`](ready/viewer-region-entry-maturity-gate.md)
   — Eight ported notifications for a refused entry, and nothing raises one
-- [`viewer-region-environment-panel`](ready/viewer-region-environment-panel.md)
-  — Region / parcel environment settings panel (blocked by
-  `viewer-region-options-general` (done), `viewer-environment-my-environments`
-  (done))
 - [`viewer-region-estate-group-picker`](ready/viewer-region-estate-group-picker.md)
   — Group picker for the Region/Estate Access → Allowed Groups list
 - [`viewer-region-estate-object-return`](ready/viewer-region-estate-object-return.md)
@@ -1301,7 +1299,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1075)
+## done (1076)
 
 ### protocol
 
@@ -2599,6 +2597,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   multi-row selection and its multi-avatar menu
 - [`viewer-reattached-rigged-mesh-renders-static-mislocated`](done/viewer-reattached-rigged-mesh-renders-static-mislocated.md)
   — Re-attached rigged mesh renders static and mislocated (fine at login)
+- [`viewer-region-environment-panel`](done/viewer-region-environment-panel.md) —
+  Region / parcel environment settings panel (blocked by
+  `viewer-region-options-general` (done), `viewer-environment-my-environments`
+  (done))
 - [`viewer-region-name-connecting-after-crossing`](done/viewer-region-name-connecting-after-crossing.md)
   — Top-bar region name stuck on "Connecting..." after crossing into a region
   never teleported to

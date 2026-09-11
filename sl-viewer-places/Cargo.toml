@@ -22,6 +22,7 @@ sl-client-bevy = { workspace = true, features = [
 ] }
 sl-notecard = { path = "../sl-notecard", version = "0.1.0" }
 sl-types = { workspace = true }
+sl-viewer-environment = { workspace = true }
 sl-viewer-inventory = { workspace = true }
 sl-viewer-map = { workspace = true }
 sl-viewer-notices = { workspace = true }
@@ -30,7 +31,6 @@ sl-viewer-platform = { workspace = true }
 sl-viewer-ui-core = { workspace = true }
 sl-viewer-ui-widgets = { workspace = true }
 sl-viewer-world-api = { workspace = true }
-sl-viewer-world-scene = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]

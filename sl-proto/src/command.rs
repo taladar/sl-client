@@ -906,6 +906,20 @@ pub enum Command {
         /// The partial update to publish.
         update: Box<EnvironmentUpdate>,
     },
+    /// Drop the stored extended-environment (EEP) settings via an
+    /// `ExtEnvironment` **DELETE** (the reference viewer's
+    /// `coroResetEnvironment`), so the land falls back to what it inherits — a
+    /// parcel to its region's environment, a region to the grid default. The
+    /// reply carries no settings of its own, so the grid announces the change
+    /// the way it announces any other environment edit.
+    ResetEnvironment {
+        /// The parcel's region-local id, or [`None`] for the region
+        /// environment.
+        parcel_id: Option<i32>,
+        /// The single sky track to drop, or [`None`] for the whole
+        /// environment.
+        track_no: Option<i32>,
+    },
     /// Request `ParcelProperties` for a metre rectangle (region-local).
     RequestParcelProperties {
         /// The western edge (metres).
@@ -2965,6 +2979,7 @@ impl Command {
             Self::RequestLandStat { .. } => "RequestLandStat",
             Self::RequestEnvironment { .. } => "RequestEnvironment",
             Self::SetEnvironment { .. } => "SetEnvironment",
+            Self::ResetEnvironment { .. } => "ResetEnvironment",
             Self::RequestParcelProperties { .. } => "RequestParcelProperties",
             Self::RequestParcelPropertiesById { .. } => "RequestParcelPropertiesById",
             Self::SetParcelOtherCleanTime { .. } => "SetParcelOtherCleanTime",

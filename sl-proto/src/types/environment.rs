@@ -56,6 +56,61 @@ pub struct EnvironmentSettings {
     pub track_altitudes: [f32; 3],
     /// The day cycle: its schedule of sky/water frames and the frames themselves.
     pub day_cycle: DayCycle,
+    /// The settings **asset** the day cycle came from (`day_asset`), when the
+    /// grid published one — the reference's `EnvironmentInfo::mAssetId`. `None`
+    /// for an environment carried inline, which is what a grid that resolves
+    /// the asset itself (OpenSim) always sends.
+    pub day_asset: Option<Uuid>,
+    /// What the grid called the environment's tracks (`day_names`).
+    pub day_names: DayNames,
+}
+
+/// How many tracks a day cycle has on the wire: the water track plus the four
+/// sky tracks (the reference's `LLSettingsDay::TRACK_MAX`). The length of a
+/// `day_names` array.
+pub const TRACK_MAX: usize = SKY_TRACK_COUNT + 1;
+
+/// What the grid called the tracks of an environment (`day_names` in the
+/// `ExtEnvironment` reply) — the reference's `EnvironmentInfo::mDayCycleName`
+/// and `mNameList`, which are the two shapes that one wire field takes.
+///
+/// An environment assembled out of per-track settings assets has a name per
+/// track and no name of its own; one published from a single day-cycle asset
+/// has the reverse.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum DayNames {
+    /// The grid sent no `day_names`. The cycle's own [`DayCycle::name`] is the
+    /// only name there is.
+    #[default]
+    Unnamed,
+    /// `day_names` as a **string**: one name for the whole day cycle.
+    Cycle(String),
+    /// `day_names` as an **array**: one name per track, water first and then
+    /// the four sky tracks, ground up. An empty entry is a track the grid did
+    /// not name.
+    Tracks([String; TRACK_MAX]),
+}
+
+impl DayNames {
+    /// What to call `track` (0 = water, 1 = the ground sky track, 2..=4 the
+    /// altitude sky tracks above it), or `None` when this says nothing about
+    /// it and the caller should fall back to [`DayCycle::name`].
+    ///
+    /// The reference's `getNameForTrackIndex`, minus its display fallbacks:
+    /// which placeholder an unnamed track shows ("(empty)", "(region
+    /// environment)", the track below it in brackets) is the panel's decision
+    /// and depends on whether it is looking at a region or a parcel.
+    #[must_use]
+    pub fn track(&self, track: usize) -> Option<&str> {
+        match self {
+            Self::Unnamed => None,
+            Self::Cycle(name) => (!name.is_empty()).then_some(name.as_str()),
+            Self::Tracks(names) => names
+                .get(track)
+                .filter(|name| !name.is_empty())
+                .map(String::as_str),
+        }
+    }
 }
 
 /// A partial environment update: the body of an `ExtEnvironment` PUT (the
@@ -84,6 +139,20 @@ pub struct EnvironmentUpdate {
     pub day_name: Option<String>,
     /// The raw environment behaviour flags to store.
     pub flags: u32,
+}
+
+impl EnvironmentUpdate {
+    /// The published settings may not be copied out of the land
+    /// (`LLSettingsBase::FLAG_NOCOPY`).
+    pub const FLAG_NOCOPY: u32 = 1 << 0;
+    /// The published settings may not be modified
+    /// (`LLSettingsBase::FLAG_NOMOD`) — set when the inventory item the asset
+    /// came from withholds **modify** from its owner.
+    pub const FLAG_NOMOD: u32 = 1 << 1;
+    /// The published settings may not be transferred
+    /// (`LLSettingsBase::FLAG_NOTRANS`) — set when the item withholds
+    /// **transfer**.
+    pub const FLAG_NOTRANS: u32 = 1 << 2;
 }
 
 /// A day cycle: the tracks scheduling named frames over a day, plus the frame
@@ -1078,6 +1147,8 @@ impl EnvironmentSettings {
                 sky_frames,
                 water_frames,
             },
+            day_asset: None,
+            day_names: DayNames::Unnamed,
         }
     }
 
@@ -1125,6 +1196,8 @@ impl EnvironmentSettings {
                 sky_frames: BTreeMap::from([(DEFAULT_SKY_FRAME.to_owned(), sky)]),
                 water_frames: BTreeMap::from([(DEFAULT_WATER_FRAME.to_owned(), water)]),
             },
+            day_asset: None,
+            day_names: DayNames::Unnamed,
         }
     }
 

@@ -45,10 +45,10 @@ use sl_proto::{
     build_update_script_task_request, build_update_task_item_asset_request,
     build_upload_baked_texture_request, build_user_info_update, build_voice_signaling_request,
     chat_session_agents_body, chat_session_request_body, copy_inventory_from_notecard_body,
-    create_listing_request, delete_listing_request, display_names_query, experience_id_query,
-    experience_info_query, find_experience_query, forget_experience_query, group_experiences_query,
-    group_invite_response_body, listing_request, listings_request, merchant_status_request,
-    parse_login_response, update_listing_request,
+    create_listing_request, delete_listing_request, display_names_query, environment_cap_url,
+    experience_id_query, experience_info_query, find_experience_query, forget_experience_query,
+    group_experiences_query, group_invite_response_body, listing_request, listings_request,
+    merchant_status_request, parse_login_response, update_listing_request,
 };
 
 // Re-export the core types a consumer needs to configure the plugin, drive the
@@ -66,37 +66,37 @@ pub use sl_proto::{
     CoarseLocation, Color, ColorAlpha, Command, ControlFlags, ConversationKind, CreateGroupParams,
     CreateListing, DEFAULT_BLOOM_TEXTURE, DEFAULT_CLOUD_TEXTURE, DEFAULT_HALO_TEXTURE,
     DEFAULT_MOON_TEXTURE, DEFAULT_PRIM_TEXTURE, DEFAULT_RAINBOW_TEXTURE, DEFAULT_SUN_TEXTURE,
-    DEFAULT_WATER_NORMAL_TEXTURE, DayCycle, DayCycleFrame, DayTrack, DeRezDestination,
+    DEFAULT_WATER_NORMAL_TEXTURE, DayCycle, DayCycleFrame, DayNames, DayTrack, DeRezDestination,
     DensityLayer, DetachOrder, Diagnostic, DirClassifiedResult, DirEventResult, DirFindFlags,
     DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, Direction, DirectoryVisibility,
     DisconnectReason, DisplayName, DisplayNameUpdate, Distance, EconomyData, EnvironmentAsset,
-    EnvironmentSettings, Error as SessionError, EstateAccessDelta, EstateAccessKind,
-    EstateCovenant, EstateFlags, EstateInfo, EstateInfoUpdate, EventId, EventInfo, ExperienceInfo,
-    ExperienceKey, ExperiencePermission, ExperienceProperties, ExperienceUpdate, ExtendedMesh,
-    FaceMaterialPut, FlexibleData, FolderInfo, FolderState, FolderType, Friend, FriendKey,
-    FriendPresence, FriendRights, GestureActivation, GlobalCoordinates, Glow, GltfMaterialOverride,
-    GridCoordinates, GroupInvitationReceived, GroupKey, GroupMember, GroupMembership, GroupNotice,
-    GroupNoticeAttachment, GroupNoticeItem, GroupNoticeKey, GroupNoticeReceived, GroupProfile,
-    GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember,
-    GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog,
-    ImSessionId, InstantMessage, InterestsUpdate, InventoryCacheConfig, InventoryCallbackId,
-    InventoryCursor, InventoryFolder, InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey,
-    InventoryKey, InventoryOffer, InventoryOwner, InventoryType, ItemInfo, KEYFRAME_SLOP, Key,
-    Kilobits, LandArea, LandImpact, LandSearchType, LandingType, LegacyMaterial, LegacyPresetError,
-    LightData, LightImage, LindenAmount, LindenBalance, Listing, ListingId, LoadUrlRequest,
-    LoggedChatType, LoginAccount, LoginFailure, LoginParams, LoginRejectKind, LoginRequest,
-    LookAtType, LureId, MAX_FACES, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP,
-    MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, MarketplaceApiError,
-    MarketplaceApiErrorKind, MarketplaceAssociateInventoryInfo, MarketplaceInventoryInfo,
-    MarketplaceOperation, Material, MaterialOverrideUpdate, Maturity, MediaEntry, MerchantStatus,
-    MeshKey, MessageCursor, MessageId, MfaChallenge, MoneyBalance, MoneyTransaction,
-    MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType, NearbyHistoryLine,
-    NegativeBalanceError, NeighborInfo, NewInventoryItem, NewInventoryLink, Object,
-    ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectMediaResponse, ObjectMotion,
-    ObjectPermMasks, ObjectPhysicsData, ObjectPlayingAnimation, ObjectProperties,
-    ObjectPropertiesFamily, ObjectTransform, OpenRegionInfo, OpenSimExtras, OwnerKey,
-    ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelDetails,
-    ParcelFlags, ParcelInfo, ParcelKey, ParcelMediaCommand, ParcelMediaUpdateInfo,
+    EnvironmentSettings, EnvironmentUpdate, Error as SessionError, EstateAccessDelta,
+    EstateAccessKind, EstateCovenant, EstateFlags, EstateInfo, EstateInfoUpdate, EventId,
+    EventInfo, ExperienceInfo, ExperienceKey, ExperiencePermission, ExperienceProperties,
+    ExperienceUpdate, ExtendedMesh, FaceMaterialPut, FlexibleData, FolderInfo, FolderState,
+    FolderType, Friend, FriendKey, FriendPresence, FriendRights, GestureActivation,
+    GlobalCoordinates, Glow, GltfMaterialOverride, GridCoordinates, GroupInvitationReceived,
+    GroupKey, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment, GroupNoticeItem,
+    GroupNoticeKey, GroupNoticeReceived, GroupProfile, GroupRequestId, GroupRole, GroupRoleChange,
+    GroupRoleEdit, GroupRoleKey, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType,
+    GroupTitle, HomeLocation, IceCandidate, ImDialog, ImSessionId, InstantMessage, InterestsUpdate,
+    InventoryCacheConfig, InventoryCallbackId, InventoryCursor, InventoryFolder,
+    InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey, InventoryOffer,
+    InventoryOwner, InventoryType, ItemInfo, KEYFRAME_SLOP, Key, Kilobits, LandArea, LandImpact,
+    LandSearchType, LandingType, LegacyMaterial, LegacyPresetError, LightData, LightImage,
+    LindenAmount, LindenBalance, Listing, ListingId, LoadUrlRequest, LoggedChatType, LoginAccount,
+    LoginFailure, LoginParams, LoginRejectKind, LoginRequest, LookAtType, LureId, MAX_FACES,
+    MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER,
+    MapItem, MapItemType, MapRegionInfo, MarketplaceApiError, MarketplaceApiErrorKind,
+    MarketplaceAssociateInventoryInfo, MarketplaceInventoryInfo, MarketplaceOperation, Material,
+    MaterialOverrideUpdate, Maturity, MediaEntry, MerchantStatus, MeshKey, MessageCursor,
+    MessageId, MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType, MovementMode,
+    MuteEntry, MuteFlags, MuteType, NearbyHistoryLine, NegativeBalanceError, NeighborInfo,
+    NewInventoryItem, NewInventoryLink, Object, ObjectExtraParams, ObjectFlagSettings, ObjectKey,
+    ObjectMediaResponse, ObjectMotion, ObjectPermMasks, ObjectPhysicsData, ObjectPlayingAnimation,
+    ObjectProperties, ObjectPropertiesFamily, ObjectTransform, OpenRegionInfo, OpenSimExtras,
+    OwnerKey, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
+    ParcelDetails, ParcelFlags, ParcelInfo, ParcelKey, ParcelMediaCommand, ParcelMediaUpdateInfo,
     ParcelObjectOwner, ParcelOverlayCell, ParcelOverlayGrid, ParcelOverlayInfo, ParcelOwnership,
     ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate, ParcelVoiceInfo,
     ParticleSystem, PermissionField, Permissions, Permissions5, PhysicsShapeType,
@@ -112,17 +112,17 @@ pub use sl_proto::{
     ScriptPermissions, ScriptTarget, ScriptTeleportRequest, ScriptUploadLocation, SculptData,
     SculptOrMeshKey, SequenceNumber, ServerHistoryMessage, SetDisplayNameReply, SettingsKind,
     SimulatorFeatures, SkySettings, SoundFlags, SoundPreload, StartLocation,
-    StartLocationParseError, StartLocationSlot, SurfaceInfo, TaskInventoryItem, TaskInventoryKey,
-    TaskInventoryReply, TerrainLayerType, TerrainPatch, TextureAnimation, TextureEntry,
-    TextureFace, TextureKey, Throttle, ThrottleBuilder, ThrottleError, TimestampFormat,
-    TransactionId, TransferId, Transmit, UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER,
-    UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN, UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT,
-    UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT, UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE,
-    UI_SOUND_WINDOW_OPEN, UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, UserInfo, Uuid,
-    Vector, ViewerEffect, ViewerEffectData, ViewerEffectType, VoiceAccountInfo,
-    VoiceProvisionRequest, WaterSettings, Wearable, WearableType, WireError, XferId,
-    avatar_texture, azimuth_altitude_to_rotation, decode_particle_system, decode_texture_anim,
-    decode_texture_entry, encode_texture_entry, environment_asset_from_bytes,
+    StartLocationParseError, StartLocationSlot, SurfaceInfo, TRACK_MAX, TaskInventoryItem,
+    TaskInventoryKey, TaskInventoryReply, TerrainLayerType, TerrainPatch, TextureAnimation,
+    TextureEntry, TextureFace, TextureKey, Throttle, ThrottleBuilder, ThrottleError,
+    TimestampFormat, TransactionId, TransferId, Transmit, UI_SOUND_ALERT, UI_SOUND_CLICK,
+    UI_SOUND_IM_OR_OFFER, UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN, UI_SOUND_MONEY_UP,
+    UI_SOUND_NEARBY_CHAT, UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT, UI_SOUND_TYPING,
+    UI_SOUND_WINDOW_CLOSE, UI_SOUND_WINDOW_OPEN, UpdatableAssetType, UpdateGroupInfoParams,
+    UpdateListing, UserInfo, Uuid, Vector, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    VoiceAccountInfo, VoiceProvisionRequest, WaterSettings, Wearable, WearableType, WireError,
+    XferId, avatar_texture, azimuth_altitude_to_rotation, decode_particle_system,
+    decode_texture_anim, decode_texture_entry, encode_texture_entry, environment_asset_from_bytes,
     environment_asset_to_bytes, grid_to_handle, group_powers, handle_to_global, handle_to_grid,
     legacy_day_cycle_from_bytes, legacy_preset_from_bytes, legacy_preset_name, particle_pattern,
     pcode, rotation_to_azimuth_altitude, sim_access, texture_anim_mode,
@@ -2481,7 +2481,7 @@ fn apply_command(
             if let Some(caps) = caps {
                 if let Some(base) = caps.map.get(CAP_EXT_ENVIRONMENT).cloned() {
                     let events_tx = caps.events_tx.clone();
-                    let url = format!("{base}?parcelid={}", parcel_id.unwrap_or(-1));
+                    let url = environment_cap_url(&base, *parcel_id, None);
                     tracing::info!(
                         target: "sl_client_bevy::environment",
                         "requesting EEP environment from {CAP_EXT_ENVIRONMENT} cap"
@@ -2514,16 +2514,24 @@ fn apply_command(
                 && let Some(base) = caps.map.get(CAP_EXT_ENVIRONMENT).cloned()
             {
                 let events_tx = caps.events_tx.clone();
-                let parcel_id = parcel_id.unwrap_or(-1);
-                let url = match track_no {
-                    Some(track_no) => {
-                        format!("{base}?parcelid={parcel_id}&trackno={track_no}")
-                    }
-                    None => format!("{base}?parcelid={parcel_id}"),
-                };
+                let url = environment_cap_url(&base, *parcel_id, *track_no);
                 let body = build_environment_update_request(update);
                 std::thread::spawn(move || {
                     run_put_caps_llsd(&url, body, CAP_EXT_ENVIRONMENT, &events_tx);
+                });
+            }
+        }
+        Command::ResetEnvironment {
+            parcel_id,
+            track_no,
+        } => {
+            if let Some(caps) = caps
+                && let Some(base) = caps.map.get(CAP_EXT_ENVIRONMENT).cloned()
+            {
+                let events_tx = caps.events_tx.clone();
+                let url = environment_cap_url(&base, *parcel_id, *track_no);
+                std::thread::spawn(move || {
+                    run_delete_caps_llsd(&url, CAP_EXT_ENVIRONMENT, &events_tx);
                 });
             }
         }
