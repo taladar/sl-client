@@ -610,6 +610,79 @@ const fn table_spec(category: SearchCategory) -> &'static TableSpec {
 // Per-category page state.
 // ---------------------------------------------------------------------------
 
+/// A directory reply row that can say whether it is a real result.
+///
+/// A `Dir*Reply`'s variable block carries entries that are not results: blocks
+/// whose subject id is nil (the grid pads a reply with them), which the
+/// reference skips per category (`llpaneldirbrowser.cpp` — `agent_id.isNull()`
+/// at :459, `parcel_id` at :556 and :945, `owner_id` at :646, `group_id` at
+/// :753, `classified_id.notNull()` at :857).
+trait DirRow {
+    /// Whether this block is a nil-id placeholder rather than a result.
+    fn is_placeholder(&self) -> bool;
+}
+
+impl DirRow for DirPeopleResult {
+    /// A people block with no agent.
+    fn is_placeholder(&self) -> bool {
+        self.agent_id.uuid().is_nil()
+    }
+}
+
+impl DirRow for DirGroupResult {
+    /// A group block with no group.
+    fn is_placeholder(&self) -> bool {
+        self.group_id.uuid().is_nil()
+    }
+}
+
+impl DirRow for DirPlaceResult {
+    /// A places block with no parcel.
+    fn is_placeholder(&self) -> bool {
+        self.parcel_id.uuid().is_nil()
+    }
+}
+
+impl DirRow for DirLandResult {
+    /// A land-for-sale block with no parcel.
+    fn is_placeholder(&self) -> bool {
+        self.parcel_id.uuid().is_nil()
+    }
+}
+
+impl DirRow for DirEventResult {
+    /// An event block with no owner (the reference's "skipped event due to
+    /// owner_id null").
+    fn is_placeholder(&self) -> bool {
+        self.owner_id.is_nil()
+    }
+}
+
+impl DirRow for DirClassifiedResult {
+    /// A classified block with no classified.
+    fn is_placeholder(&self) -> bool {
+        self.classified_id.uuid().is_nil()
+    }
+}
+
+/// Trim a directory reply to one page, dropping the entry past it and every
+/// nil-id placeholder; returns whether the reply reached past the page (so a
+/// **Next** is meaningful).
+///
+/// The grid answers a full page with `PAGE_SIZE + 1` entries, the last of which
+/// means only "there is more" — the reference drops it rather than showing it
+/// (`llpaneldirbrowser.cpp:1179` `showNextButton`, `rows -= (mResultsReceived -
+/// mResultsPerPage)`). The trim is by *position* on the raw blocks, and only
+/// then are the nil ids dropped, so a page can show fewer than `PAGE_SIZE`
+/// rows — same as the reference, which trims the block count first and skips
+/// nil ids inside the loop.
+fn strip_sentinel<T: DirRow>(results: &mut Vec<T>) -> bool {
+    let has_more = results.len() > PAGE_SIZE_USIZE;
+    results.truncate(PAGE_SIZE_USIZE);
+    results.retain(|row| !row.is_placeholder());
+    has_more
+}
+
 /// One category's live results and paging state.
 #[derive(Debug)]
 struct Page<T> {
@@ -619,7 +692,8 @@ struct Page<T> {
     pending: Option<QueryId>,
     /// The results currently shown.
     results: Vec<T>,
-    /// Whether the last reply filled a whole page (so a Next is meaningful).
+    /// Whether the last reply reached past a whole page (so a Next is
+    /// meaningful).
     filled: bool,
     /// Bumped whenever `results` changes, driving the row rebind + count.
     revision: u64,
@@ -638,12 +712,26 @@ impl<T> Default for Page<T> {
     }
 }
 
-impl<T> Page<T> {
-    /// Fold a fresh reply in.
-    fn set_results(&mut self, results: Vec<T>) {
-        self.filled = results.len() >= PAGE_SIZE_USIZE;
+impl<T: DirRow> Page<T> {
+    /// Fold a fresh reply in, dropping the "there is more" sentinel and the
+    /// nil-id placeholders (see [`strip_sentinel`]).
+    fn set_results(&mut self, mut results: Vec<T>) {
+        self.filled = strip_sentinel(&mut results);
         self.results = results;
         self.revision = self.revision.wrapping_add(1);
+    }
+
+    /// Fold a fresh reply in and order the page by `compare`.
+    ///
+    /// The sentinel is positional, so it must be dropped *before* the sort —
+    /// sorting first can move it out of last place.
+    fn set_results_sorted_by(
+        &mut self,
+        results: Vec<T>,
+        compare: impl FnMut(&T, &T) -> core::cmp::Ordering,
+    ) {
+        self.set_results(results);
+        self.results.sort_by(compare);
     }
 }
 
@@ -2327,9 +2415,9 @@ fn ingest_search_replies(mut events: MessageReader<SlEvent>, mut state: ResMut<S
                 query_id, results, ..
             } if pending_matches(state.places.pending, *query_id) => {
                 state.places.pending = None;
-                let mut sorted = results.clone();
-                sorted.sort_by(|a, b| b.dwell.total_cmp(&a.dwell));
-                state.places.set_results(sorted);
+                state
+                    .places
+                    .set_results_sorted_by(results.clone(), |a, b| b.dwell.total_cmp(&a.dwell));
             }
             SlSessionEvent::DirLandReply { query_id, results }
                 if pending_matches(state.land.pending, *query_id) =>
@@ -3111,10 +3199,47 @@ fn poll_detail_snapshot(
 mod tests {
 
     use super::{
-        CATEGORY_ORDER, EventsMode, LandSaleFilter, LandSort, PAGE_SIZE_USIZE, Page,
-        SearchCategory, SearchTab, build_sl_search_url, events_query_text,
+        AgentKey, CATEGORY_ORDER, ClassifiedKey, DirClassifiedResult, DirEventResult,
+        DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, DirRow, EventId,
+        EventsMode, GroupKey, LandSaleFilter, LandSort, PAGE_SIZE_USIZE, Page, ParcelKey,
+        SearchCategory, SearchTab, Uuid, build_sl_search_url, events_query_text,
     };
     use pretty_assertions::assert_eq;
+    use sl_client_bevy::{LandArea, LindenAmount};
+
+    /// A people result for `id` (`0` is the nil key, i.e. a padding block).
+    fn person(id: u32) -> DirPeopleResult {
+        DirPeopleResult {
+            agent_id: AgentKey::from(Uuid::from_u128(u128::from(id))),
+            first_name: "Avatar".to_owned(),
+            last_name: "Tester".to_owned(),
+            group: String::new(),
+            online: false,
+            reputation: 0,
+        }
+    }
+
+    /// A reply of `count` distinct (non-padding) people results.
+    fn people(count: usize) -> Vec<DirPeopleResult> {
+        let mut reply = Vec::with_capacity(count);
+        let mut id = 0_u32;
+        while reply.len() < count {
+            id = id.saturating_add(1);
+            reply.push(person(id));
+        }
+        reply
+    }
+
+    /// A places result for `id` with the given dwell.
+    fn place(id: u32, dwell: f32) -> DirPlaceResult {
+        DirPlaceResult {
+            parcel_id: ParcelKey::from(Uuid::from_u128(u128::from(id))),
+            name: "Parcel".to_owned(),
+            for_sale: false,
+            auction: false,
+            dwell,
+        }
+    }
 
     /// The tab order leads with Web, then the six categories.
     #[test]
@@ -3134,15 +3259,152 @@ mod tests {
         }
     }
 
-    /// A page counts a reply as full only at the page size.
+    /// A page is "there is more" only when the reply reaches *past* the page:
+    /// the `PAGE_SIZE + 1`th entry is the grid's sentinel, is not displayed,
+    /// and exactly one page of real results leaves Next off (which is what
+    /// stops a full page from offering an empty next one).
     #[test]
-    fn full_page_detected_at_page_size() {
-        let mut page: Page<u8> = Page::default();
-        page.set_results(vec![0_u8; PAGE_SIZE_USIZE - 1]);
+    fn the_sentinel_entry_is_not_a_result() {
+        let mut page: Page<DirPeopleResult> = Page::default();
+
+        // A short page: everything shown, no Next.
+        page.set_results(people(PAGE_SIZE_USIZE - 1));
+        assert_eq!(page.results.len(), PAGE_SIZE_USIZE - 1);
         assert!(!page.filled);
-        page.set_results(vec![0_u8; PAGE_SIZE_USIZE]);
+
+        // Exactly one page: everything shown, still no Next.
+        page.set_results(people(PAGE_SIZE_USIZE));
+        assert_eq!(page.results.len(), PAGE_SIZE_USIZE);
+        assert!(!page.filled);
+
+        // One past the page: the sentinel is dropped, and Next is offered. The
+        // ids run 1..=101, so the last row kept is the 100th.
+        page.set_results(people(PAGE_SIZE_USIZE + 1));
+        assert_eq!(page.results.len(), PAGE_SIZE_USIZE);
         assert!(page.filled);
-        assert_eq!(page.revision, 2);
+        assert_eq!(
+            page.results.last().map(|last| last.agent_id),
+            Some(AgentKey::from(Uuid::from_u128(100)))
+        );
+
+        // An empty reply is not a full page either.
+        page.set_results(Vec::new());
+        assert!(page.results.is_empty());
+        assert!(!page.filled);
+        assert_eq!(page.revision, 4);
+    }
+
+    /// A nil-id block is padding, not a result — in every category.
+    #[test]
+    fn nil_id_blocks_are_not_results() {
+        assert!(person(0).is_placeholder());
+        assert!(!person(1).is_placeholder());
+        assert!(place(0, 0.0).is_placeholder());
+        assert!(!place(1, 0.0).is_placeholder());
+
+        let group = |id: u128| DirGroupResult {
+            group_id: GroupKey::from(Uuid::from_u128(id)),
+            group_name: "Group".to_owned(),
+            members: 0,
+            search_order: 0.0,
+        };
+        assert!(group(0).is_placeholder());
+        assert!(!group(1).is_placeholder());
+
+        let land = |id: u128| DirLandResult {
+            parcel_id: ParcelKey::from(Uuid::from_u128(id)),
+            name: "Parcel".to_owned(),
+            auction: false,
+            for_sale: true,
+            sale_price: Some(LindenAmount(0)),
+            actual_area: LandArea(512),
+        };
+        assert!(land(0).is_placeholder());
+        assert!(!land(1).is_placeholder());
+
+        let event = |id: u128| DirEventResult {
+            owner_id: Uuid::from_u128(id),
+            name: "Event".to_owned(),
+            event_id: EventId::new(7),
+            date: "01/02 03:00".to_owned(),
+            unix_time: 0,
+            event_flags: 0,
+        };
+        assert!(event(0).is_placeholder());
+        assert!(!event(1).is_placeholder());
+
+        let classified = |id: u128| DirClassifiedResult {
+            classified_id: ClassifiedKey::from(Uuid::from_u128(id)),
+            name: "Ad".to_owned(),
+            classified_flags: 0,
+            creation_date: 0,
+            expiration_date: 0,
+            price_for_listing: LindenAmount(50),
+        };
+        assert!(classified(0).is_placeholder());
+        assert!(!classified(1).is_placeholder());
+    }
+
+    /// Padding inside the page is dropped too, so a full page can show fewer
+    /// than `PAGE_SIZE` rows while still offering a Next.
+    #[test]
+    fn padding_inside_the_page_is_dropped() {
+        let mut page: Page<DirPeopleResult> = Page::default();
+        // 98 results and 2 padding blocks fill the page; the 101st entry is
+        // the sentinel.
+        let mut reply = people(PAGE_SIZE_USIZE - 2);
+        reply.push(person(0));
+        reply.push(person(0));
+        reply.push(person(4242));
+        page.set_results(reply);
+        assert_eq!(page.results.len(), PAGE_SIZE_USIZE - 2);
+        assert!(page.filled);
+        assert!(!page.results.iter().any(DirRow::is_placeholder));
+    }
+
+    /// Places are sorted by dwell *after* the sentinel is dropped — the
+    /// sentinel is the last entry of the reply, not the least-visited parcel,
+    /// so sorting first would keep it and drop a real result instead.
+    #[test]
+    fn places_drop_the_sentinel_before_sorting_by_dwell() {
+        let mut page: Page<DirPlaceResult> = Page::default();
+        let mut reply = Vec::with_capacity(PAGE_SIZE_USIZE + 1);
+        let mut id = 0_u32;
+        while reply.len() < PAGE_SIZE_USIZE {
+            id = id.saturating_add(1);
+            reply.push(place(id, 1.0));
+        }
+        // The sentinel, with the highest dwell in the reply.
+        reply.push(place(0xdead, 9999.0));
+        page.set_results_sorted_by(reply, |a, b| b.dwell.total_cmp(&a.dwell));
+        assert_eq!(page.results.len(), PAGE_SIZE_USIZE);
+        assert!(page.filled);
+        assert!(
+            !page
+                .results
+                .iter()
+                .any(|row| row.parcel_id == ParcelKey::from(Uuid::from_u128(0xdead)))
+        );
+    }
+
+    /// The dwell sort itself still orders the page, highest first.
+    #[test]
+    fn places_are_ordered_by_dwell_descending() {
+        let mut page: Page<DirPlaceResult> = Page::default();
+        let reply = vec![place(1, 3.0), place(2, 42.0), place(3, 7.0)];
+        page.set_results_sorted_by(reply, |a, b| b.dwell.total_cmp(&a.dwell));
+        assert_eq!(
+            page.results
+                .iter()
+                .map(|row| row.parcel_id)
+                .collect::<Vec<_>>(),
+            vec![
+                ParcelKey::from(Uuid::from_u128(2)),
+                ParcelKey::from(Uuid::from_u128(3)),
+                ParcelKey::from(Uuid::from_u128(1)),
+            ]
+        );
+        assert!(!page.filled);
     }
 
     /// The Land sort default (the first combo option) is Price, matching the

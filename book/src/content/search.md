@@ -7,6 +7,18 @@ client can correlate an answer with the request that produced it. Results are
 paged: most queries take a `query_start` index and the simulator returns a
 batch from there.
 
+A reply's blocks are not all results, and the events are handed on verbatim —
+filtering them is the caller's job, as it is the reference viewer's:
+
+- a page is **100** results, and a grid with more to give answers with
+  **101** — the last entry means only "there is more", and is not a result to
+  display (`llpaneldirbrowser.cpp`, `showNextButton`). So "there is a next
+  page" is `len() > 100`, not `>= 100`; a reply of exactly 100 is the end of
+  the results.
+- blocks whose subject id is **nil** are padding, in every category — a nil
+  `AgentID`, `GroupID`, `ParcelID`, `OwnerID` or `ClassifiedID` is skipped
+  rather than rendered as a blank row.
+
 This chapter covers the directory searches (`Dir*Query`), the avatar-name
 autocomplete (`AvatarPickerRequest`), and the land-holdings lookup
 (`PlacesQuery`).

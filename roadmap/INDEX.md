@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 42 |
 | in-progress | 21 |
 | bugs | 44 |
-| done | 1082 |
+| done | 1083 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1654** |
+| **total** | **1655** |
 
 ## ideas (100)
 
@@ -1230,8 +1230,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   its cloud
 - [`viewer-audit-plugin-resource-registration`](bugs/viewer-audit-plugin-resource-registration.md)
   — Two plugins read resources they never register
-- [`viewer-audit-search-sentinel-row`](bugs/viewer-audit-search-sentinel-row.md)
-  — The directory 'there is more' sentinel row is rendered as a result
 - [`viewer-audit-sit-camera-gating`](bugs/viewer-audit-sit-camera-gating.md) —
   The scripted sit camera arms on any SitResult and never clears forced
   mouselook
@@ -1283,6 +1281,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rigged-attachments-wearer-not-resolved`](bugs/viewer-rigged-attachments-wearer-not-resolved.md)
   — Worn rigged attachments (e.g. own shoes) don't render — wearer never
   resolved / too many rigged-pending objects
+- [`viewer-search-multi-packet-page`](bugs/viewer-search-multi-packet-page.md) —
+  A search page split over several packets shows only the first packet
 - [`viewer-sunlit-face-clips-two-channels`](bugs/viewer-sunlit-face-clips-two-channels.md)
   — A sunlit opaque face pins red and green rather than showing its texture
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
@@ -1294,7 +1294,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1082)
+## done (1083)
 
 ### protocol
 
@@ -1597,6 +1597,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-scene-change-guards-day-cycle`](done/viewer-audit-scene-change-guards-day-cycle.md)
   — The scene crate's write-on-change guards were reasoned about under a pinned
   sky
+- [`viewer-audit-search-sentinel-row`](done/viewer-audit-search-sentinel-row.md)
+  — The directory 'there is more' sentinel row is rendered as a result
 - [`viewer-audit-settings-write-race`](done/viewer-audit-settings-write-race.md)
   — Settings are written non-atomically from unordered detached tasks
 - [`viewer-audit-stale-globaltransform-readers`](done/viewer-audit-stale-globaltransform-readers.md)
