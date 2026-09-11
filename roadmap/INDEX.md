@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 322 |
 | blocked | 42 |
 | in-progress | 21 |
-| bugs | 48 |
-| done | 1078 |
+| bugs | 47 |
+| done | 1079 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1653** |
@@ -1185,7 +1185,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (48)
+## bugs (47)
 
 ### viewer
 
@@ -1219,8 +1219,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-inventory-merge-and-tree-walks`](bugs/viewer-audit-inventory-merge-and-tree-walks.md)
   — The chunked inventory merge is quadratic, and the downward tree walks have
   no cycle guard
-- [`viewer-audit-map-tile-transient-error`](bugs/viewer-audit-map-tile-transient-error.md)
-  — A transient map-tile fetch error is cached as permanently missing
 - [`viewer-audit-media-url-scheme-allowlist`](bugs/viewer-audit-media-url-scheme-allowlist.md)
   — Parcel media URLs reach CEF and GStreamer with no scheme allowlist
 - [`viewer-audit-parcel-audio-autoplay`](bugs/viewer-audit-parcel-audio-autoplay.md)
@@ -1300,7 +1298,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1078)
+## done (1079)
 
 ### protocol
 
@@ -1577,6 +1575,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A parcel environment reply is accepted as the shared one
 - [`viewer-audit-gpu-pick-slot-lifecycle`](done/viewer-audit-gpu-pick-slot-lifecycle.md)
   — Pick slots are recycled with no generation, and a lost try_insert leaks one
+- [`viewer-audit-map-tile-transient-error`](done/viewer-audit-map-tile-transient-error.md)
+  — A transient map-tile fetch error is cached as permanently missing
 - [`viewer-audit-name-tag-viewport-gate`](done/viewer-audit-name-tag-viewport-gate.md)
   — The name-tag viewport-changed gate is exactly inverted
 - [`viewer-audit-notification-store-overwrite`](done/viewer-audit-notification-store-overwrite.md)
