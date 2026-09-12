@@ -86,6 +86,16 @@
 //! `setregiondebug` toggles, the terrain `setregionterrain` fields) are shown as
 //! **permanently disabled** controls reflecting the grid's value, not as prose.
 //!
+//! # The windows this one opens
+//!
+//! The Region tab's **Manage Telehub…** opens [`crate::telehub`], the estate
+//! owner's view of the region's telehub and its spawn points. It is an
+//! estate-manager write button like the two Teleport Home ones beside it, and
+//! it is the only way into that window — as in the reference, where it lives on
+//! `panel_region_general.xml`. Unlike the reference, opening it does **not**
+//! hide this floater: that made sense for a singleton over the build tools, and
+//! hiding one of several keyed windows the person opened would not.
+//!
 //! Reference (Firestorm, read-only): `llfloaterregioninfo.cpp`,
 //! `panel_region_*.xml`; the `EstateOwnerMessage` `setregioninfo` /
 //! `estateaccessdelta` / `restart` methods.
@@ -115,6 +125,7 @@ use crate::land_environment::{
     AllowEnvironmentOverrideRequested, LandEnvironmentPlugin, LandEnvironmentSubject,
     LandPanelKind, spawn_land_environment_panel,
 };
+use crate::telehub::{OpenTelehub, TelehubPlugin};
 use crate::ui::{column, row};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
@@ -1162,6 +1173,8 @@ enum AboutRegionAction {
     /// Open the experience picker to add to one of the estate's three
     /// experience lists.
     AddExperience(ExperienceList),
+    /// Open the Telehub window ([`crate::telehub`]) on this region.
+    ManageTelehub,
 }
 
 /// A marker on a terrain texture-swatch button carrying which detail slot it
@@ -1187,6 +1200,12 @@ impl Plugin for AboutRegionPlugin {
         // brings its systems.
         if !app.is_plugin_added::<LandEnvironmentPlugin>() {
             app.add_plugins(LandEnvironmentPlugin);
+        }
+        // The Region tab's Manage Telehub… button writes `OpenTelehub`, and a
+        // message nothing registered panics on the first write — so the window
+        // it opens comes with the button.
+        if !app.is_plugin_added::<TelehubPlugin>() {
+            app.add_plugins(TelehubPlugin);
         }
         app.add_message::<OpenAboutRegion>()
             .add_systems(
@@ -1450,6 +1469,14 @@ fn build_region_tab(commands: &mut Commands, panel: Entity) -> RegionHandles {
         "about-region-teleport-home-all",
         AboutRegionAction::TeleportHomeAll,
         7,
+        true,
+    );
+    spawn_action_button(
+        commands,
+        actions,
+        "about-region-manage-telehub",
+        AboutRegionAction::ManageTelehub,
+        8,
         true,
     );
     handles
@@ -3355,6 +3382,7 @@ fn on_about_region_action(
     mut sl_commands: MessageWriter<SlCommand>,
     mut pickers: MessageWriter<OpenAvatarPicker>,
     mut experience_pickers: MessageWriter<OpenExperiencePicker>,
+    mut telehubs: MessageWriter<OpenTelehub>,
 ) {
     if press.button != PointerButton::Primary {
         return;
@@ -3484,6 +3512,9 @@ fn on_about_region_action(
                     ExperienceList::Allowed | ExperienceList::Blocked => state.default_experience,
                 },
             });
+        }
+        AboutRegionAction::ManageTelehub => {
+            telehubs.write(OpenTelehub);
         }
     }
 }

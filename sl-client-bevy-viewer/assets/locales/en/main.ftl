@@ -578,6 +578,7 @@ about-region-allow-join-divide = Allow land join / divide
 # Region tab: estate-manager actions.
 about-region-teleport-home-one = Teleport Home One Resident…
 about-region-teleport-home-all = Teleport Home All Residents…
+about-region-manage-telehub = Manage Telehub…
 
 # Debug tab.
 about-region-disable-scripts = Disable scripts
@@ -672,6 +673,23 @@ about-region-experiences-add-trusted = Add Key Experience…
 about-region-experiences-add-allowed = Add Allowed Experience…
 about-region-experiences-add-blocked = Add Blocked Experience…
 about-region-experiences-profile = Profile
+
+## The Telehub window (viewer-region-telehub) — the region's telehub object and
+## its spawn points, reached from the Region tab's Manage Telehub… button.
+
+telehub-title = Telehub
+telehub-status-connected = Telehub connected to object { $object }
+telehub-status-not-connected = No telehub connected.
+telehub-status-loading = (asking the region about its telehub…)
+telehub-help-connected = To remove, click Disconnect.
+telehub-help-not-connected = Select an object and click Connect Telehub.
+telehub-connect = Connect Telehub
+telehub-disconnect = Disconnect
+telehub-spawn-points = Spawn points (positions, not objects):
+telehub-spawn-position = Position
+telehub-add-spawn = Add Spawn
+telehub-remove-spawn = Remove Spawn
+telehub-spawn-help = Select an object and click "Add Spawn" to record its position. You can then move or delete that object. Positions are relative to the telehub's centre. Select an entry in the list to mark it in the world.
 
 ## The land-environment panel (viewer-region-environment-panel) — the Region /
 ## Estate floater's Environment tab and About Land's.

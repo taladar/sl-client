@@ -229,6 +229,10 @@ impl Plugin for ViewerRenderPlugins {
             // beam + label + off-screen arrow drawn at the tracked position from the
             // shared `MapTracking` resource.
             app.add_plugins(crate::beacons::BeaconPlugin);
+            // The in-world debug-beacon markers (viewer-region-telehub): the cross
+            // markers an open floater asks for through the shared `DebugBeacons`
+            // resource — the telehub and its selected spawn point today.
+            app.add_plugins(crate::debug_beacons::DebugBeaconPlugin);
             // The world-space avatar name-tag billboards (viewer-name-tags-billboard-
             // render): the embedded billboard shader + material pipeline; the tag
             // systems themselves register with the avatar systems below.

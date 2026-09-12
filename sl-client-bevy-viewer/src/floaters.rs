@@ -472,6 +472,17 @@ pub(crate) const FLOATERS: &[FloaterElement] = &[
         ),
     },
     FloaterElement {
+        id: "telehub",
+        summary: "Telehub: the region's telehub object and its spawn points — Connect / \
+                  Disconnect over the current selection, and the spawn-point list with Add / \
+                  Remove Spawn.",
+        spec: crate::telehub::telehub_floater_spec,
+        content: FloaterContent::Stub(
+            "The status and help lines, the Connect / Disconnect row, the spawn-point list and \
+             its Add / Remove Spawn row.",
+        ),
+    },
+    FloaterElement {
         id: "texture-picker",
         summary: "Pick: Texture — the inventory swatch grid, the quick-choice row and the \
                   OK / Cancel reply protocol every texture swatch is written against. One \

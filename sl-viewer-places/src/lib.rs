@@ -4,7 +4,8 @@
 //! the options a parcel owner sets. [`about_region`] is its region and estate
 //! counterpart, down to the terrain textures and the estate manager list.
 //! [`about_landmark`] is the small one: a landmark item's destination, and the
-//! teleport to it.
+//! teleport to it. [`telehub`] hangs off [`about_region`]: the region's telehub
+//! object and the spawn points arriving teleports are placed on.
 //!
 //! All three are read-mostly views over parcel and region state the world
 //! layer already holds, plus the wire calls that change it.
@@ -40,3 +41,4 @@ pub(crate) use sl_viewer_world_api as world_api;
 pub mod about_land;
 pub mod about_landmark;
 pub mod about_region;
+pub mod telehub;

@@ -115,7 +115,7 @@ pub use sl_proto::{
     ScriptTeleportRequest, ScriptUploadLocation, SculptData, SculptOrMeshKey, SequenceNumber,
     ServerHistoryMessage, SetDisplayNameReply, SettingsKind, SimulatorFeatures, SkySettings,
     SoundFlags, SoundPreload, StartLocation, StartLocationParseError, StartLocationSlot,
-    SurfaceInfo, TRACK_MAX, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply,
+    SurfaceInfo, TRACK_MAX, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo,
     TerrainLayerType, TerrainPatch, TextureAnimation, TextureEntry, TextureFace, TextureKey,
     Throttle, ThrottleBuilder, ThrottleError, TimestampFormat, TransactionId, TransferId, Transmit,
     UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER, UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN,

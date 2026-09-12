@@ -33,6 +33,7 @@ pub(crate) use sl_viewer_people::add_friend;
 pub(crate) use sl_viewer_places::about_land;
 pub(crate) use sl_viewer_places::about_landmark;
 pub(crate) use sl_viewer_places::about_region;
+pub(crate) use sl_viewer_places::telehub;
 pub(crate) use sl_viewer_world_avatar::animations;
 pub(crate) use sl_viewer_world_avatar::animesh;
 /// Every module that declares settings, in registration order.
@@ -113,6 +114,7 @@ pub(crate) use sl_viewer_world_avatar::bake_inputs;
 pub(crate) use sl_viewer_world_avatar::bake_publish;
 pub(crate) use sl_viewer_world_avatar::body_physics;
 pub(crate) use sl_viewer_world_scene::beacons;
+pub(crate) use sl_viewer_world_scene::debug_beacons;
 mod bottom_toolbar;
 // Media (the CEF / GStreamer backends, the browser widget) is its own crate;
 // each module is aliased under its old name so every `crate::<module>::…`
