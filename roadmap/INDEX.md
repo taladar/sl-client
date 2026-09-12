@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 317 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 43 |
-| done | 1099 |
+| bugs | 42 |
+| done | 1100 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1664** |
@@ -1171,7 +1171,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (43)
+## bugs (42)
 
 ### viewer
 
@@ -1234,9 +1234,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   terrain)
 - [`viewer-disabled-field-selection-flash`](bugs/viewer-disabled-field-selection-flash.md)
   — A disabled text field flashes a selection, and cannot be copied from
-- [`viewer-groups-pane-empty-on-opensim`](bugs/viewer-groups-pane-empty-on-opensim.md)
-  — The Groups pane lists nothing while the profile's group list has the same
-  groups
 - [`viewer-hair-dome-stays-grey`](bugs/viewer-hair-dome-stays-grey.md) — The
   default hair dome intermittently stays grey for a whole session
 - [`viewer-hover-tooltip-202ms-frame-spike`](bugs/viewer-hover-tooltip-202ms-frame-spike.md)
@@ -1276,7 +1273,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1099)
+## done (1100)
 
 ### protocol
 
@@ -1873,6 +1870,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-group-notice-display`](done/viewer-group-notice-display.md) — Group
   notice display — image, title, body, item toast (blocked by
   `viewer-ui-notification-host` (done), `viewer-social-group-profile` (done))
+- [`viewer-groups-pane-empty-on-opensim`](done/viewer-groups-pane-empty-on-opensim.md)
+  — The Groups pane lists nothing while the profile's group list has the same
+  groups
 - [`viewer-gst-audio-mixer-handoff`](done/viewer-gst-audio-mixer-handoff.md) —
   GStreamer audio into the shared mixer (parcel stream + video PCM) (blocked by
   `viewer-audio-backend` (done))

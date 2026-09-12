@@ -2024,6 +2024,14 @@ fn apply_sort(
 
 /// Rebuild `FriendsView` whenever the model's revision advances, resetting the
 /// list scroll to the top so the new order is read from its start.
+///
+/// The list is **also** re-sized whenever its count disagrees with the view: the
+/// buddy list arrives with the login reply, which can be a frame or two before
+/// the pane exists (it waits on the conversations strip), and stamping the
+/// revision then would leave the widget at zero rows until some *later* model
+/// change happened to rebuild it — the same trap
+/// [`crate::groups::rebuild_groups_view`] documents, where there is no later
+/// change at all.
 fn rebuild_friends_view(
     model: Res<FriendsModel>,
     sort: Res<SortState>,
@@ -2033,17 +2041,26 @@ fn rebuild_friends_view(
     mut lists: Query<&mut VirtualList>,
     mut tables: Query<&mut TableState>,
 ) {
-    if view.built_revision == model.revision() {
-        return;
+    let rebuilt = view.built_revision != model.revision();
+    if rebuilt {
+        view.built_revision = model.revision();
+        view.rows = ordered(&model, &sort);
     }
-    view.built_revision = model.revision();
-    view.rows = ordered(&model, &sort);
     let Some(ui) = ui else {
         return;
     };
     if let Ok(mut list) = lists.get_mut(ui.friends_viewport) {
-        list.item_count = view.rows.len();
-        list.scroll_to_top();
+        if rebuilt {
+            list.item_count = view.rows.len();
+            list.scroll_to_top();
+        } else if list.item_count != view.rows.len() {
+            // A pane that appeared after the buddy list: adopt the rows already
+            // built, leaving the scroll where the user put it.
+            list.item_count = view.rows.len();
+        }
+    }
+    if !rebuilt {
+        return;
     }
     // Put the same people back onto their new row indices. This is deliberately
     // not read back as a selection *event*: nothing was selected, the rows
@@ -2527,9 +2544,11 @@ fn set_text(text: &mut Text, value: &str) {
 #[cfg(test)]
 mod tests {
     use super::{
-        Command, FriendAction, FriendRow, FriendsModel, FriendsView, SelectedFriend, SortState,
-        friend_command, ordered,
+        Command, FriendAction, FriendRow, FriendsModel, FriendsView, PeopleIcons, PeopleUi,
+        ROW_HEIGHT, SelectedFriend, SortState, VirtualList, friend_command, ordered,
+        rebuild_friends_view,
     };
+    use bevy::prelude::*;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{AgentKey, Friend, FriendKey, FriendPresence, FriendRights, Uuid};
 
@@ -2809,5 +2828,63 @@ mod tests {
             friend_command(FriendAction::RemoveFriend, friend),
             Some(Command::TerminateFriendship(_))
         ));
+    }
+
+    /// The buddy list arrives with the login reply, which can land a frame or two
+    /// before the pane that shows it exists (it waits on the conversations strip).
+    /// A list spawned afterwards must adopt the rows already built rather than sit
+    /// empty until some later model change happens to rebuild it — the trap that
+    /// left the Groups pane, whose one membership push is all there is, empty for
+    /// a whole session.
+    #[test]
+    fn a_list_spawned_after_the_buddy_list_still_lists_the_friends() {
+        let mut app = App::new();
+        app.init_resource::<FriendsModel>()
+            .init_resource::<FriendsView>()
+            .init_resource::<SortState>()
+            .init_resource::<SelectedFriend>()
+            .add_systems(Update, rebuild_friends_view);
+
+        // The buddy list lands with no pane to put it in.
+        app.world_mut()
+            .resource_mut::<FriendsModel>()
+            .note_friends(&[friend(1), friend(2), friend(3)]);
+        app.update();
+
+        // The pane arrives afterwards, its list empty.
+        let friends_viewport = app.world_mut().spawn(VirtualList::new(ROW_HEIGHT)).id();
+        let friends_table = app.world_mut().spawn_empty().id();
+        app.world_mut().insert_resource(PeopleUi {
+            tab_button: Entity::PLACEHOLDER,
+            pane: Entity::PLACEHOLDER,
+            sub_strip: Entity::PLACEHOLDER,
+            friends_content: Entity::PLACEHOLDER,
+            friends_table,
+            friends_viewport,
+            groups_content: Entity::PLACEHOLDER,
+            blocked_content: Entity::PLACEHOLDER,
+            contact_sets_content: Entity::PLACEHOLDER,
+            name_arrow: Entity::PLACEHOLDER,
+            status_arrow: Entity::PLACEHOLDER,
+            icons: PeopleIcons {
+                online: Handle::default(),
+                map: Handle::default(),
+                edit: Handle::default(),
+                check_on: Handle::default(),
+                check_off: Handle::default(),
+            },
+            confirm_overlay: Entity::PLACEHOLDER,
+            confirm_text: Entity::PLACEHOLDER,
+        });
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .entity(friends_viewport)
+                .get::<VirtualList>()
+                .map(|list| list.item_count),
+            Some(3),
+            "the list adopts the friends noted before it existed"
+        );
     }
 }

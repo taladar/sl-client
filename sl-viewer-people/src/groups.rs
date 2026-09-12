@@ -717,22 +717,39 @@ pub fn ingest_group_events(mut events: MessageReader<SlEvent>, mut model: ResMut
 
 /// Rebuild `GroupsView` whenever the model's revision advances, resetting the
 /// list scroll to the top so the new order is read from its start.
+///
+/// The list is **also** re-sized whenever its count disagrees with the view,
+/// which is what keeps the pane from being empty for a whole session: the
+/// memberships are a single push the grid sends within a frame or two of login
+/// (nothing ever asks for them again), while the pane itself is two deferred
+/// spawns behind — the People pane waits for the conversations strip, and the
+/// group list waits for the People pane. Stamping the revision on the frame the
+/// push lands and only writing `item_count` under `ui` would leave the list at
+/// zero rows with no second revision to rebuild it from.
 fn rebuild_groups_view(
     model: Res<GroupsModel>,
     mut view: ResMut<GroupsView>,
     ui: Option<Res<GroupsUi>>,
     mut lists: Query<&mut VirtualList>,
 ) {
-    if view.built_revision == model.revision() {
-        return;
+    let rebuilt = view.built_revision != model.revision();
+    if rebuilt {
+        view.built_revision = model.revision();
+        view.rows = model.ordered();
     }
-    view.built_revision = model.revision();
-    view.rows = model.ordered();
-    if let Some(ui) = ui
-        && let Ok(mut list) = lists.get_mut(ui.viewport)
-    {
+    let Some(ui) = ui else {
+        return;
+    };
+    let Ok(mut list) = lists.get_mut(ui.viewport) else {
+        return;
+    };
+    if rebuilt {
         list.item_count = view.rows.len();
         list.scroll_to_top();
+    } else if list.item_count != view.rows.len() {
+        // A pane that appeared after the push: adopt the rows already built,
+        // leaving the scroll where the user put it.
+        list.item_count = view.rows.len();
     }
 }
 
@@ -747,7 +764,10 @@ fn refresh_groups(
     let Some(ui) = ui else {
         return;
     };
-    if !model.is_changed() {
+    // `ui.is_added()` is the pane catching up with a model that changed before it
+    // existed (see [`rebuild_groups_view`]); `translator.changed()` relocalises the
+    // line on a locale switch, which no model change would.
+    if !model.is_changed() && !ui.is_added() && !translator.changed() {
         return;
     }
     let count = i64::try_from(model.len()).unwrap_or(i64::MAX);
@@ -999,7 +1019,12 @@ fn set_text(text: &mut Text, value: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Command, GroupAction, GroupsModel, group_command};
+    use super::{
+        COUNT_KEY, Command, GroupAction, GroupsModel, GroupsUi, GroupsView, ROW_HEIGHT,
+        VirtualList, group_command, rebuild_groups_view, refresh_groups,
+    };
+    use crate::i18n::install_untranslated;
+    use bevy::prelude::*;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{GroupKey, GroupMembership, LandArea, TextureKey, Uuid};
 
@@ -1093,5 +1118,56 @@ mod tests {
             group_command(GroupAction::Leave, group),
             Some(Command::LeaveGroup(_))
         ));
+    }
+
+    /// The memberships are a **single push** the grid sends within a frame or two
+    /// of login, and the pane is two deferred spawns behind it (the People pane
+    /// waits for the conversations strip, the group list waits for the People
+    /// pane). A list that appears after that push must adopt the rows already
+    /// built — there is no second push to rebuild it from, and waiting for one is
+    /// what left the pane empty for a whole session.
+    #[test]
+    fn a_list_spawned_after_the_push_still_lists_the_groups() {
+        let mut app = App::new();
+        install_untranslated(&mut app);
+        app.init_resource::<GroupsModel>()
+            .init_resource::<GroupsView>()
+            .add_systems(Update, (rebuild_groups_view, refresh_groups).chain());
+
+        // The memberships land with no pane to put them in.
+        app.world_mut()
+            .resource_mut::<GroupsModel>()
+            .apply_memberships(&[membership(1, "One"), membership(2, "Two")]);
+        app.update();
+
+        // The pane arrives afterwards: an empty list and a blank count line.
+        let viewport = app.world_mut().spawn(VirtualList::new(ROW_HEIGHT)).id();
+        let count_text = app.world_mut().spawn(Text::new(String::new())).id();
+        let confirm_overlay = app.world_mut().spawn_empty().id();
+        let confirm_text = app.world_mut().spawn_empty().id();
+        app.world_mut().insert_resource(GroupsUi {
+            viewport,
+            count_text,
+            confirm_overlay,
+            confirm_text,
+        });
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .entity(viewport)
+                .get::<VirtualList>()
+                .map(|list| list.item_count),
+            Some(2),
+            "the list adopts the memberships pushed before it existed"
+        );
+        assert_eq!(
+            app.world()
+                .entity(count_text)
+                .get::<Text>()
+                .map(|text| text.0.clone()),
+            Some(COUNT_KEY.to_owned()),
+            "and the count line is filled in too (untranslated: the key itself)"
+        );
     }
 }
