@@ -239,6 +239,19 @@ pub fn seed_catalogue(sim: &mut SimSession) {
     for record in catalogue() {
         sim.experiences_mut().insert(record);
     }
+    // The estate's own three lists (`RegionExperiences`), seeded **distinct**
+    // and one deep each: the Region / Estate floater's Experiences tab shows
+    // three identical tables, so a fixture whose three lists were equal (or
+    // empty) could not show that each one is wired to its own slot of the
+    // reply. Each entry is also eligible for the list it is in under the
+    // viewer's per-list picker filters — land-scoped in Allowed, grid-scoped
+    // and unprivileged in Blocked — so the panel is never seeded with a row its
+    // own Add would have refused.
+    sim.experiences_mut().set_region_lists(
+        vec![experience_key(OFFSET_ARENA)],
+        vec![filler_key(2)],
+        vec![experience_key(OFFSET_WEATHER)],
+    );
     // A group's experience list is a statement about the group, not about
     // whoever is logged in, so it belongs on this side of the split.
     sim.experiences_mut().set_group(

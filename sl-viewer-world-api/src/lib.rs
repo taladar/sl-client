@@ -30,16 +30,16 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use sl_client_bevy::{
     AgentKey, AssetUpdateLocation, AttachmentPoint, AvatarName, BodyPhysics, ChatSessionKind,
-    Command, ControlFlags, DecodedTexture, DisplayName, Friend, FriendKey, FriendPresence,
-    FriendRights, GroupKey, GroupMembership, ImSessionId, InventoryFolderKey, InventoryKey,
-    JointOverrides, LightData, MAX_FACES, MeshKey, MuteEntry, MuteFlags, MuteType, Object,
-    ObjectExtraParams, ObjectKey, ObjectProperties, ParticleSystem, PrimFaceId, PrimLod,
-    PrimShapeParams, Priority, ReflectionProbe, ReflectionProbeFlags, RegionCoordinates,
-    RegionHandle, RestoreItem, Rotation, ScopedObjectId, ScriptLanguage, ScriptTarget,
-    ScriptUploadLocation, SculptOrMeshKey, SettingsKind, SkeletalDeformations, SlCommand,
-    SurfaceInfo, TaskInventoryKey, TerrainPatch, TextureAnimation, TextureFace, TextureKey,
-    TreeLod, Uuid, Vector, VolumeDeformations, avatar_texture, decode_texture_entry, pcode,
-    texture_face_uv_transform, to_bevy_image,
+    Command, ControlFlags, DecodedTexture, DisplayName, ExperienceKey, ExperienceProperties,
+    Friend, FriendKey, FriendPresence, FriendRights, GroupKey, GroupMembership, ImSessionId,
+    InventoryFolderKey, InventoryKey, JointOverrides, LightData, MAX_FACES, MeshKey, MuteEntry,
+    MuteFlags, MuteType, Object, ObjectExtraParams, ObjectKey, ObjectProperties, ParticleSystem,
+    PrimFaceId, PrimLod, PrimShapeParams, Priority, ReflectionProbe, ReflectionProbeFlags,
+    RegionCoordinates, RegionHandle, RestoreItem, Rotation, ScopedObjectId, ScriptLanguage,
+    ScriptTarget, ScriptUploadLocation, SculptOrMeshKey, SettingsKind, SkeletalDeformations,
+    SlCommand, SurfaceInfo, TaskInventoryKey, TerrainPatch, TextureAnimation, TextureFace,
+    TextureKey, TreeLod, Uuid, Vector, VolumeDeformations, avatar_texture, decode_texture_entry,
+    pcode, texture_face_uv_transform, to_bevy_image,
 };
 use sl_terrain::TerrainComposition;
 use sl_viewer_kit::coords::{sl_rotation_to_quat, sl_to_bevy_rotation};
@@ -1590,6 +1590,72 @@ impl AvatarPicked {
     pub fn first(&self) -> Option<&PickedAvatar> {
         self.picks.first()
     }
+}
+
+/// Which experiences an experience picker may offer — the reference's
+/// `LLPanelExperiencePicker` filter list, as the three shapes its callers
+/// actually construct (`LLPanelRegionExperiences::refreshFromRegion`).
+///
+/// The reference passes a vector of predicates; naming the three combinations
+/// instead keeps the *reason* for each filter with the list it belongs to,
+/// which a bare predicate list loses at the call site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ExperiencePickerFilter {
+    /// Anything may be picked — the estate's **Key** (trusted) list, which the
+    /// reference opens with no filters at all.
+    #[default]
+    Any,
+    /// Only **land-scoped** experiences: the estate's Allowed list, which the
+    /// reference filters with `FilterWithProperty(PROPERTY_GRID)` — a
+    /// grid-scoped experience already runs everywhere, so allowing one here
+    /// would say nothing.
+    LandScoped,
+    /// Only **grid-scoped, non-privileged** experiences: the estate's Blocked
+    /// list. Blocking is meaningful only for something that would otherwise run
+    /// grid-wide (`FilterWithoutProperty(PROPERTY_GRID)`), and a privileged
+    /// experience cannot be refused at all
+    /// (`FilterWithProperty(PROPERTY_PRIVILEGED)`).
+    GridScopedUnprivileged,
+}
+
+impl ExperiencePickerFilter {
+    /// Whether an experience with `properties` passes this filter.
+    #[must_use]
+    pub const fn admits(self, properties: ExperienceProperties) -> bool {
+        match self {
+            Self::Any => true,
+            Self::LandScoped => !properties.is_grid(),
+            Self::GridScopedUnprivileged => properties.is_grid() && !properties.is_privileged(),
+        }
+    }
+}
+
+/// Ask the experience picker to open for a feature. `requester` tags the
+/// eventual [`ExperiencePicked`] so only the asking feature consumes it — the
+/// same out-of-band shape as [`OpenAvatarPicker`].
+///
+/// The reference's equivalent is `LLFloaterExperiencePicker::show`, which every
+/// estate / parcel experience list opens from its Add button.
+#[derive(Message, Debug, Clone, Copy)]
+pub struct OpenExperiencePicker {
+    /// The feature tag echoed back in [`ExperiencePicked`].
+    pub requester: &'static str,
+    /// Which experiences this open may offer.
+    pub filter: ExperiencePickerFilter,
+}
+
+/// The confirmed experience pick. The picker chooses exactly one (the
+/// reference's estate lists open it with `allow_multiple` false and
+/// `close_on_select` true).
+#[derive(Message, Debug, Clone)]
+pub struct ExperiencePicked {
+    /// The tag of the feature that opened the picker.
+    pub requester: &'static str,
+    /// The chosen experience.
+    pub experience: ExperienceKey,
+    /// The name the picked row carried, so a consumer that must show the
+    /// experience before its own metadata fetch answers has something to show.
+    pub name: String,
 }
 
 /// What a picker open browses: **textures** (the default — the reference's

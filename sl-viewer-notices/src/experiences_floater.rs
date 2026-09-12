@@ -59,7 +59,7 @@
 //!
 //! `FindExperiences` is paged, and the Next / Prev arrows are enabled from the
 //! grid's own `next_page_url` / `previous_page_url` markers, carried through as
-//! [`ExperienceSearchPage::has_next_page`] / `has_previous_page` — the same two
+//! [`sl_client_bevy::ExperienceSearchPage::has_next_page`] / `has_previous_page` — the same two
 //! bits the reference reads (`LLPanelExperiencePicker::processResponse`). Only
 //! the grid can answer "is there another page": it counted the matches this
 //! page was cut from, and the page itself cannot say.
@@ -93,11 +93,11 @@ use bevy::text::EditableText;
 use bevy::ui::Checked;
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use sl_client_bevy::{
-    Command, ExperienceInfo, ExperienceKey, ExperiencePermission, ExperienceSearchPage, OwnerKey,
-    SlCommand, SlEvent, SlSessionEvent,
+    Command, ExperienceInfo, ExperienceKey, ExperiencePermission, SlCommand, SlEvent,
+    SlSessionEvent,
 };
 use sl_l10n::{DateTimeLength, DateTimeStyle};
 use sl_settings::{Scope, SettingValue};
@@ -107,7 +107,11 @@ use crate::experience_log::{
 };
 use crate::experience_profile::{
     MATURITY_GENERAL, MATURITY_KEYS, OpenExperienceProfile, maturity_from_index, maturity_index,
-    maturity_key,
+};
+use crate::experience_search::{
+    COL_SEARCH_NAME, COL_SEARCH_OWNER, COL_SEARCH_RATING, ExperienceInfos, ExperienceRow,
+    SEARCH_COLUMNS, SearchProgress, compare_ci, experience_label, render_rows,
+    sort_experience_rows,
 };
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::{TransArgs, Translated, Translator};
@@ -137,7 +141,7 @@ const EXPERIENCES_ELEMENT: &str = "experiences-floater";
 
 /// The persisted-settings section this window's knobs live under — the same one
 /// [`crate::experience_log`] uses, because they are one feature's settings.
-const EXPERIENCES_SECTION: &[&str] = &["experiences"];
+pub(crate) const EXPERIENCES_SECTION: &[&str] = &["experiences"];
 
 /// The search tab's max-content-rating filter, stored as a `sim_access` **rating
 /// code** (see the module docs' divergence note).
@@ -206,10 +210,6 @@ const CHECK_OFF: Color = Color::srgba(0.0, 0.0, 0.0, 0.35);
 /// The checkbox box's fill when ticked — the same emerald the headings wear.
 const CHECK_ON: Color = HEADING_COLOR;
 
-/// The number of leading hex characters of an experience id shown as a fallback
-/// label while its name is still resolving.
-const SHORT_ID_LEN: usize = 8;
-
 // ---------------------------------------------------------------------------
 // Tables.
 // ---------------------------------------------------------------------------
@@ -219,15 +219,6 @@ const COL_LIST_NAME: usize = 0;
 
 /// The rating column of an experience list.
 const COL_LIST_RATING: usize = 1;
-
-/// The rating column of the search results.
-const COL_SEARCH_RATING: usize = 0;
-
-/// The name column of the search results.
-const COL_SEARCH_NAME: usize = 1;
-
-/// The owner column of the search results.
-const COL_SEARCH_OWNER: usize = 2;
 
 /// The time column of the event log.
 const COL_EVENT_TIME: usize = 0;
@@ -326,35 +317,6 @@ static OWNED_TABLE: TableSpec = list_table(
     "ExperiencesOwnedSort",
     "ExperiencesOwnedWidths",
 );
-
-/// The search results' columns — rating, name and owner, as the reference's
-/// `search_results` scroll list.
-static SEARCH_COLUMNS: [TableColumn; 3] = [
-    TableColumn {
-        header_key: "experiences-col-rating",
-        token: "rating",
-        kind: TableColumnKind::Text,
-        width: TableColumnWidth::Fixed { default: 84.0 },
-        align: TableAlign::Start,
-        sortable: true,
-    },
-    TableColumn {
-        header_key: "experiences-col-name",
-        token: "name",
-        kind: TableColumnKind::Text,
-        width: TableColumnWidth::Flex(1.0),
-        align: TableAlign::Start,
-        sortable: true,
-    },
-    TableColumn {
-        header_key: "experiences-col-owner",
-        token: "owner",
-        kind: TableColumnKind::Text,
-        width: TableColumnWidth::Flex(1.0),
-        align: TableAlign::Start,
-        sortable: true,
-    },
-];
 
 /// The search results sort by name, like the reference's
 /// `sortByColumnIndex(1, true)`.
@@ -523,59 +485,6 @@ impl Pane {
 // State.
 // ---------------------------------------------------------------------------
 
-/// A search's progress, which is what the results table's empty line says.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-enum SearchProgress {
-    /// Nothing asked for yet.
-    #[default]
-    Idle,
-    /// A query is out.
-    Searching,
-    /// A page came back, with the grid's word on what lies on either side of
-    /// it — which is what enables the two arrows (see the module docs).
-    Done {
-        /// Whether the grid offered a page after this one.
-        has_next_page: bool,
-        /// Whether the grid offered a page before this one.
-        has_previous_page: bool,
-    },
-}
-
-impl SearchProgress {
-    /// The progress an arrived page puts the search in: done, remembering the
-    /// grid's two paging markers verbatim.
-    const fn from_page(page: &ExperienceSearchPage) -> Self {
-        Self::Done {
-            has_next_page: page.has_next_page,
-            has_previous_page: page.has_previous_page,
-        }
-    }
-
-    /// Whether the Next arrow has somewhere to go. Only a page the grid said
-    /// has a successor does — a search that has not answered yet has none, and
-    /// neither does a grid that sends no markers.
-    const fn offers_next(self) -> bool {
-        matches!(
-            self,
-            Self::Done {
-                has_next_page: true,
-                ..
-            }
-        )
-    }
-
-    /// Whether the Previous arrow has somewhere to go.
-    const fn offers_previous(self) -> bool {
-        matches!(
-            self,
-            Self::Done {
-                has_previous_page: true,
-                ..
-            }
-        )
-    }
-}
-
 /// The floater's data: the five id lists, the resolved-metadata cache, the
 /// search's own state, the outstanding-GET count that disambiguates a full-list
 /// reply from a single-edit reply, and a revision the rebuild watches.
@@ -601,7 +510,7 @@ struct ExperiencesState {
     query: String,
     /// Resolved experience metadata, folded in as
     /// [`SlSessionEvent::ExperienceInfo`] arrives.
-    infos: BTreeMap<ExperienceKey, ExperienceInfo>,
+    infos: ExperienceInfos,
     /// The number of [`Command::RequestExperiencePermissions`] GETs whose reply
     /// is still outstanding. A permissions event is treated as an authoritative
     /// full list only while this is non-zero (see the module docs).
@@ -648,14 +557,6 @@ impl ExperiencesState {
         self.touch();
     }
 
-    /// The resolved name for an experience id, if known and non-empty.
-    fn name(&self, id: ExperienceKey) -> Option<&str> {
-        self.infos
-            .get(&id)
-            .map(|info| info.name.as_str())
-            .filter(|name| !name.is_empty())
-    }
-
     /// Every id any pane mentions — what the metadata fetch asks about.
     fn mentioned_ids(&self, log: &ExperienceLog) -> Vec<ExperienceKey> {
         let mut ids: Vec<ExperienceKey> = ListTab::ALL
@@ -668,21 +569,6 @@ impl ExperiencesState {
         ids.dedup();
         ids
     }
-}
-
-/// One list / search row, with every cell already rendered for the current
-/// locale and name caches — so the bind pass only writes strings, and a cache
-/// that resolves later simply rebuilds the view.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ExperienceRow {
-    /// The experience this row stands for.
-    id: ExperienceKey,
-    /// The display name (or the short-id fallback).
-    name: String,
-    /// The content rating's label, or empty while the metadata is unknown.
-    rating: String,
-    /// The owner's resolved name, or empty when unknown.
-    owner: String,
 }
 
 /// One event-log row, rendered the same way.
@@ -1148,6 +1034,11 @@ fn build_search_tab(commands: &mut Commands, panel: Entity) -> SearchTab {
             Node {
                 align_items: AlignItems::Center,
                 flex_shrink: 0.0,
+                // Three buttons and a status line do not fit one line at every
+                // width, scale and language; wrapping moves whole buttons down
+                // rather than squeezing each label (see `spawn_button_shell`).
+                flex_wrap: FlexWrap::Wrap,
+                row_gap: Val::Px(4.0),
                 ..row(Val::Px(6.0))
             },
             ChildOf(panel),
@@ -1339,6 +1230,10 @@ fn spawn_button_shell(commands: &mut Commands, parent: Entity, tab: i32) -> Enti
             Node {
                 padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
                 border: UiRect::all(Val::Px(2.0)),
+                // A button yields by moving to the action row's next line, not
+                // by squeezing its label: left to shrink, "◀ Previous" comes
+                // out as two lines with the arrow alone on the first.
+                flex_shrink: 0.0,
                 ..default()
             },
             BackgroundColor(BUTTON_BACKGROUND),
@@ -1513,8 +1408,8 @@ fn rebuild_experience_views(
     view.built_sorts = sorts;
 
     for tab in ListTab::ALL {
-        let mut rows = render_rows(&state, state.ids(tab), &avatars, &groups, &translator);
-        sort_experience_rows(&mut rows, sort_keys(&ui, &tables, Pane::List(tab)));
+        let mut rows = render_rows(&state.infos, state.ids(tab), &avatars, &groups, &translator);
+        sort_experience_rows(&mut rows, &sort_keys(&ui, &tables, Pane::List(tab)));
         if let Some(slot) = view.lists.get_mut(list_index(tab)) {
             *slot = rows;
         }
@@ -1533,8 +1428,8 @@ fn rebuild_experience_views(
                 .is_none_or(|info| info.maturity <= ceiling)
         })
         .collect();
-    let mut search = render_rows(&state, &visible, &avatars, &groups, &translator);
-    sort_experience_rows(&mut search, sort_keys(&ui, &tables, Pane::Search));
+    let mut search = render_rows(&state.infos, &visible, &avatars, &groups, &translator);
+    sort_experience_rows(&mut search, &sort_keys(&ui, &tables, Pane::Search));
     view.search = search;
 
     let mut events: Vec<(i64, EventRow)> = log
@@ -1585,40 +1480,6 @@ fn sort_keys(
         .collect()
 }
 
-/// Render one list of ids into display rows.
-fn render_rows(
-    state: &ExperiencesState,
-    ids: &[ExperienceKey],
-    avatars: &AvatarState,
-    groups: &GroupsModel,
-    translator: &Translator,
-) -> Vec<ExperienceRow> {
-    ids.iter()
-        .map(|id| {
-            let info = state.infos.get(id);
-            ExperienceRow {
-                id: *id,
-                name: experience_label(state, *id),
-                rating: info.map_or_else(String::new, |info| {
-                    translator.get(maturity_key(info.maturity))
-                }),
-                owner: info
-                    .and_then(|info| info.owner)
-                    .map_or_else(String::new, |owner| owner_label(owner, avatars, groups)),
-            }
-        })
-        .collect()
-}
-
-/// One owner's resolved name, or its id in parentheses until the cache has it.
-fn owner_label(owner: OwnerKey, avatars: &AvatarState, groups: &GroupsModel) -> String {
-    let resolved = match owner {
-        OwnerKey::Agent(agent) => avatars.shown_name_of(agent).map(str::to_owned),
-        OwnerKey::Group(group) => groups.group_name(group).map(str::to_owned),
-    };
-    resolved.unwrap_or_else(|| format!("({})", owner.uuid()))
-}
-
 /// Render one logged event into its four cells.
 fn render_event(
     entry: &LoggedExperienceEvent,
@@ -1645,33 +1506,9 @@ fn render_event(
     EventRow {
         time,
         kind,
-        experience: experience_label(state, entry.experience_id),
+        experience: experience_label(&state.infos, entry.experience_id),
         object: entry.object_name.clone(),
     }
-}
-
-/// Order rendered experience rows by a table's sort keys, most significant
-/// first. An unknown token leaves the order alone rather than inventing one.
-fn sort_experience_rows(rows: &mut [ExperienceRow], keys: Vec<(&'static str, bool)>) {
-    rows.sort_by(|left, right| {
-        for (token, ascending) in &keys {
-            let ordering = match *token {
-                "name" => compare_ci(&left.name, &right.name),
-                "rating" => compare_ci(&left.rating, &right.rating),
-                "owner" => compare_ci(&left.owner, &right.owner),
-                _unknown => core::cmp::Ordering::Equal,
-            };
-            let ordering = if *ascending {
-                ordering
-            } else {
-                ordering.reverse()
-            };
-            if ordering != core::cmp::Ordering::Equal {
-                return ordering;
-            }
-        }
-        core::cmp::Ordering::Equal
-    });
 }
 
 /// Order rendered event rows. Time orders by the entry's own timestamp rather
@@ -1698,28 +1535,6 @@ fn sort_event_rows(rows: &mut [(i64, EventRow)], keys: Vec<(&'static str, bool)>
         }
         core::cmp::Ordering::Equal
     });
-}
-
-/// Case-insensitive comparison, the way the reference's name comparator
-/// upper-cases both sides before comparing.
-fn compare_ci(left: &str, right: &str) -> core::cmp::Ordering {
-    left.to_lowercase().cmp(&right.to_lowercase())
-}
-
-/// The row label for an experience: its resolved name, or the leading hex of
-/// its id as a stable fallback while the name is still resolving.
-fn experience_label(state: &ExperiencesState, id: ExperienceKey) -> String {
-    state
-        .name(id)
-        .map_or_else(|| short_experience_id(id), str::to_owned)
-}
-
-/// The leading [`SHORT_ID_LEN`] hex characters of an experience id, an ellipsis
-/// appended — the stable fallback shown until the name resolves.
-fn short_experience_id(id: ExperienceKey) -> String {
-    let hex = id.uuid().simple().to_string();
-    let head: String = hex.chars().take(SHORT_ID_LEN).collect();
-    format!("{head}\u{2026}")
 }
 
 // ---------------------------------------------------------------------------
@@ -2002,7 +1817,7 @@ fn track_maturity_filter(
 }
 
 /// The highest rating a search result may carry, from the persisted filter.
-fn search_ceiling(settings: Option<&ViewerSettings>) -> i32 {
+pub(crate) fn search_ceiling(settings: Option<&ViewerSettings>) -> i32 {
     settings
         .and_then(|settings| settings.store().get_i32(SETTING_SEARCH_MATURITY).ok())
         .unwrap_or(MATURITY_GENERAL)
@@ -2180,56 +1995,9 @@ fn spawn_specimen_button(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ExperienceRow, ExperiencesState, ListTab, Pane, SHORT_ID_LEN, SearchProgress,
-        experience_label, list_index, pane_index, short_experience_id, sort_experience_rows,
-    };
+    use super::{ExperiencesState, ListTab, Pane, list_index, pane_index};
     use pretty_assertions::{assert_eq, assert_ne};
-    use sl_client_bevy::{ExperienceInfo, ExperienceKey, ExperienceSearchPage, Uuid};
-
-    /// A row with just the fields the sort reads.
-    fn row(name: &str, rating: &str, owner: &str) -> ExperienceRow {
-        ExperienceRow {
-            id: ExperienceKey::from(Uuid::from_u128(0x1)),
-            name: name.to_owned(),
-            rating: rating.to_owned(),
-            owner: owner.to_owned(),
-        }
-    }
-
-    /// The short id is the leading hex of the (dash-free) uuid with an ellipsis.
-    #[test]
-    fn short_id_is_leading_hex_with_ellipsis() {
-        let id = ExperienceKey::from(Uuid::from_u128(0x1234_5678_9abc_def0_1234_5678_9abc_def0));
-        let short = short_experience_id(id);
-        assert_eq!(short, "12345678\u{2026}");
-        assert_eq!(short.chars().count(), SHORT_ID_LEN + 1);
-    }
-
-    /// A row shows the resolved name once known, and the short-id fallback
-    /// until then — and an *empty* name is not a resolution.
-    #[test]
-    fn label_prefers_the_resolved_name() {
-        let id = ExperienceKey::from(Uuid::from_u128(0xabcd));
-        let mut state = ExperiencesState::default();
-        assert_eq!(experience_label(&state, id), short_experience_id(id));
-
-        // A record with an empty name is what the grid sends for an experience
-        // it knows of but will not name; the fallback must survive it.
-        state.note_info(ExperienceInfo {
-            public_id: id,
-            name: String::new(),
-            ..ExperienceInfo::default()
-        });
-        assert_eq!(experience_label(&state, id), short_experience_id(id));
-
-        state.note_info(ExperienceInfo {
-            public_id: id,
-            name: "Neon Speedway".to_owned(),
-            ..ExperienceInfo::default()
-        });
-        assert_eq!(experience_label(&state, id), "Neon Speedway");
-    }
+    use sl_client_bevy::{ExperienceKey, Uuid};
 
     /// A forget drops the experience from whichever preference list held it and
     /// bumps the revision so the view rebuild reacts — and leaves the
@@ -2262,73 +2030,6 @@ mod tests {
         assert_eq!(seen.len(), count);
         for tab in ListTab::ALL {
             assert_eq!(pane_index(Pane::List(tab)), list_index(tab));
-        }
-    }
-
-    /// The sort is case-insensitive, multi-level, and honours each level's
-    /// direction.
-    #[test]
-    fn rows_sort_case_insensitively_by_each_key() {
-        let mut rows = vec![
-            row("beta", "General", "Zoe"),
-            row("Alpha", "Moderate", "Ann"),
-            row("alpha", "General", "Bob"),
-        ];
-        sort_experience_rows(&mut rows, vec![("name", true), ("rating", true)]);
-        assert_eq!(
-            rows.iter().map(|r| r.rating.as_str()).collect::<Vec<_>>(),
-            vec!["General", "Moderate", "General"]
-        );
-        assert_eq!(
-            rows.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
-            vec!["alpha", "Alpha", "beta"]
-        );
-
-        sort_experience_rows(&mut rows, vec![("owner", false)]);
-        assert_eq!(
-            rows.iter().map(|r| r.owner.as_str()).collect::<Vec<_>>(),
-            vec!["Zoe", "Bob", "Ann"]
-        );
-    }
-
-    /// An unknown sort token leaves the order alone rather than inventing one.
-    #[test]
-    fn an_unknown_sort_token_is_inert() {
-        let mut rows = vec![row("beta", "", ""), row("alpha", "", "")];
-        sort_experience_rows(&mut rows, vec![("nonesuch", true)]);
-        assert_eq!(
-            rows.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
-            vec!["beta", "alpha"]
-        );
-    }
-
-    /// The two arrows are enabled from the grid's own markers, not from the
-    /// row count: an empty page whose grid said there is more still offers a
-    /// Next, and a page that fills the table but is the last one does not.
-    #[test]
-    fn the_arrows_follow_the_grids_markers() {
-        let progress = |has_next_page, has_previous_page| {
-            SearchProgress::from_page(&ExperienceSearchPage {
-                infos: Vec::new(),
-                has_next_page,
-                has_previous_page,
-            })
-        };
-        assert!(progress(true, false).offers_next());
-        assert!(!progress(true, false).offers_previous());
-        assert!(progress(false, true).offers_previous());
-        assert!(!progress(false, true).offers_next());
-        assert!(!progress(false, false).offers_next());
-        assert!(!progress(false, false).offers_previous());
-    }
-
-    /// A search that has not answered offers no paging in either direction —
-    /// there is no page to be on the far side of.
-    #[test]
-    fn an_unanswered_search_offers_no_paging() {
-        for progress in [SearchProgress::Idle, SearchProgress::Searching] {
-            assert!(!progress.offers_next(), "{progress:?}");
-            assert!(!progress.offers_previous(), "{progress:?}");
         }
     }
 

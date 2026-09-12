@@ -660,9 +660,23 @@ about-region-rating-mature = Moderate
 about-region-rating-adult = Adult
 about-region-rating-unknown = Unknown
 
-# Environment / Experiences placeholder tabs.
+# Environment placeholder tab.
 about-region-env-unimplemented = Region environment editing is not implemented yet.
-about-region-experiences-unimplemented = Region experiences are not implemented yet.
+
+# Experiences tab — the estate's three experience lists. The captions are the
+# reference viewer's own explanations of where each list applies; they are the
+# only place the rules are written down, so keep them complete when translating.
+about-region-experiences-caption = Changes on this tab affect every region in the estate.
+about-region-experiences-trusted = Key experiences
+about-region-experiences-allowed = Allowed experiences
+about-region-experiences-blocked = Blocked experiences
+about-region-experiences-trusted-help = Any experience may be Key. Key experiences may run on this estate — and if the estate is not open to the public, residents taking part in one may enter and stay while they remain in it.
+about-region-experiences-allowed-help = Only land-scoped experiences may be allowed. Allowed experiences may run on this estate.
+about-region-experiences-blocked-help = Only grid-scoped experiences may be blocked. Blocked experiences may not run on this estate.
+about-region-experiences-add-trusted = Add Key Experience…
+about-region-experiences-add-allowed = Add Allowed Experience…
+about-region-experiences-add-blocked = Add Blocked Experience…
+about-region-experiences-profile = Profile
 
 ## The emoji-picker floater (viewer-emoji-picker-floater).
 
@@ -3316,6 +3330,14 @@ experiences-events-clear = Clear
 experiences-events-notify = Notify on every event
 # The Event cell when the row stands for more than one identical report.
 experiences-event-kind-repeated = { $event } ×{ $count }
+
+# The reusable "Choose Experience" picker (the reference's
+# LLFloaterExperiencePicker), opened by every estate experience list's Add.
+# Its query field, rating filter, result columns and paging arrows reuse the
+# experiences-* keys above, because they are literally the same search.
+experience-picker-title = Choose Experience
+experience-picker-select = Select
+experience-picker-cancel = Cancel
 
 # The content ratings an experience can carry, shared by the profile window's
 # combo and the search tab's filter.

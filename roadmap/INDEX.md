@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 41 |
 | in-progress | 21 |
 | bugs | 52 |
-| done | 1078 |
+| done | 1079 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1655** |
+| **total** | **1656** |
 
 ## ideas (100)
 
@@ -799,8 +799,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Group picker for the Region/Estate Access → Allowed Groups list
 - [`viewer-region-estate-object-return`](ready/viewer-region-estate-object-return.md)
   — Region Debug tab — estate-wide object return by resident
-- [`viewer-region-experiences-panel`](ready/viewer-region-experiences-panel.md)
-  — Region / Estate floater — Experiences tab
+- [`viewer-region-experiences-default-experience`](ready/viewer-region-experiences-default-experience.md)
+  — RegionExperiences — the estate's default experience
 - [`viewer-region-restart-schedule`](ready/viewer-region-restart-schedule.md) —
   Region restart schedule + restart countdown (blocked by
   `viewer-region-options-general` (done))
@@ -1304,7 +1304,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1078)
+## done (1079)
 
 ### protocol
 
@@ -2609,6 +2609,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   multi-row selection and its multi-avatar menu
 - [`viewer-reattached-rigged-mesh-renders-static-mislocated`](done/viewer-reattached-rigged-mesh-renders-static-mislocated.md)
   — Re-attached rigged mesh renders static and mislocated (fine at login)
+- [`viewer-region-experiences-panel`](done/viewer-region-experiences-panel.md) —
+  Region / Estate floater — Experiences tab
 - [`viewer-region-name-connecting-after-crossing`](done/viewer-region-name-connecting-after-crossing.md)
   — Top-bar region name stuck on "Connecting..." after crossing into a region
   never teleported to

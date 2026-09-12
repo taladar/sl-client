@@ -21,6 +21,13 @@ struct Options {
     #[arg(long = "account", value_name = "FIRST:LAST:PASSWORD")]
     accounts: Vec<String>,
 
+    /// Grant an account estate powers, as `First:Last` (repeatable). The
+    /// estate-gated surfaces — the Region / Estate floater's writes, its
+    /// access lists and its experience lists — are refused to everyone else,
+    /// so a grid with no estate manager can only be looked at.
+    #[arg(long = "estate-manager", value_name = "FIRST:LAST")]
+    estate_managers: Vec<String>,
+
     /// A region as `Name` or `Name@X,Y` (grid coordinates; repeatable — the
     /// first is the start region, and a viewer can teleport between them
     /// from the map). Default: one "Fake Region" at 1000,1000; unplaced
@@ -160,6 +167,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // A usable default so `sl-fake-grid` alone is enough for a smoke test.
         builder = builder.account(AccountConfig::new("Test", "User", "password"));
         tracing::info!("no --account given; created Test User / password");
+    }
+    for raw in &options.estate_managers {
+        // Named rather than applied to every account on purpose: the policy
+        // gate exists so a *refusal* can be exercised, and a grid where
+        // everyone manages the estate cannot show one.
+        let Some((first, last)) = raw.split_once(':') else {
+            tracing::error!("unparsable --estate-manager {raw:?} (want First:Last)");
+            return Err("bad --estate-manager argument".into());
+        };
+        if !builder.grant_estate_powers(first.trim(), last.trim()) {
+            tracing::error!("--estate-manager {raw:?} names no account");
+            return Err("bad --estate-manager argument".into());
+        }
+        tracing::info!("{} {} holds estate powers", first.trim(), last.trim());
     }
 
     tracing::info!("scenario {:?}: {}", scene.name, scene.summary);

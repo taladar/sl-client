@@ -160,6 +160,7 @@ pub(crate) use sl_viewer_kit::face_material;
 pub(crate) use sl_viewer_kit::flexi;
 pub(crate) use sl_viewer_notices::experience_log;
 pub(crate) use sl_viewer_notices::experience_permission;
+pub(crate) use sl_viewer_notices::experience_picker;
 pub(crate) use sl_viewer_notices::experience_profile;
 pub(crate) use sl_viewer_notices::experiences_floater;
 pub(crate) use sl_viewer_platform::environment_assets;
@@ -411,6 +412,7 @@ use crate::emoji_complete::ColonCompletePlugin;
 use crate::emoji_picker::EmojiPickerPlugin;
 use crate::experience_log::ExperienceLogPlugin;
 use crate::experience_permission::ExperiencePermissionPlugin;
+use crate::experience_picker::ExperiencePickerPlugin;
 use crate::experience_profile::ExperienceProfilePlugin;
 use crate::experiences_floater::ExperiencesPlugin;
 use crate::floater::FloaterPlugin;
@@ -1554,6 +1556,12 @@ fn run_session(
     // -- for an administrator -- the editable fields. After ExperiencesPlugin,
     // whose lists and search results open it.
     .add_plugins(ExperienceProfilePlugin)
+    // The reusable "Choose Experience" picker (viewer-region-experiences-panel):
+    // the window every estate experience list's Add opens, answering an
+    // OpenExperiencePicker with an ExperiencePicked. After ExperiencesPlugin,
+    // whose persisted search-rating setting it shares, and ExperienceProfilePlugin,
+    // whose window its View Profile button opens.
+    .add_plugins(ExperiencePickerPlugin)
     // The experience event log (viewer-experience-event-stream): the per-account
     // record of what the experiences the agent joined actually did to them, the
     // only signal in the protocol that reports an experience attachment, and the

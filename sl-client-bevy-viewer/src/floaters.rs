@@ -207,6 +207,17 @@ pub(crate) const FLOATERS: &[FloaterElement] = &[
         ),
     },
     FloaterElement {
+        id: "experience-picker",
+        summary: "Choose Experience: the paged name search over its rating-filtered result \
+                  table, and the Select / Cancel / View Profile reply row every estate \
+                  experience list adds through.",
+        spec: crate::experience_picker::experience_picker_floater_spec,
+        content: FloaterContent::Stub(
+            "The query row, the rating filter, the search-result table and the Select / \
+             Cancel / View Profile row.",
+        ),
+    },
+    FloaterElement {
         id: "experiences",
         summary: "Experiences: the seven tabs -- search, the Allowed / Blocked / Admin / \
                   Contributor / Owned lists and the event log -- each a sortable, virtualized \

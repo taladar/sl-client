@@ -42,7 +42,9 @@ pub(crate) use sl_viewer_world_api as world_api;
 
 pub mod experience_log;
 pub mod experience_permission;
+pub mod experience_picker;
 pub mod experience_profile;
+pub(crate) mod experience_search;
 pub mod experiences_floater;
 pub mod linkified_text;
 pub mod notification_host;
@@ -133,6 +135,7 @@ mod tests {
                 crate::experience_log::ExperienceLogPlugin,
                 crate::experiences_floater::ExperiencesPlugin,
                 crate::experience_profile::ExperienceProfilePlugin,
+                crate::experience_picker::ExperiencePickerPlugin,
             ));
         // Every key resolves to itself, which is all a scheduling check needs —
         // and without it `Translator` has no `Localization` to read.

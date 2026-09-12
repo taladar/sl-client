@@ -1349,6 +1349,24 @@ impl FakeGridBuilder {
         self
     }
 
+    /// Grants estate powers to the already-added account named
+    /// `first` / `last`, answering whether one was found.
+    ///
+    /// Not `#[must_use]`-chained like the rest of the builder because it
+    /// *addresses* an account rather than adding one: a caller building the
+    /// account itself says [`AccountConfig::estate_manager`] there, and this is
+    /// for the caller that only has a name (the binary's `--estate-manager`).
+    pub fn grant_estate_powers(&mut self, first: &str, last: &str) -> bool {
+        let mut granted = false;
+        for account in &mut self.accounts {
+            if account.first_name == first && account.last_name == last {
+                account.estate_manager = true;
+                granted = true;
+            }
+        }
+        granted
+    }
+
     /// Adds a region.
     #[must_use]
     pub fn region(mut self, region: RegionConfig) -> Self {
