@@ -941,6 +941,164 @@ mod test {
         Ok(())
     }
 
+    /// The trade the test above makes visible, taken: **the held item follows
+    /// the save even on the grid that says nothing about it.**
+    ///
+    /// On the flavour that announces, the push rebinds the item and every later
+    /// read is right by accident of the grid's manners. On the flavour that does
+    /// not, the completion is the only word there is — so a client that files
+    /// nothing from it keeps an item naming the asset the save **replaced** for
+    /// the rest of the login. That is not an abstraction: the folder page a
+    /// viewer resolves a row from is the held item, so re-opening a just-saved
+    /// notecard fetches the body from before the save (and on OpenSim a fresh
+    /// notecard's placeholder asset is a single NUL byte, which reads as an
+    /// empty notecard — a save that appears to have been thrown away).
+    ///
+    /// Asserted through the folder **page**, not through the asset store,
+    /// because the page is what the viewer reads: the question is not "did the
+    /// grid keep the bytes" (it did, either way) but "does this client still
+    /// know where they are".
+    ///
+    /// Both flavours, because they withhold different halves and the client must
+    /// not need either: OpenSim echoes the rewritten item in the completion and
+    /// announces nothing, Second Life announces the rewrite and omits the item
+    /// from the completion — so the OpenSim leg is the one that fails without
+    /// the rebind, and the Second Life leg is the one that fails without taking
+    /// the item from the id the client sent.
+    #[tokio::test]
+    async fn a_save_rebinds_the_held_item_on_a_grid_that_announces_nothing() -> Result<(), TestError>
+    {
+        for imitates in [ImitatedGrid::OpenSim, ImitatedGrid::SecondLife] {
+            a_save_rebinds_the_held_item(imitates).await?;
+        }
+        Ok(())
+    }
+
+    /// One flavour's leg of
+    /// [`a_save_rebinds_the_held_item_on_a_grid_that_announces_nothing`].
+    async fn a_save_rebinds_the_held_item(imitates: ImitatedGrid) -> Result<(), TestError> {
+        let item = sl_fake_grid::scenario::fixture_item_id(sl_proto::AssetType::Notecard);
+        let mut running = start_configured(vec![RegionConfig::default()], None, imitates).await?;
+
+        // Find the item's folder, and fetch it, so the page asserted below is
+        // answered out of the held model rather than out of an empty one.
+        running.commands.send(Command::QueryInventoryRoots).await?;
+        let root = running
+            .wait_for(|event| match event {
+                Event::InventoryRoots { agent_root, .. } => *agent_root,
+                _other => None,
+            })
+            .await?;
+        let folder = fetch_folder_holding(&mut running, root, item).await?;
+
+        // The asset the item names *before* the save — the thing that must not
+        // survive it.
+        let before = held_item_asset(&mut running, folder, item).await?;
+        save_over_seeded_notecard(&running, item).await?;
+        let saved = running
+            .wait_for(|event| match event {
+                Event::AssetUploaded { new_asset, .. } => Some(*new_asset),
+                _other => None,
+            })
+            .await?;
+        assert_ne!(
+            saved, before,
+            "{imitates:?}: the save stored the asset the item already had, so this proves nothing"
+        );
+
+        let after = held_item_asset(&mut running, folder, item).await?;
+        assert_eq!(
+            after, saved,
+            "{imitates:?}: the held item still names the asset the save replaced, so every later \
+             read of it — a re-opened notecard included — fetches the body from before the save"
+        );
+        Ok(())
+    }
+
+    /// Fetch the folders under `root` and return the one `item` is filed in,
+    /// with its contents loaded — the descendents reply is waited for, so a
+    /// later folder query is answered from a model that has them.
+    async fn fetch_folder_holding(
+        running: &mut Running,
+        root: sl_types::key::InventoryFolderKey,
+        item: sl_types::key::InventoryKey,
+    ) -> Result<sl_types::key::InventoryFolderKey, TestError> {
+        // The root's own descendents name every system folder under it.
+        running
+            .commands
+            .send(Command::QueryInventoryFolder {
+                folder: root,
+                before: None,
+                limit: 200,
+            })
+            .await?;
+        let children = running
+            .wait_for(|event| match event {
+                Event::InventoryDescendents {
+                    folder_id, folders, ..
+                } if *folder_id == root => Some(folders.clone()),
+                _other => None,
+            })
+            .await?;
+        // Fetch each of them and take the one the item turns up in. The fixture
+        // files an item by its class, so this is the Notecards folder — asked
+        // for by where the item *is* rather than by a folder id derived twice.
+        for child in children {
+            running
+                .commands
+                .send(Command::QueryInventoryFolder {
+                    folder: child.folder_id,
+                    before: None,
+                    limit: 200,
+                })
+                .await?;
+            let holds = running
+                .wait_for(|event| match event {
+                    Event::InventoryDescendents {
+                        folder_id, items, ..
+                    } if *folder_id == child.folder_id => {
+                        Some(items.iter().any(|held| held.item_id == item))
+                    }
+                    _other => None,
+                })
+                .await?;
+            if holds {
+                return Ok(child.folder_id);
+            }
+        }
+        Err("no folder under the agent root holds the seeded notecard".into())
+    }
+
+    /// The asset id `item` carries in the **held** model, read the way a viewer
+    /// reads it: a folder page, answered then and there out of the model.
+    async fn held_item_asset(
+        running: &mut Running,
+        folder: sl_types::key::InventoryFolderKey,
+        item: sl_types::key::InventoryKey,
+    ) -> Result<sl_proto::Uuid, TestError> {
+        running
+            .commands
+            .send(Command::QueryInventoryFolder {
+                folder,
+                before: None,
+                limit: 200,
+            })
+            .await?;
+        let items = running
+            .wait_for(|event| match event {
+                Event::InventoryFolderPage {
+                    folder: got, items, ..
+                } if *got == folder => Some(std::sync::Arc::clone(items)),
+                _other => None,
+            })
+            .await?;
+        items
+            .iter()
+            .find(|held| held.item_id == item)
+            .map(|held| held.asset_id)
+            .ok_or_else(|| "the seeded notecard is not in its own folder's page".into())
+    }
+
     /// A `NewFileAgentInventory` upload's **new** item is announced by neither
     /// flavour — the half of `sl_fake_grid::UploadAnnouncements` the two live
     /// grids agree on.

@@ -3,8 +3,8 @@
 use crate::caps::deliver;
 use reqwest::Client as ReqwestClient;
 use sl_proto::{
-    AgentKey, Event, NewFileAgentInventoryRequest, ScriptCompileError, parse_asset_upload_response,
-    uploaded_inventory_item,
+    AgentKey, Event, NewFileAgentInventoryRequest, ScriptCompileError, Uuid,
+    parse_asset_upload_response, uploaded_inventory_item,
 };
 use tokio::sync::mpsc;
 
@@ -24,16 +24,40 @@ pub(crate) type NewItemUpload = Option<(NewFileAgentInventoryRequest, AgentKey)>
 ///
 /// `creating` carries the request of an upload that creates an item, so the
 /// completion can be turned into the item itself — no grid announces one.
+/// `asked_about` is the item an **update** was asked to rewrite, which names the
+/// completion when the grid does not (see [`named_item`]).
 pub(crate) async fn run_caps_upload(
     cap_url: String,
     metadata: String,
     data: Vec<u8>,
     creating: NewItemUpload,
+    asked_about: Option<Uuid>,
     http: ReqwestClient,
     events: mpsc::Sender<Event>,
 ) {
-    let event = caps_upload_event(&cap_url, metadata, data, creating, &http).await;
+    let event = caps_upload_event(&cap_url, metadata, data, creating, asked_about, &http).await;
     deliver(&events, event).await;
+}
+
+/// **The item a save rewrote, named by whoever knows it.** An update
+/// capability's completion is only obliged to carry the new *asset*: the item
+/// already exists and the client is the one that named it, so a grid may echo it
+/// (OpenSim's `UpdateItemAsset.cs` does) or say nothing at all (Second Life does
+/// not, and the reference's update path —
+/// `LLBufferedAssetUploadInfo::finishUpload` — reads the asset from the response
+/// and takes the item from `getItemId()`, the id it sent).
+///
+/// So the completion is filled in from the request when the grid leaves it out:
+/// without it, everything that correlates a save with the item it saved —
+/// reporting the save, and rebinding the item to the asset it now holds — simply
+/// never fires on the stricter grid.
+const fn named_item(reported: Option<Uuid>, asked_about: Option<Uuid>) -> Option<Uuid> {
+    // A nil id parses as `None` (as a genuinely item-less baked-texture
+    // completion does), so this covers "echoed a nil" as well as "said nothing".
+    match reported {
+        Some(item) => Some(item),
+        None => asked_about,
+    }
 }
 
 /// Performs both steps of a CAPS asset upload and returns the resulting event.
@@ -42,6 +66,7 @@ pub(crate) async fn caps_upload_event(
     metadata: String,
     data: Vec<u8>,
     creating: NewItemUpload,
+    asked_about: Option<Uuid>,
     http: &ReqwestClient,
 ) -> Event {
     // Step 1: POST the metadata, expecting an `uploader` URL back.
@@ -70,7 +95,7 @@ pub(crate) async fn caps_upload_event(
         Ok(response) => match response.new_asset {
             Some(new_asset) => Event::AssetUploaded {
                 new_asset,
-                new_inventory_item: response.new_inventory_item,
+                new_inventory_item: named_item(response.new_inventory_item, asked_about),
                 created: creating.and_then(|(request, owner)| {
                     uploaded_inventory_item(&request, &response, owner, unix_seconds())
                         .map(Box::new)
@@ -109,10 +134,11 @@ pub(crate) async fn run_script_upload(
     metadata: String,
     source: Vec<u8>,
     running: Option<bool>,
+    asked_about: Option<Uuid>,
     http: ReqwestClient,
     events: mpsc::Sender<Event>,
 ) {
-    let event = script_upload_event(&cap_url, metadata, source, running, &http).await;
+    let event = script_upload_event(&cap_url, metadata, source, running, asked_about, &http).await;
     deliver(&events, event).await;
 }
 
@@ -122,6 +148,7 @@ async fn script_upload_event(
     metadata: String,
     source: Vec<u8>,
     running: Option<bool>,
+    asked_about: Option<Uuid>,
     http: &ReqwestClient,
 ) -> Event {
     // Step 1: POST the metadata (item/task ids + compile target), get an uploader.
@@ -162,7 +189,7 @@ async fn script_upload_event(
                 // already exists — `Command::UploadScript` names it — so unlike
                 // `AssetUploaded` there is never an item to assemble here.
                 new_asset: response.new_asset,
-                new_inventory_item: response.new_inventory_item,
+                new_inventory_item: named_item(response.new_inventory_item, asked_about),
                 // A grid that completed but omitted `compiled` is treated as a
                 // clean compile.
                 compiled: response.compiled.unwrap_or(true),

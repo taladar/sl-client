@@ -10473,6 +10473,34 @@ impl Session {
         self.cache_inventory_item(item);
     }
 
+    /// Points a held item at the asset an **in-place save** just wrote, as the
+    /// `Update*Inventory` capability's completion named it. Returns whether the
+    /// item was held (an item this session has never fetched cannot be rebound).
+    ///
+    /// The save's sibling of [`cache_uploaded_item`](Self::cache_uploaded_item),
+    /// and needed for the same reason: a grid may not say a word about it. An
+    /// upload that *rewrites* an item is announced by Second Life (the legacy
+    /// `UpdateCreateInventoryItem` follows the completion) and by **OpenSim not
+    /// at all** — its `CapsUpdateInventoryItemAsset` stores the asset, rebinds
+    /// the item server-side and returns, with the client notify commented out.
+    /// So on that grid the completion is the only word there is, and a session
+    /// that does not fold it in keeps an item naming **the asset the save
+    /// replaced** for the rest of the login: every later read of that item —
+    /// including the page a folder query is answered from — hands back the old
+    /// asset, and re-opening a just-saved notecard fetches the body from before
+    /// the save (on OpenSim, a fresh notecard's one-NUL-byte placeholder, which
+    /// reads as an empty notecard).
+    ///
+    /// The runtime calls this as the completion comes back, before delivering
+    /// [`Event::AssetUploaded`](crate::Event::AssetUploaded) /
+    /// [`Event::ScriptUploaded`](crate::Event::ScriptUploaded), so a consumer
+    /// that re-reads the folder on that event sees the new asset in the page.
+    /// It is deliberately idempotent against the grid that *does* announce:
+    /// Second Life's push carries the same binding and simply overwrites it.
+    pub fn rebind_saved_item_asset(&mut self, item: InventoryKey, new_asset: Uuid) -> bool {
+        self.inventory.rebind_item_asset(item, new_asset)
+    }
+
     /// Allocates the next async inventory `CallbackID` (never zero).
     fn next_inventory_callback(&mut self) -> InventoryCallbackId {
         self.inventory.next_callback()

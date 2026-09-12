@@ -10,7 +10,7 @@ use sl_wire::{
 };
 use uuid::Uuid;
 
-use crate::{AssetType, FolderState, InventoryType, SaleType, WearableType};
+use crate::{AssetType, Event, FolderState, InventoryType, SaleType, WearableType};
 
 /// An inventory folder (category): from the login skeleton
 /// ([`Event::InventorySkeleton`](crate::Event::InventorySkeleton)) or an `InventoryDescendents` sub-folder.
@@ -222,6 +222,38 @@ pub fn uploaded_inventory_item(
         group: None,
         permissions,
     })
+}
+
+/// The `(item, new asset)` binding an upload completion establishes when it
+/// **rewrote** an item that already existed — the in-place save — or `None` for
+/// any other event, including the upload that *created* an item (that one is
+/// filed whole by [`uploaded_inventory_item`]) and the one that created none at
+/// all (a baked texture).
+///
+/// The shared reading of the two completion events behind
+/// [`Session::rebind_saved_item_asset`](crate::Session::rebind_saved_item_asset),
+/// so both runtimes decide "was this a save, and of what" the same way rather
+/// than each matching the variants for itself.
+#[must_use]
+pub fn saved_item_rebinding(event: &Event) -> Option<(InventoryKey, Uuid)> {
+    match event {
+        // A save is the completion that names an item and created none — an
+        // upload that created one carries the whole item instead — or the
+        // script uploader's own completion (it also carries the compile
+        // result), where a refused compile stored no asset and so rebinds
+        // nothing.
+        Event::AssetUploaded {
+            new_asset,
+            new_inventory_item: Some(item),
+            created: None,
+        }
+        | Event::ScriptUploaded {
+            new_asset: Some(new_asset),
+            new_inventory_item: Some(item),
+            ..
+        } => Some((InventoryKey::from(*item), *new_asset)),
+        _other => None,
+    }
 }
 
 /// Parameters for creating a new inventory item via
@@ -749,8 +781,9 @@ mod tests {
     use super::{
         AgentKey, AssetType, AssetUploadResponse, InventoryFolder, InventoryFolderKey,
         InventoryKey, InventoryType, NewFileAgentInventoryRequest, OwnerKey, Permissions, SaleType,
-        UploadGrantedPermissions, uploaded_inventory_item,
+        UploadGrantedPermissions, saved_item_rebinding, uploaded_inventory_item,
     };
+    use crate::Event;
 
     /// [`InventoryKey`] and [`InventoryFolderKey`] are transparent wrappers over
     /// their [`Uuid`]: wrapping a raw id and unwrapping it again yields the
@@ -928,6 +961,54 @@ mod tests {
                 0,
             )
             .is_none()
+        );
+    }
+
+    /// Which completions are an **in-place save**, and what they rebind. The
+    /// classification is the whole of it: a save is the completion that names
+    /// an item and created none, an upload that created one is filed whole
+    /// instead, and a completion with no item (a baked texture) or no asset (a
+    /// refused compile) binds nothing.
+    #[test]
+    fn only_an_in_place_save_rebinds_an_item() {
+        let (item, asset) = (Uuid::from_u128(0x17e3), Uuid::from_u128(0xa55e7));
+        assert_eq!(
+            saved_item_rebinding(&Event::AssetUploaded {
+                new_asset: asset,
+                new_inventory_item: Some(item),
+                created: None,
+            }),
+            Some((InventoryKey::from(item), asset))
+        );
+        assert_eq!(
+            saved_item_rebinding(&Event::ScriptUploaded {
+                new_asset: Some(asset),
+                new_inventory_item: Some(item),
+                compiled: true,
+                errors: Vec::new(),
+                running: None,
+            }),
+            Some((InventoryKey::from(item), asset))
+        );
+        // A baked texture: an asset, and no item to bind it to.
+        assert_eq!(
+            saved_item_rebinding(&Event::AssetUploaded {
+                new_asset: asset,
+                new_inventory_item: None,
+                created: None,
+            }),
+            None
+        );
+        // A compile the simulator refused stored no asset, so nothing moved.
+        assert_eq!(
+            saved_item_rebinding(&Event::ScriptUploaded {
+                new_asset: None,
+                new_inventory_item: Some(item),
+                compiled: false,
+                errors: Vec::new(),
+                running: None,
+            }),
+            None
         );
     }
 }

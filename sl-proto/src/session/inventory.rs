@@ -27,6 +27,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::time::Instant;
 
 use sl_types::key::{InventoryFolderKey, InventoryKey, OwnerKey};
+use uuid::Uuid;
 
 use crate::bookkeeping_ids::InventoryCallbackId;
 use crate::types::{Child, InventoryFolder, InventoryItem, optional_key_from_wire};
@@ -426,6 +427,22 @@ impl Inventory {
             self.entry(new_folder, owner).child_items.insert(key);
         }
         self.items.insert(key, item);
+    }
+
+    /// Points a held item at a new asset, leaving everything else about it
+    /// alone. Returns whether the item was held at all (an item this model has
+    /// never seen cannot be rebound, and inventing one from an id would file a
+    /// nameless, typeless row).
+    pub(crate) fn rebind_item_asset(&mut self, item: InventoryKey, asset_id: Uuid) -> bool {
+        let Some(held) = self.items.get_mut(&item) else {
+            return false;
+        };
+        if held.asset_id == asset_id {
+            return true;
+        }
+        held.asset_id = asset_id;
+        self.dirty = true;
+        true
     }
 
     /// Marks a folder's contents as fetched at `version` — the authoritative
@@ -1001,6 +1018,52 @@ mod tests {
             Some(FolderState::Loaded { version: 3 })
         );
         assert_eq!(inv.folder(fk(0xBEEF)), None);
+    }
+
+    /// An in-place save rebinds the held item's asset and nothing else — and
+    /// the folder's own listing hands the new asset back, because that listing
+    /// *is* the held item. An item the model never saw is refused rather than
+    /// invented from an id.
+    #[test]
+    fn rebind_item_asset_follows_a_save() {
+        let mut inv = Inventory::new();
+        inv.cache_folder(folder(0xF0, None, 1), InventoryOwner::Agent);
+        inv.cache_item(item(0xD1, 0xF0), InventoryOwner::Agent);
+        inv.clear_dirty();
+
+        let saved = Uuid::from_u128(0x5A7E_D000);
+        assert!(inv.rebind_item_asset(ik(0xD1), saved));
+        assert!(inv.is_dirty(), "a rebind must reach the disk cache");
+        let held = inv.item(ik(0xD1));
+        assert_eq!(held.map(|item| item.asset_id), Some(saved));
+        // Only the asset moved: the row a viewer draws is otherwise untouched.
+        assert_eq!(
+            held.map(|item| item.name.clone()),
+            Some("item-209".to_owned())
+        );
+        assert_eq!(held.map(|item| item.folder_id), Some(fk(0xF0)));
+        // And the page a folder query is answered from is the same item, so a
+        // re-open after the save fetches the asset the save wrote.
+        assert_eq!(
+            inv.children(fk(0xF0))
+                .1
+                .iter()
+                .map(|item| item.asset_id)
+                .collect::<Vec<Uuid>>(),
+            vec![saved]
+        );
+
+        // A no-op rebind is not a write.
+        inv.clear_dirty();
+        assert!(inv.rebind_item_asset(ik(0xD1), saved));
+        assert!(
+            !inv.is_dirty(),
+            "rebinding to the same asset dirtied the cache"
+        );
+
+        // An unheld item cannot be rebound: there is no row to point anywhere.
+        assert!(!inv.rebind_item_asset(ik(0xDEAD), saved));
+        assert_eq!(inv.item(ik(0xDEAD)), None);
     }
 
     /// Re-parenting a folder and moving an item both relink the child index:

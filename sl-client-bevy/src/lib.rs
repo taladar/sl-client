@@ -1424,6 +1424,15 @@ fn advance_running(
             {
                 session.cache_uploaded_item(item.as_ref().clone());
             }
+            // And the save's half of the same gap: an upload that *rewrote* an
+            // item is announced by Second Life and by OpenSim not at all, so
+            // the completion is the only word there is. Fold it in before the
+            // event goes out, or every later read of that item — the page a
+            // folder query is answered from included — names the asset the save
+            // replaced.
+            if let Some((item, new_asset)) = sl_proto::saved_item_rebinding(&event) {
+                session.rebind_saved_item_asset(item, new_asset);
+            }
             report(outbound, NetOutbound::Event(event));
         }
 
@@ -3504,13 +3513,31 @@ fn apply_command(
                     Some(*running),
                 ),
             };
+            // The item this save is *about*, for the completion below — the same
+            // reason the asset update names its own: a task item is not an
+            // agent-inventory item, so it stays `None`.
+            let updated_item = match location {
+                ScriptUploadLocation::AgentInventory { item_id } => Some(item_id.uuid()),
+                ScriptUploadLocation::TaskInventory { .. } => None,
+            };
             if let Some(caps) = caps
                 && let Some(url) = caps.map.get(cap).cloned()
             {
                 let asset_tx = caps.asset_tx.clone();
                 let source = source.clone();
                 std::thread::spawn(move || {
-                    deliver(&asset_tx, run_script_upload(&url, body, source, running));
+                    let mut event = run_script_upload(&url, body, source, running);
+                    // Name the item ourselves when the grid does not: Second
+                    // Life's update path answers with the asset alone, and the
+                    // reference takes the item from the id it sent.
+                    if let SessionEvent::ScriptUploaded {
+                        new_inventory_item, ..
+                    } = &mut event
+                        && new_inventory_item.is_none()
+                    {
+                        *new_inventory_item = updated_item;
+                    }
+                    deliver(&asset_tx, event);
                 });
             } else {
                 emit_upload_unavailable(caps, cap);

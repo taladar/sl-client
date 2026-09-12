@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 41 |
 | in-progress | 22 |
 | bugs | 41 |
-| done | 1103 |
+| done | 1104 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1666** |
+| **total** | **1667** |
 
 ## ideas (100)
 
@@ -1271,7 +1271,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1103)
+## done (1104)
 
 ### protocol
 
@@ -1893,6 +1893,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-i18n-fluent-scaffold` (done))
 - [`viewer-im-tab-shows-short-id-not-name`](done/viewer-im-tab-shows-short-id-not-name.md)
   — An IM tab we open ourselves is titled with a short id, never a name
+- [`viewer-in-place-save-reverts-to-old-asset`](done/viewer-in-place-save-reverts-to-old-asset.md)
+  — A saved notecard read back blank, the session never hearing the save
 - [`viewer-in-world-sounds`](done/viewer-in-world-sounds.md) — In-world spatial
   sounds (blocked by `viewer-audio-backend` (done))
 - [`viewer-input-action-map`](done/viewer-input-action-map.md) — Input action

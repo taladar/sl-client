@@ -622,11 +622,13 @@ impl Client {
         // stamped with the generation of the region change that asked for it, so a
         // slow fetch overtaken by a second crossing cannot install a stale map.
         let (caps_map_tx, mut caps_map_rx) = mpsc::channel::<(u64, HashMap<String, String>)>(4);
-        // An asset upload that *creates* an inventory item completes into this
-        // channel rather than straight out to the client, because the item it
-        // built has to be filed in the session's inventory before anything acts
-        // on the completion — no grid announces it, so this is the only chance.
-        // Everything read here is forwarded to `events` unchanged.
+        // An asset upload that **binds an inventory item** — one that creates
+        // one, and one that rewrites one — completes into this channel rather
+        // than straight out to the client, because the session's inventory has
+        // to learn what the completion did before anything acts on it: a created
+        // item is announced by no grid at all, and a rewritten one by Second Life
+        // only, so for both this is the only chance there is. Everything read
+        // here is forwarded to `events` unchanged.
         let (upload_events, mut upload_rx) = mpsc::channel::<Event>(16);
         let mut caps_generation: u64 = 0;
         let mut caps_refetch_task: Option<tokio::task::JoinHandle<()>> = None;
@@ -928,6 +930,14 @@ impl Client {
                         // finds it there.
                         if let Event::AssetUploaded { created: Some(item), .. } = &event {
                             self.session.cache_uploaded_item(item.as_ref().clone());
+                        }
+                        // And the save's half: an upload that *rewrote* an item
+                        // is announced by Second Life and by OpenSim not at
+                        // all, so the completion is the only word there is.
+                        // Without this the held item names the asset the save
+                        // replaced for the rest of the login.
+                        if let Some((item, new_asset)) = sl_proto::saved_item_rebinding(&event) {
+                            self.session.rebind_saved_item_asset(item, new_asset);
                         }
                         deliver(&events, event).await;
                     }
@@ -2018,7 +2028,7 @@ impl Client {
                                 // grid announces the item it created, so the
                                 // completion has to be turned into one here.
                                 let creating = self.session.agent_id().map(|owner| (request, owner));
-                                tokio::spawn(run_caps_upload(url, body, data, creating, http.clone(), upload_events.clone()));
+                                tokio::spawn(run_caps_upload(url, body, data, creating, None, http.clone(), upload_events.clone()));
                             } else {
                                 deliver(&events, Event::AssetUploadFailed { reason: "NewFileAgentInventory capability not available".to_owned(), }).await;
                             }
@@ -2026,7 +2036,7 @@ impl Client {
                         Some(Command::UploadBakedTexture { data }) => {
                             if let Some(url) = caps.get(CAP_UPLOAD_BAKED_TEXTURE).cloned() {
                                 let body = build_upload_baked_texture_request();
-                                tokio::spawn(run_caps_upload(url, body, data, None, http.clone(), events.clone()));
+                                tokio::spawn(run_caps_upload(url, body, data, None, None, http.clone(), events.clone()));
                             } else {
                                 deliver(&events, Event::AssetUploadFailed { reason: "UploadBakedTexture capability not available".to_owned(), }).await;
                             }
@@ -2045,8 +2055,14 @@ impl Client {
                                     build_update_task_item_asset_request(task_id, item_id),
                                 ),
                             };
+                            // The item this save is *about*. A task item is not
+                            // an agent-inventory item, so it stays `None`.
+                            let asked_about = match location {
+                                AssetUpdateLocation::AgentInventory { item_id } => Some(item_id.uuid()),
+                                AssetUpdateLocation::TaskInventory { .. } => None,
+                            };
                             if let Some(url) = caps.get(cap).cloned() {
-                                tokio::spawn(run_caps_upload(url, body, data, None, http.clone(), events.clone()));
+                                tokio::spawn(run_caps_upload(url, body, data, None, asked_about, http.clone(), upload_events.clone()));
                             } else {
                                 deliver(&events, Event::AssetUploadFailed { reason: format!("{cap} capability not available"), }).await;
                             }
@@ -2071,9 +2087,14 @@ impl Client {
                                     Some(running),
                                 ),
                             };
+                            let asked_about = match location {
+                                ScriptUploadLocation::AgentInventory { item_id } => Some(item_id.uuid()),
+                                ScriptUploadLocation::TaskInventory { .. } => None,
+                            };
                             if let Some(url) = caps.get(cap).cloned() {
                                 tokio::spawn(run_script_upload(
-                                    url, body, source, running, http.clone(), events.clone(),
+                                    url, body, source, running, asked_about, http.clone(),
+                                    upload_events.clone(),
                                 ));
                             } else {
                                 deliver(&events, Event::AssetUploadFailed { reason: format!("{cap} capability not available"), }).await;
