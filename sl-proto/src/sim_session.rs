@@ -153,10 +153,11 @@ use sl_wire::messages::{
     RegionInfoRegionInfoBlock,
 };
 use sl_wire::{
-    AnyMessage, CircuitCode, ControlFlags, EventQueueEvent, ExperienceInfo, ExperiencePermission,
-    ExperienceUpdate, GlobalCoordinates, Llsd, MessageId, PacketFlags, Permissions, Permissions5,
-    Reader, RegionHandle, RegionLocalObjectId, RegionLocalParcelId, SequenceNumber, WireError,
-    Writer, build_event_queue_response, encode_datagram, parse_datagram, zero_decode,
+    AnyMessage, CircuitCode, ControlFlags, EventQueueEvent, ExperienceEnvironmentPush,
+    ExperienceEvent, ExperienceInfo, ExperiencePermission, ExperienceUpdate, GlobalCoordinates,
+    Llsd, MessageId, PacketFlags, Permissions, Permissions5, Reader, RegionHandle,
+    RegionLocalObjectId, RegionLocalParcelId, SequenceNumber, WireError, Writer,
+    build_event_queue_response, encode_datagram, parse_datagram, zero_decode,
 };
 use uuid::Uuid;
 
@@ -164,7 +165,8 @@ use crate::AssetKey;
 use crate::ack_flush::send_ack_packets;
 use crate::appearance::{MAX_FACES, decode_texture_entry};
 use crate::bookkeeping_ids::{
-    ImSessionId, InventoryCallbackId, LureId, PingId, QueryId, TransactionId, TransferId, XferId,
+    ImSessionId, InventoryCallbackId, InvoiceId, LureId, PingId, QueryId, TransactionId,
+    TransferId, XferId,
 };
 use crate::error::Error;
 use crate::extra_params::decode_extra_param_blocks;
@@ -3341,7 +3343,7 @@ pub struct SimSession {
     /// details GET serves ([`SimSession::set_land_resource_details`]).
     /// Driver-populated.
     land_resource_details: Vec<ParcelScriptResources>,
-    /// The experience fixture set the twelve experience capabilities serve
+    /// The experience fixture set the thirteen experience capabilities serve
     /// from. Driver-populated ([`SimSession::experiences_mut`]) like
     /// [`display_names`](Self::display_names), but the three mutating caps
     /// (`ExperiencePreferences`, `UpdateExperience`, the
@@ -7201,6 +7203,70 @@ impl SimSession {
         });
         self.send(&message, Reliability::Reliable, now)?;
         Ok(())
+    }
+
+    /// Sends a `PushExpEnvironment` — the environment an **experience** pushes
+    /// at this viewer (`llSetEnvironment`), which the client surfaces as
+    /// [`Event::ExperienceEnvironmentPush`](crate::Event::ExperienceEnvironmentPush).
+    ///
+    /// This is the one *live* environment change in the protocol. Editing what
+    /// [`set_environment`](Self::set_environment) serves changes only what a
+    /// **fetch** answers, and a viewer already standing here has no reason to
+    /// fetch again until a `RegionInfo` arrives; a push reaches it at once, and
+    /// layers over the region's settings rather than replacing them.
+    ///
+    /// The experience id travels in the message's invoice, which is where the
+    /// reference reads it from — see
+    /// [`build_environment_push_params`](sl_wire::build_environment_push_params).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_experience_environment_push(
+        &mut self,
+        push: &ExperienceEnvironmentPush,
+        now: Instant,
+    ) -> Result<(), Error> {
+        self.send_generic_message(
+            &GenericMessage {
+                method: sl_wire::PUSH_EXP_ENVIRONMENT_METHOD.to_owned(),
+                invoice: InvoiceId::from(push.experience_id.uuid()),
+                params: sl_wire::build_environment_push_params(push),
+            },
+            now,
+        )
+    }
+
+    /// Sends an `ExperienceEvent` — the after-the-fact report that an
+    /// **experience** the agent has joined exercised a permission on them, which
+    /// the client surfaces as [`Event::ExperienceEvent`](crate::Event::ExperienceEvent).
+    ///
+    /// An experience's scripts do not ask, so nothing else in the session tells
+    /// the agent what one of them did; this message is the whole of that record,
+    /// and the only place an experience **attachment** is reported at all.
+    ///
+    /// The experience id travels in the message's invoice, which is where the
+    /// reference reads it from — see
+    /// [`build_experience_event_params`](sl_wire::build_experience_event_params).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_experience_event(
+        &mut self,
+        event: &ExperienceEvent,
+        now: Instant,
+    ) -> Result<(), Error> {
+        self.send_generic_message(
+            &GenericMessage {
+                method: sl_wire::EXPERIENCE_EVENT_METHOD.to_owned(),
+                invoice: InvoiceId::from(event.experience_id.uuid()),
+                params: sl_wire::build_experience_event_params(event),
+            },
+            now,
+        )
     }
 
     /// Sends a `LargeGenericMessage` — the same method-name + parameter-list

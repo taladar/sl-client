@@ -37,6 +37,32 @@ pub use sl_types::experience::{
 /// (A client request constant, kept local — not a general SL concept.)
 pub const SEARCH_PAGE_SIZE: i32 = 30;
 
+/// One page of a `FindExperienceByName` reply: the matching records, plus
+/// whether the grid offered a page on either side of this one.
+///
+/// The reply states the two neighbours as **URLs** (`next_page_url` /
+/// `previous_page_url`), but the reference viewer never fetches either — it
+/// re-queries by page number and reads only whether the key is *there*
+/// (`LLPanelExperiencePicker::processResponse` enables its `right_btn` /
+/// `left_btn` from `content.has(…)`). So the two markers are carried as
+/// booleans: that is the whole of what the URLs are used for, and a URL nothing
+/// dereferences would be a field kept only to be ignored.
+///
+/// A grid that omits both keys therefore offers no paging at all, which is
+/// exactly what the reference does with such a reply.
+#[derive(Debug, Clone, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ExperienceSearchPage {
+    /// The experiences on this page, in reply order.
+    pub infos: Vec<ExperienceInfo>,
+    /// Whether the reply carried a `next_page_url` — there is a page after
+    /// this one.
+    pub has_next_page: bool,
+    /// Whether the reply carried a `previous_page_url` — there is a page
+    /// before this one.
+    pub has_previous_page: bool,
+}
+
 /// The per-experience preference an agent can set over `ExperiencePreferences`.
 /// `Allow`/`Block` are sent as a PUT body; `Forget` clears any prior preference
 /// (sent as a DELETE — see [`build_set_experience_permission_request`](crate::build_set_experience_permission_request)).

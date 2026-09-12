@@ -1858,8 +1858,9 @@ of the script was not written for a world where it never happened.
 The `Action` is anything a simulator does unprompted: `RezObject`,
 `MoveObject`, `UpdateObject`, `KillObject`, `Attach` / `Detach`,
 `AnimateAvatar`, `SetAppearance`, `Chat`, `Im`, `SetEnvironment`,
-`ConfigureRegion`, `ChangeParcel`, `Teleport`, `CrossRegion`, `SimStats`,
-`SimulatorTime`, `Marker`, and `Custom` for a hook.
+`PushExperienceEnvironment`, `ReportExperienceEvent`,
+`SetExperiencePreference`, `ConfigureRegion`, `ChangeParcel`, `Teleport`,
+`CrossRegion`, `SimStats`, `SimulatorTime`, `Marker`, and `Custom` for a hook.
 
 `SetEnvironment` and `ConfigureRegion` go together, and the pairing is a
 protocol fact rather than an inconvenience. Nothing carries new environment
@@ -1873,13 +1874,37 @@ otherwise: a `RegionInfo` carries no environment fields at all. So an estate
 that changes only the sky saves the Region tab without moving a limit, and a
 script says the same thing with an empty `ConfigureRegion` edit.
 
-The one environment change that really is *pushed* is a different feature —
-`PushExpEnvironment`, an experience's `llSetEnvironment`, which travels as a
-`GenericMessage` and layers over the region's settings. Neither end of it exists
-in this workspace yet. The world-changing ones go through the
-region's shared store and publish to its change stream, so a second avatar
-standing there is told as well — a scripted rez is a rez, not a picture
-painted on one circuit.
+The one environment change that really is *pushed* is a different action —
+`PushExperienceEnvironment`, an experience's `llSetEnvironment`, which travels
+as a `GenericMessage` (`PushExpEnvironment`) and needs no `ConfigureRegion`
+beside it. It layers **over** the region's settings rather than replacing them,
+so its `Clear` case puts the region's own sky back with no refetch — the
+settings underneath were never overwritten, only covered. Its three cases are
+the reference's own: `Clear` releases one experience (or, with a nil experience
+id, every one of them), `Full` names a settings **asset** by id — which the
+viewer fetches over `ViewerAsset`, so the scenario has to have put those bytes
+in the grid's asset store — and `Partial` carries a sky and/or water fragment
+whose keys are overlaid on whatever is in force. The experience id rides in the
+message's invoice, not in the parameter list.
+
+`ReportExperienceEvent` is the other half of what a region says about an
+experience, and the only half that is *about* the experience rather than about
+the sky. An experience the agent has joined runs its scripts without prompting
+for each permission — that is what joining one buys — so no `ScriptQuestion`
+ever appears for what it does, and nothing else in the session mentions it. The
+region instead reports it afterwards, as an `ExperienceEvent` generic message
+carrying the permission index, the owner, whether the acting object was an
+attachment, and the object and parcel names. It is the only message on any path
+that says an experience **attached** something to the agent, which is why the
+viewer's experience log exists to keep it.
+
+A real region sends one of these beside a `PushExperienceEnvironment`; this grid
+does not, deliberately, so a test can drive either half alone — the sky change
+without the paper trail, or the paper trail without touching the sky.
+
+The world-changing ones go through the region's shared store and publish to its
+change stream, so a second avatar standing there is told as well — a scripted
+rez is a rez, not a picture painted on one circuit.
 
 Every wait is a `tokio` sleep and every stamp comes from the grid's
 injected clock, so a test that pauses tokio's timer pauses the script with
@@ -2230,9 +2255,67 @@ sit in "connecting" — the signalling, not the audio, is what this
 exercises. Chat-session channels can be gated with
 `set_channel_credentials(channel, credentials)`.
 
+## The experience catalogue
+
+Experiences are a Second Life feature — stock OpenSim ships no experience
+module — so a viewer's Experiences floater has, historically, had exactly one
+grid it could be pointed at, and that grid costs an account, a login and a
+network. `default_setup` seeds the offline other one (`sl-fake-grid`'s
+`experiences` module): a set of records the `GetExperienceInfo`,
+`FindExperienceByName` and `UpdateExperience` capabilities answer from, owned
+by a fixture resident whose display name is registered beside them so the
+viewer's Owner column resolves to a name.
+
+It is deliberately bigger than the handful of hand-written records it needs to
+cover the corners of the record (grid-wide, privileged, group-owned, and one
+**private** one, which is in the catalogue precisely to be absent from search
+results). `FindExperienceByName` is paged, and its reply states whether there
+is a page on either side of the one it carries — a catalogue small enough to
+fit one page can never make the grid say *yes* to that, so it can never
+exercise a viewer's paging arrows. The filler records therefore number one more
+than a whole page, so a search for them spills onto a short second page and the
+boundary is visible from both sides.
+
+### The agent's own five lists, and the hook they need
+
+The agent's five relationships — allowed, blocked, owned, admin, contributor —
+are statements about *who is logged in*, and a scenario's `setup` hook runs
+before the circuit is open, so the session does not know the agent id yet: a
+fixture claiming the agent owns an experience would have to name somebody else
+as that experience's owner, which is the one lie an "owned by you" list must
+not tell.
+
+So a `Scenario` has a second seeding hook, `setup_for_agent`, run immediately
+after `setup` with the `AvatarIdentity` the login was matched to. That is the
+first place a fixture can state a relationship *to the agent* — an experience
+it owns, and by extension anything later that needs the same (a parcel it
+holds, a group it is in). `default_agent_setup` uses it for the experience
+half: two records the agent owns, built with the real agent id rather than
+stored under a placeholder and corrected afterwards.
+
+The five lists are seeded **distinct**, because three of the floater's tabs are
+otherwise indistinguishable — the agent owns two experiences, administers those
+two *and* the group-owned one, and contributes to one it neither owns nor
+administers. A fixture where owned == admin == contributor cannot show that a
+viewer has wired each tab to its own capability. Two more shapes are
+deliberate: one of the agent's own records is **private**, so the Owned tab
+lists something search will not, and the blocked list holds the fixture
+resident's private record, because a preference is the agent's own keyed entry
+rather than a search result.
+
+`Action::SetExperiencePreference` moves one id between the allowed and blocked
+lists from a timeline, the way the `ExperiencePreferences` capability does. It
+sends nothing — the protocol has no message that tells a viewer its own
+preferences moved, since the only thing that ever moves them is that viewer —
+so it stands for the agent having decided somewhere else; a test that wants the
+round trip a floater's Allow button makes drives the client's own
+`SetExperiencePermission`.
+
+## What is deliberately still small
+
 The stock `Scenario` is intentionally small (an inventory skeleton, a library
 of the twelve textures above, one parcel, one box, a chat greeting, WebRTC
-voice signalling). A real viewer
+voice signalling, the experience catalogue above). A real viewer
 will ask for much more — terrain, appearance, textures — and renders a login
 into a nearly empty world; growing the default scenario against what a viewer
 actually requests is expected iteration, not a bug. Firestorm's seed-request

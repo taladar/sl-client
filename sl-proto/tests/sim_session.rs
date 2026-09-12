@@ -15,17 +15,18 @@ mod test {
         ChatSource, ChatType, ClassifiedCategory, ClassifiedKey, CoarseLocation, ControlFlags,
         DeRezDestination, DetachOrder, DirClassifiedResult, DirEventResult, DirFindFlags,
         DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, DirectoryVisibility,
-        DisplayName, DisplayNameUpdate, EjectAction, EstateCovenant, Event, EventId, EventInfo,
-        FeatureDisabled, FollowCamProperty, FollowCamPropertyValue, FreezeAction, FriendKey,
-        FriendRights, GenericMessage, GenericStreamingMessage, GestureActivation,
-        GlobalCoordinates, GodRegionUpdate, GridCoordinates, GridRectangle, GroupAccountDetails,
+        DisplayName, DisplayNameUpdate, EjectAction, EnvironmentPushAction, EstateCovenant, Event,
+        EventId, EventInfo, ExperienceEnvironmentPush, ExperienceKey, FeatureDisabled,
+        FollowCamProperty, FollowCamPropertyValue, FreezeAction, FriendKey, FriendRights,
+        GenericMessage, GenericStreamingMessage, GestureActivation, GlobalCoordinates,
+        GodRegionUpdate, GridCoordinates, GridRectangle, GroupAccountDetails,
         GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
         GroupAccountTransactions, GroupActiveProposalItem, GroupKey, GroupName, GroupRequestId,
         GroupRoleKey, GroupVote, GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder,
         InventoryFolderKey, InventoryItem, InventoryItemMove, InventoryItemOrFolderKey,
         InventoryKey, InventoryType, InvoiceId, Kick, LandArea, LandBrushAction, LandBrushSize,
         LandEdit, LandSearchType, LandStatItem, LandStatReportType, LandingType, LightData,
-        LindenAmount, LindenBalance, LoginParams, MAX_FACES, MapItem, MapItemType, MapLayer,
+        LindenAmount, LindenBalance, Llsd, LoginParams, MAX_FACES, MapItem, MapItemType, MapLayer,
         MapRegionInfo, MapRequestFlags, Maturity, MeanCollision, MeanCollisionType, MovementMode,
         NavMeshBuildStatus, NavMeshStatus, NewInventoryLink, NotecardRez, ObjectBuyItem,
         ObjectExtraParams, ObjectKey, ObjectPlayingAnimation, ObjectPropertiesFamily,
@@ -2633,6 +2634,96 @@ mod test {
             })
             .ok_or("expected a GenericStreamingMessage client event")?;
         assert_eq!(got_streaming, streaming);
+        Ok(())
+    }
+
+    #[test]
+    fn an_experience_environment_push_reaches_the_client_typed() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+
+        let experience_id = ExperienceKey::from(uuid::Uuid::from_u128(0xE_1234));
+        let pushes = [
+            EnvironmentPushAction::Full {
+                asset_id: uuid::Uuid::from_u128(0x5117),
+            },
+            EnvironmentPushAction::Partial {
+                sky: Some(Llsd::Map(std::collections::HashMap::from([(
+                    "cloud_shadow".to_owned(),
+                    Llsd::Real(0.9),
+                )]))),
+                water: None,
+            },
+            EnvironmentPushAction::Clear,
+        ];
+        let sent: Vec<ExperienceEnvironmentPush> = pushes
+            .into_iter()
+            .map(|action| ExperienceEnvironmentPush {
+                experience_id,
+                action,
+                transition_time: 2.5,
+                owner_id: uuid::Uuid::from_u128(0x0_0FEE),
+                object_name: "Weather Machine".to_owned(),
+                parcel_name: "The Back Forty".to_owned(),
+            })
+            .collect();
+        for push in &sent {
+            sim.send_experience_environment_push(push, now)?;
+        }
+        pump(&mut client, &mut sim, now)?;
+
+        let got: Vec<ExperienceEnvironmentPush> = drain_client(&mut client)
+            .into_iter()
+            .filter_map(|event| match event {
+                Event::ExperienceEnvironmentPush(push) => Some(*push),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(got, sent, "every push case must survive the round trip");
+        Ok(())
+    }
+
+    /// A `PushExpEnvironment` the client cannot decode must not vanish: it comes
+    /// back out as the raw envelope it arrived in, so a consumer can still tell
+    /// the user an experience tried to change their sky.
+    #[test]
+    fn an_undecodable_environment_push_is_forwarded_raw() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+
+        let invoice = InvoiceId::from(uuid::Uuid::from_u128(0xE_9999));
+        let generic = GenericMessage {
+            method: "PushExpEnvironment".to_owned(),
+            invoice,
+            // A well-formed LLSD map naming an action nothing implements.
+            params: vec![
+                Llsd::Map(std::collections::HashMap::from([(
+                    "action".to_owned(),
+                    Llsd::String("MakeItRain".to_owned()),
+                )]))
+                .to_llsd_notation(),
+            ],
+        };
+        sim.send_generic_message(&generic, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let events = drain_client(&mut client);
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(*event, Event::ExperienceEnvironmentPush(_))),
+            "an action nothing implements must not decode as a push"
+        );
+        let raw = events
+            .iter()
+            .find_map(|event| match *event {
+                Event::GenericMessage(ref generic) => Some(generic.clone()),
+                _ => None,
+            })
+            .ok_or("expected the undecodable push to be forwarded raw")?;
+        assert_eq!(raw, generic);
         Ok(())
     }
 

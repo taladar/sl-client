@@ -270,7 +270,14 @@ impl Plugin for FloaterPlugin {
                 )
                     .chain(),
             )
-            .add_systems(Update, open_floaters_from_env);
+            .add_systems(Update, open_floaters_from_env)
+            // Late, and before the stack pass reads the z-order: this is the
+            // one place that turns "a window became visible" into a raise, and
+            // it must see every flip `Update` made, whoever made it.
+            .add_systems(
+                PostUpdate,
+                raise_floaters_on_open.before(bevy::ui::UiSystems::Stack),
+            );
     }
 }
 
@@ -669,6 +676,18 @@ pub struct FloaterCommand {
     /// What to do to it.
     pub op: FloaterOp,
 }
+
+/// Whether a floater was shown as of the last [`raise_floaters_on_open`] pass —
+/// the edge detector that makes **opening a window raise it**, for every
+/// singleton floater, without its own feature remembering to ask.
+///
+/// Needed because Bevy's change detection is per *write*, not per *transition*:
+/// a system that sets `UiPanelShown(true)` unconditionally every frame (several
+/// do, mirroring a toggle's state) marks it changed every frame, and raising on
+/// that would pin the window to the front forever. Comparing against the last
+/// value raises only on the false → true edge.
+#[derive(Component, Debug, Clone, Copy)]
+struct FloaterWasShown(bool);
 
 /// The chrome operations routed through [`FloaterCommand`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1273,6 +1292,7 @@ pub fn spawn_keyed_floater(
                 is_hoverable: true,
             },
             UiPanelShown(false),
+            FloaterWasShown(false),
             Floater {
                 id: spec.id,
                 key,
@@ -1797,6 +1817,51 @@ fn apply_floater_commands(
                 }
             }
         }
+    }
+}
+
+/// **Opening a window raises it.** Every floater that went from hidden to shown
+/// this frame is brought to the front and made active.
+///
+/// This exists because the alternative was a bug we kept re-writing: a button
+/// in one window opens another, and the *click* that pressed the button has
+/// already raised the window it landed in (the root observer's
+/// [`FloaterOp::BringToFront`]). A feature that merely flips the other window's
+/// [`UiPanelShown`] therefore opens it **behind** the window that asked for it —
+/// the picker you just summoned sits under the panel whose Add you pressed.
+/// Every such feature could remember to write its own raise; several did,
+/// several did not, and nothing made the difference visible until someone opened
+/// the window.
+///
+/// So the raise belongs to the manager, not to the feature: a floater becoming
+/// visible *is* the event that should raise it, whoever made it visible and
+/// however. [`KeyedFloaters`] keeps raising directly as well — it must, because
+/// a keyed window can be opened while already shown (a second click on the same
+/// subject), which is not an edge this pass can see.
+///
+/// Runs in `PostUpdate`, before the UI stack pass reads the z-order, so it sees
+/// every flip made anywhere in `Update`: a feature's open system cannot end up
+/// scheduled after it and lose a frame.
+fn raise_floaters_on_open(
+    mut floaters: Query<(Entity, &UiPanelShown, &mut FloaterWasShown, &Floater)>,
+    mut z_indices: Query<&mut GlobalZIndex>,
+    mut z_top: ResMut<FloaterZTop>,
+    mut active: ResMut<ActiveFloater>,
+) {
+    for (entity, shown, mut was_shown, floater) in &mut floaters {
+        if was_shown.0 == shown.0 {
+            continue;
+        }
+        was_shown.0 = shown.0;
+        if !shown.0 {
+            continue;
+        }
+        // A docked floater is in its host's flow and does not restack — the
+        // same exemption [`FloaterOp::BringToFront`] makes.
+        if floater.docked_in.is_none() {
+            raise(entity, &mut z_indices, &mut z_top);
+        }
+        active.0 = Some(entity);
     }
 }
 
@@ -2342,8 +2407,8 @@ mod tests {
         FloaterSystems, FloaterZTop, KeyedFloaterOpen, KeyedFloaters, MIN_VISIBLE, RESIZE_FLOOR,
         apply_floater_commands, apply_floater_content, apply_floater_glyphs, apply_floater_inset,
         build_deferred_floater_content, clamp_floaters_on_screen, clamp_position, drag_position,
-        floater_panel, highlight_active_floater, resize_size, snap_rect_of, spawn_floater,
-        toggle_floater,
+        floater_panel, highlight_active_floater, raise_floaters_on_open, resize_size, snap_rect_of,
+        spawn_floater, toggle_floater,
     };
     use bevy::picking::backend::HitData;
     use bevy::picking::pointer::PointerId;
@@ -2381,7 +2446,10 @@ mod tests {
                     highlight_active_floater,
                 )
                     .chain(),
-            );
+            )
+            // Where the plugin puts it: a pass that must see every `Update`
+            // flip, whoever made it.
+            .add_systems(PostUpdate, raise_floaters_on_open);
         let root = app.world_mut().spawn(Node::default()).id();
         let host = app.world_mut().spawn(Node::default()).id();
         app.insert_resource(UiRoot(root));
@@ -2859,6 +2927,95 @@ mod tests {
             first < second && second < third,
             "each raise must take a value above the last: {first}, {second}, {third}"
         );
+    }
+
+    /// **Opening a window raises it**, without the feature that opened it
+    /// having to ask.
+    ///
+    /// The shape of the bug this pins: a button in one window opens another,
+    /// and the click that pressed the button has already raised the window it
+    /// landed in. A feature that only flips the other window's `UiPanelShown`
+    /// used to open it *behind* the one that asked for the pick.
+    #[test]
+    fn showing_a_floater_raises_it_over_the_window_that_opened_it() -> Result<(), TestError> {
+        let (mut app, root, _host) = floater_app();
+        let opener = spawn_one(&mut app, root);
+        let opened = spawn_one(&mut app, root);
+        // The press on the opener's button raises the opener — the root
+        // observer's own `BringToFront`, before the feature runs at all.
+        command(&mut app, opener, FloaterOp::BringToFront);
+
+        // All the feature does is make its window visible.
+        app.world_mut()
+            .get_mut::<UiPanelShown>(opened)
+            .ok_or("the floater lost its `UiPanelShown`")?
+            .0 = true;
+        app.update();
+
+        let opener_z = app
+            .world()
+            .get::<GlobalZIndex>(opener)
+            .ok_or("the opener lost its z")?
+            .0;
+        let opened_z = app
+            .world()
+            .get::<GlobalZIndex>(opened)
+            .ok_or("the opened floater lost its z")?
+            .0;
+        assert!(
+            opened_z > opener_z,
+            "a window that just became visible must sit above the one whose              button opened it: opened z {opened_z}, opener z {opener_z}"
+        );
+        assert_eq!(
+            app.world().resource::<ActiveFloater>().0,
+            Some(opened),
+            "and it becomes the active window"
+        );
+        Ok(())
+    }
+
+    /// Re-asserting that an already-shown window is shown does **not** raise it
+    /// again — the raise is on the hidden → shown *edge*, not on every write.
+    ///
+    /// Several features mirror a toggle's state into `UiPanelShown` every
+    /// frame, which marks it changed every frame. Raising on change rather than
+    /// on transition would pin such a window in front of everything for as long
+    /// as it stayed open.
+    #[test]
+    fn re_asserting_shown_does_not_keep_raising() -> Result<(), TestError> {
+        let (mut app, root, _host) = floater_app();
+        let first = spawn_one(&mut app, root);
+        let second = spawn_one(&mut app, root);
+        let show = |app: &mut App, floater: Entity| -> Result<(), TestError> {
+            app.world_mut()
+                .get_mut::<UiPanelShown>(floater)
+                .ok_or("the floater lost its `UiPanelShown`")?
+                .0 = true;
+            app.update();
+            Ok(())
+        };
+        show(&mut app, first)?;
+        show(&mut app, second)?;
+
+        // The first window re-asserts its own visibility, as a toggle-mirroring
+        // system does every frame.
+        show(&mut app, first)?;
+
+        let first_z = app
+            .world()
+            .get::<GlobalZIndex>(first)
+            .ok_or("the first floater lost its z")?
+            .0;
+        let second_z = app
+            .world()
+            .get::<GlobalZIndex>(second)
+            .ok_or("the second floater lost its z")?
+            .0;
+        assert!(
+            second_z > first_z,
+            "the window opened last must stay on top: first z {first_z},              second z {second_z}"
+        );
+        Ok(())
     }
 
     /// Closing a floater hides it (via its `UiPanelShown`, the flag a consumer

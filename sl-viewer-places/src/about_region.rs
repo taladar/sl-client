@@ -2,9 +2,33 @@
 //! (`viewer-region-options-debug` / `-general` / `-terrain` / `-estate`): the
 //! region-and-estate information surface. It presents the reference viewer's
 //! `llfloaterregioninfo` as tabs — **Region**, **Debug**, **Terrain**,
-//! **Estate**, **Covenant**, **Access**, plus placeholder **Environment** and
-//! **Experiences** tabs (their write paths — `ExtEnvironment` PUT and the
-//! experience service — are their own roadmap items).
+//! **Estate**, **Covenant**, **Access**, **Experiences**, plus a placeholder
+//! **Environment** tab (its write path, the `ExtEnvironment` PUT, is its own
+//! roadmap item).
+//!
+//! # The Experiences tab
+//!
+//! The estate's three experience lists — **Key** (trusted), **Allowed** and
+//! **Blocked** — over the `RegionExperiences` capability
+//! ([`Command::RequestRegionExperiences`] to read,
+//! [`Command::SetRegionExperiences`] to write, both answered by
+//! [`SlSessionEvent::RegionExperiences`]). Each list is a bounded table of
+//! name / rating rows with a per-row **Profile** and **Remove**, over an
+//! **Add** that opens the reusable experience picker
+//! ([`crate::world_api::OpenExperiencePicker`]) with that list's filter — Key
+//! takes anything, Allowed only land-scoped experiences, Blocked only
+//! grid-scoped, non-privileged ones, exactly as `LLPanelRegionExperiences`
+//! filters its three pickers.
+//!
+//! The cap takes the **whole** set rather than a delta, so every add and remove
+//! posts all three lists and the region's reply replaces them — an edit it
+//! refused visibly reverts instead of appearing to have stuck. Two deliberate
+//! divergences from the reference: it writes the incremental
+//! `estateexperiencedelta` estate message *as well*, behind a "this estate /
+//! all estates" confirmation, and neither the message nor the all-estates
+//! scope is in our protocol surface; and it also reads the reply's `default`
+//! key to pin the estate's default experience into the Key list as a
+//! non-removable row, which our decoded event does not carry.
 //!
 //! # One window per region
 //!
@@ -59,17 +83,20 @@
 //! `panel_region_*.xml`; the `EstateOwnerMessage` `setregioninfo` /
 //! `estateaccessdelta` / `restart` methods.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui::InteractionDisabled;
 use sl_client_bevy::{
     AgentKey, Asset, AssetKey, AssetType, Command, EstateAccessDelta, EstateAccessKind,
-    EstateCovenant, EstateFlags, EstateInfo, EstateInfoUpdate, GroupKey, LandArea, Maturity,
-    OwnerKey, ProductType, RegionDebugUpdate, RegionFlags, RegionIdentity, RegionInfoUpdate,
-    RegionName, RegionTerrainUpdate, SlCommand, SlCurrentRegion, SlEvent, SlRegionIdentity,
-    SlRegionLimits, SlSessionEvent, TextureKey, Uuid,
+    EstateCovenant, EstateFlags, EstateInfo, EstateInfoUpdate, ExperienceInfo, ExperienceKey,
+    GroupKey, LandArea, Maturity, OwnerKey, ProductType, RegionDebugUpdate, RegionFlags,
+    RegionIdentity, RegionInfoUpdate, RegionName, RegionTerrainUpdate, SlCommand, SlCurrentRegion,
+    SlEvent, SlRegionIdentity, SlRegionLimits, SlSessionEvent, TextureKey, Uuid,
 };
+use sl_viewer_notices::experience_profile::{OpenExperienceProfile, maturity_key};
 
 use crate::floater::{
     Floater, FloaterCaps, FloaterHandle, FloaterKey, FloaterSpec, FloaterSystems, KeyedFloaterOpen,
@@ -100,6 +127,7 @@ use crate::world_api::AvatarState;
 use crate::world_api::GroupsModel;
 use crate::world_api::TexturePicked;
 use crate::world_api::{AvatarPicked, OpenAvatarPicker};
+use crate::world_api::{ExperiencePicked, ExperiencePickerFilter, OpenExperiencePicker};
 
 /// The floater's body font size, in logical pixels.
 const FONT_SIZE: f32 = 13.0;
@@ -153,6 +181,34 @@ const PICK_TELEPORT: &str = "about-region-teleport";
 /// The avatar-picker requester tag for kicking a resident from the estate.
 const PICK_KICK: &str = "about-region-kick";
 
+/// The experience-picker requester tag for the estate's Key (trusted) list.
+const PICK_EXPERIENCE_TRUSTED: &str = "about-region-experience-trusted";
+
+/// The experience-picker requester tag for the estate's Allowed list.
+const PICK_EXPERIENCE_ALLOWED: &str = "about-region-experience-allowed";
+
+/// The experience-picker requester tag for the estate's Blocked list.
+const PICK_EXPERIENCE_BLOCKED: &str = "about-region-experience-blocked";
+
+/// The most experiences an estate list may hold — the reference's
+/// `ESTATE_MAX_EXPERIENCE_IDS` (`indra/llmessage/llregionflags.h`). A full list
+/// refuses an Add rather than posting a set the region would truncate.
+const MAX_ESTATE_EXPERIENCES: usize = 8;
+
+/// The bounded height of each estate experience list, in logical pixels. Lower
+/// than [`LIST_HEIGHT`] because this tab stacks **three** of them over their
+/// captions, and a list bounded to eight rows has a known ceiling anyway.
+const EXPERIENCE_LIST_HEIGHT: f32 = 96.0;
+
+/// The Key (trusted) experiences table.
+const TRUSTED_EXPERIENCES_TABLE: TableSpec = experience_table("about-region-experiences-trusted");
+
+/// The allowed experiences table.
+const ALLOWED_EXPERIENCES_TABLE: TableSpec = experience_table("about-region-experiences-allowed");
+
+/// The blocked experiences table.
+const BLOCKED_EXPERIENCES_TABLE: TableSpec = experience_table("about-region-experiences-blocked");
+
 /// The estate-manager list table (name + per-row remove).
 const MANAGERS_TABLE: TableSpec = access_table("about-region-managers");
 
@@ -185,6 +241,57 @@ const fn access_table(element: &'static str) -> TableSpec {
                 token: "remove",
                 kind: TableColumnKind::Custom,
                 width: TableColumnWidth::Fixed { default: 70.0 },
+                align: TableAlign::End,
+                sortable: false,
+            },
+        ],
+        default_sort: &[],
+        builtin_sort: false,
+        row_height: ROW_HEIGHT,
+        font_size: FONT_SIZE,
+        header_color: DIM_LABEL_COLOR,
+        cell_color: LABEL_COLOR,
+        column_gap: 6.0,
+        row_padding: 4.0,
+        sort_setting: None,
+        widths_setting: None,
+    }
+}
+
+/// The shared three-column layout (name, rating, actions) of an estate
+/// experience list table, parameterised by element.
+///
+/// The actions column is one cell holding the row's **Profile** and **Remove**
+/// buttons — the reference's `panel_experience_list_editor` puts both beside
+/// the list and drives them off the selection; a pooled row is a *view* of an
+/// item, so putting them in the row is what keeps them addressing the right
+/// experience without a rebind on every scroll.
+const fn experience_table(element: &'static str) -> TableSpec {
+    TableSpec {
+        element,
+        selection: TableSelectionMode::None,
+        columns: &[
+            TableColumn {
+                header_key: "experiences-col-name",
+                token: "name",
+                kind: TableColumnKind::Text,
+                width: TableColumnWidth::Flex(1.0),
+                align: TableAlign::Start,
+                sortable: false,
+            },
+            TableColumn {
+                header_key: "experiences-col-rating",
+                token: "rating",
+                kind: TableColumnKind::Text,
+                width: TableColumnWidth::Fixed { default: 76.0 },
+                align: TableAlign::Start,
+                sortable: false,
+            },
+            TableColumn {
+                header_key: "about-region-access-remove",
+                token: "actions",
+                kind: TableColumnKind::Custom,
+                width: TableColumnWidth::Fixed { default: 138.0 },
                 align: TableAlign::End,
                 sortable: false,
             },
@@ -286,6 +393,28 @@ struct AboutRegionState {
     allowed_groups_revision: u64,
     /// A revision bumped when [`Self::banned`] changes.
     banned_revision: u64,
+    /// The estate's three experience lists, in [`ExperienceList::index`] order.
+    experiences: [Vec<ExperienceKey>; 3],
+    /// One revision per experience list, bumped when that list changes.
+    experience_revisions: [u64; 3],
+    /// Resolved experience metadata, folded in as `GetExperienceInfo` replies
+    /// arrive — the names and ratings the rows show.
+    experience_infos: BTreeMap<ExperienceKey, ExperienceInfo>,
+    /// The ids a metadata fetch has already gone out for, so a list naming an
+    /// id the grid will not resolve is not re-asked every frame.
+    experience_infos_asked: BTreeSet<ExperienceKey>,
+    /// Whether the `RegionExperiences` GET has gone out for this window's
+    /// region since it last became current.
+    experiences_requested: bool,
+    /// Which experience lists this window has an Add outstanding for, in
+    /// [`ExperienceList::index`] order.
+    ///
+    /// A *set*, not the single [`pending_pick`](Self::pending_pick) slot the
+    /// avatar picks use, because the experience picker is **one window per
+    /// list**: opening Add on Allowed and then on Blocked leaves two pickers up
+    /// at once, and a single slot would silently drop whichever pick came back
+    /// second — the claim would name the other list by then.
+    pending_experience_picks: [bool; 3],
 }
 
 impl AboutRegionState {
@@ -300,6 +429,70 @@ impl AboutRegionState {
         self.allowed_revision = self.allowed_revision.wrapping_add(1);
         self.allowed_groups_revision = self.allowed_groups_revision.wrapping_add(1);
         self.banned_revision = self.banned_revision.wrapping_add(1);
+    }
+
+    /// One estate experience list's ids.
+    fn experiences(&self, list: ExperienceList) -> &[ExperienceKey] {
+        self.experiences
+            .get(list.index())
+            .map_or(&[], Vec::as_slice)
+    }
+
+    /// Replace the three experience lists from a `RegionExperiences` reply,
+    /// bumping every revision so all three views rebind.
+    fn set_experiences(
+        &mut self,
+        allowed: Vec<ExperienceKey>,
+        blocked: Vec<ExperienceKey>,
+        trusted: Vec<ExperienceKey>,
+    ) {
+        self.experiences = [trusted, allowed, blocked];
+        for revision in &mut self.experience_revisions {
+            *revision = revision.wrapping_add(1);
+        }
+    }
+
+    /// Add an experience to one list, answering whether it was added — a
+    /// duplicate, or a list already at [`MAX_ESTATE_EXPERIENCES`], is refused.
+    fn add_experience(&mut self, list: ExperienceList, id: ExperienceKey) -> bool {
+        let index = list.index();
+        let Some(ids) = self.experiences.get_mut(index) else {
+            return false;
+        };
+        if ids.contains(&id) || ids.len() >= MAX_ESTATE_EXPERIENCES {
+            return false;
+        }
+        ids.push(id);
+        if let Some(revision) = self.experience_revisions.get_mut(index) {
+            *revision = revision.wrapping_add(1);
+        }
+        true
+    }
+
+    /// Drop an experience from one list, answering whether it was there.
+    fn remove_experience(&mut self, list: ExperienceList, id: ExperienceKey) -> bool {
+        let index = list.index();
+        let Some(ids) = self.experiences.get_mut(index) else {
+            return false;
+        };
+        let Some(position) = ids.iter().position(|entry| *entry == id) else {
+            return false;
+        };
+        let _removed = ids.remove(position);
+        if let Some(revision) = self.experience_revisions.get_mut(index) {
+            *revision = revision.wrapping_add(1);
+        }
+        true
+    }
+
+    /// The three lists as the `RegionExperiences` POST names them — the write
+    /// is a whole-set replace, so every edit posts all three.
+    fn experiences_update(&self) -> (Vec<ExperienceKey>, Vec<ExperienceKey>, Vec<ExperienceKey>) {
+        (
+            self.experiences(ExperienceList::Allowed).to_vec(),
+            self.experiences(ExperienceList::Blocked).to_vec(),
+            self.experiences(ExperienceList::Trusted).to_vec(),
+        )
     }
 
     /// The list for an access-list kind, with its revision counter.
@@ -395,6 +588,34 @@ struct BannedView {
     rows: Vec<AccessRowData>,
     /// The revision the rows were built from.
     built: u64,
+}
+
+/// One resolved estate-experience row.
+#[derive(Debug, Clone)]
+struct ExperienceRowData {
+    /// The resolved experience name (or a short-id fallback).
+    name: String,
+    /// The content rating's label, or empty while the metadata is unknown.
+    rating: String,
+    /// The experience the row stands for (for Remove / Profile).
+    id: ExperienceKey,
+}
+
+/// The three estate experience lists' view models — one component, because the
+/// three are rebuilt by one pass from one metadata cache.
+#[derive(Component, Debug, Default)]
+struct ExperiencesView {
+    /// The resolved rows, in [`ExperienceList::index`] order.
+    rows: [Vec<ExperienceRowData>; 3],
+    /// The revision each list's rows were built from.
+    built: [u64; 3],
+}
+
+impl ExperiencesView {
+    /// One list's rendered rows.
+    fn rows(&self, list: ExperienceList) -> &[ExperienceRowData] {
+        self.rows.get(list.index()).map_or(&[], Vec::as_slice)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -505,6 +726,28 @@ struct AccessHandles {
     banned_table: Option<Entity>,
 }
 
+/// The Experiences tab's table handles (one viewport + root per list), in
+/// [`ExperienceList::index`] order.
+#[derive(Debug, Default)]
+struct ExperienceHandles {
+    /// Each list's virtual-list viewport.
+    viewports: [Option<Entity>; 3],
+    /// Each list's table root.
+    tables: [Option<Entity>; 3],
+}
+
+impl ExperienceHandles {
+    /// The list whose viewport is `viewport`, with its table root.
+    fn list_of_viewport(&self, viewport: Entity) -> Option<(ExperienceList, Entity)> {
+        ExperienceList::ALL.into_iter().find_map(|list| {
+            (self.viewports.get(list.index()).copied().flatten() == Some(viewport))
+                .then(|| self.tables.get(list.index()).copied().flatten())
+                .flatten()
+                .map(|table| (list, table))
+        })
+    }
+}
+
 /// One window's live entity handles.
 #[derive(Component, Debug)]
 struct AboutRegionUi {
@@ -525,6 +768,8 @@ struct AboutRegionUi {
     access: AccessHandles,
     /// The Environment tab's shared land-environment panel.
     environment: Entity,
+    /// The Experiences tab's handles.
+    experiences: ExperienceHandles,
 }
 
 // ---------------------------------------------------------------------------
@@ -717,6 +962,128 @@ impl AccessList {
     }
 }
 
+/// What one of an experience row's two buttons does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExperienceRowAction {
+    /// Open the experience's profile window (the reference's `btn_profile`).
+    Profile,
+    /// Take the experience off this list (the reference's `btn_remove`).
+    Remove,
+}
+
+impl ExperienceRowAction {
+    /// The button's label key.
+    const fn label_key(self) -> &'static str {
+        match self {
+            Self::Profile => "about-region-experiences-profile",
+            Self::Remove => "about-region-remove",
+        }
+    }
+}
+
+/// A per-row estate-experience button, naming the list and the pooled row it
+/// acts on — a pooled row is a *view*, so the row entity is what resolves back
+/// to whichever experience it currently shows.
+#[derive(Component, Debug, Clone, Copy)]
+struct ExperienceRowButton {
+    /// Which of the three lists the row is in.
+    list: ExperienceList,
+    /// The pooled row the button sits in.
+    row: Entity,
+    /// What the button does.
+    action: ExperienceRowAction,
+}
+
+/// Which of the estate's three experience lists a row, table or Add button
+/// belongs to — the reference's `panel_trusted` / `panel_allowed` /
+/// `panel_blocked` (`LLPanelRegionExperiences::postBuild`).
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+enum ExperienceList {
+    /// **Key** experiences: allowed to run here whatever their scope, and (on a
+    /// closed estate) admitting the residents taking part in them.
+    Trusted,
+    /// **Allowed** experiences: land-scoped ones this estate admits.
+    Allowed,
+    /// **Blocked** experiences: grid-scoped ones this estate refuses.
+    Blocked,
+}
+
+impl ExperienceList {
+    /// The three lists, in the reference panel's top-to-bottom order.
+    const ALL: [Self; 3] = [Self::Trusted, Self::Allowed, Self::Blocked];
+
+    /// The list's index into the per-window row / revision arrays.
+    const fn index(self) -> usize {
+        match self {
+            Self::Trusted => 0,
+            Self::Allowed => 1,
+            Self::Blocked => 2,
+        }
+    }
+
+    /// The list's section-heading Fluent key.
+    const fn label_key(self) -> &'static str {
+        match self {
+            Self::Trusted => "about-region-experiences-trusted",
+            Self::Allowed => "about-region-experiences-allowed",
+            Self::Blocked => "about-region-experiences-blocked",
+        }
+    }
+
+    /// The read-only caption explaining where this list applies — the
+    /// reference's `trusted_estate_text` / `allowed_estate_text` /
+    /// `blocked_estate_text` panel strings.
+    const fn help_key(self) -> &'static str {
+        match self {
+            Self::Trusted => "about-region-experiences-trusted-help",
+            Self::Allowed => "about-region-experiences-allowed-help",
+            Self::Blocked => "about-region-experiences-blocked-help",
+        }
+    }
+
+    /// The list's Add button label.
+    const fn add_key(self) -> &'static str {
+        match self {
+            Self::Trusted => "about-region-experiences-add-trusted",
+            Self::Allowed => "about-region-experiences-add-allowed",
+            Self::Blocked => "about-region-experiences-add-blocked",
+        }
+    }
+
+    /// The experience-picker requester tag this list's Add opens with.
+    const fn pick_tag(self) -> &'static str {
+        match self {
+            Self::Trusted => PICK_EXPERIENCE_TRUSTED,
+            Self::Allowed => PICK_EXPERIENCE_ALLOWED,
+            Self::Blocked => PICK_EXPERIENCE_BLOCKED,
+        }
+    }
+
+    /// Which experiences this list may hold — the reference's per-list picker
+    /// filters (`LLPanelRegionExperiences::refreshFromRegion`).
+    const fn filter(self) -> ExperiencePickerFilter {
+        match self {
+            Self::Trusted => ExperiencePickerFilter::Any,
+            Self::Allowed => ExperiencePickerFilter::LandScoped,
+            Self::Blocked => ExperiencePickerFilter::GridScopedUnprivileged,
+        }
+    }
+
+    /// The list's table spec.
+    const fn spec(self) -> &'static TableSpec {
+        match self {
+            Self::Trusted => &TRUSTED_EXPERIENCES_TABLE,
+            Self::Allowed => &ALLOWED_EXPERIENCES_TABLE,
+            Self::Blocked => &BLOCKED_EXPERIENCES_TABLE,
+        }
+    }
+
+    /// The list a picker requester tag belongs to, if any.
+    fn from_pick_tag(tag: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|list| list.pick_tag() == tag)
+    }
+}
+
 /// A press-dispatch tag on the floater's action buttons.
 #[derive(Component, Debug, Clone, Copy)]
 enum AboutRegionAction {
@@ -746,6 +1113,9 @@ enum AboutRegionAction {
     AddAllowed,
     /// Open the avatar picker to add a banned resident.
     AddBanned,
+    /// Open the experience picker to add to one of the estate's three
+    /// experience lists.
+    AddExperience(ExperienceList),
 }
 
 /// A marker on a terrain texture-swatch button carrying which detail slot it
@@ -810,9 +1180,33 @@ impl Plugin for AboutRegionPlugin {
                     .before(layout_virtual_lists)
                     .run_if(any_with_component::<AboutRegionState>),
             )
+            // The Experiences tab's own pass, a second tuple only because
+            // `chain` is bounded at twenty systems and the pass above is full.
+            // Ordered after it: the GET is gated on the estate rights
+            // `refresh_on_region` sets, and the views read the lists
+            // `ingest_about_region_events` folded in.
             .add_systems(
                 Update,
-                (populate_access_rows, bind_access_rows)
+                (
+                    request_region_experiences,
+                    request_unknown_region_experience_infos,
+                    sync_experiences_view,
+                    apply_experience_picks,
+                )
+                    .chain()
+                    .after(ingest_about_region_events)
+                    .after(refresh_on_region)
+                    .before(layout_virtual_lists)
+                    .run_if(any_with_component::<AboutRegionState>),
+            )
+            .add_systems(
+                Update,
+                (
+                    populate_access_rows,
+                    bind_access_rows,
+                    populate_experience_rows,
+                    bind_experience_rows,
+                )
                     .chain()
                     .after(layout_virtual_lists)
                     .run_if(any_with_component::<AboutRegionState>),
@@ -898,7 +1292,7 @@ fn build_region_content(commands: &mut Commands, handle: FloaterHandle) -> About
     let access = build_access_tab(commands, panel(5));
     let environment =
         spawn_land_environment_panel(commands, panel(6), LandPanelKind::Region, ENV_TAB_INDEX);
-    build_placeholder_tab(commands, panel(7), "about-region-experiences-unimplemented");
+    let experiences = build_experiences_tab(commands, panel(7));
 
     AboutRegionUi {
         title_text: handle.title_text,
@@ -909,6 +1303,7 @@ fn build_region_content(commands: &mut Commands, handle: FloaterHandle) -> About
         covenant,
         access,
         environment,
+        experiences,
     }
 }
 
@@ -1325,9 +1720,67 @@ fn build_access_tab(commands: &mut Commands, panel: Entity) -> AccessHandles {
     handles
 }
 
-/// Build a placeholder tab that just states the feature is not yet implemented.
-fn build_placeholder_tab(commands: &mut Commands, panel: Entity, key: &'static str) {
-    spawn_note(commands, panel, key);
+/// Build the Experiences tab: the estate-wide caption, then the three lists —
+/// Key, Allowed, Blocked — each a caption, a bounded table and an Add button.
+fn build_experiences_tab(commands: &mut Commands, panel: Entity) -> ExperienceHandles {
+    let mut handles = ExperienceHandles::default();
+    spawn_note(commands, panel, "about-region-experiences-caption");
+    for (offset, list) in ExperienceList::ALL.into_iter().enumerate() {
+        spawn_section_label(commands, panel, list.label_key());
+        spawn_note(commands, panel, list.help_key());
+        let table = spawn_experience_table(commands, panel, list);
+        if let Some(slot) = handles.viewports.get_mut(list.index()) {
+            *slot = Some(table.viewport);
+        }
+        if let Some(slot) = handles.tables.get_mut(list.index()) {
+            *slot = Some(table.root);
+        }
+        let button_row = spawn_row(commands, panel);
+        let _add = spawn_action_button(
+            commands,
+            button_row,
+            list.add_key(),
+            AboutRegionAction::AddExperience(list),
+            // After the Access tab's four (tab indices 2–4), continuing the
+            // window's single tab order rather than restarting it.
+            5_i32.saturating_add(i32::try_from(offset).unwrap_or(0)),
+            true,
+        );
+    }
+    handles
+}
+
+/// Spawn one estate experience list's table, bounded to
+/// [`EXPERIENCE_LIST_HEIGHT`].
+fn spawn_experience_table(
+    commands: &mut Commands,
+    parent: Entity,
+    list: ExperienceList,
+) -> BoundedTable {
+    let wrapper = commands
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Px(EXPERIENCE_LIST_HEIGHT),
+                // **A height, not a suggestion.** This tab stacks three lists
+                // over three wrapped captions in a scrolling column, which asks
+                // for more block space than the panel has — and a flex item's
+                // default `flex_shrink: 1` answers that by squeezing whatever
+                // has a fixed height. The tables lost almost all of theirs: a
+                // header and half a row each. Refusing to shrink puts the
+                // overflow where it belongs, on the panel's scrollbar.
+                flex_shrink: 0.0,
+                ..default()
+            },
+            BackgroundColor(LIST_BACKGROUND),
+            ChildOf(parent),
+        ))
+        .id();
+    let table = spawn_table(commands, wrapper, list.spec());
+    BoundedTable {
+        root: table.root,
+        viewport: table.viewport,
+    }
 }
 
 /// The root + viewport handles a table hosts.
@@ -1428,6 +1881,7 @@ fn open_about_region(
                 AllowedView::default(),
                 AllowedGroupsView::default(),
                 BannedView::default(),
+                ExperiencesView::default(),
                 ui,
             ));
         }
@@ -1515,6 +1969,25 @@ fn ingest_about_region_events(
                     state.covenant_pending = None;
                     state.covenant_text = Some(decode_covenant(asset));
                     dirty.covenant_values = true;
+                }
+                SlSessionEvent::RegionExperiences {
+                    allowed,
+                    blocked,
+                    trusted,
+                } => {
+                    // The reply is the whole of the estate's three lists,
+                    // whether it answers the GET or a POST — so it replaces
+                    // them, and an optimistic edge the region refused reverts
+                    // here rather than standing.
+                    state.set_experiences(allowed.clone(), blocked.clone(), trusted.clone());
+                }
+                SlSessionEvent::ExperienceInfo(infos) => {
+                    for info in infos.iter().filter(|info| !info.missing) {
+                        let _previous = state.experience_infos.insert(info.public_id, info.clone());
+                    }
+                }
+                SlSessionEvent::ExperienceUpdated(info) if !info.missing => {
+                    let _previous = state.experience_infos.insert(info.public_id, info.clone());
                 }
                 _other => {}
             }
@@ -1607,6 +2080,9 @@ fn refresh_on_region(
             if !is_current {
                 state.can_manage = false;
             }
+            // Re-arm the experiences GET: a window walked back into asks again,
+            // since the lists may have moved while it was frozen.
+            state.experiences_requested = false;
             dirty.mark_all();
         }
         if !is_current {
@@ -2420,6 +2896,345 @@ fn bind_access_rows(
 }
 
 // ---------------------------------------------------------------------------
+// Estate experiences.
+// ---------------------------------------------------------------------------
+
+/// Issue the `RegionExperiences` GET once per window per stay in its region.
+///
+/// Unlike the estate access lists — which the estate `getinfo` reply brings
+/// along — the experience lists are their own capability, and nothing else asks
+/// for them. The GET is estate-gated on the region side, so a window that is
+/// not managing does not ask: a refusal is not data.
+fn request_region_experiences(
+    mut windows: Query<&mut AboutRegionState>,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    for mut state in &mut windows {
+        if state.experiences_requested || !state.is_current || !state.can_manage {
+            continue;
+        }
+        state.experiences_requested = true;
+        commands.write(SlCommand(Command::RequestRegionExperiences));
+    }
+}
+
+/// Ask for the metadata of every experience a list names that this window has
+/// no record for — the names and ratings its rows show.
+fn request_unknown_region_experience_infos(
+    mut windows: Query<&mut AboutRegionState>,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    for mut state in &mut windows {
+        if !state.is_current {
+            continue;
+        }
+        let mut unknown: Vec<ExperienceKey> = ExperienceList::ALL
+            .into_iter()
+            .flat_map(|list| state.experiences(list).to_vec())
+            .filter(|id| {
+                !state.experience_infos.contains_key(id)
+                    && !state.experience_infos_asked.contains(id)
+            })
+            .collect();
+        unknown.sort_unstable();
+        unknown.dedup();
+        if unknown.is_empty() {
+            continue;
+        }
+        state.experience_infos_asked.extend(unknown.iter().copied());
+        commands.write(SlCommand(Command::RequestExperienceInfo {
+            experience_ids: unknown,
+        }));
+    }
+}
+
+/// Rebuild each window's three experience views when their ids, the metadata
+/// cache or the locale moved.
+fn sync_experiences_view(
+    mut windows: Query<(Ref<AboutRegionState>, &mut ExperiencesView, &AboutRegionUi)>,
+    translator: Translator,
+    mut lists: Query<&mut VirtualList>,
+) {
+    let locale_moved = translator.changed();
+    for (state, view, ui) in &mut windows {
+        let view = view.into_inner();
+        for list in ExperienceList::ALL {
+            let index = list.index();
+            let revision = state
+                .experience_revisions
+                .get(index)
+                .copied()
+                .unwrap_or_default();
+            let built = view.built.get(index).copied().unwrap_or_default();
+            if built == revision && !locale_moved && !state.is_changed() {
+                continue;
+            }
+            if let Some(slot) = view.built.get_mut(index) {
+                *slot = revision;
+            }
+            let rows: Vec<ExperienceRowData> = state
+                .experiences(list)
+                .iter()
+                .map(|id| {
+                    let info = state.experience_infos.get(id);
+                    ExperienceRowData {
+                        name: info
+                            .map(|info| info.name.clone())
+                            .filter(|name| !name.is_empty())
+                            .unwrap_or_else(|| format!("({})", id.uuid())),
+                        rating: info.map_or_else(String::new, |info| {
+                            translator.get(maturity_key(info.maturity))
+                        }),
+                        id: *id,
+                    }
+                })
+                .collect();
+            let count = rows.len();
+            if let Some(slot) = view.rows.get_mut(index) {
+                *slot = rows;
+            }
+            if let Some(viewport) = ui.experiences.viewports.get(index).copied().flatten()
+                && let Ok(mut virtual_list) = lists.get_mut(viewport)
+            {
+                virtual_list.item_count = count;
+            }
+        }
+    }
+}
+
+/// Build each newly-pooled experience row's cells and its two row buttons.
+fn populate_experience_rows(
+    mut commands: Commands,
+    windows: Query<&AboutRegionUi>,
+    new_rows: Query<(Entity, &ChildOf), Added<VirtualRow>>,
+) {
+    for (row_entity, child_of) in &new_rows {
+        let parent = child_of.parent();
+        for ui in &windows {
+            let Some((list, table)) = ui.experiences.list_of_viewport(parent) else {
+                continue;
+            };
+            let cells = spawn_table_row(&mut commands, row_entity, table, list.spec());
+            if let Some(custom) = cells.cell(2) {
+                spawn_experience_row_button(
+                    &mut commands,
+                    custom,
+                    list,
+                    row_entity,
+                    ExperienceRowAction::Profile,
+                );
+                spawn_experience_row_button(
+                    &mut commands,
+                    custom,
+                    list,
+                    row_entity,
+                    ExperienceRowAction::Remove,
+                );
+            }
+            break;
+        }
+    }
+}
+
+/// Bind each pooled experience row to its window's resolved name and rating,
+/// and reveal that window's Remove buttons only when the agent may manage its
+/// estate. Profile stays offered either way — reading an experience's page is
+/// not an estate write.
+fn bind_experience_rows(
+    windows: Query<(
+        Entity,
+        Ref<ExperiencesView>,
+        Ref<AboutRegionState>,
+        &AboutRegionUi,
+    )>,
+    rows: Query<(Ref<VirtualRow>, &ChildOf, &crate::ui_table::TableRowCells)>,
+    row_buttons: Query<(Entity, &ExperienceRowButton)>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
+    mut visibility: Query<&mut Visibility>,
+    mut texts: Query<(&mut Text, &mut TextColor)>,
+) {
+    for (window, view, state, ui) in &windows {
+        let refresh = view.is_changed() || state.is_changed();
+        for (row, child_of, cells) in &rows {
+            let Some((list, _table)) = ui.experiences.list_of_viewport(child_of.parent()) else {
+                continue;
+            };
+            if !refresh && !row.is_changed() {
+                continue;
+            }
+            let data = row.index.and_then(|index| view.rows(list).get(index));
+            set_cell(
+                &mut texts,
+                cells,
+                0,
+                data.map_or("", |row| row.name.as_str()),
+            );
+            set_cell(
+                &mut texts,
+                cells,
+                1,
+                data.map_or("", |row| row.rating.as_str()),
+            );
+        }
+        let want = if state.can_manage {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        for (entity, button) in &row_buttons {
+            if button.action != ExperienceRowAction::Remove {
+                continue;
+            }
+            if host_floater(entity, &parents, &floaters) != Some(window) {
+                continue;
+            }
+            if let Ok(mut vis) = visibility.get_mut(entity)
+                && *vis != want
+            {
+                *vis = want;
+            }
+        }
+    }
+}
+
+/// A per-row estate-experience button in a table's custom cell.
+fn spawn_experience_row_button(
+    commands: &mut Commands,
+    cell: Entity,
+    list: ExperienceList,
+    row: Entity,
+    action: ExperienceRowAction,
+) {
+    let button = commands
+        .spawn((
+            Button,
+            ExperienceRowButton { list, row, action },
+            Node {
+                padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                ..default()
+            },
+            BorderColor::all(BUTTON_BORDER),
+            BackgroundColor(BUTTON_BACKGROUND),
+            Pickable::default(),
+            ChildOf(cell),
+        ))
+        .observe(on_experience_row_button)
+        .id();
+    commands.spawn((
+        Text::default(),
+        Translated::new(action.label_key()),
+        UiFont::Sans.at(FONT_SIZE),
+        TextColor(LABEL_COLOR),
+        Pickable::IGNORE,
+        ChildOf(button),
+    ));
+}
+
+/// Resolve and act on a per-row experience button press, in the window it was
+/// pressed in.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the observer reads the pressed button, its row, the window it belongs to, \
+              that window's view and state, and the two message sinks"
+)]
+fn on_experience_row_button(
+    press: On<Pointer<Press>>,
+    buttons: Query<&ExperienceRowButton>,
+    rows: Query<&VirtualRow>,
+    mut windows: Query<(&ExperiencesView, &mut AboutRegionState)>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
+    mut profiles: MessageWriter<OpenExperienceProfile>,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    if press.button != PointerButton::Primary {
+        return;
+    }
+    let Ok(button) = buttons.get(press.entity) else {
+        return;
+    };
+    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+        return;
+    };
+    let Ok((view, mut state)) = windows.get_mut(window) else {
+        return;
+    };
+    let Some(index) = rows.get(button.row).ok().and_then(|row| row.index) else {
+        return;
+    };
+    let Some(id) = view.rows(button.list).get(index).map(|row| row.id) else {
+        return;
+    };
+    match button.action {
+        ExperienceRowAction::Profile => {
+            profiles.write(OpenExperienceProfile { experience: id });
+        }
+        ExperienceRowAction::Remove => {
+            if !state.can_manage {
+                return;
+            }
+            if state.remove_experience(button.list, id) {
+                post_region_experiences(&state, &mut commands);
+            }
+        }
+    }
+}
+
+/// Fold an experience pick into the list whose Add opened the picker.
+///
+/// The picker echoes a tag rather than an entity, so the window is the one
+/// holding a matching claim ([`AboutRegionState::pending_pick`]) — the same
+/// rule the avatar picks follow.
+fn apply_experience_picks(
+    mut picked: MessageReader<ExperiencePicked>,
+    mut windows: Query<&mut AboutRegionState>,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    let frame: Vec<ExperiencePicked> = picked.read().cloned().collect();
+    if frame.is_empty() {
+        return;
+    }
+    for event in &frame {
+        let Some(list) = ExperienceList::from_pick_tag(event.requester) else {
+            continue;
+        };
+        for mut state in &mut windows {
+            let claimed = state
+                .pending_experience_picks
+                .get(list.index())
+                .copied()
+                .unwrap_or(false);
+            if !claimed || !state.can_manage {
+                continue;
+            }
+            if let Some(slot) = state.pending_experience_picks.get_mut(list.index()) {
+                *slot = false;
+            }
+            if state.add_experience(list, event.experience) {
+                post_region_experiences(&state, &mut commands);
+            }
+        }
+    }
+}
+
+/// Write the estate's three experience lists back over the `RegionExperiences`
+/// capability.
+///
+/// The cap takes the **whole** set, not a delta, so every add and every remove
+/// posts all three lists — which is also what the reference's `sendUpdate`
+/// does. The region's reply then replaces them, so an edit it refused reverts.
+fn post_region_experiences(state: &AboutRegionState, commands: &mut MessageWriter<SlCommand>) {
+    let (allowed, blocked, trusted) = state.experiences_update();
+    commands.write(SlCommand(Command::SetRegionExperiences {
+        allowed,
+        blocked,
+        trusted,
+    }));
+}
+
+// ---------------------------------------------------------------------------
 // Edit observers / handlers.
 // ---------------------------------------------------------------------------
 
@@ -2469,6 +3284,7 @@ fn on_about_region_action(
     fields: Query<&EditableText>,
     mut sl_commands: MessageWriter<SlCommand>,
     mut pickers: MessageWriter<OpenAvatarPicker>,
+    mut experience_pickers: MessageWriter<OpenExperiencePicker>,
 ) {
     if press.button != PointerButton::Primary {
         return;
@@ -2575,6 +3391,21 @@ fn on_about_region_action(
         AboutRegionAction::AddBanned => {
             state.pending_pick = Some(PICK_BANNED);
             pickers.write(OpenAvatarPicker::many(PICK_BANNED));
+        }
+        AboutRegionAction::AddExperience(list) => {
+            // A full list refuses rather than opening a picker whose pick it
+            // would then drop: the region caps each estate list at
+            // `ESTATE_MAX_EXPERIENCE_IDS`.
+            if state.experiences(*list).len() >= MAX_ESTATE_EXPERIENCES {
+                return;
+            }
+            if let Some(slot) = state.pending_experience_picks.get_mut(list.index()) {
+                *slot = true;
+            }
+            experience_pickers.write(OpenExperiencePicker {
+                requester: list.pick_tag(),
+                filter: list.filter(),
+            });
         }
     }
 }
@@ -3393,12 +4224,13 @@ fn spawn_remove_button(commands: &mut Commands, cell: Entity, list: AccessList, 
 #[cfg(test)]
 mod tests {
     use super::{
-        AboutRegionState, AccessList, CheckKind, freshest_region_flags, maturity_from_index,
-        maturity_index,
+        AboutRegionState, AccessList, CheckKind, ExperienceList, MAX_ESTATE_EXPERIENCES,
+        PICK_MANAGER, freshest_region_flags, maturity_from_index, maturity_index,
     };
-    use pretty_assertions::assert_eq;
+    use crate::world_api::ExperiencePickerFilter;
+    use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_bevy::{
-        EstateAccessDelta, EstateFlags, Maturity, OwnerKey, RegionInfoUpdate, Uuid,
+        EstateAccessDelta, EstateFlags, ExperienceKey, Maturity, OwnerKey, RegionInfoUpdate, Uuid,
     };
 
     /// The maturity ↔ combo-index mapping round-trips for every real rating, and
@@ -3528,6 +4360,90 @@ mod tests {
         assert_eq!(freshest_region_flags(handshake, None), handshake);
     }
 
+    /// Each estate experience list opens its picker with the reference's own
+    /// filter, and every list's picker tag resolves back to that list.
+    #[test]
+    fn each_experience_list_carries_its_reference_filter() {
+        assert_eq!(
+            ExperienceList::Trusted.filter(),
+            ExperiencePickerFilter::Any
+        );
+        assert_eq!(
+            ExperienceList::Allowed.filter(),
+            ExperiencePickerFilter::LandScoped
+        );
+        assert_eq!(
+            ExperienceList::Blocked.filter(),
+            ExperiencePickerFilter::GridScopedUnprivileged
+        );
+        for list in ExperienceList::ALL {
+            assert_eq!(ExperienceList::from_pick_tag(list.pick_tag()), Some(list));
+        }
+        assert_eq!(ExperienceList::from_pick_tag(PICK_MANAGER), None);
+        // The three indices are distinct, which the per-list row / revision
+        // arrays depend on.
+        let mut indices: Vec<usize> = ExperienceList::ALL.iter().map(|l| l.index()).collect();
+        indices.sort_unstable();
+        indices.dedup();
+        assert_eq!(indices.len(), ExperienceList::ALL.len());
+    }
+
+    /// A reply replaces all three lists into their own slots and bumps every
+    /// revision, so all three views rebind — and the POST names them back the
+    /// way the cap does.
+    #[test]
+    fn a_reply_fills_each_list_and_the_post_names_them_back() {
+        let allowed = ExperienceKey::from(Uuid::from_u128(0xa));
+        let blocked = ExperienceKey::from(Uuid::from_u128(0xb));
+        let trusted = ExperienceKey::from(Uuid::from_u128(0xc));
+        let mut state = AboutRegionState::default();
+        let before = state.experience_revisions;
+
+        state.set_experiences(vec![allowed], vec![blocked], vec![trusted]);
+        assert_eq!(state.experiences(ExperienceList::Allowed), [allowed]);
+        assert_eq!(state.experiences(ExperienceList::Blocked), [blocked]);
+        assert_eq!(state.experiences(ExperienceList::Trusted), [trusted]);
+        for (index, revision) in state.experience_revisions.iter().enumerate() {
+            assert_ne!(Some(revision), before.get(index));
+        }
+
+        let (posted_allowed, posted_blocked, posted_trusted) = state.experiences_update();
+        assert_eq!(posted_allowed, vec![allowed]);
+        assert_eq!(posted_blocked, vec![blocked]);
+        assert_eq!(posted_trusted, vec![trusted]);
+    }
+
+    /// An add refuses a duplicate and refuses to overrun the region's cap, and
+    /// a remove only reports (and only bumps a revision) when it removed
+    /// something — the two conditions that decide whether a POST goes out.
+    #[test]
+    fn an_add_refuses_duplicates_and_a_full_list() {
+        let mut state = AboutRegionState::default();
+        let list = ExperienceList::Allowed;
+        for n in 0..MAX_ESTATE_EXPERIENCES {
+            let id = ExperienceKey::from(Uuid::from_u128(u128::try_from(n).unwrap_or(0)));
+            assert!(state.add_experience(list, id), "add {n} should be taken");
+            assert!(!state.add_experience(list, id), "a duplicate is refused");
+        }
+        assert_eq!(state.experiences(list).len(), MAX_ESTATE_EXPERIENCES);
+
+        let overflow = ExperienceKey::from(Uuid::from_u128(0xffff));
+        assert!(!state.add_experience(list, overflow), "a full list refuses");
+        assert_eq!(state.experiences(list).len(), MAX_ESTATE_EXPERIENCES);
+
+        let first = ExperienceKey::from(Uuid::from_u128(0));
+        let revision_before = state.experience_revisions.get(list.index()).copied();
+        assert!(state.remove_experience(list, first));
+        assert!(!state.remove_experience(list, first), "already gone");
+        assert_ne!(
+            state.experience_revisions.get(list.index()).copied(),
+            revision_before
+        );
+        // The other two lists were never touched by any of it.
+        assert!(state.experiences(ExperienceList::Trusted).is_empty());
+        assert!(state.experiences(ExperienceList::Blocked).is_empty());
+    }
+
     /// **One window per region** (`viewer-keyed-floater-audit`), and the freeze
     /// a window keeps once the agent has left its region.
     mod instances {
@@ -3585,6 +4501,9 @@ mod tests {
                 .add_message::<crate::world_api::TexturePicked>()
                 .add_message::<crate::world_api::OpenAvatarPicker>()
                 .add_message::<crate::world_api::AvatarPicked>()
+                .add_message::<crate::world_api::OpenExperiencePicker>()
+                .add_message::<crate::world_api::ExperiencePicked>()
+                .add_message::<sl_viewer_notices::experience_profile::OpenExperienceProfile>()
                 .init_resource::<AvatarState>()
                 .init_resource::<GroupsModel>()
                 .init_resource::<UiScale>()

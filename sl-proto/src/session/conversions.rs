@@ -65,7 +65,7 @@ use sl_wire::messages::{
     UpdateCreateInventoryItemInventoryDataBlock,
 };
 use sl_wire::{Direction, GlobalCoordinates};
-use sl_wire::{Llsd, SkeletonFolder, parse_llsd_binary, parse_llsd_notation, parse_llsd_xml};
+use sl_wire::{Llsd, LlsdEncoding, SkeletonFolder, parse_llsd_serialized, to_llsd_serialized};
 use sl_wire::{Permissions, Permissions5};
 
 use crate::asset_keys::AssetKey;
@@ -940,11 +940,6 @@ pub fn environment_asset_from_bytes(name: &str, bytes: &[u8]) -> Option<Environm
     day_cycle_from_asset(name, &llsd).map(|cycle| EnvironmentAsset::DayCycle(Box::new(cycle)))
 }
 
-/// The header line the reference writes above a settings asset's body
-/// (`LLSDSerialize::serialize` with `LLSD_NOTATION`, which is what
-/// `LLSettingsVOBase::createInventoryItem` uploads).
-const SETTINGS_ASSET_HEADER: &[u8] = b"<? llsd/notation ?>\n";
-
 /// Encode an [`EnvironmentAsset`] as the `AT_SETTINGS` asset bytes a grid
 /// serves and the reference viewer uploads — the inverse of
 /// [`environment_asset_from_bytes`].
@@ -962,64 +957,210 @@ pub fn environment_asset_to_bytes(asset: &EnvironmentAsset) -> Vec<u8> {
         EnvironmentAsset::Water(water) => water_settings_to_llsd(water),
         EnvironmentAsset::DayCycle(cycle) => day_cycle_to_llsd(cycle),
     };
-    let mut bytes = SETTINGS_ASSET_HEADER.to_vec();
-    bytes.extend_from_slice(&llsd.to_llsd_notation());
-    bytes
+    to_llsd_serialized(&llsd, LlsdEncoding::Notation)
 }
 
-/// Parse a settings-asset payload into LLSD, handling the encodings one can arrive
-/// in — XML (self-describing), or binary / notation behind an optional
-/// `<? LLSD/… ?>` header line.
+/// Overlay the LLSD `values` an **experience** pushed onto `sky`, returning the
+/// frame that results — the reference's `LLSettingsInjected::injectExperienceValues`
+/// (one `injectSetting` per key) followed by `applyInjections`, which assigns
+/// each override into a clone of the source settings map before reloading it.
 ///
-/// The header line, when there is one, *names* the encoding
-/// (`LLSDSerialize::deserialize` dispatches on it), so it is honoured rather
-/// than guessed: notation and binary are not mutually exclusive by sight — a
-/// notation map opens with `{`, which is also binary LLSD's map marker — so
-/// sniffing alone would hand a notation asset to the binary parser. Without a
-/// header each encoding is tried in turn.
-fn settings_asset_llsd(bytes: &[u8]) -> Option<Llsd> {
-    // XML carries its own `<?xml …?>` / `<llsd>` opening the parser expects.
-    if let Ok(text) = std::str::from_utf8(bytes) {
-        let start = text.trim_start();
-        if (start.starts_with("<?xml") || start.starts_with("<llsd"))
-            && let Ok(llsd) = parse_llsd_xml(text)
-        {
-            return Some(llsd);
-        }
-    }
-    let (header, payload) = split_llsd_header_line(bytes);
-    // A `<? … ?>` line naming an encoding settles it. The reference's markers
-    // are `LLSD/Binary`, `LLSD/XML` and `llsd/notation`, matched case-insensitively
-    // because grids have shipped both spellings.
-    let header = header.map(|line| String::from_utf8_lossy(line).to_lowercase());
-    match header.as_deref() {
-        Some(line) if line.contains("notation") => return parse_llsd_notation(payload).ok(),
-        Some(line) if line.contains("binary") => return parse_llsd_binary(payload).ok(),
-        Some(line) if line.contains("xml") => {
-            return std::str::from_utf8(payload)
-                .ok()
-                .and_then(|text| parse_llsd_xml(text).ok());
-        }
-        _other => {}
-    }
-    if let Ok(llsd) = parse_llsd_binary(payload) {
-        return Some(llsd);
-    }
-    parse_llsd_notation(payload).ok()
+/// The overlay is **shallow**, exactly as the reference's `settings[key] = value`
+/// is. That has one consequence worth knowing about rather than discovering: the
+/// seven legacy-haze values are read out of the frame's `legacy_haze` sub-map
+/// first (`get_color` / `get_float`, `llsettingssky.cpp`), so a push naming
+/// `ambient` at the top level is shadowed by the sub-map an EEP sky always
+/// carries and changes nothing. The reference behaves the same way; injecting a
+/// whole replacement `legacy_haze` map is what works on both.
+///
+/// `values` that is not a map leaves `sky` unchanged — a push that carries no
+/// keys asks for nothing.
+#[must_use]
+pub fn sky_with_pushed_values(sky: &SkySettings, values: &Llsd) -> SkySettings {
+    sky_with_blended_values(sky, values, &BTreeMap::new())
 }
 
-/// Split `bytes` at a leading `<? … ?>` LLSD header line into that line and the
-/// payload after it, or `(None, bytes)` when there is none. An `<?xml` prolog is
-/// left in place — it is XML the caller parses whole, not an LLSD header.
-fn split_llsd_header_line(bytes: &[u8]) -> (Option<&[u8]>, &[u8]) {
-    if bytes.starts_with(b"<?")
-        && !bytes.starts_with(b"<?xml")
-        && let Some(newline) = bytes.iter().position(|&byte| byte == b'\n')
-        && let Some(payload) = bytes.get(newline.saturating_add(1)..)
-    {
-        return (bytes.get(..newline), payload);
+/// [`sky_with_pushed_values`] with a per-key **mix**: a key listed in `mixes`
+/// lands only `mix` of the way from the frame's own value to the pushed one,
+/// rather than replacing it outright. A key absent from `mixes` is assigned
+/// whole, as [`sky_with_pushed_values`] assigns every key.
+///
+/// This is the reference's `applyInjections` in full: an injection scheduled by
+/// `injectSetting` (a push whose transition is over `0.1` seconds) interpolates
+/// **that key** from the value underneath toward the injected one and lets every
+/// other key alone, rather than cross-fading the whole environment. A mix of
+/// `1.0` is the plain overlay, and a mix of `0.0` leaves the key at the frame's
+/// own value.
+#[must_use]
+pub fn sky_with_blended_values(
+    sky: &SkySettings,
+    values: &Llsd,
+    mixes: &BTreeMap<String, f32>,
+) -> SkySettings {
+    let Some(overrides) = values.as_map() else {
+        return sky.clone();
+    };
+    let mut frame = sky_settings_to_llsd(sky);
+    overlay_llsd_map(&mut frame, overrides, mixes);
+    sky_settings_from_llsd(&sky.name, &frame)
+}
+
+/// [`sky_with_pushed_values`] for a water frame — the same shallow overlay, over
+/// `LLSettingsWater`'s own keys.
+#[must_use]
+pub fn water_with_pushed_values(water: &WaterSettings, values: &Llsd) -> WaterSettings {
+    water_with_blended_values(water, values, &BTreeMap::new())
+}
+
+/// [`sky_with_blended_values`] for a water frame.
+#[must_use]
+pub fn water_with_blended_values(
+    water: &WaterSettings,
+    values: &Llsd,
+    mixes: &BTreeMap<String, f32>,
+) -> WaterSettings {
+    let Some(overrides) = values.as_map() else {
+        return water.clone();
+    };
+    let mut frame = water_settings_to_llsd(water);
+    overlay_llsd_map(&mut frame, overrides, mixes);
+    water_settings_from_llsd(&water.name, &frame)
+}
+
+/// Assign each entry of `overrides` into `target`, replacing whatever was there
+/// — or, for a key `mixes` names, blending that far toward it from what was
+/// there. A no-op when `target` is not a map.
+fn overlay_llsd_map(
+    target: &mut Llsd,
+    overrides: &HashMap<String, Llsd>,
+    mixes: &BTreeMap<String, f32>,
+) {
+    let Llsd::Map(entries) = target else {
+        return;
+    };
+    for (key, value) in overrides {
+        let blended = match mixes.get(key) {
+            Some(mix) => entries.get(key).map_or_else(
+                || value.clone(),
+                |from| blend_llsd_value(key, from, value, *mix),
+            ),
+            None => value.clone(),
+        };
+        drop(entries.insert(key.clone(), blended));
     }
-    (None, bytes)
+}
+
+/// Past which mix a value that cannot be interpolated switches over — the
+/// reference's `BREAK_POINT` (`llsettingsbase.cpp`).
+const BLEND_BREAK_POINT: f32 = 0.5;
+
+/// Interpolate one settings value `mix` of the way from `from` to `to` — the
+/// reference's `LLSettingsBase::interpolateSDValue`.
+///
+/// Numbers lerp (integers rounding), maps and arrays recurse element-wise, and
+/// anything else — strings, uuids, booleans, a pair whose LLSD kinds disagree —
+/// switches at [`BLEND_BREAK_POINT`], because there is no halfway between two of
+/// them. The two rotation keys slerp rather than lerping their four components,
+/// which is the reference's `getSlerpKeys`: lerping a quaternion's components
+/// walks off the unit sphere and puts the sun somewhere neither end asked for.
+fn blend_llsd_value(key: &str, from: &Llsd, to: &Llsd, mix: f32) -> Llsd {
+    /// Linear interpolation, clamped to the two ends.
+    fn lerp(from: f64, to: f64, mix: f32) -> f64 {
+        from + (to - from) * f64::from(mix.clamp(0.0, 1.0))
+    }
+    /// Rounds a value the caller has already bounded by two `i32`s back to an
+    /// `i32`. There is no `f64 → i32` conversion without a cast, so the cast
+    /// lints are expected here, as they are for the terrain coefficients.
+    #[expect(
+        clippy::as_conversions,
+        clippy::cast_possible_truncation,
+        reason = "the lerp of two i32 endpoints lies between them, so it fits an i32"
+    )]
+    const fn round_to_i32(value: f64) -> i32 {
+        value.round() as i32
+    }
+    match (from, to) {
+        (Llsd::Integer(from), Llsd::Integer(to)) => {
+            Llsd::Integer(round_to_i32(lerp(f64::from(*from), f64::from(*to), mix)))
+        }
+        (Llsd::Real(from), Llsd::Real(to)) => Llsd::Real(lerp(*from, *to, mix)),
+        (Llsd::Array(from), Llsd::Array(to)) if is_slerp_key(key) => {
+            slerp_llsd_rotation(from, to, mix)
+        }
+        (Llsd::Array(from), Llsd::Array(to)) => Llsd::Array(
+            (0..from.len().max(to.len()))
+                .map(|index| match (from.get(index), to.get(index)) {
+                    (Some(from), Some(to)) => blend_llsd_value(key, from, to, mix),
+                    // Only one side has this element; there is nothing to
+                    // interpolate against, so it passes through.
+                    (Some(only), None) | (None, Some(only)) => only.clone(),
+                    (None, None) => Llsd::Undef,
+                })
+                .collect(),
+        ),
+        (Llsd::Map(from), Llsd::Map(to)) => Llsd::Map(
+            from.keys()
+                .chain(to.keys())
+                .map(|key_name| {
+                    let value = match (from.get(key_name), to.get(key_name)) {
+                        (Some(from), Some(to)) => blend_llsd_value(key_name, from, to, mix),
+                        (Some(only), None) | (None, Some(only)) => only.clone(),
+                        (None, None) => Llsd::Undef,
+                    };
+                    (key_name.clone(), value)
+                })
+                .collect(),
+        ),
+        _ => {
+            if mix > BLEND_BREAK_POINT {
+                to.clone()
+            } else {
+                from.clone()
+            }
+        }
+    }
+}
+
+/// Whether `key` names one of the two rotations the reference slerps rather than
+/// lerping component-wise (`LLSettingsSky::getSlerpKeys`).
+fn is_slerp_key(key: &str) -> bool {
+    matches!(key, "sun_rotation" | "moon_rotation")
+}
+
+/// Spherically interpolate two LLSD quaternion arrays (`[x, y, z, w]`), falling
+/// back to the destination for anything that is not one.
+fn slerp_llsd_rotation(from: &[Llsd], to: &[Llsd], mix: f32) -> Llsd {
+    let read = |value: &[Llsd]| -> Option<Rotation> {
+        Some(Rotation {
+            x: value.first()?.as_f32()?,
+            y: value.get(1)?.as_f32()?,
+            z: value.get(2)?.as_f32()?,
+            s: value.get(3)?.as_f32()?,
+        })
+    };
+    let (Some(start), Some(end)) = (read(from), read(to)) else {
+        return Llsd::Array(to.to_vec());
+    };
+    let blended = crate::types::environment::slerp_rotation(&start, &end, mix.clamp(0.0, 1.0));
+    Llsd::Array(vec![
+        Llsd::Real(f64::from(blended.x)),
+        Llsd::Real(f64::from(blended.y)),
+        Llsd::Real(f64::from(blended.z)),
+        Llsd::Real(f64::from(blended.s)),
+    ])
+}
+
+/// Parse a settings-asset payload into LLSD, in whichever of the three
+/// encodings it arrives in — [`parse_llsd_serialized`], which is the
+/// reference's `LLSDSerialize::deserialize`.
+///
+/// A settings asset is one of the payloads whose surrounding protocol does not
+/// say how it is encoded, so it carries an optional `<? … ?>` header line and
+/// the reader honours it. `None` here for a payload that decodes as none of
+/// them: the caller's next step is to ask what *kind* of settings it holds, and
+/// there is nothing to ask.
+fn settings_asset_llsd(bytes: &[u8]) -> Option<Llsd> {
+    parse_llsd_serialized(bytes).ok()
 }
 
 /// Parses a day-cycle `OSDMap` into a [`DayCycle`]: its tracks (track 0 water, the

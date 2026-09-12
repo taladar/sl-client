@@ -74,6 +74,14 @@ pub enum LlsdError {
     /// payload fails cleanly instead of yielding a bogus tree.
     #[error("notation LLSD input was malformed")]
     MalformedNotation,
+    /// An LLSD payload that announced itself as XML — by a `<? LLSD/XML ?>`
+    /// header or by opening `<llsd` / `<?xml` — was not valid UTF-8, was not
+    /// well-formed XML, or held no LLSD document. Raised by
+    /// [`parse_llsd_serialized`](crate::parse_llsd_serialized), which is the
+    /// only reader here that decides an encoding for itself and so is the only
+    /// one that can be handed XML it did not ask for.
+    #[error("XML LLSD input was malformed")]
+    MalformedXml,
     /// An LLSD stream nested arrays / maps deeper than
     /// [`MAX_NESTING_DEPTH`](crate::MAX_NESTING_DEPTH). The parsers are
     /// recursive descent, so nesting depth is stack depth: the limit is

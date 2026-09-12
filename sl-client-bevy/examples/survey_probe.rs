@@ -276,6 +276,7 @@ fn on_events(
             | SlSessionEvent::ExperienceContributorStatus { .. }
             | SlSessionEvent::ExperienceUpdated(_)
             | SlSessionEvent::RegionExperiences { .. }
+            | SlSessionEvent::ParcelExperiences { .. }
             | SlSessionEvent::ConferenceSessionMessage { .. }
             | SlSessionEvent::ConferenceSessionParticipant { .. }
             | SlSessionEvent::ConferenceInvited { .. }
@@ -351,7 +352,9 @@ fn on_events(
             | SlSessionEvent::MarketplaceListingGone(_)
             | SlSessionEvent::MarketplaceError { .. }
             | SlSessionEvent::Ping { .. }
-            | SlSessionEvent::Environment(_) => {}
+            | SlSessionEvent::Environment(_)
+            | SlSessionEvent::ExperienceEnvironmentPush(_)
+            | SlSessionEvent::ExperienceEvent(_) => {}
             SlSessionEvent::TeleportFailed { reason, .. } => warn!("teleport failed: {reason}"),
             SlSessionEvent::RegionChanged {
                 region_handle, sim, ..

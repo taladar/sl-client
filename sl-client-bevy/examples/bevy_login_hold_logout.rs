@@ -285,6 +285,8 @@ fn on_events(
             | SlSessionEvent::ParcelDetails(_)
             | SlSessionEvent::RemoteParcelId { .. }
             | SlSessionEvent::Environment(_)
+            | SlSessionEvent::ExperienceEnvironmentPush(_)
+            | SlSessionEvent::ExperienceEvent(_)
             | SlSessionEvent::MoneyBalance(_)
             | SlSessionEvent::EconomyData(_)
             | SlSessionEvent::ParcelProperties(_)
@@ -373,6 +375,7 @@ fn on_events(
             | SlSessionEvent::ExperienceContributorStatus { .. }
             | SlSessionEvent::ExperienceUpdated(_)
             | SlSessionEvent::RegionExperiences { .. }
+            | SlSessionEvent::ParcelExperiences { .. }
             | SlSessionEvent::ConferenceSessionMessage { .. }
             | SlSessionEvent::ConferenceSessionParticipant { .. }
             | SlSessionEvent::ConferenceInvited { .. }

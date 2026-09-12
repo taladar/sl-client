@@ -757,6 +757,7 @@ impl Survey {
             | Event::ExperienceContributorStatus { .. }
             | Event::ExperienceUpdated(_)
             | Event::RegionExperiences { .. }
+            | Event::ParcelExperiences { .. }
             | Event::ConferenceSessionMessage { .. }
             | Event::ConferenceSessionParticipant { .. }
             | Event::ConferenceInvited { .. }
@@ -832,7 +833,9 @@ impl Survey {
             | Event::MarketplaceListingGone(_)
             | Event::MarketplaceError { .. }
             | Event::Ping { .. }
-            | Event::Environment(_) => {}
+            | Event::Environment(_)
+            | Event::ExperienceEnvironmentPush(_)
+            | Event::ExperienceEvent(_) => {}
         }
         Ok(false)
     }

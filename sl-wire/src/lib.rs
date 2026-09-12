@@ -7,8 +7,10 @@ mod control_flags;
 mod display_name;
 mod economy_helper;
 mod endian;
+mod environment_push;
 mod error;
 mod experience;
+mod experience_event;
 mod fake_parcel_id;
 mod field;
 mod geometry;
@@ -73,21 +75,31 @@ pub use economy_helper::{
     parse_buy_land_prep_response, parse_currency_quote_request, parse_currency_quote_response,
     parse_preflight_land_prep_request, parse_preflight_land_prep_response,
 };
+pub use environment_push::{
+    EnvironmentPushAction, ExperienceEnvironmentPush, PUSH_EXP_ENVIRONMENT_METHOD,
+    build_environment_push_params, parse_environment_push,
+};
 pub use error::WireError;
 pub use experience::{
-    ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceUpdate,
-    PROPERTY_DISABLED, PROPERTY_GRID, PROPERTY_INVALID, PROPERTY_PRIVATE, PROPERTY_PRIVILEGED,
-    PROPERTY_SUSPENDED, SEARCH_PAGE_SIZE, build_experience_ids_response,
+    ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceSearchPage,
+    ExperienceUpdate, PROPERTY_DISABLED, PROPERTY_GRID, PROPERTY_INVALID, PROPERTY_PRIVATE,
+    PROPERTY_PRIVILEGED, PROPERTY_SUSPENDED, SEARCH_PAGE_SIZE, build_experience_ids_response,
     build_experience_infos_response, build_experience_permissions_response,
+    build_experience_query_response, build_experience_search_response,
     build_experience_status_response, build_region_experiences_request,
     build_region_experiences_response, build_set_experience_permission_request,
-    build_update_experience_request, experience_id_query, experience_info_query,
+    build_update_experience_request, experience_id_query, experience_info_query, experience_query,
     find_experience_query, forget_experience_query, group_experiences_query,
     parse_experience_id_query, parse_experience_ids, parse_experience_info_query,
-    parse_experience_infos, parse_experience_permissions, parse_experience_status,
+    parse_experience_infos, parse_experience_permissions, parse_experience_query,
+    parse_experience_query_reply, parse_experience_search_page, parse_experience_status,
     parse_find_experience_query, parse_forget_experience_query, parse_group_experiences_query,
     parse_region_experiences, parse_region_experiences_request,
     parse_set_experience_permission_request, parse_update_experience_request,
+};
+pub use experience_event::{
+    EXPERIENCE_EVENT_METHOD, ExperienceEvent, ExperienceEventPermission,
+    build_experience_event_params, parse_experience_event,
 };
 pub use fake_parcel_id::FakeParcelId;
 pub use field::{Reader, Writer};
@@ -119,10 +131,10 @@ pub use inventory::{
 pub use landmark::{LandmarkAsset, landmark_to_wire, parse_landmark};
 pub use llsd::{
     AssetUploadResponse, EventQueueEvent, EventQueueRequest, EventQueueResponse,
-    FetchInventoryFolderRequest, FetchInventoryItemsRequest, FetchItemRef, Llsd, LlsdError,
-    MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER,
-    MediaEntry, NewFileAgentInventoryRequest, ObjectMediaNavigateRequest, ObjectMediaRequest,
-    ObjectMediaResponse, UpdateScriptAgentRequest, UpdateScriptTaskRequest,
+    FetchInventoryFolderRequest, FetchInventoryItemsRequest, FetchItemRef, Llsd, LlsdEncoding,
+    LlsdError, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE,
+    MEDIA_PERM_OWNER, MediaEntry, NewFileAgentInventoryRequest, ObjectMediaNavigateRequest,
+    ObjectMediaRequest, ObjectMediaResponse, UpdateScriptAgentRequest, UpdateScriptTaskRequest,
     UpdateTaskItemAssetRequest, UploadGrantedPermissions, build_asset_upload_response,
     build_event_queue_request, build_event_queue_response, build_fetch_inventory_items_request,
     build_fetch_inventory_request, build_group_member_data_request, build_group_notice_bucket,
@@ -133,12 +145,12 @@ pub use llsd::{
     build_update_task_item_asset_request, build_upload_baked_texture_request,
     parse_asset_upload_response, parse_event_queue_request, parse_event_queue_response,
     parse_fetch_inventory_items_request, parse_fetch_inventory_request, parse_llsd_binary,
-    parse_llsd_binary_prefix, parse_llsd_notation, parse_llsd_xml,
+    parse_llsd_binary_prefix, parse_llsd_notation, parse_llsd_serialized, parse_llsd_xml,
     parse_new_file_agent_inventory_request, parse_object_media_navigate_request,
     parse_object_media_request, parse_seed_request, parse_seed_response,
     parse_update_avatar_appearance_request, parse_update_item_asset_request,
     parse_update_script_agent_request, parse_update_script_task_request,
-    parse_update_task_item_asset_request,
+    parse_update_task_item_asset_request, to_llsd_serialized,
 };
 pub use login::{
     BuddyListEntry, Credential, GestureEntry, GlobalTextures, HomeLocation, InitialOutfit,

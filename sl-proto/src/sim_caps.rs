@@ -34,7 +34,8 @@ use sl_wire::{
     build_attachment_resources_response, build_avatar_picker_search_response,
     build_create_inventory_category_response, build_display_names_response,
     build_experience_ids_response, build_experience_infos_response,
-    build_experience_permissions_response, build_experience_status_response,
+    build_experience_permissions_response, build_experience_query_response,
+    build_experience_search_response, build_experience_status_response,
     build_get_object_cost_response, build_get_object_physics_data_response,
     build_land_resource_detail_response, build_land_resource_summary_response,
     build_land_resources_response, build_lsl_syntax_document,
@@ -42,14 +43,15 @@ use sl_wire::{
     build_provision_voice_account_response, build_region_experiences_response,
     build_remote_parcel_response, build_render_materials_response,
     build_resource_cost_selected_response, build_seed_response, build_simulator_features_response,
-    is_ais_current_outfit_links_url, is_ais_orphans_url, parse_agent_preferences,
-    parse_ais_category_children_fetch_url, parse_ais_category_children_subset,
-    parse_ais_category_children_url, parse_ais_category_links_url, parse_ais_category_url,
-    parse_ais_create_category_body, parse_ais_create_category_url, parse_ais_create_link_body,
-    parse_ais_item_url, parse_ais_move_body, parse_ais_rename_category_body,
-    parse_ais_update_item_body, parse_avatar_picker_search_query,
-    parse_create_inventory_category_request, parse_display_names_query, parse_event_queue_request,
-    parse_experience_id_query, parse_experience_info_query, parse_fetch_inventory_items_request,
+    find_experience_query, is_ais_current_outfit_links_url, is_ais_orphans_url,
+    parse_agent_preferences, parse_ais_category_children_fetch_url,
+    parse_ais_category_children_subset, parse_ais_category_children_url,
+    parse_ais_category_links_url, parse_ais_category_url, parse_ais_create_category_body,
+    parse_ais_create_category_url, parse_ais_create_link_body, parse_ais_item_url,
+    parse_ais_move_body, parse_ais_rename_category_body, parse_ais_update_item_body,
+    parse_avatar_picker_search_query, parse_create_inventory_category_request,
+    parse_display_names_query, parse_event_queue_request, parse_experience_id_query,
+    parse_experience_info_query, parse_experience_query, parse_fetch_inventory_items_request,
     parse_fetch_inventory_request, parse_find_experience_query, parse_forget_experience_query,
     parse_get_object_cost_request, parse_get_object_physics_data_request,
     parse_group_experiences_query, parse_land_resources_request, parse_llsd_xml,
@@ -82,15 +84,16 @@ use crate::sim_session::{CapsUploadMetadata, SimSession};
 use crate::{
     CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES, CAP_ATTACHMENT_RESOURCES,
     CAP_AVATAR_PICKER_SEARCH, CAP_CHAT_SESSION_REQUEST, CAP_COPY_INVENTORY_FROM_NOTECARD,
-    CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT,
-    CAP_FETCH_INVENTORY, CAP_FETCH_INVENTORY_ITEM, CAP_FETCH_LIBRARY, CAP_FETCH_LIBRARY_ITEM,
-    CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES,
-    CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST,
-    CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_EXPERIENCES, CAP_INVENTORY_API_V3,
-    CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3,
-    CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
-    CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT,
-    CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
+    CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES, CAP_EXPERIENCE_QUERY,
+    CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_INVENTORY_ITEM, CAP_FETCH_LIBRARY,
+    CAP_FETCH_LIBRARY_ITEM, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
+    CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
+    CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_EXPERIENCES,
+    CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR,
+    CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS,
+    CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE,
+    CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
+    CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
     CAP_RESOURCE_COST_SELECTED, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
     CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
     CAP_UPDATE_GESTURE_AGENT_INVENTORY, CAP_UPDATE_MATERIAL_AGENT_INVENTORY,
@@ -215,6 +218,7 @@ const SERVED_CAPABILITIES: &[&str] = &[
     CAP_IS_EXPERIENCE_CONTRIBUTOR,
     CAP_UPDATE_EXPERIENCE,
     CAP_REGION_EXPERIENCES,
+    CAP_EXPERIENCE_QUERY,
     // The voice signalling cluster.
     CAP_PROVISION_VOICE_ACCOUNT,
     CAP_PARCEL_VOICE_INFO,
@@ -348,6 +352,10 @@ pub enum CapHandler {
     /// allowed / blocked / trusted lists, POST replaces them wholesale
     /// (`SimSession::apply_region_experiences`).
     RegionExperiences,
+    /// The `ExperienceQuery` GET (`?parcelid=…&experiences=…`), answering
+    /// per experience whether that parcel admits it, from the store's
+    /// per-parcel table (`SimExperiences::parcel_experiences`).
+    ExperienceQuery,
     /// `ProvisionVoiceAccountRequest`: a WebRTC offer → JSEP answer (or a
     /// logout), or the Vivox account fixture, served from the voice stub
     /// ([`SimSession::voice`], `SimSession::provision_voice`).
@@ -667,6 +675,7 @@ impl SimCaps {
             }
             CAP_UPDATE_EXPERIENCE => Some(CapHandler::UpdateExperience),
             CAP_REGION_EXPERIENCES => Some(CapHandler::RegionExperiences),
+            CAP_EXPERIENCE_QUERY => Some(CapHandler::ExperienceQuery),
             CAP_PROVISION_VOICE_ACCOUNT => Some(CapHandler::ProvisionVoiceAccount),
             CAP_PARCEL_VOICE_INFO => Some(CapHandler::ParcelVoiceInfo),
             CAP_VOICE_SIGNALING => Some(CapHandler::VoiceSignaling),
@@ -861,6 +870,9 @@ impl SimCaps {
                 }
                 Some(CapHandler::RegionExperiences) => {
                     CapsDispatch::Response(Self::dispatch_region_experiences(sim, request))
+                }
+                Some(CapHandler::ExperienceQuery) => {
+                    CapsDispatch::Response(Self::dispatch_experience_query(sim, request))
                 }
                 Some(CapHandler::ProvisionVoiceAccount) => {
                     CapsDispatch::Response(Self::dispatch_provision_voice_account(sim, request))
@@ -2057,6 +2069,11 @@ impl SimCaps {
     /// hides invalid and private records). A query missing `page` or
     /// `query` → `400`; wrong method → `405`.
     ///
+    /// A neighbouring page that exists is named by the `next_page_url` /
+    /// `previous_page_url` the reference viewer enables its paging arrows
+    /// from — written as the query suffix that would fetch it, which is the
+    /// request this very handler would answer.
+    ///
     /// [`SimExperiences::find`]: crate::SimExperiences::find
     fn dispatch_experience_search(sim: &SimSession, request: &CapsRequest<'_>) -> CapsResponse {
         if request.method != "GET" {
@@ -2065,8 +2082,14 @@ impl SimCaps {
         let Some((text, page)) = parse_find_experience_query(&ais_suffix(request)) else {
             return CapsResponse::bad_request();
         };
-        CapsResponse::llsd_xml(build_experience_infos_response(
-            &sim.experiences().find(&text, page),
+        let found = sim.experiences().find(&text, page);
+        let neighbour = |offered: bool, step: i32| {
+            offered.then(|| find_experience_query(&text, page.saturating_add(step)))
+        };
+        CapsResponse::llsd_xml(build_experience_search_response(
+            &found.infos,
+            neighbour(found.has_next_page, 1).as_deref(),
+            neighbour(found.has_previous_page, -1).as_deref(),
         ))
     }
 
@@ -2226,6 +2249,27 @@ impl SimCaps {
             }
             _ => CapsResponse::method_not_allowed(),
         }
+    }
+
+    /// Serves the `ExperienceQuery` GET: for each experience the query names,
+    /// whether the parcel it names admits it
+    /// ([`SimExperiences::parcel_experiences`]). A query without a `parcelid`
+    /// → `400`; other methods → `405`.
+    ///
+    /// The reference asks this whenever an agent with an injected environment
+    /// steps over a parcel line, and clears the injections of every experience
+    /// answered `false` — so a fixture that declares a parcel's admitted
+    /// experiences is declaring where that parcel's visitors keep their sky.
+    fn dispatch_experience_query(sim: &SimSession, request: &CapsRequest<'_>) -> CapsResponse {
+        if request.method != "GET" {
+            return CapsResponse::method_not_allowed();
+        }
+        let Some((parcel_id, ids)) = parse_experience_query(&ais_suffix(request)) else {
+            return CapsResponse::bad_request();
+        };
+        CapsResponse::llsd_xml(build_experience_query_response(
+            &sim.experiences().parcel_experiences(parcel_id, &ids),
+        ))
     }
 
     /// Serves one `ProvisionVoiceAccountRequest` POST from the voice stub.
@@ -2489,6 +2533,7 @@ mod tests {
             ("IsExperienceContributor", CapStatus::Served),
             ("UpdateExperience", CapStatus::Served),
             ("RegionExperiences", CapStatus::Served),
+            ("ExperienceQuery", CapStatus::Served),
             ("ReadOfflineMsgs", CapStatus::Served),
             ("ChatSessionRequest", CapStatus::Served),
             ("AcceptGroupInvite", CapStatus::Pending),

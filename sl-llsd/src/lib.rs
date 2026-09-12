@@ -3,12 +3,14 @@
 mod binary;
 mod error;
 mod notation;
+mod serialize;
 mod value;
 mod xml;
 
 pub use binary::{parse_llsd_binary, parse_llsd_binary_prefix};
 pub use error::LlsdError;
 pub use notation::{Scan, parse_llsd_notation};
+pub use serialize::{LlsdEncoding, parse_llsd_serialized, to_llsd_serialized};
 pub use value::{Llsd, parse_llsd_xml, push_escaped};
 pub use xml::{parse_guarded_xml, xml_nesting_within};
 

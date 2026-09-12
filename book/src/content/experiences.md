@@ -27,7 +27,9 @@ family of experience capabilities:
 
 - **Look up** — info for specific experience keys (`RequestExperienceInfo`) and
   search by name (`FindExperiences`), returning `Event::ExperienceInfo` /
-  `ExperienceSearchResults`.
+  `ExperienceSearchResults`. Search is paged, one-based, and the page carries
+  the grid's word on whether another one exists on either side of it
+  (`ExperienceSearchPage::has_next_page` / `has_previous_page`).
 - **Permissions** — the user's allowed/blocked list
   (`RequestExperiencePermissions` → `Event::ExperiencePermissions`) and changing
   one (`SetExperiencePermission`).
@@ -41,6 +43,11 @@ family of experience capabilities:
 - **Region** — list and set the experiences allowed on the current land
   (`RequestRegionExperiences` / `SetRegionExperiences` →
   `Event::RegionExperiences`).
+- **Parcel** — which of a set of experiences one parcel admits
+  (`QueryParcelExperiences` → `Event::ParcelExperiences`). An experience is
+  admitted per land, so the viewer asks this whenever an agent holding an
+  experience-pushed environment steps over a parcel line, and releases the sky
+  of every experience the new parcel refuses.
 
 ---
 
@@ -56,3 +63,10 @@ family of experience capabilities:
 > - Commands are the `*Experience*` variants in `sl-proto/src/command.rs`;
 >   events the matching ones in `sl-proto/src/types/event.rs`. Worked example:
 >   `sl-client-tokio/examples/experiences.rs`.
+> - The viewer surfaces live in `sl-viewer-notices`: the in-the-moment grant
+>   prompt is `experience_permission.rs`, the per-account log of what a joined
+>   experience did is `experience_log.rs`, the seven-tab manage window (search,
+>   allowed / blocked / admin / contributor / owned, recent events) is
+>   `experiences_floater.rs`, and one experience's own page — with the
+>   administrator's edit column over `UpdateExperience` — is
+>   `experience_profile.rs`, a floater keyed per experience.

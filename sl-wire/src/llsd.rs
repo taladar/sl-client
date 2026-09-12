@@ -15,8 +15,8 @@ use sl_types::key::{ExperienceKey, InventoryFolderKey, InventoryKey, ObjectKey};
 use uuid::Uuid;
 
 pub use sl_llsd::{
-    Llsd, LlsdError, parse_llsd_binary, parse_llsd_binary_prefix, parse_llsd_notation,
-    parse_llsd_xml,
+    Llsd, LlsdEncoding, LlsdError, parse_llsd_binary, parse_llsd_binary_prefix,
+    parse_llsd_notation, parse_llsd_serialized, parse_llsd_xml, to_llsd_serialized,
 };
 pub(crate) use sl_llsd::{Scan, push_escaped};
 

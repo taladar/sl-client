@@ -345,15 +345,26 @@ pub(crate) const CONTRACTS: &[ElementContract] = &[
     },
     ElementContract {
         element: "experiences-floater",
-        nodes: &[NodeContract::new(
-            "experiences-button",
-            &[
-                Row::emits(Gesture::PrimaryClick, &["forget"]),
-                Row::emits(Gesture::DoubleClick, &["forget", "forget"]),
-                Row::emits(Gesture::Enter, &["forget"]),
-                Row::emits(Gesture::Space, &["forget"]),
-            ],
-        )],
+        nodes: &[
+            NodeContract::new(
+                "experiences-action:profile",
+                &[
+                    Row::emits(Gesture::PrimaryClick, &["profile"]),
+                    Row::emits(Gesture::DoubleClick, &["profile", "profile"]),
+                    Row::emits(Gesture::Enter, &["profile"]),
+                    Row::emits(Gesture::Space, &["profile"]),
+                ],
+            ),
+            NodeContract::new(
+                "experiences-action:forget",
+                &[
+                    Row::emits(Gesture::PrimaryClick, &["forget"]),
+                    Row::emits(Gesture::DoubleClick, &["forget", "forget"]),
+                    Row::emits(Gesture::Enter, &["forget"]),
+                    Row::emits(Gesture::Space, &["forget"]),
+                ],
+            ),
+        ],
     },
     ElementContract {
         element: "friendship-offer-toast",

@@ -1,8 +1,8 @@
 //! Client side: experience cap request builders and response parsers.
 
 use super::{
-    ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceUpdate, PROPERTY_INVALID,
-    SEARCH_PAGE_SIZE, uuid_array,
+    ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceSearchPage,
+    ExperienceUpdate, PROPERTY_INVALID, SEARCH_PAGE_SIZE, uuid_array,
 };
 use crate::WireError;
 use crate::llsd::{Llsd, push_escaped};
@@ -38,6 +38,24 @@ pub fn find_experience_query(text: &str, page: i32) -> String {
 #[must_use]
 pub fn group_experiences_query(group_id: Uuid) -> String {
     format!("?{group_id}")
+}
+
+/// Builds the URL suffix for an `ExperienceQuery` GET
+/// (`{cap}?parcelid=<id>&experiences=<id>,<id>,…`) — "of the experiences
+/// currently injecting something, which does this parcel admit?".
+///
+/// The `experiences` parameter is omitted entirely when the list is empty,
+/// which is what the reference's own string building does
+/// (`DayInjection::testExperiencesOnParcelCoro`, `indra/newview/llenvironment.cpp`):
+/// it writes the parameter name only before the *first* id.
+#[must_use]
+pub fn experience_query(parcel_id: i32, experiences: &[ExperienceKey]) -> String {
+    let mut out = format!("?parcelid={parcel_id}");
+    for (index, id) in experiences.iter().enumerate() {
+        out.push_str(if index == 0 { "&experiences=" } else { "," });
+        out.push_str(&id.to_string());
+    }
+    out
 }
 
 /// Builds the URL suffix for an `IsExperienceAdmin` / `IsExperienceContributor`
@@ -158,6 +176,26 @@ pub fn parse_experience_infos(body: &Llsd) -> Result<Vec<ExperienceInfo>, WireEr
     Ok(infos)
 }
 
+/// Decodes a `FindExperienceByName` reply into one [`ExperienceSearchPage`]:
+/// the `experience_keys` records ([`parse_experience_infos`]) plus the
+/// `next_page_url` / `previous_page_url` markers, read — as the reference reads
+/// them — by presence alone.
+///
+/// # Errors
+///
+/// Returns a [`WireError::Llsd`] if a decoded LLSD field has the wrong kind.
+pub fn parse_experience_search_page(body: &Llsd) -> Result<ExperienceSearchPage, WireError> {
+    // `Undef` is how an LLSD-XML `<undef/>` arrives, and the reference's
+    // `has()` is false for a key that is not in the map at all; a key present
+    // but undefined names no page either, so both count as absent.
+    let offered = |field: &str| !matches!(body.get(field), None | Some(Llsd::Undef));
+    Ok(ExperienceSearchPage {
+        infos: parse_experience_infos(body)?,
+        has_next_page: offered("next_page_url"),
+        has_previous_page: offered("previous_page_url"),
+    })
+}
+
 /// Decodes the `experience_ids` array of an `AgentExperiences` /
 /// `GetAdminExperiences` / `GetCreatorExperiences` / `GroupExperiences` reply.
 ///
@@ -214,6 +252,35 @@ pub fn parse_region_experiences(
             .collect())
     };
     Ok((keys("allowed")?, keys("blocked")?, keys("trusted")?))
+}
+
+/// Decodes the `{ experiences: { "<id>": bool, … } }` of an `ExperienceQuery`
+/// reply: for each queried experience, whether the parcel admits it. Sorted by
+/// id, so a caller comparing two replies compares two identical orders.
+///
+/// An entry whose key is not a UUID, or whose value is not a boolean, is
+/// skipped: the reference reads each entry with `asBoolean()` and acts only on
+/// the ones that say *no*, so an unreadable entry must not become a clear.
+///
+/// # Errors
+///
+/// Returns a [`WireError::Llsd`] if `experiences` is present but not an LLSD
+/// map.
+pub fn parse_experience_query_reply(body: &Llsd) -> Result<Vec<(ExperienceKey, bool)>, WireError> {
+    let Some(entries) = body.field_map("experiences", "experiences")? else {
+        return Ok(Vec::new());
+    };
+    let mut admitted: Vec<(ExperienceKey, bool)> = entries
+        .iter()
+        .filter_map(|(id, allowed)| {
+            Some((
+                ExperienceKey::from(Uuid::parse_str(id.trim()).ok()?),
+                allowed.as_bool()?,
+            ))
+        })
+        .collect();
+    admitted.sort_unstable();
+    Ok(admitted)
 }
 
 /// Decodes the `{ status }` boolean of an `IsExperienceAdmin` /

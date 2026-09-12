@@ -13,13 +13,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 100 |
 | ready | 317 |
-| blocked | 42 |
+| blocked | 41 |
 | in-progress | 22 |
 | bugs | 43 |
-| done | 1092 |
+| done | 1099 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1658** |
+| **total** | **1664** |
 
 ## ideas (100)
 
@@ -266,8 +266,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Session and SimSession are god objects with 12k-line impl blocks
 - [`protocol-audit-wire-error-contract`](ready/protocol-audit-wire-error-contract.md)
   — sl-wire's public parse surface has five different failure disciplines
-- [`protocol-experience-environment-push`](ready/protocol-experience-environment-push.md)
-  — An experience can set the sky, and nothing in this stack can say so
 - [`protocol-sl-llsd-serde`](ready/protocol-sl-llsd-serde.md) — serde
   Serialize/Deserialize derives for sl-llsd (Llsd) types
 - [`protocol-sl-lsl-serde`](ready/protocol-sl-lsl-serde.md) — serde support for
@@ -325,6 +323,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-object-children-index`](ready/viewer-audit-object-children-index.md)
   — ObjectState has no children index, so every linkset query full-scans the
   region
+- [`viewer-audit-picker-requester-identity`](ready/viewer-audit-picker-requester-identity.md)
+  — Two instances of one window share a picker, and both claim its answer
 - [`viewer-audit-plugins-own-their-schedule`](ready/viewer-audit-plugins-own-their-schedule.md)
   — Most viewer crates export loose systems instead of owning a plugin
 - [`viewer-audit-preferences-hub-decoupling`](ready/viewer-audit-preferences-hub-decoupling.md)
@@ -487,11 +487,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Pause cloud animation toggle
 - [`viewer-event-details`](ready/viewer-event-details.md) — Event details
   floater + reminders (blocked by `viewer-ui-widget-scaffold` (done))
-- [`viewer-experience-event-stream`](ready/viewer-experience-event-stream.md) —
-  Experience event stream — the ExperienceEvent log and its notifications
-- [`viewer-experiences-floater`](ready/viewer-experiences-floater.md) —
-  Experiences floater — lists, profile, search (blocked by
-  `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
+- [`viewer-experience-profile-extended-metadata`](ready/viewer-experience-profile-extended-metadata.md)
+  — Experience profile — the marketplace link, the logo, and the owning group
 - [`viewer-floater-update-in-place`](ready/viewer-floater-update-in-place.md) —
   Detail/property floaters — update values in place, don't rebuild structure
 - [`viewer-flycam-avatar-movement-keys`](ready/viewer-flycam-avatar-movement-keys.md)
@@ -795,8 +792,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Group picker for the Region/Estate Access → Allowed Groups list
 - [`viewer-region-estate-object-return`](ready/viewer-region-estate-object-return.md)
   — Region Debug tab — estate-wide object return by resident
-- [`viewer-region-experiences-panel`](ready/viewer-region-experiences-panel.md)
-  — Region / Estate floater — Experiences tab
+- [`viewer-region-experiences-default-experience`](ready/viewer-region-experiences-default-experience.md)
+  — RegionExperiences — the estate's default experience
 - [`viewer-region-restart-schedule`](ready/viewer-region-restart-schedule.md) —
   Region restart schedule + restart countdown (blocked by
   `viewer-region-options-general` (done))
@@ -838,6 +835,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-resync-animations`](ready/viewer-resync-animations.md) — Resync
   animations action
+- [`viewer-rlv-blocked-objects`](ready/viewer-rlv-blocked-objects.md) — RLV —
+  the blocked-object list for an unapproved experience's attachment (blocked by
+  `viewer-experience-event-stream` (done), `viewer-rlv-temp-attachment-gate`
+  (done))
 - [`viewer-rlv-enforce-camera`](ready/viewer-rlv-enforce-camera.md) — RLV —
   camera restrictions and vision overlay (blocked by
   `viewer-rlv-restriction-state` (done), `viewer-camera-third-person-orbit`
@@ -982,7 +983,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-binary-duplication`](ready/repl-audit-binary-duplication.md) —
   The two REPL binaries share ~400 near-verbatim lines and have already drifted
 
-## blocked (42)
+## blocked (41)
 
 ### viewer
 
@@ -1052,9 +1053,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   toggle axis — every effect must differ where it should and nowhere else
   (blocked by `viewer-render-context-matrix`, `viewer-render-overrides-resource`
   (done))
-- [`viewer-rlv-blocked-objects`](blocked/viewer-rlv-blocked-objects.md) — RLV —
-  the blocked-object list for an unapproved experience's attachment (blocked by
-  `viewer-experience-event-stream`, `viewer-rlv-temp-attachment-gate` (done))
 - [`viewer-rlv-enforce-forced-actions`](blocked/viewer-rlv-enforce-forced-actions.md)
   — RLV — forced actions and the #RLV inventory sub-protocol (blocked by
   `viewer-rlv-restriction-state` (done), `viewer-sit-stand-actions`,
@@ -1278,7 +1276,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1092)
+## done (1099)
 
 ### protocol
 
@@ -1450,6 +1448,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-audit-tokio-caps-refetch`](done/protocol-audit-tokio-caps-refetch.md)
   — The tokio region-change caps fetch stalls the UDP pump, then swallows its
   failure
+- [`protocol-experience-environment-push`](done/protocol-experience-environment-push.md)
+  — An experience can set the sky, and nothing in this stack can say so
+- [`protocol-experience-parcel-recheck`](done/protocol-experience-parcel-recheck.md)
+  — An experience's sky follows you off its land, and nothing takes it back
+- [`protocol-experience-search-paging`](done/protocol-experience-search-paging.md)
+  — Carry the experience search's paging URLs through to the viewer
 - [`protocol-lsl-syntax`](done/protocol-lsl-syntax.md) — LSLSyntax capability —
   fetch, cache and decode the grid's language definition
 - [`protocol-sim-caps-agent-comms`](done/protocol-sim-caps-agent-comms.md) —
@@ -1803,12 +1807,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   folder needs
 - [`viewer-environment-settings-unsupported-gate`](done/viewer-environment-settings-unsupported-gate.md)
   — Grey the settings creators on a grid that cannot store settings
+- [`viewer-experience-event-stream`](done/viewer-experience-event-stream.md) —
+  Experience event stream — the ExperienceEvent log and its notifications
 - [`viewer-experience-permission-body-links`](done/viewer-experience-permission-body-links.md)
   — Experience card name — clickable experience-profile SLURL (blocked by
   `viewer-url-linkification` (done))
 - [`viewer-experience-permission-dialog`](done/viewer-experience-permission-dialog.md)
   — Experience permission flow (accept / manage) (blocked by
   `viewer-ui-notification-host` (done))
+- [`viewer-experiences-floater`](done/viewer-experiences-floater.md) —
+  Experiences floater — lists, profile, search (blocked by
+  `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
 - [`viewer-f3-overlay-additional-asset-stores`](done/viewer-f3-overlay-additional-asset-stores.md)
   — Extend the F3 pipeline overlay to the asset stores added since it was built
 - [`viewer-f3-overlay-covered-by-menu-bar`](done/viewer-f3-overlay-covered-by-menu-bar.md)
@@ -2606,6 +2615,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Region / parcel environment settings panel (blocked by
   `viewer-region-options-general` (done), `viewer-environment-my-environments`
   (done))
+- [`viewer-region-experiences-panel`](done/viewer-region-experiences-panel.md) —
+  Region / Estate floater — Experiences tab
 - [`viewer-region-name-connecting-after-crossing`](done/viewer-region-name-connecting-after-crossing.md)
   — Top-bar region name stuck on "Connecting..." after crossing into a region
   never teleported to
@@ -3666,6 +3677,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   inbound UDP messages (SimStats, SimulatorViewerTimeMessage) log warnings
 - [`aditi-3`](done/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
+
+### server
+
+- [`server-fake-grid-agent-experiences`](done/server-fake-grid-agent-experiences.md)
+  — Fake grid — the agent's own five experience lists
 
 ## deferred (26)
 

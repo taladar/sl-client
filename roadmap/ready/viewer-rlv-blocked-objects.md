@@ -2,7 +2,7 @@
 id: viewer-rlv-blocked-objects
 title: RLV — the blocked-object list for an unapproved experience's attachment
 topic: viewer
-status: blocked
+status: ready
 origin: deferred from viewer-rlv-command-intake (2026-09-07) — the refusal path
   whose only producer this viewer does not have
 refs: [viewer-rlv-command-intake, viewer-experience-permission-dialog]

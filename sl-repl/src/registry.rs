@@ -5703,11 +5703,12 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "find_experiences",
-            usage: "<query> [page=0]",
+            // One-based, as the reference's picker numbers its pages.
+            usage: "<query> [page=1]",
             build: |args, ctx| {
                 Ok(Command::FindExperiences {
                     query: args.req_str(ctx, "query", 0)?,
-                    page: args.parse_or(ctx, "page", 1, "i32", 0)?,
+                    page: args.parse_or(ctx, "page", 1, "i32", 1)?,
                 })
             },
         },
@@ -5799,6 +5800,20 @@ fn all_specs() -> Vec<CommandSpec> {
                         .collect(),
                     trusted: args
                         .vec_uuid(ctx, "trusted", 2)?
+                        .into_iter()
+                        .map(ExperienceKey::from)
+                        .collect(),
+                })
+            },
+        },
+        CommandSpec {
+            name: "query_parcel_experiences",
+            usage: "<parcel_id> <experiences: id,id,…>",
+            build: |args, ctx| {
+                Ok(Command::QueryParcelExperiences {
+                    parcel_id: args.req_parse(ctx, "parcel_id", 0, "i32")?,
+                    experiences: args
+                        .vec_uuid(ctx, "experiences", 1)?
                         .into_iter()
                         .map(ExperienceKey::from)
                         .collect(),

@@ -571,12 +571,13 @@ codecs); this cluster wired them into dispatch over the new stores.
 
 ### The experience handlers
 
-The experience cluster serves the twelve experience caps from one new
+The experience cluster serves the thirteen experience caps from one new
 driver-populated fixture set, `SimExperiences`
 (`sl-proto/src/sim_experiences.rs`, held as `SimSession::experiences[_mut]`):
 metadata records keyed by public id, the agent's allowed/blocked
 preference lists, the agent's owned/admin/creator id lists, per-group id
-lists, and the region's allowed/blocked/trusted triple. Three caps
+lists, the region's allowed/blocked/trusted triple, and the per-parcel
+admitted-experience table `ExperienceQuery` answers from. Three caps
 mutate — `ExperiencePreferences`, `UpdateExperience` and the
 `RegionExperiences` POST — and their edits apply to the fixture (so
 follow-up reads observe them), each surfacing a `ServerEvent`
@@ -590,7 +591,13 @@ follow-up reads observe them), each surfacing a `ServerEvent`
   `SEARCH_PAGE_SIZE` page of records whose name contains the
   percent-decoded text case-insensitively, hiding invalid and
   `PROPERTY_PRIVATE` records (the grid's search lists public experiences
-  only), sorted by name with an id tie-break.
+  only), sorted by name with an id tie-break. The reply also states
+  whether a page exists on either side of this one, as a
+  `next_page_url` / `previous_page_url` written only when it does — the
+  reference viewer enables its paging arrows from those keys' *presence*
+  and never fetches either URL, so the client decodes them into the two
+  booleans of `ExperienceSearchPage`. Only the grid can answer the
+  question: it counted the matches the page was cut from.
 - **`GetExperiences`** (bodyless GET) serves the agent's
   allowed/blocked lists via `build_experience_permissions_response`.
 - **`ExperiencePreferences`** routes on method: PUT parses the
@@ -624,6 +631,14 @@ follow-up reads observe them), each surfacing a `ServerEvent`
   triple, POST parses the same-shaped `{ allowed, blocked, trusted }`
   body, replaces the lists wholesale and echoes the stored result, both
   via `build_region_experiences_response`.
+- **`ExperienceQuery`** (GET `?parcelid=…&experiences=<id>,<id>`) answers
+  `{ experiences: { "<id>": bool } }` — per experience, whether that
+  parcel admits it — from the per-parcel table
+  (`SimExperiences::set_parcel_experiences`). **A parcel nothing was
+  declared for admits everything**: declaring one is what makes the
+  fixture land-scoped. This is the cap a viewer holding an injected
+  environment asks on every parcel change, clearing the injections of
+  every experience the new land refuses.
 
 The status contract is the house standard — wrong method `405`,
 malformed body or query `400`, an `UpdateExperience` targeting an

@@ -1,14 +1,14 @@
 [package]
 name = "sl-viewer-notices"
-description = "The Second Life / OpenSim viewer's notice surfaces: the notification host and its persistence, script and experience permission dialogs, and the linkified text they are written in"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+description = "The Second Life / OpenSim viewer's notice surfaces: the notification host and its persistence, script and experience permission dialogs, and the linkified text they are written in"
 readme.workspace = true
 repository.workspace = true
 license.workspace = true
-keywords = ["secondlife", "opensim", "viewer", "notifications"]
+keywords = ["notifications", "opensim", "secondlife", "viewer"]
 categories = ["game-development"]
 exclude.workspace = true
 publish.workspace = true
@@ -24,6 +24,7 @@ serde_json = { workspace = true }
 sl-client-bevy = { workspace = true, features = [
   "bevy_pbr",
 ] }
+sl-l10n = { path = "../sl-l10n", version = "0.1.0" }
 sl-settings = { path = "../sl-settings", version = "0.1.0" }
 sl-types = { workspace = true }
 sl-viewer-kit = { workspace = true }
@@ -33,7 +34,9 @@ sl-viewer-settings = { workspace = true }
 sl-viewer-ui-core = { workspace = true }
 sl-viewer-ui-widgets = { workspace = true }
 sl-viewer-world-api = { workspace = true }
+time = { workspace = true, features = ["local-offset"] }
 tracing = { workspace = true }
+url = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

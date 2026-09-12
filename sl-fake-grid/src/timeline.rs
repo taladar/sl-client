@@ -55,12 +55,13 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use sl_proto::{
-    ArrivalPlacement, AvatarAppearance, ChatSource, ChatType, EnvironmentSettings, InstantMessage,
-    Object, ParcelInfo, PlayingAnimation, RegionLimits, RegionLocalObjectId, RegionLocalParcelId,
+    ArrivalPlacement, AvatarAppearance, ChatSource, ChatType, EnvironmentSettings,
+    ExperienceEnvironmentPush, ExperienceEvent, ExperiencePermission, InstantMessage, Object,
+    ParcelInfo, PlayingAnimation, RegionLimits, RegionLocalObjectId, RegionLocalParcelId,
     RegionStats, SequenceNumber, ServerEvent, SimSession, SimulatorTime,
     attachment_state_from_point,
 };
-use sl_types::key::InventoryKey;
+use sl_types::key::{ExperienceKey, InventoryKey};
 use sl_types::lsl::Vector;
 use sl_types::map::{RegionCoordinates, TeleportFlags};
 use tokio::sync::{broadcast, watch};
@@ -286,12 +287,56 @@ pub enum Action {
     /// the sky" pairs this with [`ConfigureRegion`](Self::ConfigureRegion),
     /// which is what sends that `RegionInfo`.
     ///
-    /// The one environment change that *is* pushed is a different feature:
-    /// `PushExpEnvironment`, an experience's `llSetEnvironment` injection,
-    /// which travels as a `GenericMessage` and layers over the region's
-    /// settings rather than replacing them. Neither end of it exists here yet —
-    /// the roadmap item is `protocol-experience-environment-push`.
+    /// The one environment change that *is* pushed is a different action:
+    /// [`PushExperienceEnvironment`](Self::PushExperienceEnvironment).
     SetEnvironment(Box<EnvironmentSettings>),
+    /// Pushes an environment at the viewer as an **experience** does
+    /// (`llSetEnvironment`) — the only live environment change in the protocol.
+    ///
+    /// Unlike [`SetEnvironment`](Self::SetEnvironment) this needs no
+    /// [`ConfigureRegion`](Self::ConfigureRegion) beside it and changes nothing
+    /// the region serves: it reaches the viewer at once, layers over the
+    /// region's settings, and the
+    /// [`Clear`](sl_proto::EnvironmentPushAction::Clear) case takes the layer
+    /// away again — at which point the region's own sky is back with no
+    /// refetch. A scenario that wants the *estate* to have changed its sky
+    /// still wants `SetEnvironment` + `ConfigureRegion`.
+    ///
+    /// A [`Full`](sl_proto::EnvironmentPushAction::Full) push names a settings
+    /// **asset** by id, which the viewer fetches over `ViewerAsset` — so the
+    /// scenario has to have put those bytes in the grid's asset store
+    /// (`environment_asset_to_bytes`) or the push resolves to nothing.
+    PushExperienceEnvironment(Box<ExperienceEnvironmentPush>),
+    /// Reports, as the region does after the fact, that an **experience** the
+    /// agent has joined exercised a permission on them.
+    ///
+    /// This is the whole of what the protocol says about an experience's
+    /// conduct: its scripts never ask, so nothing else in the session mentions
+    /// them, and the
+    /// [`Attach`](sl_proto::ExperienceEventPermission::Attach) case is the only
+    /// message on any path that says an experience attached something to the
+    /// agent. A scenario that wants a viewer's experience *log* populated sends
+    /// these; a scenario that wants the sky to actually change sends
+    /// [`PushExperienceEnvironment`](Self::PushExperienceEnvironment) — which a
+    /// real region accompanies with one of these, and this grid leaves to the
+    /// scenario so a test can have either half alone.
+    ReportExperienceEvent(Box<ExperienceEvent>),
+    /// Moves one experience between the agent's allowed and blocked lists, as
+    /// the `ExperiencePreferences` capability does.
+    ///
+    /// It changes what a **fetch** answers and sends nothing: the protocol has
+    /// no message that tells a viewer its own preferences moved, because the
+    /// only thing that ever moves them is that same viewer. So this is the
+    /// scripted stand-in for the agent having decided elsewhere — a second
+    /// viewer, the web profile — and a test drives the *client's* own
+    /// [`SetExperiencePermission`](sl_proto::Command::SetExperiencePermission)
+    /// when it wants the round trip a floater's Allow button makes.
+    SetExperiencePreference {
+        /// Which experience the preference is about.
+        experience_id: ExperienceKey,
+        /// Allow, block, or forget it — `Forget` clears it from both lists.
+        permission: ExperiencePermission,
+    },
     /// Edits the region's own configuration and sends the `RegionInfo` that
     /// announces it — the estate floater's Region tab, saved by nobody.
     ///
@@ -374,6 +419,24 @@ impl std::fmt::Debug for Action {
             Self::Chat { message, .. } => f.debug_tuple("Chat").field(message).finish(),
             Self::Im(im) => f.debug_tuple("Im").field(&im.message).finish(),
             Self::SetEnvironment(_) => f.write_str("SetEnvironment(<settings>)"),
+            Self::PushExperienceEnvironment(push) => f
+                .debug_struct("PushExperienceEnvironment")
+                .field("experience", &push.experience_id)
+                .field("action", &push.action.name())
+                .finish_non_exhaustive(),
+            Self::ReportExperienceEvent(event) => f
+                .debug_struct("ReportExperienceEvent")
+                .field("experience", &event.experience_id)
+                .field("permission", &event.permission)
+                .finish_non_exhaustive(),
+            Self::SetExperiencePreference {
+                experience_id,
+                permission,
+            } => f
+                .debug_struct("SetExperiencePreference")
+                .field("experience", experience_id)
+                .field("permission", permission)
+                .finish_non_exhaustive(),
             Self::ConfigureRegion { .. } => f.write_str("ConfigureRegion(<edit>)"),
             Self::ChangeParcel { local_id, .. } => f
                 .debug_struct("ChangeParcel")
@@ -885,6 +948,40 @@ async fn execute(
             let environment = (**environment).clone();
             shared
                 .with_sim(move |sim| sim.set_environment(environment))
+                .await;
+        }
+        Action::PushExperienceEnvironment(push) => {
+            let push = (**push).clone();
+            shared
+                .with_sim(move |sim| {
+                    if let Err(error) = sim.send_experience_environment_push(&push, now) {
+                        tracing::warn!(
+                            "a scripted experience environment push failed to send: {error}"
+                        );
+                    }
+                })
+                .await;
+        }
+        Action::ReportExperienceEvent(event) => {
+            let event = (**event).clone();
+            shared
+                .with_sim(move |sim| {
+                    if let Err(error) = sim.send_experience_event(&event, now) {
+                        tracing::warn!("a scripted experience event failed to send: {error}");
+                    }
+                })
+                .await;
+        }
+        Action::SetExperiencePreference {
+            experience_id,
+            permission,
+        } => {
+            let (experience_id, permission) = (*experience_id, *permission);
+            shared
+                .with_sim(move |sim| {
+                    sim.experiences_mut()
+                        .set_preference(experience_id, permission);
+                })
                 .await;
         }
         Action::ConfigureRegion { edit } => {

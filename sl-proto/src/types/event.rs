@@ -41,7 +41,8 @@ use sl_types::map::RegionCoordinates;
 use sl_wire::AgentPreferences;
 use sl_wire::AttachmentResourcesReport;
 use sl_wire::DisplayName;
-use sl_wire::ExperienceInfo;
+use sl_wire::ExperienceEnvironmentPush;
+use sl_wire::ExperienceEvent;
 use sl_wire::LandResourcesUrls;
 use sl_wire::LslSyntax;
 use sl_wire::MediaEntry;
@@ -55,6 +56,7 @@ use sl_wire::ResourceSummary;
 use sl_wire::SelectedResourceCost;
 use sl_wire::SimulatorFeatures;
 use sl_wire::VoiceAccountInfo;
+use sl_wire::{ExperienceInfo, ExperienceSearchPage};
 use uuid::Uuid;
 
 use crate::bookkeeping_ids::{InventoryCallbackId, TransactionId, TransferId, XferId};
@@ -191,6 +193,27 @@ pub enum Event {
     /// or a parcel, parsed from the `ExtEnvironment` capability (the reply to
     /// [`Command::RequestEnvironment`](crate::Command::RequestEnvironment)).
     Environment(Box<EnvironmentSettings>),
+    /// An **experience** has pushed an environment at the agent — the
+    /// `PushExpEnvironment` generic message an `llSetEnvironment` script sends,
+    /// decoded by [`sl_wire::parse_environment_push`].
+    ///
+    /// Unlike [`Environment`](Self::Environment) this is not an answer to
+    /// anything the client asked: it is the one *live* environment change in the
+    /// protocol. The settings it carries layer **over** the region's rather than
+    /// replacing them, and the
+    /// [`Clear`](sl_wire::EnvironmentPushAction::Clear) case takes them away
+    /// again — at which point the region's own environment is in force once more
+    /// without a refetch.
+    ExperienceEnvironmentPush(Box<ExperienceEnvironmentPush>),
+    /// An **experience** the agent has joined exercised a permission on them —
+    /// the `ExperienceEvent` generic message, decoded by
+    /// [`sl_wire::parse_experience_event`].
+    ///
+    /// An experience runs its scripts without asking, so no `ScriptQuestion`
+    /// ever appears for what it does; this is the after-the-fact report that
+    /// replaces it, and the only signal in the protocol that says an experience
+    /// **attached** something to the agent.
+    ExperienceEvent(Box<ExperienceEvent>),
     /// The agent's L$ balance, parsed from a `MoneyBalanceReply` (a reply to
     /// [`Session::request_money_balance`](crate::Session::request_money_balance),
     /// or pushed by the simulator after a transaction changes the balance).
@@ -1513,8 +1536,11 @@ pub enum Event {
     /// [`missing`](ExperienceInfo::missing) placeholders.
     ExperienceInfo(Vec<ExperienceInfo>),
     /// The reply to a `FindExperienceByName` capability GET (the runtime
-    /// `FindExperiences` command): one page of experiences matching the query.
-    ExperienceSearchResults(Vec<ExperienceInfo>),
+    /// `FindExperiences` command): one page of experiences matching the query,
+    /// with the grid's own word on whether a page follows or precedes it (see
+    /// [`ExperienceSearchPage`]) — a question a page of results cannot answer
+    /// about itself.
+    ExperienceSearchResults(ExperienceSearchPage),
     /// The reply to a `GetExperiences` capability GET or an `ExperiencePreferences`
     /// PUT/DELETE (the runtime `RequestExperiencePermissions` /
     /// `SetExperiencePermission` commands): the agent's per-experience preferences
@@ -1575,6 +1601,21 @@ pub enum Event {
         blocked: Vec<ExperienceKey>,
         /// The experiences the region trusts (privileged, key-grid scope).
         trusted: Vec<ExperienceKey>,
+    },
+    /// The reply to an `ExperienceQuery` capability GET (the runtime
+    /// [`Command::QueryParcelExperiences`](crate::Command::QueryParcelExperiences)):
+    /// for each queried experience, whether the parcel admits it.
+    ///
+    /// The parcel is echoed from the request — the reply names only the
+    /// experiences — so a viewer that has walked on again can tell this answer
+    /// is about land it has already left and ignore it, as the reference does by
+    /// re-reading the agent's parcel when its coroutine resumes.
+    ParcelExperiences {
+        /// The parcel that was asked about, as the region numbers them.
+        parcel_id: i32,
+        /// Each queried experience and whether that parcel admits it, in id
+        /// order.
+        experiences: Vec<(ExperienceKey, bool)>,
     },
     /// A decoded terrain (or wind/cloud/water) patch arrived in a `LayerData`
     /// message and was added to or refreshed in the terrain cache. For a

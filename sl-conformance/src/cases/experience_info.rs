@@ -154,28 +154,31 @@ impl GridTest for ExperienceInfo {
             // FindExperienceByName: search for the resolved name and confirm the
             // search capability answers. Whether the anchor appears in the single
             // paged result set is best-effort (recorded, not asserted).
-            let (search_len, search_rtt, found_by_name, searched) =
+            let (search_page, search_rtt, found_by_name, searched) =
                 if name.chars().count() >= MIN_QUERY_CHARS {
                     let search_started = Instant::now();
                     session
                         .send(Command::FindExperiences {
                             query: name.clone(),
-                            page: 0,
+                            // One-based: the reference's picker starts at page 1
+                            // and never asks for a lower one.
+                            page: 1,
                         })
                         .await?;
                     match session
                         .wait_for(LONG_TIMEOUT, |event| match event {
-                            Event::ExperienceSearchResults(results) => Some(results.clone()),
+                            Event::ExperienceSearchResults(page) => Some(page.clone()),
                             _ => None,
                         })
                         .await
                     {
-                        Ok(results) => {
+                        Ok(page) => {
                             let rtt = search_started.elapsed();
-                            let found = results
+                            let found = page
+                                .infos
                                 .iter()
                                 .any(|result| result.public_id == anchor && !result.missing);
-                            (Some(results.len()), Some(rtt), found, true)
+                            (Some(page), Some(rtt), found, true)
                         }
                         Err(TestFailure::Timeout(_)) => (None, None, false, true),
                         Err(other) => return Err(other),
@@ -191,12 +194,19 @@ impl GridTest for ExperienceInfo {
             metrics.set("experience_is_grid", is_grid);
             metrics.set_timing(&secs_metric("info_rtt"), info_rtt.as_secs_f64());
             metrics.set("searched_by_name", searched);
-            if let Some(len) = search_len {
+            if let Some(page) = search_page {
                 metrics.set(
                     &count_metric("search_results"),
-                    i64::try_from(len).unwrap_or(-1),
+                    i64::try_from(page.infos.len()).unwrap_or(-1),
                 );
                 metrics.set("found_by_name", found_by_name);
+                // Whether the live grid actually sends the `next_page_url` /
+                // `previous_page_url` the reference's paging arrows are enabled
+                // from. Recorded, not asserted: a one-page result set legitimately
+                // sends neither, and we cannot ask for a query that is sure to
+                // overflow a page.
+                metrics.set("search_has_next_page", page.has_next_page);
+                metrics.set("search_has_previous_page", page.has_previous_page);
             }
             if let Some(rtt) = search_rtt {
                 metrics.set_timing(&secs_metric("search_rtt"), rtt.as_secs_f64());

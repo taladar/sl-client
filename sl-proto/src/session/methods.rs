@@ -41,17 +41,18 @@ use super::{
     CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES,
     CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_USER_INFO,
     CHAT_SESSION_FETCH_HISTORY_TAG, ChatLifecycleView, ChatSession, ChatSessionInfo,
-    ChatSessionKind, ChatSessionLifecycle, Circuit, DEFAULT_DRAW_DISTANCE, FolderState,
-    FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION, INVENTORY_FETCH_MAX_ATTEMPTS,
-    Inventory, InventoryOwner, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT,
-    MAX_XFER_DOWNLOAD_BYTES, MessageCursor, OfferedUpload, PING_INTERVAL, PendingHandover,
-    PendingInvite, RELIABLE_REPLY_GRACE, ReliableSeverity, SIT_TIMEOUT, ScriptGrant, ScriptHolder,
-    ServerHistoryFetch, ServerHistoryMessage, ServerHistoryState, Session, SessionMessage,
-    SessionState, SitState, TELEPORT_TIMEOUT, TEXTURE_DOWNLOAD_MAX_ATTEMPTS,
-    TEXTURE_DOWNLOAD_STALL_TIMEOUT, TYPING_TIMEOUT, TakenControls, TeleportPhase, TextureDownload,
-    TransferDownload, TransferProgress, TransferPurpose, VoiceChannelInfo, XFER_OFFER_TIMEOUT,
-    XFER_REFUSED_RESULT, XFER_STALL_TIMEOUT, XFER_TIMEOUT_RESULT, XferDownload, XferPurpose,
-    XferUpload, deadline, merge_deadline,
+    ChatSessionKind, ChatSessionLifecycle, Circuit, DEFAULT_DRAW_DISTANCE, EXPERIENCE_QUERY_TAG,
+    FolderState, FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION,
+    INVENTORY_FETCH_MAX_ATTEMPTS, Inventory, InventoryOwner, LAND_RESOURCE_DETAIL_TAG,
+    LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT, MAX_XFER_DOWNLOAD_BYTES, MessageCursor,
+    OfferedUpload, PING_INTERVAL, PendingHandover, PendingInvite, RELIABLE_REPLY_GRACE,
+    ReliableSeverity, SIT_TIMEOUT, ScriptGrant, ScriptHolder, ServerHistoryFetch,
+    ServerHistoryMessage, ServerHistoryState, Session, SessionMessage, SessionState, SitState,
+    TELEPORT_TIMEOUT, TEXTURE_DOWNLOAD_MAX_ATTEMPTS, TEXTURE_DOWNLOAD_STALL_TIMEOUT,
+    TYPING_TIMEOUT, TakenControls, TeleportPhase, TextureDownload, TransferDownload,
+    TransferProgress, TransferPurpose, VoiceChannelInfo, XFER_OFFER_TIMEOUT, XFER_REFUSED_RESULT,
+    XFER_STALL_TIMEOUT, XFER_TIMEOUT_RESULT, XferDownload, XferPurpose, XferUpload, deadline,
+    merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
@@ -109,11 +110,12 @@ use sl_wire::{
     VoiceAccountInfo, WireError, build_group_notice_bucket, build_login_request, message_name,
     parse_agent_preferences, parse_attachment_resources, parse_avatar_picker_search,
     parse_datagram, parse_display_names, parse_experience_ids, parse_experience_infos,
-    parse_experience_permissions, parse_get_object_cost, parse_get_object_physics_data,
-    parse_gltf_material_override, parse_land_resource_detail, parse_land_resource_summary,
-    parse_land_resources_reply, parse_lsl_syntax, parse_object_physics_properties,
-    parse_region_experiences, parse_remote_parcel_answer, parse_resource_cost_selected,
-    parse_simulator_features, parse_user_info_reply, zero_decode,
+    parse_experience_permissions, parse_experience_query_reply, parse_experience_search_page,
+    parse_get_object_cost, parse_get_object_physics_data, parse_gltf_material_override,
+    parse_land_resource_detail, parse_land_resource_summary, parse_land_resources_reply,
+    parse_lsl_syntax, parse_object_physics_properties, parse_region_experiences,
+    parse_remote_parcel_answer, parse_resource_cost_selected, parse_simulator_features,
+    parse_user_info_reply, zero_decode,
 };
 use sl_wire::{
     Direction, GlobalCoordinates, XFER_CHUNK_SIZE, XferPacketId, combine_uuids, decode_xfer_chunk,
@@ -312,6 +314,74 @@ impl Session {
             message: message.to_owned(),
             reason: Some(error.to_string()),
         });
+    }
+
+    /// Decodes a `PushExpEnvironment` parameter list and queues the resulting
+    /// [`Event::ExperienceEnvironmentPush`]; `large` says which envelope it
+    /// arrived in, for the diagnostic.
+    ///
+    /// A push that will not decode is **not** silently dropped and is **not**
+    /// swallowed either: it comes back out as the raw
+    /// [`Event::GenericMessage`] it arrived as, beside a warning naming the
+    /// reason. A consumer that cannot render an environment it cannot parse can
+    /// at least tell the user an experience tried to change their sky.
+    fn push_environment_push(&mut self, invoice: Uuid, params: Vec<Vec<u8>>, large: bool) {
+        let experience_id = ExperienceKey::from(invoice);
+        match sl_wire::parse_environment_push(experience_id, &params) {
+            Ok(push) => self
+                .events
+                .push_back(Event::ExperienceEnvironmentPush(Box::new(push))),
+            Err(error) => {
+                tracing::warn!(
+                    error = %error,
+                    experience = %experience_id,
+                    "an experience environment push failed to parse; forwarding it raw"
+                );
+                let generic = GenericMessage {
+                    method: sl_wire::PUSH_EXP_ENVIRONMENT_METHOD.to_owned(),
+                    invoice: InvoiceId::from(invoice),
+                    params,
+                };
+                self.events.push_back(if large {
+                    Event::LargeGenericMessage(generic)
+                } else {
+                    Event::GenericMessage(generic)
+                });
+            }
+        }
+    }
+
+    /// Decodes an `ExperienceEvent` parameter list and queues the resulting
+    /// [`Event::ExperienceEvent`]; `large` says which envelope it arrived in.
+    ///
+    /// As with [`push_environment_push`](Self::push_environment_push), a report
+    /// that will not decode comes back out as the raw envelope it arrived in
+    /// rather than vanishing: this is the only record the agent gets of what an
+    /// experience did to them, so an unparsable one is still worth surfacing.
+    fn push_experience_event(&mut self, invoice: Uuid, params: Vec<Vec<u8>>, large: bool) {
+        let experience_id = ExperienceKey::from(invoice);
+        match sl_wire::parse_experience_event(experience_id, &params) {
+            Ok(event) => self
+                .events
+                .push_back(Event::ExperienceEvent(Box::new(event))),
+            Err(error) => {
+                tracing::warn!(
+                    error = %error,
+                    experience = %experience_id,
+                    "an experience event failed to parse; forwarding it raw"
+                );
+                let generic = GenericMessage {
+                    method: sl_wire::EXPERIENCE_EVENT_METHOD.to_owned(),
+                    invoice: InvoiceId::from(invoice),
+                    params,
+                };
+                self.events.push_back(if large {
+                    Event::LargeGenericMessage(generic)
+                } else {
+                    Event::GenericMessage(generic)
+                });
+            }
+        }
     }
 
     /// Sets the draw distance (metres) advertised in keep-alive `AgentUpdate`s.
@@ -844,9 +914,11 @@ impl Session {
                 Ok(infos) => self.events.push_back(Event::ExperienceInfo(infos)),
                 Err(error) => self.caps_decode_error(message, &error),
             },
-            // The reply to a `FindExperienceByName` GET: one page of search hits.
-            CAP_FIND_EXPERIENCE_BY_NAME => match parse_experience_infos(body) {
-                Ok(infos) => self.events.push_back(Event::ExperienceSearchResults(infos)),
+            // The reply to a `FindExperienceByName` GET: one page of search
+            // hits, plus the grid's `next_page_url` / `previous_page_url`
+            // markers saying whether there is a page on either side of it.
+            CAP_FIND_EXPERIENCE_BY_NAME => match parse_experience_search_page(body) {
+                Ok(page) => self.events.push_back(Event::ExperienceSearchResults(page)),
                 Err(error) => self.caps_decode_error(message, &error),
             },
             // The reply to a `GetExperiences` GET or an `ExperiencePreferences`
@@ -892,6 +964,25 @@ impl Session {
                         allowed,
                         blocked,
                         trusted,
+                    });
+                }
+                Err(error) => self.caps_decode_error(message, &error),
+            },
+            // The reply to an `ExperienceQuery` GET: which of the queried
+            // experiences the parcel admits. The runtime stamps the parcel it
+            // asked about into the reply (the answer names only experiences),
+            // so a viewer that has stepped on again can discard an answer about
+            // land it has already left.
+            EXPERIENCE_QUERY_TAG => match parse_experience_query_reply(body) {
+                Ok(experiences) => {
+                    let parcel_id = body
+                        .field_i32("parcelid", "parcelid")
+                        .ok()
+                        .flatten()
+                        .unwrap_or(-1);
+                    self.events.push_back(Event::ParcelExperiences {
+                        parcel_id,
+                        experiences,
                     });
                 }
                 Err(error) => self.caps_decode_error(message, &error),
@@ -4713,6 +4804,61 @@ impl Session {
                 if trimmed_string(&generic.method_data.method) == "emptymutelist" =>
             {
                 self.note_mute_list(Vec::new());
+            }
+            // An experience pushing an environment at this agent
+            // (`llSetEnvironment`) — the one live environment change in the
+            // protocol, and the only `GenericMessage` feature here that both
+            // envelopes carry: the reference dispatches `GenericMessage` and
+            // `LargeGenericMessage` through one handler, and a partial push
+            // carrying a whole sky fragment is exactly the payload the large
+            // envelope exists for.
+            AnyMessage::GenericMessage(generic)
+                if trimmed_string(&generic.method_data.method)
+                    == sl_wire::PUSH_EXP_ENVIRONMENT_METHOD =>
+            {
+                let params: Vec<Vec<u8>> = generic
+                    .param_list
+                    .iter()
+                    .map(|block| block.parameter.clone())
+                    .collect();
+                self.push_environment_push(generic.method_data.invoice, params, false);
+            }
+            AnyMessage::LargeGenericMessage(generic)
+                if trimmed_string(&generic.method_data.method)
+                    == sl_wire::PUSH_EXP_ENVIRONMENT_METHOD =>
+            {
+                let params: Vec<Vec<u8>> = generic
+                    .param_list
+                    .iter()
+                    .map(|block| block.parameter.clone())
+                    .collect();
+                self.push_environment_push(generic.method_data.invoice, params, true);
+            }
+            // An experience reporting, after the fact, a permission it exercised
+            // on this agent. Like the environment push it is dispatched off both
+            // envelopes, because the reference routes both through the one
+            // `gGenericDispatcher` the handler is registered on.
+            AnyMessage::GenericMessage(generic)
+                if trimmed_string(&generic.method_data.method)
+                    == sl_wire::EXPERIENCE_EVENT_METHOD =>
+            {
+                let params: Vec<Vec<u8>> = generic
+                    .param_list
+                    .iter()
+                    .map(|block| block.parameter.clone())
+                    .collect();
+                self.push_experience_event(generic.method_data.invoice, params, false);
+            }
+            AnyMessage::LargeGenericMessage(generic)
+                if trimmed_string(&generic.method_data.method)
+                    == sl_wire::EXPERIENCE_EVENT_METHOD =>
+            {
+                let params: Vec<Vec<u8>> = generic
+                    .param_list
+                    .iter()
+                    .map(|block| block.parameter.clone())
+                    .collect();
+                self.push_experience_event(generic.method_data.invoice, params, true);
             }
             // A generic method-name + parameter envelope used for a grab-bag of
             // loosely-coupled features keyed by `Method` (the feature-specific

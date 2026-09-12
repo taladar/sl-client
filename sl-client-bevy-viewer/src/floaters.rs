@@ -196,9 +196,32 @@ pub(crate) const FLOATERS: &[FloaterElement] = &[
         content: FloaterContent::Specimen(crate::emoji_picker::spawn_emoji_picker_specimen),
     },
     FloaterElement {
+        id: "experience-profile",
+        summary: "Experience Profile: one experience's name, description, rating, owner and home \
+                  location, its allow / forget / block actions, and an administrator's editable \
+                  fields. One window per experience, so its geometry is not persisted.",
+        spec: crate::experience_profile::experience_profile_floater_spec,
+        content: FloaterContent::Stub(
+            "The read-only field column over the permission actions, with the edit column in its \
+             place while editing.",
+        ),
+    },
+    FloaterElement {
+        id: "experience-picker",
+        summary: "Choose Experience: the paged name search over its rating-filtered result \
+                  table, and the Select / Cancel / View Profile reply row every estate \
+                  experience list adds through.",
+        spec: crate::experience_picker::experience_picker_floater_spec,
+        content: FloaterContent::Stub(
+            "The query row, the rating filter, the search-result table and the Select / \
+             Cancel / View Profile row.",
+        ),
+    },
+    FloaterElement {
         id: "experiences",
-        summary: "Experiences: the Allowed / Blocked headed lists, each row an experience name \
-                  with a Forget button.",
+        summary: "Experiences: the seven tabs -- search, the Allowed / Blocked / Admin / \
+                  Contributor / Owned lists and the event log -- each a sortable, virtualized \
+                  table over its capability's reply.",
         spec: crate::experiences_floater::experiences_floater_spec,
         content: FloaterContent::Specimen(crate::experiences_floater::spawn_experiences_specimen),
     },

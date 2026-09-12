@@ -658,9 +658,20 @@ about-region-rating-mature = Moderate
 about-region-rating-adult = Adult
 about-region-rating-unknown = Unknown
 
-# Experiences placeholder tab (the Environment tab hosts the shared
-# land-environment panel).
-about-region-experiences-unimplemented = Region experiences are not implemented yet.
+# Experiences tab — the estate's three experience lists. The captions are the
+# reference viewer's own explanations of where each list applies; they are the
+# only place the rules are written down, so keep them complete when translating.
+about-region-experiences-caption = Changes on this tab affect every region in the estate.
+about-region-experiences-trusted = Key experiences
+about-region-experiences-allowed = Allowed experiences
+about-region-experiences-blocked = Blocked experiences
+about-region-experiences-trusted-help = Any experience may be Key. Key experiences may run on this estate — and if the estate is not open to the public, residents taking part in one may enter and stay while they remain in it.
+about-region-experiences-allowed-help = Only land-scoped experiences may be allowed. Allowed experiences may run on this estate.
+about-region-experiences-blocked-help = Only grid-scoped experiences may be blocked. Blocked experiences may not run on this estate.
+about-region-experiences-add-trusted = Add Key Experience…
+about-region-experiences-add-allowed = Add Allowed Experience…
+about-region-experiences-add-blocked = Add Blocked Experience…
+about-region-experiences-profile = Profile
 
 ## The land-environment panel (viewer-region-environment-panel) — the Region /
 ## Estate floater's Environment tab and About Land's.
@@ -3336,14 +3347,118 @@ experience-permission-history = Experience: { $experience }
 experience-scope-grid = grid-wide
 experience-scope-land = land-scoped
 
-# The Experiences floater (viewer-experience-permission-dialog): the manage surface
-# listing the agent's allowed / blocked experiences with a per-row Forget.
+# The Experiences floater (viewer-experiences-floater): the manage surface's
+# seven tabs over the experience capabilities.
 experiences-title = Experiences
 experiences-refresh = Refresh
-experiences-allowed-heading = Allowed experiences
-experiences-blocked-heading = Blocked experiences
-experiences-empty = No experiences.
 experiences-forget = Forget
+experiences-profile = Profile…
+experiences-find = Find
+experiences-search-placeholder = Experience name
+experiences-search-rating = Max rating
+experiences-searching = Searching…
+experiences-search-page = Page { $page }
+experiences-page-previous = ◀ Previous
+experiences-page-next = Next ▶
+
+# The floater's tab labels, in the reference's order.
+experiences-tab-search = Search
+experiences-tab-allowed = Allowed
+experiences-tab-blocked = Blocked
+experiences-tab-admin = Admin
+experiences-tab-contributor = Contributor
+experiences-tab-owned = Owned
+experiences-tab-events = Recent events
+
+# The table column headers shared by the seven lists.
+experiences-col-name = Experience
+experiences-col-rating = Rating
+experiences-col-owner = Owner
+experiences-col-time = Time
+experiences-col-event = Event
+experiences-col-experience = Experience
+experiences-col-object = Object
+
+# The experience event log (viewer-experience-event-stream): the per-account
+# record of what an experience the agent joined actually did to them, and its
+# Recent events tab in the Experiences floater.
+experiences-events-clear = Clear
+experiences-events-notify = Notify on every event
+# The Event cell when the row stands for more than one identical report.
+experiences-event-kind-repeated = { $event } ×{ $count }
+
+# The reusable "Choose Experience" picker (the reference's
+# LLFloaterExperiencePicker), opened by every estate experience list's Add.
+# Its query field, rating filter, result columns and paging arrows reuse the
+# experiences-* keys above, because they are literally the same search.
+experience-picker-title = Choose Experience
+experience-picker-select = Select
+experience-picker-cancel = Cancel
+
+# The content ratings an experience can carry, shared by the profile window's
+# combo and the search tab's filter.
+experience-rating-general = General
+experience-rating-moderate = Moderate
+experience-rating-adult = Adult
+# An experience the grid named with an empty string (the reference's
+# ExperienceNameUntitled).
+experience-name-untitled = (Untitled)
+
+# The Experience Profile window (viewer-experiences-floater): one experience's
+# page, and — for an administrator — its editable fields.
+experience-profile-title = Experience Profile
+experience-profile-loading = (loading)
+experience-profile-rating = Rating
+experience-profile-owner = Owner
+experience-profile-owner-loading = (loading)
+experience-profile-owner-none = (none)
+experience-profile-location = Home location
+experience-profile-location-none = (not set)
+experience-profile-scope-grid = This experience works grid-wide.
+experience-profile-scope-land = This experience works only on its own land.
+experience-profile-privileged = This is a Linden experience; it cannot be blocked.
+experience-profile-allow = Allow
+experience-profile-forget = Forget
+experience-profile-block = Block
+experience-profile-edit = Edit
+experience-profile-save = Save
+experience-profile-cancel = Cancel
+experience-profile-name-caption = Name
+experience-profile-description-caption = Description
+experience-profile-set-location = Set to current location
+experience-profile-clear-location = Clear location
+experience-profile-enabled = Enabled
+experience-profile-private = Private
+experience-profile-saving = Saving…
+experience-profile-saved = Saved.
+experience-profile-not-loaded = This experience has not loaded yet.
+experience-profile-no-location = Your location is not known yet.
+
+# What an experience did, as a notification body reads it (the reference's
+# ExperiencePermission<n> strings).
+experience-permission-take-controls = take over your controls
+experience-permission-trigger-animation = trigger animations on your avatar
+experience-permission-attach = attach to your avatar
+experience-permission-track-camera = track your camera
+experience-permission-control-camera = control your camera
+experience-permission-teleport = teleport you
+experience-permission-join-experience = automatically accept experience permissions
+experience-permission-force-sit = force your avatar to sit
+experience-permission-change-environment = change your environment settings
+experience-permission-unknown = perform an unknown operation: { $permission }
+
+# The same, as the events list's Event column shows it (the reference's
+# ExperiencePermissionShort<n> strings).
+experience-permission-short-take-controls = Take Controls
+experience-permission-short-trigger-animation = Trigger Animations
+experience-permission-short-attach = Attach
+experience-permission-short-track-camera = Track Camera
+experience-permission-short-control-camera = Control Camera
+experience-permission-short-teleport = Teleport
+experience-permission-short-join-experience = Permission
+experience-permission-short-force-sit = Sit
+experience-permission-short-change-environment = Environment
+experience-permission-short-unknown = Unknown ({ $permission })
 
 # The offers & invites toasts (viewer-dialog-offers-invites): the accept /
 # decline cards the grid throws at the user over IM — an inventory offer, a

@@ -3,10 +3,10 @@
 use reqwest::Client as ReqwestClient;
 use sl_proto::{
     AVATAR_PICKER_SEARCH_TAG, CAP_CHAT_SESSION_REQUEST, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX,
-    CAP_REMOTE_PARCEL_REQUEST, CHAT_SESSION_FETCH_HISTORY_TAG, LAND_RESOURCE_DETAIL_TAG,
-    LAND_RESOURCE_SUMMARY_TAG, Llsd, ParcelKey, RemoteParcelRequest, build_land_resources_request,
-    build_remote_parcel_request, parse_land_resources_reply, parse_llsd_xml,
-    stamp_remote_parcel_request,
+    CAP_REMOTE_PARCEL_REQUEST, CHAT_SESSION_FETCH_HISTORY_TAG, EXPERIENCE_QUERY_TAG,
+    LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, Llsd, ParcelKey, RemoteParcelRequest,
+    build_land_resources_request, build_remote_parcel_request, parse_land_resources_reply,
+    parse_llsd_xml, stamp_remote_parcel_request,
 };
 use std::collections::HashMap;
 use tokio::sync::mpsc;
@@ -238,6 +238,29 @@ pub(crate) async fn get_caps_llsd(
         }
         None => report_caps_failure(&caps_tx, cap).await,
     }
+}
+
+/// GETs the `ExperienceQuery` capability and forwards its reply to `caps_tx`
+/// tagged [`EXPERIENCE_QUERY_TAG`], stamping the queried `parcel_id` into the
+/// reply map — the answer names only experiences, so without the stamp it could
+/// not be told from one about a parcel the agent has already walked off.
+/// Mirrors the bevy `run_experience_query`.
+pub(crate) async fn get_experience_query(
+    url: String,
+    parcel_id: i32,
+    http: ReqwestClient,
+    caps_tx: mpsc::Sender<(String, Llsd)>,
+) {
+    let Some(reply) = get_llsd(&url, EXPERIENCE_QUERY_TAG, &http).await else {
+        report_caps_failure(&caps_tx, EXPERIENCE_QUERY_TAG).await;
+        return;
+    };
+    let mut map = match reply {
+        Llsd::Map(map) => map,
+        _other => HashMap::new(),
+    };
+    let _previous = map.insert("parcelid".to_owned(), Llsd::Integer(parcel_id));
+    deliver(&caps_tx, (EXPERIENCE_QUERY_TAG.to_owned(), Llsd::Map(map))).await;
 }
 
 /// GETs the `AvatarPickerSearch` capability and forwards its reply to `caps_tx`
