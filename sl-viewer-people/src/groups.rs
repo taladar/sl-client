@@ -58,7 +58,7 @@ use crate::virtual_list::{
 };
 use crate::world_api::OpenGroupProfile;
 use crate::world_api::{ConversationKey, OpenConversation};
-use crate::world_api::{GroupRow, GroupsModel};
+use crate::world_api::{GroupChoice, GroupRow, GroupsModel};
 
 /// A group-list row's uniform height, in logical pixels — matched to the friends
 /// list beside it so the whole pane reads as one surface.
@@ -94,6 +94,13 @@ const SELECTED_ROW_BACKGROUND: Color = Color::srgba(0.30, 0.42, 0.62, 0.55);
 
 /// An action button's background.
 const ACTION_BACKGROUND: Color = Color::srgb(0.24, 0.29, 0.38);
+
+/// A disabled action button's background — the same hue, sunk towards the panel
+/// so it reads as unavailable rather than as a second kind of button.
+const ACTION_DISABLED_BACKGROUND: Color = Color::srgb(0.18, 0.20, 0.24);
+
+/// A disabled action button's label colour — dim, matching the chrome text.
+const DISABLED_LABEL_COLOR: Color = Color::srgb(0.52, 0.55, 0.60);
 
 /// The table header row's background — a recessed strip above the list.
 const HEADER_BACKGROUND: Color = Color::srgb(0.14, 0.17, 0.22);
@@ -138,6 +145,9 @@ const HEADER_ACTIVE_KEY: &str = "groups-header-active";
 /// The Fluent key for the group-count line.
 const COUNT_KEY: &str = "groups-count";
 
+/// The Fluent key for the leading "wear no group" row's label.
+const NONE_KEY: &str = "groups-none";
+
 /// The Fluent key for the confirm dialog's leave prompt (arg `name`).
 const LEAVE_CONFIRM_PROMPT_KEY: &str = "groups-leave-confirm-prompt";
 
@@ -175,6 +185,14 @@ enum GroupAction {
     Leave,
 }
 
+/// Every action the column offers, in the order it stacks them.
+const ACTIONS: [GroupAction; 4] = [
+    GroupAction::Info,
+    GroupAction::Im,
+    GroupAction::Activate,
+    GroupAction::Leave,
+];
+
 impl GroupAction {
     /// The Fluent key for this action's button label.
     const fn label_key(self) -> &'static str {
@@ -187,16 +205,48 @@ impl GroupAction {
     }
 }
 
-/// The wire [`Command`] an action produces for `group`, or `None` for the actions
-/// that are not a plain fire-and-forget command: [`GroupAction::Info`] (which
-/// opens the profile floater via a message) and [`GroupAction::Im`] (which opens a
-/// conversation tab and starts the session through separate paths). Pure so the
-/// routing is unit-testable.
-const fn group_command(action: GroupAction, group: GroupKey) -> Option<Command> {
+/// Whether `action` can do anything for the current `selection` — the single
+/// predicate both the button's greying and its press refusal read, so a greyed
+/// button is exactly an inert one (Bevy's own disabled marker is advisory, and
+/// would not stop the observer).
+///
+/// Mirrors the reference's `LLGroupList::onContextMenuItemEnable`: Info, IM and
+/// Leave need a **real** group, so the "no group" row disables all three; every
+/// row can be activated, except the one already worn, which activating would not
+/// change. Nothing selected disables everything.
+fn action_enabled(action: GroupAction, selection: Option<GroupChoice>, view: &GroupsView) -> bool {
+    let Some(choice) = selection else {
+        return false;
+    };
+    match action {
+        GroupAction::Info | GroupAction::Im | GroupAction::Leave => {
+            matches!(choice, GroupChoice::Group(_))
+        }
+        GroupAction::Activate => !view
+            .rows
+            .iter()
+            .any(|row| row.group == choice && row.active),
+    }
+}
+
+/// The wire [`Command`] an action produces for `choice`, or `None` for the
+/// actions that are not a plain fire-and-forget command: [`GroupAction::Info`]
+/// (which opens the profile floater via a message) and [`GroupAction::Im`] (which
+/// opens a conversation tab and starts the session through separate paths). Pure
+/// so the routing is unit-testable.
+///
+/// [`GroupChoice::NoGroup`] activates as `ActivateGroup(None)` — the only way to
+/// wear no group and so carry no title. Leave produces nothing for it: there is
+/// no group to leave. What the user may *reach* is [`action_enabled`]'s business;
+/// this is only what the reachable action sends.
+const fn group_command(action: GroupAction, choice: GroupChoice) -> Option<Command> {
     match action {
         GroupAction::Info | GroupAction::Im => None,
-        GroupAction::Activate => Some(Command::ActivateGroup(Some(group))),
-        GroupAction::Leave => Some(Command::LeaveGroup(group)),
+        GroupAction::Activate => Some(Command::ActivateGroup(choice.key())),
+        GroupAction::Leave => match choice {
+            GroupChoice::NoGroup => None,
+            GroupChoice::Group(group) => Some(Command::LeaveGroup(group)),
+        },
     }
 }
 
@@ -212,10 +262,26 @@ pub(crate) struct GroupsUi {
     viewport: Entity,
     /// The group-count line under the list.
     count_text: Entity,
+    /// The action column's buttons, each with the label node to dim alongside it
+    /// — read by [`refresh_group_actions`] to grey the ones the current selection
+    /// cannot support.
+    action_buttons: Vec<ActionButton>,
     /// The leave-confirm modal overlay (shown while a leave is pending).
     confirm_overlay: Entity,
     /// The confirm modal's prompt text node (rewritten with the group's name).
     confirm_text: Entity,
+}
+
+/// One spawned action button: which action it fires, the button node to recolour
+/// and the label node to dim with it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ActionButton {
+    /// The action this button fires.
+    action: GroupAction,
+    /// The button node (carries the background).
+    button: Entity,
+    /// The button's label node (carries the text colour).
+    label: Entity,
 }
 
 /// The ordered, render-ready groups projection the virtualized list binds to.
@@ -227,17 +293,19 @@ pub(crate) struct GroupsView {
     built_revision: u64,
 }
 
-/// The currently-selected group, which the action column acts on.
+/// The currently-selected row, which the action column acts on — `None` when
+/// nothing is selected, which is distinct from a selected
+/// [`GroupChoice::NoGroup`] row.
 #[derive(Resource, Debug, Default)]
-pub(crate) struct SelectedGroup(Option<GroupKey>);
+pub(crate) struct SelectedGroup(Option<GroupChoice>);
 
 /// The last group-row click, for detecting a double-click (two presses on the same
-/// group within [`DOUBLE_CLICK_SECS`] open its IM). Tracked by group id, not row
+/// group within [`DOUBLE_CLICK_SECS`] open its IM). Tracked by choice, not row
 /// entity, since the virtualized rows are recycled.
 #[derive(Resource, Debug, Default)]
 pub(crate) struct GroupClickTracker {
-    /// The group the last press selected, if any.
-    group: Option<GroupKey>,
+    /// The row the last press selected, if any.
+    group: Option<GroupChoice>,
     /// When that press landed, in seconds since startup ([`Time::elapsed_secs`]).
     time: f32,
 }
@@ -248,10 +316,10 @@ pub(crate) struct GroupClickTracker {
 #[derive(Resource, Debug, Default)]
 pub(crate) struct PendingLeaveConfirm(Option<GroupKey>);
 
-/// The group a pooled row currently presents (so a press knows which to select),
+/// The choice a pooled row currently presents (so a press knows which to select),
 /// or `None` when the row is parked.
 #[derive(Component, Debug, Clone, Copy)]
-struct BoundGroup(Option<GroupKey>);
+struct BoundGroup(Option<GroupChoice>);
 
 /// The persistent inner parts of a pooled group row, updated in place on bind.
 #[derive(Component)]
@@ -281,6 +349,7 @@ impl Plugin for GroupsPlugin {
                     ingest_group_events,
                     rebuild_groups_view,
                     refresh_groups,
+                    refresh_group_actions,
                     drive_leave_confirm,
                 )
                     .chain()
@@ -407,20 +476,17 @@ fn spawn_groups_panel(
             ChildOf(body),
         ))
         .id();
-    for action in [
-        GroupAction::Info,
-        GroupAction::Im,
-        GroupAction::Activate,
-        GroupAction::Leave,
-    ] {
-        spawn_action_button(&mut commands, actions, action);
-    }
+    let action_buttons = ACTIONS
+        .into_iter()
+        .map(|action| spawn_action_button(&mut commands, actions, action))
+        .collect();
 
     let (confirm_overlay, confirm_text) = spawn_leave_confirm_modal(&mut commands, root.0);
 
     commands.insert_resource(GroupsUi {
         viewport,
         count_text,
+        action_buttons,
         confirm_overlay,
         confirm_text,
     });
@@ -477,8 +543,21 @@ fn spawn_groups_header(commands: &mut Commands, list_column: Entity) {
 /// Spawn one action-column button wired to `action`, acting on the current
 /// selection: Info opens the profile floater, IM opens the chat tab, Activate
 /// wears the group, and Leave opens a confirm modal.
-fn spawn_action_button(commands: &mut Commands, actions: Entity, action: GroupAction) {
-    commands
+fn spawn_action_button(
+    commands: &mut Commands,
+    actions: Entity,
+    action: GroupAction,
+) -> ActionButton {
+    let label = commands
+        .spawn((
+            Text::new(String::new()),
+            UiFont::Sans.at(CHROME_FONT_SIZE),
+            TextColor(LABEL_COLOR),
+            Translated::new(action.label_key()),
+            Pickable::IGNORE,
+        ))
+        .id();
+    let button = commands
         .spawn((
             Node {
                 flex_shrink: 0.0,
@@ -495,16 +574,11 @@ fn spawn_action_button(commands: &mut Commands, actions: Entity, action: GroupAc
             Name::new("groups-action"),
             ChildOf(actions),
         ))
-        .with_child((
-            Text::new(String::new()),
-            UiFont::Sans.at(CHROME_FONT_SIZE),
-            TextColor(LABEL_COLOR),
-            Translated::new(action.label_key()),
-            Pickable::IGNORE,
-        ))
+        .add_child(label)
         .observe(
             move |mut press: On<Pointer<Press>>,
                   selected: Res<SelectedGroup>,
+                  view: Res<GroupsView>,
                   mut pending: ResMut<PendingLeaveConfirm>,
                   mut sl: MessageWriter<SlCommand>,
                   mut open: MessageWriter<OpenConversation>,
@@ -513,31 +587,52 @@ fn spawn_action_button(commands: &mut Commands, actions: Entity, action: GroupAc
                 if press.button != PointerButton::Primary {
                     return;
                 }
-                let Some(group) = selected.0 else {
+                let Some(choice) = selected.0 else {
                     return;
                 };
+                // A greyed button must really be inert: Bevy's disabled marker is
+                // advisory, so the refusal lives here and the greying in
+                // `refresh_group_actions` reads from the same predicate.
+                if !action_enabled(action, Some(choice), &view) {
+                    return;
+                }
                 match action {
                     // Info opens the subject-bound group profile floater.
                     GroupAction::Info => {
-                        profile.write(OpenGroupProfile { group });
+                        if let GroupChoice::Group(group) = choice {
+                            profile.write(OpenGroupProfile { group });
+                        }
                     }
                     // IM opens (and joins) the group's chat tab. Mirrors the
                     // Friends list's IM, which opens a one-to-one tab.
-                    GroupAction::Im => open_group_im(group, &mut open, &mut sl),
+                    GroupAction::Im => {
+                        if let GroupChoice::Group(group) = choice {
+                            open_group_im(group, &mut open, &mut sl);
+                        }
+                    }
                     // Leaving is destructive — open the confirm modal instead of
                     // sending straight away.
                     GroupAction::Leave => {
-                        pending.0 = Some(group);
+                        if let GroupChoice::Group(group) = choice {
+                            pending.0 = Some(group);
+                        }
                     }
-                    // Activate fires immediately.
+                    // Activate fires immediately — including for the "no group"
+                    // row, which is what takes the title off.
                     GroupAction::Activate => {
-                        if let Some(command) = group_command(action, group) {
+                        if let Some(command) = group_command(action, choice) {
                             sl.write(SlCommand(command));
                         }
                     }
                 }
             },
-        );
+        )
+        .id();
+    ActionButton {
+        action,
+        button,
+        label,
+    }
 }
 
 /// Spawn the leave-confirm modal: a full-window scrim (blocking clicks behind it)
@@ -779,6 +874,48 @@ fn refresh_groups(
     }
 }
 
+/// Grey each action button the current selection cannot support, from the same
+/// [`action_enabled`] predicate its press refusal uses — so the "no group" row
+/// shows Info, IM and Leave as unavailable instead of offering three buttons that
+/// do nothing, and the worn group shows Activate the same way.
+fn refresh_group_actions(
+    selected: Res<SelectedGroup>,
+    view: Res<GroupsView>,
+    ui: Option<Res<GroupsUi>>,
+    mut backgrounds: Query<&mut BackgroundColor>,
+    mut colors: Query<&mut TextColor>,
+) {
+    let Some(ui) = ui else {
+        return;
+    };
+    if !selected.is_changed() && !view.is_changed() && !ui.is_added() {
+        return;
+    }
+    for entry in &ui.action_buttons {
+        let enabled = action_enabled(entry.action, selected.0, &view);
+        let wanted = if enabled {
+            ACTION_BACKGROUND
+        } else {
+            ACTION_DISABLED_BACKGROUND
+        };
+        if let Ok(mut background) = backgrounds.get_mut(entry.button)
+            && background.0 != wanted
+        {
+            background.0 = wanted;
+        }
+        let wanted = TextColor(if enabled {
+            LABEL_COLOR
+        } else {
+            DISABLED_LABEL_COLOR
+        });
+        if let Ok(mut color) = colors.get_mut(entry.label)
+            && *color != wanted
+        {
+            *color = wanted;
+        }
+    }
+}
+
 /// Show / hide the leave-confirm modal from [`PendingLeaveConfirm`], filling the
 /// prompt with the pending group's name.
 fn drive_leave_confirm(
@@ -897,6 +1034,7 @@ fn bind_group_rows(
     view: Res<GroupsView>,
     selected: Res<SelectedGroup>,
     ui: Option<Res<GroupsUi>>,
+    translator: Translator,
     mut rows: Query<(
         Entity,
         Ref<VirtualRow>,
@@ -910,7 +1048,10 @@ fn bind_group_rows(
     let Some(ui) = ui else {
         return;
     };
-    let refresh_all = view.is_changed() || selected.is_changed();
+    // The "no group" row carries no name of its own — its label is a localised
+    // string, so a locale switch has to re-bind the rows that show it.
+    let none_label = translator.get(NONE_KEY);
+    let refresh_all = view.is_changed() || selected.is_changed() || translator.changed();
     for (row_entity, row, child_of, parts, mut bound) in &mut rows {
         if child_of.parent() != ui.viewport {
             continue;
@@ -927,7 +1068,13 @@ fn bind_group_rows(
         bound.0 = Some(group_row.group);
         // The name — brighter (accent) for the active group, so it reads as worn.
         if let Ok((mut text, mut color)) = texts.get_mut(parts.label) {
-            set_text(&mut text, &group_row.name);
+            set_text(
+                &mut text,
+                match group_row.group {
+                    GroupChoice::NoGroup => &none_label,
+                    GroupChoice::Group(_) => &group_row.name,
+                },
+            );
             *color = TextColor(if group_row.active {
                 ACTIVE_COLOR
             } else {
@@ -993,18 +1140,21 @@ fn on_group_row_press(
     let Ok(bound) = rows.get(press.entity) else {
         return;
     };
-    let Some(group) = bound.0 else {
+    let Some(choice) = bound.0 else {
         return;
     };
-    selected.0 = Some(group);
+    selected.0 = Some(choice);
     let now = time.elapsed_secs();
-    if tracker.group == Some(group) && now - tracker.time <= DOUBLE_CLICK_SECS {
-        // Second quick click on the same group: open its IM. Clear the tracker so a
-        // third click does not re-fire.
-        open_group_im(group, &mut open, &mut sl);
+    if tracker.group == Some(choice) && now - tracker.time <= DOUBLE_CLICK_SECS {
+        // Second quick click on the same row: open its IM — for a real group only,
+        // since the "no group" row has no conversation to open. Clear the tracker
+        // so a third click does not re-fire either way.
+        if let GroupChoice::Group(group) = choice {
+            open_group_im(group, &mut open, &mut sl);
+        }
         tracker.group = None;
     } else {
-        tracker.group = Some(group);
+        tracker.group = Some(choice);
         tracker.time = now;
     }
 }
@@ -1020,8 +1170,9 @@ fn set_text(text: &mut Text, value: &str) {
 #[cfg(test)]
 mod tests {
     use super::{
-        COUNT_KEY, Command, GroupAction, GroupsModel, GroupsUi, GroupsView, ROW_HEIGHT,
-        VirtualList, group_command, rebuild_groups_view, refresh_groups,
+        ACTIONS, COUNT_KEY, Command, GroupAction, GroupChoice, GroupRow, GroupsModel, GroupsUi,
+        GroupsView, ROW_HEIGHT, VirtualList, action_enabled, group_command, rebuild_groups_view,
+        refresh_groups,
     };
     use crate::i18n::install_untranslated;
     use bevy::prelude::*;
@@ -1040,24 +1191,59 @@ mod tests {
         }
     }
 
+    /// The real-group rows, without the leading "no group" choice.
+    fn real_rows(model: &GroupsModel) -> Vec<GroupRow> {
+        model
+            .ordered()
+            .into_iter()
+            .filter(|row| matches!(row.group, GroupChoice::Group(_)))
+            .collect()
+    }
+
     /// Memberships seed the model, replacing wholesale (the wire list is the full
     /// membership set), and rows come out case-folded by name.
     #[test]
     fn memberships_seed_and_order() {
         let mut model = GroupsModel::default();
         model.apply_memberships(&[membership(1, "zeta guild"), membership(2, "Alpha club")]);
-        let names: Vec<String> = model.ordered().into_iter().map(|row| row.name).collect();
+        let names: Vec<String> = real_rows(&model).into_iter().map(|row| row.name).collect();
         assert_eq!(names, vec!["Alpha club", "zeta guild"]);
         // A second (full) push replaces the set.
         model.apply_memberships(&[membership(3, "Only one")]);
         assert_eq!(model.len(), 1);
         assert_eq!(
-            model.ordered().first().map(|row| row.name.clone()),
+            real_rows(&model).first().map(|row| row.name.clone()),
             Some("Only one".to_owned())
         );
     }
 
-    /// The active group is marked on its row and cleared when it changes / is left.
+    /// The "no group" choice leads the list whenever there is a group to wear
+    /// instead — it is the only way back to no title — and is absent for a member
+    /// of nothing, where it would do nothing.
+    #[test]
+    fn the_no_group_row_leads_a_non_empty_list() {
+        let mut model = GroupsModel::default();
+        assert!(
+            model.ordered().is_empty(),
+            "a member of no groups is offered nothing at all"
+        );
+        model.apply_memberships(&[membership(1, "zeta guild"), membership(2, "Alpha club")]);
+        let rows = model.ordered();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(
+            rows.first().map(|row| row.group),
+            Some(GroupChoice::NoGroup)
+        );
+        assert_eq!(
+            rows.first().map(|row| row.name.as_str()),
+            Some(""),
+            "its label is the UI's localised string, not the model's"
+        );
+    }
+
+    /// The active group is marked on its row and cleared when it changes / is left
+    /// — and with nothing worn the mark moves to the "no group" row, which is what
+    /// makes "wearing no title" visible as a state rather than an absence.
     #[test]
     fn active_group_marks_its_row() {
         let mut model = GroupsModel::default();
@@ -1065,11 +1251,12 @@ mod tests {
         let one = GroupKey::from(Uuid::from_u128(1));
         model.set_active(Some(one), "");
         let active: Vec<bool> = model.ordered().into_iter().map(|row| row.active).collect();
-        // Sorted "One" then "Two"; only "One" is active.
-        assert_eq!(active, vec![true, false]);
-        // Clearing the active group unmarks it.
+        // The none row, then "One" then "Two"; only "One" is active.
+        assert_eq!(active, vec![false, true, false]);
+        // Clearing the active group unmarks it and marks the none row.
         model.set_active(None, "");
-        assert!(model.ordered().iter().all(|row| !row.active));
+        let active: Vec<bool> = model.ordered().into_iter().map(|row| row.active).collect();
+        assert_eq!(active, vec![true, false, false]);
     }
 
     /// Removing a group drops it and clears the active marker if it was active; an
@@ -1082,7 +1269,7 @@ mod tests {
         model.set_active(Some(one), "");
         model.remove(one);
         assert_eq!(model.len(), 1);
-        assert!(model.ordered().iter().all(|row| !row.active));
+        assert!(real_rows(&model).iter().all(|row| !row.active));
         // An unknown id changes nothing.
         let before = model.revision();
         model.remove(GroupKey::from(Uuid::from_u128(42)));
@@ -1094,8 +1281,7 @@ mod tests {
     fn unnamed_group_uses_short_id() {
         let mut model = GroupsModel::default();
         model.apply_memberships(&[membership(0x1234_5678_9abc, "")]);
-        let name = model
-            .ordered()
+        let name = real_rows(&model)
             .first()
             .map(|row| row.name.clone())
             .unwrap_or_default();
@@ -1107,7 +1293,7 @@ mod tests {
     /// the session elsewhere) produce none.
     #[test]
     fn action_command_mapping() {
-        let group = GroupKey::from(Uuid::from_u128(7));
+        let group = GroupChoice::Group(GroupKey::from(Uuid::from_u128(7)));
         assert!(group_command(GroupAction::Info, group).is_none());
         assert!(group_command(GroupAction::Im, group).is_none());
         assert!(matches!(
@@ -1118,6 +1304,75 @@ mod tests {
             group_command(GroupAction::Leave, group),
             Some(Command::LeaveGroup(_))
         ));
+    }
+
+    /// Activating the "no group" row is the whole point of it: it goes out as
+    /// `ActivateGroup(None)`, the wire's "wear nothing", which no real group's
+    /// activation can express. Leaving it produces nothing — there is no group to
+    /// leave.
+    #[test]
+    fn the_no_group_row_activates_as_no_group() {
+        assert!(matches!(
+            group_command(GroupAction::Activate, GroupChoice::NoGroup),
+            Some(Command::ActivateGroup(None))
+        ));
+        assert!(group_command(GroupAction::Leave, GroupChoice::NoGroup).is_none());
+        assert!(group_command(GroupAction::Info, GroupChoice::NoGroup).is_none());
+        assert!(group_command(GroupAction::Im, GroupChoice::NoGroup).is_none());
+    }
+
+    /// What the action column offers, from the same predicate the press refusal
+    /// reads: Info / IM / Leave need a real group, every row but the worn one can
+    /// be activated, and an empty selection offers nothing.
+    #[test]
+    fn only_the_actions_a_row_supports_are_offered() {
+        let mut model = GroupsModel::default();
+        model.apply_memberships(&[membership(1, "One"), membership(2, "Two")]);
+        let one = GroupChoice::Group(GroupKey::from(Uuid::from_u128(1)));
+        model.set_active(one.key(), "");
+        let view = GroupsView {
+            rows: model.ordered(),
+            built_revision: model.revision(),
+        };
+
+        // Nothing selected: nothing to do.
+        for action in ACTIONS {
+            assert!(!action_enabled(action, None, &view), "{action:?} with none");
+        }
+        // The "no group" row: only Activate, since no group is worn... it is not
+        // worn here, "One" is.
+        assert!(action_enabled(
+            GroupAction::Activate,
+            Some(GroupChoice::NoGroup),
+            &view
+        ));
+        for action in [GroupAction::Info, GroupAction::Im, GroupAction::Leave] {
+            assert!(
+                !action_enabled(action, Some(GroupChoice::NoGroup), &view),
+                "{action:?} needs a real group"
+            );
+        }
+        // The worn group: everything but Activate, which would change nothing.
+        assert!(!action_enabled(GroupAction::Activate, Some(one), &view));
+        for action in [GroupAction::Info, GroupAction::Im, GroupAction::Leave] {
+            assert!(
+                action_enabled(action, Some(one), &view),
+                "{action:?} on a group"
+            );
+        }
+
+        // With nothing worn, the "no group" row is the one that cannot be activated.
+        model.set_active(None, "");
+        let view = GroupsView {
+            rows: model.ordered(),
+            built_revision: model.revision(),
+        };
+        assert!(!action_enabled(
+            GroupAction::Activate,
+            Some(GroupChoice::NoGroup),
+            &view
+        ));
+        assert!(action_enabled(GroupAction::Activate, Some(one), &view));
     }
 
     /// The memberships are a **single push** the grid sends within a frame or two
@@ -1148,6 +1403,7 @@ mod tests {
         app.world_mut().insert_resource(GroupsUi {
             viewport,
             count_text,
+            action_buttons: Vec::new(),
             confirm_overlay,
             confirm_text,
         });
@@ -1158,7 +1414,8 @@ mod tests {
                 .entity(viewport)
                 .get::<VirtualList>()
                 .map(|list| list.item_count),
-            Some(2),
+            // Two memberships plus the leading "no group" row.
+            Some(3),
             "the list adopts the memberships pushed before it existed"
         );
         assert_eq!(

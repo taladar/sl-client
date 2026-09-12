@@ -1200,6 +1200,14 @@ impl GroupsModel {
 
     /// The ordered, render-ready row list: case-folded by group name, with a stable
     /// id tie-break so equal names keep a fixed order.
+    ///
+    /// A [`GroupChoice::NoGroup`] row leads the list whenever the agent is in any
+    /// group at all — the only way to wear **no** group (and so no title), which
+    /// activating a real group can never undo. The reference lists it the same
+    /// way, and suppresses it for a member of nothing for the same reason: with
+    /// no group to leave there is nothing for it to do. Its `name` is empty
+    /// because it has none of its own; the label is a localised string the UI
+    /// supplies, which is why it does not live here.
     #[must_use]
     pub fn ordered(&self) -> Vec<GroupRow> {
         let mut rows: Vec<GroupRow> = self
@@ -1212,7 +1220,7 @@ impl GroupsModel {
                     group_name.clone()
                 };
                 GroupRow {
-                    group: *id,
+                    group: GroupChoice::Group(*id),
                     name,
                     active: self.active == Some(*id),
                 }
@@ -1222,8 +1230,18 @@ impl GroupsModel {
             left.name
                 .to_lowercase()
                 .cmp(&right.name.to_lowercase())
-                .then_with(|| left.group.uuid().cmp(&right.group.uuid()))
+                .then_with(|| left.group.key().cmp(&right.group.key()))
         });
+        if !rows.is_empty() {
+            rows.insert(
+                0,
+                GroupRow {
+                    group: GroupChoice::NoGroup,
+                    name: String::new(),
+                    active: self.active.is_none(),
+                },
+            );
+        }
         rows
     }
 
@@ -1245,15 +1263,46 @@ impl GroupsModel {
     }
 }
 
-/// One render-ready group row: the id its actions need, the display name, and
-/// whether it is the active (worn) group.
+/// What a row of the group list stands for: one of the agent's groups, or the
+/// **no group** choice that wears none of them.
+///
+/// An enum rather than the reference's null-UUID sentinel, so "wear nothing" and
+/// "wear the group whose id happens to be nil" cannot be confused, and so every
+/// action that only makes sense for a real group (Info, IM, Leave) has to say so
+/// in its own signature instead of remembering to test for a magic id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupChoice {
+    /// Wear no group: no active group and no title. Sent as
+    /// [`Command::ActivateGroup(None)`](sl_client_bevy::Command::ActivateGroup).
+    NoGroup,
+    /// One of the agent's groups.
+    Group(GroupKey),
+}
+
+impl GroupChoice {
+    /// The group id this choice names, or `None` for [`Self::NoGroup`] — the
+    /// shape `Command::ActivateGroup` already takes, so activating a row is the
+    /// same call either way.
+    #[must_use]
+    pub const fn key(self) -> Option<GroupKey> {
+        match self {
+            Self::NoGroup => None,
+            Self::Group(group) => Some(group),
+        }
+    }
+}
+
+/// One render-ready group row: what its actions act on, the display name, and
+/// whether it is the active (worn) choice.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupRow {
-    /// The group id (for every action).
-    pub group: GroupKey,
-    /// The display name (or a short-id placeholder for an unnamed group).
+    /// The group this row acts on, or the "no group" choice.
+    pub group: GroupChoice,
+    /// The display name (or a short-id placeholder for an unnamed group). Empty
+    /// for [`GroupChoice::NoGroup`], whose label the UI localises.
     pub name: String,
-    /// Whether this is the agent's active (worn) group.
+    /// Whether this is the agent's active (worn) choice — for
+    /// [`GroupChoice::NoGroup`], whether no group is worn.
     pub active: bool,
 }
 

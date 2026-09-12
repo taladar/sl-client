@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 41 |
 | in-progress | 22 |
 | bugs | 42 |
-| done | 1100 |
+| done | 1102 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1664** |
+| **total** | **1666** |
 
 ## ideas (100)
 
@@ -1273,7 +1273,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1100)
+## done (1102)
 
 ### protocol
 
@@ -2736,12 +2736,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-snapshot-quick-key`](done/viewer-snapshot-quick-key.md) —
   Quick-snapshot keybind → disk (blocked by `viewer-input-action-map` (done))
+- [`viewer-social-friends-disable-unusable-actions`](done/viewer-social-friends-disable-unusable-actions.md)
+  — The Friends action column offered buttons that silently did nothing
 - [`viewer-social-group-profile`](done/viewer-social-group-profile.md) — Group
   profile floater — general / members / roles / notices (blocked by
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
 - [`viewer-social-groups`](done/viewer-social-groups.md) — Groups list (Info /
   IM / Activate / Leave) (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-ui-virtualized-list` (done))
+- [`viewer-social-groups-activate-none`](done/viewer-social-groups-activate-none.md)
+  — The group list offers no way to wear no group (and so no title)
 - [`viewer-social-im-conversations`](done/viewer-social-im-conversations.md) —
   IM / conversation UI + chat input (blocked by `viewer-ui-widget-scaffold`
   (done), `viewer-ui-text-input-widget` (done))

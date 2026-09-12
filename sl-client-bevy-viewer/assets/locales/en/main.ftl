@@ -113,6 +113,8 @@ people-grant-confirm-no = Cancel
 groups-header-name = Name
 # The groups-table "Active" column header (the currently-worn group title).
 groups-header-active = Active
+# The leading row of the group list: activate it to wear no group and no title.
+groups-none = (none)
 # The group-count line under the list ({ $count } is the number of groups).
 groups-count =
     { $count ->

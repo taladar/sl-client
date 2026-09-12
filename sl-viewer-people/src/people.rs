@@ -130,6 +130,13 @@ const OFFLINE_COLOR: Color = Color::srgb(0.42, 0.46, 0.52);
 /// An action button's background.
 const ACTION_BACKGROUND: Color = Color::srgb(0.24, 0.29, 0.38);
 
+/// A disabled action button's background — the same values the Groups column
+/// beside this one uses, so the two read as one surface.
+const ACTION_DISABLED_BACKGROUND: Color = Color::srgb(0.18, 0.20, 0.24);
+
+/// A disabled action button's label colour — dim, matching the chrome text.
+const DISABLED_LABEL_COLOR: Color = Color::srgb(0.52, 0.55, 0.60);
+
 /// The table header row's background — a recessed strip above the list.
 const HEADER_BACKGROUND: Color = Color::srgb(0.14, 0.17, 0.22);
 
@@ -840,6 +847,75 @@ impl FriendAction {
     }
 }
 
+/// Every action the column offers, in the order it stacks them.
+const FRIEND_ACTIONS: [FriendAction; 5] = [
+    FriendAction::Im,
+    FriendAction::Profile,
+    FriendAction::OfferTeleport,
+    FriendAction::RemoveFriend,
+    FriendAction::Block,
+];
+
+/// The most teleport offers one `OfferTeleport` may name — the reference's own
+/// cap (`LLAvatarActions::canOfferTeleport`), above which it refuses the button
+/// rather than sending a message the grid would truncate.
+const MAX_TELEPORT_OFFERS: usize = 250;
+
+/// Whether a teleport offer can reach `friend` — the reference's
+/// `LLAvatarActions::canOfferTeleport` for a buddy, which is simply whether they
+/// are online. An offer to an offline friend is a message nobody receives.
+///
+/// Both the enablement and the send read this, so the offer names exactly the
+/// friends the button was enabled for.
+fn can_offer_teleport(friend: FriendKey, view: &FriendsView) -> bool {
+    view.rows
+        .iter()
+        .any(|row| row.friend == friend && row.online)
+}
+
+/// Whether `action` can do anything for the current `selection` — the single
+/// predicate both the button's greying and its press refusal read, so a greyed
+/// button is exactly an inert one (Bevy's own disabled marker is advisory, and
+/// would not stop the observer). The same arrangement
+/// [`crate::groups::action_enabled`] uses for the Groups column beside this one.
+///
+/// Mirrors the reference's `PeopleContextMenu::enableContextMenuItem`: an empty
+/// selection disables everything, and **Offer Teleport** additionally needs
+/// somebody who [can receive one](can_offer_teleport). IM, Profile and Remove
+/// Friend need only a selection — `can_delete`'s "all are friends" is already
+/// true of every row of a *friends* list.
+///
+/// **Block** is deliberately not gated here even though the reference's
+/// `can_block` greys it for yourself and for Lindens. Its own authoritative
+/// refusal is in `LLMuteList::add`, and ours is in the same place —
+/// [`crate::mutes::check_block`], which refuses both and raises the matching
+/// notification. Repeating it here would only add a *second* answer that
+/// disagrees: `canBlock` reads the **cached** display name, so the reference's
+/// own greying flickers as names resolve, and the guard that actually holds is
+/// the one on the block path.
+fn friend_action_enabled(
+    action: FriendAction,
+    selection: &[FriendKey],
+    view: &FriendsView,
+) -> bool {
+    if selection.is_empty() {
+        return false;
+    }
+    match action {
+        FriendAction::Im
+        | FriendAction::Profile
+        | FriendAction::RemoveFriend
+        | FriendAction::Block => true,
+        FriendAction::OfferTeleport => {
+            let offerable = selection
+                .iter()
+                .filter(|friend| can_offer_teleport(**friend, view))
+                .count();
+            offerable > 0 && offerable <= MAX_TELEPORT_OFFERS
+        }
+    }
+}
+
 /// The wire [`Command`] an action produces for `friend`, or `None` for the
 /// actions that are not a plain command: [`FriendAction::Im`] and
 /// [`FriendAction::Profile`] open a conversation tab / the profile floater, and
@@ -862,6 +938,18 @@ fn friend_command(action: FriendAction, friend: FriendKey) -> Option<Command> {
 // ECS side
 // ---------------------------------------------------------------------------
 
+/// One spawned action button: which action it fires, the button node to recolour
+/// and the label node to dim with it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FriendActionButton {
+    /// The action this button fires.
+    action: FriendAction,
+    /// The button node (carries the background).
+    button: Entity,
+    /// The button's label node (carries the text colour).
+    label: Entity,
+}
+
 /// The People tab / pane entities — the ECS mirror of [`FriendsModel`].
 #[derive(Resource, Debug)]
 pub(crate) struct PeopleUi {
@@ -880,6 +968,10 @@ pub(crate) struct PeopleUi {
     friends_table: Entity,
     /// The virtualized friends-list viewport (carries [`VirtualList`]).
     friends_viewport: Entity,
+    /// The Friends action column's buttons, each with the label node to dim
+    /// alongside it — read by [`refresh_friend_actions`] to grey the ones the
+    /// current selection cannot support.
+    friend_actions: Vec<FriendActionButton>,
     /// The Groups sub-tab content container, shown for the Groups tab. It is
     /// spawned here (so the sub-tab switch in [`refresh_people`] can toggle it) but
     /// filled by [`crate::groups`], which owns the group list — the same
@@ -1142,6 +1234,13 @@ impl Plugin for PeoplePlugin {
                     refresh_people.run_if(crate::floater::floater_shown(
                         crate::conversations::CONVERSATIONS_FLOATER_ID,
                     )),
+                    // Deliberately *not* gated on the floater being shown: the gate
+                    // would skip the frame a selection changed behind a hidden
+                    // window, and the change flag it was waiting on is gone by the
+                    // time the window comes back — the buttons would reopen greyed
+                    // wrongly. Five colour comparisons behind change detection cost
+                    // nothing to run either way.
+                    refresh_friend_actions,
                     drive_grant_confirm,
                 )
                     .chain()
@@ -1266,8 +1365,14 @@ fn spawn_people_tab(
         },
     );
 
-    let (friends_content, friends_table, friends_viewport, name_arrow, status_arrow) =
-        spawn_friends_content(&mut commands, pane, &icons);
+    let (
+        friends_content,
+        friends_table,
+        friends_viewport,
+        name_arrow,
+        status_arrow,
+        friend_actions,
+    ) = spawn_friends_content(&mut commands, pane, &icons);
     let groups_content = spawn_groups_content(&mut commands, pane);
     let blocked_content = spawn_blocked_content(&mut commands, pane);
     let contact_sets_content = spawn_contact_sets_content(&mut commands, pane);
@@ -1280,6 +1385,7 @@ fn spawn_people_tab(
         friends_content,
         friends_table,
         friends_viewport,
+        friend_actions,
         groups_content,
         blocked_content,
         contact_sets_content,
@@ -1430,12 +1536,19 @@ fn spawn_confirm_button(
 /// Spawn the Friends sub-tab content: a list column (a persistent, sortable table
 /// header above the virtualized avatar list) beside a **trailing** column of
 /// per-friend action buttons. Returns
-/// `(content, viewport, name_arrow, status_arrow)`.
+/// `(content, table, viewport, name_arrow, status_arrow, action_buttons)`.
 fn spawn_friends_content(
     commands: &mut Commands,
     pane: Entity,
     icons: &PeopleIcons,
-) -> (Entity, Entity, Entity, Entity, Entity) {
+) -> (
+    Entity,
+    Entity,
+    Entity,
+    Entity,
+    Entity,
+    Vec<FriendActionButton>,
+) {
     // The content is a row: the list column takes the width, the action column
     // sits at its trailing edge.
     let content = commands
@@ -1500,17 +1613,19 @@ fn spawn_friends_content(
             ChildOf(content),
         ))
         .id();
-    for action in [
-        FriendAction::Im,
-        FriendAction::Profile,
-        FriendAction::OfferTeleport,
-        FriendAction::RemoveFriend,
-        FriendAction::Block,
-    ] {
-        spawn_action_button(commands, actions, action);
-    }
+    let friend_actions = FRIEND_ACTIONS
+        .into_iter()
+        .map(|action| spawn_action_button(commands, actions, action))
+        .collect();
 
-    (content, table_root, viewport, name_arrow, status_arrow)
+    (
+        content,
+        table_root,
+        viewport,
+        name_arrow,
+        status_arrow,
+        friend_actions,
+    )
 }
 
 /// Add People's own sort control to a widget-built header cell: a click observer
@@ -1628,8 +1743,21 @@ fn fill_rights_group_header(
 }
 
 /// Spawn one action-column button wired to `action`.
-fn spawn_action_button(commands: &mut Commands, actions: Entity, action: FriendAction) {
-    commands
+fn spawn_action_button(
+    commands: &mut Commands,
+    actions: Entity,
+    action: FriendAction,
+) -> FriendActionButton {
+    let label = commands
+        .spawn((
+            Text::new(String::new()),
+            UiFont::Sans.at(CHROME_FONT_SIZE),
+            TextColor(LABEL_COLOR),
+            Translated::new(action.label_key()),
+            Pickable::IGNORE,
+        ))
+        .id();
+    let button = commands
         .spawn((
             Node {
                 flex_shrink: 0.0,
@@ -1646,16 +1774,11 @@ fn spawn_action_button(commands: &mut Commands, actions: Entity, action: FriendA
             Name::new("people-friends-action"),
             ChildOf(actions),
         ))
-        .with_child((
-            Text::new(String::new()),
-            UiFont::Sans.at(CHROME_FONT_SIZE),
-            TextColor(LABEL_COLOR),
-            Translated::new(action.label_key()),
-            Pickable::IGNORE,
-        ))
+        .add_child(label)
         .observe(
             move |mut press: On<Pointer<Press>>,
                   selected: Res<SelectedFriend>,
+                  view: Res<FriendsView>,
                   model: Res<FriendsModel>,
                   mut sl: MessageWriter<SlCommand>,
                   mut blocks: MessageWriter<RequestBlock>,
@@ -1669,6 +1792,12 @@ fn spawn_action_button(commands: &mut Commands, actions: Entity, action: FriendA
                 let Some(primary) = selected.primary() else {
                     return;
                 };
+                // A greyed button must really be inert: Bevy's disabled marker is
+                // advisory, so the refusal lives here and the greying in
+                // `refresh_friend_actions` reads the same predicate.
+                if !friend_action_enabled(action, friends, &view) {
+                    return;
+                }
                 match action {
                     // One row is an IM, several are one ad-hoc conference —
                     // the reference's own count branch, made by the shared
@@ -1694,11 +1823,18 @@ fn spawn_action_button(commands: &mut Commands, actions: Entity, action: FriendA
                             blocks.write(RequestBlock::new(agent.uuid(), name, MuteType::Agent));
                         }
                     }
-                    // One offer names everyone — the message's target is
-                    // already a list.
+                    // One offer names everyone it can reach — the message's
+                    // target is already a list, and the reference filters that
+                    // list to whoever can receive an offer rather than naming
+                    // offline friends the grid will drop.
                     FriendAction::OfferTeleport => {
                         sl.write(SlCommand(Command::OfferTeleport {
-                            targets: friends.iter().copied().map(AgentKey::from).collect(),
+                            targets: friends
+                                .iter()
+                                .copied()
+                                .filter(|friend| can_offer_teleport(*friend, &view))
+                                .map(AgentKey::from)
+                                .collect(),
                             message: String::new(),
                         }));
                     }
@@ -1711,7 +1847,13 @@ fn spawn_action_button(commands: &mut Commands, actions: Entity, action: FriendA
                     }
                 }
             },
-        );
+        )
+        .id();
+    FriendActionButton {
+        action,
+        button,
+        label,
+    }
 }
 
 /// Spawn the Groups sub-tab content container — an empty column, hidden until the
@@ -2103,6 +2245,48 @@ fn mirror_friend_selection(
         .anchor()
         .and_then(|index| view.rows.get(index))
         .map(|row| row.friend);
+}
+
+/// Grey each Friends action button the current selection cannot support, from the
+/// same [`friend_action_enabled`] predicate its press refusal uses — so an empty
+/// selection stops offering five buttons that do nothing, and Offer Teleport
+/// shows as unavailable for a selection nobody in is online to receive it.
+fn refresh_friend_actions(
+    selected: Res<SelectedFriend>,
+    view: Res<FriendsView>,
+    ui: Option<Res<PeopleUi>>,
+    mut backgrounds: Query<&mut BackgroundColor>,
+    mut colors: Query<&mut TextColor>,
+) {
+    let Some(ui) = ui else {
+        return;
+    };
+    if !selected.is_changed() && !view.is_changed() && !ui.is_added() {
+        return;
+    }
+    for entry in &ui.friend_actions {
+        let enabled = friend_action_enabled(entry.action, selected.all(), &view);
+        let wanted = if enabled {
+            ACTION_BACKGROUND
+        } else {
+            ACTION_DISABLED_BACKGROUND
+        };
+        if let Ok(mut background) = backgrounds.get_mut(entry.button)
+            && background.0 != wanted
+        {
+            background.0 = wanted;
+        }
+        let wanted = TextColor(if enabled {
+            LABEL_COLOR
+        } else {
+            DISABLED_LABEL_COLOR
+        });
+        if let Ok(mut color) = colors.get_mut(entry.label)
+            && *color != wanted
+        {
+            *color = wanted;
+        }
+    }
 }
 
 /// Keep the People surface in step: the tab colours (active while the strip focus
@@ -2544,9 +2728,9 @@ fn set_text(text: &mut Text, value: &str) {
 #[cfg(test)]
 mod tests {
     use super::{
-        Command, FriendAction, FriendRow, FriendsModel, FriendsView, PeopleIcons, PeopleUi,
-        ROW_HEIGHT, SelectedFriend, SortState, VirtualList, friend_command, ordered,
-        rebuild_friends_view,
+        Command, FRIEND_ACTIONS, FriendAction, FriendRow, FriendsModel, FriendsView, PeopleIcons,
+        PeopleUi, ROW_HEIGHT, SelectedFriend, SortState, VirtualList, friend_action_enabled,
+        friend_command, ordered, rebuild_friends_view,
     };
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
@@ -2830,6 +3014,67 @@ mod tests {
         ));
     }
 
+    /// What the action column offers, from the same predicate the press refusal
+    /// reads. An empty selection offers nothing; Offer Teleport additionally needs
+    /// somebody online to receive it (the reference's `canOfferTeleport` is false
+    /// for an offline buddy), while the rest need only a friend — a *friends*
+    /// list's rows are all friends and none of them is you, which is everything
+    /// the reference's remaining gates test for.
+    #[test]
+    fn only_the_actions_a_selection_supports_are_offered() {
+        let offline = FriendKey::from(Uuid::from_u128(1));
+        let online = FriendKey::from(Uuid::from_u128(2));
+        let mut view = view_of(&[offline, online]);
+        if let Some(row) = view.rows.iter_mut().find(|row| row.friend == online) {
+            row.online = true;
+        }
+
+        // Nothing selected: nothing to do.
+        for action in FRIEND_ACTIONS {
+            assert!(
+                !friend_action_enabled(action, &[], &view),
+                "{action:?} with an empty selection"
+            );
+        }
+        // An offline friend: everything but a teleport offer they cannot receive.
+        assert!(!friend_action_enabled(
+            FriendAction::OfferTeleport,
+            &[offline],
+            &view
+        ));
+        for action in [
+            FriendAction::Im,
+            FriendAction::Profile,
+            FriendAction::RemoveFriend,
+            FriendAction::Block,
+        ] {
+            assert!(
+                friend_action_enabled(action, &[offline], &view),
+                "{action:?} needs only a friend"
+            );
+        }
+        // An online friend can be offered one, and so can a mixed selection: the
+        // reference enables the offer when *anyone* in it can receive it.
+        assert!(friend_action_enabled(
+            FriendAction::OfferTeleport,
+            &[online],
+            &view
+        ));
+        assert!(friend_action_enabled(
+            FriendAction::OfferTeleport,
+            &[offline, online],
+            &view
+        ));
+
+        // And a mixed selection offers to the online ones only — the same rule
+        // the button was enabled by decides who the message names.
+        let offered: Vec<FriendKey> = [offline, online]
+            .into_iter()
+            .filter(|friend| super::can_offer_teleport(*friend, &view))
+            .collect();
+        assert_eq!(offered, vec![online]);
+    }
+
     /// The buddy list arrives with the login reply, which can land a frame or two
     /// before the pane that shows it exists (it waits on the conversations strip).
     /// A list spawned afterwards must adopt the rows already built rather than sit
@@ -2861,6 +3106,7 @@ mod tests {
             friends_content: Entity::PLACEHOLDER,
             friends_table,
             friends_viewport,
+            friend_actions: Vec::new(),
             groups_content: Entity::PLACEHOLDER,
             blocked_content: Entity::PLACEHOLDER,
             contact_sets_content: Entity::PLACEHOLDER,
