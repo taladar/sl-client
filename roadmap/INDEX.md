@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 316 |
+| ready | 313 |
 | blocked | 41 |
-| in-progress | 23 |
+| in-progress | 22 |
 | bugs | 43 |
-| done | 1099 |
+| done | 1103 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1664** |
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (316)
+## ready (313)
 
 ### protocol
 
@@ -582,16 +582,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-inventory-thumbnails`](ready/viewer-inventory-thumbnails.md) —
   Inventory thumbnails — view & edit (blocked by `viewer-ui-texture-picker`
   (done))
-- [`viewer-key-animation-preview`](ready/viewer-key-animation-preview.md) — One
-  animation-preview window per animation
-- [`viewer-key-color-picker`](ready/viewer-key-color-picker.md) — One
-  colour-picker window per field, like the texture picker
 - [`viewer-key-material-editor`](ready/viewer-key-material-editor.md) — One
   material-editor window per material item
 - [`viewer-key-object-contents`](ready/viewer-key-object-contents.md) — One
   Object Contents window per object
-- [`viewer-key-texture-preview`](ready/viewer-key-texture-preview.md) — One
-  texture-preview window per texture
 - [`viewer-key-wearable-editor`](ready/viewer-key-wearable-editor.md) — One
   wearable-editor window per bodypart / clothing item
 - [`viewer-key-web-browser`](ready/viewer-key-web-browser.md) — Decide whether
@@ -1108,15 +1102,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (23)
+## in-progress (22)
 
 ### viewer
 
 - [`viewer-agentupdate-cadence-effects`](in-progress/viewer-agentupdate-cadence-effects.md)
   — Explore what the raised AgentUpdate/camera-interest cadence buys (and how
   the sim reacts)
-- [`viewer-audit-picker-requester-identity`](in-progress/viewer-audit-picker-requester-identity.md)
-  — Two instances of one window share a picker, and both claim its answer
 - [`viewer-avatar-falls-through-ground`](in-progress/viewer-avatar-falls-through-ground.md)
   — Avatar falls through the ground (simulator reports a bouncing avatar
   position)
@@ -1276,7 +1268,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1099)
+## done (1103)
 
 ### protocol
 
@@ -1570,6 +1562,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-parcel-access-list-accumulate`](done/viewer-audit-parcel-access-list-accumulate.md)
   — Editing a multi-packet parcel ban list unbans everyone not in the last
   packet
+- [`viewer-audit-picker-requester-identity`](done/viewer-audit-picker-requester-identity.md)
+  — Two instances of one window share a picker, and both claim its answer
 - [`viewer-audit-probe-ambient-multiply`](done/viewer-audit-probe-ambient-multiply.md)
   — suppress_global_ambient multiplies an absolute producer and decays it
   geometrically
@@ -1977,6 +1971,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   properties offered permission controls the item did not allow
 - [`viewer-item-price-field-silently-dropped`](done/viewer-item-price-field-silently-dropped.md)
   — The item-properties price field took a value it never saved
+- [`viewer-key-animation-preview`](done/viewer-key-animation-preview.md) — One
+  animation-preview window per animation
+- [`viewer-key-color-picker`](done/viewer-key-color-picker.md) — One
+  colour-picker window per field, like the texture picker
+- [`viewer-key-texture-preview`](done/viewer-key-texture-preview.md) — One
+  texture-preview window per texture
 - [`viewer-land-context-menu`](done/viewer-land-context-menu.md) — Land /
   terrain context pie menu entries (blocked by `viewer-ui-radial-menu` (done))
 - [`viewer-load-url-body-links`](done/viewer-load-url-body-links.md) — Script

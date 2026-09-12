@@ -2,7 +2,7 @@
 id: viewer-key-animation-preview
 title: One animation-preview window per animation
 topic: viewer
-status: ready
+status: done
 origin: split out of [[viewer-keyed-floater-audit]] (2026-09-07)
 points: 2
 refs: [viewer-keyed-floater-audit, viewer-key-texture-preview,
@@ -37,3 +37,19 @@ Convert it onto the keyed scaffold ([[viewer-profile-floater-single-instance]]):
 Open two different animations from inventory: two windows, each on its own
 animation, each closable on its own; re-opening one raises it. Pin it with an
 `instances` unit test mirroring `two_landmarks_open_two_windows`.
+
+## Done (2026-09-12)
+
+Keyed by the animation asset, alongside [[viewer-key-texture-preview]], whose
+entry carries what the pair deleted. `AnimationPreviewState` is a component on
+the window root and the Play / Stop buttons **read it through**
+`host_floater` rather than capturing an asset id in their observer closures:
+with two previews open the two Play buttons are the same control in two
+windows, and only the window says which animation it is about.
+
+**What a second preview means for playback**, the question this task asked to
+answer and write down: nothing has to arbitrate. The preview plays the
+animation on the agent, and an avatar plays as many animations at once as it is
+told to, so two windows are two independent transports — each Play sends
+`PlayAnimation` for its own asset and each Stop stops its own. The module
+header says so.

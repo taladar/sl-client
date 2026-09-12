@@ -657,9 +657,9 @@ pub struct FloaterCommand {
 /// that is gone. Tearing it down could be each feature's own job — but that is
 /// five features each remembering, and the one that forgets is found by a
 /// person months later. So the relationship is recorded once, here, and
-/// [`close_owned_floaters`] acts on it: the same argument as
-/// [`raise_floaters_on_open`], which exists because "opening a window raises
-/// it" kept being re-written per feature.
+/// `close_owned_floaters` acts on it: the same argument as the raise pass, which
+/// exists because "opening a window raises it" kept being re-written per
+/// feature.
 ///
 /// # The owner is the opening **floater**, not the control
 ///
@@ -696,7 +696,7 @@ pub enum FloaterOp {
     Close,
     /// Close it whatever its guard says — what a feature writes once the person
     /// has answered its confirmation, and what the manager itself uses where
-    /// there is nobody left to ask ([`close_owned_floaters`]).
+    /// there is nobody left to ask (the owner sweep, `close_owned_floaters`).
     CloseNow,
     /// Toggle minimize / restore.
     ToggleMinimize,

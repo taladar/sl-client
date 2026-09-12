@@ -346,7 +346,7 @@ pub(crate) const FLOATERS: &[FloaterElement] = &[
     FloaterElement {
         id: "preview-animation",
         summary: "Animation preview: an animation item's play / stop controls and its metadata. \
-                  Subject-bound, so its geometry is not persisted.",
+                  One window per animation asset, so its geometry is not persisted.",
         spec: crate::inventory_properties::animation_preview_floater_spec,
         content: FloaterContent::Stub(
             "The animation's play / stop controls and its priority / duration metadata.",
@@ -355,7 +355,8 @@ pub(crate) const FLOATERS: &[FloaterElement] = &[
     FloaterElement {
         id: "preview-texture",
         summary: "Texture preview: an inventory texture decoded to an image node at its own \
-                  aspect. Subject-bound, so its geometry is not persisted.",
+                  aspect. One window per texture, so two can be compared side by side and \
+                  neither persists its geometry.",
         spec: crate::inventory_properties::texture_preview_floater_spec,
         content: FloaterContent::Stub(
             "The decoded texture as an image node at its own aspect ratio, with its dimensions.",

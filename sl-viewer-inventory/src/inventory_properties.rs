@@ -33,7 +33,23 @@
 //! is already up rebuilds rather than merely raising, unlike the asset editors
 //! where a rebuild would discard unsaved text.
 //!
-//! The two per-type **previews** below are still singletons.
+//! # One preview window per asset
+//!
+//! The two per-type **previews** are keyed the same way, by the **asset** they
+//! show rather than by the item pointing at it: comparing two textures side by
+//! side is the ordinary reason to open one, and a singleton answers a second
+//! Open by throwing the first texture away. Two items sharing one asset — a
+//! copied texture, a landmark's snapshot — are the same picture, so they share
+//! a window.
+//!
+//! Re-opening an asset already up only **raises** it: the fetch it started is
+//! either still in flight or already drawn, and starting it again would replace
+//! a decoded image with "(loading)".
+//!
+//! Two animation previews do not fight over the avatar. Play sends
+//! `PlayAnimation` for **that window's** animation and Stop stops that one; an
+//! avatar plays as many animations at once as it is told to, so two open
+//! previews are two independent controls rather than one shared transport.
 //!
 //! Reference (Firestorm, read-only): `llfloaterproperties.cpp`,
 //! `skins/vintage/xui/en/floater_inventory_item_properties.xml`,
@@ -51,11 +67,11 @@ use sl_client_bevy::{
 
 use crate::floater::{
     Floater, FloaterCaps, FloaterKey, FloaterSpec, FloaterSystems, KeyedFloaterOpen, KeyedFloaters,
-    host_floater, spawn_floater,
+    host_floater,
 };
 use crate::i18n::Translated;
 use crate::inventory::query_folder_page;
-use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, row};
+use crate::ui::row;
 use crate::ui_font::UiFont;
 use crate::world_api::AVATAR_BOOST_PRIORITY;
 use crate::world_api::{BoostTexture, DecodedTextures};
@@ -182,30 +198,25 @@ enum PropsToggle {
 pub struct InventoryPropertiesPlugin;
 
 impl Plugin for InventoryPropertiesPlugin {
-    /// Register messages and systems; spawn the (hidden) preview floaters.
+    /// Register messages and systems.
     ///
-    /// The **properties** floater spawns nothing at `Startup`: it opens per
-    /// item, so `open_properties` spawns the instance and builds its content.
-    /// The two per-type previews are still singletons (a separate entry in
-    /// `viewer-keyed-floater-audit`).
+    /// Nothing is spawned at `Startup`: every window this plugin owns — the
+    /// properties floater and both previews — opens per subject, so the open
+    /// system spawns the instance and builds its content.
     fn build(&self, app: &mut App) {
-        app.init_resource::<PreviewState>()
-            .add_message::<OpenItemProperties>()
+        app.add_message::<OpenItemProperties>()
             .add_message::<OpenItemPreview>()
-            .add_systems(
-                Startup,
-                spawn_preview_floaters.after(UiScaffoldSystems::SpawnRoot),
-            )
             .add_systems(
                 Update,
                 (
                     // After the manager's command pass — see `FloaterSystems`:
                     // the inventory row that opens a properties window also
                     // raises the inventory floater it sits in, and the later
-                    // raise wins.
+                    // raise wins. Both open systems say so themselves rather
+                    // than inheriting it from a neighbour in the chain.
                     open_properties.after(FloaterSystems::Commands),
                     commit_text_edits.run_if(any_with_component::<ItemPropertiesState>),
-                    open_previews,
+                    open_previews.after(FloaterSystems::Commands),
                     poll_texture_preview,
                 )
                     .chain(),
@@ -264,57 +275,6 @@ fn preview_floater_spec(id: &'static str, title: &str) -> FloaterSpec {
             dockable: false,
         },
     }
-}
-
-/// Spawn the preview floaters, hidden. (The properties floater is keyed, so it
-/// is spawned per item by [`open_properties`].)
-fn spawn_preview_floaters(mut commands: Commands, root: Res<UiRoot>) {
-    // Notecards open in their own editor floater (`crate::edit_notecard`),
-    // landmarks in the About Landmark floater (`crate::about_landmark`) — not
-    // here.
-    // Texture.
-    let texture = spawn_preview_floater(&mut commands, root.0, texture_preview_floater_spec());
-    // Animation.
-    let animation = spawn_preview_floater(&mut commands, root.0, animation_preview_floater_spec());
-    commands.insert_resource(PreviewUi { texture, animation });
-}
-
-/// Spawn one preview floater shell, returning its handles.
-fn spawn_preview_floater(
-    commands: &mut Commands,
-    root: Entity,
-    spec: FloaterSpec,
-) -> PreviewFloater {
-    let handle = spawn_floater(commands, root, spec);
-    // Subject-bound, like the properties floater: not persisted.
-    commands
-        .entity(handle.root)
-        .insert(crate::floater_persist::FloaterPersistExempt);
-    PreviewFloater {
-        panel: handle.root,
-        content: handle.content,
-        title_text: handle.title_text,
-    }
-}
-
-/// One preview floater's entities.
-#[derive(Debug, Clone, Copy)]
-struct PreviewFloater {
-    /// The floater root (carries [`UiPanelShown`]).
-    panel: Entity,
-    /// The rebuilt-per-open content column.
-    content: Entity,
-    /// The title text node (set to the item's name on open).
-    title_text: Entity,
-}
-
-/// The preview floaters' entities.
-#[derive(Resource)]
-struct PreviewUi {
-    /// The texture / snapshot preview.
-    texture: PreviewFloater,
-    /// The animation preview.
-    animation: PreviewFloater,
 }
 
 /// The [`FloaterKey`] of the window showing `item`'s properties — one window
@@ -1057,40 +1017,57 @@ const fn civil_from_days(days: i64) -> (i64, u8, u8) {
 // Previews.
 // ---------------------------------------------------------------------------
 
-/// The previews' in-flight fetches.
-#[derive(Resource, Debug, Default)]
-struct PreviewState {
-    /// The texture awaited from the texture pipeline, with the node to give
-    /// the image to.
-    pending_texture: Option<(TextureKey, Entity)>,
-    /// The animation shown in the animation preview.
-    animation: Option<AssetKey>,
+/// One texture-preview window's subject and in-flight decode — a **component
+/// on the window**, since the floater opens per texture ([`FloaterKey`]) and
+/// two of them can be waiting on the pipeline at once.
+#[derive(Component, Debug)]
+struct TexturePreviewState {
+    /// The texture this window shows.
+    texture: TextureKey,
+    /// The placeholder node awaiting the decoded image; `None` once filled.
+    pending: Option<Entity>,
 }
 
-/// Route an Open to its type's preview floater.
+/// One animation-preview window's subject — a **component on the window**, read
+/// by its own Play / Stop buttons (which resolve their window with
+/// [`host_floater`]) so two open previews drive their own animation.
+#[derive(Component, Debug)]
+struct AnimationPreviewState {
+    /// The animation this window's buttons play and stop.
+    animation: AssetKey,
+}
+
+/// The [`FloaterKey`] of the window previewing a texture — the **asset**, not
+/// the item: two inventory copies of one texture are one picture.
+fn texture_preview_key(texture: TextureKey) -> FloaterKey {
+    FloaterKey::subject(&texture)
+}
+
+/// The [`FloaterKey`] of the window previewing an animation — the asset, for
+/// the same reason [`texture_preview_key`] uses it.
+fn animation_preview_key(animation: AssetKey) -> FloaterKey {
+    FloaterKey::subject(&animation)
+}
+
+/// Route an Open to its type's preview floater — a window per asset for the two
+/// this module draws, and the owning floater's own open message for the types
+/// that have one.
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources: the open stream, the \
-              preview state and floaters, the texture pipeline, and the spawn / visibility \
-              outputs"
+              keyed-window opener, the texture pipeline, the spawn output, and the four \
+              messages the types this module does not draw are handed on with"
 )]
 fn open_previews(
     mut opens: MessageReader<OpenItemPreview>,
-    ui: Option<Res<PreviewUi>>,
-    mut state: ResMut<PreviewState>,
+    mut floaters: KeyedFloaters,
     mut boost: MessageWriter<BoostTexture>,
-    children: Query<&Children>,
-    mut panels: Query<&mut UiPanelShown>,
-    mut texts: Query<&mut Text>,
     mut commands: Commands,
     mut notecard_opens: MessageWriter<crate::world_api::OpenNotecard>,
     mut script_opens: MessageWriter<crate::world_api::OpenScript>,
     mut landmark_opens: MessageWriter<crate::inventory::OpenAboutLandmark>,
     mut settings_opens: MessageWriter<crate::world_api::OpenSettingsEditor>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
     for open in opens.read() {
         let item = &open.item;
         match item.inv_type {
@@ -1121,13 +1098,21 @@ fn open_previews(
                 });
             }
             InventoryType::Texture | InventoryType::Snapshot => {
-                reset_preview(
-                    &ui.texture,
-                    &item.name,
-                    &children,
-                    &mut texts,
-                    &mut commands,
-                );
+                let key = TextureKey::from(item.asset_id);
+                let KeyedFloaterOpen::Spawned(handle) =
+                    floaters.open(texture_preview_floater_spec(), texture_preview_key(key))
+                else {
+                    // Already up — raised by the open, and its image is either
+                    // drawn or on its way. Fetching again would put "(loading)"
+                    // back over a texture the person is looking at.
+                    continue;
+                };
+                // The window's title is the item's own name; the spec's
+                // "Texture" names the kind, and with one window per texture
+                // that is no longer enough to tell two of them apart.
+                commands
+                    .entity(handle.title_text)
+                    .insert(Text::new(item.name.clone()));
                 let placeholder = commands
                     .spawn((
                         Node {
@@ -1138,7 +1123,7 @@ fn open_previews(
                             ..default()
                         },
                         BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.35)),
-                        ChildOf(ui.texture.content),
+                        ChildOf(handle.content),
                     ))
                     .with_child((
                         Text::new("(loading)"),
@@ -1146,13 +1131,14 @@ fn open_previews(
                         TextColor(DIM_LABEL_COLOR),
                     ))
                     .id();
-                let key = TextureKey::from(item.asset_id);
                 boost.write(BoostTexture {
                     key,
                     priority: AVATAR_BOOST_PRIORITY,
                 });
-                state.pending_texture = Some((key, placeholder));
-                show(&mut panels, ui.texture.panel);
+                commands.entity(handle.root).insert(TexturePreviewState {
+                    texture: key,
+                    pending: Some(placeholder),
+                });
             }
             InventoryType::Landmark => {
                 // The full About Landmark floater owns this type.
@@ -1181,74 +1167,86 @@ fn open_previews(
                 });
             }
             InventoryType::Animation => {
-                reset_preview(
-                    &ui.animation,
-                    &item.name,
-                    &children,
-                    &mut texts,
-                    &mut commands,
-                );
                 let animation = AssetKey::from(item.asset_id);
-                state.animation = Some(animation);
+                let KeyedFloaterOpen::Spawned(handle) = floaters.open(
+                    animation_preview_floater_spec(),
+                    animation_preview_key(animation),
+                ) else {
+                    // Already up, and raised by the open: re-opening an
+                    // animation is not a reason to restart it.
+                    continue;
+                };
+                commands
+                    .entity(handle.title_text)
+                    .insert(Text::new(item.name.clone()));
                 let buttons = commands
                     .spawn((
                         Node {
                             ..row(Val::Px(8.0))
                         },
-                        ChildOf(ui.animation.content),
+                        ChildOf(handle.content),
                     ))
                     .id();
                 let play =
                     spawn_text_button(&mut commands, buttons, "animation-play-inworld", 1, true);
-                commands.entity(play).observe(
-                    move |press: On<Pointer<Press>>, mut commands: MessageWriter<SlCommand>| {
-                        if press.button == PointerButton::Primary {
-                            commands.write(SlCommand(Command::PlayAnimation(AnimationKey::from(
-                                animation.uuid(),
-                            ))));
-                        }
-                    },
-                );
+                commands.entity(play).observe(play_pressed);
                 let stop = spawn_text_button(&mut commands, buttons, "animation-stop", 2, true);
-                commands.entity(stop).observe(
-                    move |press: On<Pointer<Press>>, mut commands: MessageWriter<SlCommand>| {
-                        if press.button == PointerButton::Primary {
-                            commands.write(SlCommand(Command::StopAnimation(AnimationKey::from(
-                                animation.uuid(),
-                            ))));
-                        }
-                    },
-                );
-                show(&mut panels, ui.animation.panel);
+                commands.entity(stop).observe(stop_pressed);
+                commands
+                    .entity(handle.root)
+                    .insert(AnimationPreviewState { animation });
             }
             _other => {}
         }
     }
 }
 
-/// Clear a preview floater's content and set its title to the item's name.
-fn reset_preview(
-    floater: &PreviewFloater,
-    title: &str,
-    children: &Query<&Children>,
-    texts: &mut Query<&mut Text>,
-    commands: &mut Commands,
+/// Play **this window's** animation on the agent.
+///
+/// Which animation that is comes from the window the button sits in, not from
+/// the button: with two previews open, the two Play buttons are the same
+/// control in two windows, and only the window says which asset it is about.
+fn play_pressed(
+    press: On<Pointer<Press>>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
+    windows: Query<&AnimationPreviewState>,
+    mut commands: MessageWriter<SlCommand>,
 ) {
-    if let Ok(existing) = children.get(floater.content) {
-        for child in existing.iter().collect::<Vec<_>>() {
-            commands.entity(child).despawn();
-        }
-    }
-    if let Ok(mut text) = texts.get_mut(floater.title_text) {
-        title.clone_into(&mut text.0);
+    if let Some(animation) = pressed_animation(&press, &parents, &floaters, &windows) {
+        commands.write(SlCommand(Command::PlayAnimation(animation)));
     }
 }
 
-/// Show a floater.
-fn show(panels: &mut Query<&mut UiPanelShown>, panel: Entity) {
-    if let Ok(mut shown) = panels.get_mut(panel) {
-        shown.0 = true;
+/// Stop this window's animation — [`play_pressed`]'s other half.
+fn stop_pressed(
+    press: On<Pointer<Press>>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
+    windows: Query<&AnimationPreviewState>,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    if let Some(animation) = pressed_animation(&press, &parents, &floaters, &windows) {
+        commands.write(SlCommand(Command::StopAnimation(animation)));
     }
+}
+
+/// The animation of the preview window a primary press landed in — the walk
+/// both transport buttons share.
+fn pressed_animation(
+    press: &On<Pointer<Press>>,
+    parents: &Query<&ChildOf>,
+    floaters: &Query<(Entity, &Floater)>,
+    windows: &Query<&AnimationPreviewState>,
+) -> Option<AnimationKey> {
+    if press.button != PointerButton::Primary {
+        return None;
+    }
+    let window = host_floater(press.entity, parents, floaters)?;
+    windows
+        .get(window)
+        .ok()
+        .map(|state| AnimationKey::from(state.animation.uuid()))
 }
 
 /// A bordered translated button (greyed when not `enabled`).
@@ -1315,30 +1313,36 @@ pub fn parse_landmark(text: &str) -> Option<LandmarkAsset> {
     }
 }
 
-/// Swap the texture preview's placeholder for the decoded image once the
-/// texture pipeline holds it.
+/// Swap each waiting texture preview's placeholder for the decoded image once
+/// the texture pipeline holds it.
+///
+/// Every open window asks the same store for its own texture, so two decoding
+/// at once is the normal case: each fills the placeholder it spawned, and drops
+/// its pending node when it has.
 fn poll_texture_preview(
-    mut state: ResMut<PreviewState>,
+    mut windows: Query<&mut TexturePreviewState>,
     store: Res<DecodedTextures>,
     mut images: ResMut<Assets<Image>>,
     children: Query<&Children>,
     mut commands: Commands,
 ) {
-    let Some((key, node)) = state.pending_texture else {
-        return;
-    };
-    let Some(decoded) = store.get(key) else {
-        return;
-    };
-    let handle = images.add(to_bevy_image(decoded));
-    // Replace the placeholder's children with the image.
-    if let Ok(existing) = children.get(node) {
-        for child in existing.iter().collect::<Vec<_>>() {
-            commands.entity(child).despawn();
+    for mut state in &mut windows {
+        let Some(node) = state.pending else {
+            continue;
+        };
+        let Some(decoded) = store.get(state.texture) else {
+            continue;
+        };
+        let handle = images.add(to_bevy_image(decoded));
+        // Replace the placeholder's children with the image.
+        if let Ok(existing) = children.get(node) {
+            for child in existing.iter().collect::<Vec<_>>() {
+                commands.entity(child).despawn();
+            }
         }
+        commands.entity(node).insert(ImageNode::new(handle));
+        state.pending = None;
     }
-    commands.entity(node).insert(ImageNode::new(handle));
-    state.pending_texture = None;
 }
 
 #[cfg(test)]
@@ -1376,26 +1380,66 @@ mod tests {
         assert!(parse_landmark("").is_none());
     }
 
+    /// A boxed error so tests use `?` rather than the disallowed
+    /// `unwrap` / `expect`.
+    type TestError = Box<dyn core::error::Error>;
+
+    /// The agent whose inventory these items are in.
+    fn owner() -> sl_client_bevy::AgentKey {
+        sl_client_bevy::AgentKey::from(sl_client_bevy::Uuid::from_u128(0xA9))
+    }
+
+    /// An app with the floater manager and this plugin — the harness **both**
+    /// halves of it are driven through, since one plugin owns the properties
+    /// window and the two previews and every system in it must be able to run.
+    fn properties_app() -> bevy::app::App {
+        use bevy::prelude::*;
+        let mut app = App::new();
+        let identity = sl_client_bevy::SlIdentity {
+            agent_id: Some(owner()),
+            ..sl_client_bevy::SlIdentity::default()
+        };
+        app.add_message::<sl_client_bevy::SlCommand>()
+            .insert_resource(identity)
+            .init_resource::<crate::world_api::AvatarState>()
+            .init_resource::<UiScale>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<bevy::input_focus::InputFocus>()
+            // The seams the previews hand the types they do not draw on to:
+            // notecards, scripts, landmarks and settings each open in their own
+            // floater, in a crate this one does not pull in for a test.
+            .add_message::<crate::world_api::BoostTexture>()
+            .add_message::<crate::world_api::OpenNotecard>()
+            .add_message::<crate::world_api::OpenScript>()
+            .add_message::<crate::inventory::OpenAboutLandmark>()
+            .add_message::<crate::world_api::OpenSettingsEditor>()
+            .init_resource::<crate::world_api::DecodedTextures>()
+            .init_resource::<Assets<Image>>()
+            .add_plugins((
+                crate::floater::FloaterPlugin,
+                super::InventoryPropertiesPlugin,
+            ));
+        let root = app.world_mut().spawn(Node::default()).id();
+        app.insert_resource(crate::ui::UiRoot(root));
+        app.update();
+        app
+    }
+
     /// **One window per item** (`viewer-keyed-floater-audit`): the open path,
     /// driven by the message an inventory row's Properties entry writes.
     mod instances {
         use super::super::{
-            InventoryPropertiesPlugin, ItemPropertiesState, ItemPropertiesUi, OpenItemProperties,
-            PermissionGates, properties_key,
+            ItemPropertiesState, ItemPropertiesUi, OpenItemProperties, PermissionGates,
+            properties_key,
         };
-        use crate::floater::{Floater, FloaterCommand, FloaterOp, FloaterPlugin};
-        use crate::ui::UiRoot;
+        use super::{TestError, owner, properties_app};
+        use crate::floater::{Floater, FloaterCommand, FloaterOp};
         use bevy::prelude::*;
         use pretty_assertions::assert_eq;
         use sl_client_bevy::{
             AgentKey, AssetType, InventoryFolderKey, InventoryKey, InventoryType, ItemInfo,
-            LindenAmount, OwnerKey, Permissions, Permissions5, SaleInfo, SaleType, SlCommand,
-            SlIdentity, Uuid,
+            LindenAmount, OwnerKey, Permissions, Permissions5, SaleInfo, SaleType, Uuid,
         };
-
-        /// A boxed error so tests use `?` rather than the disallowed
-        /// `unwrap` / `expect`.
-        type TestError = Box<dyn core::error::Error>;
 
         /// One inventory item, owned by the logged-in agent so its fields are
         /// editable (the read-only path spawns no fields to tell apart).
@@ -1432,43 +1476,6 @@ mod tests {
         /// Modify + copy + transfer, the mask a fully permissive item carries.
         fn all_rights() -> Permissions {
             Permissions::MODIFY | Permissions::COPY | Permissions::TRANSFER
-        }
-
-        /// The agent whose inventory these items are in.
-        fn owner() -> AgentKey {
-            AgentKey::from(Uuid::from_u128(0xA9))
-        }
-
-        /// An app with the floater manager and the properties plugin.
-        fn properties_app() -> App {
-            let mut app = App::new();
-            let identity = SlIdentity {
-                agent_id: Some(owner()),
-                ..SlIdentity::default()
-            };
-            app.add_message::<SlCommand>()
-                .insert_resource(identity)
-                .init_resource::<crate::world_api::AvatarState>()
-                .init_resource::<UiScale>()
-                .init_resource::<ButtonInput<KeyCode>>()
-                .init_resource::<bevy::input_focus::InputFocus>()
-                // The plugin's other half — the per-type previews — reads the
-                // texture pipeline and hands notecards / scripts / landmarks to
-                // their own floaters. Those seams are stood up empty: the
-                // properties window under test never uses them, but every
-                // system in the plugin must be able to run.
-                .add_message::<crate::world_api::BoostTexture>()
-                .add_message::<crate::world_api::OpenNotecard>()
-                .add_message::<crate::world_api::OpenScript>()
-                .add_message::<crate::inventory::OpenAboutLandmark>()
-                .add_message::<crate::world_api::OpenSettingsEditor>()
-                .init_resource::<crate::world_api::DecodedTextures>()
-                .init_resource::<Assets<Image>>()
-                .add_plugins((FloaterPlugin, InventoryPropertiesPlugin));
-            let root = app.world_mut().spawn(Node::default()).id();
-            app.insert_resource(UiRoot(root));
-            app.update();
-            app
         }
 
         /// Open an item's properties the way the inventory row does.
@@ -1722,6 +1729,258 @@ mod tests {
             assert_eq!(
                 left.first().and_then(|(_window, item)| *item),
                 Some(second.item_id)
+            );
+            Ok(())
+        }
+    }
+
+    /// **One preview window per asset** (`viewer-key-texture-preview`,
+    /// `viewer-key-animation-preview`): the Open path, driven by the message an
+    /// inventory row's Open entry writes.
+    mod previews {
+        use super::super::{
+            AnimationPreviewState, OpenItemPreview, TexturePreviewState, animation_preview_key,
+            texture_preview_key,
+        };
+        use super::{TestError, owner, properties_app};
+        use crate::floater::{Floater, FloaterCommand, FloaterOp};
+        use crate::world_api::{BoostTexture, DecodedTextures};
+        use bevy::prelude::*;
+        use pretty_assertions::assert_eq;
+        use sl_client_bevy::{
+            AgentKey, AssetKey, AssetType, DecodedTexture, DiscardLevel, InventoryFolderKey,
+            InventoryKey, InventoryType, ItemInfo, OwnerKey, Permissions5, SaleInfo, TextureKey,
+            Uuid,
+        };
+
+        /// One previewable inventory item: `id` names the item, `asset` the
+        /// thing it points at — two items can name the same asset, which is
+        /// what the keying is about.
+        fn preview_item(id: u128, asset: u128, name: &str, inv_type: InventoryType) -> ItemInfo {
+            ItemInfo {
+                item_id: InventoryKey::from(Uuid::from_u128(id)),
+                folder_id: InventoryFolderKey::from(Uuid::from_u128(0x0F)),
+                name: name.to_owned(),
+                description: String::new(),
+                asset_id: Uuid::from_u128(asset),
+                asset_type: match inv_type {
+                    InventoryType::Animation => AssetType::Animation,
+                    _other => AssetType::Texture,
+                },
+                inv_type,
+                flags: 0,
+                creation_date: 0,
+                owner: OwnerKey::Agent(owner()),
+                last_owner_id: Uuid::from_u128(0),
+                creator_id: AgentKey::from(Uuid::from_u128(0)),
+                group: None,
+                permissions: Permissions5::default(),
+                sale: SaleInfo::default(),
+            }
+        }
+
+        /// A texture item, and an animation item.
+        fn texture(id: u128, asset: u128, name: &str) -> ItemInfo {
+            preview_item(id, asset, name, InventoryType::Texture)
+        }
+
+        /// An animation item — [`texture`]'s other half.
+        fn animation(id: u128, asset: u128, name: &str) -> ItemInfo {
+            preview_item(id, asset, name, InventoryType::Animation)
+        }
+
+        /// Open an item's preview the way the inventory row's Open does.
+        fn open(app: &mut App, item: &ItemInfo) {
+            app.world_mut()
+                .write_message(OpenItemPreview { item: item.clone() });
+            app.update();
+        }
+
+        /// Every live texture-preview window, as (entity, texture) pairs.
+        fn texture_windows(app: &mut App) -> Vec<(Entity, TextureKey)> {
+            app.world_mut()
+                .query::<(Entity, &TexturePreviewState)>()
+                .iter(app.world())
+                .map(|(entity, state)| (entity, state.texture))
+                .collect()
+        }
+
+        /// Every live animation-preview window, as (entity, animation) pairs.
+        fn animation_windows(app: &mut App) -> Vec<(Entity, AssetKey)> {
+            app.world_mut()
+                .query::<(Entity, &AnimationPreviewState)>()
+                .iter(app.world())
+                .map(|(entity, state)| (entity, state.animation))
+                .collect()
+        }
+
+        /// How many texture fetches this app has asked for, all frames counted
+        /// — the message is the only observable "it went and got it again".
+        fn fetches(app: &App) -> usize {
+            app.world()
+                .resource::<Messages<BoostTexture>>()
+                .iter_current_update_messages()
+                .count()
+        }
+
+        /// Every key a live floater carries.
+        fn keys(app: &mut App) -> Vec<crate::floater::FloaterKey> {
+            app.world_mut()
+                .query::<&Floater>()
+                .iter(app.world())
+                .filter_map(|floater| floater.key().cloned())
+                .collect()
+        }
+
+        /// Two textures are two windows, each keyed by — and showing — its own.
+        #[test]
+        fn two_textures_open_two_windows() {
+            let (first, second) = (texture(0xA1, 0x1A, "Bark"), texture(0xB2, 0x2B, "Moss"));
+            let mut app = properties_app();
+            open(&mut app, &first);
+            open(&mut app, &second);
+
+            let windows = texture_windows(&mut app);
+            assert_eq!(
+                windows.len(),
+                2,
+                "the second texture reused the first window"
+            );
+            let shown: Vec<TextureKey> = windows.iter().map(|(_window, key)| *key).collect();
+            assert!(shown.contains(&TextureKey::from(first.asset_id)));
+            assert!(shown.contains(&TextureKey::from(second.asset_id)));
+            let open_keys = keys(&mut app);
+            assert!(open_keys.contains(&texture_preview_key(TextureKey::from(first.asset_id))));
+            assert!(open_keys.contains(&texture_preview_key(TextureKey::from(second.asset_id))));
+        }
+
+        /// Two inventory items pointing at **one** texture are one window: the
+        /// window is about the picture, not about the item naming it.
+        #[test]
+        fn two_items_sharing_a_texture_share_a_window() {
+            let (first, second) = (
+                texture(0xA1, 0x1A, "Bark"),
+                texture(0xB2, 0x1A, "Bark copy"),
+            );
+            let mut app = properties_app();
+            open(&mut app, &first);
+            open(&mut app, &second);
+
+            assert_eq!(
+                texture_windows(&mut app).len(),
+                1,
+                "one picture, one window — whichever item was opened"
+            );
+        }
+
+        /// Re-opening a texture already up raises it and fetches nothing: the
+        /// second Open must not put "(loading)" back over a decoded image.
+        #[test]
+        fn reopening_a_texture_does_not_refetch_it() {
+            let item = texture(0xA1, 0x1A, "Bark");
+            let mut app = properties_app();
+            open(&mut app, &item);
+            assert_eq!(fetches(&app), 1, "the first open fetches");
+            open(&mut app, &item);
+
+            assert_eq!(texture_windows(&mut app).len(), 1);
+            assert_eq!(fetches(&app), 0, "the re-open fetched the texture again");
+        }
+
+        /// Each window fills the placeholder **it** spawned: a decode answers
+        /// the window that asked for that texture and leaves the other waiting.
+        #[test]
+        fn a_decode_fills_only_the_window_waiting_for_it() -> Result<(), TestError> {
+            let (first, second) = (texture(0xA1, 0x1A, "Bark"), texture(0xB2, 0x2B, "Moss"));
+            let mut app = properties_app();
+            open(&mut app, &first);
+            open(&mut app, &second);
+            let decoded = std::sync::Arc::new(DecodedTexture::new(
+                1,
+                1,
+                4,
+                DiscardLevel::FULL,
+                bytes::Bytes::from_static(&[255, 255, 255, 255]),
+                None,
+            ));
+            app.world_mut()
+                .resource_mut::<DecodedTextures>()
+                .insert(TextureKey::from(first.asset_id), decoded);
+            app.update();
+
+            let waiting: Vec<(TextureKey, bool)> = app
+                .world_mut()
+                .query::<&TexturePreviewState>()
+                .iter(app.world())
+                .map(|state| (state.texture, state.pending.is_some()))
+                .collect();
+            let pending_of = |asset: Uuid| {
+                waiting.iter().find_map(|(key, pending)| {
+                    (*key == TextureKey::from(asset)).then_some(*pending)
+                })
+            };
+            assert_eq!(
+                pending_of(first.asset_id),
+                Some(false),
+                "the decoded texture's window is still waiting"
+            );
+            assert_eq!(
+                pending_of(second.asset_id),
+                Some(true),
+                "the other window took a decode that was not its texture"
+            );
+            Ok(())
+        }
+
+        /// Two animations are two windows, each on its own animation.
+        #[test]
+        fn two_animations_open_two_windows() {
+            let (first, second) = (animation(0xA1, 0x1A, "Wave"), animation(0xB2, 0x2B, "Bow"));
+            let mut app = properties_app();
+            open(&mut app, &first);
+            open(&mut app, &second);
+
+            let windows = animation_windows(&mut app);
+            assert_eq!(
+                windows.len(),
+                2,
+                "the second animation reused the first window"
+            );
+            let shown: Vec<AssetKey> = windows.iter().map(|(_window, key)| *key).collect();
+            assert!(shown.contains(&AssetKey::from(first.asset_id)));
+            assert!(shown.contains(&AssetKey::from(second.asset_id)));
+            let open_keys = keys(&mut app);
+            assert!(open_keys.contains(&animation_preview_key(AssetKey::from(first.asset_id))));
+            assert!(open_keys.contains(&animation_preview_key(AssetKey::from(second.asset_id))));
+        }
+
+        /// Closing one preview leaves the other open on its own subject.
+        #[test]
+        fn closing_one_preview_leaves_the_other() -> Result<(), TestError> {
+            let (first, second) = (texture(0xA1, 0x1A, "Bark"), texture(0xB2, 0x2B, "Moss"));
+            let mut app = properties_app();
+            open(&mut app, &first);
+            open(&mut app, &second);
+            let target = texture_windows(&mut app)
+                .into_iter()
+                .find_map(|(window, key)| {
+                    (key == TextureKey::from(first.asset_id)).then_some(window)
+                })
+                .ok_or("the first texture has no window")?;
+
+            app.world_mut()
+                .resource_mut::<Messages<FloaterCommand>>()
+                .write(FloaterCommand {
+                    floater: target,
+                    op: FloaterOp::Close,
+                });
+            app.update();
+
+            let left = texture_windows(&mut app);
+            assert_eq!(left.len(), 1);
+            assert_eq!(
+                left.first().map(|(_window, key)| *key),
+                Some(TextureKey::from(second.asset_id))
             );
             Ok(())
         }

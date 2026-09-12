@@ -90,8 +90,8 @@ const VALUE_CLASS: &str = "sk-build-value";
 pub struct ColorSwatchValue(pub Color);
 
 /// A swatch's **field** name — which control it is, and so half of the identity
-/// of the picker window it opens (see [`OpenColorPicker::field`]). The
-/// [`TextureSwatchField`](crate::ui_texture_picker) of this module.
+/// of the picker window it opens (see [`OpenColorPicker::field`]). The texture
+/// picker's `TextureSwatchField`, for colours.
 #[derive(Component, Debug, Clone)]
 struct ColorSwatchField(Box<str>);
 

@@ -1292,8 +1292,8 @@ impl InventoryTab {
 ///
 /// Open / closed is **not** tracked here — the floater's
 /// [`UiPanelShown`] is the single source of truth, so restoring the window open
-/// from saved settings ([`crate::floater_persist`]) and toggling it with `Ctrl+I`
-/// go through the same flag and can never drift apart.
+/// from saved settings ([`sl_viewer_ui_widgets::floater_persist`]) and toggling
+/// it with `Ctrl+I` go through the same flag and can never drift apart.
 #[derive(Resource, Default)]
 pub(crate) struct InventoryState {
     /// The active tab.
@@ -1990,13 +1990,13 @@ const fn wearable_label(wearable_type: WearableType) -> &'static str {
 
 /// The hosting floater's [`crate::floater::FloaterSpec::id`] — it also keys the
 /// window's remembered geometry in the settings store
-/// ([`crate::floater_persist`]).
+/// ([`sl_viewer_ui_widgets::floater_persist`]).
 pub const INVENTORY_FLOATER_ID: &str = "inventory";
 
 /// Refresh the inventory whenever the window becomes visible — whether opened
 /// from the menu (by pick or by its `Ctrl+I` accelerator) or **restored open**
-/// from saved settings ([`crate::floater_persist`]), since both just flip the
-/// floater's [`UiPanelShown`].
+/// from saved settings ([`sl_viewer_ui_widgets::floater_persist`]), since both
+/// just flip the floater's [`UiPanelShown`].
 ///
 /// A cheap local snapshot each time: the login skeleton may have arrived after a
 /// previous open, and folders can be created during the session.
