@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 317 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 42 |
-| done | 1102 |
+| bugs | 41 |
+| done | 1103 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1666** |
@@ -1171,7 +1171,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (42)
+## bugs (41)
 
 ### viewer
 
@@ -1247,8 +1247,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Mouselook — parts of the own avatar's head render from the inside
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
-- [`viewer-notecard-preview-ignores-unsaved-text`](bugs/viewer-notecard-preview-ignores-unsaved-text.md)
-  — The notecard's View Items preview shows the loaded text, not what you typed
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
   — Own avatar looks broken after a teleport
 - [`viewer-own-avatar-facing-drifts-idle`](bugs/viewer-own-avatar-facing-drifts-idle.md)
@@ -1273,7 +1271,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1102)
+## done (1103)
 
 ### protocol
 
@@ -2067,6 +2065,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A see-through container in front of a field clears its focus, at random
 - [`viewer-notecard-format`](done/viewer-notecard-format.md) — Notecard format —
   a pure crate (sl-notecard)
+- [`viewer-notecard-preview-ignores-unsaved-text`](done/viewer-notecard-preview-ignores-unsaved-text.md)
+  — The notecard's View Items preview shows the loaded text, not what you typed
 - [`viewer-notification-catalogue`](done/viewer-notification-catalogue.md) —
   Notification catalogue — port the reference server-alert & confirm entries
   (blocked by `viewer-ui-notification-host` (done))

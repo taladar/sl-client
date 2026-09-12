@@ -37,9 +37,9 @@ need a *real* group (`real_group_selected`), while **every** row including
   it, not as an absence. Its `name` stays empty: the label is a localised
   string (`groups-none`) the UI supplies, keeping presentation out of the model.
 - `action_enabled` is the single predicate behind **both** the buttons' greying
-  and their press refusal. Bevy's `InteractionDisabled` is advisory (see
-  [[sl-client-widget-interaction-disabled]]), so a greyed button that still
-  fired would be a lie; routing both through one function makes greyed mean
+  and their press refusal. Bevy's `InteractionDisabled` is advisory, so a
+  greyed button that still fired would be a lie; routing both through one
+  function makes greyed mean
   inert by construction. A row double-click no longer tries to open an IM for
   the "none" row either.
 

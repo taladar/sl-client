@@ -5,7 +5,7 @@ topic: viewer
 status: done
 origin: split from [[viewer-social-groups-activate-none]], which gave the
   Groups column the treatment (2026-09-12)
-refs: [viewer-social-friends, viewer-social-groups-activate-none]
+refs: [viewer-social-people-panel, viewer-social-groups-activate-none]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -21,10 +21,9 @@ broken button rather than an unavailable one.
 `friend_action_enabled` is the single predicate behind **both** the greying
 (`refresh_friend_actions`) and the press refusal, the arrangement
 [[viewer-social-groups-activate-none]] established for the Groups column beside
-it. They have to be two places — Bevy's `InteractionDisabled` is advisory, see
-[[sl-client-widget-interaction-disabled]] — so routing both through one
-function is what makes a greyed button an inert one by construction rather than
-by two call sites agreeing.
+it. They have to be two places — Bevy's `InteractionDisabled` is advisory — so
+routing both through one function is what makes a greyed button an inert one by
+construction rather than by two call sites agreeing.
 
 The rules follow the reference's `PeopleContextMenu::enableContextMenuItem`:
 
@@ -74,5 +73,5 @@ could only show the empty-selection state (all five greyed). The per-friend
 states — Offer Teleport greyed for an offline friend, live for an online one,
 and a mixed selection offering to the online one alone — rest on the unit tests
 until somebody befriends the secondary account. The same gap applies to
-anything else that needs a populated Friends list; see
-[[sl-client-test-avatar-and-smoke-tests]] for the second account.
+anything else that needs a populated Friends list, which wants the second test
+account.

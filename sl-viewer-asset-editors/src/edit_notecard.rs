@@ -27,7 +27,10 @@
 //!   reconciles the item table against the markers on save) — and offers a
 //!   **toggle to that same rich read-only preview**, so its embedded items stay
 //!   reachable and clickable until the inline-box editor widget lands (in the
-//!   plain field the markers render as placeholder glyphs);
+//!   plain field the markers render as placeholder glyphs). The preview shows
+//!   the notecard **as it stands in the field**, unsaved text and all: it is
+//!   rebuilt from the edit buffer, reconciled the way a save is, whenever the
+//!   buffer has moved since it was last drawn;
 //! - lets a resident **drag an inventory item onto the editor to add it** as an
 //!   embedded item (`crate::inventory_drag`'s notecard drop target);
 //! - saves back to **agent** inventory over `UpdateNotecardAgentInventory` or,
@@ -122,7 +125,12 @@ impl Plugin for EditNotecardPlugin {
     /// notecard is open, so `open_notecard` spawns the instance and builds its
     /// content. The per-window systems are gated on there being a window.
     fn build(&self, app: &mut App) {
-        app.add_message::<OpenNotecard>()
+        // The preview's focus drop needs `InputFocus`, which normally arrives
+        // with `bevy_input_focus`'s plugin; `init_resource` is a no-op when it
+        // is already there and keeps an app without it (the gallery) from
+        // failing the system's parameter validation.
+        app.init_resource::<bevy::input_focus::InputFocus>()
+            .add_message::<OpenNotecard>()
             .add_message::<AddEmbeddedItem>()
             .add_systems(
                 Update,
@@ -135,6 +143,9 @@ impl Plugin for EditNotecardPlugin {
                     (
                         ingest_notecard_asset,
                         ingest_added_items,
+                        // After the drop that appends an item's marker, so a
+                        // shown preview picks it up in the same frame.
+                        refresh_notecard_preview,
                         report_notecard_save,
                     )
                         .chain()
@@ -378,6 +389,8 @@ struct BuiltEditor {
 /// the plain text field by default, with a **toggle to that same read-only
 /// preview** so its embedded items stay reachable until the inline-box editor
 /// widget lands, plus a Save button wired to `save_target` and a status line.
+/// The preview is *seeded* from `notecard` here and follows the edit buffer from
+/// then on ([`refresh_notecard_preview`]).
 ///
 /// `source` locates the notecard (so a copied embedded item names the right
 /// notecard / holding prim); `save_target` is where to write edits back, or
@@ -402,10 +415,11 @@ fn populate_editor(
     }
 
     // Editable: a view toggle, the plain edit field (shown) and the rich reader
-    // (hidden), built once — the toggle flips which is displayed. The plain
-    // field keeps each embedded item's private-use marker in the buffer so a
-    // round-trip never corrupts an item; the preview is where those items become
-    // legible and clickable meanwhile.
+    // (hidden) — the toggle flips which is displayed, and the reader's body is
+    // rebuilt from the edit buffer whenever what it shows has gone stale
+    // ([`refresh_notecard_preview`]). The plain field keeps each embedded item's
+    // private-use marker in the buffer so a round-trip never corrupts an item;
+    // the preview is where those items become legible and clickable meanwhile.
     let (toggle_button, toggle_label) = spawn_view_toggle(commands, content, font_size);
     let body_field = spawn_body_field(commands, content, &notecard.text, font_size);
     let reader = spawn_reader_block(commands, content, notecard, source, style, false);
@@ -414,6 +428,10 @@ fn populate_editor(
         reader,
         label: toggle_label,
         preview: false,
+        font_size,
+        // The reader was just built from this text, so a flip to preview with
+        // nothing typed since rebuilds nothing.
+        shown_text: notecard.text.clone(),
     });
 
     let bar = commands
@@ -446,8 +464,10 @@ fn populate_editor(
 
 /// A view-mode toggle on an editable notecard: which of the plain edit field or
 /// the rich read-only preview is shown. Carried by the toggle button so its
-/// observer can flip the two `display`s and its own label.
-#[derive(Component, Debug, Clone, Copy)]
+/// observer can flip the two `display`s and its own label, and so
+/// [`refresh_notecard_preview`] can tell what the reader currently shows from
+/// what the resident has since typed.
+#[derive(Component, Debug, Clone)]
 struct NotecardViewToggle {
     /// The plain multi-line edit field (shown when not previewing).
     edit_field: Entity,
@@ -457,6 +477,13 @@ struct NotecardViewToggle {
     label: Entity,
     /// Whether the read-only preview is currently shown.
     preview: bool,
+    /// The font size the reader's body is built at, kept so a rebuild matches
+    /// the window it lives in.
+    font_size: f32,
+    /// The **edit-buffer text** the reader's body was last built from. The
+    /// reader is rebuilt only when the buffer has moved away from this, so a
+    /// flip with nothing typed since costs nothing and keeps its scroll.
+    shown_text: String,
 }
 
 /// Spawn the view-mode toggle button, returning `(button, label)`.
@@ -494,10 +521,17 @@ fn spawn_view_toggle(commands: &mut Commands, parent: Entity, font_size: f32) ->
 
 /// Flip an editable notecard between the plain edit field and the rich
 /// read-only preview on a primary press.
+///
+/// The preview's **content** is not built here: a flip only changes which node
+/// is displayed, and [`refresh_notecard_preview`] brings the reader up to the
+/// edit buffer before it is seen. The hidden field also gives up focus, so
+/// keystrokes aimed at an invisible editor cannot go on editing behind the
+/// preview.
 fn on_toggle_view(
     press: On<Pointer<Press>>,
     mut toggles: Query<&mut NotecardViewToggle>,
     mut nodes: Query<&mut Node>,
+    mut focus: ResMut<bevy::input_focus::InputFocus>,
     mut commands: Commands,
 ) {
     if press.button != PointerButton::Primary {
@@ -513,6 +547,9 @@ fn on_toggle_view(
         toggle.reader,
         toggle.label,
     );
+    if preview && focus.get() == Some(edit_field) {
+        focus.clear();
+    }
     if let Ok(mut node) = nodes.get_mut(edit_field) {
         node.display = if preview {
             Display::None
@@ -535,6 +572,75 @@ fn on_toggle_view(
     commands
         .entity(label)
         .insert(crate::i18n::Translated::new(key));
+}
+
+/// Bring a **shown** preview up to the edit buffer: rebuild the reader's body
+/// from what the resident has typed, reconciled against the window's baseline
+/// the way a save is.
+///
+/// The reader used to be built once, from the notecard as it arrived, so the
+/// preview showed the notecard as *loaded or last saved* rather than what was
+/// typed — on a new notecard, an empty preview beside a field with text in it.
+///
+/// It rebuilds only when the buffer has actually moved (`shown_text`), so this
+/// is a user-paced teardown on a genuine content change, not per-frame churn:
+/// a flip with nothing typed since rebuilds nothing and keeps its scroll, and a
+/// preview nobody is looking at is not built at all. The reconciliation is
+/// [`sl_notecard::Notecard::with_edited_text`] — the same call the Save button
+/// makes — so an item deleted from the text is gone from the preview, a
+/// duplicated marker shows twice, and an item dropped in since the load appears
+/// as its own clickable box.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected queries: the toggles to refresh, the \
+              window (found through its parent chain and its floater) whose baseline the markers \
+              resolve against, the field they are typed in, and the reader's children and scroll \
+              the rebuild replaces"
+)]
+fn refresh_notecard_preview(
+    mut toggles: Query<(Entity, &mut NotecardViewToggle)>,
+    windows: Query<&NotecardEditorState>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
+    fields: Query<&EditableText>,
+    children: Query<&Children>,
+    mut scrolls: Query<&mut ScrollPosition>,
+    mut commands: Commands,
+) {
+    for (button, mut toggle) in &mut toggles {
+        if !toggle.preview {
+            continue;
+        }
+        let Ok(field) = fields.get(toggle.edit_field) else {
+            continue;
+        };
+        // Compared before it is materialised: a preview nobody has typed into
+        // since costs a string comparison, not an allocation, per frame.
+        if field.value() == toggle.shown_text.as_str() {
+            continue;
+        }
+        // The toggle sits inside its own notecard window, which is where the
+        // baseline the markers resolve against lives.
+        let Some(state) =
+            host_floater(button, &parents, &floaters).and_then(|window| windows.get(window).ok())
+        else {
+            continue;
+        };
+        let Some(baseline) = state.baseline.as_ref() else {
+            continue;
+        };
+        let edited = field.value().to_string();
+        let previewed = baseline.with_edited_text(&edited);
+        let (reader, style) = (toggle.reader, LinkTextStyle::at(toggle.font_size));
+        tear_down(&mut commands, &children, reader);
+        spawn_notecard_body(&mut commands, reader, &previewed, state.source, style);
+        // The body is a different length now, so a scroll offset measured
+        // against the old one means nothing; start the new one at the top.
+        if let Ok(mut scroll) = scrolls.get_mut(reader) {
+            scroll.0.y = 0.0;
+        }
+        toggle.shown_text = edited;
+    }
 }
 
 /// Spawn the rich read-only reader in a bounded, wheel-scrollable block. Shown
@@ -1402,6 +1508,337 @@ mod tests {
             let left = windows(&mut app);
             assert_eq!(left.len(), 1);
             assert_eq!(left.first().map(|(_window, source)| *source), Some(second));
+            Ok(())
+        }
+    }
+
+    /// **The View Items preview shows what you typed**
+    /// (`viewer-notecard-preview-ignores-unsaved-text`): the reader was built
+    /// once from the notecard as it arrived, so the preview showed the loaded
+    /// or last-saved text — on a new notecard, an empty preview beside a field
+    /// with text in it.
+    mod preview {
+        use super::super::{
+            NotecardEditorState, NotecardViewToggle, ingest_added_items, ingest_notecard_asset,
+            open_notecard, refresh_notecard_preview,
+        };
+        use crate::floater::FloaterPlugin;
+        use crate::inventory::AddEmbeddedItem;
+        use crate::ui::UiRoot;
+        use crate::world_api::{NotecardSource, OpenNotecard};
+        use bevy::input_focus::{FocusCause, InputFocus};
+        use bevy::picking::backend::HitData;
+        use bevy::picking::pointer::PointerId;
+        use bevy::prelude::*;
+        use bevy::text::EditableText;
+        use pretty_assertions::assert_eq;
+        use sl_client_bevy::{
+            AgentKey, Asset, AssetType, InventoryFolderKey, InventoryKey, InventoryType, ItemInfo,
+            OwnerKey, Permissions, Permissions5, SaleInfo, SlCommand, SlEvent, SlSessionEvent,
+            Uuid,
+        };
+
+        /// A boxed error so tests can use `?` rather than the disallowed
+        /// `unwrap` / `expect`.
+        type TestError = Box<dyn core::error::Error>;
+
+        /// The notecard the window is opened on.
+        const NOTECARD_ITEM: u128 = 0xC3;
+
+        /// The asset id its body arrives under.
+        const NOTECARD_ASSET: u128 = 0xC3_00;
+
+        /// The prose the notecard arrives with.
+        const LOADED_TEXT: &str = "as it was saved";
+
+        /// An app with the floater manager, the open path and the per-window
+        /// pass this bug lives in — the asset ingest that builds the editor,
+        /// the drop that adds an embedded item, and the preview refresh.
+        fn editor_app() -> App {
+            let mut app = App::new();
+            app.add_message::<SlCommand>()
+                .add_message::<SlEvent>()
+                .add_message::<OpenNotecard>()
+                .add_message::<AddEmbeddedItem>()
+                .init_resource::<UiScale>()
+                .init_resource::<InputFocus>()
+                .init_resource::<ButtonInput<KeyCode>>()
+                .add_plugins(FloaterPlugin)
+                .add_systems(
+                    Update,
+                    (
+                        open_notecard,
+                        ingest_notecard_asset,
+                        ingest_added_items,
+                        refresh_notecard_preview,
+                    )
+                        .chain(),
+                );
+            let root = app.world_mut().spawn(Node::default()).id();
+            app.insert_resource(UiRoot(root));
+            app.update();
+            app
+        }
+
+        /// Open the notecard editable and hand it a body, so the window is the
+        /// one a resident sees: a field with `text` in it and a preview built
+        /// from the same.
+        fn open_with_body(app: &mut App, text: &str) -> Result<(), TestError> {
+            app.world_mut().write_message(OpenNotecard {
+                name: "A notecard".to_owned(),
+                asset_id: Uuid::from_u128(NOTECARD_ASSET),
+                editable: true,
+                source: NotecardSource::Agent {
+                    item_id: InventoryKey::from(Uuid::from_u128(NOTECARD_ITEM)),
+                },
+            });
+            app.update();
+            let data = sl_notecard::Notecard {
+                source_version: sl_notecard::NotecardVersion::V2,
+                items: Vec::new(),
+                text: text.to_owned(),
+            }
+            .encode();
+            app.world_mut()
+                .write_message(SlEvent(SlSessionEvent::AssetReceived(Box::new(Asset {
+                    id: Uuid::from_u128(NOTECARD_ASSET),
+                    asset_type: AssetType::Notecard,
+                    data,
+                }))));
+            app.update();
+            Ok(())
+        }
+
+        /// The one open window.
+        fn window(app: &mut App) -> Result<Entity, TestError> {
+            app.world_mut()
+                .query_filtered::<Entity, With<NotecardEditorState>>()
+                .iter(app.world())
+                .next()
+                .ok_or_else(|| TestError::from("no notecard window is open"))
+        }
+
+        /// The view toggle button and the reader block it shows.
+        fn toggle(app: &mut App) -> Result<(Entity, Entity), TestError> {
+            app.world_mut()
+                .query::<(Entity, &NotecardViewToggle)>()
+                .iter(app.world())
+                .map(|(button, toggle)| (button, toggle.reader))
+                .next()
+                .ok_or_else(|| TestError::from("the editable notecard has no view toggle"))
+        }
+
+        /// Type `text` into the window's body field the way a keystroke would —
+        /// the buffer is what the preview must follow.
+        fn type_into_field(app: &mut App, text: &str) -> Result<(), TestError> {
+            let window = window(app)?;
+            let field = app
+                .world()
+                .get::<NotecardEditorState>(window)
+                .and_then(|state| state.body_field)
+                .ok_or("the editable notecard has no body field")?;
+            let mut editable = app
+                .world_mut()
+                .get_mut::<EditableText>(field)
+                .ok_or("the body field is not editable")?;
+            editable.editor_mut().set_text(text);
+            app.update();
+            Ok(())
+        }
+
+        /// Press the view toggle the way a click does, then settle a frame.
+        fn press_toggle(app: &mut App) -> Result<(), TestError> {
+            let (button, _reader) = toggle(app)?;
+            let event = Pointer::new(
+                PointerId::Mouse,
+                bevy::picking::pointer::Location {
+                    target: bevy::camera::NormalizedRenderTarget::None {
+                        width: 800,
+                        height: 600,
+                    },
+                    position: Vec2::ZERO,
+                },
+                Press {
+                    button: PointerButton::Primary,
+                    hit: HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
+                    count: 1,
+                },
+                button,
+            );
+            app.world_mut().trigger(event);
+            app.update();
+            Ok(())
+        }
+
+        /// Every text run the reader draws, in tree order — what the resident
+        /// reads in the preview.
+        fn reader_text(app: &App, reader: Entity) -> Vec<String> {
+            let mut runs = Vec::new();
+            let mut stack = vec![reader];
+            while let Some(entity) = stack.pop() {
+                if let Some(text) = app.world().get::<Text>(entity) {
+                    runs.push(text.0.clone());
+                }
+                if let Some(children) = app.world().get::<Children>(entity) {
+                    stack.extend(children.iter());
+                }
+            }
+            runs
+        }
+
+        /// An inventory item a resident drags onto the open notecard.
+        fn dropped_item(name: &str) -> ItemInfo {
+            ItemInfo {
+                item_id: InventoryKey::from(Uuid::from_u128(0xD1)),
+                folder_id: InventoryFolderKey::from(Uuid::from_u128(0xD2)),
+                name: name.to_owned(),
+                description: String::new(),
+                asset_id: Uuid::from_u128(0xD3),
+                asset_type: AssetType::Landmark,
+                inv_type: InventoryType::Landmark,
+                flags: 0,
+                sale: SaleInfo::default(),
+                creation_date: 0,
+                owner: OwnerKey::Agent(AgentKey::from(Uuid::from_u128(0xD4))),
+                last_owner_id: Uuid::from_u128(0xD4),
+                creator_id: AgentKey::from(Uuid::from_u128(0xD5)),
+                group: None,
+                permissions: Permissions5 {
+                    base: Permissions::from_bits(0x7fff_ffff),
+                    owner: Permissions::from_bits(0x7fff_ffff),
+                    group: Permissions::empty(),
+                    everyone: Permissions::empty(),
+                    next_owner: Permissions::from_bits(0x0008_2000),
+                },
+            }
+        }
+
+        /// The bug: text typed since the load must be what **View Items**
+        /// shows, not the notecard as it arrived.
+        #[test]
+        fn the_preview_shows_text_typed_since_the_load() -> Result<(), TestError> {
+            let mut app = editor_app();
+            open_with_body(&mut app, LOADED_TEXT)?;
+            let (_button, reader) = toggle(&mut app)?;
+            assert!(
+                reader_text(&app, reader)
+                    .iter()
+                    .any(|run| run == LOADED_TEXT),
+                "the preview did not start from the loaded notecard"
+            );
+
+            type_into_field(&mut app, "what the resident typed")?;
+            press_toggle(&mut app)?;
+
+            let shown = reader_text(&app, reader);
+            assert!(
+                shown.iter().any(|run| run == "what the resident typed"),
+                "the preview shows {shown:?}, not the unsaved text"
+            );
+            assert!(
+                !shown.iter().any(|run| run == LOADED_TEXT),
+                "the preview still shows the notecard as it was loaded"
+            );
+            Ok(())
+        }
+
+        /// A brand-new notecard: an empty body typed into must preview as the
+        /// typed line, not as the empty notecard it was created as.
+        #[test]
+        fn an_empty_notecard_previews_what_was_typed_into_it() -> Result<(), TestError> {
+            let mut app = editor_app();
+            open_with_body(&mut app, "")?;
+            let (_button, reader) = toggle(&mut app)?;
+
+            type_into_field(&mut app, "the first line")?;
+            press_toggle(&mut app)?;
+
+            assert!(
+                reader_text(&app, reader)
+                    .iter()
+                    .any(|run| run == "the first line"),
+                "a new notecard's preview stayed empty"
+            );
+            Ok(())
+        }
+
+        /// An item dropped **since the load** appears in the preview as its own
+        /// box, because the rebuild reconciles the markers against the window's
+        /// baseline exactly as a save does.
+        #[test]
+        fn an_item_dropped_since_the_load_appears_in_the_preview() -> Result<(), TestError> {
+            let mut app = editor_app();
+            open_with_body(&mut app, LOADED_TEXT)?;
+            let (_button, reader) = toggle(&mut app)?;
+            let editor = window(&mut app)?;
+
+            app.world_mut().write_message(AddEmbeddedItem {
+                item: dropped_item("Our Home"),
+                editor,
+            });
+            app.update();
+            press_toggle(&mut app)?;
+
+            let shown = reader_text(&app, reader);
+            assert!(
+                shown.iter().any(|run| run == "Our Home"),
+                "the preview shows {shown:?} — the dropped item is missing"
+            );
+            Ok(())
+        }
+
+        /// The rebuild is **paid for a change, not for a flip**: toggling with
+        /// nothing typed since leaves the reader's body exactly as it was, so
+        /// the preview keeps its scroll and the editor keeps the
+        /// build-once-update-on-change rule the floaters are held to.
+        #[test]
+        fn a_flip_with_nothing_typed_rebuilds_nothing() -> Result<(), TestError> {
+            let mut app = editor_app();
+            open_with_body(&mut app, LOADED_TEXT)?;
+            let (_button, reader) = toggle(&mut app)?;
+            let body = app
+                .world()
+                .get::<Children>(reader)
+                .and_then(|children| children.iter().next())
+                .ok_or("the reader has no body")?;
+
+            press_toggle(&mut app)?;
+
+            let after = app
+                .world()
+                .get::<Children>(reader)
+                .and_then(|children| children.iter().next())
+                .ok_or("the reader lost its body")?;
+            assert_eq!(
+                after, body,
+                "an unchanged preview was torn down and rebuilt anyway"
+            );
+            Ok(())
+        }
+
+        /// The field the preview hides gives up focus, so keystrokes aimed at
+        /// an invisible editor cannot go on editing behind the preview.
+        #[test]
+        fn the_hidden_field_gives_up_focus() -> Result<(), TestError> {
+            let mut app = editor_app();
+            open_with_body(&mut app, LOADED_TEXT)?;
+            let editor = window(&mut app)?;
+            let field = app
+                .world()
+                .get::<NotecardEditorState>(editor)
+                .and_then(|state| state.body_field)
+                .ok_or("the editable notecard has no body field")?;
+            app.world_mut()
+                .resource_mut::<InputFocus>()
+                .set(field, FocusCause::Pressed);
+
+            press_toggle(&mut app)?;
+
+            assert_eq!(
+                app.world().resource::<InputFocus>().get(),
+                None,
+                "the hidden edit field kept the keyboard"
+            );
             Ok(())
         }
     }
