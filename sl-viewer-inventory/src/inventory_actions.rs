@@ -736,6 +736,78 @@ pub(crate) struct ItemMenuFacts {
     pub(crate) in_membership_tab: bool,
 }
 
+/// Whether an **item** row may be deleted — moved to the Trash.
+///
+/// The one definition both delete paths ask: the context menu builds
+/// [`CAN_DELETE`] from it, and the Delete / Backspace shortcut re-checks it
+/// before sending (the discipline `edit_undo.rs` states). A row already in the
+/// Trash is not deletable — the menu deliberately offers **Purge** there, and a
+/// second move into the Trash would be a no-op the grid still has to answer.
+pub(crate) const fn item_can_delete(facts: ItemMenuFacts) -> bool {
+    // A Library row is read-only; a trashed row is purged, not re-trashed.
+    !facts.in_library && !facts.in_trash
+}
+
+/// Whether a **folder** row may be deleted — moved to the Trash. The folder
+/// half of [`item_can_delete`], with the two extra guards a folder needs: a
+/// system folder (its preferred type set) keeps its role, and the root has no
+/// parent to be moved out of.
+pub(crate) fn folder_can_delete(folder: &FolderInfo, facts: FolderMenuFacts) -> bool {
+    !facts.in_library
+        && !facts.in_trash
+        && folder.folder_type == FolderType::None
+        && folder.parent_id.is_some()
+}
+
+/// Whether a folder is the agent's Trash or sits anywhere below it.
+///
+/// Shared so that the context menu and the keyboard shortcut classify a row the
+/// same way; see [`item_can_delete`].
+pub(crate) fn within_trash(model: &InventoryModel, folder: InventoryFolderKey) -> bool {
+    model
+        .folder_by_type(FolderType::Trash)
+        .is_some_and(|trash| model.is_within(folder, trash))
+}
+
+/// The delete-relevant facts of an **item** row, read from the model. Every
+/// other fact stays at its default, so a caller that needs the full set spreads
+/// this and fills the rest in.
+pub(crate) fn item_delete_facts(model: &InventoryModel, item: &ItemInfo) -> ItemMenuFacts {
+    ItemMenuFacts {
+        in_library: model.is_library(item.folder_id),
+        in_trash: within_trash(model, item.folder_id),
+        ..ItemMenuFacts::default()
+    }
+}
+
+/// The delete-relevant facts of a **folder** row, as [`item_delete_facts`].
+pub(crate) fn folder_delete_facts(model: &InventoryModel, folder: &FolderInfo) -> FolderMenuFacts {
+    FolderMenuFacts {
+        in_library: model.is_library(folder.folder_id),
+        // "In the trash" for Delete-vs-Purge means *below* the Trash; the Trash
+        // folder itself is emptied, not purged.
+        in_trash: folder
+            .parent_id
+            .is_some_and(|parent| within_trash(model, parent)),
+        ..FolderMenuFacts::default()
+    }
+}
+
+/// Whether one selected row may be deleted, resolved straight from the model —
+/// the form the **keyboard** shortcut asks, which has no menu conditions to
+/// consult. A row that does not resolve (a Recent entry whose folder is not
+/// loaded) is not deletable.
+pub(crate) fn can_delete_row(model: &InventoryModel, key: RowKey) -> bool {
+    match key {
+        RowKey::Item(item) => model
+            .find_item(item)
+            .is_some_and(|info| item_can_delete(item_delete_facts(model, info))),
+        RowKey::Folder(folder) => model
+            .folder_info(folder)
+            .is_some_and(|info| folder_can_delete(info, folder_delete_facts(model, info))),
+    }
+}
+
 /// The conditions that hold for an **item** row's context menu.
 pub(crate) fn item_conditions(item: &ItemInfo, facts: ItemMenuFacts) -> Vec<&'static str> {
     let mut held = Vec::new();
@@ -768,9 +840,9 @@ pub(crate) fn item_conditions(item: &ItemInfo, facts: ItemMenuFacts) -> Vec<&'st
     if mutable {
         held.push(CAN_RENAME);
         held.push(CAN_CUT);
-        if !facts.in_trash {
-            held.push(CAN_DELETE);
-        }
+    }
+    if item_can_delete(facts) {
+        held.push(CAN_DELETE);
     }
     if facts.in_library || item.permissions.owner.contains(Permissions::COPY) {
         held.push(CAN_COPY);
@@ -860,15 +932,15 @@ pub(crate) fn folder_conditions(folder: &FolderInfo, facts: FolderMenuFacts) -> 
     if mutable {
         held.push(CAN_CREATE);
         held.push(CAN_SHARE);
-        // Only a plain user folder may be renamed / cut / deleted; the system
-        // folders (Trash, Clothing, the root, …) keep their role.
+        // Only a plain user folder may be renamed / cut; the system folders
+        // (Trash, Clothing, the root, …) keep their role.
         if folder.folder_type == FolderType::None {
             held.push(CAN_RENAME);
             held.push(CAN_CUT);
-            if !facts.in_trash {
-                held.push(CAN_DELETE);
-            }
         }
+    }
+    if folder_can_delete(folder, facts) {
+        held.push(CAN_DELETE);
     }
     if facts.clipboard_has_entry && mutable {
         held.push(CAN_PASTE);
@@ -1401,20 +1473,12 @@ fn resolve_row_target(
     gestures: &ActiveGestures,
     in_membership_tab: bool,
 ) -> Option<(MenuTarget, Vec<&'static str>)> {
-    let trash = model.folder_by_type(FolderType::Trash);
-    let in_trash = |folder: InventoryFolderKey| {
-        trash.is_some_and(|trash_key| model.is_within(folder, trash_key))
-    };
     let clipboard_has_entry = clipboard.entry.is_some();
     match key {
         RowKey::Folder(key) => {
             let info = model.folder_info(key)?.clone();
             let subtree = model.subtree_items(key);
             let facts = FolderMenuFacts {
-                in_library: model.is_library(key),
-                // "In the trash" for Delete-vs-Purge means *below* the Trash;
-                // the Trash folder itself is emptied, not purged.
-                in_trash: info.parent_id.is_some_and(in_trash),
                 clipboard_has_entry,
                 has_wearables: subtree.iter().any(|item| is_outfit_item(item)),
                 has_worn: subtree.iter().any(|item| {
@@ -1423,6 +1487,9 @@ fn resolve_row_target(
                 has_calling_cards: subtree
                     .iter()
                     .any(|item| item.inv_type == InventoryType::CallingCard),
+                // Library / Trash placement: the same reading the keyboard
+                // shortcut takes, so both delete paths agree.
+                ..folder_delete_facts(model, &info)
             };
             let conditions = folder_conditions(&info, facts);
             Some((MenuTarget::Folder(info), conditions))
@@ -1430,8 +1497,6 @@ fn resolve_row_target(
         RowKey::Item(key) => {
             let info = model.find_item(key)?.clone();
             let facts = ItemMenuFacts {
-                in_library: model.is_library(info.folder_id),
-                in_trash: in_trash(info.folder_id),
                 clipboard_has_entry,
                 worn: is_worn(
                     &info,
@@ -1441,6 +1506,7 @@ fn resolve_row_target(
                 ),
                 gesture_active: gestures.items.contains(&info.item_id),
                 in_membership_tab,
+                ..item_delete_facts(model, &info)
             };
             let conditions = item_conditions(&info, facts);
             Some((MenuTarget::Item(info), conditions))
@@ -3104,7 +3170,10 @@ impl Plugin for InventoryActionsPlugin {
 /// moves the selection to the Trash — but only while the inventory list is the
 /// focused widget (the reference's `LLPanelMainInventory` accelerators), so the
 /// same keys over the world (build-mode object delete) or the Content tab hit
-/// their own handlers. Library rows and system folders are never trashed.
+/// their own handlers. What may be trashed is [`can_delete_row`], the same
+/// predicate the context menu's Delete entry is enabled on: Library rows,
+/// system folders and rows *already* in the Trash are never trashed (a trashed
+/// row is purged instead, and the menu offers exactly that).
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources: the keyboard + input \
@@ -3149,11 +3218,18 @@ fn inventory_hotkeys(
         };
         let mut trashed = false;
         for key in selection.keys_in_view_order(view.rows()) {
+            // The shortcut sends only what the context menu would have offered
+            // Delete for. [`can_delete_row`] is that one predicate, so a row
+            // already in the Trash is refused here exactly as the menu offers
+            // Purge instead of Delete there, and a Library row or a system
+            // folder is left alone by both.
+            if !can_delete_row(&model, key) {
+                continue;
+            }
             match key {
                 RowKey::Item(item_key) => {
-                    if let Some(item) = model.find_item(item_key)
-                        && !model.is_library(item.folder_id)
-                    {
+                    // Resolved by the guard; re-read for the folder to refresh.
+                    if let Some(item) = model.find_item(item_key) {
                         commands.write(SlCommand(Command::MoveInventoryItem {
                             item_id: item.item_id,
                             folder_id: trash,
@@ -3164,21 +3240,12 @@ fn inventory_hotkeys(
                     }
                 }
                 RowKey::Folder(folder_key) => {
-                    // Only a plain user folder with a parent, and never the
-                    // Library — a system folder (its preferred type set) is never
-                    // trashed.
-                    if let Some(info) = model.folder_info(folder_key)
-                        && info.folder_type == FolderType::None
-                        && info.parent_id.is_some()
-                        && !model.is_library(info.folder_id)
-                    {
-                        commands.write(SlCommand(Command::MoveInventoryFolder {
-                            folder_id: info.folder_id,
-                            parent_id: trash,
-                        }));
-                        commands.write(SlCommand(Command::QueryInventoryFolders));
-                        trashed = true;
-                    }
+                    commands.write(SlCommand(Command::MoveInventoryFolder {
+                        folder_id: folder_key,
+                        parent_id: trash,
+                    }));
+                    commands.write(SlCommand(Command::QueryInventoryFolders));
+                    trashed = true;
                 }
             }
         }
@@ -3191,14 +3258,16 @@ fn inventory_hotkeys(
 #[cfg(test)]
 mod tests {
     use super::{
-        CAN_COPY, CAN_CREATE, CAN_CREATE_SETTINGS, CAN_CUT, CAN_DELETE, CAN_PASTE, CAN_PASTE_LINK,
-        CAN_RENAME, CAN_SHOW_IN_MAIN, ClipboardMode, FOLDER_HAS_CALLING_CARDS,
+        ActiveGestures, CAN_COPY, CAN_CREATE, CAN_CREATE_SETTINGS, CAN_CUT, CAN_DELETE, CAN_PASTE,
+        CAN_PASTE_LINK, CAN_RENAME, CAN_SHOW_IN_MAIN, ClipboardMode, FOLDER_HAS_CALLING_CARDS,
         FOLDER_HAS_WEARABLES, FOLDER_HAS_WORN, FolderMenuFacts, GESTURE_ACTIVE, GESTURE_INACTIVE,
         IN_TRASH, INVENTORY_FOLDER_MENU, INVENTORY_ITEM_MENU, IS_CLOTHING, IS_LANDMARK, IS_OBJECT,
-        IS_TRASH_FOLDER, IS_WEARABLE, ItemMenuFacts, MenuTarget, NOT_IN_TRASH, NOT_WORN, WORN,
-        folder_conditions, is_worn, item_conditions, new_settings_item, outfit_add_commands,
-        outfit_remove_commands, paste_commands, settings_caps_present, take_off_set, wear_set,
+        IS_TRASH_FOLDER, IS_WEARABLE, InventoryClipboard, ItemMenuFacts, MenuTarget, NOT_IN_TRASH,
+        NOT_WORN, RowKey, WORN, WornAttachments, can_delete_row, folder_conditions, is_worn,
+        item_conditions, new_settings_item, outfit_add_commands, outfit_remove_commands,
+        paste_commands, resolve_row_target, settings_caps_present, take_off_set, wear_set,
     };
+    use crate::inventory::InventoryModel;
     use crate::menu::{MenuDef, MenuItemDef};
     use crate::world_api::PendingSettingsCreations;
     use pretty_assertions::assert_eq;
@@ -4082,6 +4151,110 @@ mod tests {
         assert!(held.contains(&GESTURE_ACTIVE));
         let held = item_conditions(&gesture, ItemMenuFacts::default());
         assert!(held.contains(&GESTURE_INACTIVE));
+    }
+
+    /// **Delete decides the same thing whichever way it is asked.**
+    ///
+    /// There are two delete paths — the context menu's entry, enabled on
+    /// [`CAN_DELETE`], and the Delete / Backspace shortcut, which has no menu to
+    /// consult and so re-checks for itself. They used to re-derive *different*
+    /// predicates: the shortcut's omitted the in-Trash check, so Delete on an
+    /// already-trashed row re-sent a move into the Trash where the menu
+    /// deliberately offers **Purge** instead. Both now ask
+    /// [`can_delete_row`], and this walks a tree asserting row by row that the
+    /// menu's answer and the shortcut's are the same one.
+    #[test]
+    fn both_delete_paths_agree_on_every_row() {
+        /// A folder of the given id, parent and type.
+        fn tree_folder(id: u128, parent: Option<u128>, folder_type: FolderType) -> FolderInfo {
+            FolderInfo {
+                folder_id: InventoryFolderKey::from(Uuid::from_u128(id)),
+                parent_id: parent.map(|key| InventoryFolderKey::from(Uuid::from_u128(key))),
+                name: "Folder".to_owned(),
+                folder_type,
+                version: 1,
+                state: FolderState::Unknown,
+            }
+        }
+        /// The key of a folder id.
+        fn fkey(id: u128) -> InventoryFolderKey {
+            InventoryFolderKey::from(Uuid::from_u128(id))
+        }
+
+        // My Inventory ├ Objects (holds the loose item, id 0xF0 — where the
+        // `item` fixture files its rows) └ Trash ├ junk └ junk/deeper.
+        let mut model = InventoryModel::default();
+        model.merge_folders(
+            &[
+                tree_folder(1, None, FolderType::RootInventory),
+                tree_folder(0xF0, Some(1), FolderType::None),
+                tree_folder(7, Some(1), FolderType::Trash),
+                tree_folder(0x20, Some(7), FolderType::None),
+                tree_folder(0x21, Some(0x20), FolderType::None),
+            ],
+            false,
+        );
+        let live = item(0xA1, InventoryType::Notecard, AssetType::Notecard, 0);
+        let mut trashed = item(0xA2, InventoryType::Notecard, AssetType::Notecard, 0);
+        trashed.folder_id = fkey(0x20);
+        model.set_items(fkey(0xF0), std::slice::from_ref(&live));
+        model.set_items(fkey(0x20), std::slice::from_ref(&trashed));
+
+        let expected = [
+            (RowKey::Item(live.item_id), true, "a live item is deletable"),
+            (
+                RowKey::Item(trashed.item_id),
+                false,
+                "an item already in the Trash is purged, not re-trashed",
+            ),
+            (
+                RowKey::Folder(fkey(0xF0)),
+                true,
+                "a plain user folder is deletable",
+            ),
+            (
+                RowKey::Folder(fkey(0x20)),
+                false,
+                "a folder already in the Trash is purged, not re-trashed",
+            ),
+            (
+                RowKey::Folder(fkey(0x21)),
+                false,
+                "and so is one nested deeper under the Trash",
+            ),
+            (
+                RowKey::Folder(fkey(7)),
+                false,
+                "the Trash itself is emptied, never trashed",
+            ),
+            (
+                RowKey::Folder(fkey(1)),
+                false,
+                "the root has no parent to be moved out of",
+            ),
+            (
+                RowKey::Item(InventoryKey::from(Uuid::from_u128(0xDEAD))),
+                false,
+                "a row that does not resolve is not deletable",
+            ),
+        ];
+        for (key, deletable, why) in expected {
+            assert_eq!(can_delete_row(&model, key), deletable, "{why}");
+            // The menu half, built the way the opener builds it.
+            let offered = resolve_row_target(
+                key,
+                &model,
+                &InventoryClipboard::default(),
+                &WornAttachments::default(),
+                &ActiveGestures::default(),
+                false,
+            )
+            .is_some_and(|(_target, conditions)| conditions.contains(&CAN_DELETE));
+            assert_eq!(
+                offered, deletable,
+                "the menu and the shortcut must agree: {why}"
+            );
+        }
     }
 
     /// System folders refuse rename / cut / delete; user folders allow them;
