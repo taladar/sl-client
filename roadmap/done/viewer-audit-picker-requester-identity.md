@@ -2,12 +2,17 @@
 id: viewer-audit-picker-requester-identity
 title: Two instances of one window share a picker, and both claim its answer
 topic: viewer
-status: ready
+status: done
 origin: live check of [[viewer-region-experiences-panel]] (2026-09-12)
 points: 5
 refs: [viewer-region-experiences-panel, viewer-keyed-floater-audit,
-  viewer-experiences-floater]
+  viewer-experiences-floater, viewer-settings-save-as-create-then-put,
+  viewer-audit-asset-editor-scaffold]
 ---
+
+Done (2026-09-12). All five pickers are opener-keyed and route by `Entity`, the
+claim bookkeeping is gone, and the floater manager owns both halves of a
+picker's lifetime. See [Done](#done) at the end for what landed.
 
 Context: [context/viewer.md](../context/viewer.md).
 
@@ -120,3 +125,92 @@ Reference (Firestorm, read-only): `llpanelexperiencelisteditor.cpp`
 reference's answer to exactly this, one picker per *press* rather than per
 control), `lltexturectrl.cpp` (`LLTextureCtrl::showPicker`, a picker owned by
 the control instance).
+
+## Done
+
+### The manager grew two relationships it did not have
+
+`FloaterOwner(Entity)` records **which window opened this one**, and
+`close_owned_floaters` — a pass beside `raise_floaters_on_open` in `PostUpdate`
+— closes any floater whose owner has despawned (a keyed opener's Close) or been
+hidden (a singleton's). It writes the close for the **next** frame's command
+pass on purpose: several windows read a `FloaterOp::Close` *before* that pass to
+answer whoever was waiting (the texture picker reverts an uncommitted preview
+that way), and a command written inside `Update` would reach the despawn before
+some of those readers reached the command. A frame of latency on a close nobody
+asked for is invisible; a lost revert is a wrongly-textured object.
+
+`picker_identity(requester, field, …)` answers both questions from one walk up
+the tree: the owning floater, and the `FloaterKey` for a picker that window
+opened for that field — `{opener id}/{opener key}/{field}`. Keying on the
+opener's *identity* rather than its entity is what survives a panel rebuilt in
+place, and is what a person can read in the window's `Name`.
+
+### Routing
+
+`OpenAvatarPicker` / `AvatarPicked` and `OpenExperiencePicker` /
+`ExperiencePicked` now carry `requester: Entity` (the button pressed) plus a
+`field` naming which of that window's pickers it is. That deleted every claim:
+`AboutRegionState::pending_pick`, `pending_experience_picks`,
+`AboutLandState::pending_pick` and `conversations::PendingParticipantPick` are
+gone. Each consumer reads *what* to do off the pressed button's own component
+(`AboutRegionAction`, `AboutLandAction`, `AddParticipantsButton`,
+`RenderSettingsButton`, `BlockedButton`, `ContactSetsButton`) and *which window*
+off `host_floater` — so the two About Region windows the bug needed now each
+take only their own pick.
+
+Two openers had no button entity to name. The inventory **Share** is a menu
+action, so it names the inventory window itself — which is also the window its
+picker belongs to and closes with. The Conversations pane's add-participants
+button appends the conversation key to its field, because one window holds a
+pane per conversation and two panes sharing a field name would share a picker.
+
+### Three singletons became keyed windows
+
+The avatar, settings and colour pickers moved their `Resource` state onto the
+window root as components and build their content per instance, as the
+experience picker already did. Two swatches answered at once are now two
+windows: the colour picker used to warn about the losers of a frame and drop
+them, leaving a live preview nobody would ever commit or revert.
+
+### `FloaterKey::Named` went with the texture picker's remembered rectangle
+
+A picker keyed on the window that opened it cannot be one of a closed set of
+names, and an entry per region or parcel ever visited is what `FloaterKey`
+exists to avoid — so the texture picker gave up its per-field geometry, which
+left `Named` with no users at all. `FloaterKey` is now the one subject form and
+`Floater::persist_id` is one line.
+
+## Also done: a window may refuse a close
+
+Raised while reworking the close path, and the missing half of
+[[viewer-settings-save-as-create-then-put]]'s *Not done*: refusing a close
+"needs the floater chrome to support vetoing one, which it does not".
+
+- `FloaterCloseGuard { armed }` on a window root. While armed, the manager turns
+  a `FloaterOp::Close` into a `FloaterCloseRequested` naming the window and
+  leaves it standing; the feature asks, and answers with the unrefusable
+  `FloaterOp::CloseNow`. The manager never disarms the guard — a feature that
+  cleared it instead of answering would leave the *next* close unguarded, which
+  is the silent discard this exists to stop.
+- `close_owned_floaters` uses `CloseNow`: the window the work was for is the
+  thing that just went away, so there is nothing left to answer — and a
+  held-back close from a pass that runs every frame would re-ask forever.
+- Both settings editors arm the guard from `session.modified` and raise the
+  same `SettingsConfirmLoss` their open-replaces and Import paths already raise,
+  through the same held slot. The notecard and script editors
+  ([[viewer-audit-asset-editor-scaffold]]) can now do the same; what they still
+  lack is dirty tracking, which no chrome can give them.
+
+## Verified
+
+`cargo clippy --workspace --all-targets` clean.
+`cargo test --release --lib` green on the seven touched crates:
+`sl-viewer-ui-widgets` 231, `sl-viewer-people` 131, `sl-viewer-environment` 92,
+`sl-viewer-inventory` 85, `sl-viewer-notices` 79, `sl-viewer-places` 37,
+`sl-viewer-pickers` 12 — including the new opener-keyed identity test, the
+picker-closes-with-a-despawned-and-with-a-hidden-owner pair, the guard's three
+states, and a guard that does not outlive its owner.
+
+Not live-verified: two About Region windows on two regions each adding to the
+same experience list, and a dirty settings editor's ✕, both want a grid.

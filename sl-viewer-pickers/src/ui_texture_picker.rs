@@ -29,20 +29,24 @@
 //!   can live-preview it on the object; **OK** emits the final choice and
 //!   **Cancel** emits the original (revert), mirroring the colour picker.
 //!
-//! # One window per field
+//! # One window per field, of the window that opened it
 //!
-//! The picker is a **keyed floater** ([`FloaterKey::Named`]), keyed by the
-//! field being picked for — a swatch's element id, or a name the opener
-//! chooses ([`OpenTexturePicker::field`]). Picking a normal map therefore does
-//! not close the diffuse picker you were comparing it against, which is the
-//! reference's shape too (every `LLTextureCtrl` owns its picker). Two swatches
-//! declared with the same element id share one window: they are the same field
-//! as far as the UI is concerned.
+//! The picker is a **keyed floater** ([`picker_identity`]), keyed by the field
+//! being picked for — a swatch's element id, or a name the opener chooses
+//! ([`OpenTexturePicker::field`]) — **and by the window that field lives in**.
+//! Picking a normal map therefore does not close the diffuse picker you were
+//! comparing it against, which is the reference's shape too (every
+//! `LLTextureCtrl` owns its picker); and the same swatch in two instances of
+//! one window — About Land is one per parcel — gets two pickers rather than
+//! one they fight over. Two swatches declared with the same element id *in one
+//! window* share a picker: they are the same field as far as the UI is
+//! concerned.
 //!
-//! A *named* key is the persisted kind, so each field's window remembers its
-//! own position and size across sessions (`texture-picker_<field>_rect`), and
-//! closing a window ends it — the next pick of that field builds a fresh one,
-//! which is why the state below is per window rather than a resource.
+//! A keyed instance persists nothing, so a window does not come back where the
+//! last session left it, and closing one ends it — the next pick of that field
+//! builds a fresh one, which is why the state below is per window rather than
+//! a resource. It closes with the window that opened it too
+//! ([`FloaterOwner`]).
 //!
 //! Reference (Firestorm, read-only): `llfloatertexturepicker.cpp`,
 //! `lltexturectrl.cpp`, `llinventorypanel.cpp`.
@@ -61,8 +65,8 @@ use sl_client_bevy::{
 use std::hash::{Hash, Hasher as _};
 
 use crate::floater::{
-    Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterKey, FloaterOp, FloaterSpec,
-    FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater,
+    Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterOp, FloaterOwner, FloaterSpec,
+    FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater, picker_identity,
 };
 use crate::i18n::Translated;
 use crate::inventory::{InventoryModel, item_icon, query_folder_page};
@@ -667,9 +671,14 @@ fn handle_open_texture_picker(
     mut floaters: KeyedFloaters,
     mut windows: Query<(&mut TexturePickerState, &TexturePickerUi)>,
     mut nodes: Query<&mut Node>,
+    parents: Query<&ChildOf>,
+    openers: Query<(Entity, &Floater)>,
     mut commands: Commands,
 ) {
     for open in opens.read().cloned() {
+        // The window this picker belongs to, and the key that keeps two
+        // instances of it from sharing one picker — see `picker_identity`.
+        let (owner, key) = picker_identity(open.requester, &open.field, &parents, &openers);
         let mut spec = texture_picker_floater_spec();
         // Retitle for the active kind. Blank / Default are texture UUIDs —
         // meaningless as a material — so they are hidden in material mode
@@ -686,10 +695,13 @@ fn handle_open_texture_picker(
             PickerKind::Texture => "Pick: Texture",
             PickerKind::Material => "Pick: Material",
         });
-        let opened = floaters.open(spec, FloaterKey::named(open.field.clone()));
+        let opened = floaters.open(spec, key);
         let window = opened.root();
         if let KeyedFloaterOpen::Spawned(handle) = opened {
             build_picker_content(&mut commands, handle, &open);
+            if let Some(owner) = owner {
+                commands.entity(handle.root).insert(FloaterOwner(owner));
+            }
         }
         // Re-point an existing window at this open: the same field can be
         // picked for again with a different current value, or in the other
@@ -1588,9 +1600,12 @@ mod tests {
         /// opened on its own field's texture — picking a normal map must not
         /// close the diffuse picker you were comparing it against.
         ///
-        /// And because a field is a *named* instance, each window keeps its own
-        /// remembered geometry (`Floater::persist_id`), which is what the
-        /// scaffold's named half exists for.
+        /// And **neither remembers a rectangle**: a picker is now keyed on the
+        /// window that opened it as well as the field
+        /// (`viewer-audit-picker-requester-identity`), and such a key cannot be
+        /// a settings entry — one per region or parcel ever visited is what
+        /// `FloaterKey` exists to avoid. A transient dialog is the wrong thing
+        /// to restore anyway.
         #[test]
         fn two_fields_open_two_windows() -> Result<(), TestError> {
             let mut app = picker_app();
@@ -1613,19 +1628,14 @@ mod tests {
             );
 
             let world = app.world();
-            let mut settings: Vec<String> = windows
+            let settings: Vec<String> = windows
                 .iter()
                 .filter_map(|(window, _on)| world.get::<Floater>(*window))
                 .filter_map(Floater::persist_id)
                 .collect();
-            settings.sort();
-            assert_eq!(
-                settings,
-                vec![
-                    "texture-picker_other".to_owned(),
-                    "texture-picker_test".to_owned()
-                ],
-                "each field's window remembers its own geometry"
+            assert!(
+                settings.is_empty(),
+                "a picker persists no geometry, so neither window has a settings id: {settings:?}"
             );
             Ok(())
         }

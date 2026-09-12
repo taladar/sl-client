@@ -318,7 +318,7 @@ struct PreviewUi {
 }
 
 /// The [`FloaterKey`] of the window showing `item`'s properties — one window
-/// per inventory item, keyed by its id. A [subject](FloaterKey::Subject) key,
+/// per inventory item, keyed by its id. A [`FloaterKey`] persists nothing,
 /// so nothing is persisted: a stored rectangle per item ever inspected would
 /// grow the settings file without bound.
 fn properties_key(item: InventoryKey) -> FloaterKey {

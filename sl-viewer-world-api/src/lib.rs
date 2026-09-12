@@ -1539,12 +1539,29 @@ impl LocalChatNotice {
     }
 }
 
-/// Ask the picker to open for a feature. `requester` tags the eventual
-/// [`AvatarPicked`] so only the asking feature consumes it.
-#[derive(Message, Debug, Clone, Copy)]
+/// Ask the picker to open for a control. `requester` is the control that asked
+/// — the [`AvatarPicked`] reply carries it back, so only the widget that asked
+/// consumes it, and the window that widget lives in is the picker's own.
+///
+/// The reply used to be routed by a `&'static str` tag, which is a property of
+/// the *control* rather than of the window: two instances of one floater have
+/// the same controls, so both claimed the same answer. See `picker_identity`.
+#[derive(Message, Debug, Clone)]
 pub struct OpenAvatarPicker {
-    /// The feature tag echoed back in [`AvatarPicked`].
-    pub requester: &'static str,
+    /// The control that asked — the Add / Kick / Send-Home button. Echoed back
+    /// in [`AvatarPicked`], and the consumer resolves its host floater to reach
+    /// the window's own state.
+    pub requester: Entity,
+    /// **Which** of the opening window's pickers this is — the field name, one
+    /// per Add button. Two fields of one window are two picker windows; the
+    /// same field in two instances of that window is also two.
+    ///
+    /// Owned rather than `&'static str` for the same reason
+    /// [`OpenTexturePicker::field`] is: a window holding several of one control
+    /// (the Conversations window's per-conversation Add-participants button)
+    /// names them apart at spawn time, and two of them sharing a field name
+    /// would be one picker they fight over.
+    pub field: Box<str>,
     /// Whether the user may choose several residents at once — the reference's
     /// `allow_multiple`. Build one with [`OpenAvatarPicker::one`] or
     /// [`OpenAvatarPicker::many`] rather than by hand, so the choice reads at
@@ -1555,18 +1572,20 @@ pub struct OpenAvatarPicker {
 impl OpenAvatarPicker {
     /// Ask for exactly one resident.
     #[must_use]
-    pub const fn one(requester: &'static str) -> Self {
+    pub fn one(requester: Entity, field: impl Into<Box<str>>) -> Self {
         Self {
             requester,
+            field: field.into(),
             allow_multiple: false,
         }
     }
 
     /// Ask for any number of residents at once.
     #[must_use]
-    pub const fn many(requester: &'static str) -> Self {
+    pub fn many(requester: Entity, field: impl Into<Box<str>>) -> Self {
         Self {
             requester,
+            field: field.into(),
             allow_multiple: true,
         }
     }
@@ -1589,8 +1608,10 @@ pub struct PickedAvatar {
 /// with [`OpenAvatarPicker::one`] answers with exactly one element.
 #[derive(Message, Debug, Clone)]
 pub struct AvatarPicked {
-    /// The tag of the feature that opened the picker.
-    pub requester: &'static str,
+    /// The control that opened the picker. A consumer matches on it — and, for
+    /// a window that opens per subject, resolves its host floater to reach that
+    /// instance's state.
+    pub requester: Entity,
     /// The chosen residents — never empty (the picker does not confirm an empty
     /// selection).
     pub picks: Vec<PickedAvatar>,
@@ -1642,16 +1663,21 @@ impl ExperiencePickerFilter {
     }
 }
 
-/// Ask the experience picker to open for a feature. `requester` tags the
-/// eventual [`ExperiencePicked`] so only the asking feature consumes it — the
-/// same out-of-band shape as [`OpenAvatarPicker`].
+/// Ask the experience picker to open for a control. `requester` is the control
+/// that asked, echoed back in [`ExperiencePicked`] — the same out-of-band shape
+/// as [`OpenAvatarPicker`].
 ///
 /// The reference's equivalent is `LLFloaterExperiencePicker::show`, which every
 /// estate / parcel experience list opens from its Add button.
 #[derive(Message, Debug, Clone, Copy)]
 pub struct OpenExperiencePicker {
-    /// The feature tag echoed back in [`ExperiencePicked`].
-    pub requester: &'static str,
+    /// The control that asked — the list's Add button. Echoed back in
+    /// [`ExperiencePicked`], and its host floater is the window the pick
+    /// belongs to.
+    pub requester: Entity,
+    /// **Which** of the opening window's pickers this is — one per experience
+    /// list. See [`OpenAvatarPicker::field`].
+    pub field: &'static str,
     /// Which experiences this open may offer.
     pub filter: ExperiencePickerFilter,
 }
@@ -1661,8 +1687,8 @@ pub struct OpenExperiencePicker {
 /// `close_on_select` true).
 #[derive(Message, Debug, Clone)]
 pub struct ExperiencePicked {
-    /// The tag of the feature that opened the picker.
-    pub requester: &'static str,
+    /// The control that opened the picker (see [`OpenExperiencePicker`]).
+    pub requester: Entity,
     /// The chosen experience.
     pub experience: ExperienceKey,
     /// The name the picked row carried, so a consumer that must show the
@@ -1689,13 +1715,14 @@ pub struct OpenTexturePicker {
     /// The swatch (or other widget) the reply is tagged back to.
     pub requester: Entity,
     /// **Which field** is being picked for — the swatch's element id, or a
-    /// name the opener chooses. The picker opens one window per field (the
-    /// reference gives every `LLTextureCtrl` its own picker), so this is the
-    /// window's identity: two fields are two windows, and each remembers its
-    /// own position and size.
+    /// name the opener chooses. The picker opens one window per field of the
+    /// **opening window** (the reference gives every `LLTextureCtrl` its own
+    /// picker), so this is half of that window's identity and the opener is the
+    /// other half: two fields are two pickers, and so are the same field in two
+    /// instances of one floater. See `picker_identity`.
     ///
-    /// Two swatches declared with the same element id share one window, since
-    /// they are the same field as far as the UI is concerned.
+    /// Two swatches declared with the same element id *in one window* share one
+    /// picker, since they are the same field as far as the UI is concerned.
     ///
     /// Owned rather than `&'static str` because a field id is not always a
     /// literal: a table-driven panel (the environment editors) names its

@@ -919,7 +919,7 @@ const GROUP_PROFILE_FLOATER_ID: &str = "group-profile";
 
 /// The [`FloaterKey`] of the window showing `group`'s profile.
 ///
-/// A [subject](FloaterKey::Subject) key: instances are told apart by the group
+/// A [`FloaterKey`]: instances are told apart by the group
 /// id, and none of them persists geometry (a settings entry per group ever
 /// opened is what that variant exists to avoid).
 fn group_profile_key(group: GroupKey) -> FloaterKey {

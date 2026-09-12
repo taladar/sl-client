@@ -12,9 +12,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 317 |
+| ready | 316 |
 | blocked | 41 |
-| in-progress | 22 |
+| in-progress | 23 |
 | bugs | 43 |
 | done | 1099 |
 | deferred | 26 |
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (317)
+## ready (316)
 
 ### protocol
 
@@ -323,8 +323,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-object-children-index`](ready/viewer-audit-object-children-index.md)
   — ObjectState has no children index, so every linkset query full-scans the
   region
-- [`viewer-audit-picker-requester-identity`](ready/viewer-audit-picker-requester-identity.md)
-  — Two instances of one window share a picker, and both claim its answer
 - [`viewer-audit-plugins-own-their-schedule`](ready/viewer-audit-plugins-own-their-schedule.md)
   — Most viewer crates export loose systems instead of owning a plugin
 - [`viewer-audit-preferences-hub-decoupling`](ready/viewer-audit-preferences-hub-decoupling.md)
@@ -1110,13 +1108,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (22)
+## in-progress (23)
 
 ### viewer
 
 - [`viewer-agentupdate-cadence-effects`](in-progress/viewer-agentupdate-cadence-effects.md)
   — Explore what the raised AgentUpdate/camera-interest cadence buys (and how
   the sim reacts)
+- [`viewer-audit-picker-requester-identity`](in-progress/viewer-audit-picker-requester-identity.md)
+  — Two instances of one window share a picker, and both claim its answer
 - [`viewer-avatar-falls-through-ground`](in-progress/viewer-avatar-falls-through-ground.md)
   — Avatar falls through the ground (simulator reports a bouncing avatar
   position)

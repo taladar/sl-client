@@ -12,6 +12,16 @@
 //! - The picker floater carries three R/G/B [`Slider`]s (0..255), a live preview
 //!   swatch, and the original colour to compare against; **OK** emits
 //!   [`ColorPicked`], **Cancel** just closes (the reference reverts on cancel).
+//!
+//! # One window per swatch, of the window that opened it
+//!
+//! The picker is a **keyed** floater, keyed by the opening window and the
+//! swatch's field together ([`picker_identity`]). It used to be one shared
+//! window with a single `requester` slot, so a second swatch clicked while the
+//! first was still being answered simply took the picker over and left the
+//! first swatch's consumer holding a live preview nobody would ever commit or
+//! revert. Two instances of one window — About Land is one per parcel — hit
+//! that with the *same* swatch.
 //!   The saturation/value square, hue strip, and saved-swatch palette of the
 //!   full reference floater are a refinement left for later; R/G/B with a live
 //!   preview is the useful core (and, like the light colour, more than the
@@ -26,11 +36,12 @@ use bevy::ui_widgets::{
 };
 use bevy_flair::style::components::ClassList;
 
-use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
-use sl_viewer_ui_core::i18n::Translated;
-use sl_viewer_ui_core::ui::{
-    LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row,
+use crate::floater::{
+    Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterOp, FloaterOwner, FloaterSpec,
+    FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater, picker_identity,
 };
+use sl_viewer_ui_core::i18n::Translated;
+use sl_viewer_ui_core::ui::{LogicalInset, LogicalRect, UiScaffoldSystems, column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
 
 /// The picker's numeric-channel maximum (an sRGB byte).
@@ -78,6 +89,12 @@ const VALUE_CLASS: &str = "sk-build-value";
 #[derive(Component, Debug, Clone, Copy)]
 pub struct ColorSwatchValue(pub Color);
 
+/// A swatch's **field** name — which control it is, and so half of the identity
+/// of the picker window it opens (see [`OpenColorPicker::field`]). The
+/// [`TextureSwatchField`](crate::ui_texture_picker) of this module.
+#[derive(Component, Debug, Clone)]
+struct ColorSwatchField(Box<str>);
+
 /// Spawn a colour swatch under `parent`: a bordered button filled with `initial`
 /// that opens the picker on click, tagged with `element` for its [`Name`]. The
 /// returned entity is the **requester** a [`ColorPicked`] reply is matched by.
@@ -101,6 +118,7 @@ pub fn spawn_color_swatch(
             BorderColor::all(CONTROL_BORDER),
             BackgroundColor(initial),
             ColorSwatchValue(initial),
+            ColorSwatchField(Box::from(element)),
             Pickable::default(),
             Name::new(format!("{element}:color-swatch")),
             ChildOf(parent),
@@ -112,7 +130,7 @@ pub fn spawn_color_swatch(
 /// Request the picker for the clicked swatch, seeding it with the swatch's colour.
 fn open_picker_from_swatch(
     press: On<Pointer<Press>>,
-    swatches: Query<&ColorSwatchValue>,
+    swatches: Query<(&ColorSwatchValue, &ColorSwatchField)>,
     disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
     mut opens: MessageWriter<OpenColorPicker>,
 ) {
@@ -123,9 +141,10 @@ fn open_picker_from_swatch(
     if disabled.contains(press.entity) {
         return;
     }
-    if let Ok(value) = swatches.get(press.entity) {
+    if let Ok((value, field)) = swatches.get(press.entity) {
         opens.write(OpenColorPicker {
             requester: press.entity,
+            field: field.0.clone(),
             current: value.0,
         });
     }
@@ -152,10 +171,15 @@ fn reflect_color_swatch_disabled(
 }
 
 /// Open the colour picker for `requester`, seeded with `current`.
-#[derive(Message, Debug, Clone, Copy)]
+#[derive(Message, Debug, Clone)]
 pub struct OpenColorPicker {
     /// The swatch (or other widget) the reply is tagged back to.
     pub requester: Entity,
+    /// **Which** of the opening window's pickers this is — the swatch's element
+    /// id, or a name the opener chooses. Two swatches of one window are two
+    /// picker windows, and so is the same swatch in two instances of that
+    /// window; see `picker_identity`.
+    pub field: Box<str>,
     /// The colour to open on.
     pub current: Color,
 }
@@ -176,8 +200,9 @@ pub struct ColorPicked {
     pub final_pick: bool,
 }
 
-/// The picker's live state while open.
-#[derive(Resource, Debug, Default)]
+/// One picker window's live state — a component on the window root, so it dies
+/// with the instance.
+#[derive(Component, Debug, Default)]
 struct ColorPickerState {
     /// The widget that opened it, or `None` when closed.
     requester: Option<Entity>,
@@ -195,11 +220,9 @@ impl ColorPickerState {
     }
 }
 
-/// The picker floater's entities.
-#[derive(Resource, Debug)]
+/// One picker window's entities.
+#[derive(Component, Debug)]
 struct ColorPickerUi {
-    /// The floater root (carries `UiPanelShown`).
-    panel: Entity,
     /// The live preview swatch.
     preview: Entity,
     /// The original-colour swatch.
@@ -232,11 +255,6 @@ impl Plugin for ColorPickerPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<OpenColorPicker>()
             .add_message::<ColorPicked>()
-            .init_resource::<ColorPickerState>()
-            .add_systems(
-                Startup,
-                spawn_color_picker_floater.after(UiScaffoldSystems::SpawnRoot),
-            )
             .add_systems(
                 Update,
                 // Ordered, not a bare tuple: the visual sync reads the slider
@@ -244,7 +262,12 @@ impl Plugin for ColorPickerPlugin {
                 // to see them), so an unordered pair would leave the thumbs a
                 // frame behind the colour the picker opened on.
                 (
-                    handle_open_color_picker,
+                    // After the manager's command pass — see `FloaterSystems`:
+                    // the click on a swatch also raises the window it landed
+                    // in, and the later raise wins the z-order.
+                    handle_open_color_picker
+                        .after(FloaterSystems::Commands)
+                        .after(UiScaffoldSystems::SpawnRoot),
                     sync_color_picker_visual,
                     apply_color_swatch_fill,
                     reflect_color_swatch_disabled,
@@ -276,18 +299,8 @@ pub fn color_picker_floater_spec() -> FloaterSpec {
     }
 }
 
-/// Build the shared colour-picker floater (hidden until opened).
-fn spawn_color_picker_floater(mut commands: Commands, root: Option<Res<UiRoot>>) {
-    let Some(root) = root.map(|root| root.0) else {
-        return;
-    };
-    let handle = spawn_floater(&mut commands, root, color_picker_floater_spec());
-    // Subject-bound: it opens on whatever swatch requested it, disconnected from
-    // saved app state, so it is exempt from floater persistence — never restored
-    // open, no remembered rectangle (as the avatar profile / item previews are).
-    commands
-        .entity(handle.root)
-        .insert(crate::floater_persist::FloaterPersistExempt);
+/// Build one colour-picker window's content.
+fn build_color_picker_content(handle: &FloaterHandle, commands: &mut Commands) -> ColorPickerUi {
     commands
         .entity(handle.title_text)
         .insert(Translated::new("color-picker-title"));
@@ -311,14 +324,14 @@ fn spawn_color_picker_floater(mut commands: Commands, root: Option<Res<UiRoot>>)
             ChildOf(content),
         ))
         .id();
-    let preview = spawn_compare_swatch(&mut commands, compare, "color-picker-preview");
-    let original = spawn_compare_swatch(&mut commands, compare, "color-picker-original");
+    let preview = spawn_compare_swatch(commands, compare, "color-picker-preview");
+    let original = spawn_compare_swatch(commands, compare, "color-picker-original");
 
     // Three R/G/B slider rows.
     let mut sliders = [Entity::PLACEHOLDER; 3];
     let mut labels = [Entity::PLACEHOLDER; 3];
     for (channel, name) in [(0_usize, "R"), (1, "G"), (2, "B")] {
-        let (slider, label) = spawn_channel_row(&mut commands, content, channel, name);
+        let (slider, label) = spawn_channel_row(commands, content, channel, name);
         if let Some(slot) = sliders.get_mut(channel) {
             *slot = slider;
         }
@@ -338,21 +351,20 @@ fn spawn_color_picker_floater(mut commands: Commands, root: Option<Res<UiRoot>>)
             ChildOf(content),
         ))
         .id();
-    spawn_picker_button(&mut commands, buttons, PickerButton::Ok, "color-picker-ok");
+    spawn_picker_button(commands, buttons, PickerButton::Ok, "color-picker-ok");
     spawn_picker_button(
-        &mut commands,
+        commands,
         buttons,
         PickerButton::Cancel,
         "color-picker-cancel",
     );
 
-    commands.insert_resource(ColorPickerUi {
-        panel: handle.root,
+    ColorPickerUi {
         preview,
         original,
         sliders,
         labels,
-    });
+    }
 }
 
 /// Spawn a comparison swatch (preview / original).
@@ -489,11 +501,19 @@ fn spawn_picker_button(
 
 /// A slider drag: write the value back, update the picker's channel, and drive
 /// the preview live.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy observer's parameters are its injected world access: the change, the \
+              slider's channel and range, the window it lives in (found through the parent \
+              chain), the reply channel and the command queue that writes the value back"
+)]
 fn on_color_slider_change(
     change: On<ValueChange<f32>>,
     channels: Query<&ColorChannel>,
     ranges: Query<&SliderRange>,
-    mut state: ResMut<ColorPickerState>,
+    mut windows: Query<&mut ColorPickerState>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
     mut picked: MessageWriter<ColorPicked>,
     mut commands: Commands,
 ) {
@@ -502,6 +522,14 @@ fn on_color_slider_change(
         .get(slider)
         .map_or(change.value, |range| range.clamp(change.value));
     commands.entity(slider).insert(SliderValue(clamped));
+    // The slider's own window, not "the" picker: two swatches being answered at
+    // once are two windows with three sliders each.
+    let Some(window) = host_floater(slider, &parents, &floaters) else {
+        return;
+    };
+    let Ok(mut state) = windows.get_mut(window) else {
+        return;
+    };
     if let Ok(channel) = channels.get(slider)
         && let Some(slot) = state.channels.get_mut(channel.0)
     {
@@ -517,51 +545,63 @@ fn on_color_slider_change(
     }
 }
 
-/// Handle an [`OpenColorPicker`]: seed the state and sliders and show the floater.
+/// Open (or re-aim) the picker window for the swatch that asked, seeding its
+/// state and sliders.
+///
+/// Keyed by the **opening window and the swatch's field together**, so several
+/// requests in one frame are several windows. The shared window this replaces
+/// could only honour one of them, and said the others out loud rather than
+/// answering them.
 fn handle_open_color_picker(
     mut opens: MessageReader<OpenColorPicker>,
-    ui: Option<Res<ColorPickerUi>>,
-    mut state: ResMut<ColorPickerState>,
-    mut panels: Query<&mut UiPanelShown>,
+    mut floaters: KeyedFloaters,
+    mut windows: Query<(&mut ColorPickerState, &ColorPickerUi)>,
+    parents: Query<&ChildOf>,
+    openers: Query<(Entity, &Floater)>,
     mut commands: Commands,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    // One shared floater serves one requester, so a frame carrying several
-    // requests can only honour one of them — the **first**, the earliest click.
-    // Taking the last instead would silently leave that requester waiting on a
-    // picker that opened on somebody else's colour, so the losers are said out
-    // loud rather than dropped.
-    let mut requests = opens.read();
-    let Some(open) = requests.next().copied() else {
-        return;
-    };
-    let ignored = requests.count();
-    if ignored > 0 {
-        warn!(
-            "{ignored} further colour-picker request(s) in one frame ignored; the picker opened \
-             for {:?}",
-            open.requester
-        );
-    }
-    let srgba = open.current.to_srgba();
-    state.requester = Some(open.requester);
-    state.original = open.current;
-    state.channels = [
-        (srgba.red * CHANNEL_MAX).round(),
-        (srgba.green * CHANNEL_MAX).round(),
-        (srgba.blue * CHANNEL_MAX).round(),
-    ];
-    for (channel, slider) in ui.sliders.iter().enumerate() {
-        if let Some(value) = state.channels.get(channel) {
-            commands.entity(*slider).insert(SliderValue(*value));
+    let requests: Vec<OpenColorPicker> = opens.read().cloned().collect();
+    for open in requests {
+        let (owner, key) = picker_identity(open.requester, &open.field, &parents, &openers);
+        let opened = floaters.open(color_picker_floater_spec(), key);
+        let window = opened.root();
+        let srgba = open.current.to_srgba();
+        let state = ColorPickerState {
+            requester: Some(open.requester),
+            original: open.current,
+            channels: [
+                (srgba.red * CHANNEL_MAX).round(),
+                (srgba.green * CHANNEL_MAX).round(),
+                (srgba.blue * CHANNEL_MAX).round(),
+            ],
+        };
+        let channels = state.channels;
+        let ui = match opened {
+            KeyedFloaterOpen::Spawned(handle) => {
+                let ui = build_color_picker_content(&handle, &mut commands);
+                let sliders = ui.sliders;
+                // Seeded here rather than after the insert: the components only
+                // reach the world when this frame's commands flush, so a window
+                // spawned now is not queryable yet.
+                commands.entity(handle.root).insert((state, ui));
+                if let Some(owner) = owner {
+                    commands.entity(handle.root).insert(FloaterOwner(owner));
+                }
+                sliders
+            }
+            KeyedFloaterOpen::Existing(_root) => {
+                let Ok((mut existing, ui)) = windows.get_mut(window) else {
+                    continue;
+                };
+                *existing = state;
+                ui.sliders
+            }
+        };
+        for (channel, slider) in ui.iter().enumerate() {
+            if let Some(value) = channels.get(channel) {
+                commands.entity(*slider).insert(SliderValue(*value));
+            }
         }
-    }
-    // The original swatch's colour is painted by the visual sync from
-    // `state.original`; only the panel needs showing here.
-    if let Ok(mut shown) = panels.get_mut(ui.panel) {
-        shown.0 = true;
     }
 }
 
@@ -590,48 +630,46 @@ fn thumb_offset(value: f32, range: &SliderRange) -> f32 {
 /// resolver's own pass, small but permanent.) A closed picker is not on screen,
 /// so it does no work at all.
 fn sync_color_picker_visual(
-    ui: Option<Res<ColorPickerUi>>,
-    state: Res<ColorPickerState>,
+    windows: Query<(&ColorPickerState, &ColorPickerUi)>,
     sliders: Query<(&SliderValue, &SliderRange, &Children)>,
     mut backgrounds: Query<&mut BackgroundColor>,
     mut insets: Query<&mut LogicalInset, With<SliderThumb>>,
     mut texts: Query<&mut Text>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    if state.requester.is_none() {
-        return;
-    }
-    let current = state.current();
-    if let Ok(mut preview) = backgrounds.get_mut(ui.preview)
-        && preview.0 != current
-    {
-        preview.0 = current;
-    }
-    if let Ok(mut original) = backgrounds.get_mut(ui.original)
-        && original.0 != state.original
-    {
-        original.0 = state.original;
-    }
-    for (index, slider) in ui.sliders.iter().enumerate() {
-        let Ok((value, range, children)) = sliders.get(*slider) else {
+    for (state, ui) in &windows {
+        if state.requester.is_none() {
             continue;
-        };
-        let offset = Val::Px(thumb_offset(value.0, range));
-        for child in children.iter() {
-            if let Ok(mut inset) = insets.get_mut(child)
-                && inset.0.inline_start != offset
-            {
-                inset.0.inline_start = offset;
-            }
         }
-        if let Some(label) = ui.labels.get(index)
-            && let Ok(mut text) = texts.get_mut(*label)
+        let current = state.current();
+        if let Ok(mut preview) = backgrounds.get_mut(ui.preview)
+            && preview.0 != current
         {
-            let want = byte(value.0).to_string();
-            if text.0 != want {
-                text.0 = want;
+            preview.0 = current;
+        }
+        if let Ok(mut original) = backgrounds.get_mut(ui.original)
+            && original.0 != state.original
+        {
+            original.0 = state.original;
+        }
+        for (index, slider) in ui.sliders.iter().enumerate() {
+            let Ok((value, range, children)) = sliders.get(*slider) else {
+                continue;
+            };
+            let offset = Val::Px(thumb_offset(value.0, range));
+            for child in children.iter() {
+                if let Ok(mut inset) = insets.get_mut(child)
+                    && inset.0.inline_start != offset
+                {
+                    inset.0.inline_start = offset;
+                }
+            }
+            if let Some(label) = ui.labels.get(index)
+                && let Ok(mut text) = texts.get_mut(*label)
+            {
+                let want = byte(value.0).to_string();
+                if text.0 != want {
+                    text.0 = want;
+                }
             }
         }
     }
@@ -654,15 +692,22 @@ fn apply_color_swatch_fill(
 fn on_picker_button(
     press: On<Pointer<Press>>,
     buttons: Query<&PickerButton>,
-    ui: Option<Res<ColorPickerUi>>,
-    mut state: ResMut<ColorPickerState>,
+    mut windows: Query<&mut ColorPickerState>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
     mut picked: MessageWriter<ColorPicked>,
-    mut panels: Query<&mut UiPanelShown>,
+    mut chrome: MessageWriter<FloaterCommand>,
 ) {
     if press.button != PointerButton::Primary {
         return;
     }
     let Ok(which) = buttons.get(press.entity) else {
+        return;
+    };
+    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+        return;
+    };
+    let Ok(mut state) = windows.get_mut(window) else {
         return;
     };
     if let Some(requester) = state.requester {
@@ -683,11 +728,10 @@ fn on_picker_button(
         picked.write(reply);
     }
     state.requester = None;
-    if let Some(ui) = ui
-        && let Ok(mut shown) = panels.get_mut(ui.panel)
-    {
-        shown.0 = false;
-    }
+    chrome.write(FloaterCommand {
+        floater: window,
+        op: FloaterOp::Close,
+    });
 }
 
 /// Round a 0..255 channel value to a byte.
@@ -716,7 +760,8 @@ mod tests {
         ColorPicked, ColorPickerPlugin, ColorPickerState, ColorPickerUi, ColorSwatchValue,
         OpenColorPicker, PickerButton, byte, spawn_color_swatch, thumb_offset,
     };
-    use sl_viewer_ui_core::ui::{LogicalInset, UiPanelShown, UiRoot};
+    use crate::floater::FloaterPlugin;
+    use sl_viewer_ui_core::ui::{LogicalInset, UiDirection, UiRoot};
 
     /// A boxed error so tests can use `?` instead of the disallowed
     /// `unwrap` / `expect`.
@@ -750,19 +795,31 @@ mod tests {
             .saturating_add(backgrounds.iter().count());
     }
 
-    /// A headless app carrying the picker plugin, a `UiRoot` for its floater to
-    /// hang from, and the recorder — everything the picker's *behaviour* needs,
-    /// minus the picking backend (the tests synthesise the presses themselves).
+    /// A headless app carrying the picker plugin, the floater manager it opens
+    /// its windows through, a `UiRoot` for them to hang from, and the recorder —
+    /// everything the picker's *behaviour* needs, minus the picking backend (the
+    /// tests synthesise the presses themselves).
+    ///
+    /// [`FloaterPlugin`] is not optional here: the picker is a keyed floater, so
+    /// the manager is what spawns its window and what carries out the close its
+    /// reply buttons ask for.
     fn picker_app() -> App {
         let mut app = App::new();
+        let root = app.world_mut().spawn(Node::default()).id();
+        app.insert_resource(UiRoot(root));
+        // What the manager's systems read and `MinimalPlugins` does not supply:
+        // the writing direction the inset mirrors under, the UI scale the
+        // on-screen clamp measures in, and the keyboard Ctrl+W reads.
+        app.insert_resource(UiDirection::Ltr)
+            .init_resource::<UiScale>()
+            .init_resource::<ButtonInput<KeyCode>>();
         app.add_plugins(MinimalPlugins)
+            .add_plugins(FloaterPlugin)
             .add_plugins(ColorPickerPlugin)
             .init_resource::<Recorded>()
             .add_systems(PostUpdate, record);
-        let root = app.world_mut().spawn(Node::default()).id();
-        app.insert_resource(UiRoot(root));
-        // Startup builds the floater; a second frame settles the spawn's own
-        // change marks so a later churn count measures the sync alone.
+        // Two frames: Startup, then one that settles its own change marks so a
+        // later churn count measures the sync alone.
         app.update();
         app.update();
         app
@@ -818,18 +875,41 @@ mod tests {
             .map_or(Entity::PLACEHOLDER, |(entity, _)| entity)
     }
 
-    /// The picker's live requester, if it is open.
-    fn requester(app: &App) -> Option<Entity> {
-        app.world().resource::<ColorPickerState>().requester
+    /// The only open picker window's live requester — `None` when no window is
+    /// open at all, which for a keyed floater is the same as "closed": its
+    /// close despawns it.
+    fn requester(app: &mut App) -> Option<Entity> {
+        app.world_mut()
+            .query::<&ColorPickerState>()
+            .iter(app.world())
+            .next()
+            .and_then(|state| state.requester)
     }
 
-    /// Whether the picker floater is showing.
-    fn shown(app: &App) -> bool {
-        let panel = app.world().resource::<ColorPickerUi>().panel;
-        app.world()
-            .entity(panel)
-            .get::<UiPanelShown>()
-            .is_some_and(|shown| shown.0)
+    /// How many picker windows are open.
+    fn open_windows(app: &mut App) -> usize {
+        app.world_mut()
+            .query::<&ColorPickerState>()
+            .iter(app.world())
+            .count()
+    }
+
+    /// The only open picker window's channel values.
+    fn channels(app: &mut App) -> Option<[f32; 3]> {
+        app.world_mut()
+            .query::<&ColorPickerState>()
+            .iter(app.world())
+            .next()
+            .map(|state| state.channels)
+    }
+
+    /// The only open picker window's red slider.
+    fn red_slider(app: &mut App) -> Option<Entity> {
+        app.world_mut()
+            .query::<&ColorPickerUi>()
+            .iter(app.world())
+            .next()
+            .and_then(|ui| ui.sliders.first().copied())
     }
 
     /// The bytes of a colour, the form the picker actually round-trips.
@@ -902,19 +982,14 @@ mod tests {
 
     /// Clicking a swatch opens the picker on that swatch's colour, seeding the
     /// three sliders and showing the floater.
-    #[expect(
-        clippy::float_cmp,
-        reason = "the channels are exact bytes seeded from an exact colour"
-    )]
     #[test]
     fn a_swatch_opens_the_picker_on_its_own_colour() -> Result<(), TestError> {
         let mut app = picker_app();
         let swatch = swatch(&mut app, Color::srgb_u8(10, 20, 30));
         press(&mut app, swatch);
-        assert_eq!(requester(&app), Some(swatch));
-        assert!(shown(&app), "the floater is shown");
-        let state = app.world().resource::<ColorPickerState>();
-        assert_eq!(state.channels, [10.0, 20.0, 30.0]);
+        assert_eq!(requester(&mut app), Some(swatch));
+        assert_eq!(open_windows(&mut app), 1, "the window opened");
+        assert_eq!(channels(&mut app), Some([10.0, 20.0, 30.0]));
         Ok(())
     }
 
@@ -928,20 +1003,16 @@ mod tests {
             .entity_mut(swatch)
             .insert(bevy::ui::InteractionDisabled);
         press(&mut app, swatch);
-        assert_eq!(requester(&app), None);
-        assert!(!shown(&app));
+        assert_eq!(open_windows(&mut app), 0, "no window opened");
         Ok(())
     }
 
-    /// Two swatches asking in one frame: one shared floater can only answer one,
-    /// and it answers the **first** — the earliest click — rather than silently
-    /// discarding it in favour of the last.
-    #[expect(
-        clippy::float_cmp,
-        reason = "the channels are exact bytes seeded from an exact colour"
-    )]
+    /// **Two swatches asking at once are two windows.** The shared floater this
+    /// replaces could answer only one of them and said the other out loud; the
+    /// swatch that lost was left showing a live preview nobody would ever commit
+    /// or revert.
     #[test]
-    fn the_first_of_two_requests_in_a_frame_wins() -> Result<(), TestError> {
+    fn two_requests_in_a_frame_get_a_window_each() -> Result<(), TestError> {
         let mut app = picker_app();
         let first = swatch(&mut app, Color::srgb_u8(1, 2, 3));
         let second = swatch(&mut app, Color::srgb_u8(9, 8, 7));
@@ -949,20 +1020,32 @@ mod tests {
             let mut opens = app.world_mut().resource_mut::<Messages<OpenColorPicker>>();
             opens.write(OpenColorPicker {
                 requester: first,
+                field: Box::from("first"),
                 current: Color::srgb_u8(1, 2, 3),
             });
             opens.write(OpenColorPicker {
                 requester: second,
+                field: Box::from("second"),
                 current: Color::srgb_u8(9, 8, 7),
             });
         }
         app.update();
-        assert_eq!(requester(&app), Some(first));
-        let state = app.world().resource::<ColorPickerState>();
+        assert_eq!(open_windows(&mut app), 2, "each swatch got its own window");
+        let mut seen: Vec<(Option<Entity>, [f32; 3])> = app
+            .world_mut()
+            .query::<&ColorPickerState>()
+            .iter(app.world())
+            .map(|state| (state.requester, state.channels))
+            .collect();
+        seen.sort_by_key(|(requester, _channels)| *requester);
+        let mut wanted = vec![
+            (Some(first), [1.0, 2.0, 3.0]),
+            (Some(second), [9.0, 8.0, 7.0]),
+        ];
+        wanted.sort_by_key(|(requester, _channels)| *requester);
         assert_eq!(
-            state.channels,
-            [1.0, 2.0, 3.0],
-            "the picker opened on the first requester's colour"
+            seen, wanted,
+            "each window opened on its own swatch's colour"
         );
         Ok(())
     }
@@ -993,22 +1076,13 @@ mod tests {
 
     /// Dragging a slider updates the channel, live-previews the new colour to the
     /// requester without committing, and moves that thumb — and only that thumb.
-    #[expect(
-        clippy::float_cmp,
-        reason = "the channel takes the exact value the drag reported"
-    )]
     #[test]
     fn a_slider_drag_previews_and_moves_its_thumb() -> Result<(), TestError> {
         let mut app = picker_app();
         let swatch = swatch(&mut app, Color::BLACK);
         press(&mut app, swatch);
         settle(&mut app);
-        let slider = *app
-            .world()
-            .resource::<ColorPickerUi>()
-            .sliders
-            .first()
-            .ok_or("the picker has no red slider")?;
+        let slider = red_slider(&mut app).ok_or("the picker has no red slider")?;
         app.world_mut().trigger(ValueChange {
             source: slider,
             value: super::CHANNEL_MAX,
@@ -1016,8 +1090,7 @@ mod tests {
         });
         app.update();
 
-        let state = app.world().resource::<ColorPickerState>();
-        assert_eq!(state.channels, [255.0, 0.0, 0.0]);
+        assert_eq!(channels(&mut app), Some([255.0, 0.0, 0.0]));
         let recorded = app.world().resource::<Recorded>();
         let last = recorded.picked.last().ok_or("no preview was emitted")?;
         assert_eq!(last.requester, swatch);
@@ -1053,12 +1126,7 @@ mod tests {
         let mut app = picker_app();
         let swatch = swatch(&mut app, Color::srgb_u8(10, 20, 30));
         press(&mut app, swatch);
-        let slider = *app
-            .world()
-            .resource::<ColorPickerUi>()
-            .sliders
-            .first()
-            .ok_or("the picker has no red slider")?;
+        let slider = red_slider(&mut app).ok_or("the picker has no red slider")?;
         app.world_mut().trigger(ValueChange {
             source: slider,
             value: 200.0_f32,
@@ -1073,8 +1141,11 @@ mod tests {
         assert_eq!(last.requester, swatch);
         assert_eq!(bytes(last.color), [200, 20, 30, 255]);
         assert!(last.final_pick, "OK is the committed choice");
-        assert_eq!(requester(&app), None, "the picker is closed");
-        assert!(!shown(&app));
+        assert_eq!(
+            open_windows(&mut app),
+            0,
+            "the picker is closed — a keyed window ends on close"
+        );
         Ok(())
     }
 
@@ -1086,12 +1157,7 @@ mod tests {
         let mut app = picker_app();
         let swatch = swatch(&mut app, Color::srgb_u8(10, 20, 30));
         press(&mut app, swatch);
-        let slider = *app
-            .world()
-            .resource::<ColorPickerUi>()
-            .sliders
-            .first()
-            .ok_or("the picker has no red slider")?;
+        let slider = red_slider(&mut app).ok_or("the picker has no red slider")?;
         app.world_mut().trigger(ValueChange {
             source: slider,
             value: 200.0_f32,
@@ -1110,8 +1176,7 @@ mod tests {
             "the colour the picker opened on"
         );
         assert!(!last.final_pick, "Cancel never commits");
-        assert_eq!(requester(&app), None);
-        assert!(!shown(&app));
+        assert_eq!(open_windows(&mut app), 0);
         Ok(())
     }
 
@@ -1166,12 +1231,12 @@ mod tests {
 
         use super::{TestError, bytes};
         use crate::ui_color_picker::{
-            CHANNEL_MAX, ColorPicked, ColorPickerPlugin, ColorPickerState, THUMB_WIDTH,
-            TRACK_WIDTH, spawn_color_swatch, thumb_offset,
+            CHANNEL_MAX, ColorPicked, ColorPickerPlugin, THUMB_WIDTH, TRACK_WIDTH,
+            spawn_color_swatch, thumb_offset,
         };
         use crate::ui_test::interact::{self, InteractionTest, centre_of};
         use crate::ui_test::{drain, find_by_name, record, settle};
-        use sl_viewer_ui_core::ui::{LogicalInset, UiPanelShown, UiRoot, UiScaffoldSystems};
+        use sl_viewer_ui_core::ui::{LogicalInset, UiRoot, UiScaffoldSystems};
 
         /// The swatch's node name.
         const SWATCH: &str = "test:color-swatch";
@@ -1191,6 +1256,9 @@ mod tests {
         /// A swatch and the picker floater under the real pointer stack.
         fn picker_app() -> App {
             let mut app = InteractionTest::new().build();
+            // The picker is a keyed floater: the manager is what spawns its
+            // window and what carries out the close OK asks for.
+            app.add_plugins(crate::floater::FloaterPlugin);
             app.add_plugins(ColorPickerPlugin);
             record::<ColorPicked>(&mut app);
             app.add_systems(
@@ -1205,10 +1273,23 @@ mod tests {
             app
         }
 
-        /// Whether the picker floater is on screen.
-        fn picker_shown(app: &App) -> Option<bool> {
-            let panel = app.world().get_resource::<super::ColorPickerUi>()?.panel;
-            app.world().get::<UiPanelShown>(panel).map(|shown| shown.0)
+        /// Whether a picker window is on screen. The picker is a keyed floater,
+        /// so it exists only while it is open: its close despawns it.
+        fn picker_shown(app: &mut App) -> bool {
+            app.world_mut()
+                .query::<&super::ColorPickerState>()
+                .iter(app.world())
+                .next()
+                .is_some()
+        }
+
+        /// The open picker window's red channel value.
+        fn red_channel(app: &mut App) -> Option<f32> {
+            app.world_mut()
+                .query::<&super::ColorPickerState>()
+                .iter(app.world())
+                .next()
+                .and_then(|state| state.channels.first().copied())
         }
 
         /// Where the named slider's thumb sits along its track, in logical
@@ -1231,13 +1312,12 @@ mod tests {
         #[test]
         fn a_swatch_click_a_track_drag_and_ok() -> Result<(), TestError> {
             let mut app = picker_app();
-            assert_eq!(picker_shown(&app), Some(false), "the picker starts closed");
+            assert!(!picker_shown(&mut app), "the picker starts closed");
 
             interact::click_node(&mut app, SWATCH)?;
             settle(&mut app);
-            assert_eq!(
-                picker_shown(&app),
-                Some(true),
+            assert!(
+                picker_shown(&mut app),
                 "a click on the swatch opens the picker"
             );
             assert_eq!(
@@ -1257,8 +1337,7 @@ mod tests {
             );
             settle(&mut app);
 
-            let channels = app.world().resource::<ColorPickerState>().channels;
-            let red = channels.first().copied().ok_or("no red channel")?;
+            let red = red_channel(&mut app).ok_or("no red channel")?;
             assert!(
                 (red - DRAGGED_VALUE).abs() < 1.0,
                 "a {DRAG_PX} px drag along a {TRACK_WIDTH} px track (thumb {THUMB_WIDTH}) is \
@@ -1293,7 +1372,7 @@ mod tests {
                 .find(|reply| reply.final_pick)
                 .ok_or("OK committed nothing")?;
             assert_eq!(bytes(commit.color), [102, 0, 0, 255]);
-            assert_eq!(picker_shown(&app), Some(false), "OK puts the picker away");
+            assert!(!picker_shown(&mut app), "OK puts the picker away");
             Ok(())
         }
 
@@ -1319,13 +1398,7 @@ mod tests {
             );
             settle(&mut app);
 
-            let red = app
-                .world()
-                .resource::<ColorPickerState>()
-                .channels
-                .first()
-                .copied()
-                .ok_or("no red channel")?;
+            let red = red_channel(&mut app).ok_or("no red channel")?;
             let slider = find_by_name(&mut app, RED_SLIDER).ok_or("the slider went missing")?;
             let value = app
                 .world()

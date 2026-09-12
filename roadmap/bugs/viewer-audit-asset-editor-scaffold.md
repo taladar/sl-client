@@ -27,6 +27,13 @@ divergent third copy carries the bugs:
   just closing the floater, which is `closable: true` — **discards unsaved edits
   with no prompt**. Only `edit_wearable` has a Revert.
 
+  The chrome half of that is no longer missing: `FloaterCloseGuard` +
+  `FloaterCloseRequested` + `FloaterOp::CloseNow` let a window refuse a close
+  and ask ([[viewer-audit-picker-requester-identity]], 2026-09-12); the
+  settings editors use them. What is left here is the dirty tracking these two
+  never had, and the prompt on the *open*-replaces path, which no chrome can
+  give them.
+
 The duplication that produced this: six helpers are byte-identical modulo one
 string literal between `edit_notecard.rs:796-887` and `edit_script.rs:542-606`,
 `:733-757` (`tear_down`, `spawn_status`, `set_status`, `spawn_note`,

@@ -1701,6 +1701,7 @@ fn handle_inventory_menu_actions(
     ),
     library: Option<Res<crate::avatar_assets::AvatarAssetLibrary>>,
     settings_support: Res<SettingsInventorySupport>,
+    floaters: Query<(Entity, &crate::floater::Floater)>,
     mut settings: ResMut<crate::settings::ViewerSettings>,
     mut system_clipboard: Option<ResMut<bevy::clipboard::Clipboard>>,
     outputs: (
@@ -1749,10 +1750,22 @@ fn handle_inventory_menu_actions(
         let dest = destination_folder(&menu_target);
         match action.action {
             "share" => {
+                // Share is a **menu** action, so there is no button entity to
+                // name: the inventory window itself is the requester, which is
+                // also the window the picker belongs to and closes with.
+                let Some(window) = crate::floater::floater_panel(
+                    &floaters,
+                    crate::inventory::INVENTORY_FLOATER_ID,
+                ) else {
+                    continue;
+                };
                 pending_share.targets.clone_from(&targets);
                 // The reference shares with several residents at once
                 // (`give_inventory` opens the picker with `allow_multiple`).
-                picker_opens.write(crate::world_api::OpenAvatarPicker::many(SHARE_REQUESTER));
+                picker_opens.write(crate::world_api::OpenAvatarPicker::many(
+                    window,
+                    SHARE_REQUESTER,
+                ));
             }
             "open" => {
                 for target_row in &targets {
@@ -3000,18 +3013,23 @@ pub(crate) struct PendingShare {
     pub(crate) targets: Vec<MenuTarget>,
 }
 
-/// The avatar-picker requester tag the Share flow uses.
+/// The avatar-picker **field** name the Share flow uses — which of the
+/// inventory window's pickers it is (see `OpenAvatarPicker::field`).
 const SHARE_REQUESTER: &str = "inventory-share";
 
 /// Complete a Share when the avatar picker confirms: give the stashed item /
 /// folder to every chosen avatar (the same wire path as drag-to-give).
 fn handle_share_picks(
     mut picks: MessageReader<crate::world_api::AvatarPicked>,
+    floaters: Query<(Entity, &crate::floater::Floater)>,
     mut pending: ResMut<PendingShare>,
     mut commands: MessageWriter<SlCommand>,
 ) {
+    let window = crate::floater::floater_panel(&floaters, crate::inventory::INVENTORY_FLOATER_ID);
     for pick in picks.read() {
-        if pick.requester != SHARE_REQUESTER {
+        // Share names the inventory window as its requester (see the open), so
+        // another feature's pick is not this one's.
+        if window != Some(pick.requester) {
             continue;
         }
         // Taken once, not once per resident: the same stash is given to each

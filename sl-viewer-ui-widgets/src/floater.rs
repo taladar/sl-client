@@ -240,6 +240,7 @@ pub enum FloaterSystems {
 impl Plugin for FloaterPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<FloaterCommand>()
+            .add_message::<FloaterCloseRequested>()
             .init_resource::<FloaterZTop>()
             .init_resource::<ActiveFloater>()
             .init_resource::<DefaultDockHost>()
@@ -276,7 +277,10 @@ impl Plugin for FloaterPlugin {
             // it must see every flip `Update` made, whoever made it.
             .add_systems(
                 PostUpdate,
-                raise_floaters_on_open.before(bevy::ui::UiSystems::Stack),
+                (
+                    raise_floaters_on_open.before(bevy::ui::UiSystems::Stack),
+                    close_owned_floaters,
+                ),
             );
     }
 }
@@ -332,33 +336,26 @@ fn open_floaters_from_env(
 /// registry keyed by **name and key**, so a second subject gets a second
 /// window instead of re-pointing the first. This is that key.
 ///
-/// # Why the two forms differ, and why persistence follows them
+/// # A keyed instance persists nothing
 ///
 /// The reference's `LLFloater::getControlName(name, key)` appends the key to
 /// the saved-rect control name **only when the key is a string**; a `UUID` key
 /// falls back to the bare name. That is not an oversight — a rect control per
 /// agent id would grow the settings file by one entry per resident whose
-/// profile was ever opened, forever. The two variants here carry that
-/// distinction in the type rather than in a comment:
+/// profile was ever opened, forever. Every key here is of that opaque kind: an
+/// agent, a group, an inventory item, the window-and-field a picker was opened
+/// for. So instances are told apart by the key and **nothing about them is
+/// persisted** — they cascade off the windows already open (the reference's
+/// `POSITIONING_CASCADE_GROUP`) and start from the kind's [`FloaterSpec`]
+/// defaults each session.
 ///
-/// - [`Subject`](Self::Subject) — an opaque id (an agent, a group, an
-///   inventory item). Instances are told apart by it, and **nothing about
-///   them is persisted**: they cascade off the windows already open (the
-///   reference's `POSITIONING_CASCADE_GROUP`) and start from the kind's
-///   [`FloaterSpec`] defaults each session.
-/// - [`Named`](Self::Named) — a small, closed set of well-known instance
-///   names (a picker per named field). Each gets its **own** geometry under
-///   `{id}_{name}` in the settings store, exactly as the reference's string
-///   key does.
+/// There used to be a second, persisted form for a small closed set of
+/// well-known instance names, and the texture picker was its only user — one
+/// remembered rectangle per field being picked for. It went when the pickers
+/// became opener-keyed: a key that names the opening *window* cannot be one of
+/// a closed set, and a transient dialog is the wrong thing to restore anyway.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum FloaterKey {
-    /// An opaque subject id — an agent, a group, an inventory item. Not
-    /// persisted (see the type's documentation).
-    Subject(Box<str>),
-    /// A well-known instance name, from a closed set. Persisted under its own
-    /// settings key.
-    Named(Box<str>),
-}
+pub struct FloaterKey(Box<str>);
 
 impl FloaterKey {
     /// A key for an opaque subject id — pass whatever names the subject (an
@@ -366,34 +363,14 @@ impl FloaterKey {
     /// `Display` form is what instances are compared by.
     #[must_use]
     pub fn subject(subject: &impl core::fmt::Display) -> Self {
-        Self::Subject(subject.to_string().into_boxed_str())
-    }
-
-    /// A key for a well-known named instance (see the type's documentation for
-    /// why only these are persisted).
-    #[must_use]
-    pub fn named(name: impl Into<Box<str>>) -> Self {
-        Self::Named(name.into())
+        Self(subject.to_string().into_boxed_str())
     }
 
     /// The key's text — what two instances are told apart by, and what a
     /// window's `Name` carries after its id.
     #[must_use]
     pub fn as_str(&self) -> &str {
-        match self {
-            Self::Subject(key) | Self::Named(key) => key,
-        }
-    }
-
-    /// The suffix this key adds to its kind's settings id, or `None` when
-    /// instances of this kind persist nothing at all — the reference's
-    /// `getControlName` split (see the type's documentation).
-    #[must_use]
-    pub const fn settings_suffix(&self) -> Option<&str> {
-        match self {
-            Self::Subject(_) => None,
-            Self::Named(name) => Some(name),
-        }
+        &self.0
     }
 }
 
@@ -530,18 +507,12 @@ impl Floater {
     /// The id this floater's geometry is stored under
     /// ([`crate::floater_persist`]), or `None` when it persists nothing.
     ///
-    /// A singleton stores under its bare id; a [`FloaterKey::Named`] instance
-    /// under `{id}_{name}`; a [`FloaterKey::Subject`] instance under nothing at
-    /// all — see [`FloaterKey`] for why, and `clamp_floaters_on_screen` /
+    /// A singleton stores under its bare id; a **keyed** instance under nothing
+    /// at all — see [`FloaterKey`] for why, and `clamp_floaters_on_screen` /
     /// the cascade for what places it instead.
     #[must_use]
     pub fn persist_id(&self) -> Option<String> {
-        match self.key.as_ref() {
-            None => Some(self.id.to_owned()),
-            Some(key) => key
-                .settings_suffix()
-                .map(|suffix| format!("{}_{suffix}", self.id)),
-        }
+        self.key.is_none().then(|| self.id.to_owned())
     }
 }
 
@@ -677,6 +648,31 @@ pub struct FloaterCommand {
     pub op: FloaterOp,
 }
 
+/// **This window belongs to that one** — the floater that opened this one, so
+/// the manager can close it when its opener goes away.
+///
+/// A picker is opened *by* a window, and several of the windows that open one
+/// are instanced (About Region is one per region, About Land one per parcel).
+/// Such a picker outliving its opener would sit there answering for a window
+/// that is gone. Tearing it down could be each feature's own job — but that is
+/// five features each remembering, and the one that forgets is found by a
+/// person months later. So the relationship is recorded once, here, and
+/// [`close_owned_floaters`] acts on it: the same argument as
+/// [`raise_floaters_on_open`], which exists because "opening a window raises
+/// it" kept being re-written per feature.
+///
+/// # The owner is the opening **floater**, not the control
+///
+/// Two entities are in play and they answer two different questions: a pick is
+/// *routed* to the widget that asked (a `requester: Entity` — the swatch, the
+/// Add button), while the picker's *lifetime* hangs off the floater that widget
+/// lives in, reached with [`host_floater`]. Recording the control would work by
+/// accident in most cases and fail exactly where it matters: a floater
+/// rebuilding a panel in place despawns its controls, and would take its own
+/// still-wanted picker down with them.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct FloaterOwner(pub Entity);
+
 /// Whether a floater was shown as of the last [`raise_floaters_on_open`] pass —
 /// the edge detector that makes **opening a window raise it**, for every
 /// singleton floater, without its own feature remembering to ask.
@@ -694,12 +690,69 @@ struct FloaterWasShown(bool);
 pub enum FloaterOp {
     /// Raise to the front and make active (any press).
     BringToFront,
-    /// Close (hide) the floater.
+    /// Close (hide) the floater — **refusable**. A floater carrying an armed
+    /// [`FloaterCloseGuard`] is left standing and answers with
+    /// [`FloaterCloseRequested`] instead; see the guard for why.
     Close,
+    /// Close it whatever its guard says — what a feature writes once the person
+    /// has answered its confirmation, and what the manager itself uses where
+    /// there is nobody left to ask ([`close_owned_floaters`]).
+    CloseNow,
     /// Toggle minimize / restore.
     ToggleMinimize,
     /// Toggle dock / tear-off.
     ToggleDock,
+}
+
+/// A floater that may **refuse a close** — an editor holding edits that closing
+/// would discard.
+///
+/// The reference viewer's `LLFloater::canClose` / `checkAndConfirmSettingsLoss`:
+/// the X does not end the window outright, it asks. Without this the only
+/// choices a dirty editor had were to discard silently or to give up its close
+/// button, and both were taken — the notecard and script editors discard, and
+/// the settings editors' close guard was written and then left unwired because
+/// "refusing a close needs the floater chrome to support vetoing one, which it
+/// does not" (`viewer-settings-save-as-create-then-put`).
+///
+/// # How a feature uses it
+///
+/// Put the component on the window root and set [`armed`](Self::armed) from the
+/// feature's own dirty flag — that is the whole contract on the way in. On the
+/// way out, an armed guard turns a [`FloaterOp::Close`] into a
+/// [`FloaterCloseRequested`] naming the window; the feature shows its
+/// confirmation, and if the answer is *discard* it writes
+/// [`FloaterOp::CloseNow`], which no guard holds back.
+///
+/// The guard is **not** disarmed by the manager. A feature that cleared it
+/// instead of writing `CloseNow` would leave the next close unguarded, which is
+/// exactly the silent discard this exists to stop; clearing it is for when the
+/// work is genuinely saved.
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct FloaterCloseGuard {
+    /// Whether the next [`FloaterOp::Close`] must be confirmed.
+    pub armed: bool,
+}
+
+impl FloaterCloseGuard {
+    /// A guard in the state `dirty` describes — the one-liner an editor writes
+    /// beside its own dirty flag.
+    #[must_use]
+    pub const fn new(dirty: bool) -> Self {
+        Self { armed: dirty }
+    }
+}
+
+/// A close an armed [`FloaterCloseGuard`] held back: the person asked to close
+/// `floater` and it has work that closing would lose.
+///
+/// Whoever armed the guard answers this — show the confirmation, and on
+/// *discard* write [`FloaterOp::CloseNow`]. Nothing else has happened to the
+/// window: it is still open, still front-most, and still holds its edits.
+#[derive(Message, Debug, Clone, Copy)]
+pub struct FloaterCloseRequested {
+    /// The window whose close was held back.
+    pub floater: Entity,
 }
 
 // ---------------------------------------------------------------------------
@@ -1029,6 +1082,56 @@ pub fn host_floater(
         parents.get(*entity).ok().map(ChildOf::parent)
     })
     .find(|entity| floaters.get(*entity).is_ok())
+}
+
+/// **Who a picker belongs to**: the floater the control `requester` lives in,
+/// and the [`FloaterKey`] a picker that window opened for `field` goes under.
+///
+/// Both answers come out of the same walk up the tree, and every picker needs
+/// both. The entity becomes the picker's [`FloaterOwner`], so it closes with the
+/// window it is answering for. The key is what stops two instances of one window
+/// — About Region is one per region, About Land one per parcel — from sharing a
+/// single picker and fighting over its answer: a control's own name is the same
+/// in both instances, so the *window's* identity has to be in the key too.
+///
+/// # Why the key is the opener's identity and not its entity
+///
+/// A floater's kind and [`FloaterKey`] name it in a way a person can read in the
+/// window's `Name`, and they survive a panel being rebuilt in place — so
+/// pressing Add again after a rebuild finds the picker already open rather than
+/// stacking a second one over it. An entity id would do neither.
+///
+/// # A picker persists no geometry
+///
+/// It could not, even if that were wanted: keying on the opener would file one
+/// settings entry per region or parcel ever visited, which is the reason a
+/// [`FloaterKey`] persists nothing in the first place. And a transient dialog is
+/// the wrong thing to restore anyway — an experience picker that remembered it
+/// was open reopened itself at the next login, over a world nobody had asked it
+/// about.
+#[must_use]
+pub fn picker_identity(
+    requester: Entity,
+    field: &str,
+    parents: &Query<&ChildOf>,
+    floaters: &Query<(Entity, &Floater)>,
+) -> (Option<Entity>, FloaterKey) {
+    let Some(owner) = host_floater(requester, parents, floaters) else {
+        // Opened by something that is in no window at all — a menu bar item, a
+        // pie menu. There is only one of those, so the field alone tells its
+        // pickers apart, and there is no owner to close with.
+        return (None, FloaterKey::subject(&field));
+    };
+    let key = match floaters.get(owner).map(|(_entity, floater)| floater) {
+        Ok(floater) => match floater.key() {
+            Some(instance) => {
+                FloaterKey::subject(&format!("{}/{}/{field}", floater.id, instance.as_str()))
+            }
+            None => FloaterKey::subject(&format!("{}/{field}", floater.id)),
+        },
+        Err(_) => FloaterKey::subject(&field),
+    };
+    (Some(owner), key)
 }
 
 /// What [`KeyedFloaters::open`] did.
@@ -1737,6 +1840,8 @@ fn apply_floater_commands(
     mut z_top: ResMut<FloaterZTop>,
     mut active: ResMut<ActiveFloater>,
     mut panels: Query<&mut UiPanelShown>,
+    guards: Query<&FloaterCloseGuard>,
+    mut held_back: MessageWriter<FloaterCloseRequested>,
     dock_host: Res<DefaultDockHost>,
     root: Res<UiRoot>,
 ) {
@@ -1752,8 +1857,19 @@ fn apply_floater_commands(
                 }
                 active.0 = Some(command.floater);
             }
-            FloaterOp::Close => {
+            FloaterOp::Close | FloaterOp::CloseNow => {
                 if !floater.caps.closable {
+                    continue;
+                }
+                // A window holding work closing would lose asks first — and
+                // only for the refusable `Close`, so the answer to its own
+                // question (`CloseNow`) is not asked again.
+                if command.op == FloaterOp::Close
+                    && guards.get(command.floater).is_ok_and(|guard| guard.armed)
+                {
+                    held_back.write(FloaterCloseRequested {
+                        floater: command.floater,
+                    });
                     continue;
                 }
                 if active.0 == Some(command.floater) {
@@ -1862,6 +1978,56 @@ fn raise_floaters_on_open(
             raise(entity, &mut z_indices, &mut z_top);
         }
         active.0 = Some(entity);
+    }
+}
+
+/// **A window closes with the one that opened it.** Every floater carrying a
+/// [`FloaterOwner`] whose owner has despawned, or is no longer shown, is closed
+/// through the ordinary [`FloaterOp::Close`].
+///
+/// Going through the command rather than despawning directly is what makes this
+/// one pass enough for both kinds of window: a keyed picker is despawned by the
+/// close (so its per-instance state and its outstanding search go with it),
+/// while a singleton is merely hidden — and either way a feature watching for
+/// its own window's close sees the same thing it always did.
+///
+/// An owner that *hides* counts as gone for the same reason one that despawns
+/// does: a singleton opener is never despawned, so hiding is the only signal it
+/// can give, and a picker left up over a closed Preferences window is the bug
+/// this pass exists to stop.
+///
+/// It writes the **unrefusable** [`FloaterOp::CloseNow`]: a
+/// [`FloaterCloseGuard`] asks the person about work they would lose, and the
+/// window that work was *for* is the thing that just went away — there is
+/// nothing left to answer. It also has to: this pass runs every frame an owned
+/// window is up, so a held-back close would re-ask forever.
+///
+/// # Why `PostUpdate`, beside the raise
+///
+/// The command it writes is carried out in the **next** frame's command pass,
+/// which is what a window watching for its own close needs: several of them
+/// read [`FloaterOp::Close`] before that pass to answer whoever was waiting
+/// (the texture picker reverts an uncommitted preview that way), and a command
+/// written *inside* `Update` would reach the despawn before some of those
+/// readers reached the command. A frame of latency on a close nobody asked for
+/// is invisible; a lost revert is a wrongly-textured object.
+fn close_owned_floaters(
+    owned: Query<(Entity, &FloaterOwner, &UiPanelShown), With<Floater>>,
+    owners: Query<&UiPanelShown, With<Floater>>,
+    mut commands: MessageWriter<FloaterCommand>,
+) {
+    for (entity, owner, shown) in &owned {
+        if !shown.0 {
+            continue;
+        }
+        // `Err` is the despawned owner; `false` the hidden one.
+        if owners.get(owner.0).is_ok_and(|shown| shown.0) {
+            continue;
+        }
+        commands.write(FloaterCommand {
+            floater: entity,
+            op: FloaterOp::CloseNow,
+        });
     }
 }
 
@@ -2403,18 +2569,20 @@ pub fn register_floater_layout(app: &mut App) {
 mod tests {
     use super::{
         ActiveFloater, CASCADE_STEP, DefaultDockHost, DeferredFloaterContent, Floater, FloaterCaps,
-        FloaterCommand, FloaterHandle, FloaterKey, FloaterOp, FloaterParts, FloaterSpec,
-        FloaterSystems, FloaterZTop, KeyedFloaterOpen, KeyedFloaters, MIN_VISIBLE, RESIZE_FLOOR,
-        apply_floater_commands, apply_floater_content, apply_floater_glyphs, apply_floater_inset,
-        build_deferred_floater_content, clamp_floaters_on_screen, clamp_position, drag_position,
-        floater_panel, highlight_active_floater, raise_floaters_on_open, resize_size, snap_rect_of,
-        spawn_floater, toggle_floater,
+        FloaterCloseGuard, FloaterCloseRequested, FloaterCommand, FloaterHandle, FloaterKey,
+        FloaterOp, FloaterOwner, FloaterParts, FloaterSpec, FloaterSystems, FloaterZTop,
+        KeyedFloaterOpen, KeyedFloaters, MIN_VISIBLE, RESIZE_FLOOR, apply_floater_commands,
+        apply_floater_content, apply_floater_glyphs, apply_floater_inset,
+        build_deferred_floater_content, clamp_floaters_on_screen, clamp_position,
+        close_owned_floaters, drag_position, floater_panel, highlight_active_floater,
+        picker_identity, raise_floaters_on_open, resize_size, snap_rect_of, spawn_floater,
+        toggle_floater,
     };
     use bevy::picking::backend::HitData;
     use bevy::picking::pointer::PointerId;
     use bevy::prelude::*;
     use bevy::window::PrimaryWindow;
-    use pretty_assertions::assert_eq;
+    use pretty_assertions::{assert_eq, assert_ne};
     use sl_viewer_ui_core::ui::{UiDirection, UiPanelShown, UiRoot};
 
     /// A boxed error so tests can use `?` instead of the disallowed
@@ -2428,6 +2596,7 @@ mod tests {
     fn floater_app() -> (App, Entity, Entity) {
         let mut app = App::new();
         app.add_message::<FloaterCommand>()
+            .add_message::<FloaterCloseRequested>()
             .init_resource::<FloaterZTop>()
             .init_resource::<ActiveFloater>()
             .insert_resource(UiDirection::Ltr)
@@ -2447,9 +2616,10 @@ mod tests {
                 )
                     .chain(),
             )
-            // Where the plugin puts it: a pass that must see every `Update`
-            // flip, whoever made it.
-            .add_systems(PostUpdate, raise_floaters_on_open);
+            // Where the plugin puts them: the raise must see every `Update`
+            // flip, whoever made it, and the owner sweep writes its close for
+            // the *next* frame's command pass (see `close_owned_floaters`).
+            .add_systems(PostUpdate, (raise_floaters_on_open, close_owned_floaters));
         let root = app.world_mut().spawn(Node::default()).id();
         let host = app.world_mut().spawn(Node::default()).id();
         app.insert_resource(UiRoot(root));
@@ -2545,6 +2715,15 @@ mod tests {
             .iter(app.world())
             .filter(|floater| floater.id == KEYED_ID)
             .count()
+    }
+
+    /// Show a floater — [`spawn_floater`] leaves a singleton hidden until its
+    /// opener shows it, and a hidden window is not one anything can close.
+    fn show(app: &mut App, floater: Entity) {
+        if let Some(mut shown) = app.world_mut().get_mut::<UiPanelShown>(floater) {
+            shown.0 = true;
+        }
+        app.update();
     }
 
     /// Write a command and run a frame so the systems act on it.
@@ -3357,6 +3536,212 @@ mod tests {
         Ok(())
     }
 
+    /// **Two instances of one window get two pickers**, and the same control
+    /// pressed twice gets the one it already has.
+    ///
+    /// This is the whole of the bug: About Region is one window per region, so
+    /// two of them are open after walking across a border, and their Add
+    /// buttons carry the same field name. A key made of the field alone gave
+    /// them one picker — the second Add restarted the first's — and the pick
+    /// then landed on whichever window still held the claim.
+    #[test]
+    fn a_picker_is_keyed_by_its_opener_as_well_as_its_field() -> Result<(), TestError> {
+        let (mut app, root, _host) = floater_app();
+        let (region_a, _) = open_keyed(&mut app, "region-a")?;
+        let (region_b, _) = open_keyed(&mut app, "region-b")?;
+        let singleton = spawn_one(&mut app, root);
+        // One Add button per window, and one loose control in no window at all.
+        let add_a = app.world_mut().spawn(ChildOf(region_a)).id();
+        let add_b = app.world_mut().spawn(ChildOf(region_b)).id();
+        let in_singleton = app.world_mut().spawn(ChildOf(singleton)).id();
+        let orphan = app.world_mut().spawn_empty().id();
+        app.update();
+
+        let world = app.world_mut();
+        let mut state = bevy::ecs::system::SystemState::<(
+            Query<&ChildOf>,
+            Query<(Entity, &Floater)>,
+        )>::new(world);
+        let (parents, floaters) = state.get(world)?;
+        let identify = |control: Entity| picker_identity(control, "allowed", &parents, &floaters);
+
+        let (owner_a, key_a) = identify(add_a);
+        let (owner_b, key_b) = identify(add_b);
+        assert_eq!(owner_a, Some(region_a), "the owner is the opening window");
+        assert_eq!(owner_b, Some(region_b));
+        assert_ne!(
+            key_a, key_b,
+            "the same field in two instances of one window is two pickers"
+        );
+        assert_eq!(
+            identify(add_a).1,
+            key_a,
+            "pressing the same control again finds the picker it already has"
+        );
+        assert_ne!(
+            identify(add_a).1,
+            picker_identity(add_a, "banned", &parents, &floaters).1,
+            "two fields of one window are two pickers"
+        );
+
+        let (owner_singleton, key_singleton) = identify(in_singleton);
+        assert_eq!(owner_singleton, Some(singleton));
+        assert_ne!(
+            key_singleton, key_a,
+            "a singleton opener is still an opener, and its id is in the key"
+        );
+
+        let (owner_orphan, key_orphan) = identify(orphan);
+        assert_eq!(
+            owner_orphan, None,
+            "a control in no window has no owner to close with"
+        );
+        assert_eq!(
+            key_orphan,
+            FloaterKey::subject(&"allowed"),
+            "and the field alone tells its pickers apart"
+        );
+        Ok(())
+    }
+
+    /// A picker **closes with the window that opened it**, whether that window
+    /// was despawned (a keyed opener's Close ends it) or merely hidden (a
+    /// singleton's does not).
+    ///
+    /// The two halves are one test because the failure they guard against is
+    /// one bug wearing two hats: a picker that outlives its opener answers for
+    /// a window that is gone, and which of the two ways the opener left is an
+    /// implementation detail of the opener, not of the picker.
+    #[test]
+    fn a_picker_closes_with_the_window_that_opened_it() -> Result<(), TestError> {
+        let (mut app, root, _host) = floater_app();
+
+        // A keyed opener: its Close despawns it.
+        let (keyed_opener, _) = open_keyed(&mut app, "region-a")?;
+        let (keyed_picker, _) = open_keyed(&mut app, "picker-for-region-a")?;
+        app.world_mut()
+            .entity_mut(keyed_picker)
+            .insert(FloaterOwner(keyed_opener));
+        app.update();
+        assert!(
+            app.world().get_entity(keyed_picker).is_ok(),
+            "the picker stands while its opener does"
+        );
+
+        command(&mut app, keyed_opener, FloaterOp::Close);
+        // One more frame: the pass sees the despawn and writes the close, and
+        // the command pass carries it out in that same frame.
+        app.update();
+        assert!(
+            app.world().get_entity(keyed_picker).is_err(),
+            "a picker whose opener was despawned must go with it"
+        );
+
+        // A singleton opener: it spawns hidden, so show it first — its Close
+        // only hides it again.
+        let singleton_opener = spawn_one(&mut app, root);
+        show(&mut app, singleton_opener);
+        let (hidden_picker, _) = open_keyed(&mut app, "picker-for-the-singleton")?;
+        app.world_mut()
+            .entity_mut(hidden_picker)
+            .insert(FloaterOwner(singleton_opener));
+        app.update();
+        assert!(
+            app.world().get_entity(hidden_picker).is_ok(),
+            "the picker stands while its opener is shown"
+        );
+
+        command(&mut app, singleton_opener, FloaterOp::Close);
+        app.update();
+        assert!(
+            app.world().get_entity(hidden_picker).is_err(),
+            "a picker whose opener was hidden must go too — hiding is the only signal a \
+             singleton can give"
+        );
+        Ok(())
+    }
+
+    /// An **armed close guard** refuses the close and says so; the answer to its
+    /// own question goes through, and a disarmed guard is no guard at all.
+    #[test]
+    fn a_dirty_window_is_asked_about_before_it_closes() -> Result<(), TestError> {
+        /// Every held-back close since the last frame, oldest first.
+        fn held_back(app: &mut App) -> Vec<Entity> {
+            app.world_mut()
+                .resource_mut::<Messages<FloaterCloseRequested>>()
+                .drain()
+                .map(|request| request.floater)
+                .collect()
+        }
+
+        let (mut app, root, _host) = floater_app();
+        let editor = spawn_one(&mut app, root);
+        show(&mut app, editor);
+        app.world_mut()
+            .entity_mut(editor)
+            .insert(FloaterCloseGuard::new(true));
+        app.update();
+
+        command(&mut app, editor, FloaterOp::Close);
+        assert_eq!(
+            app.world().get::<UiPanelShown>(editor).map(|shown| shown.0),
+            Some(true),
+            "an armed guard leaves the window standing"
+        );
+        assert_eq!(
+            held_back(&mut app),
+            vec![editor],
+            "and names it, so whoever armed the guard can ask"
+        );
+
+        // The person answered "discard".
+        command(&mut app, editor, FloaterOp::CloseNow);
+        assert_eq!(
+            app.world().get::<UiPanelShown>(editor).map(|shown| shown.0),
+            Some(false),
+            "the answer to the guard's own question is not asked again"
+        );
+        assert!(held_back(&mut app).is_empty(), "and asks nothing further");
+
+        // Saved: the guard is disarmed, and an ordinary close is ordinary again.
+        app.world_mut()
+            .entity_mut(editor)
+            .insert((UiPanelShown(true), FloaterCloseGuard::new(false)));
+        app.update();
+        drop(held_back(&mut app));
+        command(&mut app, editor, FloaterOp::Close);
+        assert_eq!(
+            app.world().get::<UiPanelShown>(editor).map(|shown| shown.0),
+            Some(false),
+            "a disarmed guard holds nothing back"
+        );
+        assert!(held_back(&mut app).is_empty());
+        Ok(())
+    }
+
+    /// An owner that goes away closes its picker **whatever its guard says** —
+    /// the question "discard your edits?" is unanswerable once the window those
+    /// edits were for is gone, and asking it every frame is what a refusable
+    /// close would do here.
+    #[test]
+    fn a_guard_does_not_outlive_its_owner() -> Result<(), TestError> {
+        let (mut app, _root, _host) = floater_app();
+        let (opener, _) = open_keyed(&mut app, "region-a")?;
+        let (picker, _) = open_keyed(&mut app, "picker-for-region-a")?;
+        app.world_mut()
+            .entity_mut(picker)
+            .insert((FloaterOwner(opener), FloaterCloseGuard::new(true)));
+        app.update();
+
+        command(&mut app, opener, FloaterOp::Close);
+        app.update();
+        assert!(
+            app.world().get_entity(picker).is_err(),
+            "an armed guard must not keep a picker alive over an owner that is gone"
+        );
+        Ok(())
+    }
+
     /// **The click that opens a window also raises the window it came from**,
     /// and the new window must still land in front.
     ///
@@ -3431,37 +3816,26 @@ mod tests {
     }
 
     /// What each kind of window stores its geometry under: a singleton its bare
-    /// id, a named instance its own key, and a subject-keyed instance nothing
-    /// at all — the reference's `getControlName`, and the reason a session of
-    /// browsing residents does not grow the settings file.
+    /// id, a keyed instance nothing at all — the reference's `getControlName`
+    /// for a `UUID` key, and the reason a session of browsing residents does
+    /// not grow the settings file by one rect per resident.
     #[test]
-    fn only_a_named_instance_gets_its_own_settings_key() -> Result<(), TestError> {
+    fn only_a_singleton_gets_a_settings_key() -> Result<(), TestError> {
         let (mut app, root, _host) = floater_app();
         let singleton = spawn_one(&mut app, root);
-        let (subject, _) = open_keyed(&mut app, "resident-a")?;
-        let named = {
-            let mut queue = bevy::ecs::world::CommandQueue::default();
-            let entity = {
-                let mut commands = Commands::new(&mut queue, app.world());
-                super::spawn_keyed_floater(
-                    &mut commands,
-                    root,
-                    keyed_spec(),
-                    Some(FloaterKey::named("diffuse")),
-                    0,
-                )
-                .root
-            };
-            queue.apply(app.world_mut());
-            app.update();
-            entity
-        };
+        let (first, _) = open_keyed(&mut app, "resident-a")?;
+        let (second, _) = open_keyed(&mut app, "about-region/handle/7/experience-allowed")?;
         let world = app.world();
         let persist_id =
             |entity: Entity| world.get::<Floater>(entity).and_then(Floater::persist_id);
         assert_eq!(persist_id(singleton), Some("test".to_owned()));
-        assert_eq!(persist_id(named), Some(format!("{KEYED_ID}_diffuse")));
-        assert_eq!(persist_id(subject), None);
+        assert_eq!(persist_id(first), None);
+        assert_eq!(
+            persist_id(second),
+            None,
+            "a picker keyed on the window that opened it persists nothing either — an entry \
+             per region ever visited is what `FloaterKey` exists to avoid"
+        );
         Ok(())
     }
 

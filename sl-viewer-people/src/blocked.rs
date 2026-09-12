@@ -84,8 +84,8 @@ use crate::world_api::{AvatarPicked, OpenAvatarPicker};
 /// The `element` the block list's menu / UI actions are attributed to.
 const BLOCKED_ELEMENT: &str = "blocked";
 
-/// The tag the block list opens the shared avatar picker under, so only its own
-/// pick is consumed.
+/// The **field** name the block list opens the avatar picker under — which of
+/// this window's pickers it is (see `OpenAvatarPicker::field`).
 const PICKER_REQUESTER: &str = "blocked-list";
 
 /// The by-name block floater's stable id (persistence, `SL_VIEWER_OPEN_FLOATER`).
@@ -985,7 +985,7 @@ fn on_blocked_button_press(
         BlockedButton::BlockResident => {
             // Single, as the reference's is (`allow_multiple = false`); blocking
             // several at once belongs with the multi-select block *list*.
-            pickers.write(OpenAvatarPicker::one(PICKER_REQUESTER));
+            pickers.write(OpenAvatarPicker::one(press.entity, PICKER_REQUESTER));
         }
         BlockedButton::BlockObject => {
             if let Some(by_name) = by_name
@@ -1034,13 +1034,16 @@ fn on_block_by_name_press(
     }
 }
 
-/// Block a resident chosen in the shared avatar picker.
+/// Block a resident chosen in the avatar picker this window opened.
 fn handle_blocked_picks(
     mut picks: MessageReader<AvatarPicked>,
+    buttons: Query<&BlockedButton>,
     mut blocks: MessageWriter<RequestBlock>,
 ) {
     for pick in picks.read() {
-        if pick.requester != PICKER_REQUESTER {
+        // The pick names the button that opened the picker, so a pick for some
+        // other feature's picker is not this one's.
+        if buttons.get(pick.requester) != Ok(&BlockedButton::BlockResident) {
             continue;
         }
         let Some(chosen) = pick.first() else {

@@ -18,14 +18,19 @@
 //! window has no kind checkboxes — that is the library window's row, where the
 //! user is browsing rather than answering.
 //!
-//! # One window
+//! # One window per field, of the window that opened it
 //!
-//! The texture picker is keyed per field, because comparing a diffuse map
-//! against a normal map means having two open. Nothing compares two settings
-//! assets side by side: a panel picks a day cycle, or one frame of one, and the
-//! next pick replaces the last. So this is one window, re-aimed on each open —
-//! and an open while another is outstanding **cancels** that one first, rather
-//! than leaving a panel waiting for a reply that will never come.
+//! This is a **keyed** floater, keyed by the opening window and the field
+//! together (`picker_identity`), as the texture picker is. It used to be one
+//! shared window that an open re-aimed, cancelling whatever pick was
+//! outstanding — which reads fine for two fields of one panel, and not at all
+//! for two *instances* of that panel: About Land is one window per parcel, and
+//! picking an environment for the second parcel silently cancelled the first
+//! parcel's pick.
+//!
+//! A keyed instance is transient, so it persists nothing and every piece of
+//! per-window state is a component on the window root: closing it, or the
+//! window that opened it (`FloaterOwner`), ends it outright.
 //!
 //! # Not here
 //!
@@ -48,13 +53,13 @@ use sl_client_bevy::{InventoryKey, SettingsKind, Uuid};
 use sl_viewer_inventory::inventory::InventoryModel;
 use sl_viewer_inventory::settings_index::SettingsIndex;
 use sl_viewer_ui_core::i18n::{TransArgs, Translated, Translator};
-use sl_viewer_ui_core::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use sl_viewer_ui_core::ui::{UiScaffoldSystems, column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
 use sl_viewer_ui_core::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 use sl_viewer_ui_widgets::floater::{
-    DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, floater_shown, spawn_floater,
+    Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterOp, FloaterOwner, FloaterSpec,
+    FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater, picker_identity,
 };
-use sl_viewer_ui_widgets::floater_persist::FloaterOpenExempt;
 use sl_viewer_ui_widgets::ui_search::{SearchFieldSpec, spawn_search_field};
 use sl_viewer_ui_widgets::ui_table::{
     TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells, TableSelectionMode,
@@ -134,8 +139,9 @@ const fn title_key(kind: SettingsKind) -> &'static str {
 
 // --- State ----------------------------------------------------------------
 
-/// What the picker is answering, and what it has been told so far.
-#[derive(Resource, Debug, Default)]
+/// What one picker window is answering, and what it has been told so far — a
+/// component on the window root, so it dies with the instance.
+#[derive(Component, Debug, Default)]
 struct SettingsPickerState {
     /// The panel that opened it, and that its replies are tagged back to.
     /// `None` once OK / Cancel has answered, which is what tells a close it has
@@ -183,11 +189,9 @@ impl SettingsPickerState {
     }
 }
 
-/// The window's retained entities.
-#[derive(Resource, Debug)]
+/// One picker window's retained entities.
+#[derive(Component, Debug)]
 struct SettingsPickerUi {
-    /// The floater root, carrying the `UiPanelShown` it is shown by.
-    panel: Entity,
     /// The floater's title text, retitled per kind on open.
     title_text: Entity,
     /// The line under the title naming the field being picked for.
@@ -241,17 +245,19 @@ pub struct SettingsPickerPlugin;
 
 impl Plugin for SettingsPickerPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<SettingsPickerState>()
-            .init_resource::<SettingsIndex>()
+        app.init_resource::<SettingsIndex>()
             .add_message::<OpenSettingsPicker>()
             .add_message::<SettingsPicked>()
             .add_systems(
-                Startup,
-                spawn_settings_picker.after(UiScaffoldSystems::SpawnRoot),
+                Update,
+                // After the manager's command pass — see `FloaterSystems`: the
+                // click on a "Use Inventory…" button also raises the window it
+                // was clicked in, and the later raise wins the z-order.
+                open_settings_picker
+                    .after(FloaterSystems::Commands)
+                    .after(UiScaffoldSystems::SpawnRoot)
+                    .before(layout_virtual_lists),
             )
-            // The open is the one system that must run while the window is
-            // hidden: it is what shows it.
-            .add_systems(Update, open_settings_picker.before(layout_virtual_lists))
             .add_systems(
                 Update,
                 (
@@ -262,18 +268,22 @@ impl Plugin for SettingsPickerPlugin {
                     .chain()
                     .after(open_settings_picker)
                     .before(layout_virtual_lists)
-                    .run_if(floater_shown(SETTINGS_PICKER_FLOATER_ID)),
+                    .run_if(any_with_component::<SettingsPickerState>),
             )
             .add_systems(
                 Update,
                 (populate_picker_rows, bind_picker_rows)
                     .chain()
                     .after(layout_virtual_lists)
-                    .run_if(floater_shown(SETTINGS_PICKER_FLOATER_ID)),
+                    .run_if(any_with_component::<SettingsPickerState>),
             )
-            // Runs whatever the window's state: a close by the chrome's ✕ has to
-            // answer the panel that is still waiting.
-            .add_systems(Update, revert_picker_on_close);
+            // Reads the close **command**, before the pass that carries it out
+            // despawns the window: a keyed instance ends on close, so afterwards
+            // there is no state left to answer from.
+            .add_systems(
+                Update,
+                revert_picker_on_close.before(FloaterSystems::Commands),
+            );
     }
 }
 
@@ -302,35 +312,12 @@ pub fn settings_picker_floater_spec() -> FloaterSpec {
     }
 }
 
-/// Startup: the chrome only; the content is built on the first open.
-fn spawn_settings_picker(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = spawn_floater(&mut commands, root.0, settings_picker_floater_spec());
-    let builder = commands.register_system(build_settings_picker_content);
-    commands
-        .entity(handle.root)
-        .insert(DeferredFloaterContent { builder, handle })
-        // Its rectangle is worth keeping; its being open is not. A chooser
-        // exists only while a panel is waiting on it, and on the next run
-        // nothing is.
-        .insert(FloaterOpenExempt);
-    commands.queue(move |world: &mut World| {
-        world.insert_resource(SettingsPickerUi {
-            panel: handle.root,
-            title_text: handle.title_text,
-            // Filled in by the content build; the open path tolerates the gap
-            // because it shows the window first and titles it on the next pass.
-            field_text: Entity::PLACEHOLDER,
-            table: Entity::PLACEHOLDER,
-            viewport: Entity::PLACEHOLDER,
-            filter_field: Entity::PLACEHOLDER,
-            count_text: Entity::PLACEHOLDER,
-        });
-    });
-}
-
-/// First-open content build: the field line, the filter, the list and the reply
+/// One window's content: the field line, the filter, the list and the reply
 /// row.
-fn build_settings_picker_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
+fn build_settings_picker_content(
+    handle: &FloaterHandle,
+    commands: &mut Commands,
+) -> SettingsPickerUi {
     let content = commands
         .spawn((
             Node {
@@ -357,7 +344,7 @@ fn build_settings_picker_content(In(handle): In<FloaterHandle>, mut commands: Co
         .id();
 
     let search = spawn_search_field(
-        &mut commands,
+        commands,
         content,
         &SearchFieldSpec {
             tab_index: 0,
@@ -374,7 +361,7 @@ fn build_settings_picker_content(In(handle): In<FloaterHandle>, mut commands: Co
             .insert(Translated::new("settings-picker-filter-placeholder"));
     }
 
-    let table = spawn_table(&mut commands, content, &SETTINGS_PICKER_TABLE);
+    let table = spawn_table(commands, content, &SETTINGS_PICKER_TABLE);
     commands
         .entity(table.viewport)
         .insert((BackgroundColor(LIST_BACKGROUND), TabIndex(1)));
@@ -412,27 +399,21 @@ fn build_settings_picker_content(In(handle): In<FloaterHandle>, mut commands: Co
         .enumerate()
     {
         spawn_picker_button(
-            &mut commands,
+            commands,
             buttons,
             button,
             i32::try_from(index).unwrap_or(0).saturating_add(2),
         );
     }
 
-    commands.queue(move |world: &mut World| {
-        if let Some(mut ui) = world.get_resource_mut::<SettingsPickerUi>() {
-            ui.field_text = field_text;
-            ui.table = table.root;
-            ui.viewport = table.viewport;
-            ui.filter_field = search.field;
-            ui.count_text = count_text;
-        }
-        // The content is built a frame after the open that asked for it, so the
-        // list has never been projected. Ask for it now.
-        if let Some(mut state) = world.get_resource_mut::<SettingsPickerState>() {
-            state.built = false;
-        }
-    });
+    SettingsPickerUi {
+        title_text: handle.title_text,
+        field_text,
+        table: table.root,
+        viewport: table.viewport,
+        filter_field: search.field,
+        count_text,
+    }
 }
 
 /// One reply button.
@@ -478,140 +459,146 @@ fn spawn_picker_button(
 
 // --- Opening --------------------------------------------------------------
 
-/// Aim the window at a new field and show it.
+/// Open (or re-aim) the picker window for the field that asked.
+///
+/// Keyed by the **opening window and the field together**: the button that
+/// asked gets its own window, a second press on it re-aims that one, and the
+/// same field in a second instance of the opening window gets a window of its
+/// own rather than cancelling the first's outstanding pick.
 fn open_settings_picker(
     mut opens: MessageReader<OpenSettingsPicker>,
-    ui: Option<Res<SettingsPickerUi>>,
-    mut state: ResMut<SettingsPickerState>,
-    mut panels: Query<&mut UiPanelShown>,
+    mut floaters: KeyedFloaters,
+    mut windows: Query<(&mut SettingsPickerState, &SettingsPickerUi)>,
+    parents: Query<&ChildOf>,
+    openers: Query<(Entity, &Floater)>,
     mut fields: Query<&mut EditableText>,
-    mut picked: MessageWriter<SettingsPicked>,
     mut commands: Commands,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    for open in opens.read() {
-        // One window: an open while another pick is outstanding answers that one
-        // first, with what it opened on, rather than leaving its panel waiting
-        // for a reply that is never coming.
-        if let Some(previous) = state.requester
-            && previous != open.requester
-        {
-            picked.write(SettingsPicked {
-                requester: previous,
-                chosen: state.original.clone(),
-                final_pick: false,
-            });
+    let requests: Vec<OpenSettingsPicker> = opens.read().cloned().collect();
+    for open in requests {
+        let (owner, key) = picker_identity(open.requester, &open.field, &parents, &openers);
+        let opened = floaters.open(settings_picker_floater_spec(), key);
+        let window = opened.root();
+        let title = Translated::new(title_key(open.kind));
+        if let KeyedFloaterOpen::Spawned(handle) = opened {
+            let ui = build_settings_picker_content(&handle, &mut commands);
+            let title_text = ui.title_text;
+            // Seeded here rather than after the insert: the components only
+            // reach the world when this frame's commands flush, so a window
+            // spawned now is not queryable yet.
+            commands
+                .entity(handle.root)
+                .insert((aimed_state(&open), ui));
+            commands.entity(title_text).insert(title);
+            if let Some(owner) = owner {
+                commands.entity(handle.root).insert(FloaterOwner(owner));
+            }
+            continue;
         }
-        state.requester = Some(open.requester);
-        state.field = open.field.to_string();
-        state.filters = SettingsListFilters::only(open.kind);
-        state.original = None;
-        state.selected = None;
-        state.wanted = open.current;
-        state.built = false;
-
-        commands
-            .entity(ui.title_text)
-            .insert(Translated::new(title_key(open.kind)));
-        // A fresh field starts with a fresh filter, or the last pick's term
-        // would silently hide most of this one's choices.
+        let Ok((mut state, ui)) = windows.get_mut(window) else {
+            continue;
+        };
+        *state = aimed_state(&open);
+        commands.entity(ui.title_text).insert(title);
+        // A fresh aim starts with a fresh filter, or the last pick's term would
+        // silently hide most of this one's choices.
         if let Ok(mut field) = fields.get_mut(ui.filter_field)
             && !field.value().to_string().is_empty()
         {
             field.editor.set_text("");
         }
-        if let Ok(mut shown) = panels.get_mut(ui.panel) {
-            shown.0 = true;
-        }
+    }
+}
+
+/// The state an open aims a window at — everything the request fixes, and
+/// nothing carried over from a previous one.
+fn aimed_state(open: &OpenSettingsPicker) -> SettingsPickerState {
+    SettingsPickerState {
+        requester: Some(open.requester),
+        field: open.field.to_string(),
+        filters: SettingsListFilters::only(open.kind),
+        wanted: open.current,
+        ..SettingsPickerState::default()
     }
 }
 
 // --- View systems ---------------------------------------------------------
 
-/// Keep the filter term in step with the search field.
+/// Keep each window's filter term in step with its search field.
 fn mirror_picker_filter(
-    ui: Option<Res<SettingsPickerUi>>,
+    mut windows: Query<(&mut SettingsPickerState, &SettingsPickerUi)>,
     fields: Query<&EditableText>,
-    mut state: ResMut<SettingsPickerState>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    let Ok(field) = fields.get(ui.filter_field) else {
-        return;
-    };
-    let term = field.value().to_string();
-    if state.filters.search != term {
-        state.filters.search = term;
+    for (mut state, ui) in &mut windows {
+        let Ok(field) = fields.get(ui.filter_field) else {
+            continue;
+        };
+        let term = field.value().to_string();
+        if state.filters.search != term {
+            state.filters.search = term;
+        }
     }
 }
 
-/// Reproject when the index, the filter or the sort moved.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the two models it \
-              projects from, the window's entities, the translator, and the state and \
-              widgets it writes"
-)]
+/// Reproject each window when the index, its filter or its sort moved.
 fn rebuild_picker_rows(
     index: Res<SettingsIndex>,
     model: Option<Res<InventoryModel>>,
-    ui: Option<Res<SettingsPickerUi>>,
     translator: Translator,
-    mut state: ResMut<SettingsPickerState>,
+    mut windows: Query<(&mut SettingsPickerState, &SettingsPickerUi)>,
     tables: Query<&TableState>,
     mut lists: Query<&mut VirtualList>,
     mut texts: Query<&mut Text>,
 ) {
-    let (Some(ui), Some(model)) = (ui, model) else {
+    let Some(model) = model else {
         return;
     };
-    let sort = tables
-        .get(ui.table)
-        .ok()
-        .map(|table| (table.sort_revision(), table.sort().keys().to_vec()));
-    let sort_revision = sort.as_ref().map_or(0, |(revision, _keys)| *revision);
-    if state.built
-        && state.built_sort_revision == sort_revision
-        && state.built_filters.as_ref() == Some(&state.filters)
-        && state.built_index.as_ref() == Some(&*index)
-        && !model.is_changed()
-    {
-        return;
-    }
-    state.built = true;
-    state.built_sort_revision = sort_revision;
-    state.built_filters = Some(state.filters.clone());
-    state.built_index = Some(index.clone());
+    for (mut state, ui) in &mut windows {
+        let sort = tables
+            .get(ui.table)
+            .ok()
+            .map(|table| (table.sort_revision(), table.sort().keys().to_vec()));
+        let sort_revision = sort.as_ref().map_or(0, |(revision, _keys)| *revision);
+        if state.built
+            && state.built_sort_revision == sort_revision
+            && state.built_filters.as_ref() == Some(&state.filters)
+            && state.built_index.as_ref() == Some(&*index)
+            && !model.is_changed()
+        {
+            continue;
+        }
+        state.built = true;
+        state.built_sort_revision = sort_revision;
+        state.built_filters = Some(state.filters.clone());
+        state.built_index = Some(index.clone());
 
-    let mut rows = project(&index, &model, &state.filters);
-    let keys: Vec<(&str, bool)> = sort
-        .map(|(_revision, keys)| keys)
-        .unwrap_or_default()
-        .iter()
-        .filter_map(|key| {
-            SETTINGS_PICKER_TABLE
-                .columns
-                .get(key.column)
-                .map(|column| (column.token, key.ascending))
-        })
-        .collect();
-    sort_rows(&mut rows, &keys);
-    state.rows = rows;
+        let mut rows = project(&index, &model, &state.filters);
+        let keys: Vec<(&str, bool)> = sort
+            .map(|(_revision, keys)| keys)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|key| {
+                SETTINGS_PICKER_TABLE
+                    .columns
+                    .get(key.column)
+                    .map(|column| (column.token, key.ascending))
+            })
+            .collect();
+        sort_rows(&mut rows, &keys);
+        state.rows = rows;
 
-    if let Ok(mut list) = lists.get_mut(ui.viewport) {
-        list.item_count = state.rows.len();
-    }
-    let label = translator.format(
-        "settings-picker-count",
-        &TransArgs::new().int("shown", i64::try_from(state.rows.len()).unwrap_or(i64::MAX)),
-    );
-    if let Ok(mut text) = texts.get_mut(ui.count_text)
-        && text.0 != label
-    {
-        text.0 = label;
+        if let Ok(mut list) = lists.get_mut(ui.viewport) {
+            list.item_count = state.rows.len();
+        }
+        let label = translator.format(
+            "settings-picker-count",
+            &TransArgs::new().int("shown", i64::try_from(state.rows.len()).unwrap_or(i64::MAX)),
+        );
+        if let Ok(mut text) = texts.get_mut(ui.count_text)
+            && text.0 != label
+        {
+            text.0 = label;
+        }
     }
 }
 
@@ -622,40 +609,41 @@ fn rebuild_picker_rows(
 /// resolved on whichever projection first holds it — and dropped once resolved,
 /// so a later filter that hides the row does not re-select it behind the user's
 /// back.
-fn resolve_wanted_row(mut state: ResMut<SettingsPickerState>) {
-    let Some(wanted) = state.wanted else {
-        return;
-    };
-    let Some(found) = state
-        .rows
-        .iter()
-        .find(|row| row.asset_id == wanted)
-        .map(|row| PickedSettings {
-            item: row.item,
-            asset_id: row.asset_id,
-            name: row.name.clone(),
-        })
-    else {
-        return;
-    };
-    state.wanted = None;
-    state.selected = Some(found.item);
-    state.original = Some(found);
+fn resolve_wanted_row(mut windows: Query<&mut SettingsPickerState>) {
+    for mut state in &mut windows {
+        let Some(wanted) = state.wanted else {
+            continue;
+        };
+        let Some(found) = state
+            .rows
+            .iter()
+            .find(|row| row.asset_id == wanted)
+            .map(|row| PickedSettings {
+                item: row.item,
+                asset_id: row.asset_id,
+                name: row.name.clone(),
+            })
+        else {
+            continue;
+        };
+        state.wanted = None;
+        state.selected = Some(found.item);
+        state.original = Some(found);
+    }
 }
 
 /// Build the cells of each freshly-pooled row and attach its press observer.
 fn populate_picker_rows(
     mut commands: Commands,
-    ui: Option<Res<SettingsPickerUi>>,
+    windows: Query<&SettingsPickerUi>,
     new_rows: Query<(Entity, &ChildOf), Added<VirtualRow>>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
     for (row_entity, child_of) in &new_rows {
-        if child_of.parent() != ui.viewport {
+        // The row's own window: with two pickers up, a row pooled into one
+        // viewport must be built against that window's table.
+        let Some(ui) = windows.iter().find(|ui| ui.viewport == child_of.parent()) else {
             continue;
-        }
+        };
         spawn_table_row(&mut commands, row_entity, ui.table, &SETTINGS_PICKER_TABLE);
         commands
             .entity(row_entity)
@@ -667,8 +655,7 @@ fn populate_picker_rows(
 /// Bind each pooled row to the entry it now presents, and keep the field line in
 /// step with what is being picked for.
 fn bind_picker_rows(
-    state: Res<SettingsPickerState>,
-    ui: Option<Res<SettingsPickerUi>>,
+    windows: Query<(Ref<SettingsPickerState>, &SettingsPickerUi)>,
     translator: Translator,
     mut rows: Query<(
         Entity,
@@ -685,56 +672,55 @@ fn bind_picker_rows(
     // wider query reaches it.
     mut cells_text: Query<(&mut Text, &mut TextColor)>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    if state.is_changed()
-        && let Ok((mut text, _color)) = cells_text.get_mut(ui.field_text)
-    {
-        let label = translator.format(
-            "settings-picker-field",
-            &TransArgs::new().text("field", &state.field),
-        );
-        if text.0 != label {
-            text.0 = label;
-        }
-    }
-    let refresh_all = state.is_changed();
     let library_label = translator.get("my-environments-library");
-    for (row_entity, row, child_of, cells, mut bound) in &mut rows {
-        if child_of.parent() != ui.viewport {
-            continue;
-        }
-        if !refresh_all && !row.is_changed() {
-            continue;
-        }
-        let data = row.index.and_then(|index| state.rows.get(index));
-        bound.0 = data.map(|entry| entry.item);
-        let (name, location) = data.map_or_else(
-            || (String::new(), String::new()),
-            |entry| {
-                (
-                    entry.name.clone(),
-                    location_text(&library_label, entry.library, &entry.folder),
-                )
-            },
-        );
-        for (column, value, color) in [
-            (COL_NAME, name, LABEL_COLOR),
-            (COL_WHERE, location, DIM_LABEL_COLOR),
-        ] {
-            if let Some(cell) = cells.cell(column) {
-                set_table_cell(&mut cells_text, cell, &value, color);
+    for (state, ui) in &windows {
+        if state.is_changed()
+            && let Ok((mut text, _color)) = cells_text.get_mut(ui.field_text)
+        {
+            let label = translator.format(
+                "settings-picker-field",
+                &TransArgs::new().text("field", &state.field),
+            );
+            if text.0 != label {
+                text.0 = label;
             }
         }
-        if let Ok(mut background) = backgrounds.get_mut(row_entity) {
-            let wanted = if data.is_some() && state.selected == bound.0 {
-                SELECTED_BACKGROUND
-            } else {
-                Color::NONE
-            };
-            if background.0 != wanted {
-                background.0 = wanted;
+        let refresh_all = state.is_changed();
+        for (row_entity, row, child_of, cells, mut bound) in &mut rows {
+            if child_of.parent() != ui.viewport {
+                continue;
+            }
+            if !refresh_all && !row.is_changed() {
+                continue;
+            }
+            let data = row.index.and_then(|index| state.rows.get(index));
+            bound.0 = data.map(|entry| entry.item);
+            let (name, location) = data.map_or_else(
+                || (String::new(), String::new()),
+                |entry| {
+                    (
+                        entry.name.clone(),
+                        location_text(&library_label, entry.library, &entry.folder),
+                    )
+                },
+            );
+            for (column, value, color) in [
+                (COL_NAME, name, LABEL_COLOR),
+                (COL_WHERE, location, DIM_LABEL_COLOR),
+            ] {
+                if let Some(cell) = cells.cell(column) {
+                    set_table_cell(&mut cells_text, cell, &value, color);
+                }
+            }
+            if let Ok(mut background) = backgrounds.get_mut(row_entity) {
+                let wanted = if data.is_some() && state.selected == bound.0 {
+                    SELECTED_BACKGROUND
+                } else {
+                    Color::NONE
+                };
+                if background.0 != wanted {
+                    background.0 = wanted;
+                }
             }
         }
     }
@@ -746,15 +732,22 @@ fn bind_picker_rows(
 fn on_picker_row_press(
     mut press: On<Pointer<Press>>,
     rows: Query<&BoundPickerRow>,
-    ui: Res<SettingsPickerUi>,
+    mut windows: Query<(&mut SettingsPickerState, &SettingsPickerUi)>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
     mut focus: ResMut<InputFocus>,
-    mut state: ResMut<SettingsPickerState>,
     mut picked: MessageWriter<SettingsPicked>,
 ) {
     if press.button != PointerButton::Primary {
         return;
     }
     let Ok(BoundPickerRow(Some(item))) = rows.get(press.entity).copied() else {
+        return;
+    };
+    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+        return;
+    };
+    let Ok((mut state, ui)) = windows.get_mut(window) else {
         return;
     };
     press.propagate(false);
@@ -775,15 +768,22 @@ fn on_picker_row_press(
 fn on_picker_button(
     mut press: On<Pointer<Press>>,
     buttons: Query<&PickerButton>,
-    ui: Res<SettingsPickerUi>,
-    mut state: ResMut<SettingsPickerState>,
+    mut windows: Query<&mut SettingsPickerState>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
     mut picked: MessageWriter<SettingsPicked>,
-    mut panels: Query<&mut UiPanelShown>,
+    mut chrome: MessageWriter<FloaterCommand>,
 ) {
     if press.button != PointerButton::Primary {
         return;
     }
     let Ok(button) = buttons.get(press.entity).copied() else {
+        return;
+    };
+    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+        return;
+    };
+    let Ok(mut state) = windows.get_mut(window) else {
         return;
     };
     press.propagate(false);
@@ -804,26 +804,26 @@ fn on_picker_button(
     // Cleared *before* the close, so `revert_picker_on_close` knows this window
     // has already answered and does not send a second reply.
     state.requester = None;
-    if let Ok(mut shown) = panels.get_mut(ui.panel) {
-        shown.0 = false;
-    }
+    chrome.write(FloaterCommand {
+        floater: window,
+        op: FloaterOp::Close,
+    });
 }
 
 /// A close by the chrome's ✕ is a Cancel: the panel is still waiting, and a
 /// window that vanished without answering would leave its preview in force.
 fn revert_picker_on_close(
-    panels: Query<(Entity, &UiPanelShown), Changed<UiPanelShown>>,
-    ui: Option<Res<SettingsPickerUi>>,
-    mut state: ResMut<SettingsPickerState>,
+    mut closes: MessageReader<FloaterCommand>,
+    mut windows: Query<&mut SettingsPickerState>,
     mut picked: MessageWriter<SettingsPicked>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    for (entity, shown) in &panels {
-        if shown.0 || entity != ui.panel {
+    for command in closes.read() {
+        if !matches!(command.op, FloaterOp::Close | FloaterOp::CloseNow) {
             continue;
         }
+        let Ok(mut state) = windows.get_mut(command.floater) else {
+            continue;
+        };
         let Some(requester) = state.requester.take() else {
             continue;
         };

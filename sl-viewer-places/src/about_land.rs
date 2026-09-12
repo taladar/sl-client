@@ -141,6 +141,14 @@ const ROW_HEIGHT: f32 = 22.0;
 /// indices at, clear of the other tabs' controls.
 const ENV_TAB_INDEX: i32 = 30;
 
+/// The avatar-picker **field** name for the allow list's Add — which of this
+/// window's pickers it is (see `OpenAvatarPicker::field`); the window it was
+/// pressed in is the other half of that picker's identity.
+const PICK_ALLOW: &str = "about-land-allow";
+
+/// The avatar-picker field name for the ban list's Add.
+const PICK_BAN: &str = "about-land-ban";
+
 /// The object-owners table: type, name, object count.
 const OWNERS_TABLE: TableSpec = TableSpec {
     element: "about-land-owners",
@@ -332,14 +340,6 @@ struct AboutLandState {
     /// (a land-pie click): the reply with this echoed `sequence_id` binds the
     /// subject. `None` once bound, or when opened on a known parcel.
     pending_sequence: Option<i32>,
-    /// Which access list an avatar pick this window asked for will land in, or
-    /// `None` when it has no pick outstanding.
-    ///
-    /// The avatar picker echoes a `&'static str` tag rather than an entity, so
-    /// a pick cannot name its window. It does not have to: the picker is one
-    /// window per tag, so at most one About Land window can have a pick
-    /// outstanding for a tag, and this is that window's claim on it.
-    pending_pick: Option<AccessScope>,
 }
 
 /// A monotonic source of `ParcelPropertiesRequest` sequence ids, shared by every
@@ -422,7 +422,6 @@ impl AboutLandState {
         self.seeded = None;
         self.shown_fields = None;
         self.pending_sequence = None;
-        self.pending_pick = None;
         self.owners_revision = self.owners_revision.wrapping_add(1);
     }
 
@@ -3065,15 +3064,14 @@ fn on_about_land_action(
         // grew one — and two buttons side by side that answer a modified click
         // differently is worse than the small divergence.
         //
-        // The claim is what the pick comes back to (`pending_pick`): the picker
-        // echoes a tag, not a window.
+        // The pressed button is what the pick comes back to: it names both the
+        // list (its own `AboutLandAction`) and the window (the floater it lives
+        // in), so two About Land windows never take each other's answer.
         AboutLandAction::AddAllowed => {
-            state.pending_pick = Some(AccessScope::Allow);
-            pickers.write(OpenAvatarPicker::many("about-land-allow"));
+            pickers.write(OpenAvatarPicker::many(press.entity, PICK_ALLOW));
         }
         AboutLandAction::AddBanned => {
-            state.pending_pick = Some(AccessScope::Ban);
-            pickers.write(OpenAvatarPicker::many("about-land-ban"));
+            pickers.write(OpenAvatarPicker::many(press.entity, PICK_BAN));
         }
     }
 }
@@ -3197,16 +3195,20 @@ fn apply_texture_edits(
     }
 }
 
-/// Fold the avatar picks into the allow / ban list and commit them.
 /// Fold the avatar picks into the allow / ban list of the window that asked,
 /// and commit them.
 ///
-/// The picker echoes a `&'static str` tag rather than an entity, so the window
-/// is the one holding a matching claim ([`AboutLandState::pending_pick`]) — at
-/// most one, because the picker itself is one window per tag.
+/// The pick names the **Add button** that asked, which answers both questions:
+/// which list, from the button's own [`AboutLandAction`], and which window,
+/// from the floater it lives in ([`host_floater`]). The claim slot this
+/// replaces held one scope for the whole viewer, so a second About Land
+/// window's Add overwrote the first's and the first's confirmed pick vanished.
 fn apply_avatar_picks(
     mut picked: MessageReader<AvatarPicked>,
-    mut windows: Query<(Entity, &mut AboutLandState)>,
+    mut windows: Query<&mut AboutLandState>,
+    actions: Query<&AboutLandAction>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
     identity: Res<SlIdentity>,
     mut commands: MessageWriter<SlCommand>,
 ) {
@@ -3215,22 +3217,25 @@ fn apply_avatar_picks(
         return;
     }
     for event in &frame {
-        let scope = match event.requester {
-            "about-land-allow" => AccessScope::Allow,
-            "about-land-ban" => AccessScope::Ban,
-            _other => continue,
+        let scope = match actions.get(event.requester) {
+            Ok(AboutLandAction::AddAllowed) => AccessScope::Allow,
+            Ok(AboutLandAction::AddBanned) => AccessScope::Ban,
+            Ok(_) | Err(_) => continue,
         };
-        for (_window, mut state) in &mut windows {
-            if state.pending_pick != Some(scope) {
-                continue;
-            }
-            state.pending_pick = None;
-            let Some(scoped) = state.scoped(&identity) else {
-                continue;
-            };
-            for chosen in &event.picks {
-                add_access_entry(&mut state, scope, chosen.agent, scoped, &mut commands);
-            }
+        let Some(window) = host_floater(event.requester, &parents, &floaters) else {
+            continue;
+        };
+        let Ok(mut state) = windows.get_mut(window) else {
+            continue;
+        };
+        if !state.can_edit {
+            continue;
+        }
+        let Some(scoped) = state.scoped(&identity) else {
+            continue;
+        };
+        for chosen in &event.picks {
+            add_access_entry(&mut state, scope, chosen.agent, scoped, &mut commands);
         }
     }
 }

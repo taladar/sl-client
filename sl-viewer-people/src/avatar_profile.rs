@@ -559,7 +559,7 @@ const PROFILE_FLOATER_ID: &str = "avatar-profile";
 
 /// The [`FloaterKey`] of the window showing `agent`'s profile.
 ///
-/// A [subject](FloaterKey::Subject) key: instances are told apart by the agent
+/// A [`FloaterKey`]: instances are told apart by the agent
 /// id, and none of them persists geometry — a settings entry per resident whose
 /// profile was ever opened is exactly what that variant exists to avoid.
 fn profile_key(agent: AgentKey) -> FloaterKey {

@@ -166,28 +166,29 @@ const LIST_HEIGHT: f32 = 130.0;
 /// One list row's height, in logical pixels.
 const ROW_HEIGHT: f32 = 22.0;
 
-/// The avatar-picker requester tag for adding an estate manager.
+/// The avatar-picker **field** name for adding an estate manager — which of
+/// this window's pickers it is (see `OpenAvatarPicker::field`).
 const PICK_MANAGER: &str = "about-region-manager";
 
-/// The avatar-picker requester tag for adding an allowed resident.
+/// The avatar-picker field name for adding an allowed resident.
 const PICK_ALLOWED: &str = "about-region-allowed";
 
-/// The avatar-picker requester tag for adding a banned resident.
+/// The avatar-picker field name for adding a banned resident.
 const PICK_BANNED: &str = "about-region-banned";
 
-/// The avatar-picker requester tag for teleporting one resident home.
+/// The avatar-picker field name for teleporting one resident home.
 const PICK_TELEPORT: &str = "about-region-teleport";
 
-/// The avatar-picker requester tag for kicking a resident from the estate.
+/// The avatar-picker field name for kicking a resident from the estate.
 const PICK_KICK: &str = "about-region-kick";
 
-/// The experience-picker requester tag for the estate's Key (trusted) list.
+/// The experience-picker field name for the estate's Key (trusted) list.
 const PICK_EXPERIENCE_TRUSTED: &str = "about-region-experience-trusted";
 
-/// The experience-picker requester tag for the estate's Allowed list.
+/// The experience-picker field name for the estate's Allowed list.
 const PICK_EXPERIENCE_ALLOWED: &str = "about-region-experience-allowed";
 
-/// The experience-picker requester tag for the estate's Blocked list.
+/// The experience-picker field name for the estate's Blocked list.
 const PICK_EXPERIENCE_BLOCKED: &str = "about-region-experience-blocked";
 
 /// The most experiences an estate list may hold — the reference's
@@ -349,13 +350,6 @@ struct AboutRegionState {
     /// Whether the agent may manage the estate (owner or manager) **and** this
     /// window is current; gates editing.
     can_manage: bool,
-    /// Which picker tag this window has a resident pick outstanding for.
-    ///
-    /// The avatar picker echoes a `&'static str` rather than an entity, so a
-    /// pick cannot name its window. It does not have to: the picker is one
-    /// window per tag, so at most one Region / Estate window can be waiting on
-    /// a tag, and this is that window's claim on it.
-    pending_pick: Option<&'static str>,
     /// The editable region-settings draft, seeded from the live region.
     draft: RegionInfoUpdate,
     /// The editable region-debug draft (disable scripts / collisions / physics).
@@ -406,15 +400,6 @@ struct AboutRegionState {
     /// Whether the `RegionExperiences` GET has gone out for this window's
     /// region since it last became current.
     experiences_requested: bool,
-    /// Which experience lists this window has an Add outstanding for, in
-    /// [`ExperienceList::index`] order.
-    ///
-    /// A *set*, not the single [`pending_pick`](Self::pending_pick) slot the
-    /// avatar picks use, because the experience picker is **one window per
-    /// list**: opening Add on Allowed and then on Blocked leaves two pickers up
-    /// at once, and a single slot would silently drop whichever pick came back
-    /// second — the claim would name the other list by then.
-    pending_experience_picks: [bool; 3],
 }
 
 impl AboutRegionState {
@@ -1050,7 +1035,9 @@ impl ExperienceList {
         }
     }
 
-    /// The experience-picker requester tag this list's Add opens with.
+    /// The experience-picker **field** name this list's Add opens with — half
+    /// of that picker window's identity (the window it was pressed in is the
+    /// other half).
     const fn pick_tag(self) -> &'static str {
         match self {
             Self::Trusted => PICK_EXPERIENCE_TRUSTED,
@@ -1076,11 +1063,6 @@ impl ExperienceList {
             Self::Allowed => &ALLOWED_EXPERIENCES_TABLE,
             Self::Blocked => &BLOCKED_EXPERIENCES_TABLE,
         }
-    }
-
-    /// The list a picker requester tag belongs to, if any.
-    fn from_pick_tag(tag: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|list| list.pick_tag() == tag)
     }
 }
 
@@ -3184,12 +3166,17 @@ fn on_experience_row_button(
 
 /// Fold an experience pick into the list whose Add opened the picker.
 ///
-/// The picker echoes a tag rather than an entity, so the window is the one
-/// holding a matching claim ([`AboutRegionState::pending_pick`]) — the same
-/// rule the avatar picks follow.
+/// The pick names the **Add button** that asked, and that one entity answers
+/// both questions this needs: which list, from the button's own
+/// [`AboutRegionAction`], and which window, from the floater it lives in
+/// ([`host_floater`]). With two About Region windows open on two regions, each
+/// takes only its own pick — where a tag claim let both take one.
 fn apply_experience_picks(
     mut picked: MessageReader<ExperiencePicked>,
     mut windows: Query<&mut AboutRegionState>,
+    actions: Query<&AboutRegionAction>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     let frame: Vec<ExperiencePicked> = picked.read().cloned().collect();
@@ -3197,24 +3184,20 @@ fn apply_experience_picks(
         return;
     }
     for event in &frame {
-        let Some(list) = ExperienceList::from_pick_tag(event.requester) else {
+        let Ok(AboutRegionAction::AddExperience(list)) = actions.get(event.requester) else {
             continue;
         };
-        for mut state in &mut windows {
-            let claimed = state
-                .pending_experience_picks
-                .get(list.index())
-                .copied()
-                .unwrap_or(false);
-            if !claimed || !state.can_manage {
-                continue;
-            }
-            if let Some(slot) = state.pending_experience_picks.get_mut(list.index()) {
-                *slot = false;
-            }
-            if state.add_experience(list, event.experience) {
-                post_region_experiences(&state, &mut commands);
-            }
+        let Some(window) = host_floater(event.requester, &parents, &floaters) else {
+            continue;
+        };
+        let Ok(mut state) = windows.get_mut(window) else {
+            continue;
+        };
+        if !state.can_manage {
+            continue;
+        }
+        if state.add_experience(*list, event.experience) {
+            post_region_experiences(&state, &mut commands);
         }
     }
 }
@@ -3351,8 +3334,7 @@ fn on_about_region_action(
             sl_commands.write(SlCommand(Command::SetEstateInfo(update)));
         }
         AboutRegionAction::TeleportHomeOne => {
-            state.pending_pick = Some(PICK_TELEPORT);
-            pickers.write(OpenAvatarPicker::one(PICK_TELEPORT));
+            pickers.write(OpenAvatarPicker::one(press.entity, PICK_TELEPORT));
         }
         AboutRegionAction::TeleportHomeAll => {
             sl_commands.write(SlCommand(Command::TeleportHomeAllUsers));
@@ -3374,23 +3356,19 @@ fn on_about_region_action(
             }
         }
         AboutRegionAction::KickEstate => {
-            state.pending_pick = Some(PICK_KICK);
-            pickers.write(OpenAvatarPicker::one(PICK_KICK));
+            pickers.write(OpenAvatarPicker::one(press.entity, PICK_KICK));
         }
         // The three estate access lists take a multi-pick, as the reference's do
         // ("avatar picker yes multi-select"); a kick or a send-home is about one
         // resident, so those stay single.
         AboutRegionAction::AddManager => {
-            state.pending_pick = Some(PICK_MANAGER);
-            pickers.write(OpenAvatarPicker::many(PICK_MANAGER));
+            pickers.write(OpenAvatarPicker::many(press.entity, PICK_MANAGER));
         }
         AboutRegionAction::AddAllowed => {
-            state.pending_pick = Some(PICK_ALLOWED);
-            pickers.write(OpenAvatarPicker::many(PICK_ALLOWED));
+            pickers.write(OpenAvatarPicker::many(press.entity, PICK_ALLOWED));
         }
         AboutRegionAction::AddBanned => {
-            state.pending_pick = Some(PICK_BANNED);
-            pickers.write(OpenAvatarPicker::many(PICK_BANNED));
+            pickers.write(OpenAvatarPicker::many(press.entity, PICK_BANNED));
         }
         AboutRegionAction::AddExperience(list) => {
             // A full list refuses rather than opening a picker whose pick it
@@ -3399,11 +3377,9 @@ fn on_about_region_action(
             if state.experiences(*list).len() >= MAX_ESTATE_EXPERIENCES {
                 return;
             }
-            if let Some(slot) = state.pending_experience_picks.get_mut(list.index()) {
-                *slot = true;
-            }
             experience_pickers.write(OpenExperiencePicker {
-                requester: list.pick_tag(),
+                requester: press.entity,
+                field: list.pick_tag(),
                 filter: list.filter(),
             });
         }
@@ -3492,16 +3468,20 @@ fn apply_combo_edits(
     }
 }
 
-/// Fold the avatar picks into the estate action that opened the picker — each
-/// chosen resident in turn, since the access lists open a multi-picker.
 /// Fold the avatar picks into the estate action of the window that asked — each
 /// chosen resident in turn, since the access lists open a multi-picker.
 ///
-/// The picker echoes a tag rather than an entity, so the window is the one
-/// holding a matching claim ([`AboutRegionState::pending_pick`]).
+/// Routed exactly like the experience picks: the button that asked names its
+/// own action and, through [`host_floater`], its own window. The single
+/// `pending_pick` claim this replaces was the worse half of the old shape — a
+/// second window's Add overwrote the first window's claim, and the pick the
+/// first one had confirmed was dropped on the floor.
 fn apply_avatar_picks(
     mut picked: MessageReader<AvatarPicked>,
     mut windows: Query<&mut AboutRegionState>,
+    actions: Query<&AboutRegionAction>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     let frame: Vec<AvatarPicked> = picked.read().cloned().collect();
@@ -3509,31 +3489,37 @@ fn apply_avatar_picks(
         return;
     }
     for event in &frame {
-        for mut state in &mut windows {
-            if state.pending_pick != Some(event.requester) || !state.can_manage {
-                continue;
-            }
-            state.pending_pick = None;
-            for chosen in &event.picks {
-                let agent = chosen.agent;
-                match event.requester {
-                    PICK_TELEPORT => {
-                        commands.write(SlCommand(Command::TeleportHomeUser { target: agent }));
-                    }
-                    PICK_KICK => {
-                        commands.write(SlCommand(Command::KickEstateUser { target: agent }));
-                    }
-                    PICK_MANAGER => {
-                        add_access_entry(&mut state, AccessList::Managers, agent, &mut commands);
-                    }
-                    PICK_ALLOWED => {
-                        add_access_entry(&mut state, AccessList::Allowed, agent, &mut commands);
-                    }
-                    PICK_BANNED => {
-                        add_access_entry(&mut state, AccessList::Banned, agent, &mut commands);
-                    }
-                    _other => {}
+        let Ok(action) = actions.get(event.requester) else {
+            continue;
+        };
+        let Some(window) = host_floater(event.requester, &parents, &floaters) else {
+            continue;
+        };
+        let Ok(mut state) = windows.get_mut(window) else {
+            continue;
+        };
+        if !state.can_manage {
+            continue;
+        }
+        for chosen in &event.picks {
+            let agent = chosen.agent;
+            match action {
+                AboutRegionAction::TeleportHomeOne => {
+                    commands.write(SlCommand(Command::TeleportHomeUser { target: agent }));
                 }
+                AboutRegionAction::KickEstate => {
+                    commands.write(SlCommand(Command::KickEstateUser { target: agent }));
+                }
+                AboutRegionAction::AddManager => {
+                    add_access_entry(&mut state, AccessList::Managers, agent, &mut commands);
+                }
+                AboutRegionAction::AddAllowed => {
+                    add_access_entry(&mut state, AccessList::Allowed, agent, &mut commands);
+                }
+                AboutRegionAction::AddBanned => {
+                    add_access_entry(&mut state, AccessList::Banned, agent, &mut commands);
+                }
+                _other => {}
             }
         }
     }
@@ -4225,7 +4211,8 @@ fn spawn_remove_button(commands: &mut Commands, cell: Entity, list: AccessList, 
 mod tests {
     use super::{
         AboutRegionState, AccessList, CheckKind, ExperienceList, MAX_ESTATE_EXPERIENCES,
-        PICK_MANAGER, freshest_region_flags, maturity_from_index, maturity_index,
+        PICK_ALLOWED, PICK_BANNED, PICK_KICK, PICK_MANAGER, PICK_TELEPORT, freshest_region_flags,
+        maturity_from_index, maturity_index,
     };
     use crate::world_api::ExperiencePickerFilter;
     use pretty_assertions::{assert_eq, assert_ne};
@@ -4376,10 +4363,28 @@ mod tests {
             ExperienceList::Blocked.filter(),
             ExperiencePickerFilter::GridScopedUnprivileged
         );
-        for list in ExperienceList::ALL {
-            assert_eq!(ExperienceList::from_pick_tag(list.pick_tag()), Some(list));
-        }
-        assert_eq!(ExperienceList::from_pick_tag(PICK_MANAGER), None);
+        // Every list's picker field is its own, and none collides with an
+        // avatar picker's: two pickers of one window sharing a field name would
+        // be one window they fight over.
+        let mut fields: Vec<&str> = ExperienceList::ALL
+            .iter()
+            .map(|list| list.pick_tag())
+            .chain([
+                PICK_MANAGER,
+                PICK_ALLOWED,
+                PICK_BANNED,
+                PICK_TELEPORT,
+                PICK_KICK,
+            ])
+            .collect();
+        let asked = fields.len();
+        fields.sort_unstable();
+        fields.dedup();
+        assert_eq!(
+            fields.len(),
+            asked,
+            "two of this window's pickers share a field name"
+        );
         // The three indices are distinct, which the per-list row / revision
         // arrays depend on.
         let mut indices: Vec<usize> = ExperienceList::ALL.iter().map(|l| l.index()).collect();

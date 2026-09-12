@@ -194,8 +194,10 @@ const CLOSE_GLYPH: &str = "\u{2715}";
 /// The add-participants glyph (a small ✚), on a one-to-one or conference pane.
 const ADD_PARTICIPANTS_GLYPH: &str = "\u{271A}";
 
-/// The [`crate::world_api::OpenAvatarPicker::requester`] tag the
-/// add-participants button opens the shared picker under.
+/// The [`crate::world_api::OpenAvatarPicker::field`] prefix the
+/// add-participants button opens its picker under. The conversation's own key
+/// is appended: one window holds a pane per conversation, and two panes sharing
+/// a field name would share one picker and lose the first pane's request.
 const ADD_PARTICIPANTS_REQUESTER: &str = "conversations-add-participants";
 
 /// The panel area's background — the content shade the active tab shares.
@@ -953,12 +955,14 @@ struct RespondToInvite {
     accept: bool,
 }
 
-/// The conversation whose **add-participants** button opened the shared avatar
-/// picker, so its answer knows what it is adding to. `None` when no such pick is
-/// outstanding. One slot rather than a per-request tag, because the picker
-/// floater is a singleton — the same reason its `requester` is a `&'static str`.
-#[derive(Resource, Debug, Default)]
-struct PendingParticipantPick(Option<ConversationKey>);
+/// A pane's **add-participants** button, carrying the conversation it adds to.
+///
+/// The avatar picker's answer names this button, so the conversation comes off
+/// the button itself. It used to be a single `PendingParticipantPick` slot
+/// beside a shared picker, which two panes — or a pane and any other feature
+/// wanting a resident — quietly overwrote for each other.
+#[derive(Component, Debug, Clone, Copy)]
+struct AddParticipantsButton(ConversationKey);
 
 /// A viewer-generated system line for the **Nearby Chat transcript** — e.g. a
 /// radar enter / leave report ([`crate::radar`]). This is deliberately a
@@ -1075,7 +1079,6 @@ impl Plugin for ConversationsPlugin {
             .init_resource::<StripFocus>()
             .init_resource::<NearbyRecallState>()
             .init_resource::<KeyedRecallState>()
-            .init_resource::<PendingParticipantPick>()
             .add_message::<SelectConversation>()
             .add_message::<CloseConversation>()
             .add_message::<RespondToInvite>()
@@ -1593,6 +1596,7 @@ fn spawn_add_participants_button(commands: &mut Commands, panel: Entity, key: Co
                 should_block_lower: true,
                 is_hoverable: true,
             },
+            AddParticipantsButton(key),
             Name::new("conversations-pane-add-participants"),
             ChildOf(panel),
         ))
@@ -1603,17 +1607,17 @@ fn spawn_add_participants_button(commands: &mut Commands, panel: Entity, key: Co
             Pickable::IGNORE,
         ))
         .observe(
-            move |mut press: On<Pointer<Press>>,
-                  mut pending: ResMut<PendingParticipantPick>,
-                  mut pickers: MessageWriter<OpenAvatarPicker>| {
+            move |mut press: On<Pointer<Press>>, mut pickers: MessageWriter<OpenAvatarPicker>| {
                 press.propagate(false);
                 if press.button != PointerButton::Primary {
                     return;
                 }
-                // Only one picker is open at a time, so the conversation that
-                // asked is a single slot rather than a per-request tag.
-                pending.0 = Some(key);
-                pickers.write(OpenAvatarPicker::many(ADD_PARTICIPANTS_REQUESTER));
+                // One picker per pane: the field carries the conversation, so
+                // two panes each waiting on a resident are two windows.
+                pickers.write(OpenAvatarPicker::many(
+                    press.entity,
+                    format!("{ADD_PARTICIPANTS_REQUESTER}/{key:?}"),
+                ));
             },
         );
 }
@@ -2326,15 +2330,14 @@ fn conference_plan(
 /// it is an invitation of the picked into the session already open.
 fn apply_participant_picks(
     mut picks: MessageReader<AvatarPicked>,
-    mut pending: ResMut<PendingParticipantPick>,
+    buttons: Query<&AddParticipantsButton>,
     mut conferences: MessageWriter<StartConference>,
     mut closes: MessageWriter<CloseConversation>,
 ) {
     for pick in picks.read() {
-        if pick.requester != ADD_PARTICIPANTS_REQUESTER {
-            continue;
-        }
-        let Some(key) = pending.0.take() else {
+        // The pick names the button that opened the picker, and the button
+        // names its conversation.
+        let Ok(AddParticipantsButton(key)) = buttons.get(pick.requester).copied() else {
             continue;
         };
         let picked = pick.picks.iter().map(|picked| picked.agent);
