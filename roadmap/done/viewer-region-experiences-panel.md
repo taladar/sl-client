@@ -6,7 +6,8 @@ status: done
 origin: Firestorm full-parity audit (2026-08-19)
 refs: [viewer-region-options-estate, viewer-experiences-floater,
   viewer-parcel-config-missing-writes, protocol-27,
-  viewer-region-experiences-default-experience]
+  viewer-region-experiences-default-experience,
+  viewer-audit-picker-requester-identity]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -171,3 +172,13 @@ floater's search tab too, which had the same row).
   Filed as [[viewer-region-experiences-default-experience]].
 - **No acquire / purchase.** As on the Owned tab, there is no purchase command
   in our protocol surface.
+
+### Known edge
+
+The picker is keyed by requester *tag*, so it is one window per list rather than
+per press. Two About Region windows — one per region, which is the point of
+keying that floater — pressing Add on the same list share one picker, and since
+each window's claim is its own per-list flag, both take the pick. That is a
+property of the picker contract rather than of this panel (the avatar pickers
+here and in About Land have the same shape, and worse, a single claim slot), and
+it is filed as [[viewer-audit-picker-requester-identity]].

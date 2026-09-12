@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 321 |
+| ready | 322 |
 | blocked | 41 |
 | in-progress | 21 |
 | bugs | 52 |
 | done | 1079 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1656** |
+| **total** | **1657** |
 
 ## ideas (100)
 
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (321)
+## ready (322)
 
 ### protocol
 
@@ -323,6 +323,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-object-children-index`](ready/viewer-audit-object-children-index.md)
   — ObjectState has no children index, so every linkset query full-scans the
   region
+- [`viewer-audit-picker-requester-identity`](ready/viewer-audit-picker-requester-identity.md)
+  — Two instances of one window share a picker, and both claim its answer
 - [`viewer-audit-plugins-own-their-schedule`](ready/viewer-audit-plugins-own-their-schedule.md)
   — Most viewer crates export loose systems instead of owning a plugin
 - [`viewer-audit-preferences-hub-decoupling`](ready/viewer-audit-preferences-hub-decoupling.md)
