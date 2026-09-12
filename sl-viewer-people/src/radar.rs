@@ -86,7 +86,7 @@ use crate::ui_table::{
     spawn_table_row,
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
-use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists, spawn_virtual_scrollbar};
+use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 use crate::world_api::AvatarState;
 use crate::world_api::DerenderKind;
 use crate::world_api::FriendsModel;
@@ -914,7 +914,6 @@ fn build_radar_content(
     commands
         .entity(table.viewport)
         .insert((BackgroundColor(LIST_BACKGROUND), TabIndex(1)));
-    spawn_virtual_scrollbar(&mut commands, table.viewport);
 
     // The trailing action buttons, acting on the selection.
     let actions = commands

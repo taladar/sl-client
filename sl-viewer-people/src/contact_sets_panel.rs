@@ -90,7 +90,7 @@ use crate::ui_table::{
     spawn_table_row,
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
-use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists, spawn_virtual_scrollbar};
+use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 use crate::world_api::OpenAvatarProfile;
 use crate::world_api::{AvatarPicked, OpenAvatarPicker};
 use crate::world_api::{ConversationKey, OpenConversation};
@@ -788,7 +788,6 @@ fn spawn_contact_sets_panel(
     commands
         .entity(table.viewport)
         .insert((BackgroundColor(LIST_BACKGROUND), TabIndex(3)));
-    spawn_virtual_scrollbar(&mut commands, table.viewport);
 
     let count_text = commands
         .spawn((

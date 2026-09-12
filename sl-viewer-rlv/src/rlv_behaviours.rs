@@ -40,9 +40,7 @@ use sl_viewer_platform::clipboard::{ViewerClipboard, copy_to_clipboard};
 use sl_viewer_ui_core::i18n::{TransArgs, Translated, Translator};
 use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems, column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
-use sl_viewer_ui_core::virtual_list::{
-    VirtualList, VirtualRow, layout_virtual_lists, spawn_virtual_scrollbar,
-};
+use sl_viewer_ui_core::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 use sl_viewer_ui_widgets::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, floater_shown, spawn_floater,
 };
@@ -548,7 +546,6 @@ fn build_behaviours_content(In(handle): In<FloaterHandle>, mut commands: Command
             TabIndex(1),
             list,
         ));
-        spawn_virtual_scrollbar(&mut commands, table.viewport);
         viewports.push(table.viewport);
     }
 

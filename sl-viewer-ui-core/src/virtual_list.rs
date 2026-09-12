@@ -59,7 +59,7 @@ use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
 
-use crate::ui::{LogicalInset, LogicalRect};
+use crate::ui::{LogicalInset, LogicalRect, UiDirection};
 
 /// How many extra rows to keep live just past each edge of the viewport, so a
 /// fast scroll does not flash blank rows before the pool catches up. Small on
@@ -94,11 +94,17 @@ impl Plugin for VirtualListPlugin {
 }
 
 // ---------------------------------------------------------------------------
-// The overlay scrollbar.
+// The scrollbar.
 // ---------------------------------------------------------------------------
 
 /// The scrollbar track's thickness, in logical pixels (the tab strip's value).
-const SCROLLBAR_THICKNESS: f32 = 10.0;
+///
+/// Public because a visible bar **reserves** this much of the viewport's
+/// trailing inline edge rather than floating over the content, and a consumer
+/// that lays anything out beside the rows — a table's column header — has to
+/// reserve the same width or the two stop lining up. Read it through
+/// [`VirtualList::scrollbar_inset`], which is `0.0` while the bar is hidden.
+pub const SCROLLBAR_THICKNESS: f32 = 10.0;
 
 /// The thumb's shortest length, in logical pixels, so it stays grabbable on a
 /// very long list.
@@ -110,7 +116,7 @@ const SCROLLBAR_TRACK_COLOR: Color = Color::srgb(0.12, 0.14, 0.18);
 /// The scrollbar thumb's colour.
 const SCROLLBAR_THUMB_COLOR: Color = Color::srgb(0.40, 0.48, 0.60);
 
-/// A [`VirtualList`] viewport's overlay scrollbar track, naming its viewport.
+/// A [`VirtualList`] viewport's scrollbar track, naming its viewport.
 /// Bevy's `Scrollbar` widget drives the native `ScrollPosition`, which a
 /// virtual list does not use (it owns its own clamped offset), so the bar is
 /// driven from [`VirtualList`] directly by `drive_virtual_scrollbars`.
@@ -124,12 +130,18 @@ struct VirtualScrollbar {
 #[derive(Component, Debug, Clone, Copy)]
 struct VirtualScrollbarThumb;
 
-/// Spawn the overlay scrollbar for a [`VirtualList`] `viewport`: a slim track
-/// pinned to the viewport's trailing inline edge (an *overlay*, so it never
-/// shifts the header / row layout), holding a thumb whose size and position
-/// `drive_virtual_scrollbars` keeps proportional to the scroll state.
-/// Hidden while the content fits. Dragging the thumb scrolls the list; the
-/// wheel path is untouched (hover on the bar still bubbles to the viewport).
+/// Spawn the scrollbar for a [`VirtualList`] `viewport`: a slim track pinned to
+/// the viewport's trailing inline edge, holding a thumb whose size and position
+/// `drive_virtual_scrollbars` keeps proportional to the scroll state. Hidden
+/// while the content fits. Dragging the thumb scrolls the list; the wheel path
+/// is untouched (hover on the bar still bubbles to the viewport).
+///
+/// The track is absolutely positioned, but it is **not** an overlay: while it
+/// is visible the rows are inset by [`SCROLLBAR_THICKNESS`] on the same edge
+/// (see [`layout_virtual_lists`]), so the bar sits beside the content rather
+/// than on top of its last column. That is what the reference does —
+/// `LLScrollListCtrl::updateLayout` narrows `mItemListRect` by the bar's width
+/// when the bar is visible, and lays the columns out inside the result.
 pub fn spawn_virtual_scrollbar(commands: &mut Commands, viewport: Entity) -> Entity {
     let track = commands
         .spawn((
@@ -204,7 +216,7 @@ struct ScrollbarGeometry {
 }
 
 /// The [`ScrollbarGeometry`] for a list of `item_count` rows of `row_height`
-/// in a `viewport_height` window — the track is the viewport-height overlay.
+/// in a `viewport_height` window — the track spans the viewport's height.
 fn scrollbar_geometry(
     item_count: usize,
     row_height: f32,
@@ -289,6 +301,11 @@ pub struct VirtualList {
     /// The current scroll offset from the top, in logical pixels. Private so it
     /// is only ever changed through the systems that clamp it.
     scroll: f32,
+    /// How much of the trailing inline edge the visible scrollbar is holding,
+    /// in logical pixels — [`SCROLLBAR_THICKNESS`] while it shows, `0.0` while
+    /// the content fits. Written by [`layout_virtual_lists`], which also insets
+    /// the rows by it; read through [`scrollbar_inset`](Self::scrollbar_inset).
+    scrollbar_inset: f32,
 }
 
 impl VirtualList {
@@ -300,7 +317,22 @@ impl VirtualList {
             row_height,
             item_count: 0,
             scroll: 0.0,
+            scrollbar_inset: 0.0,
         }
+    }
+
+    /// How much of the trailing inline edge the scrollbar is holding, in
+    /// logical pixels: [`SCROLLBAR_THICKNESS`] while the bar is visible, `0.0`
+    /// while the content fits.
+    ///
+    /// The rows are already inset by this; a consumer reads it to reserve the
+    /// same width in anything it lays out *beside* them — a table's column
+    /// header, which is not a child of the viewport and so is not inset by
+    /// [`layout_virtual_lists`]. Without that the header's columns are this
+    /// much wider than the rows' whenever the bar shows.
+    #[must_use]
+    pub const fn scrollbar_inset(&self) -> f32 {
+        self.scrollbar_inset
     }
 
     /// Reset the scroll offset to the top — used when the presented content
@@ -451,17 +483,18 @@ fn slot_index(slot: usize, window: RowWindow, pool_len: usize) -> Option<usize> 
     (offset < window.count).then(|| window.first.saturating_add(offset))
 }
 
-/// The [`Node`] a pooled row carries: a full-width absolutely positioned band at
-/// its item's offset within the scrolled content, or hidden when parked.
+/// The [`Node`] a pooled row carries: an absolutely positioned band at its
+/// item's offset within the scrolled content, stopping short of the scrollbar's
+/// reserved edge, or hidden when parked.
 ///
 /// Shared by the growth path (which spawns a row already bound) and the bind
-/// path (which writes the same three fields in place), so a fresh row and a
-/// recycled one cannot end up laid out differently.
-fn row_node(index: Option<usize>, row_height: f32, scroll: f32) -> Node {
+/// path (which writes the same fields in place), so a fresh row and a recycled
+/// one cannot end up laid out differently.
+fn row_node(index: Option<usize>, row_height: f32, scroll: f32, inset: RowInset) -> Node {
     Node {
         position_type: PositionType::Absolute,
-        left: Val::Px(0.0),
-        right: Val::Px(0.0),
+        left: Val::Px(inset.start),
+        right: Val::Px(inset.end),
         height: Val::Px(row_height),
         top: Val::Px(index.map_or(0.0, |index| row_top(index, row_height) - scroll)),
         display: if index.is_some() {
@@ -473,13 +506,45 @@ fn row_node(index: Option<usize>, row_height: f32, scroll: f32) -> Node {
     }
 }
 
+/// A row band's physical left / right insets, in logical pixels — the
+/// scrollbar's reserved width on the *inline-end* side and zero on the other,
+/// resolved for the live [`UiDirection`] so the gutter follows the bar under
+/// RTL (the track is pinned by `LogicalInset`, so it moves to the left edge).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct RowInset {
+    /// The physical left inset.
+    start: f32,
+    /// The physical right inset.
+    end: f32,
+}
+
+impl RowInset {
+    /// The insets reserving `gutter` logical pixels on the inline-end edge.
+    const fn new(gutter: f32, direction: UiDirection) -> Self {
+        if direction.is_rtl() {
+            Self {
+                start: gutter,
+                end: 0.0,
+            }
+        } else {
+            Self {
+                start: 0.0,
+                end: gutter,
+            }
+        }
+    }
+}
+
 /// Amend a pooled row's [`Node`] in place, leaving the fields this module owns
 /// alone — **the supported way for a consumer to dress its rows**.
 ///
-/// A row's `top` and `display` belong to [`layout_virtual_lists`]: where the row
-/// sits in the scrolled content, and whether it is parked because the window is
-/// narrower than the pool. A consumer wants the *other* fields — its alignment,
-/// gap and padding — and reaching for them by inserting a fresh `Node`
+/// A row's `top`, `display`, `left` and `right` belong to
+/// [`layout_virtual_lists`]: where the row sits in the scrolled content,
+/// whether it is parked because the window is narrower than the pool, and how
+/// much of the trailing inline edge the scrollbar is holding. A consumer wants
+/// the *other* fields — its alignment, gap and padding — and setting one this
+/// module owns is overwritten on the next layout pass anyway. Reaching for them
+/// by inserting a fresh `Node`
 /// **replaces** the whole component, placement included, so a parked row comes
 /// back at `top: Auto` and visible until the next layout pass takes it away
 /// again. Amending says "these fields are mine" and means it.
@@ -544,8 +609,16 @@ pub fn scroll_virtual_lists(
 /// Which slot shows which item is `slot_index`'s modular mapping, so a scroll
 /// rebinds only the rows that actually changed item. A row grown this frame is
 /// spawned already bound and positioned, so it never renders blank.
+///
+/// The scrollbar's gutter is decided here too, from the same geometry the bar's
+/// own visibility comes from, and applied to the rows the same frame — a frame
+/// late and a list that has just crossed the threshold shows one frame of the
+/// bar painted over its last column. Narrowing the rows cannot feed back into
+/// the decision: rows are a fixed height and the count does not depend on the
+/// width, so unlike a wrapping layout this settles in one pass.
 pub fn layout_virtual_lists(
     mut commands: Commands,
+    direction: Res<UiDirection>,
     mut lists: Query<(Entity, &mut VirtualList, &ComputedNode)>,
     children: Query<&Children>,
     mut rows: Query<(&mut VirtualRow, &mut Node)>,
@@ -562,6 +635,16 @@ pub fn layout_virtual_lists(
         if (clamped - list.scroll).abs() > f32::EPSILON {
             list.scroll = clamped;
         }
+        let gutter =
+            if scrollbar_geometry(list.item_count, list.row_height, viewport_height).is_some() {
+                SCROLLBAR_THICKNESS
+            } else {
+                0.0
+            };
+        if (gutter - list.scrollbar_inset).abs() > f32::EPSILON {
+            list.scrollbar_inset = gutter;
+        }
+        let inset = RowInset::new(gutter, *direction);
         let window = row_window(
             list.scroll,
             viewport_height,
@@ -595,7 +678,7 @@ pub fn layout_virtual_lists(
             let index = slot_index(slot, window, pool_len);
             commands.spawn((
                 VirtualRow { slot, index },
-                row_node(index, list.row_height, list.scroll),
+                row_node(index, list.row_height, list.scroll, inset),
                 ChildOf(list_entity),
             ));
         }
@@ -616,6 +699,17 @@ pub fn layout_virtual_lists(
             };
             if node.display != display {
                 node.display = display;
+            }
+            // The gutter is written to every pooled row, parked ones included:
+            // a parked row is re-shown by `display` alone, so it must already
+            // be the right width when it comes back.
+            let left = Val::Px(inset.start);
+            if node.left != left {
+                node.left = left;
+            }
+            let right = Val::Px(inset.end);
+            if node.right != right {
+                node.right = right;
             }
             if let Some(index) = index {
                 let top = Val::Px(row_top(index, list.row_height) - list.scroll);
@@ -669,9 +763,9 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::{
-        OVERSCAN_ROWS, RowWindow, VirtualList, VirtualRow, content_height, floor_to_usize,
-        index_to_f32, layout_virtual_lists, max_scroll, row_top, row_window, scrollbar_geometry,
-        slot_index,
+        OVERSCAN_ROWS, RowWindow, SCROLLBAR_THICKNESS, UiDirection, VirtualList, VirtualRow,
+        content_height, floor_to_usize, index_to_f32, layout_virtual_lists, max_scroll, row_top,
+        row_window, scrollbar_geometry, slot_index,
     };
     use pretty_assertions::assert_eq;
 
@@ -908,8 +1002,24 @@ mod tests {
     /// An app carrying just the pool machinery and the rebind counter — no
     /// `bevy_ui` layout, so the viewport's [`ComputedNode`] is written by hand.
     fn pool_app(item_count: usize, row_height: f32, viewport_height: f32) -> (App, Entity) {
+        pool_app_in(UiDirection::Ltr, item_count, row_height, viewport_height)
+    }
+
+    /// [`pool_app`] under a chosen reading direction, for the gutter the
+    /// scrollbar reserves — which is on the inline-**end** edge, so it changes
+    /// sides with the direction.
+    fn pool_app_in(
+        direction: UiDirection,
+        item_count: usize,
+        row_height: f32,
+        viewport_height: f32,
+    ) -> (App, Entity) {
         let mut app = App::new();
         app.init_resource::<Rebinds>()
+            // The layout resolves that gutter onto the inline-end edge, so it
+            // reads the direction like every other laying-out system here;
+            // without the resource it fails parameter validation on frame one.
+            .insert_resource(direction)
             .add_systems(Update, (layout_virtual_lists, count_rebinds).chain());
         let mut list = VirtualList::new(row_height);
         list.item_count = item_count;
@@ -937,6 +1047,78 @@ mod tests {
             .collect::<Vec<(usize, Option<usize>)>>();
         rows.sort_unstable_by_key(|&(slot, _)| slot);
         rows.into_iter().map(|(_, index)| index).collect()
+    }
+
+    /// A visible scrollbar **reserves** the rows' inline-end edge rather than
+    /// floating over it, and gives the space back when the content fits.
+    ///
+    /// Painting the bar over the rows hides the trailing edge of the last
+    /// column, which on a right-aligned numeric one is its last digit. The
+    /// reservation is decided in the same pass that places the rows, from the
+    /// same geometry the bar's visibility comes from, so a list that has just
+    /// crossed the threshold never shows a frame of overlap.
+    #[test]
+    fn a_visible_scrollbar_reserves_the_rows_trailing_edge() -> Result<(), TestError> {
+        // Five rows of 20 in a 100-high viewport: an exact fit, no bar.
+        let (mut app, viewport) = pool_app(5, 20.0, 100.0);
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<VirtualList>(viewport)
+                .map(VirtualList::scrollbar_inset),
+            Some(0.0),
+            "content that fits needs no bar, so it holds nothing open"
+        );
+        let mut nodes = app.world_mut().query::<(&VirtualRow, &Node)>();
+        for (row, node) in nodes.iter(app.world()) {
+            assert_eq!(
+                (node.left, node.right),
+                (Val::Px(0.0), Val::Px(0.0)),
+                "slot {} is indented for a bar that is not there",
+                row.slot
+            );
+        }
+
+        // One row more than fits: the bar appears and takes its width.
+        let (mut app, viewport) = pool_app(6, 20.0, 100.0);
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<VirtualList>(viewport)
+                .map(VirtualList::scrollbar_inset),
+            Some(SCROLLBAR_THICKNESS),
+            "content that overflows shows the bar, which holds its width open"
+        );
+        let mut nodes = app.world_mut().query::<(&VirtualRow, &Node)>();
+        for (row, node) in nodes.iter(app.world()) {
+            assert_eq!(
+                (node.left, node.right),
+                (Val::Px(0.0), Val::Px(SCROLLBAR_THICKNESS)),
+                "slot {} runs under the bar instead of stopping at it",
+                row.slot
+            );
+        }
+        Ok(())
+    }
+
+    /// The gutter is on the inline **end** edge, so under RTL it moves to the
+    /// left with the bar — whose track is pinned by `LogicalInset` and does the
+    /// same. A physical `right` would leave the rows indented away from the bar
+    /// and running under it.
+    #[test]
+    fn the_gutter_follows_the_bar_under_rtl() -> Result<(), TestError> {
+        let (mut app, _viewport) = pool_app_in(UiDirection::Rtl, 1000, 20.0, 100.0);
+        app.update();
+        let mut nodes = app.world_mut().query::<(&VirtualRow, &Node)>();
+        for (row, node) in nodes.iter(app.world()) {
+            assert_eq!(
+                (node.left, node.right),
+                (Val::Px(SCROLLBAR_THICKNESS), Val::Px(0.0)),
+                "slot {} reserves the left-to-right edge in a right-to-left UI",
+                row.slot
+            );
+        }
+        Ok(())
     }
 
     /// A row grown this frame comes up **already bound and already placed**. The

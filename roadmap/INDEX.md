@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 323 |
 | blocked | 42 |
 | in-progress | 21 |
-| bugs | 44 |
-| done | 1084 |
+| bugs | 43 |
+| done | 1086 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1656** |
+| **total** | **1657** |
 
 ## ideas (100)
 
@@ -1187,7 +1187,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (44)
+## bugs (43)
 
 ### viewer
 
@@ -1283,8 +1283,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   resolved / too many rigged-pending objects
 - [`viewer-sunlit-face-clips-two-channels`](bugs/viewer-sunlit-face-clips-two-channels.md)
   — A sunlit opaque face pins red and green rather than showing its texture
-- [`viewer-table-scrollbar-overlays-last-column`](bugs/viewer-table-scrollbar-overlays-last-column.md)
-  — A scrolling table's scrollbar is painted over its last column
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
@@ -1294,7 +1292,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1084)
+## done (1086)
 
 ### protocol
 
@@ -2756,6 +2754,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Sun disc renders grey on aditi (EEP sky needs sky_hdr_scale)
 - [`viewer-table-cell-ellipsis`](done/viewer-table-cell-ellipsis.md) — Truncate
   overflowing table cells with a locale-aware ellipsis
+- [`viewer-table-scrollbar-overlays-last-column`](done/viewer-table-scrollbar-overlays-last-column.md)
+  — A scrolling table's scrollbar is painted over its last column
+- [`viewer-table-spawns-two-scrollbars`](done/viewer-table-spawns-two-scrollbars.md)
+  — Seven tables carry two stacked scrollbars, because the consumer adds one
 - [`viewer-takeoff-hold-jumps-instead-of-flying`](done/viewer-takeoff-hold-jumps-instead-of-flying.md)
   — Holding the fly key jumps instead of taking off
 - [`viewer-teleport-flow-progress`](done/viewer-teleport-flow-progress.md) —

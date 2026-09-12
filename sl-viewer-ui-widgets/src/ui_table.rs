@@ -47,6 +47,7 @@ use sl_settings::SettingValue;
 
 use sl_viewer_settings::ViewerSettings;
 use sl_viewer_ui_core::i18n::Translated;
+use sl_viewer_ui_core::ui::UiDirection;
 use sl_viewer_ui_core::ui_ellipsis::{RevealEllipsis, spawn_ellipsis_marker};
 use sl_viewer_ui_core::ui_font::UiFont;
 use sl_viewer_ui_core::virtual_list::{VirtualList, VirtualRow, VirtualViewport, amend_row_node};
@@ -618,6 +619,24 @@ struct TableHeaderText {
     cell: Entity,
 }
 
+/// On a table's header row, naming the viewport whose scrollbar it must keep
+/// out of.
+///
+/// The header is a **sibling** of the viewport, so the bar — a child of the
+/// viewport — narrows the rows and not the header. Without this the header's
+/// flex columns come out a scrollbar wider than the rows' whenever the bar
+/// shows, and every column boundary after the first drifts.
+#[derive(Component, Debug, Clone, Copy)]
+struct TableHeaderGutter {
+    /// The viewport whose
+    /// [`VirtualList::scrollbar_inset`](sl_viewer_ui_core::virtual_list::VirtualList::scrollbar_inset)
+    /// the header mirrors.
+    viewport: Entity,
+    /// The spec the header was built from, for the row padding the reservation
+    /// is added to.
+    spec: &'static TableSpec,
+}
+
 /// A handle to a freshly-spawned table's key entities.
 #[derive(Debug, Clone)]
 pub struct TableHandle {
@@ -727,8 +746,14 @@ pub fn spawn_table(
             ChildOf(root),
         ))
         .id();
-    // The overlay scrollbar every long table needs (hidden while content fits).
+    // The scrollbar every long table needs (hidden while content fits). It
+    // reserves the viewport's trailing inline edge rather than floating over
+    // the rows, so the header has to hold the same width open — it is a sibling
+    // of the viewport and the bar never reaches it.
     sl_viewer_ui_core::virtual_list::spawn_virtual_scrollbar(commands, viewport);
+    commands
+        .entity(header)
+        .insert(TableHeaderGutter { viewport, spec });
     // Focus the viewport on a primary click, so the wheel scrolls it. The observed
     // entity is captured (not read from the event target, which bubbles up from a
     // clicked row), so a click on a row still focuses the viewport it lives in.
@@ -1012,8 +1037,10 @@ fn column_cell_node(column: &TableColumn, column_gap: f32) -> Node {
 /// an amendment through `virtual_list::amend_row_node` rather than an insert.
 const fn apply_table_row_node(node: &mut Node, spec: &TableSpec) {
     node.position_type = PositionType::Absolute;
-    node.left = Val::Px(0.0);
-    node.right = Val::Px(0.0);
+    // `left` / `right` are deliberately absent: the inline edges belong to
+    // `layout_virtual_lists`, which holds the trailing one open for the
+    // scrollbar. Setting them here would put a freshly-pooled row under the bar
+    // for the frame before the next layout pass takes it back.
     node.height = Val::Px(spec.row_height);
     node.align_items = AlignItems::Center;
     node.column_gap = Val::Px(spec.column_gap);
@@ -1026,9 +1053,11 @@ const fn apply_table_row_node(node: &mut Node, spec: &TableSpec) {
 /// which the consumer keeps and binds its projection into on each rebind. Also
 /// inserts that component on the row so widget systems can find the cells.
 ///
-/// The row node is **amended, not replaced**: `top` and `display` belong to
+/// The row node is **amended, not replaced**: `top`, `display` and the inline
+/// insets belong to
 /// [`virtual_list::layout_virtual_lists`](sl_viewer_ui_core::virtual_list::layout_virtual_lists),
-/// which owns where a pooled row sits and whether it is parked.
+/// which owns where a pooled row sits, whether it is parked, and how much of
+/// the trailing edge the scrollbar is holding.
 pub fn spawn_table_row(
     commands: &mut Commands,
     row_entity: Entity,
@@ -1311,6 +1340,46 @@ fn sync_table_column_widths(
     }
 }
 
+/// Hold the scrollbar's width open in each table's header, so the header's
+/// columns are solved against the same width the rows are.
+///
+/// The bar reserves the viewport's trailing inline edge and the rows are inset
+/// by it, but the header is a sibling of the viewport and out of the bar's
+/// reach — so it gets the reservation as extra trailing padding on top of the
+/// spec's row padding. Padding rather than a narrower box, so the header's
+/// background still runs the full width and only its *content* stops where the
+/// rows' does. This is the reference's `mItemListRect`, which
+/// `LLScrollListCtrl::updateLayout` narrows by the scrollbar and
+/// `updateColumns` then lays both the headers and the cells inside.
+///
+/// Runs after the virtual-list layout, which decides the reservation from the
+/// same frame's geometry.
+fn reserve_table_header_gutter(
+    direction: Res<UiDirection>,
+    lists: Query<&VirtualList>,
+    mut headers: Query<(&TableHeaderGutter, &mut Node)>,
+) {
+    for (gutter, mut node) in &mut headers {
+        let Ok(list) = lists.get(gutter.viewport) else {
+            continue;
+        };
+        let base = gutter.spec.row_padding;
+        let wanted = Val::Px(base + list.scrollbar_inset());
+        let leading = Val::Px(base);
+        let (want_left, want_right) = if direction.is_rtl() {
+            (wanted, leading)
+        } else {
+            (leading, wanted)
+        };
+        if node.padding.left != want_left {
+            node.padding.left = want_left;
+        }
+        if node.padding.right != want_right {
+            node.padding.right = want_right;
+        }
+    }
+}
+
 /// Set each sortable header's arrow from its table's primary sort key — the
 /// ascending / descending glyph on the most-significant column, blank elsewhere.
 fn drive_table_sort_arrows(
@@ -1517,14 +1586,17 @@ impl Plugin for TableWidgetPlugin {
     /// Register the reconciliation systems. The width sync and ellipsis reveal
     /// run after the virtual-list layout (they read laid-out sizes); so does the
     /// selection highlight, which paints by the row's *data index* and would
-    /// otherwise repaint a recycled row from the index it held last frame; the
-    /// sort / seed / persist systems are independent.
+    /// otherwise repaint a recycled row from the index it held last frame, and
+    /// the header gutter, which mirrors the scrollbar reservation that layout
+    /// decides; the sort / seed / persist systems are independent.
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
             (
                 seed_tables_from_settings,
                 sync_table_column_widths,
+                reserve_table_header_gutter
+                    .after(sl_viewer_ui_core::virtual_list::layout_virtual_lists),
                 drive_table_sort_arrows,
                 reflect_table_disabled,
                 apply_table_selection_highlight
@@ -1609,7 +1681,7 @@ mod tests {
     use bevy::picking::pointer::{Location, PointerId};
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
-    use sl_viewer_ui_core::ui::UiRoot;
+    use sl_viewer_ui_core::ui::{UiDirection, UiRoot};
     use sl_viewer_ui_core::virtual_list::VirtualRow;
 
     /// A boxed error so tests can use `?` instead of the disallowed
@@ -1836,10 +1908,15 @@ mod tests {
     /// row-selection observer reads. No settings resource: the seed and persist
     /// systems take it as an `Option` and no-op without it, which is what a
     /// disabled-state test wants — nothing writing widths behind the assertions.
+    ///
+    /// [`UiDirection`] is not optional the same way: the header's scrollbar
+    /// gutter goes on the inline-end edge, so its system reads the direction and
+    /// fails parameter validation on frame one without the resource.
     fn table_app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_plugins(TableWidgetPlugin)
+            .insert_resource(UiDirection::Ltr)
             .init_resource::<ButtonInput<KeyCode>>();
         let root = app.world_mut().spawn(Node::default()).id();
         app.insert_resource(UiRoot(root));
@@ -2202,12 +2279,12 @@ mod tests {
         use pretty_assertions::assert_eq;
 
         use super::{SORTABLE_SPEC, TableState, TestError, spawn_table, spawn_table_row};
-        use crate::ui_table::{TableRow, TableWidgetPlugin};
-        use crate::ui_test::interact::{self, InteractionTest, centre_of};
+        use crate::ui_table::{TableRow, TableRowCells, TableWidgetPlugin};
+        use crate::ui_test::interact::{self, InteractionTest, centre_of, centre_of_entity};
         use crate::ui_test::{find_by_name, settle};
         use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems};
         use sl_viewer_ui_core::virtual_list::{
-            VirtualList, VirtualListPlugin, VirtualRow, index_to_f32,
+            SCROLLBAR_THICKNESS, VirtualList, VirtualListPlugin, VirtualRow, index_to_f32,
         };
 
         /// How many rows the fixture's consumer has. Small enough that the
@@ -2470,6 +2547,159 @@ mod tests {
             rows
         }
 
+        /// The trailing edge of a node, in logical pixels.
+        fn right_edge(app: &App, entity: Entity) -> Option<f32> {
+            let node = app.world().get::<ComputedNode>(entity)?;
+            let centre = centre_of_entity(app, entity)?;
+            let half = node.size().x * node.inverse_scale_factor() / 2.0;
+            Some(centre.x + half)
+        }
+
+        /// A live pooled row's entity — the first one the window is showing.
+        fn a_live_row(app: &mut App) -> Option<Entity> {
+            let mut query = app.world_mut().query::<(Entity, &VirtualRow, &Node)>();
+            let mut rows: Vec<(usize, Entity)> = query
+                .iter(app.world())
+                .filter(|(_entity, _row, node)| node.display != Display::None)
+                .filter_map(|(entity, row, _node)| row.index.map(|index| (index, entity)))
+                .collect();
+            rows.sort_unstable();
+            rows.first().map(|&(_index, entity)| entity)
+        }
+
+        /// The scrollbar **reserves** its width rather than floating over the
+        /// rows: while it shows, the rows stop short of it and the header takes
+        /// the same width as extra trailing padding. A bar painted over the
+        /// content hides the trailing edge of the last column — which on a
+        /// right-aligned numeric column (Search's "Traffic") is the last digit.
+        ///
+        /// A table whose content fits gives the space back, so a short list is
+        /// not permanently indented for a bar that never appears.
+        #[test]
+        fn the_scrollbar_reserves_its_width_rather_than_covering_the_last_column()
+        -> Result<(), TestError> {
+            let padding = SORTABLE_SPEC.row_padding;
+
+            let mut short = table_app_with(ITEM_COUNT);
+            let header = find_by_name(&mut short, "test:table-header").ok_or("no header")?;
+            let viewport = find_by_name(&mut short, "test:table-viewport").ok_or("no viewport")?;
+            let inset = short
+                .world()
+                .get::<VirtualList>(viewport)
+                .map(VirtualList::scrollbar_inset);
+            assert_eq!(inset, Some(0.0), "{ITEM_COUNT} rows fit, so no bar shows");
+            assert_eq!(
+                short
+                    .world()
+                    .get::<Node>(header)
+                    .map(|node| node.padding.right),
+                Some(Val::Px(padding)),
+                "a table with no bar keeps its plain row padding"
+            );
+            let row = a_live_row(&mut short).ok_or("no live row")?;
+            assert_eq!(
+                short.world().get::<Node>(row).map(|node| node.right),
+                Some(Val::Px(0.0)),
+                "and its rows run the full width of the viewport"
+            );
+
+            let mut long = table_app_with(LONG_LIST);
+            let header = find_by_name(&mut long, "test:table-header").ok_or("no header")?;
+            let viewport = find_by_name(&mut long, "test:table-viewport").ok_or("no viewport")?;
+            let inset = long
+                .world()
+                .get::<VirtualList>(viewport)
+                .map(VirtualList::scrollbar_inset);
+            assert_eq!(
+                inset,
+                Some(SCROLLBAR_THICKNESS),
+                "{LONG_LIST} rows do not fit, so the bar shows and holds its width"
+            );
+            assert_eq!(
+                long.world()
+                    .get::<Node>(header)
+                    .map(|node| node.padding.right),
+                Some(Val::Px(padding + SCROLLBAR_THICKNESS)),
+                "the header is a sibling of the viewport, so it reserves the width itself"
+            );
+            let row = a_live_row(&mut long).ok_or("no live row")?;
+            assert_eq!(
+                long.world().get::<Node>(row).map(|node| node.right),
+                Some(Val::Px(SCROLLBAR_THICKNESS)),
+                "and every row stops at the bar rather than under it"
+            );
+            Ok(())
+        }
+
+        /// A table's viewport gets **one** scrollbar, from `spawn_table`.
+        ///
+        /// Seven panels used to call `spawn_virtual_scrollbar` on a viewport
+        /// `spawn_table` had already given a bar to, stacking two identical
+        /// tracks on the same edge. They landed exactly on top of each other, so
+        /// nothing looked wrong and nobody noticed — which is precisely why this
+        /// wants a test rather than an eyeball.
+        #[test]
+        fn a_table_viewport_has_exactly_one_scrollbar() -> Result<(), TestError> {
+            let mut app = table_app_with(LONG_LIST);
+            let viewport = find_by_name(&mut app, "test:table-viewport").ok_or("no viewport")?;
+            let mut query = app.world_mut().query::<(&Name, &ChildOf)>();
+            let bars = query
+                .iter(app.world())
+                .filter(|(name, child_of)| {
+                    name.as_str() == "virtual-list:scrollbar" && child_of.parent() == viewport
+                })
+                .count();
+            assert_eq!(
+                bars, 1,
+                "spawn_table is the one place a table's bar is spawned"
+            );
+            Ok(())
+        }
+
+        /// The reservation reaches the header and the rows *equally*, so the
+        /// last column's header and its cells still end at the same edge.
+        ///
+        /// This is the half a per-node assertion cannot see: the header's
+        /// columns are solved by flex against the header's width, so a header
+        /// that is a scrollbar wider than the rows does not merely overhang —
+        /// every boundary after the first flex column drifts.
+        #[test]
+        fn the_header_and_the_rows_end_at_the_same_edge() -> Result<(), TestError> {
+            let mut app = table_app_with(LONG_LIST);
+            let last = SORTABLE_SPEC.columns.len().saturating_sub(1);
+
+            let header_cell = find_by_name(&mut app, &format!("test:table-header-cell:{last}"))
+                .ok_or("no last header cell")?;
+            let row = a_live_row(&mut app).ok_or("no live row")?;
+            let row_cell = app
+                .world()
+                .get::<TableRowCells>(row)
+                .and_then(|cells| cells.cell(last))
+                .ok_or("no last row cell")?;
+
+            let header_edge = right_edge(&app, header_cell).ok_or("the header never laid out")?;
+            let row_edge = right_edge(&app, row_cell).ok_or("the row never laid out")?;
+            assert!(
+                (header_edge - row_edge).abs() < 0.5,
+                "the last column's header ends at {header_edge} and its cells at {row_edge}"
+            );
+
+            let track =
+                find_by_name(&mut app, "virtual-list:scrollbar").ok_or("the bar never laid out")?;
+            let track_edge = right_edge(&app, track).ok_or("the bar has no computed node")?;
+            let track_width = app
+                .world()
+                .get::<ComputedNode>(track)
+                .map(|node| node.size().x * node.inverse_scale_factor())
+                .ok_or("the bar has no size")?;
+            assert!(
+                row_edge <= track_edge - track_width + 0.5,
+                "the content ends at {row_edge}, which is not clear of a bar starting at {}",
+                track_edge - track_width
+            );
+            Ok(())
+        }
+
         /// **The wheel, and where it belongs**: a notch over the rows scrolls
         /// the list, the window moves, no live row is left blank or misplaced —
         /// and the same notch over the header, which is *not* inside the
@@ -2562,7 +2792,7 @@ mod tests {
             Ok(())
         }
 
-        /// Dragging the overlay scrollbar's thumb scrolls by the **track's**
+        /// Dragging the scrollbar's thumb scrolls by the **track's**
         /// ratio: a short thumb over a long list means one pixel of thumb is
         /// many rows of content, so the list moves much further than the
         /// pointer did.

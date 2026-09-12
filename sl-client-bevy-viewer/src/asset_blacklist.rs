@@ -54,7 +54,7 @@ use crate::ui_table::{
     TableSortDefault, TableSpec, TableState, register_table_settings, set_table_cell, spawn_table,
     spawn_table_row,
 };
-use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists, spawn_virtual_scrollbar};
+use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 use crate::world_api::{DerenderEntry, DerenderList};
 
 /// The floater's stable id (persistence, `SL_VIEWER_OPEN_FLOATER`).
@@ -423,7 +423,6 @@ fn build_blacklist_content(In(handle): In<FloaterHandle>, mut commands: Commands
     commands
         .entity(table.viewport)
         .insert((BackgroundColor(LIST_BACKGROUND), TabIndex(1)));
-    spawn_virtual_scrollbar(&mut commands, table.viewport);
 
     let count_text = commands
         .spawn((

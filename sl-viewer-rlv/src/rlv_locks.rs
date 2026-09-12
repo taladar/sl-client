@@ -37,9 +37,7 @@ use sl_rlv::{
 use sl_viewer_ui_core::i18n::{TransArgs, Translated, Translator};
 use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems, column};
 use sl_viewer_ui_core::ui_font::UiFont;
-use sl_viewer_ui_core::virtual_list::{
-    VirtualList, VirtualRow, layout_virtual_lists, spawn_virtual_scrollbar,
-};
+use sl_viewer_ui_core::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 use sl_viewer_ui_widgets::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, floater_shown, spawn_floater,
 };
@@ -382,7 +380,6 @@ fn build_locks_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
     commands
         .entity(table.viewport)
         .insert((BackgroundColor(LIST_BACKGROUND), TabIndex(0)));
-    spawn_virtual_scrollbar(&mut commands, table.viewport);
 
     let count_text = commands
         .spawn((
