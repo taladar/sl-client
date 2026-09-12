@@ -14,6 +14,9 @@
 //!   swash cannot rasterise; the rest are bundled so text renders identically
 //!   on a host with no fonts installed.
 //! - [`ui_text`], [`virtual_list`] — text nodes and a windowed list.
+//! - [`ui_format`] — how a value reads in a cell (a duration in mixed units,
+//!   `humantime`-style), pure and shared by whichever panels show the same kind
+//!   of number.
 //! - [`ui_ellipsis`] — the trailing `…` a clipped value is marked with, and the
 //!   one rule that decides when it shows.
 //! - [`ui_element`] — the vocabulary a gallery entry is written in
@@ -42,6 +45,7 @@ pub mod ui;
 pub mod ui_element;
 pub mod ui_ellipsis;
 pub mod ui_font;
+pub mod ui_format;
 pub mod ui_pseudoloc;
 pub mod ui_sounds;
 pub mod ui_text;

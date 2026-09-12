@@ -1,5 +1,7 @@
 //! Parcels and land management: properties, access lists, media, overlays.
 
+use std::time::Duration;
+
 use sl_types::key::{AgentKey, GroupKey, ObjectKey, OwnerKey, ParcelKey, TextureKey};
 use sl_types::map::{RegionCoordinates, RegionName};
 use sl_types::money::LindenAmount;
@@ -1227,6 +1229,80 @@ impl LandStatReportType {
     }
 }
 
+/// One row's score, in the unit the report it came from gives it.
+///
+/// The wire has one `Score` field for both reports and no unit anywhere: what
+/// the number means is decided by the reply's `ReportType`, which is why this is
+/// built at the codec boundary ([`from_wire`](Self::from_wire)) rather than left
+/// to every reader to remember.
+///
+/// A simulator reports script time over a **rolling window**, not since the
+/// region came up: OpenSim's XEngine sums a script's execution over the last 30
+/// seconds (`ScriptInstance::MeasurementWindow`). How long that window is, and
+/// how faithfully the simulator measures it, is the simulator's business — a
+/// value far larger than the window itself says the region's clock arithmetic is
+/// off (a Mono `Stopwatch.Frequency` mismatch does exactly that), not that the
+/// client read it wrong.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
+pub enum LandStatScore {
+    /// Script time the object's scripts used over the simulator's measurement
+    /// window (a top-scripts report).
+    ScriptTime(Duration),
+    /// How many potential collisions the object took part in (a top-colliders
+    /// report). A count, sent as a float.
+    Collisions(f32),
+    /// The raw score of a report type this build does not know.
+    Other(f32),
+}
+
+impl LandStatScore {
+    /// Reads a wire `Score` in the unit its report gives it. A top-scripts score
+    /// is milliseconds; a negative or non-finite one (which no conforming
+    /// simulator sends) clamps to zero rather than being dropped.
+    #[must_use]
+    pub fn from_wire(report_type: LandStatReportType, score: f32) -> Self {
+        match report_type {
+            LandStatReportType::TopScripts => Self::ScriptTime(
+                Duration::try_from_secs_f64(f64::from(score) / MILLIS_PER_SECOND)
+                    .unwrap_or(Duration::ZERO),
+            ),
+            LandStatReportType::TopColliders => Self::Collisions(score),
+            LandStatReportType::Other(_unknown) => Self::Other(score),
+        }
+    }
+
+    /// The raw wire `Score` — what an encoder writes back, and what a list sorts
+    /// and sums by without having to case on the unit.
+    #[must_use]
+    pub fn raw(self) -> f32 {
+        match self {
+            Self::ScriptTime(time) => {
+                #[expect(
+                    clippy::as_conversions,
+                    clippy::cast_possible_truncation,
+                    reason = "the value came from an `f32` and returns to one; the `f64`                               round-trip through seconds is exact to well inside an `f32` ulp"
+                )]
+                let millis = (time.as_secs_f64() * MILLIS_PER_SECOND) as f32;
+                millis
+            }
+            Self::Collisions(score) | Self::Other(score) => score,
+        }
+    }
+
+    /// The script time, when this is a top-scripts score.
+    #[must_use]
+    pub const fn script_time(self) -> Option<Duration> {
+        match self {
+            Self::ScriptTime(time) => Some(time),
+            Self::Collisions(_score) | Self::Other(_score) => None,
+        }
+    }
+}
+
+/// Milliseconds in a second — the unit a wire script-time score is in.
+const MILLIS_PER_SECOND: f64 = 1000.0;
+
 /// One row of a `LandStatReply` — a single top-scripts / top-colliders object,
 /// from a `LandStatReply` `ReportData` block. Surfaced (with the others) as
 /// [`Event::LandStatReply`](crate::Event::LandStatReply).
@@ -1238,13 +1314,46 @@ pub struct LandStatItem {
     pub task_id: ObjectKey,
     /// The object's region position (`LocationX`/`Y`/`Z`), in metres.
     pub location: RegionCoordinates,
-    /// The object's score for this report (`Score`): script time for top-scripts,
-    /// collision count for top-colliders.
-    pub score: f32,
+    /// The object's score for this report, in that report's unit.
+    pub score: LandStatScore,
     /// The object's name (`TaskName`).
     pub task_name: String,
     /// The object owner's name (`OwnerName`).
     pub owner_name: String,
+    /// The row's `DataExtended` half, when the reply carried one — the
+    /// event-queue form of the reply does, the UDP form cannot. See
+    /// [`LandStatExtended`].
+    pub extended: Option<LandStatExtended>,
+}
+
+/// The `DataExtended` half of a `LandStatReply` row: what the object costs
+/// besides its score, and where and when it is.
+///
+/// This block exists **only in the event-queue form** of the reply. The UDP
+/// `LandStatReply` message has no `DataExtended` block in the message template,
+/// so a row decoded from the packet never has one — which is also why the
+/// reference viewer guards its parcel / date / memory / URL columns with
+/// `msg->has("DataExtended")`. Every simulator with an event queue (OpenSim's
+/// default, and Second Life) answers a `LandStatRequest` over the queue, so in
+/// practice this is what a real report carries.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct LandStatExtended {
+    /// The Mono half of the score (`MonoScore`), where the simulator separates
+    /// it. OpenSim always reports `0.0`.
+    pub mono_score: f32,
+    /// The object owner's id (`OwnerID`), where the simulator sends one.
+    /// Second Life does not (the reference viewer carries a "*TODO: Send
+    /// owner_id from server" note beside the owner column because of it).
+    pub owner_id: Option<AgentKey>,
+    /// The name of the parcel the object stands on (`ParcelName`).
+    pub parcel_name: String,
+    /// How many public URLs the object's scripts hold (`PublicURLs`).
+    pub public_urls: i32,
+    /// The script memory the object uses, in bytes (`Size`). The reference
+    /// shows it in kibibytes.
+    pub script_size_bytes: f32,
+    /// When the object was rezzed (`TimeStamp`), as a Unix timestamp.
+    pub timestamp: u32,
 }
 
 /// Basic parcel information from a `ParcelInfoReply` — the condensed listing the

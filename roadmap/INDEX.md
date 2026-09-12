@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 315 |
+| ready | 314 |
 | blocked | 41 |
 | in-progress | 22 |
 | bugs | 43 |
-| done | 1101 |
+| done | 1102 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1664** |
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (315)
+## ready (314)
 
 ### protocol
 
@@ -797,9 +797,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-region-options-general` (done))
 - [`viewer-region-script-count-monitor`](ready/viewer-region-script-count-monitor.md)
   — Announce region script-count changes to chat
-- [`viewer-region-top-objects`](ready/viewer-region-top-objects.md) — Top
-  objects — top scripts / top colliders (blocked by `viewer-ui-widget-scaffold`
-  (done), `viewer-ui-virtualized-list` (done))
 - [`viewer-region-tracker`](ready/viewer-region-tracker.md) — Region tracker —
   watch regions, notify on status (blocked by `viewer-ui-widget-scaffold`
   (done), `viewer-ui-notification-host` (done))
@@ -1272,7 +1269,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1101)
+## done (1102)
 
 ### protocol
 
@@ -2626,6 +2623,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-region-options-debug` (done))
 - [`viewer-region-telehub`](done/viewer-region-telehub.md) — Telehub management
   floater
+- [`viewer-region-top-objects`](done/viewer-region-top-objects.md) — Top objects
+  — top scripts / top colliders
 - [`viewer-remote-parcel-id-uncorrelated`](done/viewer-remote-parcel-id-uncorrelated.md)
   — A resolved parcel id names no question, so two askers cannot be told apart
 - [`viewer-remove-attachment-message-is-a-no-op`](done/viewer-remove-attachment-message-is-a-no-op.md)

@@ -109,9 +109,9 @@ use bevy::ui::InteractionDisabled;
 use sl_client_bevy::{
     AgentKey, Asset, AssetKey, AssetType, Command, EstateAccessDelta, EstateAccessKind,
     EstateCovenant, EstateFlags, EstateInfo, EstateInfoUpdate, ExperienceInfo, ExperienceKey,
-    GroupKey, LandArea, Maturity, OwnerKey, ProductType, RegionDebugUpdate, RegionFlags,
-    RegionIdentity, RegionInfoUpdate, RegionName, RegionTerrainUpdate, SlCommand, SlCurrentRegion,
-    SlEvent, SlRegionIdentity, SlRegionLimits, SlSessionEvent, TextureKey, Uuid,
+    GroupKey, LandArea, LandStatReportType, Maturity, OwnerKey, ProductType, RegionDebugUpdate,
+    RegionFlags, RegionIdentity, RegionInfoUpdate, RegionName, RegionTerrainUpdate, SlCommand,
+    SlCurrentRegion, SlEvent, SlRegionIdentity, SlRegionLimits, SlSessionEvent, TextureKey, Uuid,
 };
 use sl_viewer_notices::experience_profile::{OpenExperienceProfile, maturity_key};
 
@@ -126,6 +126,7 @@ use crate::land_environment::{
     LandPanelKind, spawn_land_environment_panel,
 };
 use crate::telehub::{OpenTelehub, TelehubPlugin};
+use crate::top_objects::{OpenTopObjects, TopObjectsPlugin};
 use crate::ui::{column, row};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
@@ -1175,6 +1176,11 @@ enum AboutRegionAction {
     AddExperience(ExperienceList),
     /// Open the Telehub window ([`crate::telehub`]) on this region.
     ManageTelehub,
+    /// Open the Top Objects window ([`crate::top_objects`]) on the region's
+    /// top-colliders report.
+    TopColliders,
+    /// Open the Top Objects window on the region's top-scripts report.
+    TopScripts,
 }
 
 /// A marker on a terrain texture-swatch button carrying which detail slot it
@@ -1206,6 +1212,10 @@ impl Plugin for AboutRegionPlugin {
         // it opens comes with the button.
         if !app.is_plugin_added::<TelehubPlugin>() {
             app.add_plugins(TelehubPlugin);
+        }
+        // Same for the Debug tab's two report buttons and the window they open.
+        if !app.is_plugin_added::<TopObjectsPlugin>() {
+            app.add_plugins(TopObjectsPlugin);
         }
         app.add_message::<OpenAboutRegion>()
             .add_systems(
@@ -1514,6 +1524,27 @@ fn build_debug_tab(commands: &mut Commands, panel: Entity) -> DebugHandles {
         1,
     );
 
+    // The two report buttons, where the reference puts them — above the restart
+    // controls, since asking a region what is costing it the most is what one
+    // does *before* restarting it.
+    let reports = spawn_row(commands, panel);
+    spawn_action_button(
+        commands,
+        reports,
+        "about-region-top-colliders",
+        AboutRegionAction::TopColliders,
+        2,
+        true,
+    );
+    spawn_action_button(
+        commands,
+        reports,
+        "about-region-top-scripts",
+        AboutRegionAction::TopScripts,
+        3,
+        true,
+    );
+
     let restart_row = spawn_labeled_row(commands, panel, "about-region-restart-delay");
     handles.restart_field = Some(spawn_edit_field(
         commands,
@@ -1521,7 +1552,7 @@ fn build_debug_tab(commands: &mut Commands, panel: Entity) -> DebugHandles {
         "about-region-restart-field",
         TextInputKind::NonNegativeInteger,
         6.0,
-        2,
+        4,
         5,
     ));
     let actions = spawn_row(commands, panel);
@@ -1530,7 +1561,7 @@ fn build_debug_tab(commands: &mut Commands, panel: Entity) -> DebugHandles {
         actions,
         "about-region-restart",
         AboutRegionAction::Restart,
-        3,
+        5,
         true,
     );
     spawn_action_button(
@@ -1538,7 +1569,7 @@ fn build_debug_tab(commands: &mut Commands, panel: Entity) -> DebugHandles {
         actions,
         "about-region-cancel-restart",
         AboutRegionAction::CancelRestart,
-        4,
+        6,
         true,
     );
     handles
@@ -1897,7 +1928,11 @@ fn spawn_bounded_table(
 /// The region's own id where the grid sent one, and its handle otherwise (an
 /// OpenSim region can answer a handshake before its `RegionInfo2` block is
 /// known) — either way, two regions are two subjects.
-fn region_key(identity: &RegionIdentity) -> FloaterKey {
+///
+/// Shared with the windows this one opens *on its region*
+/// ([`crate::top_objects`]), so a child window is the same instance-per-region
+/// its opener is, keyed the same way.
+pub(crate) fn region_key(identity: &RegionIdentity) -> FloaterKey {
     if identity.region_id.is_nil() {
         FloaterKey::subject(&format!("handle/{}", identity.region_handle.get()))
     } else {
@@ -3379,10 +3414,12 @@ fn on_about_region_action(
     parents: Query<&ChildOf>,
     floaters: Query<(Entity, &Floater)>,
     fields: Query<&EditableText>,
+    regions: Query<&SlRegionIdentity, With<SlCurrentRegion>>,
     mut sl_commands: MessageWriter<SlCommand>,
     mut pickers: MessageWriter<OpenAvatarPicker>,
     mut experience_pickers: MessageWriter<OpenExperiencePicker>,
     mut telehubs: MessageWriter<OpenTelehub>,
+    mut reports: MessageWriter<OpenTopObjects>,
 ) {
     if press.button != PointerButton::Primary {
         return;
@@ -3515,6 +3552,24 @@ fn on_about_region_action(
         }
         AboutRegionAction::ManageTelehub => {
             telehubs.write(OpenTelehub);
+        }
+        // The report windows are keyed by region, like this one. The region is
+        // read from the *current* one rather than from `state`: both buttons
+        // are write buttons, so they are only reachable in a window about the
+        // region the agent is in — which is also the only region a report could
+        // be asked of.
+        AboutRegionAction::TopColliders | AboutRegionAction::TopScripts => {
+            let Some(identity) = regions.iter().next().map(|region| region.0.clone()) else {
+                return;
+            };
+            reports.write(OpenTopObjects {
+                report: if matches!(action, AboutRegionAction::TopColliders) {
+                    LandStatReportType::TopColliders
+                } else {
+                    LandStatReportType::TopScripts
+                },
+                region: Box::new(identity),
+            });
         }
     }
 }

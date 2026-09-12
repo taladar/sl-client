@@ -538,11 +538,11 @@ pub use object::{
 };
 pub use open_region::OpenRegionInfo;
 pub use parcel::{
-    DEFAULT_GRIDS_PER_EDGE, LandStatItem, LandStatReportType, LandingType, PARCEL_GRID_STEP_METRES,
-    ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelDetails,
-    ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayCell,
-    ParcelOverlayError, ParcelOverlayGrid, ParcelOverlayInfo, ParcelOwnership, ParcelRequestResult,
-    ParcelReturnType, ParcelStatus, ParcelUpdate,
+    DEFAULT_GRIDS_PER_EDGE, LandStatExtended, LandStatItem, LandStatReportType, LandStatScore,
+    LandingType, PARCEL_GRID_STEP_METRES, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
+    ParcelCategory, ParcelDetails, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo,
+    ParcelObjectOwner, ParcelOverlayCell, ParcelOverlayError, ParcelOverlayGrid, ParcelOverlayInfo,
+    ParcelOwnership, ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate,
 };
 pub use pathfinding::{NavMeshBuildStatus, NavMeshStatus};
 pub use region::{

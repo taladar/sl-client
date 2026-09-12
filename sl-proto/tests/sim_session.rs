@@ -25,26 +25,26 @@ mod test {
         GroupRoleKey, GroupVote, GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder,
         InventoryFolderKey, InventoryItem, InventoryItemMove, InventoryItemOrFolderKey,
         InventoryKey, InventoryType, InvoiceId, Kick, LandArea, LandBrushAction, LandBrushSize,
-        LandEdit, LandSearchType, LandStatItem, LandStatReportType, LandingType, LightData,
-        LindenAmount, LindenBalance, Llsd, LoginParams, MAX_FACES, MapItem, MapItemType, MapLayer,
-        MapRegionInfo, MapRequestFlags, Maturity, MeanCollision, MeanCollisionType, MovementMode,
-        NavMeshBuildStatus, NavMeshStatus, NewInventoryLink, NotecardRez, ObjectBuyItem,
-        ObjectExtraParams, ObjectKey, ObjectPlayingAnimation, ObjectPropertiesFamily,
-        OpenRegionInfo, OwnerKey, ParcelCategory, ParcelDetails, ParcelInfo, ParcelKey,
-        ParcelObjectOwner, ParcelRequestResult, ParcelReturnType, ParcelStatus, Permissions,
-        Permissions5, PingId, PlacesResult, PointAtType, Postcard, PrimShape, PrimShapeParams,
-        ProductType, QueryId, RegionCoordinates, RegionHandle, RegionIdentity, RegionLocalObjectId,
-        RegionLocalParcelId, RegionStats, RegionTerrainComposition, RejectionReason,
-        RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
-        SaleType, ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction,
-        ScriptPermissionRequest, ScriptPermissionStatus, ScriptPermissions, ServerError,
-        ServerEvent, Session, SetDisplayNameReply, SimSession, SimStatId, SimWideDeleteFlags,
-        SimulatorTime, SitTransform, StartLocationSlot, TERRAIN_PATCHES_PER_MESSAGE,
-        TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea,
-        TerrainLayerType, TerrainPatch, TextureEntry, TextureFace, TextureKey, Throttle,
-        TransactionId, TransferId, TransferRequestSource, TransferStatus, Transmit,
-        UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType, XferId,
-        enable_simulator_to_caps_llsd, parse_event_queue_response,
+        LandEdit, LandSearchType, LandStatItem, LandStatReportType, LandStatScore, LandingType,
+        LightData, LindenAmount, LindenBalance, Llsd, LoginParams, MAX_FACES, MapItem, MapItemType,
+        MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MeanCollision, MeanCollisionType,
+        MovementMode, NavMeshBuildStatus, NavMeshStatus, NewInventoryLink, NotecardRez,
+        ObjectBuyItem, ObjectExtraParams, ObjectKey, ObjectPlayingAnimation,
+        ObjectPropertiesFamily, OpenRegionInfo, OwnerKey, ParcelCategory, ParcelDetails,
+        ParcelInfo, ParcelKey, ParcelObjectOwner, ParcelRequestResult, ParcelReturnType,
+        ParcelStatus, Permissions, Permissions5, PingId, PlacesResult, PointAtType, Postcard,
+        PrimShape, PrimShapeParams, ProductType, QueryId, RegionCoordinates, RegionHandle,
+        RegionIdentity, RegionLocalObjectId, RegionLocalParcelId, RegionStats,
+        RegionTerrainComposition, RejectionReason, RequiredVoiceVersion, RestoreItem,
+        RezAttachment, RezObjectParams, RezScriptParams, SaleType, ScopedObjectId, ScopedParcelId,
+        ScriptControl, ScriptControlAction, ScriptPermissionRequest, ScriptPermissionStatus,
+        ScriptPermissions, ServerError, ServerEvent, Session, SetDisplayNameReply, SimSession,
+        SimStatId, SimWideDeleteFlags, SimulatorTime, SitTransform, StartLocationSlot,
+        TERRAIN_PATCHES_PER_MESSAGE, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply,
+        TelehubInfo, TerraformArea, TerrainLayerType, TerrainPatch, TextureEntry, TextureFace,
+        TextureKey, Throttle, TransactionId, TransferId, TransferRequestSource, TransferStatus,
+        Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
+        ViewerEffectType, XferId, enable_simulator_to_caps_llsd, parse_event_queue_response,
     };
     use sl_proto::{
         AgentPresence, FlowMirrorStatus, SESSION_FLOW_COVERAGE, SimChatSessionKind, UserRightsEntry,
@@ -2474,9 +2474,11 @@ mod test {
                 task_local_id: RegionLocalObjectId(4_294_967_000),
                 task_id: task,
                 location: RegionCoordinates::new(128.0, 64.5, 25.0),
-                score: 0.85,
+                score: LandStatScore::ScriptTime(Duration::from_micros(850)),
                 task_name: "busy script".to_owned(),
                 owner_name: "Test Resident".to_owned(),
+                // The UDP form carries no `DataExtended` block.
+                extended: None,
             }],
             now,
         )?;
@@ -2501,7 +2503,13 @@ mod test {
         assert_eq!(item.task_id, task);
         assert_eq!(item.task_name, "busy script");
         assert_eq!(item.owner_name, "Test Resident");
-        assert_eq!(item.score.to_bits(), 0.85_f32.to_bits());
+        // The score comes back in the unit its report gives it: 0.85 ms of
+        // script time, not a bare number.
+        assert_eq!(
+            item.score,
+            LandStatScore::ScriptTime(Duration::from_micros(850))
+        );
+        assert_eq!(item.score.raw().to_bits(), 0.85_f32.to_bits());
         Ok(())
     }
 

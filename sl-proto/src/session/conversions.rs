@@ -16,11 +16,12 @@ use crate::types::{
     GroupAccountTransactions, GroupActiveProposalItem, GroupMember, GroupMembership, GroupName,
     GroupNotice, GroupNoticeKey, GroupProfile, GroupRole, GroupTitle, GroupVote,
     GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
-    InventoryListing, InventoryType, LandingType, MapItem, MapItemType, MapLayer, MapRegionInfo,
-    MapRequestFlags, Maturity, MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags, MuteType,
-    NavMeshBuildStatus, NavMeshStatus, NeighborInfo, Object, ObjectProperties, ObjectTransform,
-    OpenRegionInfo, ParcelCategory, ParcelInfo, ParcelRequestResult, ParcelStatus, PickInfo,
-    PickKey, PlayingAnimation, PrimShapeParams, ProductType, ProposalCandidateId, ProposalVoteId,
+    InventoryListing, InventoryType, LandStatExtended, LandStatItem, LandStatReportType,
+    LandStatScore, LandingType, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags,
+    Maturity, MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags, MuteType, NavMeshBuildStatus,
+    NavMeshStatus, NeighborInfo, Object, ObjectProperties, ObjectTransform, OpenRegionInfo,
+    ParcelCategory, ParcelInfo, ParcelRequestResult, ParcelStatus, PickInfo, PickKey,
+    PlayingAnimation, PrimShapeParams, ProductType, ProposalCandidateId, ProposalVoteId,
     RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionLimits,
     RegionTerrainComposition, RequiredVoiceVersion, RestoreItem, SaleType, Scale, ScriptDialog,
     ScriptPermissionRequest, ScriptPermissions, SetDisplayNameReply, SkySettings, TRACK_MAX,
@@ -4749,6 +4750,143 @@ pub fn teleport_finish_to_llsd(info: &TeleportFinishInfo) -> Llsd {
         ("RegionSizeY", u32_to_llsd(size_y)),
     ]);
     llsd_map(vec![("Info", Llsd::Array(vec![info]))])
+}
+
+/// Decodes a CAPS `LandStatReply` event body — the region's top-scripts /
+/// top-colliders report as every simulator with an event queue answers a
+/// `LandStatRequest` (OpenSim's default, and Second Life; the UDP
+/// `LandStatReply` message is marked `UDPDeprecated` for exactly this reason).
+///
+/// The body is
+/// `{ RequestData: [ { ReportType, RequestFlags, TotalObjectCount } ],
+///    ReportData: [ { TaskLocalID, TaskID, LocationX/Y/Z, Score, TaskName,
+///                    OwnerName } ],
+///    DataExtended: [ { MonoScore, OwnerID, ParcelName, PublicURLs, Size,
+///                      TimeStamp } ] }`
+/// — the two row arrays run in parallel, one `DataExtended` entry per
+/// `ReportData` entry, and a report of no rows carries neither array.
+///
+/// `RequestData` is required (without it there is no report to speak of); every
+/// row field defaults, so one malformed row does not drop the report.
+pub(crate) fn land_stat_reply_from_caps_llsd(
+    body: &Llsd,
+) -> Option<(LandStatReportType, u32, u32, Vec<LandStatItem>)> {
+    let request = body.get("RequestData").and_then(|data| data.index(0))?;
+    let report_type = LandStatReportType::from_u32(u32_member(request, "ReportType"));
+    let request_flags = u32_member(request, "RequestFlags");
+    let total_object_count = u32_member(request, "TotalObjectCount");
+    let rows = body.get("ReportData").and_then(Llsd::as_array);
+    let extended = body.get("DataExtended").and_then(Llsd::as_array);
+    let items = rows.map_or_else(Vec::new, |rows| {
+        rows.iter()
+            .enumerate()
+            .map(|(index, row)| LandStatItem {
+                task_local_id: RegionLocalObjectId(u32_member(row, "TaskLocalID")),
+                task_id: ObjectKey::from(uuid_member(row, "TaskID")),
+                location: RegionCoordinates::new(
+                    f32_member(row, "LocationX"),
+                    f32_member(row, "LocationY"),
+                    f32_member(row, "LocationZ"),
+                ),
+                score: LandStatScore::from_wire(report_type, f32_member(row, "Score")),
+                task_name: string_member(row, "TaskName"),
+                owner_name: string_member(row, "OwnerName").trim().to_owned(),
+                extended: extended
+                    .and_then(|entries| entries.get(index))
+                    .map(land_stat_extended_from_llsd),
+            })
+            .collect()
+    });
+    Some((report_type, request_flags, total_object_count, items))
+}
+
+/// Decodes one `DataExtended` entry of a CAPS `LandStatReply`.
+fn land_stat_extended_from_llsd(entry: &Llsd) -> LandStatExtended {
+    LandStatExtended {
+        mono_score: f32_member(entry, "MonoScore"),
+        // Only a simulator that sends one; a nil id is "not sent" rather than
+        // "owned by nobody".
+        owner_id: entry
+            .get("OwnerID")
+            .and_then(Llsd::as_uuid)
+            .filter(|id| !id.is_nil())
+            .map(AgentKey::from),
+        parcel_name: string_member(entry, "ParcelName"),
+        public_urls: i32_member(entry, "PublicURLs"),
+        script_size_bytes: f32_member(entry, "Size"),
+        timestamp: u32_member(entry, "TimeStamp"),
+    }
+}
+
+/// Serializes a top-objects report as a CAPS `LandStatReply` event body (the
+/// inverse of the client's own `land_stat_reply_from_caps_llsd`, and the shape
+/// OpenSim's `LLClientView::SendLandStatReply` builds).
+///
+/// The `DataExtended` array is written whenever there are rows, one entry per
+/// row, with the defaults of [`LandStatExtended`] standing in for a row that
+/// carries none — the two arrays are positional, so a partial one would
+/// pair every row after the gap with the wrong extended entry.
+#[must_use]
+pub fn land_stat_reply_to_caps_llsd(
+    report_type: LandStatReportType,
+    request_flags: u32,
+    total_object_count: u32,
+    items: &[LandStatItem],
+) -> Llsd {
+    let request = llsd_map(vec![
+        ("ReportType", u32_to_llsd(report_type.to_u32())),
+        ("RequestFlags", u32_to_llsd(request_flags)),
+        ("TotalObjectCount", u32_to_llsd(total_object_count)),
+    ]);
+    let mut entries = vec![("RequestData", Llsd::Array(vec![request]))];
+    if !items.is_empty() {
+        let rows: Vec<Llsd> = items
+            .iter()
+            .map(|item| {
+                llsd_map(vec![
+                    ("LocationX", Llsd::Real(f64::from(item.location.x()))),
+                    ("LocationY", Llsd::Real(f64::from(item.location.y()))),
+                    ("LocationZ", Llsd::Real(f64::from(item.location.z()))),
+                    ("OwnerName", Llsd::String(item.owner_name.clone())),
+                    ("Score", Llsd::Real(f64::from(item.score.raw()))),
+                    ("TaskID", Llsd::Uuid(item.task_id.uuid())),
+                    ("TaskLocalID", u32_to_llsd(item.task_local_id.0)),
+                    ("TaskName", Llsd::String(item.task_name.clone())),
+                ])
+            })
+            .collect();
+        let extended: Vec<Llsd> = items
+            .iter()
+            .map(|item| {
+                let extended = item.extended.clone().unwrap_or(LandStatExtended {
+                    mono_score: 0.0,
+                    owner_id: None,
+                    parcel_name: String::new(),
+                    public_urls: 0,
+                    script_size_bytes: 0.0,
+                    timestamp: 0,
+                });
+                llsd_map(vec![
+                    ("MonoScore", Llsd::Real(f64::from(extended.mono_score))),
+                    (
+                        "OwnerID",
+                        Llsd::Uuid(
+                            extended
+                                .owner_id
+                                .map_or_else(Uuid::nil, |owner| owner.uuid()),
+                        ),
+                    ),
+                    ("ParcelName", Llsd::String(extended.parcel_name)),
+                    ("PublicURLs", Llsd::Integer(extended.public_urls)),
+                    ("Size", Llsd::Real(f64::from(extended.script_size_bytes))),
+                    ("TimeStamp", u32_to_llsd(extended.timestamp)),
+                ])
+            })
+            .collect();
+        entries.push(("ReportData", Llsd::Array(rows)));
+        entries.push(("DataExtended", Llsd::Array(extended)));
+    }
+    llsd_map(entries)
 }
 
 /// Serializes a neighbour's region handle, address and size as a CAPS

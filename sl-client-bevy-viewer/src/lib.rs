@@ -34,6 +34,7 @@ pub(crate) use sl_viewer_places::about_land;
 pub(crate) use sl_viewer_places::about_landmark;
 pub(crate) use sl_viewer_places::about_region;
 pub(crate) use sl_viewer_places::telehub;
+pub(crate) use sl_viewer_places::top_objects;
 pub(crate) use sl_viewer_world_avatar::animations;
 pub(crate) use sl_viewer_world_avatar::animesh;
 /// Every module that declares settings, in registration order.

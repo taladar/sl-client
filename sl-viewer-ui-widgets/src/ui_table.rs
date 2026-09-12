@@ -108,7 +108,9 @@ pub enum TableColumnWidth {
     },
 }
 
-/// A cell value's horizontal alignment within its column.
+/// A cell **value's** horizontal alignment within its column. A column's
+/// *heading* is always leading-aligned, whatever this says — see
+/// `spawn_table_header_cell` for why.
 #[derive(Debug, Clone, Copy)]
 pub enum TableAlign {
     /// Leading edge (the common case: a name or subject), so the *start* of a
@@ -890,13 +892,23 @@ fn spawn_header_cell(
     }
     // The label sits in a clip container so a long header truncates rather than
     // pushing the arrow out / overflowing into the next column.
+    //
+    // **A heading always starts at the leading edge**, whatever its column's
+    // values do. Two reasons, and the second is the one that bites: a row of
+    // headings that all begin on the same line reads as a row, where a mix of
+    // leading and trailing ones reads as a ransom note; and a heading too wide
+    // for its column has to lose its *tail*, which is still recognisable
+    // ("Memory (…"), where an end-aligned one loses its head and reads as a
+    // different word — with the ellipsis marker at the far edge, where it warns
+    // nobody. The values keep [`TableColumn::align`]: a column of numbers still
+    // lines up on its digits.
     let clip = commands
         .spawn((
             Node {
                 flex_grow: 1.0,
                 min_width: Val::Px(0.0),
                 overflow: Overflow::clip(),
-                justify_content: column.align.justify(),
+                justify_content: JustifyContent::Start,
                 align_items: AlignItems::Center,
                 ..default()
             },

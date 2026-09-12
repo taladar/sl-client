@@ -493,6 +493,27 @@ pub(crate) const FLOATERS: &[FloaterElement] = &[
         ),
     },
     FloaterElement {
+        id: "top-colliders",
+        summary: "Top Colliders: the objects a region spends the most collisions on — the \
+                  sortable report, the three region-side filters, and the return / disable / \
+                  beacon actions over what it lists. One window per region.",
+        spec: crate::top_objects::top_colliders_floater_spec,
+        content: FloaterContent::Stub(
+            "The summary line, the score / name / owner / location / parcel / date list, the \
+             selected object's id, the three filter rows and the action row.",
+        ),
+    },
+    FloaterElement {
+        id: "top-scripts",
+        summary: "Top Scripts: the objects a region spends the most script time on — the same \
+                  report with the script memory and public-URL columns. One window per region.",
+        spec: crate::top_objects::top_scripts_floater_spec,
+        content: FloaterContent::Stub(
+            "The summary line, the time / name / owner / location / parcel / date / memory / \
+             URLs list, the selected object's id, the three filter rows and the action row.",
+        ),
+    },
+    FloaterElement {
         id: "wearable-editor",
         summary: "Edit Wearable: a worn item's visual-param sliders and its texture swatches, with \
                   the Save / Save As row.",

@@ -9412,6 +9412,7 @@ dependencies = [
  "sl-viewer-inventory",
  "sl-viewer-map",
  "sl-viewer-notices",
+ "sl-viewer-notifications",
  "sl-viewer-pickers",
  "sl-viewer-platform",
  "sl-viewer-ui-core",

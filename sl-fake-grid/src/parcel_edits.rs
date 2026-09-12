@@ -221,15 +221,19 @@ pub(crate) fn answer_parcel_edit(
         // scripts and simulates no physics, so the honest answer is an empty
         // report rather than no answer at all — a viewer that gets nothing
         // waits out its own timeout and shows the same empty list.
+        //
+        // Over the **event queue**, because that is where a region with one
+        // answers this (OpenSim's `SendLandStatReply` only falls back to the UDP
+        // packet when it has no queue, and the message is `UDPDeprecated` for
+        // the same reason). A grid that answered by packet would let a viewer
+        // that only understands the packet pass here and fail on every real
+        // grid.
         ServerEvent::RequestLandStat {
             report_type,
             request_flags,
             ..
         } => {
-            if let Err(error) = sim.send_land_stat_reply(*report_type, *request_flags, 0, &[], now)
-            {
-                tracing::warn!("answering a land stat request failed: {error}");
-            }
+            sim.enqueue_land_stat_reply(*report_type, *request_flags, 0, &[]);
         }
         ServerEvent::RequestRegionInfo => {
             if let Err(error) = sim.send_region_info(&region_limits(identity), now) {

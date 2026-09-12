@@ -13341,6 +13341,81 @@ mod test {
         Ok(())
     }
 
+    /// A named-object return whose list is longer than a datagram holds goes out
+    /// as several messages — every id exactly once, each message carrying the
+    /// same parcel and return type. This is the region top-objects return, whose
+    /// list is as long as the report the simulator sent.
+    #[test]
+    fn a_long_object_return_splits_into_several_messages() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
+        drain(&mut session)?;
+
+        let ids: Vec<ObjectKey> = (0..90_u128)
+            .map(|index| ObjectKey::from(uuid::Uuid::from_u128(0x5000 + index)))
+            .collect();
+        // The whole region (`-1`), as the reference's top-objects return sends it.
+        session.return_parcel_objects(
+            ScopedParcelId::new(circuit, sl_proto::RegionLocalParcelId(-1)),
+            ParcelReturnType::NONE,
+            &[],
+            &ids,
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+
+        let returns: Vec<_> = sent
+            .iter()
+            .filter_map(|m| match m {
+                AnyMessage::ParcelReturnObjects(message) => Some(message),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            returns.len() > 1,
+            "90 ids should not have been sent as one message"
+        );
+        let mut carried: Vec<uuid::Uuid> = Vec::new();
+        for message in &returns {
+            assert_eq!(message.parcel_data.local_id, -1);
+            assert_eq!(message.parcel_data.return_type, ParcelReturnType::NONE.0);
+            carried.extend(message.task_i_ds.iter().map(|block| block.task_id));
+        }
+        assert_eq!(
+            carried,
+            ids.iter().map(ObjectKey::uuid).collect::<Vec<_>>(),
+            "every id, once, in order"
+        );
+        Ok(())
+    }
+
+    /// An **empty** id list is not an empty request: it means "every object of
+    /// this type", and still goes out as exactly one message.
+    #[test]
+    fn an_object_disable_with_no_ids_is_still_one_message() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
+        drain(&mut session)?;
+
+        session.disable_parcel_objects(
+            ScopedParcelId::new(circuit, sl_proto::RegionLocalParcelId(7)),
+            ParcelReturnType::OTHER,
+            &[],
+            &[],
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+
+        let disables: Vec<_> = sent
+            .iter()
+            .filter(|m| matches!(m, AnyMessage::ParcelDisableObjects(_)))
+            .collect();
+        assert_eq!(disables.len(), 1);
+        Ok(())
+    }
+
     #[test]
     fn parcel_dwell_reply_surfaces_event() -> Result<(), TestError> {
         let now = Instant::now();

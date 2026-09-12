@@ -16,15 +16,16 @@ use super::conversions::{
     group_members_from_caps_llsd, group_membership, group_memberships_from_caps_llsd, group_names,
     group_notice, group_profile, group_role, group_title, group_vote_history_item, index_into,
     instant_message, inventory_descendents_from_llsd, inventory_folder, inventory_item,
-    inventory_item_from_create, inventory_offer_bucket, invite_channel_from_llsd, map_item,
-    map_layer, map_region_info, money_balance, nav_mesh_status_from_llsd, neighbor_info,
-    object_from_full_update, object_properties, offline_messages_from_llsd,
-    open_region_info_from_llsd, pack_uuids, packages_of, parcel_info, parcel_info_from_llsd,
-    parse_lure_region_handle, parse_mute_list, parse_task_inventory, parse_uuid_string, pick_info,
-    region_identity, region_limits, required_voice_version_from_llsd, script_dialog,
-    script_permission_request, script_running_from_caps_llsd, server_appearance_update_from_llsd,
-    session_history_from_llsd, set_display_name_reply_from_llsd, sim_console_response_from_llsd,
-    skeleton_folder, teleport_finish_from_llsd, trimmed_string, voice_channel_info_from_llsd,
+    inventory_item_from_create, inventory_offer_bucket, invite_channel_from_llsd,
+    land_stat_reply_from_caps_llsd, map_item, map_layer, map_region_info, money_balance,
+    nav_mesh_status_from_llsd, neighbor_info, object_from_full_update, object_properties,
+    offline_messages_from_llsd, open_region_info_from_llsd, pack_uuids, packages_of, parcel_info,
+    parcel_info_from_llsd, parse_lure_region_handle, parse_mute_list, parse_task_inventory,
+    parse_uuid_string, pick_info, region_identity, region_limits, required_voice_version_from_llsd,
+    script_dialog, script_permission_request, script_running_from_caps_llsd,
+    server_appearance_update_from_llsd, session_history_from_llsd,
+    set_display_name_reply_from_llsd, sim_console_response_from_llsd, skeleton_folder,
+    teleport_finish_from_llsd, trimmed_string, voice_channel_info_from_llsd,
     windlight_refresh_from_llsd,
 };
 use super::{
@@ -77,23 +78,23 @@ use crate::types::{
     GroupNoticeAttachment, GroupNoticeKey, GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange,
     ImDialog, ImageCodec, InterestsUpdate, InventoryCursor, InventoryFolder, InventoryItem,
     InventoryItemMove, InventoryOffer, ItemInfo, Kick, LandEdit, LandSearchType, LandStatItem,
-    LandStatReportType, LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams, MapItemType,
-    Material, Maturity, MeanCollision, MeanCollisionType, MoneyTransactionType, MovementMode,
-    MuteEntry, MuteFlags, MuteType, NeighborInfo, NewInventoryItem, NewInventoryLink, NotecardRez,
-    Object, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectPlayingAnimation,
-    ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
-    ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelInfo, ParcelMediaCommand,
-    ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate,
-    PermissionField, PickKey, PickUpdate, PlacesResult, Postcard, PrimShape, PrimShapeParams,
-    ProfileUpdate, ProposalVoteId, RegionDebugUpdate, RegionInfoUpdate, RegionStats,
-    RegionTerrainUpdate, Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
-    SaleType, ScriptControl, ScriptControlAction, ScriptControlsInfo, ScriptGrantInfo,
-    ScriptLanguage, ScriptPermissionState, ScriptPermissionStatus, ScriptPermissions,
-    ScriptTeleportRequest, ServerError, SimStatId, SimWideDeleteFlags, SimulatorTime, SoundFlags,
-    SoundPreload, StartLocationSlot, SurfaceInfo, TaskInventoryKey, TaskInventoryReply,
-    TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture, TextureEntry, Throttle,
-    TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
-    ViewerEffectType, Wearable, WearableType,
+    LandStatReportType, LandStatScore, LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams,
+    MapItemType, Material, Maturity, MeanCollision, MeanCollisionType, MoneyTransactionType,
+    MovementMode, MuteEntry, MuteFlags, MuteType, NeighborInfo, NewInventoryItem, NewInventoryLink,
+    NotecardRez, Object, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings,
+    ObjectPlayingAnimation, ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry,
+    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelInfo,
+    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo,
+    ParcelReturnType, ParcelUpdate, PermissionField, PickKey, PickUpdate, PlacesResult, Postcard,
+    PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId, RegionDebugUpdate, RegionInfoUpdate,
+    RegionStats, RegionTerrainUpdate, Reliability, RestoreItem, RezAttachment, RezObjectParams,
+    RezScriptParams, SaleType, ScriptControl, ScriptControlAction, ScriptControlsInfo,
+    ScriptGrantInfo, ScriptLanguage, ScriptPermissionState, ScriptPermissionStatus,
+    ScriptPermissions, ScriptTeleportRequest, ServerError, SimStatId, SimWideDeleteFlags,
+    SimulatorTime, SoundFlags, SoundPreload, StartLocationSlot, SurfaceInfo, TaskInventoryKey,
+    TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture,
+    TextureEntry, Throttle, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo,
+    ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable, WearableType,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
@@ -130,6 +131,14 @@ use uuid::Uuid;
 /// `UUIDGroupNameRequest`. Each id is 16 bytes; 80 keeps the datagram (plus its
 /// header and block count) comfortably within a typical UDP MTU.
 const UUID_NAMES_PER_REQUEST: usize = 80;
+
+/// The maximum number of object ids packed into a single `ParcelReturnObjects` /
+/// `ParcelDisableObjects`. Each id is 16 bytes, and the two messages carry a
+/// second id list (the owners) besides, so this is half the name-request batch —
+/// the same reasoning the reference viewer applies dynamically, filling a
+/// message until `isSendFullFast` says it is full and starting another
+/// (`LLFloaterTopObjects::returnObjects`).
+const TASK_IDS_PER_REQUEST: usize = 40;
 
 /// The largest asset (in bytes) a [`Session::save_inventory_asset`] inlines into
 /// a single `AssetUploadRequest`; a larger asset sends an empty `AssetData` and
@@ -486,6 +495,25 @@ impl Session {
                         object_id,
                         item_id,
                         running,
+                    });
+                } else {
+                    self.caps_decode_failed(message);
+                }
+            }
+            // The region's top-scripts / top-colliders report. A simulator with
+            // an event queue answers a `LandStatRequest` over it rather than
+            // with the (`UDPDeprecated`) packet — and only this form carries the
+            // `DataExtended` half, which is where the parcel, rez date, script
+            // memory and URL count come from.
+            "LandStatReply" => {
+                if let Some((report_type, request_flags, total_object_count, items)) =
+                    land_stat_reply_from_caps_llsd(body)
+                {
+                    self.events.push_back(Event::LandStatReply {
+                        report_type,
+                        request_flags,
+                        total_object_count,
+                        items,
                     });
                 } else {
                     self.caps_decode_failed(message);
@@ -3172,8 +3200,9 @@ impl Session {
                 });
             }
             AnyMessage::LandStatReply(reply) => {
+                let report_type = LandStatReportType::from_u32(reply.request_data.report_type);
                 self.events.push_back(Event::LandStatReply {
-                    report_type: LandStatReportType::from_u32(reply.request_data.report_type),
+                    report_type,
                     request_flags: reply.request_data.request_flags,
                     total_object_count: reply.request_data.total_object_count,
                     items: reply
@@ -3183,9 +3212,12 @@ impl Session {
                             task_local_id: RegionLocalObjectId(item.task_local_id),
                             task_id: ObjectKey::from(item.task_id),
                             location: RegionCoordinates::new(item.location_x, item.location_y, item.location_z),
-                            score: item.score,
+                            score: LandStatScore::from_wire(report_type, item.score),
                             task_name: trimmed_string(&item.task_name),
                             owner_name: trimmed_string(&item.owner_name),
+                            // The UDP message's template has no `DataExtended`
+                            // block; only the event-queue form carries one.
+                            extended: None,
                         })
                         .collect(),
                 });
@@ -11433,6 +11465,13 @@ impl Session {
     /// (use [`ParcelReturnType::LIST`] with `task_ids` to return specific
     /// objects). Requires parcel ownership / land rights.
     ///
+    /// A `task_ids` list longer than one datagram holds is split into MTU-sized
+    /// batches, each sent as its own message with the same parcel and return
+    /// type — the shape the region's top-objects return needs, where the list is
+    /// as long as the report. An **empty**
+    /// `task_ids` still sends exactly one message: "every object of this type",
+    /// which is a different request, not an empty one.
+    ///
     /// # Errors
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
@@ -11448,7 +11487,13 @@ impl Session {
         let circuit = self.circuit_for_scope(local_id.circuit)?;
         let local_id = local_id.id;
         let owner_ids: Vec<Uuid> = owner_ids.iter().map(OwnerKey::uuid).collect();
-        circuit.send_parcel_return_objects(local_id, return_type.0, &owner_ids, task_ids, now)?;
+        if task_ids.is_empty() {
+            circuit.send_parcel_return_objects(local_id, return_type.0, &owner_ids, &[], now)?;
+            return Ok(());
+        }
+        for batch in task_ids.chunks(TASK_IDS_PER_REQUEST) {
+            circuit.send_parcel_return_objects(local_id, return_type.0, &owner_ids, batch, now)?;
+        }
         Ok(())
     }
 
@@ -11599,6 +11644,8 @@ impl Session {
     /// `task_ids` to disable specific objects. Requires parcel ownership / land
     /// rights.
     ///
+    /// `task_ids` batches exactly as [`Self::return_parcel_objects`]'s does.
+    ///
     /// # Errors
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
@@ -11614,7 +11661,13 @@ impl Session {
         let circuit = self.circuit_for_scope(local_id.circuit)?;
         let local_id = local_id.id;
         let owner_ids: Vec<Uuid> = owner_ids.iter().map(OwnerKey::uuid).collect();
-        circuit.send_parcel_disable_objects(local_id, return_type.0, &owner_ids, task_ids, now)?;
+        if task_ids.is_empty() {
+            circuit.send_parcel_disable_objects(local_id, return_type.0, &owner_ids, &[], now)?;
+            return Ok(());
+        }
+        for batch in task_ids.chunks(TASK_IDS_PER_REQUEST) {
+            circuit.send_parcel_disable_objects(local_id, return_type.0, &owner_ids, batch, now)?;
+        }
         Ok(())
     }
 
