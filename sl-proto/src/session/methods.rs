@@ -959,11 +959,12 @@ impl Session {
             // The reply to a `RegionExperiences` GET or POST: the region's
             // allow/block/trust lists.
             CAP_REGION_EXPERIENCES => match parse_region_experiences(body) {
-                Ok((allowed, blocked, trusted)) => {
+                Ok(lists) => {
                     self.events.push_back(Event::RegionExperiences {
-                        allowed,
-                        blocked,
-                        trusted,
+                        allowed: lists.allowed,
+                        blocked: lists.blocked,
+                        trusted: lists.trusted,
+                        default_experience: lists.default_experience,
                     });
                 }
                 Err(error) => self.caps_decode_error(message, &error),

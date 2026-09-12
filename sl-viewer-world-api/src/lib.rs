@@ -1654,6 +1654,16 @@ pub struct OpenExperiencePicker {
     pub requester: &'static str,
     /// Which experiences this open may offer.
     pub filter: ExperiencePickerFilter,
+    /// One experience this open must **not** offer, whatever
+    /// [`filter`](Self::filter) says about it.
+    ///
+    /// A property filter cannot express "not that one": the reference adds the
+    /// exclusion as a second, id-matching filter beside the property one
+    /// (`LLPanelExperiencePicker::FilterMatching`), which is how the estate's
+    /// Allowed and Blocked pickers keep the estate's own **default experience**
+    /// off their lists — it is neither something to allow nor something to
+    /// block.
+    pub excluded: Option<ExperienceKey>,
 }
 
 /// The confirmed experience pick. The picker chooses exactly one (the

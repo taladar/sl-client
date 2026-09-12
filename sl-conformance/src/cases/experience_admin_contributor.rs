@@ -11,7 +11,8 @@
 //! - `AgentExperiences` → the experiences the agent **owns**,
 //! - `GetAdminExperiences` → the experiences the agent **administers**,
 //! - `GetCreatorExperiences` → the experiences the agent **created**,
-//! - `RegionExperiences` (GET) → the region's **allow / block / trust** lists,
+//! - `RegionExperiences` (GET) → the region's **allow / block / trust** lists
+//!   and, if the grid still sends the key, the estate's **default** experience,
 //! - `IsExperienceAdmin?experience_id=<id>` → whether the agent administers *that*
 //!   experience,
 //! - `IsExperienceContributor?experience_id=<id>` → whether the agent contributes
@@ -66,7 +67,8 @@ struct ExperienceLists {
     region: Option<RegionLists>,
 }
 
-/// The region's experience allow / block / trust lists.
+/// The region's experience allow / block / trust lists, and the estate's
+/// default experience.
 #[derive(Debug)]
 struct RegionLists {
     /// Experiences the region allows.
@@ -75,6 +77,11 @@ struct RegionLists {
     blocked: Vec<ExperienceKey>,
     /// Experiences the region trusts (privileged, key-grid scope).
     trusted: Vec<ExperienceKey>,
+    /// The estate's default experience, when the reply carried the `default`
+    /// key. The reference reads it and pins it into the trusted list as a
+    /// non-removable row; whether Second Life still *sends* it is what this
+    /// case's `region_default` metric records.
+    default_experience: Option<ExperienceKey>,
 }
 
 impl ExperienceLists {
@@ -233,10 +240,12 @@ async fn collect_experience_lists(session: &mut Session) -> Result<ExperienceLis
                     allowed,
                     blocked,
                     trusted,
+                    default_experience,
                 } => Some(Reply::Region(RegionLists {
                     allowed: allowed.clone(),
                     blocked: blocked.clone(),
                     trusted: trusted.clone(),
+                    default_experience: *default_experience,
                 })),
                 _ => None,
             })
@@ -355,12 +364,19 @@ fn record_list_metrics(
     let owned = count(&lists.owned);
     let admin = count(&lists.admin);
     let creator = count(&lists.creator);
-    let (region_allowed, region_blocked, region_trusted) =
-        lists.region.as_ref().map_or((-1, -1, -1), |region| {
+    // `region_default` is the third state the counts do not have room for: `-1`
+    // when the capability did not answer at all, `0` when it answered without a
+    // `default` key, `1` when it named the estate's default experience. Whether
+    // Second Life still sends the key is exactly what the reference's
+    // `content.has("default")` branch depends on, and this is the only place we
+    // can observe it.
+    let (region_allowed, region_blocked, region_trusted, region_default) =
+        lists.region.as_ref().map_or((-1, -1, -1, -1), |region| {
             (
                 i64::try_from(region.allowed.len()).unwrap_or(-1),
                 i64::try_from(region.blocked.len()).unwrap_or(-1),
                 i64::try_from(region.trusted.len()).unwrap_or(-1),
+                i64::from(region.default_experience.is_some()),
             )
         });
 
@@ -371,5 +387,6 @@ fn record_list_metrics(
     metrics.set(&count_metric("region_allowed"), region_allowed);
     metrics.set(&count_metric("region_blocked"), region_blocked);
     metrics.set(&count_metric("region_trusted"), region_trusted);
+    metrics.set(&count_metric("region_default"), region_default);
     metrics.set_timing(&secs_metric("lists_rtt"), lists_rtt.as_secs_f64());
 }

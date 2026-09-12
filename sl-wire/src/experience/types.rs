@@ -63,6 +63,33 @@ pub struct ExperienceSearchPage {
     pub has_previous_page: bool,
 }
 
+/// The estate's experience lists, as the `RegionExperiences` capability states
+/// them: the three id arrays, plus the estate's **default experience**.
+///
+/// The `default` key is what the reference reads out of the reply beside the
+/// arrays (`LLPanelRegionExperiences::processResponse` guards it with
+/// `content.has("default")`), and it names an experience the estate cannot be
+/// without: the panel appends it to the **trusted** list, refuses to remove it
+/// there, and filters it out of the Allowed and Blocked pickers. A grid that
+/// has no default simply omits the key, so it is decoded as an [`Option`]
+/// rather than as a null id.
+///
+/// The POST body shares this shape but carries no `default` — the reference's
+/// `sendUpdate` writes only the three arrays, and the default rides back inside
+/// `trusted`, where `processResponse` put it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct RegionExperienceLists {
+    /// The experiences the region allows.
+    pub allowed: Vec<ExperienceKey>,
+    /// The experiences the region blocks.
+    pub blocked: Vec<ExperienceKey>,
+    /// The experiences the region trusts (privileged, key-grid scope).
+    pub trusted: Vec<ExperienceKey>,
+    /// The estate's default experience, when the reply named one.
+    pub default_experience: Option<ExperienceKey>,
+}
+
 /// The per-experience preference an agent can set over `ExperiencePreferences`.
 /// `Allow`/`Block` are sent as a PUT body; `Forget` clears any prior preference
 /// (sent as a DELETE — see [`build_set_experience_permission_request`](crate::build_set_experience_permission_request)).

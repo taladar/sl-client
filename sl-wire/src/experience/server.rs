@@ -1,7 +1,8 @@
 //! Server side: experience cap request parsers and response builders.
 
 use super::{
-    ExperienceInfo, ExperiencePermission, ExperienceUpdate, llsd_uuid, parse_region_experiences,
+    ExperienceInfo, ExperiencePermission, ExperienceUpdate, RegionExperienceLists, llsd_uuid,
+    parse_region_experiences,
 };
 use crate::WireError;
 use crate::llsd::{Llsd, LlsdError, parse_llsd_xml};
@@ -160,21 +161,20 @@ pub fn parse_update_experience_request(xml: &str) -> Result<ExperienceUpdate, Wi
 }
 
 /// Parses a `RegionExperiences` POST body back into its
-/// `(allowed, blocked, trusted)` id lists — the inverse of
+/// `{ allowed, blocked, trusted }` id lists — the inverse of
 /// [`build_region_experiences_request`](crate::build_region_experiences_request). (The body and reply share a shape, so
 /// this delegates to [`parse_region_experiences`].)
+///
+/// The reference's POST carries no `default` key, so the decoded
+/// [`RegionExperienceLists::default_experience`] is normally [`None`]; a body
+/// that does name one is decoded rather than rejected, and it is the region's
+/// business whether to honour it.
 ///
 /// # Errors
 ///
 /// Returns a [`LlsdError::MalformedField`] if the body is not well-formed XML or
 /// a present `allowed`/`blocked`/`trusted` field has the wrong LLSD kind.
-#[expect(
-    clippy::type_complexity,
-    reason = "mirrors parse_region_experiences' (allowed, blocked, trusted) tuple, wrapped in Result for the malformed-field error"
-)]
-pub fn parse_region_experiences_request(
-    xml: &str,
-) -> Result<(Vec<ExperienceKey>, Vec<ExperienceKey>, Vec<ExperienceKey>), WireError> {
+pub fn parse_region_experiences_request(xml: &str) -> Result<RegionExperienceLists, WireError> {
     let root = parse_llsd_xml(xml).map_err(|error| LlsdError::MalformedField {
         field: "RegionExperiences",
         value: error.to_string(),
@@ -278,21 +278,29 @@ pub fn build_experience_permissions_response(
     .to_llsd_xml()
 }
 
-/// Builds a `RegionExperiences` reply (`{ allowed, blocked, trusted }`) — the
-/// inverse of [`parse_region_experiences`]. (The reply shares its shape with the
-/// POST body that [`build_region_experiences_request`](crate::build_region_experiences_request) writes.)
+/// Builds a `RegionExperiences` reply (`{ allowed, blocked, trusted }`, plus a
+/// `default` when the estate has one) — the inverse of
+/// [`parse_region_experiences`]. (The reply shares its shape with the POST body
+/// that [`build_region_experiences_request`](crate::build_region_experiences_request) writes.)
+///
+/// An estate with no default experience is written as **no key at all**, not as
+/// a null id: the reference reads the key by presence
+/// (`LLPanelRegionExperiences::processResponse` guards it with
+/// `content.has("default")`) and only clears the sticky row it drives when the
+/// id it decodes is null — a `default` of `00000000-…` would therefore say the
+/// same thing at more length, and any grid that sends the key at all sends a
+/// real id.
 #[must_use]
-pub fn build_region_experiences_response(
-    allowed: &[ExperienceKey],
-    blocked: &[ExperienceKey],
-    trusted: &[ExperienceKey],
-) -> String {
-    Llsd::Map(HashMap::from([
-        ("allowed".to_owned(), uuid_array_llsd(allowed)),
-        ("blocked".to_owned(), uuid_array_llsd(blocked)),
-        ("trusted".to_owned(), uuid_array_llsd(trusted)),
-    ]))
-    .to_llsd_xml()
+pub fn build_region_experiences_response(lists: &RegionExperienceLists) -> String {
+    let mut map = HashMap::from([
+        ("allowed".to_owned(), uuid_array_llsd(&lists.allowed)),
+        ("blocked".to_owned(), uuid_array_llsd(&lists.blocked)),
+        ("trusted".to_owned(), uuid_array_llsd(&lists.trusted)),
+    ]);
+    if let Some(default_experience) = lists.default_experience {
+        let _previous = map.insert("default".to_owned(), Llsd::Uuid(default_experience.uuid()));
+    }
+    Llsd::Map(map).to_llsd_xml()
 }
 
 /// Builds an `ExperienceQuery` reply (`{ experiences: { "<id>": bool, … } }`) —

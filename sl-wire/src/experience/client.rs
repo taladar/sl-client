@@ -2,7 +2,8 @@
 
 use super::{
     ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceSearchPage,
-    ExperienceUpdate, PROPERTY_INVALID, SEARCH_PAGE_SIZE, uuid_array,
+    ExperienceUpdate, PROPERTY_INVALID, RegionExperienceLists, SEARCH_PAGE_SIZE, llsd_uuid,
+    uuid_array,
 };
 use crate::WireError;
 use crate::llsd::{Llsd, push_escaped};
@@ -232,26 +233,34 @@ pub fn parse_experience_permissions(
     ))
 }
 
-/// Decodes the `{ allowed, blocked, trusted }` of a `RegionExperiences` reply.
+/// Decodes the `{ allowed, blocked, trusted }` of a `RegionExperiences` reply,
+/// plus the estate's `default` experience when the reply names one.
+///
+/// The `default` key is read leniently — absent, `<undef/>`, or a value that is
+/// not a UUID all decode as "no default" — because the reference reads it the
+/// same way (`content.has("default")`, then `asUUID()`), and a grid that has no
+/// estate default simply does not send it.
 ///
 /// # Errors
 ///
 /// Returns a [`WireError::Llsd`] if `allowed`, `blocked`, or `trusted`
 /// is present but not an LLSD array.
-#[expect(
-    clippy::type_complexity,
-    reason = "the (allowed, blocked, trusted) tuple, wrapped in Result for the malformed-field error"
-)]
-pub fn parse_region_experiences(
-    body: &Llsd,
-) -> Result<(Vec<ExperienceKey>, Vec<ExperienceKey>, Vec<ExperienceKey>), WireError> {
+pub fn parse_region_experiences(body: &Llsd) -> Result<RegionExperienceLists, WireError> {
     let keys = |name: &'static str| -> Result<Vec<ExperienceKey>, WireError> {
         Ok(uuid_array(body, name)?
             .into_iter()
             .map(ExperienceKey::from)
             .collect())
     };
-    Ok((keys("allowed")?, keys("blocked")?, keys("trusted")?))
+    Ok(RegionExperienceLists {
+        allowed: keys("allowed")?,
+        blocked: keys("blocked")?,
+        trusted: keys("trusted")?,
+        default_experience: body
+            .get("default")
+            .and_then(llsd_uuid)
+            .map(ExperienceKey::from),
+    })
 }
 
 /// Decodes the `{ experiences: { "<id>": bool, … } }` of an `ExperienceQuery`

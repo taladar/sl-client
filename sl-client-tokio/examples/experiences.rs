@@ -116,15 +116,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 allowed,
                 blocked,
                 trusted,
+                default_experience,
             } => {
                 info!(
-                    "region experiences: {} allowed, {} blocked, {} trusted",
+                    "region experiences: {} allowed, {} blocked, {} trusted{}",
                     allowed.len(),
                     blocked.len(),
-                    trusted.len()
+                    trusted.len(),
+                    default_experience
+                        .map_or_else(String::new, |id| format!(", estate default {id}")),
                 );
                 request_info(&command_tx, allowed).await;
                 request_info(&command_tx, trusted).await;
+                request_info(&command_tx, default_experience.into_iter().collect()).await;
             }
             Event::ExperienceSearchResults(page) => {
                 info!(

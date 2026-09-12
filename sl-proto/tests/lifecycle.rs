@@ -18903,12 +18903,22 @@ mod test {
         Ok(())
     }
 
-    /// A `RegionExperiences` reply surfaces the region's allow/block/trust lists.
+    /// A `RegionExperiences` reply surfaces the region's allow/block/trust
+    /// lists, and the estate's `default` experience when the grid names one.
     #[test]
     fn region_experiences_surfaces_lists() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
         drain(&mut session)?;
+
+        let read = |session: &mut sl_proto::Session, xml: &str| -> Result<Event, TestError> {
+            let body = sl_proto::parse_llsd_xml(xml)?;
+            session.handle_caps_event("RegionExperiences", &body, now)?;
+            drain_events(session)
+                .into_iter()
+                .find(|event| matches!(event, Event::RegionExperiences { .. }))
+                .ok_or_else(|| "expected a RegionExperiences event".into())
+        };
 
         let xml = "<llsd><map>\
             <key>allowed</key><array>\
@@ -18916,24 +18926,39 @@ mod test {
             <key>blocked</key><array></array>\
             <key>trusted</key><array>\
             <uuid>33333333-3333-3333-3333-333333333333</uuid></array></map></llsd>";
-        let body = sl_proto::parse_llsd_xml(xml)?;
-        session.handle_caps_event("RegionExperiences", &body, now)?;
-
-        let event = drain_events(&mut session)
-            .into_iter()
-            .find(|event| matches!(event, Event::RegionExperiences { .. }))
-            .ok_or("expected a RegionExperiences event")?;
         let Event::RegionExperiences {
             allowed,
             blocked,
             trusted,
-        } = event
+            default_experience,
+        } = read(&mut session, xml)?
         else {
             return Err("expected RegionExperiences".into());
         };
         assert_eq!(allowed.len(), 1);
         assert!(blocked.is_empty());
         assert_eq!(trusted.len(), 1);
+        // A grid with no estate default omits the key.
+        assert_eq!(default_experience, None);
+
+        let xml = "<llsd><map>\
+            <key>allowed</key><array></array>\
+            <key>blocked</key><array></array>\
+            <key>trusted</key><array></array>\
+            <key>default</key>\
+            <uuid>44444444-4444-4444-4444-444444444444</uuid></map></llsd>";
+        let Event::RegionExperiences {
+            default_experience, ..
+        } = read(&mut session, xml)?
+        else {
+            return Err("expected RegionExperiences".into());
+        };
+        assert_eq!(
+            default_experience,
+            Some(sl_types::key::ExperienceKey::from(uuid::Uuid::parse_str(
+                "44444444-4444-4444-4444-444444444444"
+            )?))
+        );
         Ok(())
     }
 

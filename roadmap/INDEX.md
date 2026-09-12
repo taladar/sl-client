@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 317 |
+| ready | 316 |
 | blocked | 41 |
 | in-progress | 22 |
 | bugs | 43 |
-| done | 1099 |
+| done | 1100 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1664** |
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (317)
+## ready (316)
 
 ### protocol
 
@@ -792,8 +792,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Group picker for the Region/Estate Access → Allowed Groups list
 - [`viewer-region-estate-object-return`](ready/viewer-region-estate-object-return.md)
   — Region Debug tab — estate-wide object return by resident
-- [`viewer-region-experiences-default-experience`](ready/viewer-region-experiences-default-experience.md)
-  — RegionExperiences — the estate's default experience
 - [`viewer-region-restart-schedule`](ready/viewer-region-restart-schedule.md) —
   Region restart schedule + restart countdown (blocked by
   `viewer-region-options-general` (done))
@@ -1276,7 +1274,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1099)
+## done (1100)
 
 ### protocol
 
@@ -2615,6 +2613,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Region / parcel environment settings panel (blocked by
   `viewer-region-options-general` (done), `viewer-environment-my-environments`
   (done))
+- [`viewer-region-experiences-default-experience`](done/viewer-region-experiences-default-experience.md)
+  — RegionExperiences — the estate's default experience
 - [`viewer-region-experiences-panel`](done/viewer-region-experiences-panel.md) —
   Region / Estate floater — Experiences tab
 - [`viewer-region-name-connecting-after-crossing`](done/viewer-region-name-connecting-after-crossing.md)

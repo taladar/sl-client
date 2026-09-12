@@ -6,17 +6,18 @@ use uuid::Uuid;
 
 use super::{
     ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceUpdate, PROPERTY_GRID,
-    PROPERTY_INVALID, build_experience_ids_response, build_experience_infos_response,
-    build_experience_permissions_response, build_experience_query_response,
-    build_experience_search_response, build_experience_status_response,
-    build_region_experiences_request, build_region_experiences_response,
-    build_set_experience_permission_request, build_update_experience_request, experience_id_query,
-    experience_info_query, experience_query, find_experience_query, forget_experience_query,
-    group_experiences_query, parse_experience_id_query, parse_experience_ids,
-    parse_experience_info_query, parse_experience_infos, parse_experience_permissions,
-    parse_experience_query, parse_experience_query_reply, parse_experience_search_page,
-    parse_experience_status, parse_find_experience_query, parse_forget_experience_query,
-    parse_group_experiences_query, parse_region_experiences, parse_region_experiences_request,
+    PROPERTY_INVALID, RegionExperienceLists, build_experience_ids_response,
+    build_experience_infos_response, build_experience_permissions_response,
+    build_experience_query_response, build_experience_search_response,
+    build_experience_status_response, build_region_experiences_request,
+    build_region_experiences_response, build_set_experience_permission_request,
+    build_update_experience_request, experience_id_query, experience_info_query, experience_query,
+    find_experience_query, forget_experience_query, group_experiences_query,
+    parse_experience_id_query, parse_experience_ids, parse_experience_info_query,
+    parse_experience_infos, parse_experience_permissions, parse_experience_query,
+    parse_experience_query_reply, parse_experience_search_page, parse_experience_status,
+    parse_find_experience_query, parse_forget_experience_query, parse_group_experiences_query,
+    parse_region_experiences, parse_region_experiences_request,
     parse_set_experience_permission_request, parse_update_experience_request,
 };
 use crate::WireError;
@@ -197,11 +198,49 @@ fn region_experiences_round_trip() -> Result<(), String> {
     ));
 
     let reply = parse_llsd_xml(&body).map_err(|error| format!("{error:?}"))?;
-    let (allowed_out, blocked_out, trusted_out) =
-        parse_region_experiences(&reply).map_err(|error| format!("{error:?}"))?;
-    assert_eq!(allowed_out, allowed);
-    assert!(blocked_out.is_empty());
-    assert_eq!(trusted_out, trusted);
+    let lists = parse_region_experiences(&reply).map_err(|error| format!("{error:?}"))?;
+    assert_eq!(lists.allowed, allowed);
+    assert!(lists.blocked.is_empty());
+    assert_eq!(lists.trusted, trusted);
+    // The POST body the builder writes carries no `default` — the reference's
+    // `sendUpdate` does not send one — so the decoder must not invent one.
+    assert_eq!(lists.default_experience, None);
+    Ok(())
+}
+
+/// The reply's optional `default` key decodes into
+/// [`RegionExperienceLists::default_experience`], and a reply without it (or
+/// with an unreadable one) decodes as no default rather than as an error — the
+/// reference reads the key by presence and then by `asUUID()`.
+#[test]
+fn region_experiences_default_is_optional() -> Result<(), String> {
+    let default = experience_key("33333333-3333-3333-3333-333333333333")?;
+    let decode = |xml: &str| -> Result<Option<ExperienceKey>, String> {
+        let body = parse_llsd_xml(xml).map_err(|error| format!("{error:?}"))?;
+        Ok(parse_region_experiences(&body)
+            .map_err(|error| format!("{error:?}"))?
+            .default_experience)
+    };
+
+    assert_eq!(
+        decode(
+            "<llsd><map><key>default</key><uuid>33333333-3333-3333-3333-333333333333</uuid></map></llsd>"
+        )?,
+        Some(default),
+    );
+    // A grid that spells it as a string is read the same way `llsd_uuid` reads
+    // every other id in this family.
+    assert_eq!(
+        decode(
+            "<llsd><map><key>default</key><string>33333333-3333-3333-3333-333333333333</string></map></llsd>"
+        )?,
+        Some(default),
+    );
+    assert_eq!(decode("<llsd><map /></llsd>")?, None);
+    assert_eq!(
+        decode("<llsd><map><key>default</key><undef /></map></llsd>")?,
+        None,
+    );
     Ok(())
 }
 
@@ -317,19 +356,37 @@ fn region_experiences_service_round_trip() -> Result<(), String> {
     let allowed = [experience_key("11111111-1111-1111-1111-111111111111")?];
     let trusted = [experience_key("22222222-2222-2222-2222-222222222222")?];
     let request = build_region_experiences_request(&allowed, &[], &trusted);
-    let (allowed_out, blocked_out, trusted_out) =
+    let posted =
         parse_region_experiences_request(&request).map_err(|error| format!("{error:?}"))?;
-    assert_eq!(allowed_out, allowed);
-    assert!(blocked_out.is_empty());
-    assert_eq!(trusted_out, trusted);
+    assert_eq!(posted.allowed, allowed);
+    assert!(posted.blocked.is_empty());
+    assert_eq!(posted.trusted, trusted);
+    assert_eq!(posted.default_experience, None);
 
-    let reply = build_region_experiences_response(&allowed, &[], &trusted);
-    let (allowed_out, blocked_out, trusted_out) =
+    let served = RegionExperienceLists {
+        allowed: allowed.to_vec(),
+        blocked: Vec::new(),
+        trusted: trusted.to_vec(),
+        default_experience: Some(experience_key("33333333-3333-3333-3333-333333333333")?),
+    };
+    let reply = build_region_experiences_response(&served);
+    let decoded =
         parse_region_experiences(&parse_llsd_xml(&reply).map_err(|error| format!("{error:?}"))?)
             .map_err(|error| format!("{error:?}"))?;
-    assert_eq!(allowed_out, allowed);
-    assert!(blocked_out.is_empty());
-    assert_eq!(trusted_out, trusted);
+    assert_eq!(decoded, served);
+
+    // An estate with no default omits the key entirely, so the round trip is
+    // still lossless and the reply names nothing to be sticky about.
+    let plain = RegionExperienceLists {
+        default_experience: None,
+        ..served
+    };
+    let reply = build_region_experiences_response(&plain);
+    assert!(!reply.contains("default"));
+    let decoded =
+        parse_region_experiences(&parse_llsd_xml(&reply).map_err(|error| format!("{error:?}"))?)
+            .map_err(|error| format!("{error:?}"))?;
+    assert_eq!(decoded, plain);
     Ok(())
 }
 

@@ -3548,6 +3548,9 @@ mod test {
     const EXP_C: u128 = 0x0E0C;
     /// An experience id no fixture knows — the "could not resolve" probe.
     const EXP_UNKNOWN: u128 = 0x0EFF;
+    /// The estate's default experience — in none of the three region lists, so
+    /// a reply that carries it is carrying it as the `default` key.
+    const EXP_DEFAULT: u128 = 0x0E0D;
     /// The group that owns [`EXP_C`].
     const EXP_GROUP: u128 = 0x0E60;
     /// The id base of the filler records that make a search spill onto a
@@ -3597,6 +3600,7 @@ mod test {
             vec![exp_key(EXP_B)],
             vec![exp_key(EXP_C)],
         );
+        experiences.set_region_default_experience(Some(exp_key(EXP_DEFAULT)));
     }
 
     /// The `GetExperienceInfo` GET serves the stored records through the
@@ -4066,10 +4070,11 @@ mod test {
         Ok(())
     }
 
-    /// The `RegionExperiences` GET serves the seeded triple; the POST
-    /// replaces it wholesale, echoes the stored lists, surfaces
-    /// [`ServerEvent::RegionExperiencesSet`], and a follow-up GET observes
-    /// the replacement.
+    /// The `RegionExperiences` GET serves the seeded triple and the estate's
+    /// default experience; the POST replaces the three lists wholesale, echoes
+    /// the stored lists (default included, since the POST cannot change it),
+    /// surfaces [`ServerEvent::RegionExperiencesSet`], and a follow-up GET
+    /// observes the replacement.
     #[test]
     fn region_experiences_get_and_post_round_trip() -> Result<(), TestError> {
         let mut caps = new_caps()?;
@@ -4092,11 +4097,13 @@ mod test {
                     allowed,
                     blocked,
                     trusted,
+                    default_experience,
                 },
             ] => {
                 assert_eq!(allowed, &vec![exp_key(EXP_A)]);
                 assert_eq!(blocked, &vec![exp_key(EXP_B)]);
                 assert_eq!(trusted, &vec![exp_key(EXP_C)]);
+                assert_eq!(default_experience, &Some(exp_key(EXP_DEFAULT)));
             }
             other => return Err(format!("expected RegionExperiences, got {other:?}").into()),
         }
@@ -4119,11 +4126,14 @@ mod test {
                     allowed,
                     blocked,
                     trusted,
+                    default_experience,
                 },
             ] => {
                 assert_eq!(allowed, &vec![exp_key(EXP_C)]);
                 assert_eq!(blocked, &Vec::new());
                 assert_eq!(trusted, &vec![exp_key(EXP_A), exp_key(EXP_B)]);
+                // The POST body named no default and the estate's is unchanged.
+                assert_eq!(default_experience, &Some(exp_key(EXP_DEFAULT)));
             }
             other => return Err(format!("expected RegionExperiences, got {other:?}").into()),
         }

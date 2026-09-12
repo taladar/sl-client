@@ -50,6 +50,13 @@
 //! cached record and a miss leaves the row in, so hiding unresolved rows would
 //! make the visible results depend on reply order.
 //!
+//! An open may also name **one id to exclude**
+//! ([`sl_viewer_world_api::OpenExperiencePicker::excluded`]) — the reference's
+//! second, `FilterMatching` filter, which is how the estate's Allowed and
+//! Blocked pickers keep the estate's own default experience off their lists. It
+//! needs no resolved record, so it is applied beside the property filter rather
+//! than inside it.
+//!
 //! # Divergence
 //!
 //! The reference's rating filter is an icon combo whose rows are the three
@@ -179,6 +186,10 @@ struct ExperiencePickerState {
     requester: Option<&'static str>,
     /// What this window's open will accept.
     filter: ExperiencePickerFilter,
+    /// One id this window's open refuses whatever [`Self::filter`] says — the
+    /// reference's second, `FilterMatching` filter (see
+    /// [`OpenExperiencePicker::excluded`]).
+    excluded: Option<ExperienceKey>,
     /// The current page's results, in reply order.
     results: Vec<ExperienceKey>,
     /// The search's progress.
@@ -203,9 +214,10 @@ impl ExperiencePickerState {
     /// Reset to a fresh open for `requester` under `filter` — what an Add on an
     /// already-open window does, so the second open cannot confirm a row the
     /// first one's filter admitted.
-    fn restart(&mut self, requester: &'static str, filter: ExperiencePickerFilter) {
-        self.requester = Some(requester);
-        self.filter = filter;
+    fn restart(&mut self, open: &OpenExperiencePicker) {
+        self.requester = Some(open.requester);
+        self.filter = open.filter;
+        self.excluded = open.excluded;
         self.results.clear();
         self.query.clear();
         self.page = 0;
@@ -355,7 +367,7 @@ fn open_experience_picker(
                     .entity(handle.title_text)
                     .insert(Translated::new("experience-picker-title"));
                 let mut state = ExperiencePickerState::default();
-                state.restart(open.requester, open.filter);
+                state.restart(&open);
                 // Seeded here rather than after the insert: the components only
                 // reach the world when this frame's commands flush, so a window
                 // spawned now is not queryable yet.
@@ -365,7 +377,7 @@ fn open_experience_picker(
             }
             KeyedFloaterOpen::Existing(window) => {
                 if let Ok(mut state) = states.get_mut(window) {
-                    state.restart(open.requester, open.filter);
+                    state.restart(&open);
                 }
             }
         }
@@ -772,6 +784,10 @@ fn rebuild_picker_view(
             .iter()
             .copied()
             .filter(|id| filter_admits(state.filter, &state.infos, *id))
+            // The reference's second filter: an id excluded by the opener is
+            // refused whatever its properties say (it needs no resolved record,
+            // which is why it is not folded into `filter_admits`).
+            .filter(|id| state.excluded != Some(*id))
             .filter(|id| {
                 state
                     .infos
@@ -1149,7 +1165,11 @@ mod tests {
     #[test]
     fn re_opening_restarts_the_search() {
         let mut state = ExperiencePickerState::default();
-        state.restart("trusted", ExperiencePickerFilter::Any);
+        state.restart(&OpenExperiencePicker {
+            requester: "trusted",
+            filter: ExperiencePickerFilter::Any,
+            excluded: Some(key(7)),
+        });
         state.query = "tour".to_owned();
         state.page = 3;
         state.results = vec![key(1), key(2)];
@@ -1158,9 +1178,16 @@ mod tests {
             has_previous_page: true,
         };
 
-        state.restart("blocked", ExperiencePickerFilter::GridScopedUnprivileged);
+        state.restart(&OpenExperiencePicker {
+            requester: "blocked",
+            filter: ExperiencePickerFilter::GridScopedUnprivileged,
+            excluded: None,
+        });
         assert_eq!(state.requester, Some("blocked"));
         assert_eq!(state.filter, ExperiencePickerFilter::GridScopedUnprivileged);
+        // The exclusion belongs to the open, not to the window: a second Add
+        // that names none must not keep the first one's.
+        assert_eq!(state.excluded, None);
         assert!(state.results.is_empty(), "a stale page must not survive");
         assert!(state.query.is_empty());
         assert_eq!(state.page, 0);

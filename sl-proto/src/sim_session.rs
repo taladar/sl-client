@@ -155,8 +155,8 @@ use sl_wire::messages::{
 use sl_wire::{
     AnyMessage, CircuitCode, ControlFlags, EventQueueEvent, ExperienceEnvironmentPush,
     ExperienceEvent, ExperienceInfo, ExperiencePermission, ExperienceUpdate, GlobalCoordinates,
-    Llsd, MessageId, PacketFlags, Permissions, Permissions5, Reader, RegionHandle,
-    RegionLocalObjectId, RegionLocalParcelId, SequenceNumber, WireError, Writer,
+    Llsd, MessageId, PacketFlags, Permissions, Permissions5, Reader, RegionExperienceLists,
+    RegionHandle, RegionLocalObjectId, RegionLocalParcelId, SequenceNumber, WireError, Writer,
     build_event_queue_response, encode_datagram, parse_datagram, zero_decode,
 };
 use uuid::Uuid;
@@ -4414,14 +4414,15 @@ impl SimSession {
 
     /// Replaces the region's experience lists wholesale (the
     /// `RegionExperiences` POST) and surfaces
-    /// [`ServerEvent::RegionExperiencesSet`]. Returns the stored triple for
-    /// the reply's echo.
+    /// [`ServerEvent::RegionExperiencesSet`]. Returns the stored lists for
+    /// the reply's echo — including the estate's default experience, which the
+    /// POST does not carry and therefore does not change.
     pub(crate) fn apply_region_experiences(
         &mut self,
         allowed: Vec<ExperienceKey>,
         blocked: Vec<ExperienceKey>,
         trusted: Vec<ExperienceKey>,
-    ) -> (Vec<ExperienceKey>, Vec<ExperienceKey>, Vec<ExperienceKey>) {
+    ) -> RegionExperienceLists {
         let stored =
             self.experiences
                 .apply_region_lists(allowed.clone(), blocked.clone(), trusted.clone());

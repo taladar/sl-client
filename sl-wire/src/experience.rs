@@ -30,7 +30,8 @@
 //! - `IsExperienceAdmin` / `IsExperienceContributor` — GET `…?experience_id=<id>` → `{ status }`.
 //! - `UpdateExperience` — POST the editable metadata → the updated experience info.
 //! - `RegionExperiences` — GET, or POST `{ allowed, blocked, trusted }` to update;
-//!   both reply `{ allowed, blocked, trusted }`.
+//!   both reply `{ allowed, blocked, trusted }`, optionally with the estate's
+//!   `default` experience beside them ([`RegionExperienceLists`]).
 //! - `ExperienceQuery` — GET `…?parcelid=<id>&experiences=<id>,<id>` → `{
 //!   experiences: { "<id>": bool } }`: of the experiences named, which does that
 //!   parcel admit? Unlike the rest of this family it is a **region** capability
@@ -68,7 +69,7 @@ pub use server::{
 pub use types::{
     ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceSearchPage,
     ExperienceUpdate, PROPERTY_DISABLED, PROPERTY_GRID, PROPERTY_INVALID, PROPERTY_PRIVATE,
-    PROPERTY_PRIVILEGED, PROPERTY_SUSPENDED, SEARCH_PAGE_SIZE,
+    PROPERTY_PRIVILEGED, PROPERTY_SUSPENDED, RegionExperienceLists, SEARCH_PAGE_SIZE,
 };
 
 /// Reads a UUID-valued LLSD value, accepting either a `uuid` or a `string`.
