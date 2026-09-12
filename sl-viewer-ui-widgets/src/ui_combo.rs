@@ -255,10 +255,11 @@ impl Plugin for ComboWidgetPlugin {
     /// Register the reconcile system, the change message, and the outside-press
     /// dismiss observer.
     fn build(&self, app: &mut App) {
+        // So the widget crate stands alone in its own tests; idempotent, and
+        // the viewer's scaffold installs the same thing.
+        sl_viewer_ui_core::ui::install_ui_pointer_claim(app);
         app.add_message::<ComboChanged>()
             .add_message::<SetComboOptions>()
-            .init_resource::<sl_viewer_ui_core::ui::UiPointerClaim>()
-            .add_systems(First, sl_viewer_ui_core::ui::reset_ui_pointer_claim)
             .add_systems(
                 Update,
                 (

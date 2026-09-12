@@ -189,6 +189,10 @@ pub struct ViewerUiPlugin;
 
 impl Plugin for ViewerUiPlugin {
     fn build(&self, app: &mut App) {
+        // Every widget that closes itself on a press depends on this, and the
+        // world pick that consults it is nowhere near any of them — so the
+        // scaffold owns it (see `install_ui_pointer_claim`).
+        install_ui_pointer_claim(app);
         app
             // The keyboard half of focus. `DefaultPlugins` brings `InputFocus`
             // and dispatch, but not navigation, so `Tab` is inert without this.
@@ -2349,4 +2353,67 @@ impl UiPointerClaim {
 /// picking observers that set it run.
 pub fn reset_ui_pointer_claim(mut claim: ResMut<UiPointerClaim>) {
     claim.claimed = false;
+}
+
+/// Claim a press that landed on a blocking UI node, for **every** widget at
+/// once.
+///
+/// The predicate is `pointer_over_blocking_ui`'s, applied to the pressed entity
+/// rather than to the hover map, and that difference is the whole point: this
+/// runs as a picking observer, in the frame's press, while the node is still
+/// alive. The hover-map test runs later, in `Update`, and a widget that
+/// **despawns itself** while handling the press — a combo dropdown closing on a
+/// pick, a keyed picker floater closing on OK, a pooled list row despawned by
+/// the rebuild its own click triggered — has by then left a stale hover-map
+/// entry with no `ComputedNode` behind it. The test reads that as "not a UI
+/// surface" and **fails open**: the press leaks to the world pick, where a
+/// click on nothing means *deselect*. Which is how choosing a group for the
+/// selected object used to throw the selection away.
+///
+/// Claiming generically rather than per widget is deliberate. The hazard
+/// belongs to "a UI node was pressed and then went away", which is a property
+/// of the press, not of any one widget — and the two widgets that remembered to
+/// claim were the two whose authors had been bitten. Every other self-closing
+/// surface in the viewer was one careless frame from the same bug.
+///
+/// It only ever *adds* a reason to skip the world pick: a node that blocks here
+/// is a node the hover-map test would also have called blocking, had it
+/// survived to be asked.
+fn claim_ui_press(
+    press: On<Pointer<Press>>,
+    pickables: Query<&Pickable>,
+    sizes: Query<&ComputedNode>,
+    mut claim: ResMut<UiPointerClaim>,
+) {
+    let blocks = pickables
+        .get(press.entity)
+        .map_or(true, |pickable| pickable.should_block_lower);
+    // No `ComputedNode` means the press landed on something that is not a
+    // `bevy_ui` node at all — an object in the world — and the world's own
+    // handling of it must not be claimed away.
+    let has_area = sizes
+        .get(press.entity)
+        .is_ok_and(|computed| computed.size().x > 0.0 && computed.size().y > 0.0);
+    if blocks && has_area {
+        claim.claim();
+    }
+}
+
+/// Install [`UiPointerClaim`] with its per-frame reset and the generic
+/// `claim_ui_press` observer — which claims any press that lands on a blocking
+/// UI node, so a widget that despawns itself while handling one cannot leak it
+/// to the world pick.
+///
+/// Idempotent, and called by every fold that stands up enough UI for a press to
+/// be claimed — the viewer's scaffold, the combo widget's own plugin, and the
+/// test harnesses. A fold that consults the claim without installing the
+/// claimer would read "nothing claimed this" for every press, which is the
+/// failure this exists to prevent.
+pub fn install_ui_pointer_claim(app: &mut App) {
+    if app.world().get_resource::<UiPointerClaim>().is_some() {
+        return;
+    }
+    app.init_resource::<UiPointerClaim>()
+        .add_systems(First, reset_ui_pointer_claim)
+        .add_observer(claim_ui_press);
 }

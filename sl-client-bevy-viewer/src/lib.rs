@@ -179,6 +179,7 @@ pub(crate) use sl_viewer_kit::geometry_cache;
 pub(crate) use sl_viewer_people::group_notice;
 pub(crate) use sl_viewer_people::group_profile;
 pub(crate) use sl_viewer_people::groups;
+pub(crate) use sl_viewer_pickers::group_picker;
 pub(crate) use sl_viewer_world_avatar::gpu_avatar_spike;
 pub(crate) use sl_viewer_world_avatar::gpu_avatars;
 pub(crate) use sl_viewer_world_avatar::ground;
@@ -423,6 +424,7 @@ use crate::experiences_floater::ExperiencesPlugin;
 use crate::floater::FloaterPlugin;
 use crate::floater_persist::FloaterPersistPlugin;
 use crate::group_notice::GroupNoticePlugin;
+use crate::group_picker::GroupPickerPlugin;
 use crate::group_profile::GroupProfilePlugin;
 use crate::groups::GroupsPlugin;
 use crate::i18n::ViewerI18nPlugin;
@@ -1338,6 +1340,12 @@ fn run_session(
     .add_plugins(SettingsIndexPlugin)
     .add_plugins(AboutLandmarkPlugin)
     .add_plugins(AvatarPickerPlugin)
+    // The group picker (viewer-region-estate-group-picker): the chooser behind
+    // every set-group control — About Land's group, the build tool's, and the
+    // estate's allowed-groups Add. Lists the agent's memberships (GroupsModel,
+    // whose GroupsPlugin follows) and, where the caller can use one, searches
+    // the directory for a group the agent is not in.
+    .add_plugins(GroupPickerPlugin)
     // The avatar profile floater (viewer-social-profiles): 2nd Life / Web /
     // Picks / Classifieds / 1st Life / Notes, opened from the avatar pie's
     // Profile slice and the People list, editable for one's own profile.

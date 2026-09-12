@@ -98,6 +98,7 @@ use crate::world_api::AgentRegionPosition;
 use crate::world_api::AvatarState;
 use crate::world_api::GroupsModel;
 use crate::world_api::{AvatarPicked, OpenAvatarPicker};
+use crate::world_api::{GroupPicked, OpenGroupPicker};
 use crate::world_api::{OpenTexturePicker, PickerKind, TexturePicked};
 
 /// The floater's body font size, in logical pixels.
@@ -148,6 +149,10 @@ const PICK_ALLOW: &str = "about-land-allow";
 
 /// The avatar-picker field name for the ban list's Add.
 const PICK_BAN: &str = "about-land-ban";
+
+/// The **group**-picker field name for the General tab's group Set… (see
+/// `OpenGroupPicker::field`).
+const PICK_GROUP: &str = "about-land-group";
 
 /// The object-owners table: type, name, object count.
 const OWNERS_TABLE: TableSpec = TableSpec {
@@ -948,6 +953,8 @@ enum AboutLandAction {
     SetLandingPoint,
     /// Clear the landing point.
     ClearLandingPoint,
+    /// Open the group picker to set (or clear) the parcel's group.
+    SetGroup,
     /// Open the avatar picker to add to the allow list.
     AddAllowed,
     /// Open the avatar picker to add to the ban list.
@@ -1009,6 +1016,7 @@ impl Plugin for AboutLandPlugin {
                     apply_combo_edits,
                     apply_texture_edits,
                     apply_avatar_picks,
+                    apply_group_picks,
                 )
                     .chain()
                     .after(open_about_land)
@@ -1165,6 +1173,16 @@ fn build_general_tab(commands: &mut Commands, panel: Entity) -> GeneralHandles {
         group_row,
         NameLinkSpec::new("about-land-loading", "about-land-none"),
     ));
+    // The reference's "Set…" beside the group name. Only the agent's own groups
+    // are offered: the simulator refuses a parcel group the owner is not in.
+    spawn_action_button(
+        commands,
+        group_row,
+        "about-land-set-group",
+        AboutLandAction::SetGroup,
+        4,
+        true,
+    );
     let area_row = spawn_labeled_row(commands, panel, "about-land-area");
     handles.area = Some(spawn_value_node(commands, area_row));
     let claimed_row = spawn_labeled_row(commands, panel, "about-land-claimed");
@@ -1173,7 +1191,7 @@ fn build_general_tab(commands: &mut Commands, panel: Entity) -> GeneralHandles {
     handles.traffic = Some(spawn_value_node(commands, traffic_row));
     let sale_row = spawn_labeled_row(commands, panel, "about-land-for-sale");
     handles.for_sale = Some(spawn_value_node(commands, sale_row));
-    spawn_apply_button(commands, panel, 4);
+    spawn_apply_button(commands, panel, 5);
     handles
 }
 
@@ -2261,23 +2279,37 @@ fn field_reads(fields: &Query<&mut EditableText>, field: Option<Entity>, value: 
     field_text(fields, field).is_none_or(|text| text == value)
 }
 
-/// Toggle write buttons' visibility and every editable control's
-/// [`InteractionDisabled`] to follow the agent's rights.
-/// Toggle each window's write buttons' visibility and every editable control's
-/// [`InteractionDisabled`] to follow the agent's rights **in that window**.
+/// Grey each window's write buttons and every editable control to follow the
+/// agent's rights **in that window**.
 ///
 /// The controls are found by walking up from each one to the window it lives in
 /// ([`host_floater`]), rather than by sweeping every control in the viewer: two
 /// About Land windows can disagree about `can_edit` — one on a parcel this
 /// resident owns, one on a neighbour's — and a sweep would give both the last
 /// window's answer.
+///
+/// # Greyed, not gone
+///
+/// A write button used to **hide** on a parcel this resident cannot edit. That
+/// reads as a viewer missing the feature rather than as a permission the person
+/// lacks — someone looking for the group **Set…** cannot tell "not yours" from
+/// "not built". The reference greys them instead
+/// (`LLPanelLandGeneral::refresh` walks its buttons with `setEnabled`), and so
+/// does this.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "reconciling control enable needs every window, the write buttons and their labels, \
+              the gated controls, the disabled set, and the two ancestry walks together"
+)]
 fn update_control_enable(
     mut windows: Query<(Entity, &mut AboutLandDirty, &AboutLandState)>,
-    mut write_buttons: Query<(Entity, &mut Visibility), With<WriteButton>>,
+    write_buttons: Query<Entity, With<WriteButton>>,
     gated: Query<(Entity, &EditGate)>,
     disabled: Query<(), With<InteractionDisabled>>,
     parents: Query<&ChildOf>,
+    children: Query<&Children>,
     floaters: Query<(Entity, &Floater)>,
+    mut texts: Query<&mut TextColor>,
     mut commands: Commands,
 ) {
     // The windows repainting this frame, and what each one allows.
@@ -2298,17 +2330,29 @@ fn update_control_enable(
             .iter()
             .find_map(|(window, can_edit)| (*window == host).then_some(*can_edit))
     };
-    for (entity, mut visibility) in &mut write_buttons {
+    for entity in &write_buttons {
         let Some(can_edit) = can_edit(entity) else {
             continue;
         };
+        let is_disabled = disabled.contains(entity);
+        if can_edit && is_disabled {
+            commands.entity(entity).remove::<InteractionDisabled>();
+        } else if !can_edit && !is_disabled {
+            commands.entity(entity).insert(InteractionDisabled);
+        }
+        // `InteractionDisabled` is advisory: each widget kind greys itself, and
+        // a plain action button's "self" is the label inside it.
         let want = if can_edit {
-            Visibility::Inherited
+            LABEL_COLOR
         } else {
-            Visibility::Hidden
+            DISABLED_COLOR
         };
-        if *visibility != want {
-            *visibility = want;
+        for label in children.get(entity).into_iter().flatten() {
+            if let Ok(mut color) = texts.get_mut(*label)
+                && color.0 != want
+            {
+                color.0 = want;
+            }
         }
     }
     for (entity, gate) in &gated {
@@ -3003,6 +3047,7 @@ fn on_about_land_action(
     fields: Query<&EditableText>,
     mut sl_commands: MessageWriter<SlCommand>,
     mut pickers: MessageWriter<OpenAvatarPicker>,
+    mut group_pickers: MessageWriter<OpenGroupPicker>,
     mut texture_pickers: MessageWriter<OpenTexturePicker>,
 ) {
     if press.button != PointerButton::Primary {
@@ -3058,6 +3103,11 @@ fn on_about_land_action(
         }
         AboutLandAction::ClearLandingPoint => {
             state.draft.user_location = RegionCoordinates::new(0.0, 0.0, 0.0);
+        }
+        // The agent's own groups only, and "none" among them: a parcel's group
+        // may be cleared, but the simulator refuses one the owner is not in.
+        AboutLandAction::SetGroup => {
+            group_pickers.write(OpenGroupPicker::new(press.entity, PICK_GROUP));
         }
         // Both access lists take a multi-pick. The reference only does that on
         // the ban list — its allow list was never updated when the ban path
@@ -3240,6 +3290,48 @@ fn apply_avatar_picks(
     }
 }
 
+/// Fold a group pick into the parcel's group and post it.
+///
+/// Routed like the avatar picks: the pressed Set… button names both the action
+/// and, through [`host_floater`], its window. Unlike every other General-tab
+/// edit this commits **on the pick** rather than on Apply, because the group
+/// the tab shows is the parcel's own and only the grid's echo moves it — the
+/// reference commits here too (`LLPanelLandGeneral::setGroup`). A pick of the
+/// "none" row clears the group, which is what that row is offered for.
+fn apply_group_picks(
+    mut picked: MessageReader<GroupPicked>,
+    mut windows: Query<&mut AboutLandState>,
+    actions: Query<&AboutLandAction>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
+    identity: Res<SlIdentity>,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    let frame: Vec<GroupPicked> = picked.read().cloned().collect();
+    if frame.is_empty() {
+        return;
+    }
+    for event in &frame {
+        let Ok(AboutLandAction::SetGroup) = actions.get(event.requester) else {
+            continue;
+        };
+        let Some(window) = host_floater(event.requester, &parents, &floaters) else {
+            continue;
+        };
+        let Ok(mut state) = windows.get_mut(window) else {
+            continue;
+        };
+        if !state.can_edit {
+            continue;
+        }
+        let Some(scoped) = state.scoped(&identity) else {
+            continue;
+        };
+        state.draft.group_id = event.group;
+        commit_draft(&mut state, scoped, &mut commands);
+    }
+}
+
 /// Compose the draft from the edit fields and commit it with a refresh.
 fn apply_draft(
     state: &mut AboutLandState,
@@ -3275,8 +3367,24 @@ fn apply_draft(
     {
         draft.pass_hours = hours;
     }
-    draft.local_id = scoped.id();
-    commands.write(SlCommand(Command::UpdateParcel(draft.clone())));
+    commit_draft(state, scoped, commands);
+}
+
+/// Post the draft as it stands and ask for the parcel back.
+///
+/// Split out of [`apply_draft`] for the group **Set…**, which commits on the
+/// pick rather than waiting for Apply — as the reference does
+/// (`LLPanelLandGeneral::setGroup` calls `sendParcelPropertiesUpdate`
+/// immediately) and as this floater must, since the group it shows is the
+/// *parcel's* group and only the grid's echo moves it. It deliberately does not
+/// read the edit fields: a group set must not smuggle out a half-typed name.
+fn commit_draft(
+    state: &mut AboutLandState,
+    scoped: ScopedParcelId,
+    commands: &mut MessageWriter<SlCommand>,
+) {
+    state.draft.local_id = scoped.id();
+    commands.write(SlCommand(Command::UpdateParcel(state.draft.clone())));
     commands.write(SlCommand(Command::RequestParcelPropertiesById {
         local_id: scoped,
         sequence_id: 0,
@@ -4151,17 +4259,17 @@ mod tests {
     /// request the keying had to serialise.
     mod instances {
         use super::super::{
-            AboutLandPlugin, AboutLandState, AboutLandSubject, OpenAboutLand, OwnerTallyQueue,
-            parcel_key,
+            AboutLandAction, AboutLandDirty, AboutLandPlugin, AboutLandState, AboutLandSubject,
+            OpenAboutLand, OwnerTallyQueue, parcel_key,
         };
         use crate::floater::{Floater, FloaterCommand, FloaterOp, FloaterPlugin};
         use crate::ui::UiRoot;
-        use crate::world_api::{AgentRegionPosition, AvatarState, GroupsModel};
+        use crate::world_api::{AgentRegionPosition, AvatarState, GroupPicked, GroupsModel};
         use bevy::prelude::*;
-        use pretty_assertions::assert_eq;
+        use pretty_assertions::{assert_eq, assert_ne};
         use sl_client_bevy::{
-            AgentKey, CircuitId, Command, RegionLocalParcelId, ScopedParcelId, SlAgentParcel,
-            SlCommand, SlEvent, SlIdentity, Uuid,
+            AgentKey, CircuitId, Command, GroupKey, RegionLocalParcelId, ScopedParcelId,
+            SlAgentParcel, SlCommand, SlEvent, SlIdentity, Uuid,
         };
 
         /// A boxed error so tests use `?` rather than the disallowed
@@ -4189,6 +4297,8 @@ mod tests {
                 .add_message::<crate::world_api::TexturePicked>()
                 .add_message::<crate::world_api::OpenAvatarPicker>()
                 .add_message::<crate::world_api::AvatarPicked>()
+                .add_message::<crate::world_api::OpenGroupPicker>()
+                .add_message::<crate::world_api::GroupPicked>()
                 .insert_resource(identity)
                 .init_resource::<AvatarState>()
                 .init_resource::<GroupsModel>()
@@ -4343,6 +4453,96 @@ mod tests {
             assert!(
                 tallies.owns_reply(second),
                 "the second window never got its turn"
+            );
+            Ok(())
+        }
+
+        /// **The General tab has a group Set…**
+        /// (`viewer-region-estate-group-picker`), and a parcel this resident
+        /// cannot edit greys it rather than taking it away — a vanished button
+        /// reads as a viewer without the feature, which is the wrong answer to
+        /// "where do I set the group".
+        #[test]
+        fn the_group_set_button_exists_and_greys_rather_than_vanishing() -> Result<(), TestError> {
+            let mut app = land_app();
+            open(&mut app, 7);
+            let window = *windows(&mut app).first().ok_or("no window opened")?;
+
+            let set_group = app
+                .world_mut()
+                .query::<(Entity, &AboutLandAction)>()
+                .iter(app.world())
+                .find_map(|(entity, action)| {
+                    matches!(action, AboutLandAction::SetGroup).then_some(entity)
+                })
+                .ok_or("the General tab has no group Set… button")?;
+
+            // A parcel nobody here owns: the button stays, greyed.
+            if let Some(mut state) = app.world_mut().get_mut::<AboutLandState>(window) {
+                state.can_edit = false;
+            }
+            if let Some(mut dirty) = app.world_mut().get_mut::<AboutLandDirty>(window) {
+                dirty.controls = true;
+            }
+            app.update();
+            app.update();
+
+            assert_ne!(
+                app.world().get::<Visibility>(set_group).copied(),
+                Some(Visibility::Hidden),
+                "the button hid itself instead of greying"
+            );
+            assert!(
+                app.world()
+                    .get::<bevy::ui::InteractionDisabled>(set_group)
+                    .is_some(),
+                "a shown button on a parcel this resident cannot edit must refuse input"
+            );
+            Ok(())
+        }
+
+        /// A group pick sets the parcel's group and posts it **at once** — the
+        /// reference commits on the pick (`LLPanelLandGeneral::setGroup`), and
+        /// the line the tab shows is the parcel's own, so only the grid's echo
+        /// can move it.
+        #[test]
+        fn a_group_pick_commits_the_parcel_group() -> Result<(), TestError> {
+            let mut app = land_app();
+            open(&mut app, 7);
+            let window = *windows(&mut app).first().ok_or("no window opened")?;
+            if let Some(mut state) = app.world_mut().get_mut::<AboutLandState>(window) {
+                state.can_edit = true;
+            }
+            app.update();
+            let set_group = app
+                .world_mut()
+                .query::<(Entity, &AboutLandAction)>()
+                .iter(app.world())
+                .find_map(|(entity, action)| {
+                    matches!(action, AboutLandAction::SetGroup).then_some(entity)
+                })
+                .ok_or("the General tab has no group Set… button")?;
+
+            let chosen = GroupKey::from(Uuid::from_u128(0x00C0_FFEE));
+            app.world_mut().write_message(GroupPicked {
+                requester: set_group,
+                group: Some(chosen),
+                name: "Cartographers".to_owned(),
+            });
+            app.update();
+            app.update();
+
+            let posted: Vec<SlCommand> = app
+                .world_mut()
+                .resource_mut::<Messages<SlCommand>>()
+                .drain()
+                .collect();
+            assert!(
+                posted.iter().any(|command| matches!(
+                    &command.0,
+                    Command::UpdateParcel(update) if update.group_id == Some(chosen)
+                )),
+                "the pick posted no parcel update carrying the group: {posted:?}"
             );
             Ok(())
         }

@@ -406,6 +406,8 @@ about-land-type = Type:
 about-land-rating = Rating:
 about-land-owner = Owner:
 about-land-group = Group:
+# The button beside the group name, which opens the group picker.
+about-land-set-group = Set…
 about-land-area = Area:
 about-land-claimed = Claimed:
 about-land-traffic = Traffic:
@@ -641,8 +643,8 @@ about-region-allowed-groups = Allowed groups
 about-region-banned = Banned residents
 about-region-add-manager = Add Manager…
 about-region-add-allowed = Add Resident…
+about-region-add-allowed-group = Add Group…
 about-region-add-banned = Ban Resident…
-about-region-allowed-groups-note = Adding an allowed group needs a group picker (a separate feature); existing groups can be removed here.
 about-region-access-name = Name
 about-region-access-remove = Remove
 
@@ -817,6 +819,22 @@ avatar-picker-go = Go
 avatar-picker-not-found = No residents found
 avatar-picker-ok = OK
 avatar-picker-cancel = Cancel
+
+## The group picker floater (viewer-region-estate-group-picker).
+
+group-picker-title = Choose Group
+group-picker-tab-mine = My groups
+group-picker-tab-search = Search
+group-picker-go = Go
+# The row that answers "no group at all", offered only where a control may
+# clear the group it sets.
+group-picker-none = (none)
+# Shown in the list when the agent belongs to no groups at all.
+group-picker-no-groups = You are not in any groups
+# Shown in the list when a directory search matched nothing.
+group-picker-not-found = No groups found
+group-picker-ok = OK
+group-picker-cancel = Cancel
 ## The item properties floater + Open previews
 ## (viewer-inventory-open-and-properties).
 
@@ -1204,6 +1222,8 @@ build-info-land-impact = Land Impact
 build-info-you-can = You can
 build-group-label = Group
 build-group-none = (none)
+# The button beside the object's group name, which opens the group picker.
+build-set-group = Set…
 build-deed = Deed
 build-share-group = Share with group
 build-next-owner-label = Next owner can

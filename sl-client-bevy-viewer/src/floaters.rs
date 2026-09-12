@@ -226,6 +226,15 @@ pub(crate) const FLOATERS: &[FloaterElement] = &[
         content: FloaterContent::Specimen(crate::experiences_floater::spawn_experiences_specimen),
     },
     FloaterElement {
+        id: "group-picker",
+        summary: "Choose Group: the agent's own groups over an optional \"none\" row, and the \
+                  OK / Cancel reply row every set-group control is written against.",
+        spec: crate::group_picker::group_picker_floater_spec,
+        content: FloaterContent::Stub(
+            "The group list filled from the agent's memberships, and the OK / Cancel row.",
+        ),
+    },
+    FloaterElement {
         id: "group-profile",
         summary: "Group: a group's General / Roles / Members / Notices / Land tabs. \
                   One window per group, so its geometry is not persisted.",

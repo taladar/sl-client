@@ -128,6 +128,7 @@ use crate::world_api::GroupsModel;
 use crate::world_api::TexturePicked;
 use crate::world_api::{AvatarPicked, OpenAvatarPicker};
 use crate::world_api::{ExperiencePicked, ExperiencePickerFilter, OpenExperiencePicker};
+use crate::world_api::{GroupPicked, OpenGroupPicker};
 
 /// The floater's body font size, in logical pixels.
 const FONT_SIZE: f32 = 13.0;
@@ -175,6 +176,10 @@ const PICK_ALLOWED: &str = "about-region-allowed";
 
 /// The avatar-picker field name for adding a banned resident.
 const PICK_BANNED: &str = "about-region-banned";
+
+/// The **group**-picker field name for adding an allowed group (see
+/// `OpenGroupPicker::field`).
+const PICK_ALLOWED_GROUP: &str = "about-region-allowed-group";
 
 /// The avatar-picker field name for teleporting one resident home.
 const PICK_TELEPORT: &str = "about-region-teleport";
@@ -1095,6 +1100,8 @@ enum AboutRegionAction {
     AddAllowed,
     /// Open the avatar picker to add a banned resident.
     AddBanned,
+    /// Open the group picker to add an allowed group.
+    AddAllowedGroup,
     /// Open the experience picker to add to one of the estate's three
     /// experience lists.
     AddExperience(ExperienceList),
@@ -1174,6 +1181,10 @@ impl Plugin for AboutRegionPlugin {
                     request_unknown_region_experience_infos,
                     sync_experiences_view,
                     apply_experience_picks,
+                    // Here rather than beside `apply_avatar_picks` only
+                    // because that first pass is at the twenty-system `chain`
+                    // bound; it needs nothing this tuple produces.
+                    apply_group_picks,
                 )
                     .chain()
                     .after(ingest_about_region_events)
@@ -1685,7 +1696,13 @@ fn build_access_tab(commands: &mut Commands, panel: Entity) -> AccessHandles {
     let groups = spawn_bounded_table(commands, panel, &ALLOWED_GROUPS_TABLE);
     handles.allowed_groups_viewport = Some(groups.viewport);
     handles.allowed_groups_table = Some(groups.root);
-    spawn_note(commands, panel, "about-region-allowed-groups-note");
+    spawn_row_action_button(
+        commands,
+        panel,
+        "about-region-add-allowed-group",
+        AboutRegionAction::AddAllowedGroup,
+        4,
+    );
 
     spawn_section_label(commands, panel, "about-region-banned");
     let banned = spawn_bounded_table(commands, panel, &BANNED_TABLE);
@@ -1696,7 +1713,7 @@ fn build_access_tab(commands: &mut Commands, panel: Entity) -> AccessHandles {
         panel,
         "about-region-add-banned",
         AboutRegionAction::AddBanned,
-        4,
+        5,
     );
 
     handles
@@ -1723,9 +1740,10 @@ fn build_experiences_tab(commands: &mut Commands, panel: Entity) -> ExperienceHa
             button_row,
             list.add_key(),
             AboutRegionAction::AddExperience(list),
-            // After the Access tab's four (tab indices 2–4), continuing the
-            // window's single tab order rather than restarting it.
-            5_i32.saturating_add(i32::try_from(offset).unwrap_or(0)),
+            // After the Access tab's four Add buttons (tab indices 2–5),
+            // continuing the window's single tab order rather than restarting
+            // it.
+            6_i32.saturating_add(i32::try_from(offset).unwrap_or(0)),
             true,
         );
     }
@@ -2290,14 +2308,25 @@ fn set_swatch(swatches: &mut Query<&mut TextureSwatchValue>, node: Option<Entity
 // Control enable.
 // ---------------------------------------------------------------------------
 
-/// Toggle each window's write buttons' visibility and every editable control's
-/// [`InteractionDisabled`] to follow the agent's estate rights **in that
-/// window's region**, and repaint its checkbox glyphs.
+/// Grey each window's write buttons and every editable control to follow the
+/// agent's estate rights **in that window's region**, and repaint its checkbox
+/// glyphs.
 ///
 /// The controls are found by walking up from each one to the window it lives in
 /// ([`host_floater`]): two windows can disagree — one on the region the agent
 /// manages and is standing in, one frozen on the region behind them — and a
 /// sweep would give both the last window's answer.
+///
+/// # Greyed, not gone
+///
+/// A write button used to **hide** where the agent could not manage the
+/// estate. That reads as a viewer that does not have the feature rather than as
+/// a permission the person lacks — and it hid the difference between "you may
+/// not do this here" and "nobody built it yet", which is the question someone
+/// looking for an Add button is actually asking. The reference greys the whole
+/// Access panel for a non-manager (`setCtrlsEnabled(false)`) and leaves every
+/// control where it is; so does this, through the same [`InteractionDisabled`]
+/// the gated controls take.
 #[expect(
     clippy::too_many_arguments,
     reason = "reconciling control enable needs every window, the write buttons, gated controls, \
@@ -2305,11 +2334,12 @@ fn set_swatch(swatches: &mut Query<&mut TextureSwatchValue>, node: Option<Entity
 )]
 fn update_control_enable(
     mut windows: Query<(Entity, &mut AboutRegionDirty, &AboutRegionState)>,
-    mut write_buttons: Query<(Entity, &mut Visibility), With<WriteButton>>,
+    write_buttons: Query<Entity, With<WriteButton>>,
     gated: Query<Entity, With<EditGate>>,
     disabled: Query<(), With<InteractionDisabled>>,
     checks: Query<(Entity, &AboutRegionCheck)>,
     parents: Query<&ChildOf>,
+    children: Query<&Children>,
     floaters: Query<(Entity, &Floater)>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
     mut commands: Commands,
@@ -2332,20 +2362,7 @@ fn update_control_enable(
             .iter()
             .find_map(|(window, can_manage)| (*window == host).then_some(*can_manage))
     };
-    for (entity, mut visibility) in &mut write_buttons {
-        let Some(can_manage) = can_manage(entity) else {
-            continue;
-        };
-        let want = if can_manage {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        };
-        if *visibility != want {
-            *visibility = want;
-        }
-    }
-    for entity in &gated {
+    for entity in write_buttons.iter().chain(gated.iter()) {
         let Some(can_manage) = can_manage(entity) else {
             continue;
         };
@@ -2354,6 +2371,25 @@ fn update_control_enable(
             commands.entity(entity).remove::<InteractionDisabled>();
         } else if !can_manage && !is_disabled {
             commands.entity(entity).insert(InteractionDisabled);
+        }
+    }
+    // `InteractionDisabled` is advisory: each widget kind greys itself, and a
+    // plain action button's "self" is the label inside it.
+    for button in &write_buttons {
+        let Some(can_manage) = can_manage(button) else {
+            continue;
+        };
+        let want = if can_manage {
+            LABEL_COLOR
+        } else {
+            DISABLED_COLOR
+        };
+        for label in children.get(button).into_iter().flatten() {
+            if let Ok((_text, mut color)) = texts.get_mut(*label)
+                && color.0 != want
+            {
+                color.0 = want;
+            }
         }
     }
     for (entity, check) in &checks {
@@ -2661,16 +2697,35 @@ fn sync_allowed_view(
     }
 }
 
-/// Rebuild the allowed-groups view.
-/// Rebuild each window's allowed-groups view.
+/// Rebuild each window's allowed-groups view, asking the grid for the name of
+/// any listed group the membership cache cannot name.
+///
+/// Only the three agent lists get their names for free (the avatar name cache
+/// resolves anyone). A group the agent is **not a member of** is nameless here
+/// until something asks — and the estate's allowed groups are exactly the
+/// groups a manager need not have joined, now that the picker can name one by
+/// search. Asked only when the *list* moved, not whenever a name lands, so a
+/// group the grid will not name cannot turn into a re-request loop.
 fn sync_allowed_groups_view(
     mut windows: Query<(&AboutRegionState, &mut AllowedGroupsView, &AboutRegionUi)>,
     avatars: Res<AvatarState>,
     groups: Res<GroupsModel>,
     mut lists: Query<&mut VirtualList>,
+    mut commands: MessageWriter<SlCommand>,
 ) {
     for (state, view, ui) in &mut windows {
         let view = view.into_inner();
+        if view.built != state.allowed_groups_revision {
+            let unknown: Vec<GroupKey> = state
+                .allowed_groups
+                .iter()
+                .map(|id| GroupKey::from(*id))
+                .filter(|group| groups.group_name(*group).is_none())
+                .collect();
+            if !unknown.is_empty() {
+                commands.write(SlCommand(Command::RequestGroupNames(unknown)));
+            }
+        }
         sync_access_view(
             AccessList::AllowedGroups,
             state.allowed_groups_revision,
@@ -2751,7 +2806,6 @@ fn sync_access_view(
     }
 }
 
-/// Build each newly-pooled access row's cells + Remove button once.
 /// Build each newly-pooled access row's cells + Remove button once, in
 /// whichever window's list it was pooled into.
 fn populate_access_rows(
@@ -3267,6 +3321,7 @@ fn on_about_region_action(
     fields: Query<&EditableText>,
     mut sl_commands: MessageWriter<SlCommand>,
     mut pickers: MessageWriter<OpenAvatarPicker>,
+    mut group_pickers: MessageWriter<OpenGroupPicker>,
     mut experience_pickers: MessageWriter<OpenExperiencePicker>,
 ) {
     if press.button != PointerButton::Primary {
@@ -3369,6 +3424,17 @@ fn on_about_region_action(
         }
         AboutRegionAction::AddBanned => {
             pickers.write(OpenAvatarPicker::many(press.entity, PICK_BANNED));
+        }
+        // The allowed-groups list only ever records an id, so it can take a
+        // group the manager is not a member of — which the reference cannot,
+        // its picker being the agent's own memberships and nothing else. No
+        // "none" row: a null group would be a row naming nothing.
+        AboutRegionAction::AddAllowedGroup => {
+            group_pickers.write(
+                OpenGroupPicker::new(press.entity, PICK_ALLOWED_GROUP)
+                    .without_none()
+                    .searching_the_directory(),
+            );
         }
         AboutRegionAction::AddExperience(list) => {
             // A full list refuses rather than opening a picker whose pick it
@@ -3511,13 +3577,18 @@ fn apply_avatar_picks(
                     commands.write(SlCommand(Command::KickEstateUser { target: agent }));
                 }
                 AboutRegionAction::AddManager => {
-                    add_access_entry(&mut state, AccessList::Managers, agent, &mut commands);
+                    add_access_entry(
+                        &mut state,
+                        AccessList::Managers,
+                        agent.uuid(),
+                        &mut commands,
+                    );
                 }
                 AboutRegionAction::AddAllowed => {
-                    add_access_entry(&mut state, AccessList::Allowed, agent, &mut commands);
+                    add_access_entry(&mut state, AccessList::Allowed, agent.uuid(), &mut commands);
                 }
                 AboutRegionAction::AddBanned => {
-                    add_access_entry(&mut state, AccessList::Banned, agent, &mut commands);
+                    add_access_entry(&mut state, AccessList::Banned, agent.uuid(), &mut commands);
                 }
                 _other => {}
             }
@@ -3525,8 +3596,56 @@ fn apply_avatar_picks(
     }
 }
 
-/// Fold a terrain texture pick into the terrain draft slot and repaint its
-/// swatch thumbnail (via [`TextureSwatchValue`]).
+/// Fold a group pick into the allowed-groups list of the window that asked.
+///
+/// Routed exactly like the avatar and experience picks: the button that asked
+/// names its own action and, through [`host_floater`], its own window. The
+/// picker answers with one group (never the "none" row — the open refused it),
+/// and the list records the bare id, so the same [`add_access_entry`] the three
+/// agent lists use commits the delta.
+fn apply_group_picks(
+    mut picked: MessageReader<GroupPicked>,
+    mut windows: Query<&mut AboutRegionState>,
+    actions: Query<&AboutRegionAction>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
+    mut groups: ResMut<GroupsModel>,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    let frame: Vec<GroupPicked> = picked.read().cloned().collect();
+    if frame.is_empty() {
+        return;
+    }
+    for event in &frame {
+        let Ok(AboutRegionAction::AddAllowedGroup) = actions.get(event.requester) else {
+            continue;
+        };
+        let Some(group) = event.group else {
+            continue;
+        };
+        let Some(window) = host_floater(event.requester, &parents, &floaters) else {
+            continue;
+        };
+        let Ok(mut state) = windows.get_mut(window) else {
+            continue;
+        };
+        if !state.can_manage {
+            continue;
+        }
+        // The picker already knows the name, and for a group the agent is not
+        // in that is the only name anything here has: seeding the shared cache
+        // spares the row a `UUIDGroupNameRequest` round trip it would spend
+        // showing a bare uuid.
+        groups.note_resolved_name(group, &event.name);
+        add_access_entry(
+            &mut state,
+            AccessList::AllowedGroups,
+            group.uuid(),
+            &mut commands,
+        );
+    }
+}
+
 /// Fold a terrain texture pick into the terrain draft slot of the window whose
 /// swatch asked for it, and repaint that swatch's thumbnail (via
 /// [`TextureSwatchValue`]).
@@ -3596,14 +3715,17 @@ fn read_terrain_fields(
     }
 }
 
-/// Append an agent to an estate access list and commit the delta.
+/// Append an entry to an estate access list and commit the delta.
+///
+/// Takes the bare id rather than an [`AgentKey`] because three of the four
+/// lists hold agents and the fourth holds groups; [`AccessList::target`] is
+/// what re-types it for the wire, so the list itself decides which it is.
 fn add_access_entry(
     state: &mut AboutRegionState,
     list: AccessList,
-    agent: AgentKey,
+    id: Uuid,
     commands: &mut MessageWriter<SlCommand>,
 ) {
-    let id = agent.0.0;
     {
         let (target, revision) = state.list_mut(list);
         if target.contains(&id) {
@@ -4452,15 +4574,20 @@ mod tests {
     /// **One window per region** (`viewer-keyed-floater-audit`), and the freeze
     /// a window keeps once the agent has left its region.
     mod instances {
-        use super::super::{AboutRegionPlugin, AboutRegionState, OpenAboutRegion, region_key};
+        use super::super::{
+            AboutRegionAction, AboutRegionPlugin, AboutRegionState, OpenAboutRegion, WriteButton,
+            region_key,
+        };
         use crate::floater::{Floater, FloaterCommand, FloaterOp, FloaterPlugin};
         use crate::ui::UiRoot;
-        use crate::world_api::{AvatarState, GroupsModel};
+        use crate::world_api::{AvatarState, GroupPicked, GroupsModel};
         use bevy::prelude::*;
+        use bevy::ui::InteractionDisabled;
         use pretty_assertions::assert_eq;
         use sl_client_bevy::{
-            GridCoordinates, Maturity, ProductType, RegionHandle, RegionIdentity, RegionName,
-            RegionTerrainComposition, SlCommand, SlCurrentRegion, SlEvent, SlRegionIdentity, Uuid,
+            Command, EstateAccessDelta, GridCoordinates, GroupKey, Maturity, OwnerKey, ProductType,
+            RegionHandle, RegionIdentity, RegionName, RegionTerrainComposition, SlCommand,
+            SlCurrentRegion, SlEvent, SlRegionIdentity, Uuid,
         };
 
         /// A boxed error so tests use `?` rather than the disallowed
@@ -4508,6 +4635,8 @@ mod tests {
                 .add_message::<crate::world_api::AvatarPicked>()
                 .add_message::<crate::world_api::OpenExperiencePicker>()
                 .add_message::<crate::world_api::ExperiencePicked>()
+                .add_message::<crate::world_api::OpenGroupPicker>()
+                .add_message::<crate::world_api::GroupPicked>()
                 .add_message::<sl_viewer_notices::experience_profile::OpenExperienceProfile>()
                 .init_resource::<AvatarState>()
                 .init_resource::<GroupsModel>()
@@ -4665,6 +4794,122 @@ mod tests {
             assert_eq!(
                 live.first().map(|(_window, id, _current)| *id),
                 Some(second.region_id)
+            );
+            Ok(())
+        }
+
+        /// **Every access list has an Add**, the allowed-groups one included
+        /// ([[viewer-region-estate-group-picker]]) — and a manager who cannot
+        /// manage *this* region still sees all four, greyed. They used to
+        /// vanish, which reads as a viewer that does not have the feature
+        /// rather than as a permission you lack; the reference greys them
+        /// (`setCtrlsEnabled(false)` over the whole Access panel).
+        #[test]
+        fn the_four_access_adds_exist_and_grey_rather_than_vanish() -> Result<(), TestError> {
+            let here = region(0xA1, "Alpha");
+            let mut app = region_app();
+            stand_in(&mut app, &here);
+            open(&mut app);
+
+            let adds: Vec<AboutRegionAction> = app
+                .world_mut()
+                .query::<(&AboutRegionAction, &WriteButton)>()
+                .iter(app.world())
+                .map(|(action, _write)| *action)
+                .collect();
+            for wanted in [
+                AboutRegionAction::AddManager,
+                AboutRegionAction::AddAllowed,
+                AboutRegionAction::AddAllowedGroup,
+                AboutRegionAction::AddBanned,
+            ] {
+                assert!(
+                    adds.iter().any(|action| {
+                        core::mem::discriminant(action) == core::mem::discriminant(&wanted)
+                    }),
+                    "{wanted:?} has no button: {adds:?}"
+                );
+            }
+
+            // Walk out of the region: the window keeps every control, greyed.
+            stand_in(&mut app, &region(0xB2, "Beta"));
+            app.update();
+            let (shown, disabled) = app
+                .world_mut()
+                .query_filtered::<(Entity, &Visibility), With<WriteButton>>()
+                .iter(app.world())
+                .fold((0_usize, 0_usize), |(shown, disabled), (entity, seen)| {
+                    (
+                        shown.saturating_add(usize::from(*seen != Visibility::Hidden)),
+                        disabled.saturating_add(usize::from(
+                            app.world().get::<InteractionDisabled>(entity).is_some(),
+                        )),
+                    )
+                });
+            assert!(
+                shown > 0,
+                "every write button hid itself instead of greying"
+            );
+            assert_eq!(
+                shown, disabled,
+                "a write button a left-behind window still shows must refuse input"
+            );
+            Ok(())
+        }
+
+        /// A group pick lands on the allowed-groups list of the window whose
+        /// Add asked, and goes out as an `AllowedGroupAdd` delta.
+        #[test]
+        fn a_group_pick_adds_to_the_allowed_groups_list() -> Result<(), TestError> {
+            let here = region(0xA1, "Alpha");
+            let mut app = region_app();
+            stand_in(&mut app, &here);
+            open(&mut app);
+
+            let add = app
+                .world_mut()
+                .query::<(Entity, &AboutRegionAction)>()
+                .iter(app.world())
+                .find_map(|(entity, action)| {
+                    matches!(action, AboutRegionAction::AddAllowedGroup).then_some(entity)
+                })
+                .ok_or("the allowed-groups list has no Add button")?;
+
+            let chosen = GroupKey::from(Uuid::from_u128(0x00C0_FFEE));
+            app.world_mut().write_message(GroupPicked {
+                requester: add,
+                group: Some(chosen),
+                name: "Cartographers".to_owned(),
+            });
+            app.update();
+            app.update();
+
+            let posted: Vec<SlCommand> = app
+                .world_mut()
+                .resource_mut::<Messages<SlCommand>>()
+                .drain()
+                .collect();
+            assert!(
+                posted.iter().any(|command| matches!(
+                    &command.0,
+                    Command::UpdateEstateAccess {
+                        delta: EstateAccessDelta::AllowedGroupAdd,
+                        target: OwnerKey::Group(group),
+                    } if *group == chosen
+                )),
+                "the pick posted no allowed-group add: {posted:?}"
+            );
+            let listed = app
+                .world_mut()
+                .query::<&AboutRegionState>()
+                .iter(app.world())
+                .any(|state| state.allowed_groups.contains(&chosen.uuid()));
+            assert!(listed, "the pick never reached the window's own list");
+            // The picker already knew the name, so the row does not have to
+            // wait on a `UUIDGroupNameRequest` to stop reading as a uuid.
+            assert_eq!(
+                app.world().resource::<GroupsModel>().group_name(chosen),
+                Some("Cartographers")
             );
             Ok(())
         }

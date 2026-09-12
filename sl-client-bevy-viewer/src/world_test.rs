@@ -258,8 +258,9 @@ fn add_edit_plugins(app: &mut App) {
         crate::edit_selection::EditSelectionPlugin,
     ));
     // The per-frame "a widget took this press" flag the selection gesture
-    // consults; its owner is the combo widget, over in the UI scaffold.
-    app.init_resource::<sl_viewer_ui_core::ui::UiPointerClaim>();
+    // consults, with the observer that sets it: without the observer a
+    // self-closing widget's press leaks into this very gesture and deselects.
+    sl_viewer_ui_core::ui::install_ui_pointer_claim(app);
 }
 
 /// The fixture world with the **input group** on top
@@ -443,12 +444,15 @@ pub(crate) fn world_app_with_build_tools() -> Result<App, Box<dyn core::error::E
         crate::edit_link::EditLinkPlugin,
         crate::edit_undo::EditUndoPlugin,
     ));
+    // The group picker the General tab's Set… opens. Here rather than left out
+    // because the interesting half of that button is what happens *after* the
+    // picker closes over the world: a keyed floater despawns itself on OK, and
+    // the press that closed it must not reach the selection gesture this fold
+    // also runs. Also brings `GroupsModel`, the cache the group row reads.
+    app.add_plugins(crate::group_picker::GroupPickerPlugin);
     // The local-chat channel the editors post a refused edit's notice on; its
     // owner is the chat group, which this fold leaves out.
     app.add_message::<crate::world_api::LocalChatNotice>();
-    // The group-name cache the General tab's group row resolves through; its
-    // owner is the people group's `GroupsPlugin`.
-    app.init_resource::<crate::world_api::GroupsModel>();
     // The string lookup the selection summary and every `Translated` label
     // read, with no bundles behind it: every key resolves to itself, so a test
     // asserts which strings a line is built from and never a translation's

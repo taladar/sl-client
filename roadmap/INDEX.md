@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 313 |
+| ready | 312 |
 | blocked | 41 |
 | in-progress | 22 |
 | bugs | 43 |
-| done | 1103 |
+| done | 1105 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1664** |
+| **total** | **1665** |
 
 ## ideas (100)
 
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (313)
+## ready (312)
 
 ### protocol
 
@@ -780,8 +780,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (sim) debug console (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-region-entry-maturity-gate`](ready/viewer-region-entry-maturity-gate.md)
   — Eight ported notifications for a refused entry, and nothing raises one
-- [`viewer-region-estate-group-picker`](ready/viewer-region-estate-group-picker.md)
-  — Group picker for the Region/Estate Access → Allowed Groups list
 - [`viewer-region-estate-object-return`](ready/viewer-region-estate-object-return.md)
   — Region Debug tab — estate-wide object return by resident
 - [`viewer-region-experiences-default-experience`](ready/viewer-region-experiences-default-experience.md)
@@ -1268,7 +1266,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1103)
+## done (1105)
 
 ### protocol
 
@@ -2615,6 +2613,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Region / parcel environment settings panel (blocked by
   `viewer-region-options-general` (done), `viewer-environment-my-environments`
   (done))
+- [`viewer-region-estate-group-picker`](done/viewer-region-estate-group-picker.md)
+  — Group picker for the Region/Estate Access → Allowed Groups list
 - [`viewer-region-experiences-panel`](done/viewer-region-experiences-panel.md) —
   Region / Estate floater — Experiences tab
 - [`viewer-region-name-connecting-after-crossing`](done/viewer-region-name-connecting-after-crossing.md)
@@ -2708,6 +2708,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-seated-avatar-vehicle-rubberband`](done/viewer-seated-avatar-vehicle-rubberband.md)
   — Seated avatar rubber-bands behind the vehicle it sits on instead of rigidly
   parenting
+- [`viewer-self-closing-widget-leaks-its-press`](done/viewer-self-closing-widget-leaks-its-press.md)
+  — A widget that closes on a press hands that press to the world, which
+  deselects
 - [`viewer-settings-account-scope-persist`](done/viewer-settings-account-scope-persist.md)
   — Load and save both global and per-account settings in the viewer (blocked by
   `viewer-ui-settings-store` (done))
