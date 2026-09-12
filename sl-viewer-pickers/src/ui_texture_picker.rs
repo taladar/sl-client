@@ -65,7 +65,7 @@ use crate::floater::{
     FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater,
 };
 use crate::i18n::Translated;
-use crate::inventory::{InventoryModel, item_icon, query_folder_page};
+use crate::inventory::{InventoryModel, MAX_FOLDER_DEPTH, item_icon, query_folder_page};
 use crate::material_preview::MaterialPreview;
 use crate::ui::{column, row};
 use crate::ui_font::UiFont;
@@ -812,7 +812,7 @@ fn build_tree_rows(inventory: &InventoryModel, state: &TexturePickerState) -> Ve
                     .then(|| (item.name.clone(), key))
             })
             .collect();
-        items.sort_by_key(|(name, _key)| name.to_lowercase());
+        items.sort_by_cached_key(|(name, _key)| name.to_lowercase());
         for (name, key) in items {
             rows.push(TreeRow::Item {
                 key,
@@ -824,7 +824,8 @@ fn build_tree_rows(inventory: &InventoryModel, state: &TexturePickerState) -> Ve
     rows
 }
 
-/// Emit a folder and (when expanded) its child folders and texture items.
+/// Emit a folder and (when expanded) its child folders and texture items,
+/// bounded by [`MAX_FOLDER_DEPTH`] like the inventory window's own walks.
 fn emit_folder(
     inventory: &InventoryModel,
     state: &TexturePickerState,
@@ -832,6 +833,9 @@ fn emit_folder(
     depth: usize,
     rows: &mut Vec<TreeRow>,
 ) {
+    if depth >= MAX_FOLDER_DEPTH {
+        return;
+    }
     let name = inventory
         .folder_info(folder)
         .map_or_else(|| String::from("(folder)"), |info| info.name.clone());
@@ -847,7 +851,7 @@ fn emit_folder(
     }
     // Child folders, by name.
     let mut children: Vec<InventoryFolderKey> = inventory.child_folders_of(folder).to_vec();
-    children.sort_by_key(|child| {
+    children.sort_by_cached_key(|child| {
         inventory
             .folder_info(*child)
             .map(|info| info.name.to_lowercase())
@@ -863,7 +867,7 @@ fn emit_folder(
         .filter(|item| item_matches(item.inv_type, state.kind))
         .map(|item| (item.name.clone(), TextureKey::from(item.asset_id)))
         .collect();
-    items.sort_by_key(|(name, _key)| name.to_lowercase());
+    items.sort_by_cached_key(|(name, _key)| name.to_lowercase());
     for (name, key) in items {
         rows.push(TreeRow::Item {
             key,

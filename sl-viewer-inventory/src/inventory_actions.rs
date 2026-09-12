@@ -55,8 +55,8 @@ use sl_client_bevy::{
 use std::collections::{HashMap, HashSet};
 
 use crate::inventory::{
-    InlineRename, InventoryModel, InventorySelection, InventoryUi, InventoryView, RowKey,
-    query_folder_page,
+    InlineRename, InventoryModel, InventorySelection, InventoryUi, InventoryView, MAX_FOLDER_DEPTH,
+    RowKey, query_folder_page,
 };
 use crate::menu::UNIMPLEMENTED;
 use crate::menu::{MenuCommand, MenuDef, MenuItemDef, OpenContextMenu};
@@ -2381,19 +2381,26 @@ pub(crate) fn deep_copy_commands(
     own_agent: Option<AgentKey>,
 ) -> Vec<Command> {
     let mut out = Vec::new();
-    deep_copy_folder(model, source, source_name, dest, own_agent, &mut out);
+    deep_copy_folder(model, source, 0, source_name, dest, own_agent, &mut out);
     out
 }
 
-/// One level of [`deep_copy_commands`]'s walk.
+/// One level of [`deep_copy_commands`]'s walk, bounded by
+/// [`MAX_FOLDER_DEPTH`] like every other downward walk — this one would emit a
+/// *command per level*, so an unbounded descent would not merely overflow the
+/// stack, it would spend the batch on the way down.
 fn deep_copy_folder(
     model: &InventoryModel,
     source: InventoryFolderKey,
+    depth: usize,
     source_name: &str,
     dest: InventoryFolderKey,
     own_agent: Option<AgentKey>,
     out: &mut Vec<Command>,
 ) {
+    if depth >= MAX_FOLDER_DEPTH {
+        return;
+    }
     // The UDP create lets the viewer pick the id, so the items can be
     // addressed into the new folder in the same command batch.
     let new_id = InventoryFolderKey::from(Uuid::new_v4());
@@ -2453,7 +2460,15 @@ fn deep_copy_folder(
         let child_name = model
             .folder_info(child)
             .map_or_else(String::new, |info| info.name.clone());
-        deep_copy_folder(model, child, &child_name, new_id, own_agent, out);
+        deep_copy_folder(
+            model,
+            child,
+            depth.saturating_add(1),
+            &child_name,
+            new_id,
+            own_agent,
+            out,
+        );
     }
 }
 

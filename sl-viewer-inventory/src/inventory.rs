@@ -108,6 +108,34 @@ const RECENT_LIMIT: usize = 200;
 /// normal folder arrives in one page (pagination past this is a follow-up).
 const FOLDER_PAGE_LIMIT: usize = 4096;
 
+/// How deep a folder walk may go before it gives up — the bound both the
+/// upward parent chain (`InventoryModel::is_within`) and the downward tree
+/// walks carry.
+///
+/// Real inventories nest nowhere near this deep (the reference viewer refuses
+/// to move a folder past a far shallower limit), so the cap is a backstop for
+/// data that should not exist rather than a display rule: the index itself
+/// refuses a cycle-closing parent edge (`InventoryModel::link`), and this is
+/// what keeps a walk finite even if a cycle longer than the bound slipped past
+/// that refusal.
+///
+/// `pub` because the tree is walked outside this module too — the texture
+/// picker draws its own folder tree from the same model and carries the same
+/// bound.
+pub const MAX_FOLDER_DEPTH: usize = 64;
+
+/// A folder's sort key within its sibling list: its lowercased name, or the
+/// empty string when the folder is not (yet) known.
+fn sort_name(
+    folders: &HashMap<InventoryFolderKey, FolderInfo>,
+    folder: InventoryFolderKey,
+) -> String {
+    folders
+        .get(&folder)
+        .map(|info| info.name.to_lowercase())
+        .unwrap_or_default()
+}
+
 /// The window title / toolbar text colour.
 const CHROME_COLOR: Color = Color::srgb(0.86, 0.89, 0.95);
 
@@ -336,15 +364,17 @@ impl InventoryModel {
 
     /// Whether `folder` is `ancestor` or sits anywhere below it — the check that
     /// stops a folder being moved into its own subtree, and that classifies a
-    /// row as "inside the Trash". Walks the parent chain upward, bounded against
-    /// a (server-side impossible) parent cycle.
+    /// row as "inside the Trash". Walks the parent chain upward, bounded
+    /// ([`MAX_FOLDER_DEPTH`]) against a (server-side impossible) parent cycle —
+    /// which is also what lets [`link`](Self::link) call it to decide whether a
+    /// parent edge would close one.
     pub(crate) fn is_within(
         &self,
         folder: InventoryFolderKey,
         ancestor: InventoryFolderKey,
     ) -> bool {
         let mut current = Some(folder);
-        for _step in 0..64 {
+        for _step in 0..MAX_FOLDER_DEPTH {
             let Some(key) = current else {
                 return false;
             };
@@ -444,18 +474,24 @@ impl InventoryModel {
     /// conditions and actions.
     pub(crate) fn subtree_items(&self, folder: InventoryFolderKey) -> Vec<&ItemInfo> {
         let mut out = Vec::new();
-        self.collect_subtree_items(folder, &mut out);
+        self.collect_subtree_items(folder, 0, &mut out);
         out
     }
 
-    /// The recursive half of [`subtree_items`](Self::subtree_items).
+    /// The recursive half of [`subtree_items`](Self::subtree_items), bounded by
+    /// [`MAX_FOLDER_DEPTH`] like every other downward walk.
     fn collect_subtree_items<'model>(
         &'model self,
         folder: InventoryFolderKey,
+        depth: usize,
         out: &mut Vec<&'model ItemInfo>,
     ) {
+        if depth >= MAX_FOLDER_DEPTH {
+            return;
+        }
+        let child_depth = depth.saturating_add(1);
         for &child in self.children_of(folder) {
-            self.collect_subtree_items(child, out);
+            self.collect_subtree_items(child, child_depth, out);
         }
         out.extend(self.items_of(folder));
     }
@@ -488,18 +524,25 @@ impl InventoryModel {
 
     /// Every folder of `folder`'s subtree (itself included), depth-first —
     /// the set a folder Copy prefetches so the eventual paste has contents to
-    /// copy.
+    /// copy. A folder is enqueued once: this walk has no depth to bound, and a
+    /// repeat would otherwise grow the queue forever.
     pub(crate) fn subtree_folders(&self, folder: InventoryFolderKey) -> Vec<InventoryFolderKey> {
         let mut out = vec![folder];
+        let mut seen: HashSet<InventoryFolderKey> = HashSet::from([folder]);
         let mut cursor = 0;
         while let Some(&current) = out.get(cursor) {
-            out.extend_from_slice(self.children_of(current));
+            for &child in self.children_of(current) {
+                if seen.insert(child) {
+                    out.push(child);
+                }
+            }
             cursor = cursor.saturating_add(1);
         }
         out
     }
 
-    /// Merge a batch of folders into the tree, then rebuild the index.
+    /// Merge a batch of folders into the tree, updating the index **for the
+    /// batch alone**.
     ///
     /// Merging rather than replacing is what lets the agent tree (from
     /// [`SlSessionEvent::InventoryFolders`]) and the Library tree (from
@@ -508,21 +551,120 @@ impl InventoryModel {
     /// login skeleton did not carry. `library` tags the batch as read-only shared
     /// Library folders. Also locates the Current Outfit Folder.
     ///
+    /// Incremental on purpose: the login skeleton lands one budgeted chunk per
+    /// frame (`drain_skeleton_merge`), and a merge that rebuilt the whole
+    /// parent→children index would re-sort every sibling list in the inventory
+    /// once per chunk — the chunking would buy nothing but repeats. Only the
+    /// sibling lists this batch actually pushed into (or whose sort key it
+    /// changed) are re-sorted, once, at the end.
+    ///
     /// Public because the model outlives its floater: a headless fixture world
     /// carries this resource without the inventory window's plugin (which is
     /// what folds the skeleton events in), and the folder resolution the object
     /// pie's Take / Delete depend on has to be seedable there.
     pub fn merge_folders(&mut self, infos: &[FolderInfo], library: bool) {
+        // `None` stands for the root list; `Some(parent)` for that parent's
+        // child list.
+        let mut touched: HashSet<Option<InventoryFolderKey>> = HashSet::new();
         for info in infos {
-            self.folders.insert(info.folder_id, info.clone());
-            if library {
-                self.library_folders.insert(info.folder_id);
-            }
+            let folder = info.folder_id;
+            let previous = self.folders.insert(folder, info.clone());
+            let newly_library = library && self.library_folders.insert(folder);
             if info.folder_type == FolderType::CurrentOutfit {
-                self.cof = Some(info.folder_id);
+                self.cof = Some(folder);
+            }
+            match &previous {
+                // Already linked under the same parent: only a changed sort key
+                // (its name, or its newly read-only Library standing among the
+                // roots) moves it within its list.
+                Some(prev) if prev.parent_id == info.parent_id => {
+                    if prev.name != info.name || newly_library {
+                        touched.insert(self.list_of(folder));
+                    }
+                }
+                // New, or re-parented: unlink from wherever it sat (a removal
+                // leaves the list sorted) and push into its new one.
+                previous => {
+                    if let Some(prev) = previous {
+                        self.unlink(folder, prev.parent_id);
+                    }
+                    touched.insert(self.link(folder, info.parent_id));
+                }
             }
         }
-        self.reindex();
+        for list in touched {
+            self.sort_list(list);
+        }
+    }
+
+    /// Which list `folder` is linked into — `None` for the root list, which is
+    /// where a folder whose parent edge was refused (see [`link`](Self::link))
+    /// sits as well.
+    fn list_of(&self, folder: InventoryFolderKey) -> Option<InventoryFolderKey> {
+        let parent = self.folders.get(&folder).and_then(|info| info.parent_id)?;
+        if self.children_of(parent).contains(&folder) {
+            Some(parent)
+        } else {
+            None
+        }
+    }
+
+    /// Remove `folder` from the list it was linked into. Both halves are tried:
+    /// a folder whose parent edge was refused sits among the roots, not under
+    /// the parent it names.
+    fn unlink(&mut self, folder: InventoryFolderKey, previous_parent: Option<InventoryFolderKey>) {
+        if let Some(parent) = previous_parent
+            && let Some(list) = self.child_folders.get_mut(&parent)
+        {
+            list.retain(|key| *key != folder);
+        }
+        self.roots.retain(|key| *key != folder);
+    }
+
+    /// Push `folder` into the list its parent names, returning the list it
+    /// landed in (unsorted — the caller re-sorts once per batch).
+    ///
+    /// **A parent edge that would close a cycle is refused**: the folder is
+    /// lifted to a root instead. This is the one place the tree grows an edge,
+    /// so refusing here is what keeps every downward walk — the row emitters,
+    /// the search marker, the subtree collectors — free of the cycle the
+    /// upward walk ([`is_within`](Self::is_within)) has always had to be
+    /// bounded against.
+    fn link(
+        &mut self,
+        folder: InventoryFolderKey,
+        parent: Option<InventoryFolderKey>,
+    ) -> Option<InventoryFolderKey> {
+        match parent {
+            Some(parent) if !self.is_within(parent, folder) => {
+                self.child_folders.entry(parent).or_default().push(folder);
+                Some(parent)
+            }
+            _ => {
+                self.roots.push(folder);
+                None
+            }
+        }
+    }
+
+    /// Re-sort one sibling list: the roots order agent-tree first (so "My
+    /// Inventory" sits above the read-only "Library"), then by name; a child
+    /// list by name alone. Cached keys, because the key is a fresh lowercased
+    /// `String` and a comparison sort would rebuild it on every comparison.
+    fn sort_list(&mut self, list: Option<InventoryFolderKey>) {
+        let names = &self.folders;
+        match list {
+            None => {
+                let library = &self.library_folders;
+                self.roots
+                    .sort_by_cached_key(|key| (library.contains(key), sort_name(names, *key)));
+            }
+            Some(parent) => {
+                if let Some(children) = self.child_folders.get_mut(&parent) {
+                    children.sort_by_cached_key(|key| sort_name(names, *key));
+                }
+            }
+        }
     }
 
     /// Merge a raw-wire folder batch (the Library login skeleton), resolving each
@@ -542,44 +684,6 @@ impl InventoryModel {
         self.merge_folders(&infos, true);
     }
 
-    /// Rebuild the parent→children index and the sorted root list from the folder
-    /// map. Roots order agent-tree first (so "My Inventory" sits above the
-    /// read-only "Library"), then by name; each child list is sorted by name.
-    fn reindex(&mut self) {
-        self.child_folders.clear();
-        let mut roots: Vec<InventoryFolderKey> = Vec::new();
-        for info in self.folders.values() {
-            match info.parent_id {
-                Some(parent) => self
-                    .child_folders
-                    .entry(parent)
-                    .or_default()
-                    .push(info.folder_id),
-                None => roots.push(info.folder_id),
-            }
-        }
-        let names = &self.folders;
-        let library = &self.library_folders;
-        roots.sort_by_key(|key| {
-            (
-                library.contains(key),
-                names
-                    .get(key)
-                    .map(|info| info.name.to_lowercase())
-                    .unwrap_or_default(),
-            )
-        });
-        self.roots = roots;
-        for list in self.child_folders.values_mut() {
-            list.sort_by_key(|key| {
-                names
-                    .get(key)
-                    .map(|info| info.name.to_lowercase())
-                    .unwrap_or_default()
-            });
-        }
-    }
-
     /// Store a fetched page of a folder's items (replacing any earlier page),
     /// sorted by name.
     ///
@@ -589,7 +693,7 @@ impl InventoryModel {
     /// halves of standing one up should not have different visibility.
     pub fn set_items(&mut self, folder: InventoryFolderKey, items: &[ItemInfo]) {
         let mut owned: Vec<ItemInfo> = items.to_vec();
-        owned.sort_by_key(|item| item.name.to_lowercase());
+        owned.sort_by_cached_key(|item| item.name.to_lowercase());
         self.items.insert(folder, owned);
     }
 
@@ -739,7 +843,8 @@ impl InventoryModel {
     }
 
     /// Emit `folder`'s row, then — if expanded — its child folders and items,
-    /// indented one level deeper.
+    /// indented one level deeper. Bounded by [`MAX_FOLDER_DEPTH`], the backstop
+    /// every downward walk carries.
     fn emit_folder(
         &self,
         folder: InventoryFolderKey,
@@ -748,6 +853,9 @@ impl InventoryModel {
         sort: SortSpec,
         rows: &mut Vec<DisplayRow>,
     ) {
+        if depth >= MAX_FOLDER_DEPTH {
+            return;
+        }
         let expanded = self.expanded.contains(&folder);
         let arrow = if expanded {
             RowArrow::Expanded
@@ -804,7 +912,7 @@ impl InventoryModel {
         let folder_names_match = !needle.is_empty() && !filter_active;
         let mut keep = HashSet::new();
         for &root in &self.roots {
-            self.mark_matching_subtree(root, needle, folder_names_match, passes, &mut keep);
+            self.mark_matching_subtree(root, 0, needle, folder_names_match, passes, &mut keep);
         }
         let mut rows = Vec::new();
         for &root in &self.roots {
@@ -824,17 +932,32 @@ impl InventoryModel {
 
     /// Mark `folder` in `keep` if it, or anything in its subtree, matches,
     /// and return whether it did — so an ancestor of a match is retained.
+    /// Bounded by [`MAX_FOLDER_DEPTH`]: unlike the row emitters this walk runs
+    /// over the **whole** tree (not just the expanded part) the moment a query
+    /// is typed.
     fn mark_matching_subtree(
         &self,
         folder: InventoryFolderKey,
+        depth: usize,
         needle: &str,
         folder_names_match: bool,
         passes: &dyn Fn(&ItemInfo) -> bool,
         keep: &mut HashSet<InventoryFolderKey>,
     ) -> bool {
+        if depth >= MAX_FOLDER_DEPTH {
+            return false;
+        }
         let mut any = folder_names_match && self.folder_name_matches(folder, needle);
+        let child_depth = depth.saturating_add(1);
         for &child in self.children_of(folder) {
-            if self.mark_matching_subtree(child, needle, folder_names_match, passes, keep) {
+            if self.mark_matching_subtree(
+                child,
+                child_depth,
+                needle,
+                folder_names_match,
+                passes,
+                keep,
+            ) {
                 any = true;
             }
         }
@@ -867,6 +990,9 @@ impl InventoryModel {
         passes: &dyn Fn(&ItemInfo) -> bool,
         rows: &mut Vec<DisplayRow>,
     ) {
+        if depth >= MAX_FOLDER_DEPTH {
+            return;
+        }
         rows.push(self.folder_row(folder, depth, RowArrow::Expanded));
         let child_depth = depth.saturating_add(1);
         for child in self.ordered_children(folder, sort) {
@@ -909,7 +1035,7 @@ impl InventoryModel {
         // The hierarchy half: folders on the path to a loaded recent item.
         let mut keep = HashSet::new();
         for &root in &self.roots {
-            self.mark_member_subtree(root, &members, &mut keep);
+            self.mark_member_subtree(root, 0, &members, &mut keep);
         }
         let mut rows = Vec::new();
         let mut placed: HashSet<InventoryKey> = HashSet::new();
@@ -1011,12 +1137,17 @@ impl InventoryModel {
     fn mark_member_subtree(
         &self,
         folder: InventoryFolderKey,
+        depth: usize,
         members: &HashSet<InventoryKey>,
         keep: &mut HashSet<InventoryFolderKey>,
     ) -> bool {
+        if depth >= MAX_FOLDER_DEPTH {
+            return false;
+        }
         let mut any = false;
+        let child_depth = depth.saturating_add(1);
         for &child in self.children_of(folder) {
-            if self.mark_member_subtree(child, members, keep) {
+            if self.mark_member_subtree(child, child_depth, members, keep) {
                 any = true;
             }
         }
@@ -1056,6 +1187,9 @@ impl InventoryModel {
         passes: &dyn Fn(&ItemInfo) -> bool,
         rows: &mut Vec<DisplayRow>,
     ) {
+        if depth >= MAX_FOLDER_DEPTH {
+            return;
+        }
         rows.push(self.folder_row(folder, depth, RowArrow::Expanded));
         let child_depth = depth.saturating_add(1);
         for child in self.ordered_children(folder, sort) {
@@ -1100,7 +1234,7 @@ impl InventoryModel {
         // The hierarchy half: folders on the path to a loaded worn item.
         let mut keep = HashSet::new();
         for &root in &self.roots {
-            self.mark_member_subtree(root, worn, &mut keep);
+            self.mark_member_subtree(root, 0, worn, &mut keep);
         }
         let mut rows = Vec::new();
         let mut placed: HashSet<InventoryKey> = HashSet::new();
@@ -4544,5 +4678,197 @@ mod tests {
         assert!(queried.is_empty());
         assert!(model.recent.is_empty());
         Ok(())
+    }
+
+    /// A folder key from a small integer, for the index tests.
+    fn fkey(id: u128) -> sl_client_bevy::InventoryFolderKey {
+        sl_client_bevy::InventoryFolderKey::from(sl_client_bevy::Uuid::from_u128(id))
+    }
+
+    /// A skeleton shaped like a real one: a root, system folders under it with
+    /// names that only sort right case-insensitively, and a nested branch.
+    fn skeleton() -> Vec<FolderInfo> {
+        vec![
+            folder(1, None, "My Inventory", FolderType::RootInventory),
+            folder(2, Some(1), "objects", FolderType::Object),
+            folder(3, Some(1), "Clothing", FolderType::Clothing),
+            folder(4, Some(1), "Textures", FolderType::Texture),
+            folder(5, Some(1), "animations", FolderType::Animation),
+            folder(6, Some(3), "Shirts", FolderType::None),
+            folder(7, Some(3), "boots", FolderType::None),
+            folder(8, Some(6), "Blue", FolderType::None),
+            folder(9, Some(6), "aqua", FolderType::None),
+        ]
+    }
+
+    /// Every folder's child list, flattened to names, for comparing two models.
+    fn index_shape(model: &InventoryModel) -> Vec<(Vec<String>, Vec<Vec<String>>)> {
+        let names = |keys: &[sl_client_bevy::InventoryFolderKey]| -> Vec<String> {
+            keys.iter()
+                .map(|key| {
+                    model
+                        .folders
+                        .get(key)
+                        .map_or_else(String::new, |info| info.name.clone())
+                })
+                .collect()
+        };
+        let mut lists: Vec<Vec<String>> = (1..=9_u128)
+            .map(|id| names(model.children_of(fkey(id))))
+            .collect();
+        lists.sort();
+        vec![(names(&model.roots), lists)]
+    }
+
+    /// **The chunked skeleton merge indexes the same tree as one big merge.**
+    ///
+    /// The login skeleton lands a budgeted chunk per frame, so the index is
+    /// now maintained per batch instead of rebuilt from scratch. If the
+    /// incremental path disagreed with a whole-tree rebuild in *any* order,
+    /// the tree a large inventory draws would depend on where the chunk
+    /// boundaries happened to fall.
+    #[test]
+    fn a_chunked_merge_indexes_the_same_tree_as_one_shot() {
+        let mut one_shot = InventoryModel::default();
+        one_shot.merge_folders(&skeleton(), false);
+
+        // Chunked — and with the children of a folder arriving before it, the
+        // way a skeleton page may well be ordered.
+        let mut chunked = InventoryModel::default();
+        let mut batch = skeleton();
+        batch.reverse();
+        for chunk in batch.chunks(2) {
+            chunked.merge_folders(chunk, false);
+        }
+
+        assert_eq!(index_shape(&chunked), index_shape(&one_shot));
+        assert_eq!(
+            index_shape(&one_shot),
+            vec![(
+                vec!["My Inventory".to_owned()],
+                vec![
+                    vec![],
+                    vec![],
+                    vec![],
+                    vec![],
+                    vec![],
+                    vec![],
+                    vec![
+                        "animations".to_owned(),
+                        "Clothing".to_owned(),
+                        "objects".to_owned(),
+                        "Textures".to_owned(),
+                    ],
+                    vec!["aqua".to_owned(), "Blue".to_owned()],
+                    vec!["boots".to_owned(), "Shirts".to_owned()],
+                ],
+            )],
+            "sibling lists are case-insensitively by name",
+        );
+    }
+
+    /// **A re-merged folder moves between sibling lists, and never doubles.**
+    ///
+    /// A folder page re-merges folders the skeleton already carried, and a
+    /// move re-merges one under a new parent. With the index maintained
+    /// incrementally, the old list has to lose it.
+    #[test]
+    fn a_re_merged_folder_moves_and_does_not_double() {
+        let mut model = InventoryModel::default();
+        model.merge_folders(&skeleton(), false);
+
+        // Re-merging the same batch changes nothing.
+        model.merge_folders(&skeleton(), false);
+        assert_eq!(model.children_of(fkey(3)).len(), 2);
+        assert_eq!(model.roots.len(), 1);
+
+        // "boots" moves from Clothing (3) to Objects (2).
+        model.merge_folders(&[folder(7, Some(2), "boots", FolderType::None)], false);
+        assert_eq!(
+            index_shape(&model).first().map(|shape| shape.0.clone()),
+            Some(vec!["My Inventory".to_owned()])
+        );
+        assert_eq!(model.children_of(fkey(2)), &[fkey(7)]);
+        assert_eq!(model.children_of(fkey(3)), &[fkey(6)]);
+
+        // A rename re-sorts it within its list.
+        model.merge_folders(&[folder(9, Some(6), "zebra", FolderType::None)], false);
+        assert_eq!(model.children_of(fkey(6)), &[fkey(8), fkey(9)]);
+    }
+
+    /// **A parent edge that would close a cycle never enters the index.**
+    ///
+    /// The upward walk is bounded, but the downward walks — the row emitters
+    /// and, worse, the search marker that runs over the *whole* tree the
+    /// moment a query is typed — are plain recursion. A cycle reachable from a
+    /// root would be an unconditional stack overflow, so the index refuses the
+    /// edge and lifts the folder to a root instead.
+    #[test]
+    fn a_cycle_closing_parent_is_refused() {
+        let mut model = InventoryModel::default();
+        model.merge_folders(&skeleton(), false);
+
+        // "Clothing" (3) re-parented under its own grandchild "Blue" (8).
+        model.merge_folders(&[folder(3, Some(8), "Clothing", FolderType::None)], false);
+        assert!(
+            !model.children_of(fkey(8)).contains(&fkey(3)),
+            "the edge that would close the cycle is not in the index"
+        );
+        assert!(model.roots.contains(&fkey(3)), "it is lifted to a root");
+
+        // A folder that names itself as its parent is the same refusal.
+        model.merge_folders(&[folder(4, Some(4), "Textures", FolderType::None)], false);
+        assert!(model.roots.contains(&fkey(4)));
+
+        // Every walk still terminates, expanded and searched.
+        for id in 1..=9_u128 {
+            model.expanded.insert(fkey(id));
+        }
+        let rows = build(&model, InventoryTab::Everything, "", &HashSet::new());
+        assert!(names(&rows).contains(&"Blue"));
+        let rows = build(&model, InventoryTab::Everything, "blue", &HashSet::new());
+        assert_eq!(names(&rows), vec!["Clothing", "Shirts", "Blue"]);
+        // "My Inventory" keeps only what still hangs below it: the two lifted
+        // branches are roots of their own now, and the walk visits each once.
+        let mut subtree = model.subtree_folders(fkey(1));
+        subtree.sort();
+        let mut expected = vec![fkey(1), fkey(2), fkey(5)];
+        expected.sort();
+        assert_eq!(subtree, expected);
+    }
+
+    /// **A downward walk stops at the depth bound.**
+    ///
+    /// The refusal above keeps a cycle out of the index in the first place;
+    /// this is the backstop behind it — the same bound the upward parent walk
+    /// has always carried, so no walk is unbounded even on a tree no server
+    /// would serve.
+    #[test]
+    fn a_downward_walk_stops_at_the_depth_bound() {
+        let deeper_than_the_bound = super::MAX_FOLDER_DEPTH.saturating_add(6);
+        let chain: Vec<FolderInfo> = (0..deeper_than_the_bound)
+            .map(|level| {
+                let id = u128::try_from(level).unwrap_or_default().saturating_add(1);
+                folder(
+                    id,
+                    (level > 0).then(|| id.saturating_sub(1)),
+                    &format!("level {level}"),
+                    FolderType::None,
+                )
+            })
+            .collect();
+        let mut model = InventoryModel::default();
+        model.merge_folders(&chain, false);
+        for info in &chain {
+            model.expanded.insert(info.folder_id);
+        }
+
+        let rows = build(&model, InventoryTab::Everything, "", &HashSet::new());
+        assert_eq!(rows.len(), super::MAX_FOLDER_DEPTH);
+        assert_eq!(
+            model.subtree_folders(fkey(1)).len(),
+            deeper_than_the_bound,
+            "the breadth-first collector has no depth to bound — only repeats",
+        );
     }
 }
