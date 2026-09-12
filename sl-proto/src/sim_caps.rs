@@ -96,10 +96,11 @@ use crate::{
     CAP_UPDATE_GESTURE_AGENT_INVENTORY, CAP_UPDATE_MATERIAL_AGENT_INVENTORY,
     CAP_UPDATE_NOTECARD_AGENT_INVENTORY, CAP_UPDATE_NOTECARD_TASK_INVENTORY,
     CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_UPDATE_SETTINGS_AGENT_INVENTORY,
-    CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
-    CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE,
-    CHAT_SESSION_START_CONFERENCE, Event, InventoryFolder, InventoryItem, InventoryListing,
-    ServerEvent, VoiceProvisionRefusal, offline_messages_to_llsd,
+    CAP_UPDATE_SETTINGS_TASK_INVENTORY, CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING,
+    CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
+    CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE, Event,
+    InventoryFolder, InventoryItem, InventoryListing, ServerEvent, VoiceProvisionRefusal,
+    offline_messages_to_llsd,
 };
 
 /// The LLSD-XML media type CAPS bodies use.
@@ -147,6 +148,7 @@ const UPLOAD_CAPABILITIES: &[&str] = &[
     CAP_UPDATE_SCRIPT_AGENT,
     CAP_UPDATE_SCRIPT_TASK,
     CAP_UPDATE_SETTINGS_AGENT_INVENTORY,
+    CAP_UPDATE_SETTINGS_TASK_INVENTORY,
     CAP_UPDATE_MATERIAL_AGENT_INVENTORY,
 ];
 
@@ -174,6 +176,7 @@ const SERVED_CAPABILITIES: &[&str] = &[
     CAP_UPDATE_SCRIPT_AGENT,
     CAP_UPDATE_SCRIPT_TASK,
     CAP_UPDATE_SETTINGS_AGENT_INVENTORY,
+    CAP_UPDATE_SETTINGS_TASK_INVENTORY,
     CAP_UPDATE_MATERIAL_AGENT_INVENTORY,
     CAP_UPDATE_AVATAR_APPEARANCE,
     CAP_COPY_INVENTORY_FROM_NOTECARD,
@@ -1240,7 +1243,9 @@ impl SimCaps {
     /// parked [`CapsUploadMetadata`], or `None` (→ `400`) when the body is not
     /// UTF-8 or not well-formed for the cap. The four agent-inventory `Update*`
     /// caps (gesture / notecard / settings / material) share the bare
-    /// `{ item_id }` body and fall through to the catch-all arm.
+    /// `{ item_id }` body and fall through to the catch-all arm; the two
+    /// task-inventory ones (notecard / settings) share the `{ task_id, item_id }`
+    /// body of the arm above it.
     fn parse_upload_metadata(cap_name: &str, body: &[u8]) -> Option<CapsUploadMetadata> {
         let text = std::str::from_utf8(body).ok()?;
         let metadata = match cap_name {
@@ -1254,7 +1259,7 @@ impl SimCaps {
             CAP_UPDATE_SCRIPT_TASK => {
                 CapsUploadMetadata::UpdateScriptTask(parse_update_script_task_request(text).ok()?)
             }
-            CAP_UPDATE_NOTECARD_TASK_INVENTORY => {
+            CAP_UPDATE_NOTECARD_TASK_INVENTORY | CAP_UPDATE_SETTINGS_TASK_INVENTORY => {
                 let request = parse_update_task_item_asset_request(text).ok()?;
                 CapsUploadMetadata::UpdateTaskItem {
                     cap: cap_name.to_owned(),
@@ -1829,9 +1834,10 @@ impl SimCaps {
     /// the stored result (the `{ environment, success: true }` envelope the
     /// reference viewer reads back); a `day_asset`-only update answers a
     /// graceful `200 { success: false, message }` — the fixture has no
-    /// settings-asset store to resolve the id against. A malformed query or
-    /// body → `400`; other methods (including the reference's DELETE reset,
-    /// out of scope here) → `405`.
+    /// settings-asset store to resolve the id against. DELETE drops the
+    /// stored entry ([`SimSession::reset_environment`]) and echoes what the
+    /// land inherits instead. A malformed query or body → `400`; other
+    /// methods → `405`.
     fn dispatch_environment(sim: &mut SimSession, request: &CapsRequest<'_>) -> CapsResponse {
         let Ok(parcel_id) = parse_parcel_id_query(request.query) else {
             return CapsResponse::bad_request();
@@ -1858,6 +1864,13 @@ impl SimCaps {
                 }
                 let stored = sim.apply_environment_update(parcel_id, track_no, update);
                 CapsResponse::llsd_xml(environment_to_llsd(&stored).to_llsd_xml())
+            }
+            "DELETE" => {
+                let Ok(track_no) = parse_track_no_query(request.query) else {
+                    return CapsResponse::bad_request();
+                };
+                let inherited = sim.reset_environment(parcel_id, track_no);
+                CapsResponse::llsd_xml(environment_to_llsd(&inherited).to_llsd_xml())
             }
             _ => CapsResponse::method_not_allowed(),
         }
@@ -2451,6 +2464,7 @@ mod tests {
             ("UpdateScriptAgent", CapStatus::Served),
             ("UpdateScriptTask", CapStatus::Served),
             ("UpdateSettingsAgentInventory", CapStatus::Served),
+            ("UpdateSettingsTaskInventory", CapStatus::Served),
             // `ObjectAnimation` is never POSTed — it opts into the UDP
             // `ObjectAnimation` stream and has no HTTP handler, so it stays
             // `Pending` (see `CAP_OBJECT_ANIMATION`).

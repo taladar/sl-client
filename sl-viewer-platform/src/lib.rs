@@ -14,6 +14,8 @@
 //!   [`paths`].
 //! - [`asset_retry`] — the backoff policy for a fetch that failed.
 //! - [`clipboard`] — OS clipboard access.
+//! - [`file_dialog`] — the host's file-open dialog, through the desktop's own
+//!   file chooser.
 //! - [`ui_perf`] — UI frame-timing counters.
 //! - [`url_linkify`] — finding URLs, SLURLs and avatar/group references in
 //!   arbitrary text so chat can render them as links.
@@ -31,6 +33,7 @@
 pub mod asset_retry;
 pub mod clipboard;
 pub mod environment_assets;
+pub mod file_dialog;
 pub mod paths;
 pub mod sound_cache;
 pub mod system_browser;

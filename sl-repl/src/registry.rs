@@ -3496,6 +3496,16 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "reset_environment",
+            usage: "[parcel_id] [track_no]",
+            build: |args, ctx| {
+                Ok(Command::ResetEnvironment {
+                    parcel_id: args.opt_parse(ctx, "parcel_id", 0, "i32")?,
+                    track_no: args.opt_parse(ctx, "track_no", 1, "i32")?,
+                })
+            },
+        },
+        CommandSpec {
             name: "request_parcel_properties",
             usage: "<west> <south> <east> <north> [sequence_id=0]",
             build: |args, ctx| {

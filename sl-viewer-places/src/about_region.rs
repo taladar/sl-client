@@ -65,10 +65,10 @@ use bevy::text::EditableText;
 use bevy::ui::InteractionDisabled;
 use sl_client_bevy::{
     AgentKey, Asset, AssetKey, AssetType, Command, EstateAccessDelta, EstateAccessKind,
-    EstateCovenant, EstateFlags, EstateInfo, EstateInfoUpdate, GroupKey, Maturity, OwnerKey,
-    ProductType, RegionDebugUpdate, RegionFlags, RegionIdentity, RegionInfoUpdate, RegionName,
-    RegionTerrainUpdate, SlCommand, SlCurrentRegion, SlEvent, SlRegionIdentity, SlRegionLimits,
-    SlSessionEvent, TextureKey, Uuid,
+    EstateCovenant, EstateFlags, EstateInfo, EstateInfoUpdate, GroupKey, LandArea, Maturity,
+    OwnerKey, ProductType, RegionDebugUpdate, RegionFlags, RegionIdentity, RegionInfoUpdate,
+    RegionName, RegionTerrainUpdate, SlCommand, SlCurrentRegion, SlEvent, SlRegionIdentity,
+    SlRegionLimits, SlSessionEvent, TextureKey, Uuid,
 };
 
 use crate::floater::{
@@ -77,6 +77,10 @@ use crate::floater::{
 };
 use crate::i18n::{Translated, Translator};
 use crate::inventory_properties::format_unix_date;
+use crate::land_environment::{
+    AllowEnvironmentOverrideRequested, LandEnvironmentPlugin, LandEnvironmentSubject,
+    LandPanelKind, spawn_land_environment_panel,
+};
 use crate::ui::{column, row};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
@@ -519,6 +523,8 @@ struct AboutRegionUi {
     covenant: CovenantHandles,
     /// The Access tab's handles.
     access: AccessHandles,
+    /// The Environment tab's shared land-environment panel.
+    environment: Entity,
 }
 
 // ---------------------------------------------------------------------------
@@ -760,6 +766,12 @@ pub struct AboutRegionPlugin;
 
 impl Plugin for AboutRegionPlugin {
     fn build(&self, app: &mut App) {
+        // The Environment tab is the shared land-environment panel, which
+        // About Land hosts too — whichever floater's plugin is built first
+        // brings its systems.
+        if !app.is_plugin_added::<LandEnvironmentPlugin>() {
+            app.add_plugins(LandEnvironmentPlugin);
+        }
         app.add_message::<OpenAboutRegion>()
             .add_systems(
                 Update,
@@ -790,6 +802,8 @@ impl Plugin for AboutRegionPlugin {
                     apply_combo_edits,
                     apply_avatar_picks,
                     apply_texture_edits,
+                    aim_environment_panel,
+                    apply_environment_override,
                 )
                     .chain()
                     .after(open_about_region)
@@ -809,6 +823,10 @@ impl Plugin for AboutRegionPlugin {
 // ---------------------------------------------------------------------------
 // Spawn.
 // ---------------------------------------------------------------------------
+
+/// The focus stop the Environment tab's panel starts its run of tab indices
+/// at. The other tabs' controls sit in `1..=6`, and the panel takes a dozen.
+const ENV_TAB_INDEX: i32 = 10;
 
 /// The Region / Estate floater's stable [`crate::floater::Floater::id`], the
 /// key [`open_about_region`] looks the panel up by.
@@ -878,7 +896,8 @@ fn build_region_content(commands: &mut Commands, handle: FloaterHandle) -> About
     let estate = build_estate_tab(commands, panel(3));
     let covenant = build_covenant_tab(commands, panel(4));
     let access = build_access_tab(commands, panel(5));
-    build_placeholder_tab(commands, panel(6), "about-region-env-unimplemented");
+    let environment =
+        spawn_land_environment_panel(commands, panel(6), LandPanelKind::Region, ENV_TAB_INDEX);
     build_placeholder_tab(commands, panel(7), "about-region-experiences-unimplemented");
 
     AboutRegionUi {
@@ -889,6 +908,7 @@ fn build_region_content(commands: &mut Commands, handle: FloaterHandle) -> About
         estate,
         covenant,
         access,
+        environment,
     }
 }
 
@@ -2885,6 +2905,78 @@ const fn maturity_from_index(index: usize) -> Maturity {
         1 => Maturity::Mature,
         2 => Maturity::Adult,
         _other => Maturity::Pg,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The Environment tab.
+// ---------------------------------------------------------------------------
+
+/// Keep each window's Environment tab pointed at its region.
+///
+/// Written every frame and compared rather than driven off the dirty flags:
+/// the panel is another crate's and takes a plain value, and the three facts
+/// it needs (current, manageable, the estate's override flag) are each kept by
+/// a different reply.
+fn aim_environment_panel(
+    windows: Query<(&AboutRegionState, &AboutRegionUi)>,
+    mut panels: Query<&mut LandEnvironmentSubject>,
+) {
+    for (state, ui) in &windows {
+        let Ok(mut subject) = panels.get_mut(ui.environment) else {
+            continue;
+        };
+        let wanted = LandEnvironmentSubject {
+            // A region panel publishes to the region, never to a parcel.
+            parcel_id: None,
+            live: state.is_current,
+            editable: state.can_manage,
+            allow_override: state
+                .estate_draft
+                .contains(EstateFlags::ALLOW_ENVIRONMENT_OVERRIDE),
+            // A region has no area a minimum-parcel-size test could apply to.
+            area: LandArea::ZERO,
+        };
+        if *subject != wanted {
+            *subject = wanted;
+        }
+    }
+}
+
+/// The Environment tab's "Parcel Owners May Override" was confirmed.
+///
+/// The flag is the **estate's**, not the environment's, so it rides the
+/// estate-info write the Estate tab already uses — which is why the panel asks
+/// this floater to send it rather than sending anything itself. The fixed-sun
+/// bit is cleared with it, exactly as [`AboutRegionAction::ApplyEstate`]
+/// clears it: the reference drops fixed-sun estates on any estate change.
+fn apply_environment_override(
+    mut requests: MessageReader<AllowEnvironmentOverrideRequested>,
+    mut windows: Query<(&mut AboutRegionState, &AboutRegionUi)>,
+    mut sl_commands: MessageWriter<SlCommand>,
+) {
+    for request in requests.read() {
+        for (mut state, ui) in &mut windows {
+            if ui.environment != request.panel {
+                continue;
+            }
+            let Some(estate_name) = state
+                .estate
+                .as_ref()
+                .map(|estate| estate.estate_name.clone())
+            else {
+                continue;
+            };
+            state.estate_draft = state
+                .estate_draft
+                .with(EstateFlags::ALLOW_ENVIRONMENT_OVERRIDE, request.allow)
+                .with(EstateFlags::SUN_FIXED, false);
+            sl_commands.write(SlCommand(Command::SetEstateInfo(EstateInfoUpdate {
+                estate_name,
+                flags: state.estate_draft.bits(),
+                sun_hour: 0.0,
+            })));
+        }
     }
 }
 

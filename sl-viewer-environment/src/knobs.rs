@@ -33,6 +33,7 @@ use sl_client_bevy::{
     SkySettings, TextureKey, WaterSettings, azimuth_altitude_to_rotation,
     rotation_to_azimuth_altitude,
 };
+use sl_viewer_ui_widgets::ui_trackball::{TrackballAim, TrackballBody};
 
 /// The reference's `SLIDER_SCALE_SUN_AMBIENT`: the sun and ambient colours are
 /// shown (and picked) at a third of their stored value, because the stored one
@@ -668,6 +669,125 @@ impl SkyKnob {
 }
 
 // ---------------------------------------------------------------------------
+// Aim: the knob pair one trackball drives.
+// ---------------------------------------------------------------------------
+
+/// The two knobs that place one celestial body — its compass angle and its
+/// height — as one thing.
+///
+/// The sliders drive them separately, because a slider drives one number. A
+/// trackball ([`sl_viewer_ui_widgets::ui_trackball`]) drives both at once,
+/// because pointing at a hemisphere says where a body is in one gesture; this
+/// is the pair it writes through, so the trackball itself never learns what a
+/// sky is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AimKnobs {
+    /// Which body the pair places.
+    pub body: TrackballBody,
+    /// The compass-angle knob.
+    pub azimuth: SkyKnob,
+    /// The height knob.
+    pub elevation: SkyKnob,
+}
+
+impl AimKnobs {
+    /// The sun's pair.
+    pub const SUN: Self = Self {
+        body: TrackballBody::Sun,
+        azimuth: SkyKnob::SunAzimuth,
+        elevation: SkyKnob::SunElevation,
+    };
+
+    /// The moon's pair.
+    pub const MOON: Self = Self {
+        body: TrackballBody::Moon,
+        azimuth: SkyKnob::MoonAzimuth,
+        elevation: SkyKnob::MoonElevation,
+    };
+
+    /// Both, in the order the windows draw them.
+    pub const ALL: &'static [Self] = &[Self::SUN, Self::MOON];
+
+    /// The pair `knob` belongs to, if it is one of the four aim knobs.
+    #[must_use]
+    pub fn of(knob: SkyKnob) -> Option<Self> {
+        Self::ALL.iter().copied().find(|pair| pair.covers(knob))
+    }
+
+    /// Whether `knob` is one of this pair.
+    #[must_use]
+    pub fn covers(self, knob: SkyKnob) -> bool {
+        knob == self.azimuth || knob == self.elevation
+    }
+
+    /// The slug the trackball is named and labelled by. Its own, rather than
+    /// either knob's: the control is one row showing where a body *is*, and the
+    /// two knob labels are on the two sliders under it.
+    #[must_use]
+    pub const fn slug(self) -> &'static str {
+        match self.body {
+            TrackballBody::Sun => "sun-position",
+            TrackballBody::Moon => "moon-position",
+        }
+    }
+
+    /// Where this body is in `sky`, in the degrees the trackball and the two
+    /// sliders both show.
+    #[must_use]
+    pub fn read(self, sky: &SkySettings) -> TrackballAim {
+        TrackballAim {
+            azimuth: self.azimuth.read(sky),
+            elevation: self.elevation.read(sky),
+        }
+    }
+
+    /// Put this body at `aim`.
+    ///
+    /// The height goes first, and the order is not arbitrary: a rotation
+    /// pointing exactly at a pole has no azimuth to keep, so writing the
+    /// azimuth into a body that is *currently* straight up would be dropped and
+    /// the height that followed would take it from zero. Writing the height
+    /// first leaves the azimuth write last, where it always lands.
+    pub fn write(self, sky: &mut SkySettings, aim: TrackballAim) {
+        self.elevation.write(sky, aim.elevation);
+        self.azimuth.write(sky, aim.azimuth);
+    }
+
+    /// `aim` with the one component `knob` names replaced by `value` — how a
+    /// slider drag reaches a trackball. A knob outside the pair changes
+    /// nothing.
+    #[must_use]
+    pub fn with(self, aim: TrackballAim, knob: SkyKnob, value: f32) -> TrackballAim {
+        if knob == self.azimuth {
+            TrackballAim {
+                azimuth: value,
+                ..aim
+            }
+        } else if knob == self.elevation {
+            TrackballAim {
+                elevation: value,
+                ..aim
+            }
+        } else {
+            aim
+        }
+    }
+
+    /// The component of `aim` that `knob` names — how a trackball drag reaches
+    /// a slider.
+    #[must_use]
+    pub fn value_of(self, aim: TrackballAim, knob: SkyKnob) -> Option<f32> {
+        if knob == self.azimuth {
+            Some(aim.azimuth)
+        } else if knob == self.elevation {
+            Some(aim.elevation)
+        } else {
+            None
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Water.
 // ---------------------------------------------------------------------------
 
@@ -1056,7 +1176,7 @@ fn with_elevation(rotation: &Rotation, elevation_deg: f32) -> Rotation {
 
 #[cfg(test)]
 mod tests {
-    use super::{ColorKnob, SkyKnob, TextureKnob, WaterKnob};
+    use super::{AimKnobs, ColorKnob, SkyKnob, TextureKnob, TrackballAim, WaterKnob};
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_bevy::{
         DEFAULT_CLOUD_TEXTURE, DEFAULT_WATER_NORMAL_TEXTURE, SkySettings, TextureKey, WaterSettings,
@@ -1272,6 +1392,86 @@ mod tests {
         assert!((SkyKnob::MoonElevation.read(&sky) - moon_elevation).abs() < 0.01);
         assert!((SkyKnob::SunAzimuth.read(&sky) - 123.0).abs() < 0.01);
         assert!((SkyKnob::SunElevation.read(&sky) + 12.0).abs() < 0.01);
+    }
+
+    /// **An aim round-trips through the pair**, and the pair leaves the other
+    /// body alone — the same claim as above, for the control that writes both
+    /// angles in one gesture.
+    #[test]
+    fn an_aim_round_trips_through_its_knob_pair() {
+        let mut sky = SkySettings::legacy_windlight_default("probe");
+        let moon = AimKnobs::MOON.read(&sky);
+        let wanted = TrackballAim {
+            azimuth: 200.0,
+            elevation: -35.0,
+        };
+        AimKnobs::SUN.write(&mut sky, wanted);
+        let back = AimKnobs::SUN.read(&sky);
+        assert!((back.azimuth - wanted.azimuth).abs() < 0.01, "{back:?}");
+        assert!((back.elevation - wanted.elevation).abs() < 0.01, "{back:?}");
+        let moon_again = AimKnobs::MOON.read(&sky);
+        assert!((moon_again.azimuth - moon.azimuth).abs() < 0.01);
+        assert!((moon_again.elevation - moon.elevation).abs() < 0.01);
+    }
+
+    /// **A body straight up can still be aimed somewhere else.**
+    ///
+    /// A rotation pointing at a pole has no azimuth stored in it — every
+    /// azimuth is the same direction there. So the pair writes the *height*
+    /// first and the compass second: written the other way round, an aim
+    /// leaving the zenith would lose its azimuth to a rotation that had nowhere
+    /// to keep it and come back pointing due east.
+    #[test]
+    fn a_body_at_the_zenith_keeps_the_azimuth_it_is_given() {
+        let mut sky = SkySettings::legacy_windlight_default("probe");
+        AimKnobs::SUN.write(
+            &mut sky,
+            TrackballAim {
+                azimuth: 0.0,
+                elevation: 90.0,
+            },
+        );
+        AimKnobs::SUN.write(
+            &mut sky,
+            TrackballAim {
+                azimuth: 137.0,
+                elevation: 40.0,
+            },
+        );
+        let back = AimKnobs::SUN.read(&sky);
+        assert!((back.azimuth - 137.0).abs() < 0.01, "{back:?}");
+        assert!((back.elevation - 40.0).abs() < 0.01, "{back:?}");
+    }
+
+    /// **Every aim knob belongs to exactly one pair, and every pair to two
+    /// knobs.** The lookup a slider is tagged through: a knob missing from it
+    /// is a slider the trackball above it never hears from.
+    #[test]
+    fn the_aim_pairs_cover_the_four_angle_knobs() {
+        let angles = [
+            SkyKnob::SunAzimuth,
+            SkyKnob::SunElevation,
+            SkyKnob::MoonAzimuth,
+            SkyKnob::MoonElevation,
+        ];
+        for knob in angles {
+            let found: Vec<AimKnobs> = AimKnobs::ALL
+                .iter()
+                .copied()
+                .filter(|pair| pair.covers(knob))
+                .collect();
+            assert_eq!(found.len(), 1, "{knob:?} is not in exactly one pair");
+        }
+        for knob in ALL_SKY {
+            if angles.contains(knob) {
+                continue;
+            }
+            assert_eq!(
+                AimKnobs::of(*knob),
+                None,
+                "{knob:?} is not an angle and must not be in a pair"
+            );
+        }
     }
 
     /// **A colour swatch round-trips through its display scale.** Ambient, the

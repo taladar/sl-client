@@ -56,3 +56,27 @@ Implementation notes:
 Reference (Firestorm, read-only): `LLFilePicker` / `LLDirPicker` (its GTK file
 dialog is *not* portal-based, so it breaks under a confined Wayland session — a
 concrete reason to do this properly rather than copy it), and `LLWeb::loadURL`.
+
+## The FileChooser **open** half has landed (2026-09-11)
+
+[[viewer-environment-import-legacy-presets]] needed a file-open dialog, so it
+built the shared one rather than a private hack:
+`sl_viewer_platform::file_dialog` — an `OpenFileDialog` → `FileDialogClosed`
+message pair over **`rfd`**, which settles the evaluation this task asked for.
+`rfd` was chosen over `ashpd`: its `xdg-portal` backend talks the portal
+protocol over a `dlopen`ed `libdbus` (falling back to `zenity`), so it adds no
+`zbus` tree, and it collapses the file-dialog half of the two deferred
+per-platform tasks at the same time. The dialog is driven on the `IoTaskPool`
+(request → pending → reply, never a blocking call on the frame), is
+single-flight, and remembers a last-used directory **per purpose**.
+
+What is still this task's:
+
+- **Save** dialogs, folder pickers, and multi-select — only `pick_file` is
+  wired.
+- **No parent window.** `rfd::set_parent` wants a `HasWindowHandle`, and Bevy
+  only offers one through `RawHandleWrapper::get_handle`, an `unsafe fn` this
+  workspace's `unsafe_code = "forbid"` rules out. Fixing it properly means a
+  safe accessor upstream.
+- **OpenURI, Notification, Settings (colour scheme), Inhibit** — untouched;
+  `system_browser` still shells out.

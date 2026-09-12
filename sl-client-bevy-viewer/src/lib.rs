@@ -160,6 +160,7 @@ pub(crate) use sl_viewer_kit::flexi;
 pub(crate) use sl_viewer_notices::experience_permission;
 pub(crate) use sl_viewer_notices::experiences_floater;
 pub(crate) use sl_viewer_platform::environment_assets;
+pub(crate) use sl_viewer_platform::file_dialog;
 pub(crate) use sl_viewer_ui_widgets::floater;
 #[cfg(test)]
 mod floater_chrome;
@@ -240,6 +241,7 @@ pub(crate) use sl_viewer_people::people;
 pub(crate) use sl_viewer_people::presence;
 pub(crate) use sl_viewer_people::radar;
 pub(crate) use sl_viewer_platform::paths;
+pub(crate) use sl_viewer_preferences::phototools;
 pub(crate) use sl_viewer_preferences::preferences;
 pub(crate) use sl_viewer_preferences::preferences_alerts;
 pub(crate) use sl_viewer_preferences::preferences_audio;
@@ -259,6 +261,7 @@ pub(crate) use sl_viewer_world_scene::particles;
 pub(crate) use sl_viewer_world_scene::probes;
 pub(crate) use sl_viewer_world_view::physics;
 pub mod render_gallery;
+pub(crate) use sl_viewer_environment::bulk_import;
 pub(crate) use sl_viewer_environment::day_cycle_editor;
 pub(crate) use sl_viewer_environment::my_environments;
 pub(crate) use sl_viewer_environment::personal_lighting;
@@ -350,6 +353,7 @@ pub(crate) use sl_viewer_ui_widgets::ui_radio;
 pub(crate) use sl_viewer_ui_widgets::ui_search;
 pub(crate) use sl_viewer_ui_widgets::ui_tab;
 pub(crate) use sl_viewer_ui_widgets::ui_table;
+pub(crate) use sl_viewer_ui_widgets::ui_trackball;
 #[cfg(test)]
 mod ui_test;
 pub(crate) use sl_viewer_audio::volume_panel;
@@ -1223,6 +1227,10 @@ fn run_session(
     .add_plugins(crate::linkified_text::LinkifiedTextPlugin)
     // Shared OS-clipboard handle for the "Copy SLURL" affordances.
     .add_plugins(crate::clipboard::ClipboardPlugin)
+    // The host's file-open dialog (the XDG FileChooser portal on Linux), for
+    // every "… from disk": the settings editors' Import today, the uploaders
+    // when they land.
+    .add_plugins(crate::file_dialog::FileDialogPlugin)
     // Routes a clicked / command-line SLURL to its handler (profile, IM,
     // teleport, world map): viewer-slurl-parse-dispatch.
     .add_plugins(crate::slurl_dispatch::SlurlDispatchPlugin)
@@ -1234,6 +1242,11 @@ fn run_session(
     // group's selection, so a click and an external write (the Build Tools
     // floater's tool sync) drive the same visual path.
     .add_plugins(crate::ui_radio::RadioWidgetPlugin)
+    // The sun / moon trackball's drawing half (viewer-ui-virtual-trackball):
+    // places each marker from the aim its window wrote and paints the
+    // below-horizon state. The environment editors' `RowsPlugin` adds it too,
+    // guarded, so a host that takes only those windows still draws them.
+    .add_plugins(crate::ui_trackball::TrackballPlugin)
     // The reusable combo / dropdown widget (viewer-ui-combo-widget): the closed
     // value reconcile, the ComboChanged message, and the outside-press dismiss.
     .add_plugins(crate::ui_combo::ComboWidgetPlugin)
@@ -1599,6 +1612,11 @@ fn run_session(
     // the bottom toolbar (its BottomArea host).
     .add_plugins(crate::quick_preferences::QuickPreferencesPlugin)
     .add_plugins(crate::quick_prefs_environment::QuickPrefsEnvironmentPlugin)
+    // Phototools (viewer-phototools): the photographer's window — the
+    // environment on one tab and the render knobs that change the *look* on the
+    // others, a second curated view over the same store the graphics tab binds.
+    // Opened from World ▸ Photo and Video ▸ Phototools (Alt+P).
+    .add_plugins(crate::phototools::PhototoolsPlugin)
     // The alerts tab's popup list (viewer-preferences-alerts-tab): the model
     // refresh, row pool and binding behind the panel build_alerts_tab plugs
     // into the shell's registry.

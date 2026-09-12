@@ -196,6 +196,14 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
         spawn: crate::quick_preferences::spawn_quick_prefs_specimen,
     },
     UiElement {
+        id: "phototools",
+        summary: "The Phototools window: the tab strip over the environment tab — the preset \
+                  library combo, the four times of day and the door to Personal Lighting — and \
+                  two of the render rows beneath. Static — the live window \
+                  (`crate::phototools`) adds the store binding and the environment wiring.",
+        spawn: crate::phototools::spawn_phototools_specimen,
+    },
+    UiElement {
         id: "tabs-trailing",
         summary: "The tab widget with a vertical strip on the trailing edge (right under LTR) — a \
                   placement the reference viewer cannot express, usable for LTR too, not only as \
@@ -215,6 +223,15 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
         summary: "The radio-button group stacked down the block axis — the reference viewer's usual \
                   radio shape. Same widget as `radio-group-row`, the vertical layout swept.",
         spawn: crate::ui_radio::spawn_radio_column,
+    },
+    UiElement {
+        id: "sun-moon-trackball",
+        summary: "The sun / moon trackball (`crate::ui_trackball`): a compass disc showing where a \
+                  celestial body is, dragged to aim it. Two of them here — a sun above the horizon \
+                  and a moon below it, which is the state the hollow marker carries. Every \
+                  environment editor hosts a pair beside the azimuth and elevation sliders that \
+                  write the same two angles.",
+        spawn: crate::ui_trackball::spawn_trackball_pair,
     },
     UiElement {
         id: "combo-box",

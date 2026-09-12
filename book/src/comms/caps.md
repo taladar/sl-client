@@ -556,6 +556,14 @@ The inverses added for this cluster: `parse_get_object_cost_request`
 new `EnvironmentUpdate` type (`sl-proto/src/session/conversions.rs`,
 `sl-proto/src/types/environment.rs`) — driven client-side by the new
 `Command::SetEnvironment` (both runtimes, repl command `set_environment`).
+The **DELETE** reset came later, with the region / parcel environment panel:
+`Command::ResetEnvironment` (repl `reset_environment`) drops the stored entry
+so the land inherits again — a parcel its region's environment, a region the
+grid default, which is why `SimSession::reset_environment` *replaces* the
+region entry rather than removing it and leaving the capability nothing to
+serve. All three verbs build their URL with `sl_proto::environment_cap_url`,
+which emits `?parcelid=` / `&trackno=` only when the request is scoped to
+one, as the reference does.
 Everything else already existed client-paired
 (`build_simulator_features_response`, `build_lsl_syntax_document`, the
 `remote_parcel` / `object_cost` / `object_physics` / `resource_report`

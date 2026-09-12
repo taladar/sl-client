@@ -9,7 +9,7 @@ mod test {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::time::{Duration, Instant};
 
-    use pretty_assertions::assert_eq;
+    use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
         AVATAR_PICKER_PAGE_SIZE, AVATAR_PICKER_SEARCH_TAG, AbuseReport, AbuseReportType, AgentKey,
         AgentPreferences, AssetKey, CAP_AGENT_EXPERIENCES, CAP_ATTACHMENT_RESOURCES,
@@ -25,8 +25,9 @@ mod test {
         CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST,
         CAP_RENDER_MATERIALS, CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES,
         CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_UPDATE_NOTECARD_AGENT_INVENTORY,
-        CAP_UPDATE_NOTECARD_TASK_INVENTORY, CAP_UPDATE_SCRIPT_AGENT, CAP_UPLOAD_BAKED_TEXTURE,
-        CAP_VIEWER_ASSET, CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
+        CAP_UPDATE_NOTECARD_TASK_INVENTORY, CAP_UPDATE_SCRIPT_AGENT,
+        CAP_UPDATE_SETTINGS_TASK_INVENTORY, CAP_UPLOAD_BAKED_TEXTURE, CAP_VIEWER_ASSET,
+        CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
         CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_FETCH_HISTORY_TAG,
         CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE, CapsDispatch, CapsRequest,
         CapsUploadMetadata, ChatSessionKind, DayCycle, DisplayName, EnvironmentSettings,
@@ -145,13 +146,13 @@ mod test {
         let expected = caps.grant(&requested);
         assert_eq!(granted, expected);
         // Eight agent-comms/framework sim caps, the four asset-delivery caps
-        // (GetTexture/GetMesh/GetMesh2/ViewerAsset), the fifteen content
+        // (GetTexture/GetMesh/GetMesh2/ViewerAsset), the sixteen content
         // upload/materials/MOAP caps, the seven inventory caps (the two
         // descendents fetches, the two per-item fetches, AISv3 agent +
         // Library, CreateInventoryCategory), the nine
         // region/object-information caps, the twelve experience caps, and
         // the three voice signalling caps.
-        assert_eq!(granted.len(), 58);
+        assert_eq!(granted.len(), 59);
         Ok(())
     }
 
@@ -1353,6 +1354,44 @@ mod test {
                     item_id,
                 } => {
                     assert_eq!(cap, CAP_UPDATE_NOTECARD_TASK_INVENTORY);
+                    assert_eq!(task_id, task);
+                    assert_eq!(item_id, item);
+                }
+                other => return Err(format!("expected UpdateTaskItem, got {other:?}").into()),
+            },
+            other => return Err(format!("expected CapsAssetUploaded, got {other:?}").into()),
+        }
+        Ok(())
+    }
+
+    /// `UpdateSettingsTaskInventory` is the settings sibling of the notecard
+    /// task cap, and shares its `{ task_id, item_id }` body.
+    ///
+    /// Requested and served because the **pair** of settings caps is what a
+    /// viewer reads as "this grid does settings at all" (the reference's
+    /// `LLEnvironment::isInventoryEnabled`), which gates every settings creator
+    /// and save. A grid serving only the agent half would grey them all.
+    #[test]
+    fn update_settings_task_item_replaces_asset() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let task = ObjectKey::from(uuid::Uuid::from_u128(0x5e77));
+        let item = InventoryKey::from(uuid::Uuid::from_u128(0x5e78));
+        run_two_stage_upload(
+            &mut caps,
+            &mut sim,
+            CAP_UPDATE_SETTINGS_TASK_INVENTORY,
+            &build_update_task_item_asset_request(task, item),
+            b"task-settings",
+        )?;
+        match sim.poll_event() {
+            Some(ServerEvent::CapsAssetUploaded { metadata, .. }) => match *metadata {
+                CapsUploadMetadata::UpdateTaskItem {
+                    cap,
+                    task_id,
+                    item_id,
+                } => {
+                    assert_eq!(cap, CAP_UPDATE_SETTINGS_TASK_INVENTORY);
                     assert_eq!(task_id, task);
                     assert_eq!(item_id, item);
                 }
@@ -2593,6 +2632,8 @@ mod test {
                 sky_frames: std::collections::BTreeMap::new(),
                 water_frames: std::collections::BTreeMap::new(),
             },
+            day_asset: None,
+            day_names: sl_proto::DayNames::Unnamed,
         });
 
         sim.set_object_cost(
@@ -2962,6 +3003,92 @@ mod test {
             other => return Err(format!("expected Environment, got {other:?}").into()),
         }
         Ok(())
+    }
+
+    /// The `ExtEnvironment` **DELETE** drops a parcel's stored entry, so the
+    /// parcel falls back to the region's environment, and surfaces
+    /// [`ServerEvent::EnvironmentReset`] for the driver.
+    ///
+    /// The fallback is the whole point of the verb and the reason it cannot be
+    /// spelled as a PUT: there is no update body that says "forget what I set
+    /// and inherit again". The region entry is the bottom of that chain, so a
+    /// region-scoped reset *replaces* it with the default rather than removing
+    /// it — a capability with nothing to serve would be worse than a region
+    /// with a default sky.
+    #[test]
+    fn environment_delete_drops_the_stored_entry() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_region_info(&mut sim);
+        let now = Instant::now();
+        let mut client = new_client()?;
+        let path = granted_cap_path(&caps, CAP_EXT_ENVIRONMENT)?;
+
+        // Give parcel 3 an environment of its own, distinguishable by its day
+        // length from the region's.
+        let update_body = build_environment_update_request(&EnvironmentUpdate {
+            day_length: Some(1800),
+            ..EnvironmentUpdate::default()
+        });
+        let (status, _body) = respond(
+            &mut caps,
+            &mut sim,
+            &put(&path, Some("parcelid=3"), &update_body),
+        )?;
+        assert_eq!(status, 200);
+        drop(sim.poll_event());
+
+        let events = fold_into_client(
+            &mut caps,
+            &mut sim,
+            &mut client,
+            &delete(&path, Some("parcelid=3")),
+            CAP_EXT_ENVIRONMENT,
+            now,
+        )?;
+        match events.as_slice() {
+            [Event::Environment(environment)] => {
+                assert_ne!(
+                    environment.day_length, 1800,
+                    "the parcel's own environment survived the reset"
+                );
+                assert_eq!(
+                    environment.day_length,
+                    sim_region_day_length(&mut caps, &mut sim, &path)?,
+                    "a reset parcel should be answered with the region's environment"
+                );
+            }
+            other => return Err(format!("expected Environment, got {other:?}").into()),
+        }
+        match sim.poll_event() {
+            Some(ServerEvent::EnvironmentReset {
+                parcel_id,
+                track_no,
+            }) => {
+                assert_eq!(parcel_id, 3);
+                assert_eq!(track_no, None);
+            }
+            other => return Err(format!("expected EnvironmentReset, got {other:?}").into()),
+        }
+        Ok(())
+    }
+
+    /// The day length the region entry is serving, read back through the
+    /// capability.
+    fn sim_region_day_length(
+        caps: &mut SimCaps,
+        sim: &mut SimSession,
+        path: &str,
+    ) -> Result<i32, TestError> {
+        let (status, body) = respond(caps, sim, &get(path, Some("parcelid=-1")))?;
+        assert_eq!(status, 200);
+        let llsd = parse_llsd_xml(&body)?;
+        let day_length = llsd
+            .get("environment")
+            .and_then(|environment| environment.get("day_length"))
+            .and_then(sl_wire::Llsd::as_i32)
+            .ok_or("the region environment reply carries no day_length")?;
+        Ok(day_length)
     }
 
     /// A `day_asset`-only PUT answers the reference's graceful failure —
@@ -3358,8 +3485,9 @@ mod test {
         }
 
         // ExtEnvironment: a malformed `parcelid` is a bad request, a PUT
-        // without the `environment` envelope is a bad request, and any other
-        // method (the DELETE reset stays unimplemented) is 405.
+        // without the `environment` envelope is a bad request. The three verbs
+        // the capability serves are GET, PUT and DELETE; anything else is 405,
+        // and a malformed query is 400 whichever of them asked.
         let path = granted_cap_path(&caps, CAP_EXT_ENVIRONMENT)?;
         let (status, _) = respond(&mut caps, &mut sim, &get(&path, Some("parcelid=abc")))?;
         assert_eq!(status, 400);
@@ -3369,17 +3497,9 @@ mod test {
             &put(&path, None, "<llsd><map/></llsd>"),
         )?;
         assert_eq!(status, 400);
-        let (status, _) = respond(
-            &mut caps,
-            &mut sim,
-            &CapsRequest {
-                method: "DELETE",
-                path: &path,
-                query: Some("parcelid=-1"),
-                range: None,
-                body: b"",
-            },
-        )?;
+        let (status, _) = respond(&mut caps, &mut sim, &delete(&path, Some("trackno=abc")))?;
+        assert_eq!(status, 400);
+        let (status, _) = respond(&mut caps, &mut sim, &post(&path, "<llsd><map/></llsd>"))?;
         assert_eq!(status, 405);
 
         // LandResources: an unknown sub-path is 404; the follow-up GETs are

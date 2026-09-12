@@ -182,6 +182,8 @@ impl Plugin for InventoryPlugin {
                     route_gear_menu,
                     update_gear_conditions
                         .run_if(crate::floater::floater_shown(INVENTORY_FLOATER_ID)),
+                    update_add_conditions
+                        .run_if(crate::floater::floater_shown(INVENTORY_FLOATER_ID)),
                     apply_ui_actions,
                     read_search_field,
                     rebuild_view.run_if(crate::floater::floater_shown(INVENTORY_FLOATER_ID)),
@@ -1761,6 +1763,31 @@ fn update_gear_conditions(
     }
 }
 
+/// The marker on the **+** (create) button's host entity, whose
+/// [`MenuConditions`] the New Settings entries read.
+#[derive(Component)]
+struct InventoryAddHost;
+
+/// Keep the **+** menu host's [`MenuConditions`] current: whether the grid can
+/// hold a settings asset at all, which is what greys the New Settings entries —
+/// the reference's `LLPanelMainInventory::isSettingsFolder`-adjacent enable
+/// callback, which is `LLEnvironment::isInventoryEnabled`.
+fn update_add_conditions(
+    support: Res<crate::inventory_actions::SettingsInventorySupport>,
+    mut hosts: Query<&mut MenuConditions, With<InventoryAddHost>>,
+) {
+    let wanted: &[&'static str] = if support.supported() {
+        &[crate::inventory_actions::CAN_CREATE_SETTINGS]
+    } else {
+        &[]
+    };
+    for mut conditions in &mut hosts {
+        if conditions.0 != wanted {
+            conditions.0 = wanted.to_vec();
+        }
+    }
+}
+
 /// Route the gear menu's picks (a [`UiAction`]): the expand / collapse and
 /// sort toggles act on the window state, Show / Reset Filters drive the
 /// filters floater ([`crate::inventory_filters`]), and the two emptiers issue
@@ -3293,13 +3320,18 @@ fn build_inventory_content(In(handle): In<FloaterHandle>, mut commands: Commands
     // The reference's **+** (create) menu sits beside the gear: the Upload /
     // New-item entries (`menu_inventory_add.xml`), targeting the selected
     // folder. Its defs and routing live in [`crate::inventory_actions`].
-    crate::menu::spawn_menu_button(
+    let add_host = crate::menu::spawn_menu_button(
         &mut commands,
         expand_row,
         ElementCx::new(),
         &crate::inventory_actions::INVENTORY_ADD_MENU,
         crate::inventory_actions::INVENTORY_ADD_ELEMENT,
     );
+    // The New Settings entries are greyed on a grid that cannot store one, the
+    // menu-bar pattern again — read off the host by `update_add_conditions`.
+    commands
+        .entity(add_host)
+        .insert((MenuConditions::default(), InventoryAddHost));
 
     // Search field — the reusable search-field widget (`crate::ui_search`), the
     // same box the menu bar uses. It owns the border, the `×` clear button, the

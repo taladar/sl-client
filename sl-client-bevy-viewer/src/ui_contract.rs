@@ -272,6 +272,7 @@ pub(crate) fn install_element_hosting(app: &mut App) {
         crate::emoji_complete::ColonCompletePlugin,
         crate::chat_input::ChatInputPlugin,
         crate::local_chat_input::LocalChatInputPlugin,
+        crate::ui_trackball::TrackballPlugin,
     ));
     // The messages whose *writers* are attached by a spawn but whose
     // registration lives in a plugin the sweep does not want whole.

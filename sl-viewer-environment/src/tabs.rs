@@ -12,7 +12,7 @@
 //! edit, and one on two tabs is two controls fighting over a field with only the
 //! last re-seed deciding which of them is right.
 
-use crate::knobs::{ColorKnob, SkyKnob, TextureKnob, WaterKnob};
+use crate::knobs::{AimKnobs, ColorKnob, SkyKnob, TextureKnob, WaterKnob};
 
 /// One tab of an editor: its label and the knobs on it.
 #[derive(Debug, Clone, Copy)]
@@ -30,6 +30,11 @@ pub struct TabPage {
     pub sky: &'static [SkyKnob],
     /// The water sliders (empty on a sky page).
     pub water: &'static [WaterKnob],
+    /// The trackballs, one per slider column, above the sliders in it. Only
+    /// the sun-and-moon page has any: a trackball is a second way to drive two
+    /// knobs that are already on the page, so it belongs on the page they are
+    /// on and nowhere else.
+    pub aims: &'static [AimKnobs],
 }
 
 /// The sky pages, in the reference's order.
@@ -56,6 +61,7 @@ pub const SKY_TABS: &[TabPage] = &[
             SkyKnob::Gamma,
         ],
         water: &[],
+        aims: &[],
     },
     TabPage {
         label: "settings-editor-tab-clouds",
@@ -76,6 +82,7 @@ pub const SKY_TABS: &[TabPage] = &[
             SkyKnob::CloudDetailD,
         ],
         water: &[],
+        aims: &[],
     },
     TabPage {
         label: "settings-editor-tab-sun-moon",
@@ -102,6 +109,9 @@ pub const SKY_TABS: &[TabPage] = &[
             SkyKnob::SunArcRadians,
         ],
         water: &[],
+        // The reference's own sun-and-moon panel opens with the two
+        // trackballs, one per body, above the angle spinners they share.
+        aims: &[AimKnobs::SUN, AimKnobs::MOON],
     },
     TabPage {
         label: "settings-editor-tab-density",
@@ -133,6 +143,7 @@ pub const SKY_TABS: &[TabPage] = &[
             SkyKnob::SkyTopRadius,
         ],
         water: &[],
+        aims: &[],
     },
 ];
 
@@ -163,12 +174,13 @@ pub const WATER_TABS: &[TabPage] = &[TabPage {
         WaterKnob::SmallWaveX,
         WaterKnob::SmallWaveY,
     ],
+    aims: &[],
 }];
 
 #[cfg(test)]
 mod tests {
     use super::{SKY_TABS, WATER_TABS};
-    use crate::knobs::{ColorKnob, SkyKnob, TextureKnob, WaterKnob};
+    use crate::knobs::{AimKnobs, ColorKnob, SkyKnob, TextureKnob, WaterKnob};
     use pretty_assertions::assert_eq;
 
     /// **Every knob is on exactly one tab.** The knob tables and the tab tables
@@ -224,6 +236,34 @@ mod tests {
         assert_eq!(textures.len(), TextureKnob::ALL.len());
         for knob in TextureKnob::ALL {
             assert_eq!(textures.iter().filter(|shown| *shown == knob).count(), 1);
+        }
+    }
+
+    /// **A trackball is on the page its own two knobs are on**, once, and every
+    /// body has one.
+    ///
+    /// A trackball writes two knobs that already have sliders. Put it on a page
+    /// those sliders are not on and it silently drives controls the user cannot
+    /// see beside it; put it on two pages and two controls fight over one body.
+    /// Neither is visible by reading one table.
+    #[test]
+    fn every_trackball_is_on_the_page_its_knobs_are() {
+        let pages: Vec<&super::TabPage> = SKY_TABS.iter().chain(WATER_TABS).collect();
+        for pair in AimKnobs::ALL {
+            let shown: Vec<&super::TabPage> = pages
+                .iter()
+                .copied()
+                .filter(|page| page.aims.contains(pair))
+                .collect();
+            assert_eq!(shown.len(), 1, "{:?} is not on exactly one page", pair.body);
+            for page in shown {
+                assert!(
+                    page.sky.contains(&pair.azimuth) && page.sky.contains(&pair.elevation),
+                    "{} holds a {:?} trackball but not its two sliders",
+                    page.label,
+                    pair.body
+                );
+            }
         }
     }
 

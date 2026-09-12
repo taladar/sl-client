@@ -261,6 +261,13 @@ fn register_derender_settings(settings: Option<ResMut<ViewerSettings>>) {
     let Some(mut settings) = settings else {
         return;
     };
+    declare_derender_settings(&mut settings);
+}
+
+/// The derender settings' declarations, as a plain function over the store —
+/// see [`crate::avatar_complexity::declare_complexity_settings`] for why the
+/// split exists.
+pub fn declare_derender_settings(settings: &mut ViewerSettings) {
     settings.register_in(
         DERENDER_SECTION,
         SETTING_UNTIL_TELEPORT,

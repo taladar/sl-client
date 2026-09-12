@@ -63,7 +63,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui::InteractionDisabled;
 use sl_client_bevy::{
-    AgentKey, Asset, AssetKey, AssetType, Command, EnvironmentSettings, EstateCovenant,
+    AgentKey, Asset, AssetKey, AssetType, CircuitId, Command, EstateCovenant, LandArea,
     LindenAmount, Maturity, OwnerKey, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
     ParcelCategory, ParcelFlags, ParcelInfo, ParcelMediaUpdateInfo, ParcelObjectOwner,
     ParcelUpdate, ProductType, RegionCoordinates, RegionFlags, RegionLocalParcelId, ScopedParcelId,
@@ -71,13 +71,15 @@ use sl_client_bevy::{
     SlSessionEvent, TextureKey, Uuid,
 };
 
-use crate::environment::EnvironmentState;
 use crate::floater::{
     Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterKey, FloaterOp, FloaterSpec,
     FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater,
 };
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::inventory_properties::format_unix_date;
+use crate::land_environment::{
+    LandEnvironmentPlugin, LandEnvironmentSubject, LandPanelKind, spawn_land_environment_panel,
+};
 use crate::ui::{column, row};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
@@ -134,6 +136,10 @@ const LIST_HEIGHT: f32 = 150.0;
 
 /// One list row's height, in logical pixels.
 const ROW_HEIGHT: f32 = 22.0;
+
+/// The focus stop the Environment tab's land panel starts its run of tab
+/// indices at, clear of the other tabs' controls.
+const ENV_TAB_INDEX: i32 = 30;
 
 /// The object-owners table: type, name, object count.
 const OWNERS_TABLE: TableSpec = TableSpec {
@@ -272,6 +278,11 @@ struct AboutLandState {
     read_only: bool,
     /// Whether the agent may edit the bound parcel. Fixed at open.
     can_edit: bool,
+    /// The circuit the subject was bound on. A window whose circuit is no
+    /// longer the agent's is showing a parcel in a region that has been left:
+    /// the same region-local id on the new circuit is a *different* parcel, so
+    /// nothing may be published from it (see the Environment tab).
+    bound_circuit: Option<CircuitId>,
     /// The bound parcel's properties, or `None` until they resolve.
     parcel: Option<ParcelInfo>,
     /// The parcel's dwell (traffic), or `None` until the reply arrives.
@@ -398,6 +409,7 @@ impl AboutLandState {
         self.target = None;
         self.read_only = read_only;
         self.can_edit = false;
+        self.bound_circuit = None;
         self.parcel = None;
         self.dwell = None;
         self.media = None;
@@ -430,6 +442,7 @@ impl AboutLandState {
     /// reply), computing the edit rights.
     fn bind(&mut self, parcel: ParcelInfo, identity: &SlIdentity) {
         self.rebind_rights(&parcel, identity);
+        self.bound_circuit = identity.circuit_id;
         self.target = Some(parcel.local_id);
         self.pending_sequence = None;
         self.parcel = Some(parcel);
@@ -770,15 +783,17 @@ struct AccessHandles {
     ban_table: Option<Entity>,
 }
 
-/// The retained value nodes of the Environment tab.
+/// The retained nodes of the Environment tab: the two facts the *parcel*
+/// record carries, above the shared land-environment panel that does the
+/// editing.
 #[derive(Debug, Default)]
 struct EnvironmentHandles {
     /// The "parcel overrides allowed" value node.
     override_allowed: Option<Entity>,
     /// The parcel environment-version value node.
     version: Option<Entity>,
-    /// The active day-cycle summary value node.
-    day_cycle: Option<Entity>,
+    /// The shared land-environment panel, scoped to this window's parcel.
+    panel: Option<Entity>,
 }
 
 /// What an editable / read-only checkbox reflects.
@@ -957,6 +972,12 @@ pub struct AboutLandPlugin;
 
 impl Plugin for AboutLandPlugin {
     fn build(&self, app: &mut App) {
+        // The Environment tab is the shared land-environment panel, which the
+        // Region / Estate floater hosts too — whichever plugin is built first
+        // brings its systems.
+        if !app.is_plugin_added::<LandEnvironmentPlugin>() {
+            app.add_plugins(LandEnvironmentPlugin);
+        }
         app.init_resource::<LandSequence>()
             .init_resource::<OwnerTallyQueue>()
             .add_message::<OpenAboutLand>()
@@ -982,6 +1003,7 @@ impl Plugin for AboutLandPlugin {
                     update_covenant_tab,
                     update_objects_tab,
                     update_environment_tab,
+                    aim_environment_panel,
                     sync_owners_view,
                     sync_allow_view,
                     sync_ban_view,
@@ -1524,16 +1546,20 @@ fn build_experiences_tab(commands: &mut Commands, panel: Entity) {
     spawn_note(commands, panel, "about-land-experiences-unavailable");
 }
 
-/// Build the Environment tab (read-only summary).
+/// Build the Environment tab: the parcel record's two read-only facts, then
+/// the shared land-environment panel that publishes to this parcel.
 fn build_environment_tab(commands: &mut Commands, panel: Entity) -> EnvironmentHandles {
     let mut handles = EnvironmentHandles::default();
     let override_row = spawn_labeled_row(commands, panel, "about-land-env-override");
     handles.override_allowed = Some(spawn_value_node(commands, override_row));
     let version_row = spawn_labeled_row(commands, panel, "about-land-env-version");
     handles.version = Some(spawn_value_node(commands, version_row));
-    let cycle_row = spawn_labeled_row(commands, panel, "about-land-env-day-cycle");
-    handles.day_cycle = Some(spawn_value_node(commands, cycle_row));
-    spawn_note(commands, panel, "about-land-env-edit-note");
+    handles.panel = Some(spawn_land_environment_panel(
+        commands,
+        panel,
+        LandPanelKind::Parcel,
+        ENV_TAB_INDEX,
+    ));
     handles
 }
 
@@ -2578,11 +2604,10 @@ fn update_objects_tab(
     }
 }
 
-/// Refresh the Environment tab's read-only summary in place.
-/// Refresh each window's Environment tab read-only summary in place.
+/// Refresh each window's Environment tab header — the two facts the *parcel
+/// record* carries, which the land-environment panel below has no access to.
 fn update_environment_tab(
     mut windows: Query<(&mut AboutLandDirty, &AboutLandUi, &AboutLandState)>,
-    environment: Option<Res<EnvironmentState>>,
     translator: Translator,
     mut texts: Query<(&mut Text, &mut TextColor)>,
 ) {
@@ -2606,11 +2631,38 @@ fn update_environment_tab(
                 &parcel.parcel_environment_version.to_string(),
             );
         }
-        let summary = environment.as_ref().map_or_else(
-            || translator.get("about-land-loading"),
-            |env| day_cycle_summary(&env.settings),
-        );
-        set_value_node(texts, handles.day_cycle, &summary);
+    }
+}
+
+/// Keep each window's Environment tab pointed at its parcel.
+///
+/// A window whose region the agent has left, or whose parcel has not resolved
+/// yet, hands the panel a subject it refuses to publish from — which is the
+/// same freeze the rest of this floater takes, spelled where the panel can act
+/// on it.
+fn aim_environment_panel(
+    windows: Query<(&AboutLandState, &AboutLandUi)>,
+    identity: Res<SlIdentity>,
+    mut panels: Query<&mut LandEnvironmentSubject>,
+) {
+    for (state, ui) in &windows {
+        let Some(entity) = ui.environment_handles.panel else {
+            continue;
+        };
+        let Ok(mut subject) = panels.get_mut(entity) else {
+            continue;
+        };
+        let parcel = state.parcel.as_ref();
+        let wanted = LandEnvironmentSubject {
+            parcel_id: parcel.map(|parcel| parcel.local_id.0),
+            live: state.bound_circuit.is_some() && state.bound_circuit == identity.circuit_id,
+            editable: state.can_edit,
+            allow_override: parcel.is_some_and(|parcel| parcel.region_allow_environment_override),
+            area: parcel.map_or(LandArea::ZERO, |parcel| parcel.area),
+        };
+        if *subject != wanted {
+            *subject = wanted;
+        }
     }
 }
 
@@ -3464,17 +3516,6 @@ fn subdivide_text(flags: Option<RegionFlags>, translator: &Translator) -> String
         None => "about-land-loading",
     };
     translator.get(key)
-}
-
-/// A one-line summary of the active day cycle.
-fn day_cycle_summary(settings: &EnvironmentSettings) -> String {
-    format!(
-        "{} — {} sky / {} water, day {}s",
-        settings.day_cycle.name,
-        settings.day_cycle.sky_frames.len(),
-        settings.day_cycle.water_frames.len(),
-        settings.day_length,
-    )
 }
 
 /// The display label for an optional texture id.

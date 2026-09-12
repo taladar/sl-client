@@ -1077,6 +1077,17 @@ fn register_complexity_settings(settings: Option<ResMut<ViewerSettings>>) {
     let Some(mut settings) = settings else {
         return;
     };
+    declare_complexity_settings(&mut settings);
+}
+
+/// The complexity-limiting settings' declarations, as a plain function over the
+/// store.
+///
+/// Split out of the startup system so a surface that *draws* these settings can
+/// prove in its own tests that it names them — the binding layer skips a row
+/// whose setting the store has never heard of, which is exactly the failure a
+/// test should catch rather than a user.
+pub fn declare_complexity_settings(settings: &mut ViewerSettings) {
     settings.register_in(
         RENDER_SECTION,
         SETTING_MAX_COMPLEXITY,

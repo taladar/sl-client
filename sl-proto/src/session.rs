@@ -219,6 +219,19 @@ pub const CAP_UPDATE_SCRIPT_TASK: &str = "UpdateScriptTask";
 /// the `item_id`.
 pub const CAP_UPDATE_SETTINGS_AGENT_INVENTORY: &str = "UpdateSettingsAgentInventory";
 
+/// The HTTP capability for replacing the asset of a **settings** item inside an
+/// in-world object's task inventory (`UpdateSettingsTaskInventory`). Two-step
+/// uploader carrying `task_id`/`item_id`, the task sibling of
+/// [`CAP_UPDATE_SETTINGS_AGENT_INVENTORY`].
+///
+/// Requested even though no surface writes a settings item into a prim yet,
+/// because the pair is also what tells a viewer the **grid** does settings at
+/// all: the reference's `LLEnvironment::isInventoryEnabled` is exactly "both of
+/// these caps are granted", and every settings creator and save is gated on it.
+/// A region that grants only one of the two is a region a settings item cannot
+/// round-trip through.
+pub const CAP_UPDATE_SETTINGS_TASK_INVENTORY: &str = "UpdateSettingsTaskInventory";
+
 /// The HTTP capability for the **media-on-a-prim** read/write surface
 /// (`ObjectMedia`): a POST of a `{ verb, object_id, … }` map. A `GET` verb asks
 /// for an object's current per-face media (the simulator replies with an
@@ -663,6 +676,7 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_UPDATE_SCRIPT_AGENT,
     CAP_UPDATE_SCRIPT_TASK,
     CAP_UPDATE_SETTINGS_AGENT_INVENTORY,
+    CAP_UPDATE_SETTINGS_TASK_INVENTORY,
     CAP_OBJECT_ANIMATION,
     CAP_OBJECT_MEDIA,
     CAP_OBJECT_MEDIA_NAVIGATE,
@@ -1969,6 +1983,7 @@ mod circuit;
 mod conversions;
 mod inventory;
 mod inventory_cache;
+mod legacy_preset;
 mod methods;
 
 use self::chat_session::{ChatSession, ServerHistoryFetch, ServerHistoryState, TYPING_TIMEOUT};
@@ -1980,6 +1995,11 @@ pub use chat_session::{
 };
 pub use inventory::{FolderState, InventoryOwner};
 pub use inventory_cache::INVENTORY_CACHE_VERSION;
+pub use legacy_preset::{
+    LEGACY_DAY_SKY_FRAME_PREFIX, LEGACY_DAY_WATER_FRAME_PREFIX, LEGACY_DAY_WATER_PRESET,
+    LegacyDayCycleError, LegacyPresetError, legacy_day_cycle_from_bytes, legacy_preset_from_bytes,
+    legacy_preset_name, sky_settings_from_legacy_preset, water_settings_from_legacy_preset,
+};
 
 pub(crate) use chat_session::SERVER_HISTORY_CAP;
 pub use conversions::{
@@ -1994,13 +2014,14 @@ pub use conversions::{
     chatterbox_session_start_reply_to_llsd, copy_inventory_from_notecard_body,
     created_category_to_llsd, crossed_region_to_caps_llsd, day_cycle_from_asset,
     display_name_update_to_llsd, enable_simulator_to_caps_llsd, environment_asset_from_bytes,
-    environment_asset_to_bytes, environment_to_llsd, establish_agent_communication_to_llsd,
-    fetch_inventory_items_to_llsd, group_invite_response_body, group_members_to_caps_llsd,
-    group_memberships_to_caps_llsd, inventory_descendents_to_llsd, nav_mesh_status_to_llsd,
-    offline_messages_to_llsd, open_region_info_to_llsd, parcel_info_to_llsd,
-    required_voice_version_to_llsd, server_appearance_update_to_llsd, session_history_to_llsd,
-    set_display_name_reply_to_llsd, sim_console_response_to_llsd, sky_settings_from_asset,
-    teleport_finish_to_llsd, water_settings_from_asset, windlight_refresh_to_llsd,
+    environment_asset_to_bytes, environment_cap_url, environment_to_llsd,
+    establish_agent_communication_to_llsd, fetch_inventory_items_to_llsd,
+    group_invite_response_body, group_members_to_caps_llsd, group_memberships_to_caps_llsd,
+    inventory_descendents_to_llsd, nav_mesh_status_to_llsd, offline_messages_to_llsd,
+    open_region_info_to_llsd, parcel_info_to_llsd, required_voice_version_to_llsd,
+    server_appearance_update_to_llsd, session_history_to_llsd, set_display_name_reply_to_llsd,
+    sim_console_response_to_llsd, sky_settings_from_asset, teleport_finish_to_llsd,
+    water_settings_from_asset, windlight_refresh_to_llsd,
 };
 pub(crate) use conversions::{
     ZERO_VECTOR, build_task_inventory, environment_update_from_llsd, full_update_block,

@@ -46,10 +46,10 @@ use sl_proto::{
     build_update_script_task_request, build_update_task_item_asset_request,
     build_upload_baked_texture_request, build_user_info_update, build_voice_signaling_request,
     chat_session_agents_body, chat_session_request_body, copy_inventory_from_notecard_body,
-    create_listing_request, delete_listing_request, display_names_query, experience_id_query,
-    experience_info_query, find_experience_query, forget_experience_query, group_experiences_query,
-    group_invite_response_body, listing_request, listings_request, merchant_status_request,
-    parse_login_response, update_listing_request,
+    create_listing_request, delete_listing_request, display_names_query, environment_cap_url,
+    experience_id_query, experience_info_query, find_experience_query, forget_experience_query,
+    group_experiences_query, group_invite_response_body, listing_request, listings_request,
+    merchant_status_request, parse_login_response, update_listing_request,
 };
 
 // Re-export the core types a consumer needs so they can depend on this crate
@@ -1433,7 +1433,7 @@ impl Client {
                         }
                         Some(Command::RequestEnvironment { parcel_id }) => {
                             if let Some(base) = caps.get(CAP_EXT_ENVIRONMENT).cloned() {
-                                let url = format!("{base}?parcelid={}", parcel_id.unwrap_or(-1));
+                                let url = environment_cap_url(&base, parcel_id, None);
                                 tokio::spawn(get_caps_llsd(
                                     url,
                                     CAP_EXT_ENVIRONMENT,
@@ -1444,17 +1444,22 @@ impl Client {
                         }
                         Some(Command::SetEnvironment { parcel_id, track_no, update }) => {
                             if let Some(base) = caps.get(CAP_EXT_ENVIRONMENT).cloned() {
-                                let parcel_id = parcel_id.unwrap_or(-1);
-                                let url = match track_no {
-                                    Some(track_no) => {
-                                        format!("{base}?parcelid={parcel_id}&trackno={track_no}")
-                                    }
-                                    None => format!("{base}?parcelid={parcel_id}"),
-                                };
+                                let url = environment_cap_url(&base, parcel_id, track_no);
                                 let body = build_environment_update_request(&update);
                                 tokio::spawn(put_caps_llsd(
                                     url,
                                     body,
+                                    CAP_EXT_ENVIRONMENT,
+                                    http.clone(),
+                                    caps_tx.clone(),
+                                ));
+                            }
+                        }
+                        Some(Command::ResetEnvironment { parcel_id, track_no }) => {
+                            if let Some(base) = caps.get(CAP_EXT_ENVIRONMENT).cloned() {
+                                let url = environment_cap_url(&base, parcel_id, track_no);
+                                tokio::spawn(delete_caps_llsd(
+                                    url,
                                     CAP_EXT_ENVIRONMENT,
                                     http.clone(),
                                     caps_tx.clone(),

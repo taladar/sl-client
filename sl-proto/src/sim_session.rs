@@ -1864,6 +1864,17 @@ pub enum ServerEvent {
         /// The parsed update the store merged.
         update: Box<EnvironmentUpdate>,
     },
+    /// The client dropped stored environment settings (`ExtEnvironment`
+    /// DELETE), so the land falls back to what it inherits. The serving store
+    /// has already forgotten the entry; fire-and-forget for a driver
+    /// persisting environments or notifying other clients.
+    EnvironmentReset {
+        /// The reset parcel's region-local id, or `-1` for the region.
+        parcel_id: i32,
+        /// The single sky track the client scoped the reset to, if any (the
+        /// serving store drops the whole entry either way).
+        track_no: Option<i32>,
+    },
     /// The client asked for a folder's contents over the **deprecated UDP**
     /// `FetchInventoryDescendents`; the simulator answers with
     /// [`SimSession::send_inventory_descendents`].
@@ -4123,6 +4134,38 @@ impl SimSession {
             update: Box::new(update),
         });
         environment
+    }
+
+    /// Applies an `ExtEnvironment` DELETE to the store: forgets `parcel_id`'s
+    /// entry so the effective environment falls back to what it inherits (a
+    /// parcel to the region's), surfaces [`ServerEvent::EnvironmentReset`],
+    /// and returns the settings now in force there.
+    ///
+    /// The **region** entry is replaced rather than removed, and its version
+    /// bumped: it is the bottom of the fallback chain, so forgetting it would
+    /// leave the capability with nothing to serve. A parcel entry simply goes,
+    /// which is the whole point of the verb.
+    pub(crate) fn reset_environment(
+        &mut self,
+        parcel_id: i32,
+        track_no: Option<i32>,
+    ) -> EnvironmentSettings {
+        if parcel_id == -1 {
+            let version = self.environment(-1).env_version.saturating_add(1);
+            let mut region = EnvironmentSettings {
+                env_version: version,
+                ..EnvironmentSettings::default_region()
+            };
+            region.parcel_id = -1;
+            drop(self.environments.insert(-1, region));
+        } else {
+            drop(self.environments.remove(&parcel_id));
+        }
+        self.events.push_back(ServerEvent::EnvironmentReset {
+            parcel_id,
+            track_no,
+        });
+        self.environment(parcel_id)
     }
 
     /// Stores (or replaces) an object's `GetObjectCost` record — the driver

@@ -566,6 +566,7 @@ const fn command_name(command: &Command) -> &'static str {
         Command::RequestDisplayNames(..) => "request_display_names",
         Command::RequestEnvironment { .. } => "request_environment",
         Command::SetEnvironment { .. } => "set_environment",
+        Command::ResetEnvironment { .. } => "reset_environment",
         Command::RequestParcelProperties { .. } => "request_parcel_properties",
         Command::RequestParcelPropertiesById { .. } => "request_parcel_properties_by_id",
         Command::SetParcelOtherCleanTime { .. } => "set_parcel_other_clean_time",

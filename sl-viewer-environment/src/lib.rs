@@ -20,6 +20,13 @@
 //!   and delete, and the three creators that mint a fresh sky, water or day.
 //! - [`settings_picker`] — the chooser another panel summons for one settings
 //!   field, over the same list narrowed to one kind.
+//! - [`land_environment`] — the panel the Region / Estate and About Land
+//!   floaters host: not an editor at all but a **publisher**, writing the
+//!   `ExtEnvironment` capability so the land itself carries the environment.
+//! - [`bulk_import`] — World ▸ Environment ▸ Bulk Import: a whole folder of
+//!   pre-EEP WindLight presets converted and filed as settings assets in one
+//!   go. No window of its own — a folder chooser, a progress-free run, and a
+//!   summary.
 //!
 //! The rows those last two draw are one projection ([`settings_list`]): the
 //! library and the picker differ in their chrome and in what a pick does, and
@@ -53,8 +60,10 @@
               find it — so the repetition is the protocol, not an accident of naming"
 )]
 
+pub mod bulk_import;
 pub mod day_cycle_editor;
 pub mod knobs;
+pub mod land_environment;
 pub mod my_environments;
 pub mod personal_lighting;
 pub mod rows;
@@ -64,6 +73,22 @@ pub mod settings_picker;
 pub mod tabs;
 
 use bevy::prelude::*;
+use sl_client_bevy::{FolderType, InventoryFolderKey};
+use sl_viewer_inventory::inventory::InventoryModel;
+
+/// The folder a fresh settings item goes in: the Settings system folder, or
+/// the agent's root when the skeleton has no such folder.
+///
+/// Crate-level because two unrelated surfaces mint settings items into it —
+/// the WindLight bulk importer ([`bulk_import`]) and the day-cycle editor's
+/// Save As when the cycle it is holding belongs to *land* rather than to an
+/// item ([`day_cycle_editor`]) — and a second copy is a place for the two to
+/// disagree about where a new environment lands.
+pub(crate) fn settings_destination(inventory: &InventoryModel) -> Option<InventoryFolderKey> {
+    inventory
+        .folder_by_type(FolderType::Settings)
+        .or_else(|| inventory.agent_root())
+}
 
 /// The shared palette and geometry the environment editors are drawn with — the
 /// values the sibling floaters already use, kept in one place so the family
@@ -115,11 +140,15 @@ pub struct EnvironmentUiPlugins;
 
 impl Plugin for EnvironmentUiPlugins {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<land_environment::LandEnvironmentPlugin>() {
+            app.add_plugins(land_environment::LandEnvironmentPlugin);
+        }
         app.add_plugins(personal_lighting::PersonalLightingPlugin)
             .add_plugins(settings_editor::SettingsEditorPlugin)
             .add_plugins(day_cycle_editor::DayCycleEditorPlugin)
             .add_plugins(my_environments::MyEnvironmentsPlugin)
-            .add_plugins(settings_picker::SettingsPickerPlugin);
+            .add_plugins(settings_picker::SettingsPickerPlugin)
+            .add_plugins(bulk_import::WindlightBulkImportPlugin);
     }
 }
 

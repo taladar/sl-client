@@ -11786,6 +11786,18 @@ mod test {
                 sky_frames,
                 water_frames,
             },
+            // Both `day_*` members ride the same round trip: the array form of
+            // `day_names` is what a region assembled out of per-track assets
+            // sends, and dropping either on the way through would leave the
+            // panel unable to say what a track is holding.
+            day_asset: Some(uuid::Uuid::from_u128(0xda7a)),
+            day_names: sl_proto::DayNames::Tracks([
+                "Ocean".to_owned(),
+                "Ground Sky".to_owned(),
+                String::new(),
+                "High Sky".to_owned(),
+                String::new(),
+            ]),
         };
 
         // Encode with the server-side encoder, decode with the client path.
@@ -11840,6 +11852,8 @@ mod test {
                 sky_frames,
                 water_frames,
             },
+            day_asset: None,
+            day_names: sl_proto::DayNames::Unnamed,
         };
         let sky = sl_proto::environment_to_llsd(&settings)
             .get("environment")

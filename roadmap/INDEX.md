@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 323 |
+| ready | 317 |
 | blocked | 42 |
-| in-progress | 21 |
+| in-progress | 22 |
 | bugs | 43 |
-| done | 1086 |
+| done | 1092 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1657** |
+| **total** | **1658** |
 
 ## ideas (100)
 
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (323)
+## ready (317)
 
 ### protocol
 
@@ -483,12 +483,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-object-selection-core` (done))
 - [`viewer-environment-density-profiles`](ready/viewer-environment-density-profiles.md)
   — Render the atmospheric density profiles
-- [`viewer-environment-import-legacy-presets`](ready/viewer-environment-import-legacy-presets.md)
-  — Import a legacy WindLight preset from disk
 - [`viewer-environment-pause-clouds`](ready/viewer-environment-pause-clouds.md)
   — Pause cloud animation toggle
-- [`viewer-environment-settings-unsupported-gate`](ready/viewer-environment-settings-unsupported-gate.md)
-  — Grey the settings creators on a grid that cannot store settings
 - [`viewer-event-details`](ready/viewer-event-details.md) — Event details
   floater + reminders (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-experience-event-stream`](ready/viewer-experience-event-stream.md) —
@@ -768,9 +764,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-photo-hosting-upload`](ready/viewer-photo-hosting-upload.md) — Share
   snapshots to external photo/hosting services (blocked by
   `viewer-snapshot-floater` (done))
-- [`viewer-phototools`](ready/viewer-phototools.md) — Phototools — a
-  photographer's environment & graphics control panel (blocked by
-  `viewer-ui-widget-scaffold` (done))
 - [`viewer-pie-wire-ready-placeholders`](ready/viewer-pie-wire-ready-placeholders.md)
   — Wire the pie placeholder slices whose features already exist
 - [`viewer-places-landmarks`](ready/viewer-places-landmarks.md) — Places floater
@@ -798,10 +791,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (sim) debug console (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-region-entry-maturity-gate`](ready/viewer-region-entry-maturity-gate.md)
   — Eight ported notifications for a refused entry, and nothing raises one
-- [`viewer-region-environment-panel`](ready/viewer-region-environment-panel.md)
-  — Region / parcel environment settings panel (blocked by
-  `viewer-region-options-general` (done), `viewer-environment-my-environments`
-  (done))
 - [`viewer-region-estate-group-picker`](ready/viewer-region-estate-group-picker.md)
   — Group picker for the Region/Estate Access → Allowed Groups list
 - [`viewer-region-estate-object-return`](ready/viewer-region-estate-object-return.md)
@@ -938,9 +927,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-styling-interaction-tests`](ready/viewer-ui-styling-interaction-tests.md)
   — bevy_flair state styling under synthetic hover and focus (blocked by
   `viewer-ui-interaction-harness` (done))
-- [`viewer-ui-virtual-trackball`](ready/viewer-ui-virtual-trackball.md) —
-  Virtual trackball widget (sun / moon direction) (blocked by
-  `viewer-ui-widget-scaffold` (done))
 - [`viewer-underwater-alpha-fog-remaining-materials`](ready/viewer-underwater-alpha-fog-remaining-materials.md)
   — The particle billboards do not carry the water fog
 - [`viewer-url-context-menus`](ready/viewer-url-context-menus.md) — Right-click
@@ -956,9 +942,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wearable-favorites`](ready/viewer-wearable-favorites.md) — Wearable
   favorites floater (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-ui-virtualized-list` (done))
-- [`viewer-windlight-bulk-import`](ready/viewer-windlight-bulk-import.md) —
-  Legacy Windlight bulk import (blocked by `viewer-environment-fixed-editor`
-  (done))
 - [`viewer-window-title-unread-count`](ready/viewer-window-title-unread-count.md)
   — Unread IM/chat count in the window title
 - [`viewer-world-map-tracking-teleport`](ready/viewer-world-map-tracking-teleport.md)
@@ -1129,7 +1112,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (21)
+## in-progress (22)
 
 ### viewer
 
@@ -1179,6 +1162,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Upstream PR — parley: honour the emoji presentation selector (VS16)
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
+- [`viewer-ui-virtual-trackball`](in-progress/viewer-ui-virtual-trackball.md) —
+  Virtual trackball widget (sun / moon direction) (blocked by
+  `viewer-ui-widget-scaffold` (done))
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
@@ -1292,7 +1278,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1086)
+## done (1092)
 
 ### protocol
 
@@ -1803,6 +1789,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-environment-fixed-editor`](done/viewer-environment-fixed-editor.md) —
   Environment editors — sky & water settings assets (blocked by
   `viewer-ui-widget-scaffold` (done))
+- [`viewer-environment-import-legacy-presets`](done/viewer-environment-import-legacy-presets.md)
+  — Import a legacy WindLight preset from disk
+- [`viewer-environment-land-day-cycle-edit`](done/viewer-environment-land-day-cycle-edit.md)
+  — Edit a land's day cycle in place
 - [`viewer-environment-my-environments`](done/viewer-environment-my-environments.md)
   — My Environments library (blocked by `viewer-environment-fixed-editor`
   (done))
@@ -1811,6 +1801,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-environment-settings-index`](done/viewer-environment-settings-index.md)
   — Settings assets by name — the inventory index the Library Environments
   folder needs
+- [`viewer-environment-settings-unsupported-gate`](done/viewer-environment-settings-unsupported-gate.md)
+  — Grey the settings creators on a grid that cannot store settings
 - [`viewer-experience-permission-body-links`](done/viewer-experience-permission-body-links.md)
   — Experience card name — clickable experience-profile SLURL (blocked by
   `viewer-url-linkification` (done))
@@ -2477,6 +2469,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-notification-host` (done))
 - [`viewer-phase-31-general-physics`](done/viewer-phase-31-general-physics-phase-31-general-physics-foundation-avian3d.md)
   — Phase 31 — General physics foundation (avian3d)
+- [`viewer-phototools`](done/viewer-phototools.md) — Phototools — a
+  photographer's environment & graphics control panel (blocked by
+  `viewer-ui-widget-scaffold` (done))
 - [`viewer-physical-object-motion-not-smooth`](done/viewer-physical-object-motion-not-smooth.md)
   — Physical object (vehicle) motion is not as smooth as it should be between
   updates
@@ -2607,6 +2602,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   multi-row selection and its multi-avatar menu
 - [`viewer-reattached-rigged-mesh-renders-static-mislocated`](done/viewer-reattached-rigged-mesh-renders-static-mislocated.md)
   — Re-attached rigged mesh renders static and mislocated (fine at login)
+- [`viewer-region-environment-panel`](done/viewer-region-environment-panel.md) —
+  Region / parcel environment settings panel (blocked by
+  `viewer-region-options-general` (done), `viewer-environment-my-environments`
+  (done))
 - [`viewer-region-name-connecting-after-crossing`](done/viewer-region-name-connecting-after-crossing.md)
   — Top-bar region name stuck on "Connecting..." after crossing into a region
   never teleported to
@@ -2928,6 +2927,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   website auto-login (OpenID cookie) in the in-viewer browser
 - [`viewer-widget-any-mouse-button-activates`](done/viewer-widget-any-mouse-button-activates.md)
   — A secondary or middle click presses every button in the viewer
+- [`viewer-windlight-bulk-import`](done/viewer-windlight-bulk-import.md) —
+  Legacy Windlight bulk import (blocked by `viewer-environment-fixed-editor`
+  (done))
 - [`viewer-world-drag-drop-reactions`](done/viewer-world-drag-drop-reactions.md)
   — Inventory drag&drop onto the world (blocked by
   `viewer-ui-interaction-harness` (done), `viewer-world-test-harness` (done))

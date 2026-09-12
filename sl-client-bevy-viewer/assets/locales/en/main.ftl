@@ -534,11 +534,9 @@ about-land-banned = Banned Residents
 # Experiences tab (no per-parcel experience protocol yet).
 about-land-experiences-unavailable = Per-parcel experience lists are not available yet.
 
-# Environment-tab summary.
+# Environment-tab summary, above the shared land-environment panel.
 about-land-env-override = Parcel overrides allowed:
 about-land-env-version = Parcel environment version:
-about-land-env-day-cycle = Active day cycle:
-about-land-env-edit-note = Per-parcel environment editing is a separate feature; this is the current environment.
 
 ## The Region / Estate ("About Region") floater (viewer-region-options-*).
 
@@ -660,9 +658,53 @@ about-region-rating-mature = Moderate
 about-region-rating-adult = Adult
 about-region-rating-unknown = Unknown
 
-# Environment / Experiences placeholder tabs.
-about-region-env-unimplemented = Region environment editing is not implemented yet.
+# Experiences placeholder tab (the Environment tab hosts the shared
+# land-environment panel).
 about-region-experiences-unimplemented = Region experiences are not implemented yet.
+
+## The land-environment panel (viewer-region-environment-panel) — the Region /
+## Estate floater's Environment tab and About Land's.
+
+# Why the panel cannot be used, in the reference's order of precedence.
+land-env-unavailable-cross-region = Environment settings are not available across region boundaries.
+land-env-unavailable-no-parcel = No parcel is selected, so there is no environment to set.
+land-env-unavailable-disallowed = The estate does not allow parcels to override the region environment.
+land-env-unavailable-too-small = A parcel must be at least 128 m² to carry its own environment.
+
+# Choosing what the land holds.
+land-env-select-heading = Select Environment
+land-env-use-default = Use Default Settings
+land-env-use-region = Use Region Settings
+land-env-use-inventory = Use Inventory…
+land-env-edit = Customize Day Cycle…
+land-env-allow-override = Parcel Owners May Override
+
+# What the day-cycle editor calls the land it was opened from.
+land-env-label-region = this region
+land-env-label-parcel = this parcel
+
+# The day the land runs on.
+land-env-day-heading = Day Settings
+land-env-day-length = Day Length (hours)
+land-env-day-offset = Day Offset (hours)
+land-env-apparent-time = Apparent Time of Day:
+
+# The water track and the four sky tracks, highest first.
+land-env-tracks-heading = Tracks
+land-env-track-sky-4 = Sky 4
+land-env-track-sky-3 = Sky 3
+land-env-track-sky-2 = Sky 2
+land-env-track-ground = Ground
+land-env-track-water = Water
+land-env-reset-altitudes = Reset Altitudes
+
+# Committing, and the placeholders a track shows when it holds nothing of its
+# own.
+land-env-apply = Apply
+land-env-revert = Revert
+land-env-loading = Loading…
+land-env-empty = (empty)
+land-env-region-env = (region environment)
 
 ## The emoji-picker floater (viewer-emoji-picker-floater).
 
@@ -1313,6 +1355,13 @@ color-picker-preview = Preview
 color-picker-original = Original
 color-picker-ok = OK
 color-picker-cancel = Cancel
+# The virtual trackball's compass ring: the four cardinal points, drawn round
+# the disc a sun or moon is aimed on. Single letters in English; a translation
+# uses whatever its own compass does (German O for east, not E).
+trackball-north = N
+trackball-east = E
+trackball-south = S
+trackball-west = W
 texture-picker-title = Pick: Texture
 texture-picker-title-material = Pick: Material
 texture-picker-search = Search
@@ -2378,6 +2427,13 @@ notification-auto-adjust-hdr-sky = You are editing a non-HDR sky that has been a
 notification-enable-auto-fps-warning = You are about to enable AutoFPS. All unsaved graphics settings will be lost. Would you like to save them first?
 notification-no-valid-env-setting-found = No valid environment setting selected. Please note that "Shared Environment" and "Day cycle based" cannot be selected!
 notification-windlight-bulk-import-finished = Bulk import of Windlights has finished.
+# The reference says this in a modal "please wait" dialog for the length of the
+# run; a tip says it once and leaves the viewer usable.
+notification-windlight-bulk-import-started = Importing [COUNT] Windlight presets…
+# Not in the reference, which reports only that a bulk import finished and
+# raises one modal WLImportFail per file that did not — a notification storm on
+# a folder where nothing converts. This says the same thing once.
+notification-windlight-bulk-import-summary = Bulk import of Windlights has finished: [FILED] imported, [FAILED] not. [REASONS]
 
 ## Friends & people (viewer-notification-catalogue-friends-people). Bodies follow
 ## the reference notifications.xml with the standard trims (KB URLs,
@@ -3682,6 +3738,29 @@ quick-prefs-env-region-default = Region default
 quick-prefs-env-day-cycle-based = Day-cycle based
 quick-prefs-env-no-day-cycle = No day cycle
 
+## The Phototools window (viewer-phototools): the photographer's tabbed view
+## over the environment and the render knobs that change the look. Its setting
+## rows deliberately reuse the `preferences-row-*` labels — one setting, one
+## name, whichever window it was reached through — so only the window's own
+## chrome is spelled here.
+
+phototools-title = Phototools
+# The four tabs.
+phototools-tab-environment = Environment
+phototools-tab-shadows = Shadows
+phototools-tab-look = Look
+phototools-tab-general = General
+# The environment tab's own controls.
+phototools-section-fixed-sky = Fixed sky
+phototools-env-group = Preset library
+phototools-env-shared = Shared Environment
+phototools-personal-lighting = Personal Lighting…
+# The three settings-asset tracks, and the sun / moon scrubber. Their row
+# labels are the shared ones (`quick-prefs-env-*`, `env-knob-*`); only the
+# headings are this window's.
+phototools-section-presets = Settings assets
+phototools-section-sun-moon = Sun & moon
+
 ## The Personal Lighting floater — the local sky and water override.
 
 personal-lighting-title = Personal Lighting
@@ -3742,9 +3821,29 @@ settings-picker-cancel = Cancel
 settings-editor-sky-title = Sky Settings
 settings-editor-water-title = Water Settings
 settings-editor-name = Name
+# Reads a pre-EEP WindLight preset off disk into the editor.
+settings-editor-import = Import
 settings-editor-save = Save
 settings-editor-save-as = Save As
 settings-editor-revert = Revert
+# The titles and filters of the file-open dialog Import puts up. A legacy
+# WindLight preset is an LLSD XML document, hence the .xml filter.
+settings-editor-import-sky-title = Import a WindLight sky preset
+settings-editor-import-water-title = Import a WindLight water preset
+settings-editor-import-filter-preset = WindLight preset (.xml)
+settings-editor-import-filter-all = All files
+# World > Environment > Bulk Import: the titles of the folder chooser each of
+# the three entries puts up, and the lines a run's summary is built from.
+bulk-import-skies-title = Choose a folder of WindLight sky presets
+bulk-import-water-title = Choose a folder of WindLight water presets
+bulk-import-days-title = Choose a folder of WindLight day cycles
+bulk-import-no-settings-folder = There is no Settings folder to file the presets in yet.
+bulk-import-never-answered =
+    { $count ->
+        [one] { $count } item was never confirmed by the region.
+       *[other] { $count } items were never confirmed by the region.
+    }
+bulk-import-and-more = … and { $count } more.
 # The sky editor's tabs, and the water editor's one.
 settings-editor-tab-atmosphere = Atmosphere
 settings-editor-tab-clouds = Clouds
@@ -3828,7 +3927,11 @@ env-knob-cloud-density-d = Cloud density
 env-knob-cloud-detail-x = Cloud detail X
 env-knob-cloud-detail-y = Cloud detail Y
 env-knob-cloud-detail-d = Cloud detail
-# Where the sun and the moon sit, and how they glow.
+# Where the sun and the moon sit, and how they glow. The two "position" labels
+# are the trackballs — one control aiming a whole body — over the azimuth and
+# elevation sliders that say the same thing in numbers.
+env-knob-sun-position = Sun position
+env-knob-moon-position = Moon position
 env-knob-sun-azimuth = Sun azimuth
 env-knob-sun-elevation = Sun elevation
 env-knob-sun-scale = Sun scale

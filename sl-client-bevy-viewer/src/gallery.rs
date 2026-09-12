@@ -266,6 +266,9 @@ pub fn run() -> AppExit {
         // The radio widget's runtime half: reconciles each option's indicator and
         // `Checked` marker so the radio specimens respond to clicks in the gallery.
         .add_plugins(crate::ui_radio::RadioWidgetPlugin)
+        // The sun / moon trackball's drawing half (viewer-ui-virtual-trackball):
+        // places each marker from its aim and paints the below-horizon state.
+        .add_plugins(crate::ui_trackball::TrackballPlugin)
         // The text-input widget's runtime half: the numeric fields' whole-string
         // validator, so a bad arrangement reverts in the gallery too.
         .add_plugins(crate::ui_text_input::TextInputPlugin)

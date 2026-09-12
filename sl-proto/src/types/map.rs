@@ -311,6 +311,12 @@ impl EstateFlags {
     pub const SUN_FIXED: Self = Self { bits: 1 << 4 };
     /// Parcel owners may set stricter access than the estate.
     pub const ALLOW_ACCESS_OVERRIDE: Self = Self { bits: 1 << 5 };
+    /// Parcel owners may publish their own environment (EEP) over the
+    /// region's — `REGION_FLAGS_ALLOW_ENVIRONMENT_OVERRIDE`, the estate half of
+    /// the region / parcel environment panel's "Parcel Owners May Override"
+    /// checkbox. With it clear, a parcel's `ExtEnvironment` entry is ignored
+    /// and every parcel renders the region's environment.
+    pub const ALLOW_ENVIRONMENT_OVERRIDE: Self = Self { bits: 1 << 9 };
     /// The estate is publicly visible / anyone may visit.
     pub const EXTERNALLY_VISIBLE: Self = Self { bits: 1 << 15 };
     /// Direct teleport (rather than routing to a telehub) is allowed.

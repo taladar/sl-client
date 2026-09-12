@@ -115,11 +115,11 @@ pub(crate) const SETTING_FPS_LIMIT: &str = "FramePerSecondLimit";
 /// The default frame-rate cap.
 const DEFAULT_FPS_LIMIT: u32 = 60;
 /// The lowest selectable frame-rate cap.
-const FPS_LIMIT_MIN: f32 = 15.0;
+pub(crate) const FPS_LIMIT_MIN: f32 = 15.0;
 /// The highest selectable frame-rate cap.
-const FPS_LIMIT_MAX: f32 = 240.0;
+pub(crate) const FPS_LIMIT_MAX: f32 = 240.0;
 /// The frame-rate-cap slider step.
-const FPS_LIMIT_STEP: f32 = 5.0;
+pub(crate) const FPS_LIMIT_STEP: f32 = 5.0;
 
 /// The reference `RenderQualityPerformance` setting name: the last-applied
 /// quality tier, `0` (low) ..= `6` (ultra), indexing `QUALITY_TIERS`.
@@ -129,31 +129,31 @@ pub(crate) const SETTING_RENDER_QUALITY: &str = "RenderQualityPerformance";
 const DEFAULT_RENDER_QUALITY: u32 = 4;
 
 /// The LOD-factor slider step (an eighth, the reference slider's increment).
-const LOD_FACTOR_STEP: f32 = 0.125;
+pub(crate) const LOD_FACTOR_STEP: f32 = 0.125;
 
 /// The glow-strength slider bounds / step (default 0.325; the additive
 /// per-pass strength saturates fast, so the useful range is small).
-const GLOW_STRENGTH_MAX: f32 = 1.0;
+pub(crate) const GLOW_STRENGTH_MAX: f32 = 1.0;
 /// See [`GLOW_STRENGTH_MAX`].
-const GLOW_STRENGTH_STEP: f32 = 0.025;
+pub(crate) const GLOW_STRENGTH_STEP: f32 = 0.025;
 /// The glow-width slider maximum (default 1.3; beyond ~4 the blur smears).
-const GLOW_WIDTH_MAX: f32 = 4.0;
+pub(crate) const GLOW_WIDTH_MAX: f32 = 4.0;
 /// The glow-width slider step.
-const GLOW_WIDTH_STEP: f32 = 0.1;
+pub(crate) const GLOW_WIDTH_STEP: f32 = 0.1;
 /// The glow blur-iteration slider bounds (each iteration is two passes; `0`
 /// would extract but never blur, so the floor is 1).
-const GLOW_ITERATIONS_MIN: f32 = 1.0;
+pub(crate) const GLOW_ITERATIONS_MIN: f32 = 1.0;
 /// See [`GLOW_ITERATIONS_MIN`].
-const GLOW_ITERATIONS_MAX: f32 = 4.0;
+pub(crate) const GLOW_ITERATIONS_MAX: f32 = 4.0;
 
 /// The tone-mix slider step (0–1 blend of the tone curve).
-const TONEMAP_MIX_STEP: f32 = 0.05;
+pub(crate) const TONEMAP_MIX_STEP: f32 = 0.05;
 /// The exposure slider bounds / step (the reference `RenderExposure` slider).
-const EXPOSURE_MIN: f32 = 0.5;
+pub(crate) const EXPOSURE_MIN: f32 = 0.5;
 /// See [`EXPOSURE_MIN`].
-const EXPOSURE_MAX: f32 = 4.0;
+pub(crate) const EXPOSURE_MAX: f32 = 4.0;
 /// See [`EXPOSURE_MIN`].
-const EXPOSURE_STEP: f32 = 0.1;
+pub(crate) const EXPOSURE_STEP: f32 = 0.1;
 
 /// Marks a quality-tier combo **anchor** (the entity emitting
 /// [`ComboChanged`]), so [`apply_quality_tier`] recognises a user pick on
@@ -287,6 +287,100 @@ pub(crate) fn quality_option_values() -> Vec<SettingValue> {
         .collect()
 }
 
+// ---------------------------------------------------------------------------
+// The combo option lists.
+// ---------------------------------------------------------------------------
+//
+// One definition each, because this tab is no longer their only reader: the
+// Phototools window ([`crate::phototools`]) draws the same settings for a
+// photographer, and a second surface that spelled its own `(label, value)`
+// pairs would be a second place for a level to be added to — the shape where
+// a combo on one window offers a resolution the other does not, and the
+// binding on the quieter one silently matches nothing.
+
+/// The quality-tier combo's `(label key, value)` options, in tier order.
+pub(crate) fn quality_options() -> Vec<(&'static str, SettingValue)> {
+    QUALITY_OPTION_KEYS
+        .iter()
+        .copied()
+        .zip(quality_option_values())
+        .collect()
+}
+
+/// The shadow-detail combo's options: none, or sun / moon shadows.
+pub(crate) fn shadow_detail_options() -> Vec<(&'static str, SettingValue)> {
+    vec![
+        ("preferences-shadows-none", SettingValue::U32(0)),
+        ("preferences-shadows-sun-moon", SettingValue::U32(1)),
+    ]
+}
+
+/// The shadow-map resolution combo's options, in texels per side.
+pub(crate) fn shadow_map_size_options() -> Vec<(&'static str, SettingValue)> {
+    vec![
+        ("preferences-shadow-map-1024", SettingValue::U32(1024)),
+        ("preferences-shadow-map-2048", SettingValue::U32(2048)),
+        ("preferences-shadow-map-4096", SettingValue::U32(4096)),
+        ("preferences-shadow-map-8192", SettingValue::U32(8192)),
+    ]
+}
+
+/// The mirror-resolution combo's options, in texels per side.
+pub(crate) fn mirror_resolution_options() -> Vec<(&'static str, SettingValue)> {
+    vec![
+        ("preferences-mirror-res-256", SettingValue::U32(256)),
+        ("preferences-mirror-res-512", SettingValue::U32(512)),
+        ("preferences-mirror-res-1024", SettingValue::U32(1024)),
+        ("preferences-mirror-res-2048", SettingValue::U32(2048)),
+    ]
+}
+
+/// The mirror update-rate combo's options, in frames between updates.
+pub(crate) fn mirror_update_rate_options() -> Vec<(&'static str, SettingValue)> {
+    vec![
+        ("preferences-mirror-rate-1", SettingValue::U32(1)),
+        ("preferences-mirror-rate-2", SettingValue::U32(2)),
+        ("preferences-mirror-rate-4", SettingValue::U32(4)),
+        ("preferences-mirror-rate-8", SettingValue::U32(8)),
+    ]
+}
+
+/// The tone-curve combo's options.
+pub(crate) fn tonemap_type_options() -> Vec<(&'static str, SettingValue)> {
+    vec![
+        (
+            "preferences-tonemap-khronos",
+            SettingValue::U32(crate::tonemap::TONEMAP_KHRONOS_NEUTRAL),
+        ),
+        (
+            "preferences-tonemap-aces",
+            SettingValue::U32(crate::tonemap::TONEMAP_ACES),
+        ),
+        (
+            "preferences-tonemap-none",
+            SettingValue::U32(crate::tonemap::TONEMAP_NONE),
+        ),
+    ]
+}
+
+/// The avatar complexity-mode combo's options.
+pub(crate) fn complexity_mode_options() -> Vec<(&'static str, SettingValue)> {
+    vec![
+        (
+            "preferences-complexity-mode-everyone",
+            SettingValue::U32(crate::avatar_complexity::ComplexityMode::ByComplexity.stored()),
+        ),
+        (
+            "preferences-complexity-mode-spare-friends",
+            SettingValue::U32(crate::avatar_complexity::ComplexityMode::AlwaysShowFriends.stored()),
+        ),
+        (
+            "preferences-complexity-mode-only-friends",
+            SettingValue::U32(crate::avatar_complexity::ComplexityMode::OnlyShowFriends.stored()),
+        ),
+    ]
+}
+
 /// Register the settings this tab itself consumes (see the module doc for
 /// the ownership split). Called from [`ViewerSettings`]'s `load`.
 pub fn register_settings(settings: &mut ViewerSettings) {
@@ -339,17 +433,12 @@ pub fn register_settings(settings: &mut ViewerSettings) {
 /// `crate::preferences::PREF_TABS` `build` hook).
 pub(crate) fn build_graphics_tab(commands: &mut Commands, panel: Entity) {
     spawn_pref_section(commands, panel, "preferences-section-render-quality");
-    let quality_options: Vec<(&str, SettingValue)> = QUALITY_OPTION_KEYS
-        .iter()
-        .copied()
-        .zip(quality_option_values())
-        .collect();
     let (_row, quality_anchor) = spawn_pref_combo_with_anchor(
         commands,
         panel,
         "preferences-row-render-quality",
         SettingBinding::global(SETTING_RENDER_QUALITY),
-        &quality_options,
+        &quality_options(),
     );
     commands.entity(quality_anchor).insert(QualityTierControl);
     spawn_pref_slider(
@@ -398,24 +487,7 @@ pub(crate) fn build_graphics_tab(commands: &mut Commands, panel: Entity) {
         panel,
         "preferences-row-avatar-complexity-mode",
         SettingBinding::global(crate::avatar_complexity::SETTING_COMPLEXITY_MODE),
-        &[
-            (
-                "preferences-complexity-mode-everyone",
-                SettingValue::U32(crate::avatar_complexity::ComplexityMode::ByComplexity.stored()),
-            ),
-            (
-                "preferences-complexity-mode-spare-friends",
-                SettingValue::U32(
-                    crate::avatar_complexity::ComplexityMode::AlwaysShowFriends.stored(),
-                ),
-            ),
-            (
-                "preferences-complexity-mode-only-friends",
-                SettingValue::U32(
-                    crate::avatar_complexity::ComplexityMode::OnlyShowFriends.stored(),
-                ),
-            ),
-        ],
+        &complexity_mode_options(),
     );
     spawn_pref_slider(
         commands,
@@ -432,22 +504,14 @@ pub(crate) fn build_graphics_tab(commands: &mut Commands, panel: Entity) {
         panel,
         "preferences-row-shadow-detail",
         SettingBinding::global(SETTING_SHADOW_DETAIL),
-        &[
-            ("preferences-shadows-none", SettingValue::U32(0)),
-            ("preferences-shadows-sun-moon", SettingValue::U32(1)),
-        ],
+        &shadow_detail_options(),
     );
     spawn_pref_combo(
         commands,
         panel,
         "preferences-row-shadow-map-size",
         SettingBinding::global(SETTING_SHADOW_MAP_SIZE),
-        &[
-            ("preferences-shadow-map-1024", SettingValue::U32(1024)),
-            ("preferences-shadow-map-2048", SettingValue::U32(2048)),
-            ("preferences-shadow-map-4096", SettingValue::U32(4096)),
-            ("preferences-shadow-map-8192", SettingValue::U32(8192)),
-        ],
+        &shadow_map_size_options(),
     );
     spawn_pref_slider(
         commands,
@@ -476,24 +540,14 @@ pub(crate) fn build_graphics_tab(commands: &mut Commands, panel: Entity) {
         panel,
         "preferences-row-mirror-resolution",
         SettingBinding::global(crate::probes::HERO_RESOLUTION_SETTING),
-        &[
-            ("preferences-mirror-res-256", SettingValue::U32(256)),
-            ("preferences-mirror-res-512", SettingValue::U32(512)),
-            ("preferences-mirror-res-1024", SettingValue::U32(1024)),
-            ("preferences-mirror-res-2048", SettingValue::U32(2048)),
-        ],
+        &mirror_resolution_options(),
     );
     spawn_pref_combo(
         commands,
         panel,
         "preferences-row-mirror-update-rate",
         SettingBinding::global(crate::probes::HERO_UPDATE_RATE_SETTING),
-        &[
-            ("preferences-mirror-rate-1", SettingValue::U32(1)),
-            ("preferences-mirror-rate-2", SettingValue::U32(2)),
-            ("preferences-mirror-rate-4", SettingValue::U32(4)),
-            ("preferences-mirror-rate-8", SettingValue::U32(8)),
-        ],
+        &mirror_update_rate_options(),
     );
 
     spawn_pref_section(commands, panel, "preferences-section-glow");
@@ -534,20 +588,7 @@ pub(crate) fn build_graphics_tab(commands: &mut Commands, panel: Entity) {
         panel,
         "preferences-row-tonemap-type",
         SettingBinding::global(crate::tonemap::SETTING_TONEMAP_TYPE),
-        &[
-            (
-                "preferences-tonemap-khronos",
-                SettingValue::U32(crate::tonemap::TONEMAP_KHRONOS_NEUTRAL),
-            ),
-            (
-                "preferences-tonemap-aces",
-                SettingValue::U32(crate::tonemap::TONEMAP_ACES),
-            ),
-            (
-                "preferences-tonemap-none",
-                SettingValue::U32(crate::tonemap::TONEMAP_NONE),
-            ),
-        ],
+        &tonemap_type_options(),
     );
     spawn_pref_slider(
         commands,

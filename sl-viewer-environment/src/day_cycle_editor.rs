@@ -39,33 +39,40 @@
 //!
 //! # What a save writes
 //!
-//! The whole cycle, re-encoded (`environment_asset_to_bytes`) onto the item it
-//! came from, or into a fresh item a Save As mints — the same two paths, and the
-//! same shared creation queue, the fixed editors use.
+//! That depends on where the cycle came from (the reference's
+//! `KEY_EDIT_CONTEXT`). A cycle opened from **inventory** is re-encoded
+//! (`environment_asset_to_bytes`) onto the item it came from, or into a fresh
+//! item a Save As mints — the same two paths, and the same shared creation
+//! queue, the fixed editors use. A cycle opened from **land** — a region's or a
+//! parcel's own environment, sent here by the land-environment panel
+//! ([`crate::land_environment`]) — has no asset to write onto, so Save hands it
+//! back to that panel and the panel publishes it. Save As still files a copy in
+//! inventory either way.
+//!
+//! Handing back rather than publishing here is deliberate: the panel owns the
+//! permission tests, the `?parcelid=` scope and the Apply / Revert pair, and a
+//! second path to the capability would be a second copy of all three.
 //!
 //! # Not done here
 //!
-//! - **No Apply To Parcel / Apply To Region.** The reference's Save flyout can
-//!   commit the cycle straight to the land it was opened from. Publishing an
-//!   environment to land is the region / parcel environment panel's job
-//!   (`viewer-region-environment-panel`), which owns the permission tests that
-//!   go with it; this window only ever edits an inventory item, which is the
-//!   reference's own `CONTEXT_INVENTORY`.
 //! - **No Import.** Reading a legacy WindLight day preset off disk is the
 //!   legacy-preset importer's job (`viewer-environment-import-legacy-presets`).
 //!
 //! Reference (Firestorm, read-only): `llfloatereditextdaycycle.cpp`,
 //! `floater_edit_ext_day_cycle.xml`, `llsettingsdaycycle.cpp`.
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui_widgets::{SliderRange, SliderValue, ValueChange};
 use sl_client_bevy::{
-    AssetKey, AssetUpdateLocation, Command, DayCycle, DayTrack, EnvironmentAsset, InventoryKey,
-    KEYFRAME_SLOP, SKY_TRACK_COUNT, SettingsKind, SkySettings, SlCommand, SlEvent, SlSessionEvent,
-    UpdatableAssetType, WaterSettings, environment_asset_to_bytes,
+    AssetKey, AssetUpdateLocation, Command, DayCycle, DayTrack, EnvironmentAsset,
+    InventoryFolderKey, InventoryKey, KEYFRAME_SLOP, SKY_TRACK_COUNT, SettingsKind, SkySettings,
+    SlCommand, SlEvent, SlSessionEvent, UpdatableAssetType, WaterSettings,
+    environment_asset_to_bytes,
 };
-use sl_viewer_inventory::inventory_actions::new_settings_item;
+use sl_viewer_inventory::inventory::InventoryModel;
+use sl_viewer_inventory::inventory_actions::{SettingsInventorySupport, new_settings_item};
 use sl_viewer_notifications::{NotificationResponse, ShowNotification};
 use sl_viewer_pickers::ui_texture_picker::TextureSwatchValue;
 use sl_viewer_platform::environment_assets::EnvironmentAssetManager;
@@ -87,6 +94,7 @@ use sl_viewer_ui_widgets::ui_tab::{
     DEFAULT_ELLIPSIS, TabPlacement, TabSpec, fill_tab_container, spawn_tab_container,
 };
 use sl_viewer_ui_widgets::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
+use sl_viewer_ui_widgets::ui_trackball::TrackballAim;
 use sl_viewer_world_api::{
     OpenSettingsEditor, OpenSettingsPicker, PendingSettingsCreations, SettingsItemCreated,
     SettingsPicked, TexturePicked,
@@ -94,7 +102,11 @@ use sl_viewer_world_api::{
 use sl_viewer_world_scene::environment::EnvironmentState;
 
 use crate::knobs::{ColorKnob, SkyKnob, TextureKnob, WaterKnob};
-use crate::rows::{spawn_action_button, spawn_color_row, spawn_slider, spawn_texture_row};
+use crate::land_environment::{LandDayCycleEdited, OpenLandDayCycle};
+use crate::rows::{
+    AimTrackball, paint_action_button, spawn_action_button, spawn_color_row, spawn_slider,
+    spawn_texture_row, spawn_trackball_row, tag_aim_slider,
+};
 use crate::settings_editor::EditedItem;
 use crate::style::{
     CONTROL_BORDER, DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, THUMB_FILL, TRACK_FILL,
@@ -295,15 +307,9 @@ type ChromeWidgets<'w, 's> = (
     Query<'w, 's, &'static Children>,
 );
 
-/// What [`paint_button`] writes through: a button's own background, its label's
-/// colour, and the filter that says whether it is already disabled — so a
-/// button that already looks right is left alone rather than re-marked changed
-/// every frame.
-type ChromePaint<'w, 's> = (
-    Query<'w, 's, &'static mut BackgroundColor>,
-    Query<'w, 's, &'static mut TextColor>,
-    Query<'w, 's, (), With<bevy::ui::InteractionDisabled>>,
-);
+/// What [`paint_button`] writes through — the shared
+/// [`ButtonPaint`](crate::rows::ButtonPaint), named for this window's chrome.
+type ChromePaint<'w, 's> = crate::rows::ButtonPaint<'w, 's>;
 
 // ---------------------------------------------------------------------------
 // State.
@@ -351,13 +357,88 @@ struct PendingInsert {
     position: f32,
 }
 
-/// An open whose asset has not arrived yet.
+/// An open whose asset has not arrived yet. Only an *inventory* open waits:
+/// a land open carries its cycle in the message.
 #[derive(Debug, Clone)]
 struct PendingOpen {
     /// The request that started it, replayed once the asset decodes.
     request: OpenSettingsEditor,
     /// The asset being waited for.
     asset: AssetKey,
+}
+
+/// An open the window has been asked for, whichever of the two kinds it is.
+///
+/// One type because the *guard* in front of both is one question — is there
+/// unsaved work in the window this would replace? — and an open held for a
+/// confirmation has to come back as the open it was.
+#[derive(Debug, Clone)]
+enum DayOpen {
+    /// An inventory item, whose asset is fetched first.
+    Inventory(Box<OpenSettingsEditor>),
+    /// A land's own cycle, already in hand.
+    Land(Box<OpenLandDayCycle>),
+}
+
+/// Where the cycle this window is editing came from, and therefore what
+/// **Save** means.
+///
+/// The reference splits the same way (`LLFloaterEditExtDayCycle`'s
+/// `KEY_EDIT_CONTEXT`: `CONTEXT_INVENTORY` against `CONTEXT_REGION` /
+/// `CONTEXT_PARCEL`), because a cycle that belongs to a region has no asset to
+/// write onto — the environment carries it inline.
+#[derive(Debug, Clone)]
+enum DaySource {
+    /// An inventory item. Save writes the asset back onto it; Save As files a
+    /// copy beside it.
+    Inventory(EditedItem),
+    /// A region's or a parcel's own environment, opened from the
+    /// land-environment panel ([`crate::land_environment`]).
+    ///
+    /// Save hands the cycle **back to the panel** rather than publishing it
+    /// here: the panel owns the permission tests, the scope (`?parcelid=`) and
+    /// the Apply / Revert pair, and a second path to the wire would be a
+    /// second set of all three. Save As still files a copy in inventory,
+    /// because a cycle worth putting on a region is worth keeping.
+    Land {
+        /// The panel to answer.
+        panel: Entity,
+        /// What to call the land in the status line.
+        label: String,
+        /// Where a Save As files the copy — the Settings system folder, since
+        /// a land cycle has no folder of its own to sit beside. `None` on a
+        /// session opened before the inventory skeleton arrived, where there
+        /// is nowhere to file one yet.
+        folder_id: Option<InventoryFolderKey>,
+        /// Whether the agent may change this land's environment at all. A
+        /// panel that is read-only opens the window read-only.
+        editable: bool,
+    },
+}
+
+impl DaySource {
+    /// Whether the cycle may be edited at all.
+    const fn editable(&self) -> bool {
+        match self {
+            Self::Inventory(item) => item.editable,
+            Self::Land { editable, .. } => *editable,
+        }
+    }
+
+    /// The folder a Save As files its copy in, or `None` when there is
+    /// nowhere to file one.
+    const fn save_folder(&self) -> Option<InventoryFolderKey> {
+        match self {
+            Self::Inventory(item) => Some(item.folder_id),
+            Self::Land { folder_id, .. } => *folder_id,
+        }
+    }
+
+    /// Whether a Save needs the grid to be able to store a settings asset.
+    /// A land Save publishes the cycle inline and never touches inventory.
+    const fn save_needs_asset_store(&self) -> bool {
+        matches!(*self, Self::Inventory(_))
+    }
 }
 
 /// A run of the scrubber.
@@ -380,8 +461,8 @@ struct Playback {
 )]
 #[derive(Debug, Clone)]
 struct DaySession {
-    /// The inventory item this cycle came from.
-    item: EditedItem,
+    /// Where this cycle came from, and therefore what a Save does with it.
+    source: DaySource,
     /// The name shown in the field and written into the asset.
     name: String,
     /// The cycle as loaded — what Revert restores.
@@ -478,7 +559,7 @@ struct DayCycleEditorState {
     saving_as: bool,
     /// An open the user is being asked about, because taking it would throw
     /// unsaved work away.
-    confirm: Option<OpenSettingsEditor>,
+    confirm: Option<DayOpen>,
     /// The clone-source combo's row states as last published, so the list is
     /// re-sent only when it actually changes.
     clone_rows: Vec<ComboRow>,
@@ -516,12 +597,18 @@ impl Plugin for DayCycleEditorPlugin {
             // `MessageWriter` for an unregistered message panics on its first
             // run rather than quietly doing nothing.
             .init_resource::<PendingSettingsCreations>()
+            // Idempotent likewise: the inventory's actions plugin owns it and
+            // keeps it current from the capability map; a host without one
+            // reads "no settings grid", which greys the two saves.
+            .init_resource::<SettingsInventorySupport>()
             .add_message::<ShowNotification>()
             .add_message::<NotificationResponse>()
             .add_message::<SettingsItemCreated>()
             .add_message::<OpenSettingsEditor>()
             .add_message::<OpenSettingsPicker>()
             .add_message::<SettingsPicked>()
+            .add_message::<OpenLandDayCycle>()
+            .add_message::<LandDayCycleEdited>()
             .add_systems(
                 Startup,
                 spawn_day_cycle_editor.after(UiScaffoldSystems::SpawnRoot),
@@ -533,6 +620,7 @@ impl Plugin for DayCycleEditorPlugin {
                 // window's first frame shows the last asset's values.
                 (
                     open_day_cycle_editor.after(FloaterSystems::Commands),
+                    open_land_day_cycle.after(FloaterSystems::Commands),
                     poll_pending_day_open,
                     advance_day_playback,
                     apply_day_color_picks,
@@ -1000,6 +1088,15 @@ fn spawn_pages(
                 commands.entity(swatch).insert(DayTextureSwatch(*knob));
             }
         }
+        // A body's trackball opens the column its two angle sliders are in, as
+        // the reference's sun-and-moon panel opens with them.
+        for (index, knobs) in page.aims.iter().enumerate() {
+            let Some(column_entity) = slider_columns.get(index) else {
+                continue;
+            };
+            let trackball = spawn_trackball_row(commands, *column_entity, element, *knobs, tab);
+            commands.entity(trackball).observe(on_day_trackball);
+        }
         for (index, knob) in page.sky.iter().enumerate() {
             let Some(column_entity) = slider_column(slider_columns, index, page.sky.len()) else {
                 continue;
@@ -1017,6 +1114,7 @@ fn spawn_pages(
                 .entity(track)
                 .insert(DaySkySlider(*knob))
                 .observe(on_day_sky_slider);
+            tag_aim_slider(commands, track, element, *knob);
         }
         for (index, knob) in page.water.iter().enumerate() {
             let Some(column_entity) = slider_column(slider_columns, index, page.water.len()) else {
@@ -1163,21 +1261,11 @@ fn open_day_cycle_editor(
         // of one sky cannot both be what the user is standing under. So opening a
         // second item replaces the first, and the reference asks before throwing
         // unsaved work away (`checkAndConfirmSettingsLoss`).
-        if state
-            .session
-            .as_ref()
-            .is_some_and(|session| session.modified)
-        {
-            let name = state
-                .session
-                .as_ref()
-                .map_or_else(String::new, |session| session.name.clone());
-            state.confirm = Some(open.clone());
-            notify.write(
-                ShowNotification::new("SettingsConfirmLoss")
-                    .arg("TYPE", "day cycle")
-                    .arg("NAME", name),
-            );
+        if ask_before_replacing(
+            &mut state,
+            &mut notify,
+            DayOpen::Inventory(Box::new(open.clone())),
+        ) {
             continue;
         }
         let asset = AssetKey::from(open.asset_id);
@@ -1232,29 +1320,12 @@ fn poll_pending_day_open(
             return;
         };
         let cycle = *cycle;
-        state.session = Some(DaySession {
-            item: EditedItem {
-                item_id: pending.request.item_id,
-                folder_id: pending.request.folder_id,
-                editable: pending.request.editable,
-            },
-            name: pending.request.name.clone(),
-            original: cycle.clone(),
-            edited: cycle,
-            track: DayTrack::GROUND,
-            position: 0.0,
-            selected: None,
-            playing: None,
-            dirty: true,
-            modified: false,
-            reseed: true,
-            relist: true,
-            saving: false,
+        let source = DaySource::Inventory(EditedItem {
+            item_id: pending.request.item_id,
+            folder_id: pending.request.folder_id,
+            editable: pending.request.editable,
         });
-        // Open on whatever is at midnight, as the reference opens on frame 0.
-        if let Some(session) = state.session.as_mut() {
-            session.select_at(0.0, KEYFRAME_SLOP);
-        }
+        seed_day_session(&mut state, source, pending.request.name.clone(), cycle);
         set_status(&mut texts, status, "");
     } else if assets.is_unavailable(pending.asset) {
         state.pending = None;
@@ -1271,6 +1342,7 @@ fn confirm_day_replace(
     mut responses: MessageReader<NotificationResponse>,
     mut state: ResMut<DayCycleEditorState>,
     mut opens: MessageWriter<OpenSettingsEditor>,
+    mut land_opens: MessageWriter<OpenLandDayCycle>,
 ) {
     for response in responses.read() {
         if response.template != "SettingsConfirmLoss" {
@@ -1285,7 +1357,125 @@ fn confirm_day_replace(
         // Drop the session *before* replaying, or the open would find it still
         // modified and ask again.
         state.session = None;
-        opens.write(open);
+        match open {
+            DayOpen::Inventory(request) => {
+                opens.write(*request);
+            }
+            DayOpen::Land(request) => {
+                land_opens.write(*request);
+            }
+        }
+    }
+}
+
+/// Ask before an open replaces unsaved work, holding the open until the answer
+/// comes back. Returns whether the caller should stand down and wait.
+///
+/// Shared by both kinds of open, because the question is about the session the
+/// open would *replace* and has nothing to do with where the new one comes
+/// from — the reference's `checkAndConfirmSettingsLoss`.
+fn ask_before_replacing(
+    state: &mut DayCycleEditorState,
+    notify: &mut MessageWriter<ShowNotification>,
+    open: DayOpen,
+) -> bool {
+    let Some(name) = state
+        .session
+        .as_ref()
+        .filter(|session| session.modified)
+        .map(|session| session.name.clone())
+    else {
+        return false;
+    };
+    state.confirm = Some(open);
+    notify.write(
+        ShowNotification::new("SettingsConfirmLoss")
+            .arg("TYPE", "day cycle")
+            .arg("NAME", name),
+    );
+    true
+}
+
+/// Install `cycle` as the window's session, opened at midnight as the
+/// reference opens on frame 0.
+fn seed_day_session(
+    state: &mut DayCycleEditorState,
+    source: DaySource,
+    name: String,
+    cycle: DayCycle,
+) {
+    state.session = Some(DaySession {
+        source,
+        name,
+        original: cycle.clone(),
+        edited: cycle,
+        track: DayTrack::GROUND,
+        position: 0.0,
+        selected: None,
+        playing: None,
+        dirty: true,
+        modified: false,
+        reseed: true,
+        relist: true,
+        saving: false,
+    });
+    if let Some(session) = state.session.as_mut() {
+        session.select_at(0.0, KEYFRAME_SLOP);
+    }
+}
+
+/// Handle an [`OpenLandDayCycle`]: show the window on a land's own cycle.
+///
+/// No fetch, and so no pending state — the panel had the cycle in hand, which
+/// is the whole reason this message carries it.
+fn open_land_day_cycle(
+    mut opens: MessageReader<OpenLandDayCycle>,
+    mut state: ResMut<DayCycleEditorState>,
+    inventory: Option<Res<InventoryModel>>,
+    mut notify: MessageWriter<ShowNotification>,
+    mut panels: Query<&mut UiPanelShown>,
+    mut raises: MessageWriter<FloaterCommand>,
+    mut texts: Query<&mut Text>,
+) {
+    for open in opens.read() {
+        if ask_before_replacing(
+            &mut state,
+            &mut notify,
+            DayOpen::Land(Box::new(open.clone())),
+        ) {
+            continue;
+        }
+        // A land cycle has no folder of its own; a Save As files the copy where
+        // every other freshly minted settings item goes.
+        let folder_id = inventory.as_deref().and_then(crate::settings_destination);
+        let source = DaySource::Land {
+            panel: open.panel,
+            label: open.label.clone(),
+            folder_id,
+            editable: open.editable,
+        };
+        let name = open.cycle.name.clone();
+        seed_day_session(&mut state, source, name, (*open.cycle).clone());
+        // A fetch is what normally clears the pending state; there is none
+        // here, and a stale one would seed over this session the moment its
+        // asset arrived.
+        state.pending = None;
+        let status = state.ui.status;
+        let label = open.label.clone();
+        set_status(
+            &mut texts,
+            status,
+            &format!("Editing the environment of {label}. Save hands it back to the panel."),
+        );
+        if let Some(panel) = state.ui.panel {
+            if let Ok(mut shown) = panels.get_mut(panel) {
+                shown.0 = true;
+            }
+            raises.write(FloaterCommand {
+                floater: panel,
+                op: FloaterOp::BringToFront,
+            });
+        }
     }
 }
 
@@ -1376,7 +1566,7 @@ fn on_day_strip_drag(
     };
     session.playing = None;
     let dragging_keyframe =
-        strip.0 == StripKind::Keyframes && session.item.editable && session.selected.is_some();
+        strip.0 == StripKind::Keyframes && session.source.editable() && session.selected.is_some();
     if !dragging_keyframe {
         session.position = fraction;
         session.dirty = true;
@@ -1486,7 +1676,7 @@ fn advance_day_playback(time: Res<Time>, mut state: ResMut<DayCycleEditorState>)
 /// the name a knob write should go into, or `None` when nothing is selected or
 /// the item may not be changed.
 fn writable_frame(session: &mut DaySession) -> Option<String> {
-    if !session.item.editable {
+    if !session.source.editable() {
         return None;
     }
     let index = session.selected?;
@@ -1514,6 +1704,34 @@ fn on_day_sky_slider(
     };
     if let Some(sky) = session.edited.sky_frames.get_mut(&name) {
         row_info.0.write(sky, clamped);
+        session.dirty = true;
+        session.modified = true;
+    }
+}
+
+/// A trackball was aimed: write the body's whole direction into the keyframe
+/// the window is showing. The two sliders under it are put back in step by the
+/// shared [`crate::rows`] systems.
+fn on_day_trackball(
+    change: On<ValueChange<Vec2>>,
+    trackballs: Query<&AimTrackball>,
+    mut state: ResMut<DayCycleEditorState>,
+) {
+    let Ok(trackball) = trackballs.get(change.source) else {
+        return;
+    };
+    let aim = TrackballAim {
+        azimuth: change.value.x,
+        elevation: change.value.y,
+    };
+    let Some(session) = state.session.as_mut() else {
+        return;
+    };
+    let Some(name) = writable_frame(session) else {
+        return;
+    };
+    if let Some(sky) = session.edited.sky_frames.get_mut(&name) {
+        trackball.knobs.write(sky, aim);
         session.dirty = true;
         session.modified = true;
     }
@@ -1630,15 +1848,29 @@ fn read_day_name(
     }
 }
 
+/// The two swatch kinds a re-seed paints.
+///
+/// One parameter rather than two because they are written identically and read
+/// the same pair of frames — and because the trackballs pushed the re-seed past
+/// Bevy's seven-parameter shape, which is the nudge to group what belongs
+/// together rather than to raise a limit.
+#[derive(SystemParam)]
+struct DaySwatches<'w, 's> {
+    /// The colour swatches.
+    colors: Query<'w, 's, (&'static DayColorSwatch, &'static mut ColorSwatchValue)>,
+    /// The texture swatches.
+    textures: Query<'w, 's, (&'static DayTextureSwatch, &'static mut TextureSwatchValue)>,
+}
+
 /// Seed every knob from the frame the window is showing.
 fn reseed_day_widgets(
     mut commands: Commands,
     mut state: ResMut<DayCycleEditorState>,
     sky_sliders: Query<(Entity, &DaySkySlider, &SliderRange, &SliderValue)>,
     water_sliders: Query<(Entity, &DayWaterSlider, &SliderRange, &SliderValue)>,
-    mut colors: Query<(&DayColorSwatch, &mut ColorSwatchValue)>,
-    mut textures: Query<(&DayTextureSwatch, &mut TextureSwatchValue)>,
+    mut swatches: DaySwatches,
     mut fields: Query<&mut EditableText, With<DayNameField>>,
+    mut trackballs: Query<(&AimTrackball, &mut TrackballAim)>,
 ) {
     let Some(session) = state.session.as_mut() else {
         return;
@@ -1664,6 +1896,16 @@ fn reseed_day_widgets(
                 commands.entity(entity).insert(SliderValue(wanted));
             }
         }
+        // The trackballs are seeded here rather than left to the slider sync,
+        // which only fires on a slider that *changed*: a keyframe whose sun
+        // happens to sit at its two sliders' current values would otherwise
+        // leave the marker where the last keyframe put it.
+        for (trackball, mut aim) in &mut trackballs {
+            let wanted = trackball.knobs.read(sky);
+            if *aim != wanted {
+                *aim = wanted;
+            }
+        }
     }
     if let Some(water) = water.as_ref() {
         for (entity, row_info, range, value) in &water_sliders {
@@ -1675,10 +1917,10 @@ fn reseed_day_widgets(
     }
     let sky_frame = sky.unwrap_or_else(|| SkySettings::legacy_windlight_default("scratch"));
     let water_frame = water.unwrap_or_else(|| WaterSettings::legacy_default("scratch"));
-    for (swatch, mut value) in &mut colors {
+    for (swatch, mut value) in &mut swatches.colors {
         value.0 = swatch.0.read(&sky_frame, &water_frame);
     }
-    for (swatch, mut value) in &mut textures {
+    for (swatch, mut value) in &mut swatches.textures {
         value.0 = swatch.0.read(&sky_frame, &water_frame);
     }
     for mut editable in &mut fields {
@@ -1787,6 +2029,7 @@ fn on_day_track_button(
 fn sync_day_chrome(
     mut state: ResMut<DayCycleEditorState>,
     environment: Option<Res<EnvironmentState>>,
+    support: Res<SettingsInventorySupport>,
     translator: Translator,
     mut nodes: Query<&mut Node>,
     mut texts: Query<&mut Text>,
@@ -1797,6 +2040,7 @@ fn sync_day_chrome(
 ) {
     let (tracks, buttons, ticks, labels) = widgets;
     let day_length = environment.map_or(0, |environment| environment.settings.day_length);
+    let settings_supported = support.supported();
     // A locale switch re-resolves every `Translated` label through the
     // translation sweep; a hand-formatted string has to ask for it.
     let relocalised = translator.changed();
@@ -1840,7 +2084,7 @@ fn sync_day_chrome(
 
         // The action buttons.
         for (entity, button) in &buttons {
-            let enabled = action_enabled(button.0, session);
+            let enabled = action_enabled(button.0, session, settings_supported);
             paint_button(&mut commands, &labels, &mut paint, entity, enabled, false);
         }
 
@@ -1984,13 +2228,35 @@ fn clock_at(position: f32, day_length: i32) -> Option<(i64, i64)> {
 }
 
 /// Whether `action` can be taken on `session` — the reference's `updateButtons`.
-fn action_enabled(action: DayAction, session: Option<&DaySession>) -> bool {
+///
+/// `settings_supported` is the reference's `is_inventory_avail`
+/// ([`SettingsInventorySupport`]): on a grid that cannot hold a settings asset,
+/// the two saves are the actions that cannot be taken at all, whatever the
+/// session says. (The reference *hides* them there rather than greying them;
+/// greyed is this viewer's convention for an entry that exists but cannot be
+/// used, and it is the one that tells a person the window is not broken.)
+fn action_enabled(
+    action: DayAction,
+    session: Option<&DaySession>,
+    settings_supported: bool,
+) -> bool {
     let Some(session) = session else {
         return false;
     };
+    // A Save As always mints an inventory item; a Save only writes one when the
+    // cycle came from one. A land cycle's Save publishes inline and needs
+    // nothing of the asset store, so a grid without one does not disable it.
+    let needs_store = match action {
+        DayAction::SaveAs => true,
+        DayAction::Save => session.source.save_needs_asset_store(),
+        _other => false,
+    };
+    if needs_store && !settings_supported {
+        return false;
+    }
     // Playing takes the hands off everything that edits, as the reference's
     // `can_manipulate` does; the transport itself stays live.
-    let can_edit = session.item.editable && session.playing.is_none();
+    let can_edit = session.source.editable() && session.playing.is_none();
     match action {
         // The transport never edits anything, Revert only undoes, and a Save As
         // mints a fresh item — none of them need the item to be writable, and
@@ -2000,7 +2266,7 @@ fn action_enabled(action: DayAction, session: Option<&DaySession>) -> bool {
         | DayAction::SkipForward
         | DayAction::Revert
         | DayAction::SaveAs => true,
-        DayAction::Save => session.item.editable && !session.saving,
+        DayAction::Save => session.source.editable() && !session.saving,
         DayAction::AddFrame => {
             can_edit
                 && session.keyframes().len() < MAX_KEYFRAMES
@@ -2052,10 +2318,9 @@ fn show(nodes: &mut Query<&mut Node>, entity: Option<Entity>, visible: bool) {
     }
 }
 
-/// Mark a button enabled or disabled, and lit or not.
-///
-/// Bevy's `InteractionDisabled` is advisory — it stops this window's own
-/// observers and nothing paints it — so the colours are set here beside it.
+/// Mark a button enabled or disabled, and lit or not — this window's colours
+/// over the shared [`paint_action_button`], which owns the
+/// `InteractionDisabled` half.
 fn paint_button(
     commands: &mut Commands,
     labels: &Query<&Children>,
@@ -2064,7 +2329,6 @@ fn paint_button(
     enabled: bool,
     lit: bool,
 ) {
-    let (backgrounds, texts, disabled) = paint;
     let background = if !enabled {
         TRACK_FILL
     } else if lit {
@@ -2072,36 +2336,19 @@ fn paint_button(
     } else {
         crate::style::ACTION_BACKGROUND
     };
-    if let Ok(mut current) = backgrounds.get_mut(entity)
-        && current.0 != background
-    {
-        current.0 = background;
-    }
     let label = if enabled {
         LABEL_COLOR
     } else {
         DIM_LABEL_COLOR
     };
-    if let Ok(children) = labels.get(entity) {
-        for child in children.iter() {
-            if let Ok(mut colour) = texts.get_mut(child)
-                && colour.0 != label
-            {
-                colour.0 = label;
-            }
-        }
-    }
-    if disabled.contains(entity) == enabled {
-        if enabled {
-            commands
-                .entity(entity)
-                .remove::<bevy::ui::InteractionDisabled>();
-        } else {
-            commands
-                .entity(entity)
-                .insert(bevy::ui::InteractionDisabled);
-        }
-    }
+    paint_action_button(
+        commands,
+        labels,
+        paint,
+        entity,
+        enabled,
+        (background, label),
+    );
 }
 
 /// Point a button's label at a different Fluent key (the Play / Pause swap).
@@ -2149,10 +2396,13 @@ fn on_day_button(
     buttons: Query<&DayButton>,
     disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
     mut state: ResMut<DayCycleEditorState>,
+    support: Res<SettingsInventorySupport>,
     combos: Query<&ComboSelection, With<DayCloneSource>>,
     mut creations: ResMut<PendingSettingsCreations>,
     mut commands: MessageWriter<SlCommand>,
+    mut notify: MessageWriter<ShowNotification>,
     mut pickers: MessageWriter<OpenSettingsPicker>,
+    mut land_edits: MessageWriter<LandDayCycleEdited>,
     mut texts: Query<&mut Text>,
 ) {
     if press.button != PointerButton::Primary || disabled.contains(press.entity) {
@@ -2167,10 +2417,35 @@ fn on_day_button(
         set_status(&mut texts, status, "Nothing is open in this editor.");
         return;
     }
+    // The two saves are greyed on the same predicate, so this is the race a
+    // region cross leaves: the press was made while the grid still did
+    // settings. The reference refuses in the same place —
+    // `LLSettingsVOBase::updateInventoryItem` / `createInventoryItem`, both of
+    // which raise this notification and return.
+    let touches_inventory = match button.0 {
+        DayAction::SaveAs => true,
+        DayAction::Save => state
+            .session
+            .as_ref()
+            .is_some_and(|session| session.source.save_needs_asset_store()),
+        _other => false,
+    };
+    if touches_inventory && !support.supported() {
+        warn!("day-cycle editor: the region cannot store settings assets; refusing to save");
+        notify.write(ShowNotification::new("SettingsUnsuported"));
+        set_status(
+            &mut texts,
+            status,
+            "This region cannot store settings assets.",
+        );
+        return;
+    }
     let clone_from = combos.iter().next().map_or(0, |selection| selection.active);
     let requester = press.entity;
     match button.0 {
-        DayAction::Save => save_day_cycle(&mut state, &mut commands, &mut texts),
+        DayAction::Save => {
+            save_day_cycle(&mut state, &mut commands, &mut land_edits, &mut texts);
+        }
         DayAction::SaveAs => {
             save_day_cycle_as(&mut state, &mut creations, &mut commands, &mut texts);
         }
@@ -2474,30 +2749,57 @@ fn poll_day_insert(
 // Saving.
 // ---------------------------------------------------------------------------
 
-/// Save the cycle back onto the item it came from.
+/// Save the cycle back where it came from: onto its inventory item, or — for a
+/// land cycle — into the hands of the panel that opened the window.
 fn save_day_cycle(
     state: &mut DayCycleEditorState,
     commands: &mut MessageWriter<SlCommand>,
+    edits: &mut MessageWriter<LandDayCycleEdited>,
     texts: &mut Query<&mut Text>,
 ) {
     let status = state.ui.status;
     let Some(session) = state.session.as_mut() else {
         return;
     };
-    if !session.item.editable {
-        set_status(texts, status, "That item may not be modified.");
+    if !session.source.editable() {
+        set_status(texts, status, "That day cycle may not be modified.");
         return;
     }
-    let item = session.item.item_id;
-    let data = environment_asset_to_bytes(&named(&session.edited, &session.name));
-    commands.write(SlCommand(Command::UpdateInventoryAsset {
-        location: AssetUpdateLocation::AgentInventory { item_id: item },
-        asset_type: UpdatableAssetType::Settings,
-        data,
-    }));
-    session.saving = true;
-    state.saving = Some(item);
-    set_status(texts, status, "Saving…");
+    // Read the destination out of the source first: both arms go on to mutate
+    // the session, and a borrow of `source` held across that is one the
+    // compiler will not have.
+    let destination = match &session.source {
+        DaySource::Land { panel, label, .. } => Err((*panel, label.clone())),
+        DaySource::Inventory(item) => Ok(item.item_id),
+    };
+    match destination {
+        Err((panel, label)) => {
+            edits.write(LandDayCycleEdited {
+                panel,
+                cycle: Box::new(named_cycle(&session.edited, &session.name)),
+            });
+            // Nothing is in flight and nothing can fail: the cycle is now the
+            // panel's draft, which is the new baseline a Revert goes back to.
+            session.modified = false;
+            session.original = session.edited.clone();
+            let told = format!(
+                "Handed back to the environment panel for {label} — press Apply there to \
+                 publish it."
+            );
+            set_status(texts, status, &told);
+        }
+        Ok(item) => {
+            let data = environment_asset_to_bytes(&named(&session.edited, &session.name));
+            commands.write(SlCommand(Command::UpdateInventoryAsset {
+                location: AssetUpdateLocation::AgentInventory { item_id: item },
+                asset_type: UpdatableAssetType::Settings,
+                data,
+            }));
+            session.saving = true;
+            state.saving = Some(item);
+            set_status(texts, status, "Saving…");
+        }
+    }
 }
 
 /// Save the cycle as a fresh inventory item.
@@ -2511,7 +2813,10 @@ fn save_day_cycle_as(
     let Some(session) = state.session.as_ref() else {
         return;
     };
-    let folder = session.item.folder_id;
+    let Some(folder) = session.source.save_folder() else {
+        set_status(texts, status, "There is nowhere to file a copy yet.");
+        return;
+    };
     let name = session.name.clone();
     let data = environment_asset_to_bytes(&named(&session.edited, &name));
     // Two steps, not an upload: `NewFileAgentInventory` has no settings arm on
@@ -2592,14 +2897,28 @@ fn report_day_save_as(
         state.saving_as = false;
         let status = state.ui.status;
         if let Some(session) = state.session.as_mut() {
-            session.item = EditedItem {
-                item_id: item.item,
-                folder_id: item.folder,
-                // Freshly minted by this agent, so modifiable by definition.
-                editable: true,
-            };
-            session.modified = false;
-            session.original = session.edited.clone();
+            match &session.source {
+                // Following the copy is the reference's `onInventoryCreated`,
+                // and the only coherent answer: the cycle on screen is now
+                // stored in the copy, so a window still pointed at the original
+                // would write everything just done into the wrong item.
+                DaySource::Inventory(_item) => {
+                    session.source = DaySource::Inventory(EditedItem {
+                        item_id: item.item,
+                        folder_id: item.folder,
+                        // Freshly minted by this agent, so modifiable by
+                        // definition.
+                        editable: true,
+                    });
+                    session.modified = false;
+                    session.original = session.edited.clone();
+                }
+                // A land session keeps its context. Filing a copy is a *side*
+                // errand — the window is still editing the region's cycle, and
+                // silently turning its Save from "hand this to the panel" into
+                // "write this item" would be the opposite of what was asked.
+                DaySource::Land { .. } => {}
+            }
         }
         set_status(&mut texts, status, "Saved a copy.");
     }
@@ -2609,19 +2928,26 @@ fn report_day_save_as(
 /// string in the reference, which is why editing the field renames the cycle
 /// rather than only the item.
 fn named(cycle: &DayCycle, name: &str) -> EnvironmentAsset {
+    EnvironmentAsset::DayCycle(Box::new(named_cycle(cycle, name)))
+}
+
+/// `cycle` with the name field applied, without the asset wrapper — what a
+/// land publish carries, since the environment holds the cycle inline rather
+/// than as an asset.
+fn named_cycle(cycle: &DayCycle, name: &str) -> DayCycle {
     let mut cycle = cycle.clone();
     name.clone_into(&mut cycle.name);
-    EnvironmentAsset::DayCycle(Box::new(cycle))
+    cycle
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        DayAction, DaySession, EditedItem, MARKER_WIDTH, MAX_KEYFRAMES, PLAY_SECONDS, Playback,
-        TICKS, action_enabled, clock_at, day_percent, named, neighbour_keyframe, strip_fraction,
-        tick_fraction,
+        DayAction, DaySession, DaySource, EditedItem, MARKER_WIDTH, MAX_KEYFRAMES, PLAY_SECONDS,
+        Playback, TICKS, action_enabled, clock_at, day_percent, named, neighbour_keyframe,
+        strip_fraction, tick_fraction,
     };
-    use bevy::prelude::Vec2;
+    use bevy::prelude::{Entity, Vec2};
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{
         DayCycle, DayTrack, EnvironmentAsset, EnvironmentSettings, InventoryFolderKey,
@@ -2638,11 +2964,11 @@ mod tests {
     /// `select_at`.
     fn open_session(cycle: DayCycle) -> DaySession {
         DaySession {
-            item: EditedItem {
+            source: DaySource::Inventory(EditedItem {
                 item_id: InventoryKey::from(Uuid::from_u128(1)),
                 folder_id: InventoryFolderKey::from(Uuid::from_u128(2)),
                 editable: true,
-            },
+            }),
             name: cycle.name.clone(),
             original: cycle.clone(),
             edited: cycle,
@@ -2816,47 +3142,109 @@ mod tests {
             DayAction::PlayPause,
             DayAction::CopyTrack,
         ] {
-            assert!(!action_enabled(action, None), "{action:?} with no session");
+            assert!(
+                !action_enabled(action, None, true),
+                "{action:?} with no session"
+            );
         }
 
         let mut session = open_session(cycle_with(&[0.5]));
         session.select_at(0.5, KEYFRAME_SLOP);
         // On a keyframe there is nothing to add and something to delete.
-        assert!(!action_enabled(DayAction::AddFrame, Some(&session)));
-        assert!(action_enabled(DayAction::DeleteFrame, Some(&session)));
+        assert!(!action_enabled(DayAction::AddFrame, Some(&session), true));
+        assert!(action_enabled(DayAction::DeleteFrame, Some(&session), true));
         // Between keyframes, the other way round.
         session.select_at(0.25, KEYFRAME_SLOP);
-        assert!(action_enabled(DayAction::AddFrame, Some(&session)));
-        assert!(!action_enabled(DayAction::DeleteFrame, Some(&session)));
+        assert!(action_enabled(DayAction::AddFrame, Some(&session), true));
+        assert!(!action_enabled(
+            DayAction::DeleteFrame,
+            Some(&session),
+            true
+        ));
 
         // The ground track cannot be emptied, so with one keyframe left neither
         // Clear nor Delete is on offer.
         let mut bare = open_session(EnvironmentSettings::legacy_windlight_default().day_cycle);
         bare.select_at(0.0, KEYFRAME_SLOP);
-        assert!(!action_enabled(DayAction::ClearTrack, Some(&bare)));
-        assert!(!action_enabled(DayAction::DeleteFrame, Some(&bare)));
+        assert!(!action_enabled(DayAction::ClearTrack, Some(&bare), true));
+        assert!(!action_enabled(DayAction::DeleteFrame, Some(&bare), true));
 
         // Copy needs another sky track with something on it, and the water track
         // never has a sibling to copy from.
-        assert!(!action_enabled(DayAction::CopyTrack, Some(&bare)));
+        assert!(!action_enabled(DayAction::CopyTrack, Some(&bare), true));
         let mut copyable = bare.clone();
         drop(copyable.edited.insert_sky_keyframe(
             DayTrack::Sky(1),
             0.5,
             SkySettings::legacy_windlight_default("High"),
         ));
-        assert!(action_enabled(DayAction::CopyTrack, Some(&copyable)));
+        assert!(action_enabled(DayAction::CopyTrack, Some(&copyable), true));
         copyable.track = DayTrack::Water;
-        assert!(!action_enabled(DayAction::CopyTrack, Some(&copyable)));
+        assert!(!action_enabled(DayAction::CopyTrack, Some(&copyable), true));
 
         // A read-only item is previewed, not edited — but it can still be saved
         // as a copy, which is the whole point of Save As.
         let mut locked = open_session(cycle_with(&[0.5]));
-        locked.item.editable = false;
+        locked.source = DaySource::Inventory(EditedItem {
+            item_id: InventoryKey::from(Uuid::from_u128(1)),
+            folder_id: InventoryFolderKey::from(Uuid::from_u128(2)),
+            editable: false,
+        });
         locked.select_at(0.5, KEYFRAME_SLOP);
-        assert!(!action_enabled(DayAction::Save, Some(&locked)));
-        assert!(!action_enabled(DayAction::DeleteFrame, Some(&locked)));
-        assert!(action_enabled(DayAction::SaveAs, Some(&locked)));
+        assert!(!action_enabled(DayAction::Save, Some(&locked), true));
+        assert!(!action_enabled(DayAction::DeleteFrame, Some(&locked), true));
+        assert!(action_enabled(DayAction::SaveAs, Some(&locked), true));
+
+        // A **land** session's Save publishes the cycle inline and never
+        // touches inventory, so a grid that cannot store a settings asset
+        // takes away its Save As and leaves its Save alone. Getting this
+        // backwards would make the whole feature unusable on exactly the
+        // grids where editing a region's inline cycle is the only way to
+        // change it.
+        let mut land = open_session(cycle_with(&[0.5]));
+        land.source = DaySource::Land {
+            panel: Entity::from_raw_u32(1).unwrap_or(Entity::PLACEHOLDER),
+            label: "this region".to_owned(),
+            folder_id: Some(InventoryFolderKey::from(Uuid::from_u128(2))),
+            editable: true,
+        };
+        land.select_at(0.5, KEYFRAME_SLOP);
+        assert!(action_enabled(DayAction::Save, Some(&land), false));
+        assert!(!action_enabled(DayAction::SaveAs, Some(&land), false));
+        assert!(action_enabled(DayAction::SaveAs, Some(&land), true));
+        // A panel the agent may not publish from opens the window read-only,
+        // exactly as a no-modify item does.
+        let mut read_only = land.clone();
+        read_only.source = DaySource::Land {
+            panel: Entity::from_raw_u32(1).unwrap_or(Entity::PLACEHOLDER),
+            label: "this parcel".to_owned(),
+            folder_id: None,
+            editable: false,
+        };
+        assert!(!action_enabled(DayAction::Save, Some(&read_only), true));
+        assert!(!action_enabled(
+            DayAction::DeleteFrame,
+            Some(&read_only),
+            true
+        ));
+
+        // A grid that cannot hold a settings asset takes both saves away —
+        // including the Save As a read-only item could otherwise still do,
+        // since a copy has to be filed somewhere too. Everything that only
+        // edits the open day is untouched: the window keeps working, it simply
+        // has nowhere to put the result.
+        let mut editable = open_session(cycle_with(&[0.5]));
+        editable.select_at(0.5, KEYFRAME_SLOP);
+        assert!(action_enabled(DayAction::Save, Some(&editable), true));
+        assert!(!action_enabled(DayAction::Save, Some(&editable), false));
+        assert!(!action_enabled(DayAction::SaveAs, Some(&editable), false));
+        assert!(action_enabled(DayAction::Revert, Some(&editable), false));
+        assert!(action_enabled(DayAction::PlayPause, Some(&editable), false));
+        assert!(action_enabled(
+            DayAction::DeleteFrame,
+            Some(&editable),
+            false
+        ));
 
         // Playing takes the hands off the editing verbs and leaves the
         // transport alone.
@@ -2865,9 +3253,9 @@ mod tests {
             from: 0.0,
             elapsed: 0.0,
         });
-        assert!(!action_enabled(DayAction::AddFrame, Some(&playing)));
-        assert!(!action_enabled(DayAction::ClearTrack, Some(&playing)));
-        assert!(action_enabled(DayAction::PlayPause, Some(&playing)));
+        assert!(!action_enabled(DayAction::AddFrame, Some(&playing), true));
+        assert!(!action_enabled(DayAction::ClearTrack, Some(&playing), true));
+        assert!(action_enabled(DayAction::PlayPause, Some(&playing), true));
     }
 
     /// A full track offers no more room — the reference's `canAddSliders`, which
@@ -2887,8 +3275,8 @@ mod tests {
         assert_eq!(session.keyframes().len(), MAX_KEYFRAMES);
         // Somewhere with room, so only the count can be refusing.
         session.position = 1.0 / f32::from(2_u8) / f32::from(20_u8);
-        assert!(!action_enabled(DayAction::AddFrame, Some(&session)));
-        assert!(!action_enabled(DayAction::LoadFrame, Some(&session)));
+        assert!(!action_enabled(DayAction::AddFrame, Some(&session), true));
+        assert!(!action_enabled(DayAction::LoadFrame, Some(&session), true));
     }
 
     /// **Play walks a whole day in the reference's minute.** The number is the
