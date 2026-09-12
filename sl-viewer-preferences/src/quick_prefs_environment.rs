@@ -1,7 +1,18 @@
-//! The Quick Preferences panel's **settings-asset preset combos**
+//! The **settings-asset preset combos**
 //! (`viewer-quick-prefs-environment-presets`): one combo each for the sky, the
 //! water and the day cycle, listing every settings asset in inventory, with
 //! prev / next buttons either side.
+//!
+//! # Two windows carry them
+//!
+//! The Quick Preferences panel was the first host and is why this module is
+//! named for it; the Phototools window (`crate::phototools`) is the second, and
+//! both can be open at once over one environment. A window that wants the rows
+//! declares a [`PresetHost`] — its element ids and its scope tag — and calls
+//! [`spawn_preset_rows`]; everything downstream addresses a combo through the
+//! [`PresetCombo`] its anchor carries rather than through a table of "the three
+//! anchors", which is what a singleton resource made this and could only ever
+//! describe one window.
 //!
 //! # Three tracks, not one choice
 //!
@@ -218,31 +229,71 @@ impl PresetLists {
     }
 }
 
-/// The three combos' anchors, published when the panel's content is built.
-#[derive(Resource, Debug, Clone, Copy)]
-pub struct PresetCombos {
-    /// The sky combo's anchor.
-    sky: Entity,
-    /// The water combo's anchor.
-    water: Entity,
-    /// The day-cycle combo's anchor.
-    day_cycle: Entity,
+/// One kind's position in [`KINDS`] — the index the per-kind arrays are read by.
+const fn kind_index(kind: SettingsKind) -> usize {
+    match kind {
+        SettingsKind::Sky => 0,
+        SettingsKind::Water => 1,
+        SettingsKind::DayCycle => 2,
+    }
 }
 
-impl PresetCombos {
-    /// One kind's anchor.
-    const fn of_kind(&self, kind: SettingsKind) -> Entity {
-        match kind {
-            SettingsKind::Sky => self.sky,
-            SettingsKind::Water => self.water,
-            SettingsKind::DayCycle => self.day_cycle,
-        }
-    }
+/// A window that carries a set of preset rows.
+///
+/// Two do — the Quick Preferences panel and the Phototools window
+/// (`crate::phototools`) — and both can be open at once over the same
+/// environment, so **everything that addresses a combo is scoped by its host**:
+/// the element id the widget reports, the node names, and the tag the systems
+/// query the anchors and step buttons by. A shared element id would make the two
+/// windows' combos indistinguishable to the interaction harness, and a shared
+/// anchor tag would make a prev / next press step both.
+///
+/// The row *lists* are deliberately **not** per host. What settings assets
+/// inventory holds is one answer to one question, so [`PresetLists`] stays a
+/// resource and both hosts are views of it.
+#[derive(Debug, Clone, Copy)]
+pub struct PresetHost {
+    /// The tag carried on this host's anchors and step buttons.
+    pub scope: &'static str,
+    /// The element ids of the sky, water and day-cycle combos, in sky, water,
+    /// day-cycle order.
+    pub elements: [&'static str; 3],
+}
 
-    /// The kind a given anchor belongs to, if any.
-    fn kind_of(&self, combo: Entity) -> Option<SettingsKind> {
-        KINDS.into_iter().find(|kind| self.of_kind(*kind) == combo)
+impl PresetHost {
+    /// One kind's element id.
+    fn element(&self, kind: SettingsKind) -> &'static str {
+        self.elements.get(kind_index(kind)).copied().unwrap_or("")
     }
+}
+
+/// The Quick Preferences panel's set of preset rows.
+pub static QUICK_PREFS_HOST: PresetHost = PresetHost {
+    scope: "quick-prefs",
+    elements: [
+        "quick-prefs-preset-sky",
+        "quick-prefs-preset-water",
+        "quick-prefs-preset-day-cycle",
+    ],
+};
+
+/// The Phototools window's set of preset rows.
+pub static PHOTOTOOLS_HOST: PresetHost = PresetHost {
+    scope: "phototools",
+    elements: [
+        "phototools-preset-sky",
+        "phototools-preset-water",
+        "phototools-preset-day-cycle",
+    ],
+};
+
+/// A preset combo's anchor: which track it drives and which window it is in.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct PresetCombo {
+    /// The track this combo picks for.
+    kind: SettingsKind,
+    /// The host window's [`PresetHost::scope`].
+    scope: &'static str,
 }
 
 /// A prev / next button press: step one combo's selection to the next valid row
@@ -254,8 +305,10 @@ impl PresetCombos {
 /// button click.
 #[derive(Message, Debug, Clone, Copy)]
 pub struct StepPreset {
-    /// Which combo to step.
+    /// Which track to step.
     pub kind: SettingsKind,
+    /// Which window's combo — a press in one window must not step the other's.
+    pub scope: &'static str,
     /// Forward through the list (the next button) rather than back.
     pub forward: bool,
 }
@@ -263,74 +316,58 @@ pub struct StepPreset {
 /// A prev / next button, tagged with the combo it steps and the direction.
 #[derive(Component, Debug, Clone, Copy)]
 struct PresetStepButton {
-    /// The combo this button steps.
+    /// The track this button steps.
     kind: SettingsKind,
+    /// The host window's [`PresetHost::scope`].
+    scope: &'static str,
     /// Whether it steps forward.
     forward: bool,
 }
 
-/// Build the three preset rows under `parent`, publishing [`PresetCombos`].
+/// Build the three preset rows of one `host` under `parent`, tagging each
+/// anchor with a [`PresetCombo`].
 ///
-/// Called from the quick-preferences content build. `tab_index` is the first of
+/// Called from a hosting window's content build. `tab_index` is the first of
 /// three consecutive focus stops the rows take.
 ///
 /// `seed` is the label each combo opens showing, before `refresh_preset_lists`
 /// has run once — the *Region default* sentinel, which is both what the panel
 /// will almost always be showing and what a combo with nothing in it means.
-pub fn spawn_preset_rows(commands: &mut Commands, parent: Entity, tab_index: i32, seed: &str) {
-    let mut anchors = Vec::with_capacity(KINDS.len());
+pub fn spawn_preset_rows(
+    commands: &mut Commands,
+    parent: Entity,
+    host: &PresetHost,
+    tab_index: i32,
+    seed: &str,
+) {
     for (offset, kind) in KINDS.into_iter().enumerate() {
         let index = i32::try_from(offset).unwrap_or(0);
-        anchors.push(spawn_preset_row(
+        spawn_preset_row(
             commands,
             parent,
+            host,
             kind,
             tab_index.saturating_add(index),
             seed,
-        ));
-    }
-    // The three were pushed in `KINDS` order; a shorter vec is impossible, but
-    // reading them back by index keeps the resource's fields honest.
-    if let (Some(sky), Some(water), Some(day_cycle)) =
-        (anchors.first(), anchors.get(1), anchors.get(2))
-    {
-        commands.insert_resource(PresetCombos {
-            sky: *sky,
-            water: *water,
-            day_cycle: *day_cycle,
-        });
-    }
-}
-
-/// The element id of one kind's combo — its node-name prefix and the id it
-/// reports in [`ComboSelection`].
-const fn element_of(kind: SettingsKind) -> &'static str {
-    match kind {
-        SettingsKind::Sky => "quick-prefs-preset-sky",
-        SettingsKind::Water => "quick-prefs-preset-water",
-        SettingsKind::DayCycle => "quick-prefs-preset-day-cycle",
+        );
     }
 }
 
 /// The Fluent key of one kind's row label.
 fn label_key_of(kind: SettingsKind) -> &'static str {
-    let index = match kind {
-        SettingsKind::Sky => 0,
-        SettingsKind::Water => 1,
-        SettingsKind::DayCycle => 2,
-    };
-    ROW_LABEL_KEYS.get(index).copied().unwrap_or("")
+    ROW_LABEL_KEYS.get(kind_index(kind)).copied().unwrap_or("")
 }
 
 /// Spawn one labelled row: `label  ‹ [combo] ›`, returning the combo's anchor.
 fn spawn_preset_row(
     commands: &mut Commands,
     parent: Entity,
+    host: &PresetHost,
     kind: SettingsKind,
     tab_index: i32,
     seed: &str,
 ) -> Entity {
-    let element = element_of(kind);
+    let element = host.element(kind);
     let row_entity = commands
         .spawn((
             Node {
@@ -339,7 +376,7 @@ fn spawn_preset_row(
                 width: Val::Percent(100.0),
                 ..row(Val::Px(8.0))
             },
-            Name::new(format!("quick-prefs:preset-row:{element}")),
+            Name::new(format!("{}:preset-row:{element}", host.scope)),
             ChildOf(parent),
         ))
         .id();
@@ -361,7 +398,7 @@ fn spawn_preset_row(
             ChildOf(row_entity),
         ))
         .id();
-    spawn_step_button(commands, group, kind, false);
+    spawn_step_button(commands, group, host, kind, false);
     // One row to start with, so the combo has something to show before the
     // inventory walk has found anything: the sentinel that says exactly that.
     let labels = vec![seed.to_owned()];
@@ -377,19 +414,33 @@ fn spawn_preset_row(
             translate_labels: false,
         },
     );
-    spawn_step_button(commands, group, kind, true);
+    commands.entity(anchor).insert(PresetCombo {
+        kind,
+        scope: host.scope,
+    });
+    spawn_step_button(commands, group, host, kind, true);
     anchor
 }
 
 /// Spawn one prev / next button beside a combo.
-fn spawn_step_button(commands: &mut Commands, parent: Entity, kind: SettingsKind, forward: bool) {
-    let element = element_of(kind);
+fn spawn_step_button(
+    commands: &mut Commands,
+    parent: Entity,
+    host: &PresetHost,
+    kind: SettingsKind,
+    forward: bool,
+) {
+    let element = host.element(kind);
     let side = if forward { "next" } else { "prev" };
     commands
         .spawn((
             Button,
             TabIndex(0),
-            PresetStepButton { kind, forward },
+            PresetStepButton {
+                kind,
+                scope: host.scope,
+                forward,
+            },
             Node {
                 padding: UiRect::axes(Val::Px(5.0), Val::Px(1.0)),
                 border: UiRect::all(Val::Px(1.0)),
@@ -421,6 +472,7 @@ fn on_step_button(
     if let Ok(button) = buttons.get(activate.entity) {
         steps.write(StepPreset {
             kind: button.kind,
+            scope: button.scope,
             forward: button.forward,
         });
     }
@@ -582,19 +634,22 @@ pub fn step_index(rows: &[PresetRow], from: usize, forward: bool) -> Option<usiz
 /// *identity* is not: the list does not change when the language does, but every
 /// row's text does.
 fn refresh_preset_lists(
-    combos: Option<Res<PresetCombos>>,
+    combos: Query<(Entity, &PresetCombo)>,
+    spawned: Query<(), Added<PresetCombo>>,
     index: Option<Res<SettingsIndex>>,
     translator: Translator,
     mut lists: ResMut<PresetLists>,
     mut set_options: MessageWriter<SetComboOptions>,
 ) {
-    let Some(combos) = combos else {
+    if combos.is_empty() {
         return;
-    };
+    }
     let index_changed = index.as_ref().is_some_and(|index| index.is_changed());
-    // `combos.is_added()` is the first pass after the panel's content was built:
-    // the combos exist but hold the placeholder row `spawn_preset_row` seeded.
-    if !index_changed && !translator.changed() && !combos.is_added() {
+    // A combo added this frame is a host whose content was just built: its
+    // combos exist but hold the placeholder row `spawn_preset_row` seeded. That
+    // is why this is `Added` rather than "the resource appeared" — a second
+    // host can open long after the first, and its combos need filling then.
+    if !index_changed && !translator.changed() && spawned.is_empty() {
         return;
     }
     let empty = SettingsIndex::default();
@@ -603,11 +658,16 @@ fn refresh_preset_lists(
         let rows = build_rows(kind, index.of_kind(kind));
         let labels: Vec<String> = rows.iter().map(|row| row.label(&translator)).collect();
         let row_states: Vec<ComboRow> = rows.iter().map(PresetRow::combo_row).collect();
-        set_options.write(SetComboOptions {
-            combo: combos.of_kind(kind),
-            labels,
-            rows: row_states,
-        });
+        for (anchor, combo) in &combos {
+            if combo.kind != kind {
+                continue;
+            }
+            set_options.write(SetComboOptions {
+                combo: anchor,
+                labels: labels.clone(),
+                rows: row_states.clone(),
+            });
+        }
         let held = lists.of_kind_mut(kind);
         if *held != rows {
             *held = rows;
@@ -621,15 +681,11 @@ fn refresh_preset_lists(
 /// the asset lands, and snapping the row back to the old one in the meantime
 /// would read as the click having been refused.
 fn sync_preset_combos(
-    combos: Option<Res<PresetCombos>>,
     lists: Res<PresetLists>,
     environment: Option<Res<EnvironmentState>>,
     pick: Option<Res<LocalEnvironmentPick>>,
-    mut selections: Query<&mut ComboSelection>,
+    mut combos: Query<(&PresetCombo, &mut ComboSelection)>,
 ) {
-    let Some(combos) = combos else {
-        return;
-    };
     let Some(environment) = environment else {
         return;
     };
@@ -637,18 +693,19 @@ fn sync_preset_combos(
         return;
     }
     let wanted = selected_rows(&environment);
-    for (offset, kind) in KINDS.into_iter().enumerate() {
-        let Some(row) = wanted.get(offset) else {
+    // Every host's combo for a kind shows the same row, because there is one
+    // environment: two windows open at once agree by construction rather than
+    // by being kept in step.
+    for (combo, mut selection) in &mut combos {
+        let Some(row) = wanted.get(kind_index(combo.kind)) else {
             continue;
         };
-        let rows = lists.of_kind(kind);
+        let rows = lists.of_kind(combo.kind);
         // A row the list does not hold (an asset outside inventory, a preset the
         // walk has not found yet) falls back to the first sentinel, which is
         // where the reference's failed `selectByValue` leaves the combo too.
         let index = index_of(rows, row).unwrap_or(0);
-        if let Ok(mut selection) = selections.get_mut(combos.of_kind(kind))
-            && selection.active != index
-        {
+        if selection.active != index {
             selection.active = index;
         }
     }
@@ -657,19 +714,19 @@ fn sync_preset_combos(
 /// Apply a user pick on one of the three combos.
 fn apply_preset_pick(
     mut changes: MessageReader<ComboChanged>,
-    combos: Option<Res<PresetCombos>>,
+    combos: Query<&PresetCombo>,
     lists: Res<PresetLists>,
     mut pick: Option<ResMut<LocalEnvironmentPick>>,
     mut environment: Option<ResMut<EnvironmentState>>,
 ) {
-    let Some(combos) = combos else {
-        return;
-    };
     for change in changes.read() {
-        let Some(kind) = combos.kind_of(change.combo) else {
+        // The message names the anchor, and the anchor carries which track it
+        // drives — so a change from any other combo in the world (or from the
+        // other host's) needs no list of "ours" to be checked against.
+        let Ok(combo) = combos.get(change.combo) else {
             continue;
         };
-        let Some(row) = lists.of_kind(kind).get(change.active) else {
+        let Some(row) = lists.of_kind(combo.kind).get(change.active) else {
             continue;
         };
         apply_row(row, pick.as_deref_mut(), environment.as_deref_mut());
@@ -704,20 +761,22 @@ fn apply_row(
 /// Step one combo on a prev / next press, then apply the row it landed on.
 fn step_preset_combo(
     mut steps: MessageReader<StepPreset>,
-    combos: Option<Res<PresetCombos>>,
     lists: Res<PresetLists>,
-    mut selections: Query<&mut ComboSelection>,
+    mut combos: Query<(&PresetCombo, &mut ComboSelection)>,
     mut pick: Option<ResMut<LocalEnvironmentPick>>,
     mut environment: Option<ResMut<EnvironmentState>>,
     mut notify: MessageWriter<ShowNotification>,
 ) {
-    let Some(combos) = combos else {
-        return;
-    };
     for step in steps.read() {
         let rows = lists.of_kind(step.kind);
-        let anchor = combos.of_kind(step.kind);
-        let Ok(mut selection) = selections.get_mut(anchor) else {
+        // The pressed button's own window, not every window's combo of that
+        // kind: the step is a gesture on one control. The others follow through
+        // `sync_preset_combos` once the pick lands, which is how they would
+        // follow any other way of changing the environment.
+        let Some((_combo, mut selection)) = combos
+            .iter_mut()
+            .find(|(combo, _selection)| combo.kind == step.kind && combo.scope == step.scope)
+        else {
             continue;
         };
         let Some(next) = step_index(rows, selection.active, step.forward) else {
@@ -767,16 +826,19 @@ impl Plugin for QuickPrefsEnvironmentPlugin {
 
 #[cfg(test)]
 mod tests {
-    use pretty_assertions::assert_eq;
+    use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_bevy::{
         EnvironmentAsset, EnvironmentSettings, InventoryKey, SettingsKind, SkySettings, Uuid,
         WaterSettings,
     };
 
+    use bevy::prelude::*;
+
     use super::{PresetRow, build_rows, index_of, selected_rows, step_index};
     use crate::environment::{EnvironmentState, FixedEnvironment};
     use crate::settings_index::SettingsAsset;
     use crate::sky_presets::FixedSky;
+    use crate::ui_combo::{ComboChanged, ComboSelection};
 
     /// A boxed error so tests avoid `unwrap` / `expect`.
     type TestError = Box<dyn core::error::Error>;
@@ -1101,5 +1163,130 @@ mod tests {
             Some(4),
             "the second of the two same-named skies"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Two hosts.
+    // -----------------------------------------------------------------------
+
+    /// An app with the row lists seeded and one sky combo per host, both parked
+    /// on the *Region default* sentinel. Returns the two sky anchors,
+    /// (quick-prefs, phototools).
+    fn two_host_app() -> Result<(App, Entity, Entity), TestError> {
+        let mut app = App::new();
+        app.add_message::<super::SetComboOptions>()
+            .add_message::<super::ShowNotification>()
+            .add_message::<super::StepPreset>()
+            .init_resource::<super::PresetLists>();
+        // The list refresh resolves every row's label, so it wants the
+        // translator's three resources; `install_untranslated` is the harness
+        // that gives a key back as itself.
+        crate::i18n::install_untranslated(&mut app);
+        let sky = build_rows(
+            SettingsKind::Sky,
+            &[asset("A sky", 0xA1, SettingsKind::Sky)],
+        );
+        if let Some(mut lists) = app.world_mut().get_resource_mut::<super::PresetLists>() {
+            *lists.of_kind_mut(SettingsKind::Sky) = sky;
+        }
+        let anchor = |app: &mut App, host: &super::PresetHost| {
+            app.world_mut()
+                .spawn((
+                    super::PresetCombo {
+                        kind: SettingsKind::Sky,
+                        scope: host.scope,
+                    },
+                    ComboSelection {
+                        element: host.element(SettingsKind::Sky),
+                        active: 0,
+                    },
+                ))
+                .id()
+        };
+        let quick = anchor(&mut app, &super::QUICK_PREFS_HOST);
+        let photo = anchor(&mut app, &super::PHOTOTOOLS_HOST);
+        Ok((app, quick, photo))
+    }
+
+    /// **A prev / next press steps its own window's combo, not both.**
+    ///
+    /// The step is a gesture on one control. Before the combos were addressed by
+    /// a per-anchor tag there could only ever be one window, so "the sky combo"
+    /// was unambiguous; with two open at once, a scope-blind step would move a
+    /// control the hand was nowhere near.
+    #[test]
+    fn a_step_moves_only_its_own_host() -> Result<(), TestError> {
+        let (mut app, quick, photo) = two_host_app()?;
+        app.add_systems(Update, super::step_preset_combo);
+        app.world_mut().write_message(super::StepPreset {
+            kind: SettingsKind::Sky,
+            scope: super::PHOTOTOOLS_HOST.scope,
+            forward: true,
+        });
+        app.update();
+        let photo_active = app
+            .world()
+            .get::<ComboSelection>(photo)
+            .ok_or("the phototools combo should still exist")?
+            .active;
+        let quick_active = app
+            .world()
+            .get::<ComboSelection>(quick)
+            .ok_or("the quick-prefs combo should still exist")?
+            .active;
+        assert_ne!(photo_active, 0, "the pressed window's combo stepped");
+        assert_eq!(quick_active, 0, "the other window's combo did not");
+        Ok(())
+    }
+
+    /// **Both hosts' combos are filled from the one list.**
+    ///
+    /// Three kinds times two windows is six pushes, and every one of them
+    /// carries the same labels — the lists are inventory's answer, not a
+    /// window's.
+    #[test]
+    fn every_host_combo_is_filled() -> Result<(), TestError> {
+        let (mut app, _quick, _photo) = two_host_app()?;
+        app.add_systems(Update, super::refresh_preset_lists);
+        app.update();
+        let pushed = app
+            .world()
+            .resource::<Messages<super::SetComboOptions>>()
+            .iter_current_update_messages()
+            .count();
+        // Only the sky combos exist in this fixture, so one push each.
+        assert_eq!(pushed, 2);
+        Ok(())
+    }
+
+    /// **A pick on either window's combo installs the row.**
+    ///
+    /// The anchor carries which track it drives, so a change from a combo this
+    /// module does not own is ignored without a roster to check it against.
+    #[test]
+    fn a_pick_on_the_second_host_applies() -> Result<(), TestError> {
+        let (mut app, _quick, photo) = two_host_app()?;
+        app.insert_resource(EnvironmentState::default());
+        app.add_message::<ComboChanged>()
+            .add_systems(Update, super::apply_preset_pick);
+        // Row 3 of the sky list is the one inventory asset (two sentinels and a
+        // separator come first).
+        let legacy = app
+            .world()
+            .resource::<super::PresetLists>()
+            .of_kind(SettingsKind::Sky)
+            .iter()
+            .position(|row| matches!(*row, PresetRow::Legacy(_)))
+            .ok_or("the sky list should carry the legacy presets")?;
+        app.world_mut().write_message(ComboChanged {
+            combo: photo,
+            active: legacy,
+        });
+        app.update();
+        assert!(
+            app.world().resource::<EnvironmentState>().fixed().is_some(),
+            "a legacy pick from the second host pins a fixed environment"
+        );
+        Ok(())
     }
 }

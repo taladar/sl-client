@@ -240,6 +240,7 @@ pub(crate) use sl_viewer_people::people;
 pub(crate) use sl_viewer_people::presence;
 pub(crate) use sl_viewer_people::radar;
 pub(crate) use sl_viewer_platform::paths;
+pub(crate) use sl_viewer_preferences::phototools;
 pub(crate) use sl_viewer_preferences::preferences;
 pub(crate) use sl_viewer_preferences::preferences_alerts;
 pub(crate) use sl_viewer_preferences::preferences_audio;
@@ -1602,6 +1603,11 @@ fn run_session(
     // the bottom toolbar (its BottomArea host).
     .add_plugins(crate::quick_preferences::QuickPreferencesPlugin)
     .add_plugins(crate::quick_prefs_environment::QuickPrefsEnvironmentPlugin)
+    // Phototools (viewer-phototools): the photographer's window — the
+    // environment on one tab and the render knobs that change the *look* on the
+    // others, a second curated view over the same store the graphics tab binds.
+    // Opened from World ▸ Photo and Video ▸ Phototools (Alt+P).
+    .add_plugins(crate::phototools::PhototoolsPlugin)
     // The alerts tab's popup list (viewer-preferences-alerts-tab): the model
     // refresh, row pool and binding behind the panel build_alerts_tab plugs
     // into the shell's registry.

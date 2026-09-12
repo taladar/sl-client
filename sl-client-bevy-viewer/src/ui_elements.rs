@@ -196,6 +196,14 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
         spawn: crate::quick_preferences::spawn_quick_prefs_specimen,
     },
     UiElement {
+        id: "phototools",
+        summary: "The Phototools window: the tab strip over the environment tab — the preset \
+                  library combo, the four times of day and the door to Personal Lighting — and \
+                  two of the render rows beneath. Static — the live window \
+                  (`crate::phototools`) adds the store binding and the environment wiring.",
+        spawn: crate::phototools::spawn_phototools_specimen,
+    },
+    UiElement {
         id: "tabs-trailing",
         summary: "The tab widget with a vertical strip on the trailing edge (right under LTR) — a \
                   placement the reference viewer cannot express, usable for LTR too, not only as \

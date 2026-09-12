@@ -306,6 +306,14 @@ pub(crate) const FLOATERS: &[FloaterElement] = &[
         ),
     },
     FloaterElement {
+        id: "phototools",
+        summary: "Phototools: the photographer's tabbed window — the environment preset library, \
+                  the four times of day and the way back to the region's sky, over the render \
+                  knobs that change the look (reflections, shadows, tone mapping, glow, quality).",
+        spec: crate::phototools::phototools_floater_spec,
+        content: FloaterContent::Specimen(crate::phototools::spawn_phototools_specimen),
+    },
+    FloaterElement {
         id: "preferences",
         summary: "Preferences: the search box over a leading tab strip, the labelled setting rows \
                   and the OK / Cancel footer.",

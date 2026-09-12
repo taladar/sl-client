@@ -674,6 +674,16 @@ fn register_probe_settings(settings: Option<ResMut<ViewerSettings>>) {
     let Some(mut settings) = settings else {
         return;
     };
+    declare_probe_settings(&mut settings);
+}
+
+/// The probe settings' declarations, as a plain function over the store.
+///
+/// Split out of the startup system so a surface that *draws* these settings can
+/// prove in its own tests that it names them — the binding layer skips a row
+/// whose setting the store has never heard of, which is exactly the failure a
+/// test should catch rather than a user.
+pub fn declare_probe_settings(settings: &mut ViewerSettings) {
     settings.register_in(
         &["render"],
         PROBE_DYNAMIC_SETTING,
@@ -1705,6 +1715,12 @@ fn register_mirror_settings(settings: Option<ResMut<ViewerSettings>>) {
     let Some(mut settings) = settings else {
         return;
     };
+    declare_mirror_settings(&mut settings);
+}
+
+/// The mirror settings' declarations, as a plain function over the store — see
+/// [`declare_probe_settings`] for why the split exists.
+pub fn declare_mirror_settings(settings: &mut ViewerSettings) {
     settings.register_in(
         &["render"],
         RENDER_MIRRORS_SETTING,

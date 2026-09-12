@@ -3728,6 +3728,29 @@ quick-prefs-env-region-default = Region default
 quick-prefs-env-day-cycle-based = Day-cycle based
 quick-prefs-env-no-day-cycle = No day cycle
 
+## The Phototools window (viewer-phototools): the photographer's tabbed view
+## over the environment and the render knobs that change the look. Its setting
+## rows deliberately reuse the `preferences-row-*` labels — one setting, one
+## name, whichever window it was reached through — so only the window's own
+## chrome is spelled here.
+
+phototools-title = Phototools
+# The four tabs.
+phototools-tab-environment = Environment
+phototools-tab-shadows = Shadows
+phototools-tab-look = Look
+phototools-tab-general = General
+# The environment tab's own controls.
+phototools-section-fixed-sky = Fixed sky
+phototools-env-group = Preset library
+phototools-env-shared = Shared Environment
+phototools-personal-lighting = Personal Lighting…
+# The three settings-asset tracks, and the sun / moon scrubber. Their row
+# labels are the shared ones (`quick-prefs-env-*`, `env-knob-*`); only the
+# headings are this window's.
+phototools-section-presets = Settings assets
+phototools-section-sun-moon = Sun & moon
+
 ## The Personal Lighting floater — the local sky and water override.
 
 personal-lighting-title = Personal Lighting

@@ -129,6 +129,10 @@ const FRIENDS_ONLY_ON: &str = "render-friends-only-on";
 /// drives the check mark on the World ▸ Asset Blacklist entry.
 const BLACKLIST_OPEN: &str = "asset-blacklist-open";
 
+/// The condition key that holds while the Phototools window is open — drives
+/// the check mark on the World ▸ Photo and Video ▸ Phototools entry.
+const PHOTOTOOLS_OPEN: &str = "phototools-open";
+
 /// The condition key that holds while the Avatar Render Settings floater is
 /// open — drives the check mark on the World ▸ Avatar Render Settings entry.
 const AVATAR_RENDER_SETTINGS_OPEN: &str = "avatar-render-settings-open";
@@ -483,6 +487,20 @@ static ENVIRONMENT_MENU: MenuDef = MenuDef {
     ],
 };
 
+/// The World ▸ **Photo and Video** submenu, where the reference keeps the
+/// photographer's windows. Phototools is the first entry and takes the
+/// reference's own `alt|P`; the camera / joystick window
+/// (`viewer-camera-controls-window`) and the depth-of-field focus toggles join
+/// it here once they exist.
+static PHOTO_MENU: MenuDef = MenuDef {
+    label: "Photo and Video",
+    items: &[MenuItemDef::Command(
+        MenuCommand::new("Phototools…", "toggle-phototools")
+            .accel("Alt+P")
+            .checked_when(PHOTOTOOLS_OPEN),
+    )],
+};
+
 /// The World menu — the minimap, world map, and environment today; teleport is
 /// a future entry.
 static WORLD_MENU: MenuDef = MenuDef {
@@ -535,6 +553,7 @@ static WORLD_MENU: MenuDef = MenuDef {
         ),
         MenuItemDef::Separator,
         MenuItemDef::Submenu(&ENVIRONMENT_MENU),
+        MenuItemDef::Submenu(&PHOTO_MENU),
     ],
 };
 
@@ -883,6 +902,7 @@ fn update_top_menu_conditions(
     let build_tools_open = open(crate::edit_tool::BUILD_TOOLS_FLOATER_ID);
     let experiences_open = open(crate::experiences_floater::EXPERIENCES_FLOATER_ID);
     let blacklist_open = open(crate::asset_blacklist::BLACKLIST_FLOATER_ID);
+    let phototools_open = open(crate::phototools::PHOTOTOOLS_FLOATER_ID);
     let render_settings_open = open(crate::avatar_render_floater::RENDER_SETTINGS_FLOATER_ID);
     let rlv_console_open = open(crate::rlv_console::CONSOLE_FLOATER_ID);
     let rlv_behaviours_open = open(crate::rlv_behaviours::BEHAVIOURS_FLOATER_ID);
@@ -927,6 +947,9 @@ fn update_top_menu_conditions(
     }
     if blacklist_open {
         wanted.push(BLACKLIST_OPEN);
+    }
+    if phototools_open {
+        wanted.push(PHOTOTOOLS_OPEN);
     }
     if render_settings_open {
         wanted.push(AVATAR_RENDER_SETTINGS_OPEN);
@@ -1270,6 +1293,13 @@ fn handle_top_menu_actions(
                     &floaters,
                     &mut panels,
                     crate::asset_blacklist::BLACKLIST_FLOATER_ID,
+                );
+            }
+            "toggle-phototools" => {
+                toggle_floater(
+                    &floaters,
+                    &mut panels,
+                    crate::phototools::PHOTOTOOLS_FLOATER_ID,
                 );
             }
             "toggle-avatar-render-settings" => {
@@ -1625,6 +1655,7 @@ mod tests {
                 "World > Environment > Bulk Import".to_owned(),
                 "bulk-import-water",
             ),
+            ("World > Photo and Video".to_owned(), "toggle-phototools"),
             ("Build".to_owned(), "toggle-build-tools"),
             ("Build".to_owned(), "undo-objects"),
             ("Build".to_owned(), "redo-objects"),
@@ -1735,6 +1766,9 @@ mod tests {
                 "quit",
                 "toggle-conversations",
                 "toggle-world-map",
+                // World ▸ Photo and Video ▸ Phototools, on the reference's own
+                // `alt|P`.
+                "toggle-phototools",
                 "toggle-build-tools",
                 crate::edit_undo::UNDO_ACTION,
                 crate::edit_undo::REDO_ACTION,

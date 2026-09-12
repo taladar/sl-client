@@ -703,6 +703,7 @@ fn build_quick_prefs_content(
     crate::quick_prefs_environment::spawn_preset_rows(
         &mut commands,
         content,
+        &crate::quick_prefs_environment::QUICK_PREFS_HOST,
         3,
         &translator.get(crate::quick_prefs_environment::KEY_REGION_DEFAULT),
     );

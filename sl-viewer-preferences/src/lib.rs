@@ -2,8 +2,9 @@
 //!
 //! The tabbed floater over every declared setting ([`preferences`] and its
 //! per-tab modules), the quick-preferences popover at the bottom edge
-//! ([`quick_preferences`]), and the raw debug-settings editor
-//! ([`debug_settings`]) for the ones no tab shows.
+//! ([`quick_preferences`]), the photographer's curated view over the render
+//! knobs and the environment ([`phototools`]), and the raw debug-settings
+//! editor ([`debug_settings`]) for the ones no tab shows.
 //!
 //! This crate sits at the top of the feature tier, which is the point: a tab
 //! draws a control for a setting whose behaviour lives elsewhere, so the
@@ -32,6 +33,11 @@ pub(crate) use sl_viewer_audio::audio;
 pub(crate) use sl_viewer_audio::parcel_audio;
 pub(crate) use sl_viewer_audio::volume_panel;
 pub(crate) use sl_viewer_audio::world_sounds;
+// The Personal Lighting window, which the Phototools environment tab is a door
+// to. Only its floater id is named — but a floater id is the window's own,
+// there is no layer below both that holds one, and this crate is where a
+// surface that draws another's controls belongs.
+pub(crate) use sl_viewer_environment::personal_lighting;
 // The inventory mirror's settings-asset index: the sky / water / day-cycle
 // lists the quick-preferences environment combos are a view of. A dependency on
 // the inventory crate rather than a projection resource below it because the
@@ -88,6 +94,7 @@ pub(crate) use sl_viewer_world_view::movement;
 pub(crate) use sl_viewer_world_view::session;
 
 pub mod debug_settings;
+pub mod phototools;
 pub mod preferences;
 pub mod preferences_alerts;
 pub mod preferences_audio;

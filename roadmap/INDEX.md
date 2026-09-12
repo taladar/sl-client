@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 317 |
+| ready | 316 |
 | blocked | 42 |
 | in-progress | 22 |
 | bugs | 52 |
-| done | 1077 |
+| done | 1078 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1652** |
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (317)
+## ready (316)
 
 ### protocol
 
@@ -764,9 +764,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-photo-hosting-upload`](ready/viewer-photo-hosting-upload.md) — Share
   snapshots to external photo/hosting services (blocked by
   `viewer-snapshot-floater` (done))
-- [`viewer-phototools`](ready/viewer-phototools.md) — Phototools — a
-  photographer's environment & graphics control panel (blocked by
-  `viewer-ui-widget-scaffold` (done))
 - [`viewer-pie-wire-ready-placeholders`](ready/viewer-pie-wire-ready-placeholders.md)
   — Wire the pie placeholder slices whose features already exist
 - [`viewer-places-landmarks`](ready/viewer-places-landmarks.md) — Places floater
@@ -1297,7 +1294,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1077)
+## done (1078)
 
 ### protocol
 
@@ -2467,6 +2464,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-notification-host` (done))
 - [`viewer-phase-31-general-physics`](done/viewer-phase-31-general-physics-phase-31-general-physics-foundation-avian3d.md)
   — Phase 31 — General physics foundation (avian3d)
+- [`viewer-phototools`](done/viewer-phototools.md) — Phototools — a
+  photographer's environment & graphics control panel (blocked by
+  `viewer-ui-widget-scaffold` (done))
 - [`viewer-physical-object-motion-not-smooth`](done/viewer-physical-object-motion-not-smooth.md)
   — Physical object (vehicle) motion is not as smooth as it should be between
   updates
