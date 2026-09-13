@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 310 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 38 |
+| bugs | 39 |
 | done | 1118 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1671** |
+| **total** | **1672** |
 
 ## ideas (100)
 
@@ -1157,7 +1157,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (38)
+## bugs (39)
 
 ### viewer
 
@@ -1203,6 +1203,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Eight copied texture-poll systems each leak Image assets for the session
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
   — Mesh-head brow spikes forward from face-bone shape deformation
+- [`viewer-build-tools-default-to-create`](bugs/viewer-build-tools-default-to-create.md)
+  — The build window opens on a manipulator with nothing to manipulate
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
   — Check clouds vs the waterline at the horizon against Firestorm
 - [`viewer-combo-stops-opening`](bugs/viewer-combo-stops-opening.md) — A combo
