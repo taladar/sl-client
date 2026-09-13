@@ -59,9 +59,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui_widgets::Button;
 use bevy_flair::style::components::ClassList;
-use sl_client_bevy::{
-    AssetKey, InventoryFolderKey, InventoryType, TextureKey, Uuid, to_bevy_image,
-};
+use sl_client_bevy::{AssetKey, InventoryFolderKey, InventoryType, TextureKey, Uuid};
 use std::hash::{Hash, Hasher as _};
 
 use crate::floater::{
@@ -74,8 +72,7 @@ use crate::material_preview::MaterialPreview;
 use crate::ui::{column, row};
 use crate::ui_font::UiFont;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
-use crate::world_api::AVATAR_BOOST_PRIORITY;
-use crate::world_api::{BoostTexture, DecodedTextures};
+use crate::world_api::ui_texture::{PendingUiTexture, UiTexturePlugin};
 use crate::world_api::{OpenTexturePicker, PickerKind, TexturePicked};
 use sl_client_bevy::SlCommand;
 
@@ -315,13 +312,6 @@ struct TexturePickerUi {
     default_button: Entity,
 }
 
-/// Thumbnail nodes (the preview / swatches) awaiting their texture decode.
-#[derive(Resource, Debug, Default)]
-struct PendingTexturePreviews {
-    /// The nodes waiting on each texture.
-    waiting: HashMap<TextureKey, Vec<Entity>>,
-}
-
 /// A tree row for a folder (click toggles expansion + lazy-fetches).
 #[derive(Component, Debug, Clone, Copy)]
 struct TreeFolderRow(InventoryFolderKey);
@@ -377,15 +367,18 @@ enum TreeRow {
 pub struct TexturePickerPlugin;
 
 impl Plugin for TexturePickerPlugin {
-    /// Register the messages, the shared thumbnail queue, and the systems.
+    /// Register the messages and the systems (the preview pane and the swatches
+    /// are filled in by the shared UI-texture poll).
     ///
     /// Nothing spawns at `Startup`: a picker window exists only while a field
     /// is being picked for, so `handle_open_texture_picker` spawns the instance
     /// and builds its content.
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<UiTexturePlugin>() {
+            app.add_plugins(UiTexturePlugin);
+        }
         app.add_message::<OpenTexturePicker>()
             .add_message::<TexturePicked>()
-            .init_resource::<PendingTexturePreviews>()
             .add_systems(
                 Update,
                 (
@@ -410,7 +403,6 @@ impl Plugin for TexturePickerPlugin {
                     // Swatch thumbnails are the consumers' business, not a
                     // window's: they paint whether or not a picker is open.
                     apply_texture_swatch_thumbnail,
-                    resolve_texture_previews,
                 )
                     .chain(),
             )
@@ -1173,22 +1165,15 @@ fn select_texture(
 /// issue a bogus fetch (the preview was cleared on open, pending the sphere task).
 fn request_preview_texture(
     windows: Query<(Ref<TexturePickerState>, &TexturePickerUi)>,
-    mut boost: MessageWriter<BoostTexture>,
-    mut pending: ResMut<PendingTexturePreviews>,
+    mut commands: Commands,
 ) {
     for (state, ui) in &windows {
         if !state.is_changed() || state.kind == PickerKind::Material {
             continue;
         }
-        boost.write(BoostTexture {
-            key: state.selected,
-            priority: AVATAR_BOOST_PRIORITY,
-        });
-        pending
-            .waiting
-            .entry(state.selected)
-            .or_default()
-            .push(ui.preview);
+        commands
+            .entity(ui.preview)
+            .insert(PendingUiTexture::new(state.selected));
     }
 }
 
@@ -1228,60 +1213,28 @@ fn sync_material_preview_pane(
     }
 }
 
-/// Swap thumbnail nodes for their decoded textures as they land (the preview and
-/// the swatches).
-fn resolve_texture_previews(
-    store: Res<DecodedTextures>,
-    mut pending: ResMut<PendingTexturePreviews>,
-    mut images: ResMut<Assets<Image>>,
-    mut commands: Commands,
-) {
-    if pending.waiting.is_empty() {
-        return;
-    }
-    let ready: Vec<TextureKey> = pending
-        .waiting
-        .keys()
-        .copied()
-        .filter(|key| store.get(*key).is_some())
-        .collect();
-    for key in ready {
-        let Some(decoded) = store.get(key) else {
-            continue;
-        };
-        let handle = images.add(to_bevy_image(decoded));
-        if let Some(nodes) = pending.waiting.remove(&key) {
-            for node in nodes {
-                if let Ok(mut entity) = commands.get_entity(node) {
-                    entity.insert(ImageNode::new(handle.clone()));
-                }
-            }
-        }
-    }
-}
-
 /// Keep each texture swatch showing its [`TextureSwatchValue`] thumbnail — or, for
 /// a nil (no-texture) value, clear the thumbnail so a deselected swatch does not
 /// keep showing the last prim's texture.
 fn apply_texture_swatch_thumbnail(
     swatches: Query<(Entity, &TextureSwatchValue), Changed<TextureSwatchValue>>,
-    mut boost: MessageWriter<BoostTexture>,
-    mut pending: ResMut<PendingTexturePreviews>,
     mut commands: Commands,
 ) {
     for (entity, value) in &swatches {
         if value.0.uuid().is_nil() {
             if let Ok(mut swatch) = commands.get_entity(entity) {
+                // Drop the wait as well as the image: a swatch cleared while
+                // its last texture was still decoding must not be painted with
+                // it when it lands.
                 swatch.remove::<ImageNode>();
+                swatch.remove::<PendingUiTexture>();
                 swatch.insert(BackgroundColor(EMPTY_FILL));
             }
             continue;
         }
-        boost.write(BoostTexture {
-            key: value.0,
-            priority: AVATAR_BOOST_PRIORITY,
-        });
-        pending.waiting.entry(value.0).or_default().push(entity);
+        commands
+            .entity(entity)
+            .insert(PendingUiTexture::new(value.0));
     }
 }
 

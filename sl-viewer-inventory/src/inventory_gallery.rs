@@ -19,14 +19,10 @@
 //! `panel_inventory_gallery_item.xml` (130×149 tiles, 128 px thumbnail,
 //! min two per row, back / forward navigation).
 
-use std::collections::HashMap;
-
 use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
-use sl_client_bevy::{
-    FolderType, InventoryFolderKey, InventoryType, SlCommand, TextureKey, to_bevy_image,
-};
+use sl_client_bevy::{FolderType, InventoryFolderKey, InventoryType, SlCommand, TextureKey};
 
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::Translated;
@@ -37,8 +33,7 @@ use crate::inventory_properties::{OpenItemPreview, previewable};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::UiAction;
 use crate::ui_font::UiFont;
-use crate::world_api::AVATAR_BOOST_PRIORITY;
-use crate::world_api::{BoostTexture, DecodedTextures};
+use crate::world_api::ui_texture::{PendingUiTexture, UiTexturePlugin};
 
 /// The gallery font size for tile names, in logical pixels.
 const TILE_FONT_SIZE: f32 = 12.0;
@@ -151,13 +146,6 @@ impl GalleryUi {
 #[derive(Component, Debug, Clone, Copy)]
 struct TileKey(RowKey);
 
-/// Texture-thumbnail tiles awaiting their decode, by texture key.
-#[derive(Resource, Debug, Default)]
-struct PendingThumbnails {
-    /// The tile thumbnail nodes waiting on each texture.
-    waiting: HashMap<TextureKey, Vec<Entity>>,
-}
-
 /// The plugin owning the gallery view.
 #[derive(Debug)]
 pub struct InventoryGalleryPlugin;
@@ -165,21 +153,17 @@ pub struct InventoryGalleryPlugin;
 impl Plugin for InventoryGalleryPlugin {
     /// Register the state and systems and spawn the (hidden) floater.
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<UiTexturePlugin>() {
+            app.add_plugins(UiTexturePlugin);
+        }
         app.init_resource::<GalleryState>()
-            .init_resource::<PendingThumbnails>()
             .add_systems(
                 Startup,
                 spawn_gallery_floater.after(UiScaffoldSystems::SpawnRoot),
             )
             .add_systems(
                 Update,
-                (
-                    route_gallery_actions,
-                    rebuild_gallery,
-                    scroll_gallery_grid,
-                    resolve_thumbnails,
-                )
-                    .chain(),
+                (route_gallery_actions, rebuild_gallery, scroll_gallery_grid).chain(),
             );
     }
 }
@@ -372,8 +356,7 @@ fn route_gallery_actions(
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources: the state / model / \
-              selection inputs, the floater handles, the texture pipeline for thumbnails and \
-              the spawn outputs"
+              selection inputs, the floater handles and the spawn outputs"
 )]
 fn rebuild_gallery(
     state: Res<GalleryState>,
@@ -383,8 +366,6 @@ fn rebuild_gallery(
     panels: Query<&UiPanelShown>,
     children: Query<&Children>,
     mut texts: Query<&mut Text>,
-    mut boost: MessageWriter<BoostTexture>,
-    mut pending: ResMut<PendingThumbnails>,
     mut commands: Commands,
     mut sl_commands: MessageWriter<SlCommand>,
 ) {
@@ -416,7 +397,6 @@ fn rebuild_gallery(
             commands.entity(child).despawn();
         }
     }
-    pending.waiting.clear();
     // Sub-folder tiles first, then items — name order from the model.
     for &child in model.child_folders_of(current) {
         let info = model.folder_info(child);
@@ -430,8 +410,6 @@ fn rebuild_gallery(
             folder_icon(folder_type, false),
             selection.contains(RowKey::Folder(child)),
             None,
-            &mut boost,
-            &mut pending,
         );
     }
     for item in model.loaded_items_of(current) {
@@ -448,8 +426,6 @@ fn rebuild_gallery(
             item_icon(item.inv_type),
             selection.contains(RowKey::Item(item.item_id)),
             thumbnail,
-            &mut boost,
-            &mut pending,
         );
     }
     // An unfetched folder fetches on arrival; harmless if already held.
@@ -458,11 +434,6 @@ fn rebuild_gallery(
 
 /// Spawn one gallery tile: a thumbnail area (type glyph, or the texture once
 /// decoded) over the wrapped name.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a tile spawner taking the tile's identity, look, selection state and the \
-              thumbnail pipeline"
-)]
 fn spawn_tile(
     commands: &mut Commands,
     grid: Entity,
@@ -471,8 +442,6 @@ fn spawn_tile(
     icon: &'static str,
     selected: bool,
     thumbnail: Option<TextureKey>,
-    boost: &mut MessageWriter<BoostTexture>,
-    pending: &mut PendingThumbnails,
 ) {
     let tile = commands
         .spawn((
@@ -516,11 +485,9 @@ fn spawn_tile(
         ))
         .id();
     if let Some(texture) = thumbnail {
-        boost.write(BoostTexture {
-            key: texture,
-            priority: AVATAR_BOOST_PRIORITY,
-        });
-        pending.waiting.entry(texture).or_default().push(thumb);
+        commands
+            .entity(thumb)
+            .insert(PendingUiTexture::over_placeholder(texture));
     }
     commands.spawn((
         Text::new(name.to_owned()),
@@ -650,40 +617,5 @@ fn scroll_gallery_grid(
     };
     if let Ok(mut position) = positions.get_mut(ui.grid) {
         position.0.y = (position.0.y - delta).max(0.0);
-    }
-}
-
-/// Swap tile glyphs for decoded texture thumbnails as they land.
-fn resolve_thumbnails(
-    store: Res<DecodedTextures>,
-    mut pending: ResMut<PendingThumbnails>,
-    children: Query<&Children>,
-    mut images: ResMut<Assets<Image>>,
-    mut commands: Commands,
-) {
-    if pending.waiting.is_empty() {
-        return;
-    }
-    let ready: Vec<TextureKey> = pending
-        .waiting
-        .keys()
-        .copied()
-        .filter(|key| store.get(*key).is_some())
-        .collect();
-    for key in ready {
-        let Some(decoded) = store.get(key) else {
-            continue;
-        };
-        let handle = images.add(to_bevy_image(decoded));
-        if let Some(nodes) = pending.waiting.remove(&key) {
-            for node in nodes {
-                if let Ok(existing) = children.get(node) {
-                    for child in existing.iter().collect::<Vec<_>>() {
-                        commands.entity(child).despawn();
-                    }
-                }
-                commands.entity(node).insert(ImageNode::new(handle.clone()));
-            }
-        }
     }
 }

@@ -36,7 +36,7 @@ use bevy::text::EditableText;
 use sl_client_bevy::{
     AgentKey, AssetKey, AssetType, Command, GroupKey, InventoryKey, ItemInfo, OwnerKey,
     ParcelDetails, ParcelKey, RegionCoordinates, RegionHandle, RegionName, SlCommand, SlEvent,
-    SlIdentity, SlSessionEvent, TextureKey, Uuid, to_bevy_image,
+    SlIdentity, SlSessionEvent, TextureKey, Uuid,
 };
 
 use crate::clipboard::{ViewerClipboard, copy_to_clipboard};
@@ -52,10 +52,9 @@ use crate::inventory_properties::{
 use crate::name_revisions::NameRevisions;
 use crate::ui::{column, row};
 use crate::ui_font::UiFont;
-use crate::world_api::AVATAR_BOOST_PRIORITY;
 use crate::world_api::AvatarState;
 use crate::world_api::GroupsModel;
-use crate::world_api::{BoostTexture, DecodedTextures};
+use crate::world_api::ui_texture::{PendingUiTexture, UiTexturePlugin};
 use crate::world_map::OpenWorldMap;
 
 /// The floater's font size, in logical pixels.
@@ -152,9 +151,6 @@ struct AboutLandmarkState {
     parcel_id: Option<ParcelKey>,
     /// The resolved parcel details, once received.
     details: Option<ParcelDetails>,
-    /// The snapshot texture awaited from the texture pipeline, with the image
-    /// box to fill.
-    pending_snapshot: Option<(TextureKey, Entity)>,
     /// The absolute time (seconds) after which the resolve is abandoned.
     deadline: Option<f64>,
     /// The copyable SLURL, once the region name is known.
@@ -166,7 +162,8 @@ struct AboutLandmarkState {
 // ---------------------------------------------------------------------------
 
 /// Wires the About Landmark floater: the open message, the resolve chain, the
-/// snapshot poll, the name refreshes, and the title / notes editing.
+/// name refreshes, and the title / notes editing. The snapshot box is filled in
+/// by the shared UI-texture poll.
 #[derive(Debug)]
 pub struct AboutLandmarkPlugin;
 
@@ -176,6 +173,9 @@ impl Plugin for AboutLandmarkPlugin {
     /// Nothing spawns at `Startup`: a window exists only while a landmark is
     /// open, so `open_about_landmark` spawns the instance and builds it.
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<UiTexturePlugin>() {
+            app.add_plugins(UiTexturePlugin);
+        }
         app.add_message::<OpenAboutLandmark>().add_systems(
             Update,
             (
@@ -187,7 +187,6 @@ impl Plugin for AboutLandmarkPlugin {
                     ingest_landmark_asset,
                     ingest_parcel_replies,
                     expire_resolve,
-                    poll_snapshot,
                     refresh_names,
                     commit_landmark_edits,
                 )
@@ -619,8 +618,8 @@ fn ingest_landmark_asset(
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources: the event stream, the \
-              floater state and handles, the name caches, the translator, the texture \
-              pipeline and the text / command outputs"
+              floater state and handles, the name caches, the translator, and the text / \
+              command / spawn outputs"
 )]
 fn ingest_parcel_replies(
     mut events: MessageReader<SlEvent>,
@@ -629,9 +628,9 @@ fn ingest_parcel_replies(
     groups: Res<GroupsModel>,
     translator: Translator,
     time: Res<Time>,
-    mut boost: MessageWriter<BoostTexture>,
     mut texts: Query<&mut Text>,
     mut sl_commands: MessageWriter<SlCommand>,
+    mut commands: Commands,
 ) {
     let frame: Vec<&SlEvent> = events.read().collect();
     if frame.is_empty() {
@@ -694,9 +693,9 @@ fn ingest_parcel_replies(
                         &avatars,
                         &groups,
                         &translator,
-                        &mut boost,
                         &mut texts,
                         &mut sl_commands,
+                        &mut commands,
                     );
                     state.details = Some(details.clone());
                 }
@@ -719,9 +718,9 @@ fn apply_details(
     avatars: &AvatarState,
     groups: &GroupsModel,
     translator: &Translator,
-    boost: &mut MessageWriter<BoostTexture>,
     texts: &mut Query<&mut Text>,
     sl_commands: &mut MessageWriter<SlCommand>,
+    commands: &mut Commands,
 ) {
     let position = state.landmark.map_or((0.0, 0.0, 0.0), |mark| mark.position);
     let region_id = state.landmark.map_or_else(Uuid::nil, |mark| mark.region_id);
@@ -773,11 +772,9 @@ fn apply_details(
         .filter(|key| *key != TextureKey::from(Uuid::nil()));
     match (snapshot, ui.snapshot_box) {
         (Some(key), Some(node)) => {
-            boost.write(BoostTexture {
-                key,
-                priority: AVATAR_BOOST_PRIORITY,
-            });
-            state.pending_snapshot = Some((key, node));
+            commands
+                .entity(node)
+                .insert(PendingUiTexture::over_placeholder(key));
         }
         _no_snapshot => {
             set_text(
@@ -785,37 +782,6 @@ fn apply_details(
                 ui.snapshot_label,
                 &translator.get("about-landmark-no-image"),
             );
-        }
-    }
-}
-
-/// Swap the snapshot box's "(loading)" label for the decoded image once the
-/// texture pipeline holds it. A re-open replaces the box, so a stale pending
-/// node is dropped, not applied.
-fn poll_snapshot(
-    mut windows: Query<&mut AboutLandmarkState>,
-    store: Res<DecodedTextures>,
-    mut images: ResMut<Assets<Image>>,
-    children: Query<&Children>,
-    mut commands: Commands,
-) {
-    for mut state in &mut windows {
-        let Some((key, node)) = state.pending_snapshot else {
-            continue;
-        };
-        let Some(decoded) = store.get(key) else {
-            continue;
-        };
-        state.pending_snapshot = None;
-        let Ok(mut entity) = commands.get_entity(node) else {
-            continue;
-        };
-        let handle = images.add(to_bevy_image(decoded));
-        entity.insert(ImageNode::new(handle));
-        if let Ok(existing) = children.get(node) {
-            for child in existing.iter().collect::<Vec<_>>() {
-                commands.entity(child).despawn();
-            }
         }
     }
 }

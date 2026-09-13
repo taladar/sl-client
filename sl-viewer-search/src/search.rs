@@ -40,7 +40,7 @@ use sl_client_bevy::{
     DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
     DirPeopleResult, DirPlaceResult, EventId, EventInfo, GlobalCoordinates, GroupKey, GroupProfile,
     ParcelCategory, ParcelDetails, ParcelKey, QueryId, RegionCoordinates, RegionHandle, SlCommand,
-    SlEvent, SlIdentity, SlSessionEvent, TextureKey, Uuid, Vector, to_bevy_image,
+    SlEvent, SlIdentity, SlSessionEvent, TextureKey, Uuid, Vector,
 };
 use sl_settings::SettingValue;
 
@@ -66,11 +66,10 @@ use crate::ui_table::{
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow};
-use crate::world_api::AVATAR_BOOST_PRIORITY;
 use crate::world_api::OpenAvatarProfile;
 use crate::world_api::OpenGroupProfile;
 use crate::world_api::RequestFriendship;
-use crate::world_api::{BoostTexture, DecodedTextures};
+use crate::world_api::ui_texture::{PendingUiTexture, UiTexturePlugin};
 use crate::world_api::{ConversationKey, OpenConversation};
 use crate::world_map::OpenWorldMap;
 
@@ -925,8 +924,6 @@ struct SearchDetail {
     /// The snapshot texture last requested, so a stable snapshot is not re-fetched
     /// every frame.
     snapshot_requested: Option<TextureKey>,
-    /// Texture requests whose decode is awaited: `(id, image node)`.
-    pending_textures: Vec<(TextureKey, Entity)>,
 }
 
 impl SearchDetail {
@@ -1174,6 +1171,9 @@ pub struct SearchFloaterPlugin;
 impl Plugin for SearchFloaterPlugin {
     /// Register the state and systems, and spawn the (hidden) floater.
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<UiTexturePlugin>() {
+            app.add_plugins(UiTexturePlugin);
+        }
         app.init_resource::<SearchState>()
             .init_resource::<SearchDetail>()
             .add_systems(
@@ -1193,7 +1193,6 @@ impl Plugin for SearchFloaterPlugin {
                     ingest_detail_replies,
                     update_detail_pane,
                     request_detail_snapshot,
-                    poll_detail_snapshot,
                     update_search_counts,
                     drive_search_checkbox_visual,
                 )
@@ -3169,7 +3168,6 @@ fn drive_search_checkbox_visual(
 fn request_detail_snapshot(
     mut detail: ResMut<SearchDetail>,
     ui: Option<Res<SearchUi>>,
-    mut boost: MessageWriter<BoostTexture>,
     mut commands: Commands,
 ) {
     if !detail.is_changed() {
@@ -3184,38 +3182,15 @@ fn request_detail_snapshot(
         return;
     }
     detail.snapshot_requested = wanted;
-    commands.entity(ui.detail_snapshot).remove::<ImageNode>();
+    commands
+        .entity(ui.detail_snapshot)
+        .remove::<ImageNode>()
+        .remove::<PendingUiTexture>();
     if let Some(id) = wanted {
-        boost.write(BoostTexture {
-            key: id,
-            priority: AVATAR_BOOST_PRIORITY,
-        });
-        detail.pending_textures.push((id, ui.detail_snapshot));
+        commands
+            .entity(ui.detail_snapshot)
+            .insert(PendingUiTexture::new(id));
     }
-}
-
-/// Swap a decoded snapshot into its image box once the texture arrives (the
-/// `poll_profile_textures` pattern).
-fn poll_detail_snapshot(
-    mut detail: ResMut<SearchDetail>,
-    store: Res<DecodedTextures>,
-    mut images: ResMut<Assets<Image>>,
-    mut commands: Commands,
-) {
-    if detail.pending_textures.is_empty() {
-        return;
-    }
-    let pending = std::mem::take(&mut detail.pending_textures);
-    let mut still = Vec::new();
-    for (id, node) in pending {
-        if let Some(decoded) = store.get(id) {
-            let handle = images.add(to_bevy_image(decoded));
-            commands.entity(node).insert(ImageNode::new(handle));
-        } else {
-            still.push((id, node));
-        }
-    }
-    detail.pending_textures = still;
 }
 
 #[cfg(test)]

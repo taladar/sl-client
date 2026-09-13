@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 310 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 35 |
-| done | 1122 |
+| bugs | 34 |
+| done | 1123 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1672** |
@@ -1157,7 +1157,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (35)
+## bugs (34)
 
 ### viewer
 
@@ -1194,8 +1194,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   mouselook
 - [`viewer-audit-system-ordering-claims`](bugs/viewer-audit-system-ordering-claims.md)
   — Update tuples claim a pipeline order the scheduler does not enforce
-- [`viewer-audit-ui-texture-poll-leak`](bugs/viewer-audit-ui-texture-poll-leak.md)
-  — Eight copied texture-poll systems each leak Image assets for the session
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
   — Mesh-head brow spikes forward from face-bone shape deformation
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
@@ -1242,7 +1240,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1122)
+## done (1123)
 
 ### protocol
 
@@ -1582,6 +1580,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   unbounded
 - [`viewer-audit-tonemap-legacy-sky`](done/viewer-audit-tonemap-legacy-sky.md) —
   ACES tonemapping is applied to legacy skies the reference exempts
+- [`viewer-audit-ui-texture-poll-leak`](done/viewer-audit-ui-texture-poll-leak.md)
+  — Eight copied texture-poll systems each leak Image assets for the session
 - [`viewer-audit-ui-widget-per-frame-writes`](done/viewer-audit-ui-widget-per-frame-writes.md)
   — The colour picker writes unguarded every frame and defeats the layout gate
 - [`viewer-audit-underwater-fog-nan`](done/viewer-audit-underwater-fog-nan.md) —

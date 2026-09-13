@@ -9600,6 +9600,7 @@ name = "sl-viewer-world-api"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bytes",
  "pretty_assertions",
  "serde",
  "sl-client-bevy",
