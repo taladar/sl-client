@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 317 |
+| ready | 313 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 39 |
-| done | 1106 |
+| bugs | 38 |
+| done | 1114 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1667** |
+| **total** | **1670** |
 
 ## ideas (100)
 
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (317)
+## ready (313)
 
 ### protocol
 
@@ -323,8 +323,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-object-children-index`](ready/viewer-audit-object-children-index.md)
   — ObjectState has no children index, so every linkset query full-scans the
   region
-- [`viewer-audit-picker-requester-identity`](ready/viewer-audit-picker-requester-identity.md)
-  — Two instances of one window share a picker, and both claim its answer
 - [`viewer-audit-plugins-own-their-schedule`](ready/viewer-audit-plugins-own-their-schedule.md)
   — Most viewer crates export loose systems instead of owning a plugin
 - [`viewer-audit-preferences-hub-decoupling`](ready/viewer-audit-preferences-hub-decoupling.md)
@@ -451,6 +449,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Chat / IM transcript display and style options
 - [`viewer-collision-messages-chat`](ready/viewer-collision-messages-chat.md) —
   Collision events to nearby chat
+- [`viewer-color-picker-face-pipette`](ready/viewer-color-picker-face-pipette.md)
+  — Colour picker pipette — sample a prim face's stored tint (blocked by
+  `viewer-ui-color-picker-advanced` (done))
+- [`viewer-color-picker-lsl-vector`](ready/viewer-color-picker-lsl-vector.md) —
+  Colour picker — the LSL vector tab and Copy LSL (blocked by
+  `viewer-ui-color-picker-advanced` (done))
 - [`viewer-combat-health-indicator`](ready/viewer-combat-health-indicator.md) —
   Combat health meter (HealthMessage)
 - [`viewer-consolidate-double-click-interval`](ready/viewer-consolidate-double-click-interval.md)
@@ -584,16 +588,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-inventory-thumbnails`](ready/viewer-inventory-thumbnails.md) —
   Inventory thumbnails — view & edit (blocked by `viewer-ui-texture-picker`
   (done))
-- [`viewer-key-animation-preview`](ready/viewer-key-animation-preview.md) — One
-  animation-preview window per animation
-- [`viewer-key-color-picker`](ready/viewer-key-color-picker.md) — One
-  colour-picker window per field, like the texture picker
 - [`viewer-key-material-editor`](ready/viewer-key-material-editor.md) — One
   material-editor window per material item
 - [`viewer-key-object-contents`](ready/viewer-key-object-contents.md) — One
   Object Contents window per object
-- [`viewer-key-texture-preview`](ready/viewer-key-texture-preview.md) — One
-  texture-preview window per texture
 - [`viewer-key-wearable-editor`](ready/viewer-key-wearable-editor.md) — One
   wearable-editor window per bodypart / clothing item
 - [`viewer-key-web-browser`](ready/viewer-key-web-browser.md) — Decide whether
@@ -788,8 +786,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (sim) debug console (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-region-entry-maturity-gate`](ready/viewer-region-entry-maturity-gate.md)
   — Eight ported notifications for a refused entry, and nothing raises one
-- [`viewer-region-estate-group-picker`](ready/viewer-region-estate-group-picker.md)
-  — Group picker for the Region/Estate Access → Allowed Groups list
 - [`viewer-region-estate-object-return`](ready/viewer-region-estate-object-return.md)
   — Region Debug tab — estate-wide object return by resident
 - [`viewer-region-experiences-default-experience`](ready/viewer-region-experiences-default-experience.md)
@@ -911,9 +907,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   UI regression baselines — recorded geometry that may not drift by accident
   (blocked by `viewer-ui-test-harness` (done), `viewer-test-baseline-format`
   (done))
-- [`viewer-ui-color-picker-advanced`](ready/viewer-ui-color-picker-advanced.md)
-  — Color picker — SV square, hue strip, palette & eyedropper (blocked by
-  `viewer-ui-color-picker` (done))
 - [`viewer-ui-settings-binding-combo`](ready/viewer-ui-settings-binding-combo.md)
   — Combo↔settings two-way binding (blocked by `viewer-ui-combo-widget` (done),
   `viewer-ui-settings-binding` (done))
@@ -1171,7 +1164,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (39)
+## bugs (38)
 
 ### viewer
 
@@ -1185,9 +1178,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-account-dir-index-repoint`](bugs/viewer-audit-account-dir-index-repoint.md)
   — A skipped rename still repoints the UUID index, handing one avatar another's
   data
-- [`viewer-audit-asset-editor-scaffold`](bugs/viewer-audit-asset-editor-scaffold.md)
-  — The wearable editor reports a save that has not happened, and claims other
-  editors' results
 - [`viewer-audit-audio-mute-and-device`](bugs/viewer-audit-audio-mute-and-device.md)
   — Collision sounds ignore the object-sound mute exception, and a device
   fallback lies to the UI
@@ -1266,7 +1256,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1106)
+## done (1114)
 
 ### protocol
 
@@ -1539,6 +1529,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   device, decode, listener & mixer
 - [`viewer-audit-app-exit-discarded`](done/viewer-audit-app-exit-discarded.md) —
   The viewer exits 0 on a failing AppExit
+- [`viewer-audit-asset-editor-scaffold`](done/viewer-audit-asset-editor-scaffold.md)
+  — The wearable editor reports a save that has not happened, and claims other
+  editors' results
 - [`viewer-audit-command-result-diagnostics`](done/viewer-audit-command-result-diagnostics.md)
   — The bevy command dispatcher discards 300 protocol send results with no log
 - [`viewer-audit-diagnostic-stream-unread`](done/viewer-audit-diagnostic-stream-unread.md)
@@ -1565,6 +1558,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-parcel-access-list-accumulate`](done/viewer-audit-parcel-access-list-accumulate.md)
   — Editing a multi-packet parcel ban list unbans everyone not in the last
   packet
+- [`viewer-audit-picker-requester-identity`](done/viewer-audit-picker-requester-identity.md)
+  — Two instances of one window share a picker, and both claim its answer
 - [`viewer-audit-probe-ambient-multiply`](done/viewer-audit-probe-ambient-multiply.md)
   — suppress_global_ambient multiplies an absolute producer and decays it
   geometrically
@@ -1977,6 +1972,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   properties offered permission controls the item did not allow
 - [`viewer-item-price-field-silently-dropped`](done/viewer-item-price-field-silently-dropped.md)
   — The item-properties price field took a value it never saved
+- [`viewer-key-animation-preview`](done/viewer-key-animation-preview.md) — One
+  animation-preview window per animation
+- [`viewer-key-color-picker`](done/viewer-key-color-picker.md) — One
+  colour-picker window per field, like the texture picker
+- [`viewer-key-texture-preview`](done/viewer-key-texture-preview.md) — One
+  texture-preview window per texture
 - [`viewer-land-context-menu`](done/viewer-land-context-menu.md) — Land /
   terrain context pie menu entries (blocked by `viewer-ui-radial-menu` (done))
 - [`viewer-load-url-body-links`](done/viewer-load-url-body-links.md) — Script
@@ -2617,6 +2618,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Region / parcel environment settings panel (blocked by
   `viewer-region-options-general` (done), `viewer-environment-my-environments`
   (done))
+- [`viewer-region-estate-group-picker`](done/viewer-region-estate-group-picker.md)
+  — Group picker for the Region/Estate Access → Allowed Groups list
 - [`viewer-region-experiences-panel`](done/viewer-region-experiences-panel.md) —
   Region / Estate floater — Experiences tab
 - [`viewer-region-name-connecting-after-crossing`](done/viewer-region-name-connecting-after-crossing.md)
@@ -2710,6 +2713,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-seated-avatar-vehicle-rubberband`](done/viewer-seated-avatar-vehicle-rubberband.md)
   — Seated avatar rubber-bands behind the vehicle it sits on instead of rigidly
   parenting
+- [`viewer-self-closing-widget-leaks-its-press`](done/viewer-self-closing-widget-leaks-its-press.md)
+  — A widget that closes on a press hands that press to the world, which
+  deselects
 - [`viewer-settings-account-scope-persist`](done/viewer-settings-account-scope-persist.md)
   — Load and save both global and per-account settings in the viewer (blocked by
   `viewer-ui-settings-store` (done))
@@ -2809,6 +2815,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   toolbar (button bar) (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-color-picker`](done/viewer-ui-color-picker.md) — Color picker
   floater + swatch widget (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-ui-color-picker-advanced`](done/viewer-ui-color-picker-advanced.md) —
+  Color picker — SV square, hue strip, palette & eyedropper (blocked by
+  `viewer-ui-color-picker` (done))
 - [`viewer-ui-combo-widget`](done/viewer-ui-combo-widget.md) — Reusable combo /
   dropdown widget (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-context-menu`](done/viewer-ui-context-menu.md) — Line-based

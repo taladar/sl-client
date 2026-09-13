@@ -56,12 +56,19 @@ spawn instead of `DeferredFloaterContent`.
   each on the bit it is about — so the window offered an anyone-copy on an item
   the owner cannot copy, and next-owner rights the creator never permitted
   ([[viewer-item-permission-gates]], fixed).
-- **The two per-type previews** (`inventory_properties.rs`, `"preview-texture"`
-  / `"preview-animation"`) — still singletons, and the same argument applies
-  (comparing two textures is a real workflow). They were missing from this list
-  rather than deliberately excluded. One task each, since they are two window
-  kinds sharing one module and one `PreviewState`:
-  [[viewer-key-texture-preview]] and [[viewer-key-animation-preview]].
+- ~~**The two per-type previews** (`inventory_properties.rs`,
+  `"preview-texture"` / `"preview-animation"`)~~ — **done** (2026-09-12),
+  converted together ([[viewer-key-texture-preview]],
+  [[viewer-key-animation-preview]]) because the second conversion is what
+  deletes the `PreviewState` and `PreviewUi` they shared. Both are keyed by the
+  **asset** rather than the item: two inventory copies of one texture are one
+  picture, and the window is about the picture. That is the first key in this
+  audit that is not the thing the row was clicked on, and it is why a re-open
+  can safely be a mere raise — the fetch is per asset, so a second Open has
+  nothing left to ask for. The animation window's Play / Stop read their
+  window through `host_floater` instead of capturing an asset id at spawn, and
+  two open previews need no arbitration: an avatar plays as many animations as
+  it is told to.
 - ~~**About Landmark** (`about_landmark.rs`, `"about-landmark"`)~~ — **done**
   (2026-09-07). Keyed by the landmark's inventory id
   ([[viewer-about-landmark-floater]]); the shown item, the resolve chain's
@@ -92,9 +99,14 @@ spawn instead of `DeferredFloaterContent`.
   - [[viewer-key-object-contents]] (`edit_contents.rs`, `"object-contents"`) —
     per object, not per item: the window lists one object's inventory, and the
     Build tab's surface stays a singleton.
-  - [[viewer-key-color-picker]] (`ui_color_picker.rs`, `"color-picker"`) — the
-    same argument as the texture picker, and the same **named** key: the field
-    being picked for.
+  - ~~[[viewer-key-color-picker]] (`ui_color_picker.rs`, `"color-picker"`)~~ —
+    **done** (2026-09-12), with the avatar and settings pickers beside it, in
+    [[viewer-audit-picker-requester-identity]]. Not by the **named** key this
+    list expected: a field name is the same string in two instances of one
+    window, so the key is the *opening window's* kind-and-key plus the field
+    (`picker_identity`), and `FloaterKey::Named` — along with the texture
+    picker's remembered rectangle — was deleted for want of a user. A picker
+    persists no geometry; see that entry for why.
 - ~~**Notecard / script editors** (`edit_notecard.rs` `"notecard-editor"`,
   `edit_script.rs` `"script-editor"`)~~ — **done** (2026-09-06). Each window
   carries its own `NotecardEditorState` / `ScriptEditorState` (source, baseline,

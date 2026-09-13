@@ -4,14 +4,27 @@
 //! (`floater_avatar_picker.xml`), the dialog behind Share, Pay, group
 //! invites and teleport offers.
 //!
-//! # Reusable by requester tag
+//! # Reusable by requesting control
 //!
-//! A feature opens the picker with [`OpenAvatarPicker`] carrying its own
-//! `requester` tag; when the user confirms, the picker emits
-//! [`AvatarPicked`] with the same tag, and only the requesting feature acts
-//! on it — the same out-of-band shape as the context-menu targets. The first
-//! consumer is the inventory context menu's **Share** entry
+//! A feature opens the picker with [`OpenAvatarPicker`] naming the control that
+//! asked — its Add / Share / Kick button; when the user confirms, the picker
+//! emits [`AvatarPicked`] naming that same control, and only the widget that
+//! asked acts on it — the same out-of-band shape as the context-menu targets.
+//! The first consumer is the inventory context menu's **Share** entry
 //! (`crate::inventory_actions`).
+//!
+//! # One window per control, and nothing remembered
+//!
+//! This is a **keyed** floater, keyed by the opening window and the field
+//! together ([`picker_identity`]). It used to be a singleton with a single
+//! `requester` slot, which two windows wanting a resident at once quietly
+//! fought over: the second open overwrote the first's claim and the first's
+//! confirmed pick was dropped. Two About Region windows — one per region, which
+//! is the point of keying that floater — are exactly that situation.
+//!
+//! A keyed instance is transient, so nothing here is persisted and every piece
+//! of per-window state is a component on the window root: closing it, or the
+//! window that opened it ([`FloaterOwner`]), ends it outright.
 //!
 //! # One resident or several
 //!
@@ -52,9 +65,12 @@ use sl_client_bevy::{
     Uuid,
 };
 
-use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
+use crate::floater::{
+    Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterOp, FloaterOwner, FloaterSpec,
+    FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater, picker_identity,
+};
 use crate::i18n::Translated;
-use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use crate::ui::{UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab_strip};
 use crate::world_api::AvatarState;
@@ -121,11 +137,13 @@ struct PickerRow {
     username: String,
 }
 
-/// The picker's live state.
-#[derive(Resource, Debug, Default)]
+/// One picker window's live state — a component on the window root, so it dies
+/// with the instance and the next open starts from an empty list.
+#[derive(Component, Debug, Default)]
 pub(crate) struct AvatarPickerState {
-    /// Who asked for the picker (None while closed).
-    requester: Option<&'static str>,
+    /// The control this window is answering — the button that opened it.
+    /// `None` once a pick has been confirmed or cancelled.
+    requester: Option<Entity>,
     /// The active source tab.
     tab: PickerTab,
     /// The current rows, top to bottom.
@@ -141,6 +159,10 @@ pub(crate) struct AvatarPickerState {
     pending_query: Option<QueryId>,
     /// Bumped whenever `rows` / `selected` change, driving the list rebuild.
     revision: u64,
+    /// The revision the visible list was last built from, so a rebuild happens
+    /// exactly when something it shows moved. Per window, unlike the `Local`
+    /// this replaces, which could only ever track one.
+    built_revision: Option<u64>,
     /// The agent a **by-uuid** search is waiting on, so its `GetDisplayNames`
     /// reply — which carries no query id — is recognised as this search's
     /// answer and not as some other feature's name lookup.
@@ -219,11 +241,9 @@ impl AvatarPickerState {
     }
 }
 
-/// Entity handles for the picker's parts.
-#[derive(Resource)]
+/// One picker window's parts.
+#[derive(Component)]
 pub(crate) struct AvatarPickerUi {
-    /// The floater root (carries [`UiPanelShown`]).
-    panel: Entity,
     /// The source tab strip.
     tab_strip: Entity,
     /// The search text field.
@@ -239,19 +259,20 @@ pub(crate) struct AvatarPickerUi {
 pub struct AvatarPickerPlugin;
 
 impl Plugin for AvatarPickerPlugin {
-    /// Register the messages, state and systems, and spawn the floater.
+    /// Register the messages and systems. Nothing is spawned up front: a keyed
+    /// window exists only while a resident is being picked.
     fn build(&self, app: &mut App) {
-        app.init_resource::<AvatarPickerState>()
-            .add_message::<OpenAvatarPicker>()
+        app.add_message::<OpenAvatarPicker>()
             .add_message::<AvatarPicked>()
-            .add_systems(
-                Startup,
-                spawn_picker_floater.after(UiScaffoldSystems::SpawnRoot),
-            )
             .add_systems(
                 Update,
                 (
-                    handle_open_requests,
+                    // After the manager's command pass — see `FloaterSystems`:
+                    // the click on an Add button also raises the window it was
+                    // clicked in, and the later raise wins the z-order.
+                    handle_open_requests
+                        .after(FloaterSystems::Commands)
+                        .after(UiScaffoldSystems::SpawnRoot),
                     bridge_picker_tabs,
                     ingest_picker_replies,
                     ingest_picker_id_lookups,
@@ -283,10 +304,9 @@ pub fn avatar_picker_floater_spec() -> FloaterSpec {
     }
 }
 
-/// Spawn the picker floater (hidden): the source tabs, the search row, the
+/// Build one picker window's content: the source tabs, the search row, the
 /// result list, and the OK / Cancel row.
-fn spawn_picker_floater(mut commands: Commands, root: Res<UiRoot>) {
-    let handle = spawn_floater(&mut commands, root.0, avatar_picker_floater_spec());
+fn build_picker_content(commands: &mut Commands, handle: &FloaterHandle) -> AvatarPickerUi {
     commands
         .entity(handle.title_text)
         .insert(Translated::new("avatar-picker-title"));
@@ -298,7 +318,7 @@ fn spawn_picker_floater(mut commands: Commands, root: Res<UiRoot>) {
         "avatar-picker-tab-near-me".to_owned(),
     ];
     let tab_strip = spawn_tab_strip(
-        &mut commands,
+        commands,
         content,
         &TabSpec {
             element: "avatar-picker-tabs",
@@ -324,7 +344,7 @@ fn spawn_picker_floater(mut commands: Commands, root: Res<UiRoot>) {
         ))
         .id();
     let search_field = crate::ui_text_input::spawn_text_input(
-        &mut commands,
+        commands,
         search_row,
         &crate::ui_text_input::TextInputSpec {
             font_size: PICKER_FONT_SIZE,
@@ -336,21 +356,12 @@ fn spawn_picker_floater(mut commands: Commands, root: Res<UiRoot>) {
             )
         },
     );
-    let go = spawn_picker_button(&mut commands, search_row, "avatar-picker-go", 3);
-    commands.entity(go).observe(
-        |press: On<Pointer<Press>>,
-         ui: Option<Res<AvatarPickerUi>>,
-         fields: Query<&EditableText>,
-         mut state: ResMut<AvatarPickerState>,
-         mut commands: MessageWriter<SlCommand>| {
-            if press.button != PointerButton::Primary {
-                return;
-            }
-            let Some(ui) = ui else {
-                return;
-            };
-            send_search(&ui, &fields, &mut state, &mut commands);
-        },
+    let _go = spawn_picker_button(
+        commands,
+        search_row,
+        "avatar-picker-go",
+        PickerButton::Go,
+        3,
     );
 
     // The result list: a fixed-height clipped column the rebuild fills.
@@ -375,60 +386,108 @@ fn spawn_picker_floater(mut commands: Commands, root: Res<UiRoot>) {
             ChildOf(content),
         ))
         .id();
-    let ok = spawn_picker_button(&mut commands, buttons, "avatar-picker-ok", 4);
-    commands.entity(ok).observe(
-        |press: On<Pointer<Press>>,
-         ui: Option<Res<AvatarPickerUi>>,
-         mut state: ResMut<AvatarPickerState>,
-         mut panels: Query<&mut UiPanelShown>,
-         mut picked: MessageWriter<AvatarPicked>| {
-            if press.button != PointerButton::Primary {
-                return;
-            }
-            let Some(ui) = ui else {
-                return;
-            };
-            confirm_pick(&ui, &mut state, &mut panels, &mut picked);
-        },
-    );
-    let cancel = spawn_picker_button(&mut commands, buttons, "avatar-picker-cancel", 5);
-    commands.entity(cancel).observe(
-        |press: On<Pointer<Press>>,
-         ui: Option<Res<AvatarPickerUi>>,
-         mut state: ResMut<AvatarPickerState>,
-         mut panels: Query<&mut UiPanelShown>| {
-            if press.button != PointerButton::Primary {
-                return;
-            }
-            let Some(ui) = ui else {
-                return;
-            };
-            state.requester = None;
-            if let Ok(mut shown) = panels.get_mut(ui.panel) {
-                shown.0 = false;
-            }
-        },
+    let _ok = spawn_picker_button(commands, buttons, "avatar-picker-ok", PickerButton::Ok, 4);
+    let _cancel = spawn_picker_button(
+        commands,
+        buttons,
+        "avatar-picker-cancel",
+        PickerButton::Cancel,
+        5,
     );
 
-    commands.insert_resource(AvatarPickerUi {
-        panel: handle.root,
+    AvatarPickerUi {
         tab_strip,
         search_field,
         search_row,
         list,
-    });
+    }
 }
 
-/// Spawn one bordered translated button.
+/// Which of a window's buttons a node is — a component rather than a closure
+/// per button, because every one of them has to find the window it was pressed
+/// in ([`host_floater`]) and a captured resource handle cannot.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+enum PickerButton {
+    /// Run the name search for the field's current text.
+    Go,
+    /// Confirm the selection.
+    Ok,
+    /// Close without picking.
+    Cancel,
+}
+
+/// Act on a press of one of a window's buttons, in the window it was pressed in.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy observer's parameters are its injected world access: the press, the \
+              button's action, the window it lives in (found through the parent chain), the \
+              search field it reads, and the three channels a press can write to"
+)]
+fn on_picker_button(
+    press: On<Pointer<Press>>,
+    buttons: Query<&PickerButton>,
+    mut windows: Query<(&mut AvatarPickerState, &AvatarPickerUi)>,
+    parents: Query<&ChildOf>,
+    floaters: Query<(Entity, &Floater)>,
+    fields: Query<&EditableText>,
+    mut picked: MessageWriter<AvatarPicked>,
+    mut chrome: MessageWriter<FloaterCommand>,
+    mut sl: MessageWriter<SlCommand>,
+) {
+    if press.button != PointerButton::Primary {
+        return;
+    }
+    let Ok(button) = buttons.get(press.entity) else {
+        return;
+    };
+    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+        return;
+    };
+    let Ok((mut state, ui)) = windows.get_mut(window) else {
+        return;
+    };
+    match *button {
+        PickerButton::Go => send_search(ui, &fields, &mut state, &mut sl),
+        PickerButton::Ok => {
+            let Some(requester) = state.requester else {
+                return;
+            };
+            let picks = state.picks();
+            if picks.is_empty() {
+                return;
+            }
+            picked.write(AvatarPicked { requester, picks });
+            // Clearing the requester first is what stops a close from being
+            // read as an unanswered one; the close then ends the window, since
+            // a keyed instance is despawned by it.
+            state.requester = None;
+            chrome.write(FloaterCommand {
+                floater: window,
+                op: FloaterOp::Close,
+            });
+        }
+        PickerButton::Cancel => {
+            state.requester = None;
+            chrome.write(FloaterCommand {
+                floater: window,
+                op: FloaterOp::Close,
+            });
+        }
+    }
+}
+
+/// Spawn one bordered translated button, tagged with what it does.
 fn spawn_picker_button(
     commands: &mut Commands,
     parent: Entity,
     label_key: &'static str,
+    action: PickerButton,
     tab_index: i32,
 ) -> Entity {
     commands
         .spawn((
             Button,
+            action,
             TabIndex(tab_index),
             Node {
                 padding: UiRect::axes(Val::Px(10.0), Val::Px(3.0)),
@@ -441,6 +500,7 @@ fn spawn_picker_button(
             Name::new(format!("avatar-picker:{label_key}")),
             ChildOf(parent),
         ))
+        .observe(on_picker_button)
         .with_child((
             Text::default(),
             Translated::new(label_key),
@@ -488,76 +548,81 @@ fn send_search(
     commands.write(SlCommand(Command::AvatarPickerRequest { query_id, name }));
 }
 
-/// Confirm the selection: emit [`AvatarPicked`] to the requester and close.
-fn confirm_pick(
-    ui: &AvatarPickerUi,
-    state: &mut AvatarPickerState,
-    panels: &mut Query<&mut UiPanelShown>,
-    picked: &mut MessageWriter<AvatarPicked>,
-) {
-    let Some(requester) = state.requester else {
-        return;
-    };
-    let picks = state.picks();
-    if picks.is_empty() {
-        return;
-    }
-    picked.write(AvatarPicked { requester, picks });
-    state.requester = None;
-    if let Ok(mut shown) = panels.get_mut(ui.panel) {
-        shown.0 = false;
-    }
-}
-
-/// Open the picker when a feature asks for it.
+/// Open (or re-open) the picker window for whoever asked.
+///
+/// Keyed by the **opening window and the field together**: the button that
+/// asked gets its own window, a second press on it finds that window rather
+/// than stacking another, and the same button in a second instance of the
+/// opening window gets a picker of its own.
 fn handle_open_requests(
     mut opens: MessageReader<OpenAvatarPicker>,
-    ui: Option<Res<AvatarPickerUi>>,
-    mut state: ResMut<AvatarPickerState>,
-    mut panels: Query<&mut UiPanelShown>,
+    mut floaters: KeyedFloaters,
+    mut states: Query<&mut AvatarPickerState>,
+    parents: Query<&ChildOf>,
+    openers: Query<(Entity, &Floater)>,
+    mut commands: Commands,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    for open in opens.read() {
-        state.requester = Some(open.requester);
-        state.allow_multiple = open.allow_multiple;
-        state.searched = false;
-        state.set_rows(Vec::new());
-        if let Ok(mut shown) = panels.get_mut(ui.panel) {
-            shown.0 = true;
+    let requests: Vec<OpenAvatarPicker> = opens.read().cloned().collect();
+    for open in requests {
+        let (owner, key) = picker_identity(open.requester, &open.field, &parents, &openers);
+        let opened = floaters.open(avatar_picker_floater_spec(), key);
+        match opened {
+            KeyedFloaterOpen::Spawned(handle) => {
+                let ui = build_picker_content(&mut commands, &handle);
+                let state = AvatarPickerState {
+                    requester: Some(open.requester),
+                    allow_multiple: open.allow_multiple,
+                    ..AvatarPickerState::default()
+                };
+                // Seeded here rather than after the insert: the components only
+                // reach the world when this frame's commands flush, so a window
+                // spawned now is not queryable yet.
+                commands.entity(handle.root).insert((state, ui));
+                if let Some(owner) = owner {
+                    commands.entity(handle.root).insert(FloaterOwner(owner));
+                }
+            }
+            KeyedFloaterOpen::Existing(window) => {
+                if let Ok(mut state) = states.get_mut(window) {
+                    state.requester = Some(open.requester);
+                    state.allow_multiple = open.allow_multiple;
+                    state.searched = false;
+                    state.set_rows(Vec::new());
+                }
+            }
         }
     }
 }
 
-/// Track the tab strip's active tab into the state.
+/// Track each window's tab strip into that window's state.
 fn bridge_picker_tabs(
-    ui: Option<Res<AvatarPickerUi>>,
-    strips: Query<&TabStrip, Changed<TabStrip>>,
-    mut state: ResMut<AvatarPickerState>,
+    mut windows: Query<(&mut AvatarPickerState, &AvatarPickerUi)>,
+    strips: Query<&TabStrip>,
     mut nodes: Query<&mut Node>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    let Ok(strip) = strips.get(ui.tab_strip) else {
-        return;
-    };
-    let Some(tab) = TAB_ORDER.get(strip.active).copied() else {
-        return;
-    };
-    if state.tab != tab {
-        state.tab = tab;
-        state.searched = false;
-        state.set_rows(Vec::new());
-    }
-    // The search row only applies to the Search tab.
-    if let Ok(mut node) = nodes.get_mut(ui.search_row) {
-        node.display = if tab == PickerTab::Search {
-            Display::Flex
-        } else {
-            Display::None
+    for (mut state, ui) in &mut windows {
+        let Ok(strip) = strips.get(ui.tab_strip) else {
+            continue;
         };
+        let Some(tab) = TAB_ORDER.get(strip.active).copied() else {
+            continue;
+        };
+        if state.tab != tab {
+            state.tab = tab;
+            state.searched = false;
+            state.set_rows(Vec::new());
+        }
+        // The search row only applies to the Search tab.
+        if let Ok(mut node) = nodes.get_mut(ui.search_row) {
+            let wanted = if tab == PickerTab::Search {
+                Display::Flex
+            } else {
+                Display::None
+            };
+            if node.display != wanted {
+                node.display = wanted;
+            }
+        }
     }
 }
 
@@ -575,16 +640,22 @@ fn picker_label(result: &AvatarPickerResult) -> String {
     }
 }
 
-/// Fold a search reply into the rows (ignoring stale query ids).
-fn ingest_picker_replies(mut events: MessageReader<SlEvent>, mut state: ResMut<AvatarPickerState>) {
-    for event in events.read() {
+/// Fold a search reply into the rows of the window that asked — the one whose
+/// `pending_query` the reply's id matches, since every window mints its own.
+fn ingest_picker_replies(
+    mut events: MessageReader<SlEvent>,
+    mut windows: Query<&mut AvatarPickerState>,
+) {
+    let frame: Vec<SlEvent> = events.read().cloned().collect();
+    for event in &frame {
         if let SlSessionEvent::AvatarPickerReply { query_id, results } = &event.0 {
-            let expected = state
-                .pending_query
-                .is_some_and(|pending| pending.get() == *query_id);
-            if !expected {
+            let Some(mut state) = windows.iter_mut().find(|state| {
+                state
+                    .pending_query
+                    .is_some_and(|pending| pending.get() == *query_id)
+            }) else {
                 continue;
-            }
+            };
             state.pending_query = None;
             // A nil id with no name is the legacy message's "no matches"
             // sentinel; it must not become a row that looks pickable.
@@ -608,196 +679,209 @@ fn ingest_picker_replies(mut events: MessageReader<SlEvent>, mut state: ResMut<A
 /// resolve comes back flagged `missing`, which is a "not found", not a row.
 fn ingest_picker_id_lookups(
     mut events: MessageReader<SlEvent>,
-    mut state: ResMut<AvatarPickerState>,
+    mut windows: Query<&mut AvatarPickerState>,
 ) {
-    for event in events.read() {
+    let frame: Vec<SlEvent> = events.read().cloned().collect();
+    for event in &frame {
         let SlSessionEvent::DisplayNames(names) = &event.0 else {
             continue;
         };
-        let Some(agent) = state.pending_agent else {
-            continue;
-        };
-        let Some(record) = names.iter().find(|name| name.id == agent) else {
-            continue;
-        };
-        state.pending_agent = None;
-        state.searched = true;
-        if record.missing {
-            state.set_rows(Vec::new());
-            continue;
+        // Every window waiting on this id takes it: two windows asked about the
+        // same resident is two windows that both wanted the answer, and the
+        // reply carries no query id to tell them apart by.
+        for mut state in &mut windows {
+            let Some(agent) = state.pending_agent else {
+                continue;
+            };
+            let Some(record) = names.iter().find(|name| name.id == agent) else {
+                continue;
+            };
+            state.pending_agent = None;
+            state.searched = true;
+            if record.missing {
+                state.set_rows(Vec::new());
+                continue;
+            }
+            let label = if record.display_name.is_empty() {
+                format!("{} {}", record.legacy_first_name, record.legacy_last_name)
+                    .trim()
+                    .to_owned()
+            } else {
+                record.display_name.clone()
+            };
+            state.set_rows(vec![PickerRow {
+                agent,
+                label,
+                username: record.username.clone(),
+            }]);
         }
-        let label = if record.display_name.is_empty() {
-            format!("{} {}", record.legacy_first_name, record.legacy_last_name)
-                .trim()
-                .to_owned()
-        } else {
-            record.display_name.clone()
-        };
-        state.set_rows(vec![PickerRow {
-            agent,
-            label,
-            username: record.username.clone(),
-        }]);
     }
 }
 
-/// Keep the Friends / Near Me tabs' rows current from their local sources.
+/// Keep every open window's Friends / Near Me rows current from their local
+/// sources.
 fn refresh_local_sources(
-    ui: Option<Res<AvatarPickerUi>>,
-    panels: Query<&UiPanelShown>,
+    mut windows: Query<&mut AvatarPickerState>,
     friends: Res<FriendsModel>,
     avatars: Res<AvatarState>,
     identity: Option<Res<SlIdentity>>,
     transforms: Query<&GlobalTransform>,
-    mut state: ResMut<AvatarPickerState>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    // Only while open, and only for the locally-sourced tabs.
-    let open = panels.get(ui.panel).is_ok_and(|shown| shown.0);
-    if !open {
-        return;
-    }
+    // A keyed instance exists only while it is open, so there is no closed
+    // window to skip — the query itself is the gate.
     let own = identity.and_then(|identity| identity.agent_id);
-    let rows: Vec<PickerRow> = match state.tab {
-        PickerTab::Search => return,
-        PickerTab::Friends => friends
-            .roster()
-            .into_iter()
-            .map(|(agent, name)| PickerRow {
-                agent,
-                label: name,
-                username: String::new(),
-            })
-            .collect(),
-        PickerTab::NearMe => {
-            let own_position = own
-                .and_then(|agent| avatars.root_entity_of(agent))
-                .and_then(|entity| transforms.get(entity).ok())
-                .map(|transform| transform.translation());
-            let mut with_distance: Vec<(f32, PickerRow)> = avatars
-                .known_agents()
+    for mut state in &mut windows {
+        let rows: Vec<PickerRow> = match state.tab {
+            PickerTab::Search => continue,
+            PickerTab::Friends => friends
+                .roster()
                 .into_iter()
-                .filter(|(agent, _entity)| Some(*agent) != own)
-                .map(|(agent, entity)| {
-                    let distance = match (
-                        own_position,
-                        transforms.get(entity).ok().map(|t| t.translation()),
-                    ) {
-                        (Some(own_at), Some(at)) => own_at.distance(at),
-                        _unknown => f32::MAX,
-                    };
-                    (
-                        distance,
-                        PickerRow {
-                            agent,
-                            label: avatars.label_text(agent),
-                            username: String::new(),
-                        },
-                    )
+                .map(|(agent, name)| PickerRow {
+                    agent,
+                    label: name,
+                    username: String::new(),
                 })
-                .collect();
-            with_distance.sort_by(|a, b| a.0.total_cmp(&b.0));
-            with_distance.into_iter().map(|(_d, row)| row).collect()
+                .collect(),
+            PickerTab::NearMe => {
+                let own_position = own
+                    .and_then(|agent| avatars.root_entity_of(agent))
+                    .and_then(|entity| transforms.get(entity).ok())
+                    .map(|transform| transform.translation());
+                let mut with_distance: Vec<(f32, PickerRow)> = avatars
+                    .known_agents()
+                    .into_iter()
+                    .filter(|(agent, _entity)| Some(*agent) != own)
+                    .map(|(agent, entity)| {
+                        let distance = match (
+                            own_position,
+                            transforms.get(entity).ok().map(|t| t.translation()),
+                        ) {
+                            (Some(own_at), Some(at)) => own_at.distance(at),
+                            _unknown => f32::MAX,
+                        };
+                        (
+                            distance,
+                            PickerRow {
+                                agent,
+                                label: avatars.label_text(agent),
+                                username: String::new(),
+                            },
+                        )
+                    })
+                    .collect();
+                with_distance.sort_by(|a, b| a.0.total_cmp(&b.0));
+                with_distance.into_iter().map(|(_d, row)| row).collect()
+            }
+        };
+        // Write-guarded: replacing the rows every frame would defeat the
+        // revision-driven rebuild.
+        if rows != state.rows {
+            state.set_rows_keeping_selection(rows);
         }
-    };
-    // Write-guarded: replacing the rows every frame would defeat the
-    // revision-driven rebuild.
-    if rows != state.rows {
-        state.set_rows_keeping_selection(rows);
     }
 }
 
-/// Rebuild the visible list whenever the state's revision moved: despawn the
-/// old rows and spawn one clickable row per result.
+/// Rebuild a window's visible list whenever its revision moved: despawn the old
+/// rows and spawn one clickable row per result.
+///
+/// The "already built this" mark is per window ([`AvatarPickerState`]'s
+/// `built_revision`) rather than a system `Local`, which could only ever track
+/// one of them — with two windows up, a `Local` would suppress the second one's
+/// rebuild whenever the two revisions happened to agree.
 fn rebuild_picker_list(
-    ui: Option<Res<AvatarPickerUi>>,
-    state: Res<AvatarPickerState>,
-    mut last_revision: Local<Option<u64>>,
+    mut windows: Query<(&mut AvatarPickerState, &AvatarPickerUi)>,
     children: Query<&Children>,
     mut commands: Commands,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    if *last_revision == Some(state.revision) {
-        return;
-    }
-    *last_revision = Some(state.revision);
-    if let Ok(existing) = children.get(ui.list) {
-        for child in existing {
-            commands.entity(*child).despawn();
+    for (mut state, ui) in &mut windows {
+        if state.built_revision == Some(state.revision) {
+            continue;
         }
-    }
-    // A search that answered nobody says so. An empty list is otherwise
-    // indistinguishable from a search that never ran — the reference shows a
-    // "not found" row for exactly this reason.
-    if state.rows.is_empty() && state.searched && state.tab == PickerTab::Search {
-        commands.spawn((
-            Text::default(),
-            Translated::new(NOT_FOUND_KEY),
-            UiFont::Sans.at(PICKER_FONT_SIZE),
-            TextColor(USERNAME_COLOR),
-            Node {
-                padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
-                ..default()
-            },
-            Pickable::IGNORE,
-            Name::new("avatar-picker-not-found"),
-            ChildOf(ui.list),
-        ));
-    }
-    for (index, row_data) in state.rows.iter().enumerate() {
-        let selected = state.selected.contains(&index);
-        commands
-            .spawn((
-                Button,
+        state.built_revision = Some(state.revision);
+        if let Ok(existing) = children.get(ui.list) {
+            for child in existing {
+                commands.entity(*child).despawn();
+            }
+        }
+        // A search that answered nobody says so. An empty list is otherwise
+        // indistinguishable from a search that never ran — the reference shows a
+        // "not found" row for exactly this reason.
+        if state.rows.is_empty() && state.searched && state.tab == PickerTab::Search {
+            commands.spawn((
+                Text::default(),
+                Translated::new(NOT_FOUND_KEY),
+                UiFont::Sans.at(PICKER_FONT_SIZE),
+                TextColor(USERNAME_COLOR),
                 Node {
                     padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
-                    align_items: AlignItems::Center,
-                    ..row(Val::Px(8.0))
+                    ..default()
                 },
-                BackgroundColor(if selected {
-                    SELECTED_ROW_BACKGROUND
-                } else {
-                    Color::NONE
-                }),
-                Pickable::default(),
-                Name::new("avatar-picker-row"),
+                Pickable::IGNORE,
+                Name::new("avatar-picker-not-found"),
                 ChildOf(ui.list),
-            ))
-            .observe(
-                move |press: On<Pointer<Press>>,
-                      keyboard: Res<ButtonInput<KeyCode>>,
-                      mut state: ResMut<AvatarPickerState>| {
-                    if press.button != PointerButton::Primary {
-                        return;
-                    }
-                    let ctrl = keyboard.pressed(KeyCode::ControlLeft)
-                        || keyboard.pressed(KeyCode::ControlRight);
-                    let shift = keyboard.pressed(KeyCode::ShiftLeft)
-                        || keyboard.pressed(KeyCode::ShiftRight);
-                    state.select(index, ctrl, shift);
-                },
-            )
-            .with_children(|row| {
-                row.spawn((
-                    Text::new(row_data.label.clone()),
-                    UiFont::Sans.at(PICKER_FONT_SIZE),
-                    TextColor(LABEL_COLOR),
-                    Pickable::IGNORE,
-                ));
-                // The username column, only where the source knows one.
-                if !row_data.username.is_empty() {
+            ));
+        }
+        for (index, row_data) in state.rows.iter().enumerate() {
+            let selected = state.selected.contains(&index);
+            commands
+                .spawn((
+                    Button,
+                    Node {
+                        padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
+                        align_items: AlignItems::Center,
+                        ..row(Val::Px(8.0))
+                    },
+                    BackgroundColor(if selected {
+                        SELECTED_ROW_BACKGROUND
+                    } else {
+                        Color::NONE
+                    }),
+                    Pickable::default(),
+                    Name::new("avatar-picker-row"),
+                    ChildOf(ui.list),
+                ))
+                .observe(
+                    move |press: On<Pointer<Press>>,
+                          keyboard: Res<ButtonInput<KeyCode>>,
+                          mut windows: Query<&mut AvatarPickerState>,
+                          parents: Query<&ChildOf>,
+                          floaters: Query<(Entity, &Floater)>| {
+                        if press.button != PointerButton::Primary {
+                            return;
+                        }
+                        // The row's own window, not "the" picker: two are up when
+                        // two instanced windows are each picking a resident.
+                        let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+                            return;
+                        };
+                        let Ok(mut state) = windows.get_mut(window) else {
+                            return;
+                        };
+                        let ctrl = keyboard.pressed(KeyCode::ControlLeft)
+                            || keyboard.pressed(KeyCode::ControlRight);
+                        let shift = keyboard.pressed(KeyCode::ShiftLeft)
+                            || keyboard.pressed(KeyCode::ShiftRight);
+                        state.select(index, ctrl, shift);
+                    },
+                )
+                .with_children(|row| {
                     row.spawn((
-                        Text::new(row_data.username.clone()),
+                        Text::new(row_data.label.clone()),
                         UiFont::Sans.at(PICKER_FONT_SIZE),
-                        TextColor(USERNAME_COLOR),
+                        TextColor(LABEL_COLOR),
                         Pickable::IGNORE,
                     ));
-                }
-            });
+                    // The username column, only where the source knows one.
+                    if !row_data.username.is_empty() {
+                        row.spawn((
+                            Text::new(row_data.username.clone()),
+                            UiFont::Sans.at(PICKER_FONT_SIZE),
+                            TextColor(USERNAME_COLOR),
+                            Pickable::IGNORE,
+                        ));
+                    }
+                });
+        }
     }
 }
 

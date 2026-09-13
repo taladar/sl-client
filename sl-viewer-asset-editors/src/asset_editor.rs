@@ -20,10 +20,12 @@
 //! A close is otherwise irreversible: a keyed editor window is **despawned** by
 //! the floater manager's close pass, so by the time anything could ask "save
 //! first?" the text is gone. An `UnsavedWork` component arms the manager's
-//! [`ConfirmBeforeClose`] guard while a window is holding edits, turning its
-//! close into a [`FloaterCloseRequested`] this module answers with the
-//! reference's `SaveChanges` prompt (Save / Don't Save / Cancel — the reference
-//! `LLPreviewNotecard::handleSaveChangesDialog`).
+//! [`FloaterCloseGuard`] while a window is holding edits, turning its close into
+//! a [`FloaterCloseRequested`] this module answers with the reference's
+//! `SaveChanges` prompt (Save / Don't Save / Cancel — the reference
+//! `LLPreviewNotecard::handleSaveChangesDialog`). **Don't Save** answers with
+//! the unrefusable [`FloaterOp::CloseNow`], so the guard never has to be taken
+//! down to let a deliberate discard through.
 //!
 //! **Save** and the Save *button* go the same way round: both write
 //! [`SaveEditorWindow`], so the confirmation cannot save differently from the
@@ -34,7 +36,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 
 use crate::floater::{
-    ConfirmBeforeClose, Floater, FloaterCloseRequested, FloaterCommand, FloaterOp, FloaterSystems,
+    Floater, FloaterCloseGuard, FloaterCloseRequested, FloaterCommand, FloaterOp, FloaterSystems,
     host_floater,
 };
 use crate::i18n::Translated;
@@ -233,16 +235,6 @@ pub(crate) struct UnsavedWork {
     /// closes itself the moment the work stops being unsaved, and stays open
     /// (showing the failure) if the save is refused.
     pub close_when_saved: bool,
-    /// Set when the resident has answered **Don't Save**: the work is being
-    /// given up on purpose, so the guard stays down behind the close already on
-    /// its way.
-    ///
-    /// A flag rather than simply clearing [`dirty`](Self::dirty), because the
-    /// work has not stopped being unsaved and the tracker would measure it as
-    /// unsaved again on the very next frame — re-arming the guard in time to
-    /// turn the resident's own answer into the same question a second time,
-    /// for ever.
-    pub discarded: bool,
 }
 
 /// The live text buffer an editor window's dirtiness is measured against.
@@ -314,7 +306,7 @@ fn track_edited_text(
     }
 }
 
-/// Arm (or disarm) each guarded window's [`ConfirmBeforeClose`] from whether it
+/// Arm (or disarm) each guarded window's [`FloaterCloseGuard`] from whether it
 /// is holding unsaved work.
 ///
 /// Only on a change: a guard rewritten every frame would mark the component
@@ -325,9 +317,9 @@ fn arm_close_guards(
     mut commands: Commands,
 ) {
     for (window, unsaved) in &windows {
-        commands.entity(window).insert(ConfirmBeforeClose {
-            armed: unsaved.dirty && !unsaved.discarded,
-        });
+        commands
+            .entity(window)
+            .insert(FloaterCloseGuard::new(unsaved.dirty));
     }
 }
 
@@ -339,10 +331,7 @@ fn ask_before_discarding(
     mut notify: MessageWriter<ShowNotification>,
 ) {
     for request in requests.read() {
-        if !windows
-            .get(request.floater)
-            .is_ok_and(|work| work.dirty && !work.discarded)
-        {
+        if !windows.get(request.floater).is_ok_and(|work| work.dirty) {
             continue;
         }
         if pending.0.is_some() {
@@ -383,14 +372,15 @@ fn answer_discard(
                 work.close_when_saved = true;
                 saves.write(SaveEditorWindow { window });
             }
-            // Don't Save: the work is given up deliberately, so the guard comes
-            // down and the same close goes back through.
+            // Don't Save: the work is given up deliberately, so the close goes
+            // out **unrefusable**. Taking the guard down instead would not
+            // work — the work has not stopped being unsaved, and the tracker
+            // would re-arm the guard in time to ask the same question again.
             Some("No") => {
-                work.discarded = true;
                 work.close_when_saved = false;
                 floater_commands.write(FloaterCommand {
                     floater: window,
-                    op: FloaterOp::Close,
+                    op: FloaterOp::CloseNow,
                 });
             }
             // Cancel, or a dismissal with no choice: nothing happens, which is
@@ -405,18 +395,22 @@ fn answer_discard(
 /// The editor clears `dirty` when a save succeeds — for a text editor by moving
 /// [`EditedText::saved`] onto what was written — so "no longer dirty" is the
 /// signal, and a refused save (which changes neither) simply never fires it.
+///
+/// The close is [`FloaterOp::CloseNow`] because the guard is disarmed by
+/// [`arm_close_guards`] a frame behind the dirty flag, and a refusable close in
+/// that window would ask about work that has just been saved.
 fn close_saved_windows(
     mut windows: Query<(Entity, &mut UnsavedWork)>,
     mut floater_commands: MessageWriter<FloaterCommand>,
 ) {
     for (window, mut work) in &mut windows {
-        if !work.close_when_saved || (work.dirty && !work.discarded) {
+        if !work.close_when_saved || work.dirty {
             continue;
         }
         work.close_when_saved = false;
         floater_commands.write(FloaterCommand {
             floater: window,
-            op: FloaterOp::Close,
+            op: FloaterOp::CloseNow,
         });
     }
 }
@@ -424,7 +418,7 @@ fn close_saved_windows(
 #[cfg(test)]
 mod tests {
     use super::{AssetEditorScaffoldPlugin, PendingDiscard, SaveEditorWindow, UnsavedWork};
-    use crate::floater::{ConfirmBeforeClose, FloaterCommand, FloaterOp, FloaterPlugin};
+    use crate::floater::{FloaterCloseGuard, FloaterCommand, FloaterOp, FloaterPlugin};
     use crate::notifications::{
         NotificationId, NotificationManager, NotificationResponse, ShowNotification,
     };
@@ -465,7 +459,6 @@ mod tests {
             UnsavedWork {
                 dirty: true,
                 close_when_saved: false,
-                discarded: false,
             },
         ));
         app.update();
@@ -552,7 +545,7 @@ mod tests {
         let (mut app, window) = guarded_app();
         assert_eq!(
             app.world()
-                .get::<ConfirmBeforeClose>(window)
+                .get::<FloaterCloseGuard>(window)
                 .map(|guard| guard.armed),
             Some(true),
             "unsaved work must arm the manager's guard"

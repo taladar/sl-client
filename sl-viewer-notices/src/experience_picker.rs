@@ -3,27 +3,32 @@
 //! (`floater_experience_search.xml`), the dialog behind every estate and parcel
 //! experience list's **Add** button.
 //!
-//! # Reusable by requester tag
+//! # Reusable by requesting control
 //!
 //! A feature opens the picker with [`sl_viewer_world_api::OpenExperiencePicker`]
-//! carrying its own `requester` tag; when the user confirms, the picker emits
-//! [`sl_viewer_world_api::ExperiencePicked`] with the same tag, and only the
-//! requesting feature acts on it. That is the same out-of-band contract
-//! [`sl_viewer_world_api::OpenAvatarPicker`] already uses, so a list wanting an
-//! experience is written exactly like a list wanting a resident.
+//! naming the control that asked — its Add button; when the user confirms, the
+//! picker emits [`sl_viewer_world_api::ExperiencePicked`] naming that same
+//! control, and only the widget that asked acts on it. That is the same
+//! out-of-band contract [`sl_viewer_world_api::OpenAvatarPicker`] already uses,
+//! so a list wanting an experience is written exactly like a list wanting a
+//! resident.
 //!
 //! Only ever **one** experience per pick: the reference's estate lists open it
 //! with `allow_multiple` false and `close_on_select` true
 //! (`LLPanelExperienceListEditor::onAdd`), so a confirmed pick names one
 //! experience and ends the window.
 //!
-//! # One window per requester, and nothing remembered
+//! # One window per list *per window*, and nothing remembered
 //!
-//! This is a **keyed** floater ([`FloaterKey::subject`]), keyed by the requester
-//! tag: the list that asked gets its own window, a second Add on the same list
-//! raises the one it already has, and closing — or picking — ends that instance
-//! outright. The reference does the same and then some: every Add mints a fresh
-//! key (`mKey.generateNewID()`) and marks the previous picker dead.
+//! This is a **keyed** floater, keyed by the opening window and the list
+//! together ([`picker_identity`]): the list that asked gets its own picker, a
+//! second Add on the same list raises the one it already has, and **a second
+//! About Region window's Add on that same list gets a picker of its own** —
+//! which is the whole point of a window that opens per region. Closing — or
+//! picking — ends that instance outright, and so does closing the window that
+//! opened it ([`FloaterOwner`]). The reference does the same and then some:
+//! every Add mints a fresh key (`mKey.generateNewID()`) and marks the previous
+//! picker dead.
 //!
 //! Being subject-keyed is also what keeps it out of the persisted floater
 //! geometry ([`crate::floater`]'s `persist_id`): a transient dialog that
@@ -82,8 +87,8 @@ use crate::experience_search::{
 };
 use crate::experiences_floater::{SETTING_SEARCH_MATURITY, search_ceiling};
 use crate::floater::{
-    Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterKey, FloaterOp, FloaterSpec,
-    FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater,
+    Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterOp, FloaterOwner, FloaterSpec,
+    FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater, picker_identity,
 };
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::settings::ViewerSettings;
@@ -175,8 +180,8 @@ static PICKER_TABLE: TableSpec = TableSpec {
 /// window, and dies with it.
 #[derive(Component, Debug, Default)]
 struct ExperiencePickerState {
-    /// The tag of the feature this window is answering.
-    requester: Option<&'static str>,
+    /// The control this window is answering — the Add button that opened it.
+    requester: Option<Entity>,
     /// What this window's open will accept.
     filter: ExperiencePickerFilter,
     /// The current page's results, in reply order.
@@ -203,7 +208,7 @@ impl ExperiencePickerState {
     /// Reset to a fresh open for `requester` under `filter` — what an Add on an
     /// already-open window does, so the second open cannot confirm a row the
     /// first one's filter admitted.
-    fn restart(&mut self, requester: &'static str, filter: ExperiencePickerFilter) {
+    fn restart(&mut self, requester: Entity, filter: ExperiencePickerFilter) {
         self.requester = Some(requester);
         self.filter = filter;
         self.results.clear();
@@ -332,22 +337,24 @@ pub fn experience_picker_floater_spec() -> FloaterSpec {
 
 /// Open (or re-open) the picker window for whoever asked.
 ///
-/// Keyed by the requester tag: the list that asked gets its own window, and a
-/// second Add on that same list finds it rather than stacking another.
+/// Keyed by the **opening window and the list together**: the list that asked
+/// gets its own picker, a second Add on that same list finds it rather than
+/// stacking another, and a second instance of the opening window gets a picker
+/// of its own rather than restarting the first one's.
 fn open_experience_picker(
     mut opens: MessageReader<OpenExperiencePicker>,
     mut windows: KeyedFloaters,
     mut states: Query<&mut ExperiencePickerState>,
+    parents: Query<&ChildOf>,
+    openers: Query<(Entity, &Floater)>,
     settings: Option<Res<ViewerSettings>>,
     mut spawner: Commands,
 ) {
     let requests: Vec<OpenExperiencePicker> = opens.read().copied().collect();
     let rating = maturity_index(search_ceiling(settings.as_deref()));
     for open in requests {
-        let opened = windows.open(
-            experience_picker_floater_spec(),
-            FloaterKey::subject(&open.requester),
-        );
+        let (owner, key) = picker_identity(open.requester, open.field, &parents, &openers);
+        let opened = windows.open(experience_picker_floater_spec(), key);
         match opened {
             KeyedFloaterOpen::Spawned(handle) => {
                 let ui = build_picker_content(&mut spawner, &handle, rating);
@@ -362,6 +369,9 @@ fn open_experience_picker(
                 spawner
                     .entity(handle.root)
                     .insert((state, ExperiencePickerView::default(), ui));
+                if let Some(owner) = owner {
+                    spawner.entity(handle.root).insert(FloaterOwner(owner));
+                }
             }
             KeyedFloaterOpen::Existing(window) => {
                 if let Ok(mut state) = states.get_mut(window) {
@@ -1148,8 +1158,10 @@ mod tests {
     /// new request, whose filter may admit less.
     #[test]
     fn re_opening_restarts_the_search() {
+        let trusted_add = Entity::from_raw_u32(1).unwrap_or(Entity::PLACEHOLDER);
+        let blocked_add = Entity::from_raw_u32(2).unwrap_or(Entity::PLACEHOLDER);
         let mut state = ExperiencePickerState::default();
-        state.restart("trusted", ExperiencePickerFilter::Any);
+        state.restart(trusted_add, ExperiencePickerFilter::Any);
         state.query = "tour".to_owned();
         state.page = 3;
         state.results = vec![key(1), key(2)];
@@ -1158,8 +1170,8 @@ mod tests {
             has_previous_page: true,
         };
 
-        state.restart("blocked", ExperiencePickerFilter::GridScopedUnprivileged);
-        assert_eq!(state.requester, Some("blocked"));
+        state.restart(blocked_add, ExperiencePickerFilter::GridScopedUnprivileged);
+        assert_eq!(state.requester, Some(blocked_add));
         assert_eq!(state.filter, ExperiencePickerFilter::GridScopedUnprivileged);
         assert!(state.results.is_empty(), "a stale page must not survive");
         assert!(state.query.is_empty());

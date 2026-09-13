@@ -96,8 +96,8 @@ use crate::world_api::{AvatarPicked, OpenAvatarPicker};
 use crate::world_api::{ConversationKey, OpenConversation};
 use crate::world_api::{FriendsModel, OpenAddToContactSet};
 
-/// The tag the panel opens the shared avatar picker under, so only its own pick
-/// is consumed.
+/// The **field** name the panel opens the avatar picker under — which of this
+/// window's pickers it is (see `OpenAvatarPicker::field`).
 const PICKER_REQUESTER: &str = "contact-sets";
 
 /// The add-to-set floater's stable id (persistence, `SL_VIEWER_OPEN_FLOATER`).
@@ -1618,7 +1618,7 @@ fn on_panel_button_press(
                 // The reference's Add Avatar picker is a multi-picker: a set is
                 // exactly the sort of thing one files several people into at
                 // once.
-                pickers.write(OpenAvatarPicker::many(PICKER_REQUESTER));
+                pickers.write(OpenAvatarPicker::many(press.entity, PICKER_REQUESTER));
             }
         }
         ContactSetsButton::MoveMember => {
@@ -2256,15 +2256,19 @@ fn settle_contact_set_rename(
     target.0 = Some(wanted);
 }
 
-/// File the residents chosen in the shared avatar picker under the chosen set.
+/// File the residents chosen in this panel's avatar picker under the chosen
+/// set.
 fn handle_contact_set_picks(
     mut picks: MessageReader<AvatarPicked>,
+    buttons: Query<&ContactSetsButton>,
     view: Res<ContactSetsView>,
     sets: Res<ContactSets>,
     mut requests: MessageWriter<RequestContactSet>,
 ) {
     for pick in picks.read() {
-        if pick.requester != PICKER_REQUESTER {
+        // The pick names the button that opened the picker: another feature's
+        // pick reaches this system too, and is not this panel's.
+        if buttons.get(pick.requester) != Ok(&ContactSetsButton::AddResident) {
             continue;
         }
         if !is_real_set(&sets, &view.choice) {

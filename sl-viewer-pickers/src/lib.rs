@@ -1,9 +1,10 @@
 //! The viewer's chooser floaters.
 //!
-//! Two things the rest of the viewer asks for rather than implements: pick a
-//! resident ([`avatar_picker`]) and pick a texture or a render material
-//! ([`ui_texture_picker`]), the latter also owning the reusable swatch a
-//! caller parks in its own panel to show and re-open the current choice.
+//! Three things the rest of the viewer asks for rather than implements: pick a
+//! resident ([`avatar_picker`]), pick one of your groups ([`group_picker`]),
+//! and pick a texture or a render material ([`ui_texture_picker`]), the last
+//! also owning the reusable swatch a caller parks in its own panel to show and
+//! re-open the current choice.
 //!
 //! The build tool, the wearable and material editors, the region and land
 //! floaters and the profile surfaces all summon one of these; none of them
@@ -33,4 +34,5 @@ pub(crate) use sl_viewer_world_api as world_api;
 pub(crate) use sl_viewer_world_objects::material_preview;
 
 pub mod avatar_picker;
+pub mod group_picker;
 pub mod ui_texture_picker;

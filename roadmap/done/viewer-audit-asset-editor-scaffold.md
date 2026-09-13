@@ -49,7 +49,7 @@ which is the more specific of the two answers.
 **Closing a notecard or a script threw away what you had typed, silently.**
 Both windows are `closable`, and a keyed floater is *despawned* by the close
 pass — so by the time anything could have asked, the text was gone. The floater
-manager now takes a `ConfirmBeforeClose` component: while it is armed a
+manager now takes a `FloaterCloseGuard` component: while it is armed a
 `FloaterOp::Close` becomes a `FloaterCloseRequested` and the window is left
 untouched, which is the reference's `LLFloater::canClose` drawn at the same
 place. The editors' shared scaffold arms it from an `UnsavedWork` component and
@@ -61,7 +61,8 @@ over work that was never stored.
 "Don't Save" is spelled as a deliberate discard rather than as "the work was
 saved after all": the buffer has not changed, the tracker measures it as unsaved
 again on the very next frame, and the guard that re-armed would turn the
-resident's own answer into the same question again, for ever.
+resident's own answer into the same question again, for ever. It is written as
+the unrefusable `FloaterOp::CloseNow`, which no guard holds back.
 
 The appearance editor's window is guarded too — its edit previews on the avatar
 and is stored nowhere until a Save — and closing it now *ends* the edit:

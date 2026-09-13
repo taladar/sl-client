@@ -144,13 +144,11 @@ pub(crate) const FLOATERS: &[FloaterElement] = &[
     },
     FloaterElement {
         id: "color-picker",
-        summary: "Color Picker: the shared swatch-driven picker — a saturation/value field, the \
-                  channel sliders and the reply row. Subject-bound to whatever swatch opened it.",
+        summary: "Color Picker: the shared swatch-driven picker — the hue × saturation field and \
+                  luminance strip, the R/G/B and H/S/L sliders, the hex field, the saved palette \
+                  and the reply row. Subject-bound to whatever swatch opened it.",
         spec: crate::ui_color_picker::color_picker_floater_spec,
-        content: FloaterContent::Stub(
-            "The saturation / value field, the hue and alpha tracks, the channel fields and the \
-             OK / Cancel reply row.",
-        ),
+        content: FloaterContent::Specimen(crate::ui_color_picker::spawn_color_picker_specimen),
     },
     FloaterElement {
         id: "contact-set-config",
@@ -224,6 +222,15 @@ pub(crate) const FLOATERS: &[FloaterElement] = &[
                   table over its capability's reply.",
         spec: crate::experiences_floater::experiences_floater_spec,
         content: FloaterContent::Specimen(crate::experiences_floater::spawn_experiences_specimen),
+    },
+    FloaterElement {
+        id: "group-picker",
+        summary: "Choose Group: the agent's own groups over an optional \"none\" row, and the \
+                  OK / Cancel reply row every set-group control is written against.",
+        spec: crate::group_picker::group_picker_floater_spec,
+        content: FloaterContent::Stub(
+            "The group list filled from the agent's memberships, and the OK / Cancel row.",
+        ),
     },
     FloaterElement {
         id: "group-profile",
@@ -346,7 +353,7 @@ pub(crate) const FLOATERS: &[FloaterElement] = &[
     FloaterElement {
         id: "preview-animation",
         summary: "Animation preview: an animation item's play / stop controls and its metadata. \
-                  Subject-bound, so its geometry is not persisted.",
+                  One window per animation asset, so its geometry is not persisted.",
         spec: crate::inventory_properties::animation_preview_floater_spec,
         content: FloaterContent::Stub(
             "The animation's play / stop controls and its priority / duration metadata.",
@@ -355,7 +362,8 @@ pub(crate) const FLOATERS: &[FloaterElement] = &[
     FloaterElement {
         id: "preview-texture",
         summary: "Texture preview: an inventory texture decoded to an image node at its own \
-                  aspect. Subject-bound, so its geometry is not persisted.",
+                  aspect. One window per texture, so two can be compared side by side and \
+                  neither persists its geometry.",
         spec: crate::inventory_properties::texture_preview_floater_spec,
         content: FloaterContent::Stub(
             "The decoded texture as an image node at its own aspect ratio, with its dimensions.",

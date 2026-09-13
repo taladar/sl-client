@@ -2,7 +2,7 @@
 id: viewer-key-texture-preview
 title: One texture-preview window per texture
 topic: viewer
-status: ready
+status: done
 origin: split out of [[viewer-keyed-floater-audit]] (2026-09-07)
 points: 2
 refs: [viewer-keyed-floater-audit, viewer-key-animation-preview,
@@ -39,3 +39,24 @@ Open two different textures from inventory: two windows, each showing its own
 texture, each closable without disturbing the other; re-opening one raises it.
 A unit test in the module's `instances` block, mirroring
 `two_landmarks_open_two_windows`, pins it.
+
+## Done (2026-09-12)
+
+Keyed by the **asset**, not the item: two inventory copies of one texture are
+one picture, so they share a window
+(`two_items_sharing_a_texture_share_a_window`). `TexturePreviewState` — the
+texture and the placeholder node awaiting it — is a component on the window
+root, and `poll_texture_preview` iterates the open windows, so two decodes in
+flight each fill the placeholder their own window spawned
+(`a_decode_fills_only_the_window_waiting_for_it`). The window's title is the
+item's name: the spec's "Texture" names the kind, which stopped being enough
+the moment there could be two.
+
+Re-opening a texture already up only raises it and fetches nothing
+(`reopening_a_texture_does_not_refetch_it`) — the second Open used to tear the
+content down and put "(loading)" back over a decoded image.
+
+Landing this together with [[viewer-key-animation-preview]] deleted the shared
+`PreviewState` and `PreviewUi` resources and the `Startup` spawn with them: the
+plugin now spawns nothing at startup, since all three of its windows open per
+subject.

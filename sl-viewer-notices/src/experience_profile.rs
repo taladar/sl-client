@@ -207,7 +207,7 @@ pub struct OpenExperienceProfile {
 
 /// The [`FloaterKey`] of the window showing `experience`.
 ///
-/// A [subject](FloaterKey::Subject) key: instances are told apart by the
+/// A [`FloaterKey`]: instances are told apart by the
 /// experience id and none of them persists geometry, which is what keeps a
 /// settings entry from accruing per experience ever looked at.
 fn profile_key(experience: ExperienceKey) -> FloaterKey {

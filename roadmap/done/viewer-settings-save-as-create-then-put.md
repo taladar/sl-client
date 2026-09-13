@@ -110,6 +110,12 @@ save also re-baselines what Revert goes back to.
   (`checkAndConfirmSettingsLoss([this](){ closeFloater(); … })`), but refusing a
   close needs the floater chrome to support vetoing one, which it does not.
 
+  **Since done** (2026-09-12, with
+  [[viewer-audit-picker-requester-identity]]): the chrome grew
+  `FloaterCloseGuard` / `FloaterCloseRequested` / `FloaterOp::CloseNow`, and
+  both settings editors arm the guard from `session.modified` and raise the
+  same `SettingsConfirmLoss` on a held-back close.
+
 ## Verified
 
 Live on aditi: two in-place saves reported landing, each naming its own item,

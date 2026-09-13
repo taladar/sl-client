@@ -57,6 +57,12 @@ pub(crate) fn floater_app(test: InteractionTest, floater: &FloaterElement) -> Ap
     let mut app = test.build();
     app.add_plugins(FloaterPlugin);
     crate::ui_contract::install_element_hosting(&mut app);
+    // Not part of `install_element_hosting`, which is the *element* sweep's set
+    // and has no floater manager: the colour picker's systems open keyed windows,
+    // so its plugin can only be scheduled where `FloaterPlugin` already is. Its
+    // specimen needs it — the field's picture is built by it, and the reply row's
+    // `ColorPicked` is registered by it.
+    app.add_plugins(crate::ui_color_picker::ColorPickerPlugin);
     record::<FloaterCommand>(&mut app);
     let spawn = *floater;
     app.add_systems(

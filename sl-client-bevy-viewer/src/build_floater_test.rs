@@ -1072,6 +1072,133 @@ mod tests {
         Ok(())
     }
 
+    /// **The General tab's group Set… opens the picker, and the picker's answer
+    /// commits a `SetObjectGroup`** (`viewer-region-estate-group-picker`).
+    ///
+    /// Both halves, because the first shipped with only the first working: the
+    /// button opened a picker, a group was chosen, and nothing left the viewer.
+    /// The handler was waiting on the selection's `ObjectProperties` — which
+    /// the simulator sends when it feels like it, and had not yet — so the
+    /// *send* sat behind a local echo it had no business depending on.
+    #[test]
+    fn the_group_set_button_opens_a_picker_whose_answer_commits() -> Result<(), TestError> {
+        use crate::world_api::{GroupPicked, OpenGroupPicker};
+        use sl_client_bevy::{GroupKey, Uuid};
+
+        let mut app = build_tools_app()?;
+        // Recorded rather than drained off the queue: a message lives two
+        // frames and `settle` runs two updates, so reading `Messages` directly
+        // races the buffer swap (see `sl_viewer_testkit::drain_actions`).
+        sl_viewer_testkit::record::<OpenGroupPicker>(&mut app);
+        let (scoped, _at) = select_a_fixture_prim(&mut app)?;
+        show_tab(&mut app, 0)?;
+        let _settling = drain_commands(&mut app);
+
+        interact::click_node(&mut app, "build-params:action:build-set-group")?;
+        settle(&mut app, 2);
+        let opens = sl_viewer_testkit::drain::<OpenGroupPicker>(&mut app);
+        let open = opens.last().ok_or("Set… opened no group picker")?;
+        assert!(
+            open.allow_none,
+            "an object's group may be cleared, so the picker must offer none"
+        );
+
+        // The picker's answer, naming the button that asked — the seam the
+        // window test in `group_picker` drives from the other side.
+        let chosen = GroupKey::from(Uuid::from_u128(0x00C0_FFEE));
+        app.world_mut().write_message(GroupPicked {
+            requester: open.requester,
+            group: Some(chosen),
+            name: "Cartographers".to_owned(),
+        });
+        settle(&mut app, 2);
+
+        let commands = drain_commands(&mut app);
+        let set: Vec<&Command> = commands
+            .iter()
+            .filter(|command| matches!(command, Command::SetObjectGroup { .. }))
+            .collect();
+        assert_eq!(
+            set.len(),
+            1,
+            "one confirmed pick must send exactly one group set, got {commands:#?}"
+        );
+        match set.first() {
+            Some(Command::SetObjectGroup {
+                local_ids,
+                group_id,
+            }) => {
+                assert_eq!(local_ids.as_slice(), &[scoped]);
+                assert_eq!(*group_id, chosen);
+            }
+            _other => return Err(TestError::from("no group set to read")),
+        }
+        Ok(())
+    }
+
+    /// **Confirming a group keeps the object selected.**
+    ///
+    /// The whole gesture, through the real pointer: press Set…, press a row in
+    /// the picker that opens, press OK. The picker is a keyed floater, so OK
+    /// **despawns the window under the cursor** — and the window is over the
+    /// world, because a picker opens beside the floater that asked rather than
+    /// on top of it.
+    ///
+    /// That despawn used to throw the selection away. The world-pick gesture
+    /// decides on the press frame whether the pointer is over UI by looking for
+    /// the pressed node in the hover map; a node that despawned during its own
+    /// press leaves an entry with no `ComputedNode` behind it, which reads as
+    /// "not a UI surface", so the press was taken for a click on empty world —
+    /// and a click on empty world *deselects*. `install_ui_pointer_claim`'s
+    /// observer now claims the press while the node is still alive.
+    ///
+    /// Driven with the pointer rather than by writing `GroupPicked`, because
+    /// writing the message is exactly the step that skips the press this is
+    /// about — which is why the sibling test above did not catch it.
+    #[test]
+    fn confirming_a_group_keeps_the_selection() -> Result<(), TestError> {
+        use crate::world_api::GroupsModel;
+        use sl_client_bevy::{GroupKey, GroupMembership, LandArea, TextureKey, Uuid};
+
+        let mut app = build_tools_app()?;
+        // A group to pick. The picker lists the agent's memberships, and an
+        // agent in none of them has no row to press.
+        app.world_mut()
+            .resource_mut::<GroupsModel>()
+            .apply_memberships(&[GroupMembership {
+                group_id: GroupKey::from(Uuid::from_u128(0x00C0_FFEE)),
+                group_powers: 0,
+                accept_notices: true,
+                group_insignia_id: TextureKey::from(Uuid::nil()),
+                contribution: LandArea(0),
+                group_name: "Cartographers".to_owned(),
+            }]);
+        let (scoped, _at) = select_a_fixture_prim(&mut app)?;
+        show_tab(&mut app, 0)?;
+        let _settling = drain_commands(&mut app);
+
+        interact::click_node(&mut app, "build-params:action:build-set-group")?;
+        settle(&mut app, 3);
+        // Row 0 is the "none" row; row 1 is the one group seeded above.
+        interact::click_node(&mut app, "group-picker-row:1")?;
+        settle(&mut app, 2);
+        interact::click_node(&mut app, "group-picker:group-picker-ok")?;
+        settle(&mut app, 3);
+
+        assert!(
+            app.world().resource::<SelectionSet>().is_selected(scoped),
+            "confirming a group deselected the object it was chosen for"
+        );
+        let commands = drain_commands(&mut app);
+        assert!(
+            commands
+                .iter()
+                .any(|command| matches!(command, Command::SetObjectGroup { .. })),
+            "the confirmed pick sent no group set: {commands:#?}"
+        );
+        Ok(())
+    }
+
     /// **An Object-tab shape edit commits a `SetObjectShape`.**
     ///
     /// The shape fields are quantized on the way out (the wire carries bytes,

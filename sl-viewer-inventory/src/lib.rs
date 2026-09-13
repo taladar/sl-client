@@ -32,7 +32,6 @@ pub(crate) use sl_viewer_ui_core::ui_element;
 pub(crate) use sl_viewer_ui_core::ui_font;
 pub(crate) use sl_viewer_ui_core::virtual_list;
 pub(crate) use sl_viewer_ui_widgets::floater;
-pub(crate) use sl_viewer_ui_widgets::floater_persist;
 pub(crate) use sl_viewer_ui_widgets::menu;
 pub(crate) use sl_viewer_ui_widgets::ui_search;
 pub(crate) use sl_viewer_ui_widgets::ui_tab;

@@ -278,8 +278,8 @@ impl RenderSettingsButton {
         }
     }
 
-    /// The picker tag this button opens the avatar picker with, if it is one of
-    /// the two that add someone not in the list.
+    /// The picker **field** name this button opens the avatar picker under, if
+    /// it is one of the two that add someone not in the list.
     const fn picker_tag(self) -> Option<&'static str> {
         match self {
             Self::AddFully => Some(PICKER_ADD_FULLY),
@@ -287,15 +287,14 @@ impl RenderSettingsButton {
             Self::RenderFully | Self::NeverRender | Self::Remove => None,
         }
     }
-}
 
-/// The exception a finished pick records, by the tag the picker was opened
-/// with.
-const fn picked_setting(tag: &str) -> Option<RenderOverride> {
-    match tag.as_bytes() {
-        b"avatar-render-add-fully" => Some(RenderOverride::AlwaysFull),
-        b"avatar-render-add-never" => Some(RenderOverride::Never),
-        _other => None,
+    /// The exception a finished pick on this button records.
+    const fn picked_setting(self) -> Option<RenderOverride> {
+        match self {
+            Self::AddFully => Some(RenderOverride::AlwaysFull),
+            Self::AddNever => Some(RenderOverride::Never),
+            Self::RenderFully | Self::NeverRender | Self::Remove => None,
+        }
     }
 }
 
@@ -542,10 +541,10 @@ fn spawn_render_settings_action(
                 if press.button != PointerButton::Primary {
                     return;
                 }
-                if let Some(requester) = button.picker_tag() {
+                if let Some(field) = button.picker_tag() {
                     // The reference's Add buttons open a multi-picker: one
                     // decision, however many residents it is about.
-                    pickers.write(OpenAvatarPicker::many(requester));
+                    pickers.write(OpenAvatarPicker::many(press.entity, field));
                     return;
                 }
                 let (Some(setting), Some(agent)) = (button.setting(), selected.0) else {
@@ -572,10 +571,17 @@ fn spawn_render_settings_action(
 /// setting is the one whose Add button opened it.
 fn handle_render_settings_picks(
     mut picks: MessageReader<AvatarPicked>,
+    buttons: Query<&RenderSettingsButton>,
     mut requests: MessageWriter<RequestRenderException>,
 ) {
     for pick in picks.read() {
-        let Some(setting) = picked_setting(pick.requester) else {
+        // The pick names the Add button that opened the picker, and the button
+        // names the exception it records.
+        let Some(setting) = buttons
+            .get(pick.requester)
+            .ok()
+            .and_then(|button| button.picked_setting())
+        else {
             continue;
         };
         for chosen in &pick.picks {
@@ -813,7 +819,7 @@ pub(crate) fn name_label(entry: &RenderException, live: Option<&str>) -> String 
 
 #[cfg(test)]
 mod tests {
-    use super::{ExceptionRow, matches_filter, name_label, picked_setting, sort_rows};
+    use super::{ExceptionRow, RenderSettingsButton, matches_filter, name_label, sort_rows};
     use crate::avatar_complexity::RenderOverride;
     use crate::avatar_render_settings::RenderException;
     use pretty_assertions::assert_eq;
@@ -898,18 +904,25 @@ mod tests {
         );
     }
 
-    /// Each Add button's picker tag records its own setting, and a pick from any
-    /// other feature's picker is ignored.
+    /// Each Add button records its own setting, and the buttons that act on the
+    /// selected row record none — a pick can only ever have come from an Add.
     #[test]
     fn picks_record_the_button_that_asked() {
         assert_eq!(
-            picked_setting(super::PICKER_ADD_FULLY),
+            RenderSettingsButton::AddFully.picked_setting(),
             Some(RenderOverride::AlwaysFull)
         );
         assert_eq!(
-            picked_setting(super::PICKER_ADD_NEVER),
+            RenderSettingsButton::AddNever.picked_setting(),
             Some(RenderOverride::Never)
         );
-        assert_eq!(picked_setting("inventory-share"), None);
+        for button in [
+            RenderSettingsButton::RenderFully,
+            RenderSettingsButton::NeverRender,
+            RenderSettingsButton::Remove,
+        ] {
+            assert_eq!(button.picked_setting(), None);
+            assert_eq!(button.picker_tag(), None);
+        }
     }
 }

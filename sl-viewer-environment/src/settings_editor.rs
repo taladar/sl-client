@@ -92,8 +92,8 @@ use sl_viewer_ui_core::i18n::{Translated, Translator};
 use sl_viewer_ui_core::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
 use sl_viewer_ui_widgets::floater::{
-    DeferredFloaterContent, FloaterCaps, FloaterCommand, FloaterHandle, FloaterOp, FloaterSpec,
-    FloaterSystems, spawn_floater,
+    DeferredFloaterContent, FloaterCaps, FloaterCloseGuard, FloaterCloseRequested, FloaterCommand,
+    FloaterHandle, FloaterOp, FloaterSpec, FloaterSystems, spawn_floater,
 };
 use sl_viewer_ui_widgets::floater_persist::FloaterOpenExempt;
 use sl_viewer_ui_widgets::ui_color_picker::{ColorPicked, ColorSwatchValue};
@@ -460,8 +460,16 @@ impl Plugin for SettingsEditorPlugin {
                     confirm_editor_replace,
                     drop_preview_on_close,
                     sync_editor_buttons,
+                    arm_editor_close_guards,
                 )
                     .chain(),
+            )
+            // Reads the held-back close the manager reports, and asks. Ordered
+            // after the pass that produces it, so the question is raised in the
+            // frame the ✕ was pressed.
+            .add_systems(
+                Update,
+                ask_before_closing_editor.after(FloaterSystems::Commands),
             );
     }
 }
@@ -1680,6 +1688,13 @@ enum HeldReplacement {
     /// asking for a file and *then* asking whether the answer may be used gets
     /// the order wrong.
     Import(EditorKind),
+    /// A **close** the manager held back for this window's
+    /// [`FloaterCloseGuard`] — the reference's
+    /// `checkAndConfirmSettingsLoss([this](){ closeFloater(); … })`, the third
+    /// thing that throws the frame on screen away. Until the floater chrome
+    /// could refuse a close, this arm could not exist and the ✕ discarded
+    /// silently.
+    Close(EditorKind),
 }
 
 /// The reference's `getSettingsType()` word, for the confirmation's `[TYPE]`.
@@ -1704,6 +1719,7 @@ fn confirm_editor_replace(
     mut editors: ResMut<SettingsEditors>,
     mut opens: MessageWriter<OpenSettingsEditor>,
     mut dialogs: MessageWriter<OpenFileDialog>,
+    mut chrome: MessageWriter<FloaterCommand>,
     translator: Translator,
 ) {
     for response in responses.read() {
@@ -1729,7 +1745,83 @@ fn confirm_editor_replace(
                 editors.get_mut(editor).session = None;
                 dialogs.write(import_dialog_request(editor, &translator));
             }
+            HeldReplacement::Close(editor) => {
+                let state = editors.get_mut(editor);
+                state.session = None;
+                // `CloseNow` rather than `Close`: this *is* the answer to the
+                // guard's question, and a plain close would ask it again. The
+                // guard is left armed for the same reason — clearing it would
+                // leave the window's next close unguarded, and dropping the
+                // session disarms it on the next `arm_editor_close_guards`
+                // pass anyway.
+                if let Some(panel) = state.ui.panel {
+                    chrome.write(FloaterCommand {
+                        floater: panel,
+                        op: FloaterOp::CloseNow,
+                    });
+                }
+            }
         }
+    }
+}
+
+/// Keep each editor window's [`FloaterCloseGuard`] in step with whether it holds
+/// unsaved work — the one line the manager needs to know it must ask.
+fn arm_editor_close_guards(
+    editors: Res<SettingsEditors>,
+    mut guards: Query<&mut FloaterCloseGuard>,
+    mut commands: Commands,
+) {
+    for state in [&editors.sky, &editors.water] {
+        let Some(panel) = state.ui.panel else {
+            continue;
+        };
+        let dirty = state
+            .session
+            .as_ref()
+            .is_some_and(|session| session.modified);
+        // Write-guarded, and an insert only where there is nothing to write to:
+        // inserting a component marks it changed, so re-inserting the same
+        // value every frame would re-mark the window forever.
+        if let Ok(mut guard) = guards.get_mut(panel) {
+            if guard.armed != dirty {
+                guard.armed = dirty;
+            }
+        } else if let Ok(mut window) = commands.get_entity(panel) {
+            window.insert(FloaterCloseGuard::new(dirty));
+        }
+    }
+}
+
+/// A close the guard held back: ask whether the unsaved frame may go.
+///
+/// The same `SettingsConfirmLoss` the other two throw-it-away paths raise, held
+/// in the same slot — the question is identical, and so is the answer's route
+/// back ([`confirm_editor_replace`]).
+fn ask_before_closing_editor(
+    mut held_back: MessageReader<FloaterCloseRequested>,
+    editors: Res<SettingsEditors>,
+    mut confirm: ResMut<PendingEditorReplace>,
+    mut notify: MessageWriter<ShowNotification>,
+) {
+    for request in held_back.read() {
+        let Some((editor, state)) = [
+            (EditorKind::Sky, &editors.sky),
+            (EditorKind::Water, &editors.water),
+        ]
+        .into_iter()
+        .find(|(_editor, state)| state.ui.panel == Some(request.floater)) else {
+            continue;
+        };
+        let Some(session) = state.session.as_ref() else {
+            continue;
+        };
+        confirm.0 = Some(HeldReplacement::Close(editor));
+        notify.write(
+            ShowNotification::new("SettingsConfirmLoss")
+                .arg("TYPE", settings_kind_word(editor.settings_kind()))
+                .arg("NAME", session.name.clone()),
+        );
     }
 }
 

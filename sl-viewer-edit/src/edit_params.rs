@@ -67,6 +67,7 @@ use crate::world_api::EditToolState;
 use crate::world_api::GroupsModel;
 use crate::world_api::ObjectState;
 use crate::world_api::SelectionSet;
+use crate::world_api::{GroupPicked, OpenGroupPicker};
 
 // ---------------------------------------------------------------------------
 // Wire constants (the reference's `llprimitive.cpp` limits, SL variants).
@@ -97,6 +98,10 @@ const FLAGS_OBJECT_TRANSFER: u32 = 1 << 17;
 const GROUP_SHARE_MASK: Permissions = Permissions::MODIFY
     .union(Permissions::MOVE)
     .union(Permissions::COPY);
+
+/// The **group**-picker field name for the General tab's Set… (see
+/// `OpenGroupPicker::field`).
+const PICK_GROUP: &str = "build-group";
 
 /// The minimum surviving slice between a cut begin and end (the reference's
 /// `OBJECT_MIN_CUT_INC`).
@@ -740,9 +745,6 @@ enum ParamCycle {
     HoleType,
     /// The physical material.
     Material,
-    /// The group the object is set to (cycles the agent's own groups; the
-    /// reference opens a group picker instead).
-    Group,
 }
 
 /// Marks a [`ParamCycle`] button's value text.
@@ -852,7 +854,7 @@ const fn toggle_gate(toggle: ParamToggle) -> ParamGate {
 const fn cycle_gate(cycle: ParamCycle) -> ParamGate {
     match cycle {
         ParamCycle::PrimType | ParamCycle::HoleType => ParamGate::ShapeEditable,
-        ParamCycle::Material | ParamCycle::Group => ParamGate::Selection,
+        ParamCycle::Material => ParamGate::Selection,
     }
 }
 
@@ -869,6 +871,10 @@ enum InfoText {
     /// What the agent can do with the object, from the update flags' agent-
     /// relative permission bits.
     YouCan,
+    /// The group the object is set to — read-only here, because the **Set…**
+    /// button beside it is what changes it (the reference's `llpanelpermissions`
+    /// shows the same name-plus-button pair).
+    Group,
 }
 
 /// A one-shot action button on the parameter tabs.
@@ -876,6 +882,8 @@ enum InfoText {
 enum ParamAction {
     /// Deed the object to the group it is set to (`ObjectOwner`).
     Deed,
+    /// Open the group picker to set (or clear) the object's group.
+    SetGroup,
 }
 
 /// The skin class greying a gated-off widget's text
@@ -1083,6 +1091,7 @@ fn spawn_action_button(
             action,
             match action {
                 ParamAction::Deed => ParamGate::Deed,
+                ParamAction::SetGroup => ParamGate::Selection,
             },
             Pickable::default(),
             Name::new(format!("build-params:action:{label_key}")),
@@ -1111,6 +1120,13 @@ fn spawn_info_row(
     label_key: &'static str,
 ) {
     let info_row = spawn_param_row(commands, parent, label_key);
+    spawn_info_value(commands, info_row, info);
+}
+
+/// Spawn just the value text of an info line, into a row a caller already
+/// built — the group row, which puts its **Set…** and Deed buttons beside the
+/// name rather than on a line of its own.
+fn spawn_info_value(commands: &mut Commands, parent: Entity, info: InfoText) {
     commands.spawn((
         Text::default(),
         UiFont::Sans.at(TOOL_FONT_SIZE),
@@ -1118,7 +1134,7 @@ fn spawn_info_row(
         TextColor(Color::WHITE),
         ClassList::new_with_classes([VALUE_CLASS]),
         info,
-        ChildOf(info_row),
+        ChildOf(parent),
     ));
 }
 
@@ -1197,9 +1213,17 @@ pub(crate) fn spawn_param_tabs(mut commands: Commands, pages: Option<Res<BuildTa
         spawn_info_row(&mut commands, general, info, key);
     }
 
-    // The group row: the set-group cycle plus the Deed button.
+    // The group row: the group's name, the Set… button that opens the picker,
+    // and Deed — the reference's `llpanelpermissions` group line.
     let group_row = spawn_param_row(&mut commands, general, "build-group-label");
-    spawn_param_cycle(&mut commands, group_row, ParamCycle::Group, &mut tab_index);
+    spawn_info_value(&mut commands, group_row, InfoText::Group);
+    spawn_action_button(
+        &mut commands,
+        group_row,
+        ParamAction::SetGroup,
+        "build-set-group",
+        &mut tab_index,
+    );
     spawn_action_button(
         &mut commands,
         group_row,
@@ -2082,6 +2106,12 @@ impl Plugin for EditParamsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ShownSnapshot>()
             .init_resource::<ParamFieldFocus>()
+            // Registered here as well as by the picker's own plugin: the Set…
+            // button writes one and `apply_group_picks` reads the other, and a
+            // harness that stands up the build floater without the picker
+            // would otherwise fail parameter validation on frame one.
+            .add_message::<OpenGroupPicker>()
+            .add_message::<GroupPicked>()
             // Both systems already bailed on `!EditToolState::active`; the gate
             // hoists that out of the scheduler so they are not run at all outside
             // build mode.
@@ -2090,7 +2120,11 @@ impl Plugin for EditParamsPlugin {
                 (sync_param_widgets, commit_param_fields)
                     .chain()
                     .run_if(crate::edit_tool::edit_tool_active_or_settling),
-            );
+            )
+            // Not under that gate: a pick can land the frame the picker closes,
+            // and the build tool settling out from under it must not swallow
+            // the answer the person just gave.
+            .add_systems(Update, apply_group_picks);
     }
 }
 
@@ -2491,13 +2525,6 @@ fn sync_param_widgets(
             }),
             ParamCycle::Material => data
                 .map(|data| translator.get(material_label_key(Material::from_code(data.material)))),
-            ParamCycle::Group => data.map(|data| {
-                if data.group.is_some() {
-                    data.group_label.clone()
-                } else {
-                    translator.get("build-group-none")
-                }
-            }),
         }
         .unwrap_or_else(|| NO_VALUE.to_owned());
         if text.0 != want {
@@ -2515,6 +2542,13 @@ fn sync_param_widgets(
             InfoText::Owner => data
                 .filter(|d| !d.owner_label.is_empty())
                 .map(|d| d.owner_label.clone()),
+            InfoText::Group => data.map(|d| {
+                if d.group.is_some() {
+                    d.group_label.clone()
+                } else {
+                    translator.get("build-group-none")
+                }
+            }),
             InfoText::LandImpact => data.and_then(|d| match d.land_impact {
                 crate::object_cost::LandImpact::Known(li) => Some(format!("{li:.0}")),
                 crate::object_cost::LandImpact::Pending => Some(PENDING_NAME.to_owned()),
@@ -2969,18 +3003,11 @@ fn handle_toggle_press(
 /// The observer every [`ParamCycle`] button runs on press: advance to the
 /// next entry and send the corresponding message (the cycle is read off the
 /// pressed button's component).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy observer's parameters are its injected resources / queries: the pressed \
-              button's cycle, the selection / object / group state, the snapshot, the shape \
-              fields, and the outgoing command writer"
-)]
 fn handle_cycle_press(
     press: On<Pointer<Press>>,
     cycles: Query<&ParamCycle>,
-    mut selection: ResMut<SelectionSet>,
+    selection: Res<SelectionSet>,
     mut objects: ResMut<ObjectState>,
-    groups: Res<GroupsModel>,
     mut snapshot: ResMut<ShownSnapshot>,
     fields: Query<(&ParamField, &EditableText)>,
     mut commands: MessageWriter<SlCommand>,
@@ -3005,32 +3032,6 @@ fn handle_cycle_press(
             commands.write(SlCommand(Command::SetObjectMaterial {
                 local_id: primary_scoped,
                 material: next,
-            }));
-        }
-        ParamCycle::Group => {
-            // Cycle none -> each of the agent's groups -> none (the
-            // reference opens a group picker; the cycle is the combo
-            // stand-in until [[viewer-ui-combo-widget]]).
-            let ids = groups.group_ids();
-            let Some(properties) = selection.primary_properties_mut() else {
-                return;
-            };
-            let next = match properties.group {
-                None => ids.first().copied(),
-                Some(current) => ids
-                    .iter()
-                    .position(|id| *id == current)
-                    .and_then(|index| ids.get(index.saturating_add(1)))
-                    .copied(),
-            };
-            properties.group = next;
-            snapshot.shown = None;
-            commands.write(SlCommand(Command::SetObjectGroup {
-                local_ids: vec![primary_scoped],
-                group_id: next.unwrap_or_else(|| GroupKey::from(Uuid::nil())),
-            }));
-            commands.write(SlCommand(Command::RequestObjectProperties {
-                local_ids: vec![primary_scoped],
             }));
         }
         ParamCycle::PrimType | ParamCycle::HoleType => {
@@ -3086,6 +3087,7 @@ fn handle_action_press(
     actions: Query<&ParamAction>,
     selection: Res<SelectionSet>,
     mut commands: MessageWriter<SlCommand>,
+    mut group_pickers: MessageWriter<OpenGroupPicker>,
 ) {
     if press.button != PointerButton::Primary {
         return;
@@ -3094,6 +3096,13 @@ fn handle_action_press(
         return;
     };
     match action {
+        // The agent's own groups only, and "none" among them: an object's group
+        // may be cleared, but the simulator refuses one the owner is not in.
+        // This replaces a cycle button that walked the memberships one press at
+        // a time — usable with three groups, not with thirty.
+        ParamAction::SetGroup => {
+            group_pickers.write(OpenGroupPicker::new(press.entity, PICK_GROUP));
+        }
         ParamAction::Deed => {
             let Some(primary) = selection.primary() else {
                 return;
@@ -3115,6 +3124,46 @@ fn handle_action_press(
                 local_ids: vec![primary.scoped],
             }));
         }
+    }
+}
+
+/// Fold a group pick into the selected object's group and post it
+/// (`ObjectGroup`), echoing it locally so the General tab's group line moves
+/// before the simulator's `ObjectProperties` comes back.
+///
+/// The pick names the **Set… button** that asked, which is how a group picked
+/// for some other surface is not applied to the selection.
+fn apply_group_picks(
+    mut picked: MessageReader<GroupPicked>,
+    actions: Query<&ParamAction>,
+    mut selection: ResMut<SelectionSet>,
+    mut snapshot: ResMut<ShownSnapshot>,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    let frame: Vec<GroupPicked> = picked.read().cloned().collect();
+    for event in &frame {
+        let Ok(ParamAction::SetGroup) = actions.get(event.requester) else {
+            continue;
+        };
+        let Some(primary_scoped) = selection.primary().map(|primary| primary.scoped) else {
+            continue;
+        };
+        // The local echo is best-effort: `properties` is `None` until the
+        // simulator's `ObjectProperties` reply lands, and an object selected a
+        // moment ago may not have one yet. Making the *send* wait on it is how
+        // the first cut of this silently did nothing — the picker answered, and
+        // nothing left the viewer.
+        if let Some(properties) = selection.primary_properties_mut() {
+            properties.group = event.group;
+        }
+        snapshot.shown = None;
+        commands.write(SlCommand(Command::SetObjectGroup {
+            local_ids: vec![primary_scoped],
+            group_id: event.group.unwrap_or_else(|| GroupKey::from(Uuid::nil())),
+        }));
+        commands.write(SlCommand(Command::RequestObjectProperties {
+            local_ids: vec![primary_scoped],
+        }));
     }
 }
 

@@ -28,6 +28,9 @@ sl-viewer-ui-widgets = { workspace = true }
 sl-viewer-world-api = { workspace = true }
 
 [dev-dependencies]
+# A decoded texture handed straight to the store, so a preview window's fill
+# can be driven without a decoder.
+bytes = { workspace = true }
 pretty_assertions = { workspace = true }
 
 [lints]

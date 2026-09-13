@@ -14,9 +14,10 @@ editable via the new `Command::SetEstateInfo` (`estatechangeinfo`, typed
 banned) use the reusable `ui_table` widget with Add (avatar picker) + per-row
 Remove over `UpdateEstateAccess`; covenant + estate identity are read-only (the
 estate tab falls back to the covenant reply when `getinfo` is denied to a
-non-manager). **Not yet closed:** the write paths are unverified on a live grid
-(needs an estate-owner login), and **Allowed Groups → Add** needs a group picker
-([[viewer-region-estate-group-picker]]).
+non-manager). **Allowed Groups → Add** landed with
+[[viewer-region-estate-group-picker]] (2026-09-12), which also made the rows
+ask for the names of groups the agent is not in. **Not yet closed:** the write
+paths are unverified on a live grid (needs an estate-owner login).
 
 Context: [context/viewer.md](../context/viewer.md).
 

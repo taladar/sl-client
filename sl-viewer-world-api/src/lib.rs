@@ -1171,8 +1171,15 @@ impl GroupsModel {
         }
     }
 
-    /// The own agent's active group title (from `ActiveGroupChanged`) — the
-    /// freshest source for the own tag's title line (the NameValue `Title`
+    /// The active (worn) group, if any. [`ordered`](Self::ordered) already
+    /// marks it on each membership row; this is for a surface listing groups
+    /// from somewhere *else* — the group picker's directory search, which must
+    /// mark a result the same way whichever source found it.
+    #[must_use]
+    pub const fn active(&self) -> Option<GroupKey> {
+        self.active
+    }
+
     /// The list revision — a view stores the value it last built at and
     /// rebuilds when it advances.
     #[must_use]
@@ -1180,6 +1187,8 @@ impl GroupsModel {
         self.revision
     }
 
+    /// The own agent's active group title (from `ActiveGroupChanged`) — the
+    /// freshest source for the own tag's title line (the NameValue `Title`
     /// only refreshes when the simulator re-streams the avatar object).
     #[must_use]
     pub fn own_title(&self) -> Option<&str> {
@@ -1588,12 +1597,29 @@ impl LocalChatNotice {
     }
 }
 
-/// Ask the picker to open for a feature. `requester` tags the eventual
-/// [`AvatarPicked`] so only the asking feature consumes it.
-#[derive(Message, Debug, Clone, Copy)]
+/// Ask the picker to open for a control. `requester` is the control that asked
+/// — the [`AvatarPicked`] reply carries it back, so only the widget that asked
+/// consumes it, and the window that widget lives in is the picker's own.
+///
+/// The reply used to be routed by a `&'static str` tag, which is a property of
+/// the *control* rather than of the window: two instances of one floater have
+/// the same controls, so both claimed the same answer. See `picker_identity`.
+#[derive(Message, Debug, Clone)]
 pub struct OpenAvatarPicker {
-    /// The feature tag echoed back in [`AvatarPicked`].
-    pub requester: &'static str,
+    /// The control that asked — the Add / Kick / Send-Home button. Echoed back
+    /// in [`AvatarPicked`], and the consumer resolves its host floater to reach
+    /// the window's own state.
+    pub requester: Entity,
+    /// **Which** of the opening window's pickers this is — the field name, one
+    /// per Add button. Two fields of one window are two picker windows; the
+    /// same field in two instances of that window is also two.
+    ///
+    /// Owned rather than `&'static str` for the same reason
+    /// [`OpenTexturePicker::field`] is: a window holding several of one control
+    /// (the Conversations window's per-conversation Add-participants button)
+    /// names them apart at spawn time, and two of them sharing a field name
+    /// would be one picker they fight over.
+    pub field: Box<str>,
     /// Whether the user may choose several residents at once — the reference's
     /// `allow_multiple`. Build one with [`OpenAvatarPicker::one`] or
     /// [`OpenAvatarPicker::many`] rather than by hand, so the choice reads at
@@ -1604,24 +1630,25 @@ pub struct OpenAvatarPicker {
 impl OpenAvatarPicker {
     /// Ask for exactly one resident.
     #[must_use]
-    pub const fn one(requester: &'static str) -> Self {
+    pub fn one(requester: Entity, field: impl Into<Box<str>>) -> Self {
         Self {
             requester,
+            field: field.into(),
             allow_multiple: false,
         }
     }
 
     /// Ask for any number of residents at once.
     #[must_use]
-    pub const fn many(requester: &'static str) -> Self {
+    pub fn many(requester: Entity, field: impl Into<Box<str>>) -> Self {
         Self {
             requester,
+            field: field.into(),
             allow_multiple: true,
         }
     }
 }
 
-/// The confirmed pick: every chosen resident, in list order. A picker opened
 /// One resident the picker returned.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PickedAvatar {
@@ -1635,11 +1662,14 @@ pub struct PickedAvatar {
     pub name: String,
 }
 
+/// The confirmed pick: every chosen resident, in list order. A picker opened
 /// with [`OpenAvatarPicker::one`] answers with exactly one element.
 #[derive(Message, Debug, Clone)]
 pub struct AvatarPicked {
-    /// The tag of the feature that opened the picker.
-    pub requester: &'static str,
+    /// The control that opened the picker. A consumer matches on it — and, for
+    /// a window that opens per subject, resolves its host floater to reach that
+    /// instance's state.
+    pub requester: Entity,
     /// The chosen residents — never empty (the picker does not confirm an empty
     /// selection).
     pub picks: Vec<PickedAvatar>,
@@ -1651,6 +1681,105 @@ impl AvatarPicked {
     pub fn first(&self) -> Option<&PickedAvatar> {
         self.picks.first()
     }
+}
+
+/// Ask the group picker to open for a control — the reference's
+/// `LLFloaterGroupPicker` (`floater_choose_group.xml`), the dialog behind the
+/// estate's allowed-groups Add, About Land's group **Set…** and the build
+/// tool's set-group.
+///
+/// Which groups a picker may offer.
+///
+/// Not a preference but a protocol fact: the simulator refuses to set a
+/// parcel's or an object's group to one the agent is not a member of, so a
+/// set-group control that offered a stranger's group would only ever produce a
+/// silently-refused update. Where the answer is merely *recorded* against an id
+/// — the estate's allowed-groups list — any group will do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GroupPickerScope {
+    /// The agent's own memberships alone — the reference's entire list
+    /// (`init_group_list` walks `gAgent.mGroups`).
+    #[default]
+    MemberGroups,
+    /// The memberships plus a directory name search, so a group the agent is
+    /// not in can be named. The reference cannot do this at all.
+    AnyGroup,
+}
+
+/// Ask the group picker to open for a control — the reference's
+/// `LLFloaterGroupPicker` (`floater_choose_group.xml`), the dialog behind the
+/// estate's allowed-groups Add, About Land's group **Set…** and the build
+/// tool's set-group.
+///
+/// Routed like [`OpenAvatarPicker`]: `requester` is the control that asked, the
+/// [`GroupPicked`] reply carries it back, and `field` keys the window so two
+/// controls — or two instances of one floater — each get their own picker.
+///
+/// Built from [`OpenGroupPicker::new`] and narrowed with
+/// [`without_none`](OpenGroupPicker::without_none) /
+/// [`searching_the_directory`](OpenGroupPicker::searching_the_directory), so
+/// the call site reads as what that control can accept.
+#[derive(Message, Debug, Clone)]
+pub struct OpenGroupPicker {
+    /// The control that asked — the Add / Set… button. Echoed back in
+    /// [`GroupPicked`], and the consumer resolves its host floater to reach the
+    /// window's own state.
+    pub requester: Entity,
+    /// **Which** of the opening window's pickers this is. See
+    /// [`OpenAvatarPicker::field`].
+    pub field: Box<str>,
+    /// Whether **none** is an answer — the reference's `removeNoneOption`,
+    /// inverted so the permissive case is the plain constructor. Setting a
+    /// parcel's or an object's group may clear it; adding to the estate's
+    /// allowed-groups list may not (a null group is not a group).
+    pub allow_none: bool,
+    /// Which groups this open may offer.
+    pub scope: GroupPickerScope,
+}
+
+impl OpenGroupPicker {
+    /// Ask for one of the agent's own groups, with **none** among the answers —
+    /// a set-group control, which may also unset.
+    #[must_use]
+    pub fn new(requester: Entity, field: impl Into<Box<str>>) -> Self {
+        Self {
+            requester,
+            field: field.into(),
+            allow_none: true,
+            scope: GroupPickerScope::MemberGroups,
+        }
+    }
+
+    /// Drop the **none** row: a list the answer is *added* to, where a null
+    /// group would be a row naming nothing.
+    #[must_use]
+    pub const fn without_none(mut self) -> Self {
+        self.allow_none = false;
+        self
+    }
+
+    /// Offer the directory search as well as the memberships — for a control
+    /// that only records the id, so a group the agent is not in is a usable
+    /// answer.
+    #[must_use]
+    pub const fn searching_the_directory(mut self) -> Self {
+        self.scope = GroupPickerScope::AnyGroup;
+        self
+    }
+}
+
+/// The confirmed group pick. The picker chooses exactly one group, or — where
+/// the open allowed it — **none**.
+#[derive(Message, Debug, Clone)]
+pub struct GroupPicked {
+    /// The control that opened the picker (see [`OpenGroupPicker`]).
+    pub requester: Entity,
+    /// The chosen group, or `None` for the "none" row (only ever sent for an
+    /// open that set [`OpenGroupPicker::allow_none`]).
+    pub group: Option<GroupKey>,
+    /// The name the picked row carried, so a consumer that must show the group
+    /// before the id resolves has something to show. Empty for the "none" row.
+    pub name: String,
 }
 
 /// Which experiences an experience picker may offer — the reference's
@@ -1691,16 +1820,21 @@ impl ExperiencePickerFilter {
     }
 }
 
-/// Ask the experience picker to open for a feature. `requester` tags the
-/// eventual [`ExperiencePicked`] so only the asking feature consumes it — the
-/// same out-of-band shape as [`OpenAvatarPicker`].
+/// Ask the experience picker to open for a control. `requester` is the control
+/// that asked, echoed back in [`ExperiencePicked`] — the same out-of-band shape
+/// as [`OpenAvatarPicker`].
 ///
 /// The reference's equivalent is `LLFloaterExperiencePicker::show`, which every
 /// estate / parcel experience list opens from its Add button.
 #[derive(Message, Debug, Clone, Copy)]
 pub struct OpenExperiencePicker {
-    /// The feature tag echoed back in [`ExperiencePicked`].
-    pub requester: &'static str,
+    /// The control that asked — the list's Add button. Echoed back in
+    /// [`ExperiencePicked`], and its host floater is the window the pick
+    /// belongs to.
+    pub requester: Entity,
+    /// **Which** of the opening window's pickers this is — one per experience
+    /// list. See [`OpenAvatarPicker::field`].
+    pub field: &'static str,
     /// Which experiences this open may offer.
     pub filter: ExperiencePickerFilter,
 }
@@ -1710,8 +1844,8 @@ pub struct OpenExperiencePicker {
 /// `close_on_select` true).
 #[derive(Message, Debug, Clone)]
 pub struct ExperiencePicked {
-    /// The tag of the feature that opened the picker.
-    pub requester: &'static str,
+    /// The control that opened the picker (see [`OpenExperiencePicker`]).
+    pub requester: Entity,
     /// The chosen experience.
     pub experience: ExperienceKey,
     /// The name the picked row carried, so a consumer that must show the
@@ -1738,13 +1872,14 @@ pub struct OpenTexturePicker {
     /// The swatch (or other widget) the reply is tagged back to.
     pub requester: Entity,
     /// **Which field** is being picked for — the swatch's element id, or a
-    /// name the opener chooses. The picker opens one window per field (the
-    /// reference gives every `LLTextureCtrl` its own picker), so this is the
-    /// window's identity: two fields are two windows, and each remembers its
-    /// own position and size.
+    /// name the opener chooses. The picker opens one window per field of the
+    /// **opening window** (the reference gives every `LLTextureCtrl` its own
+    /// picker), so this is half of that window's identity and the opener is the
+    /// other half: two fields are two pickers, and so are the same field in two
+    /// instances of one floater. See `picker_identity`.
     ///
-    /// Two swatches declared with the same element id share one window, since
-    /// they are the same field as far as the UI is concerned.
+    /// Two swatches declared with the same element id *in one window* share one
+    /// picker, since they are the same field as far as the UI is concerned.
     ///
     /// Owned rather than `&'static str` because a field id is not always a
     /// literal: a table-driven panel (the environment editors) names its
