@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 41 |
 | in-progress | 22 |
 | bugs | 43 |
-| done | 1102 |
+| done | 1103 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1664** |
+| **total** | **1665** |
 
 ## ideas (100)
 
@@ -1269,7 +1269,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1102)
+## done (1103)
 
 ### protocol
 
@@ -3681,6 +3681,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`server-fake-grid-agent-experiences`](done/server-fake-grid-agent-experiences.md)
   — Fake grid — the agent's own five experience lists
+- [`server-fake-grid-top-objects-report`](done/server-fake-grid-top-objects-report.md)
+  — Fake grid — a top-objects report with rows in it, and a return that finds
+  them
 
 ## deferred (26)
 

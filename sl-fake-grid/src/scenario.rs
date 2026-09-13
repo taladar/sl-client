@@ -21,7 +21,7 @@
 //! on its own, running scripted steps once the agent has arrived.
 
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use sl_proto::{
     AssetKey, AssetType, ChatSource, ChatType, InventoryFolder, InventoryItem, InventoryType,
@@ -33,7 +33,9 @@ use sl_types::key::{AgentKey, InventoryFolderKey, InventoryKey, ObjectKey, Owner
 
 use crate::timeline::Timeline;
 use crate::udp_assets::UdpAssetFixtures;
-use crate::world::{AvatarIdentity, SceneFixtures, TaskInventory, box_prim, region_wide_parcel};
+use crate::world::{
+    AvatarIdentity, ObjectCost, SceneFixtures, TaskInventory, box_prim, region_wide_parcel,
+};
 
 /// A hook run under the session lock against the machine (fixture setup,
 /// on-arrival content pushes), stamped with the grid's clock
@@ -446,6 +448,12 @@ pub fn default_udp_assets() -> UdpAssetFixtures {
 
 /// The stock parcel's name.
 pub const STOCK_PARCEL_NAME: &str = "Fake Grid Parcel";
+/// How much script time the stock scripted object is reported to have used —
+/// what a top-scripts report scores it by.
+pub const STOCK_SCRIPT_TIME: Duration = Duration::from_millis(1_250);
+/// How much script memory the stock scripted object is reported to hold, in
+/// bytes — the `DataExtended` half of its report row.
+pub const STOCK_SCRIPT_MEMORY_BYTES: f32 = 8_192.0;
 /// The stock scripted object's region-local position (a box resting on
 /// the flat stock terrain, a few metres from the arrival point).
 pub const STOCK_SCRIPTED_OBJECT_POSITION: sl_types::lsl::Vector = sl_types::lsl::Vector {
@@ -489,6 +497,15 @@ pub fn default_world() -> SceneFixtures {
     world.add_task_inventory(
         STOCK_SCRIPTED_OBJECT_LOCAL_ID,
         TaskInventory::stated(SCRIPTED_OBJECT_SERIAL, vec![stock_script_item()]),
+    );
+    // The object holds a script, so the region's top-scripts report is about
+    // it. What that script *costs* is a thing a fake region cannot measure and
+    // therefore states: without it the stock grid answers every top-objects
+    // request with an empty list, which exercises one line of a viewer's window
+    // and none of the rest.
+    world.object_costs.insert(
+        STOCK_SCRIPTED_OBJECT_LOCAL_ID,
+        ObjectCost::scripted(STOCK_SCRIPT_TIME).with_resources(STOCK_SCRIPT_MEMORY_BYTES, 1),
     );
     world
 }
