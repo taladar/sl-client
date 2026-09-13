@@ -49,6 +49,7 @@ use crate::inventory::OpenAboutLandmark;
 use crate::inventory_properties::{
     LandmarkAsset, format_unix_date, parse_landmark, send_item_update,
 };
+use crate::name_revisions::NameRevisions;
 use crate::ui::{column, row};
 use crate::ui_font::UiFont;
 use crate::world_api::AVATAR_BOOST_PRIORITY;
@@ -825,9 +826,10 @@ fn refresh_names(
     windows: Query<(&AboutLandmarkState, &AboutLandmarkUi)>,
     avatars: Res<AvatarState>,
     groups: Res<GroupsModel>,
+    mut built: Local<NameRevisions>,
     mut texts: Query<&mut Text>,
 ) {
-    if !avatars.is_changed() && !groups.is_changed() {
+    if !built.advance(NameRevisions::read(&avatars, &groups)) {
         return;
     }
     for (state, ui) in &windows {

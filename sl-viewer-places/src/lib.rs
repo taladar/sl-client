@@ -46,5 +46,6 @@ pub mod about_land;
 pub mod about_landmark;
 pub mod about_region;
 mod edit_fields;
+mod name_revisions;
 pub mod telehub;
 pub mod top_objects;

@@ -129,6 +129,7 @@ use crate::land_environment::{
     AllowEnvironmentOverrideRequested, LandEnvironmentPlugin, LandEnvironmentSubject,
     LandPanelKind, spawn_land_environment_panel,
 };
+use crate::name_revisions::{NameRevisions, ViewBuilt};
 use crate::telehub::{OpenTelehub, TelehubPlugin};
 use crate::top_objects::{OpenTopObjects, TopObjectsPlugin};
 use crate::ui::{column, row};
@@ -712,7 +713,7 @@ impl AboutRegionDirty {
 }
 
 /// One resolved access-list row.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct AccessRowData {
     /// The resolved display name (or `(id)` fallback).
     name: String,
@@ -725,8 +726,6 @@ struct AccessRowData {
 struct ManagersView {
     /// The resolved rows.
     rows: Vec<AccessRowData>,
-    /// The revision the rows were built from.
-    built: u64,
 }
 
 /// The allowed-residents list view model.
@@ -734,8 +733,6 @@ struct ManagersView {
 struct AllowedView {
     /// The resolved rows.
     rows: Vec<AccessRowData>,
-    /// The revision the rows were built from.
-    built: u64,
 }
 
 /// The allowed-groups list view model.
@@ -743,8 +740,6 @@ struct AllowedView {
 struct AllowedGroupsView {
     /// The resolved rows.
     rows: Vec<AccessRowData>,
-    /// The revision the rows were built from.
-    built: u64,
 }
 
 /// The banned-residents list view model.
@@ -752,8 +747,21 @@ struct AllowedGroupsView {
 struct BannedView {
     /// The resolved rows.
     rows: Vec<AccessRowData>,
-    /// The revision the rows were built from.
-    built: u64,
+}
+
+/// What each of one window's four access-list views was last built from.
+///
+/// Beside the views, not inside them — see [`ViewBuilt`].
+#[derive(Component, Debug, Default)]
+struct AboutRegionBuilt {
+    /// The estate-managers list.
+    managers: ViewBuilt,
+    /// The allowed residents.
+    allowed: ViewBuilt,
+    /// The allowed groups.
+    allowed_groups: ViewBuilt,
+    /// The banned residents.
+    banned: ViewBuilt,
 }
 
 /// One resolved estate-experience row.
@@ -2110,6 +2118,7 @@ fn open_about_region(
                 AllowedView::default(),
                 AllowedGroupsView::default(),
                 BannedView::default(),
+                AboutRegionBuilt::default(),
                 ExperiencesView::default(),
                 ui,
             ));
@@ -2468,9 +2477,10 @@ fn seed_terrain_draft(
 fn refresh_on_names(
     avatars: Res<AvatarState>,
     groups: Res<GroupsModel>,
+    mut built: Local<NameRevisions>,
     mut windows: Query<&mut AboutRegionDirty>,
 ) {
-    if !avatars.is_changed() && !groups.is_changed() {
+    if !built.advance(NameRevisions::read(&avatars, &groups)) {
         return;
     }
     for mut dirty in &mut windows {
@@ -2960,50 +2970,64 @@ fn update_covenant_tab(
 /// Rebuild the estate-managers view when the list or the name cache changes.
 /// Rebuild each window's estate-managers view when its list or the name cache changes.
 fn sync_managers_view(
-    mut windows: Query<(&AboutRegionState, &mut ManagersView, &AboutRegionUi)>,
+    mut windows: Query<(
+        &AboutRegionState,
+        &mut ManagersView,
+        &mut AboutRegionBuilt,
+        &AboutRegionUi,
+    )>,
     avatars: Res<AvatarState>,
     groups: Res<GroupsModel>,
     mut lists: Query<&mut VirtualList>,
 ) {
-    for (state, view, ui) in &mut windows {
-        let view = view.into_inner();
-        sync_access_view(
+    let names = NameRevisions::read(&avatars, &groups);
+    for (state, mut view, mut built, ui) in &mut windows {
+        let Some(rows) = resolved_access_rows(
             AccessList::Managers,
             state.managers_revision,
             &state.managers,
-            &mut view.rows,
-            &mut view.built,
-            ui.access.managers_viewport,
+            &view.rows,
+            &mut built.managers,
             &avatars,
             &groups,
-            avatars.is_changed() || groups.is_changed(),
-            &mut lists,
-        );
+            names,
+        ) else {
+            continue;
+        };
+        view.rows = rows;
+        set_item_count(&mut lists, ui.access.managers_viewport, view.rows.len());
     }
 }
 
 /// Rebuild the allowed-residents view.
 /// Rebuild each window's allowed-residents view.
 fn sync_allowed_view(
-    mut windows: Query<(&AboutRegionState, &mut AllowedView, &AboutRegionUi)>,
+    mut windows: Query<(
+        &AboutRegionState,
+        &mut AllowedView,
+        &mut AboutRegionBuilt,
+        &AboutRegionUi,
+    )>,
     avatars: Res<AvatarState>,
     groups: Res<GroupsModel>,
     mut lists: Query<&mut VirtualList>,
 ) {
-    for (state, view, ui) in &mut windows {
-        let view = view.into_inner();
-        sync_access_view(
+    let names = NameRevisions::read(&avatars, &groups);
+    for (state, mut view, mut built, ui) in &mut windows {
+        let Some(rows) = resolved_access_rows(
             AccessList::Allowed,
             state.allowed_revision,
             &state.allowed,
-            &mut view.rows,
-            &mut view.built,
-            ui.access.allowed_viewport,
+            &view.rows,
+            &mut built.allowed,
             &avatars,
             &groups,
-            avatars.is_changed() || groups.is_changed(),
-            &mut lists,
-        );
+            names,
+        ) else {
+            continue;
+        };
+        view.rows = rows;
+        set_item_count(&mut lists, ui.access.allowed_viewport, view.rows.len());
     }
 }
 
@@ -3017,15 +3041,23 @@ fn sync_allowed_view(
 /// search. Asked only when the *list* moved, not whenever a name lands, so a
 /// group the grid will not name cannot turn into a re-request loop.
 fn sync_allowed_groups_view(
-    mut windows: Query<(&AboutRegionState, &mut AllowedGroupsView, &AboutRegionUi)>,
+    mut windows: Query<(
+        &AboutRegionState,
+        &mut AllowedGroupsView,
+        &mut AboutRegionBuilt,
+        &AboutRegionUi,
+    )>,
     avatars: Res<AvatarState>,
     groups: Res<GroupsModel>,
     mut lists: Query<&mut VirtualList>,
     mut commands: MessageWriter<SlCommand>,
 ) {
-    for (state, view, ui) in &mut windows {
-        let view = view.into_inner();
-        if view.built != state.allowed_groups_revision {
+    let names = NameRevisions::read(&avatars, &groups);
+    for (state, mut view, mut built, ui) in &mut windows {
+        // Read before the resolve records it: the ask is owed to a moved
+        // *list*, and a name landing must not re-ask for the ones the grid has
+        // already declined to answer.
+        if built.allowed_groups.revision() != state.allowed_groups_revision {
             let unknown: Vec<GroupKey> = state
                 .allowed_groups
                 .iter()
@@ -3036,17 +3068,23 @@ fn sync_allowed_groups_view(
                 commands.write(SlCommand(Command::RequestGroupNames(unknown)));
             }
         }
-        sync_access_view(
+        let Some(rows) = resolved_access_rows(
             AccessList::AllowedGroups,
             state.allowed_groups_revision,
             &state.allowed_groups,
-            &mut view.rows,
-            &mut view.built,
-            ui.access.allowed_groups_viewport,
+            &view.rows,
+            &mut built.allowed_groups,
             &avatars,
             &groups,
-            avatars.is_changed() || groups.is_changed(),
+            names,
+        ) else {
+            continue;
+        };
+        view.rows = rows;
+        set_item_count(
             &mut lists,
+            ui.access.allowed_groups_viewport,
+            view.rows.len(),
         );
     }
 }
@@ -3054,65 +3092,83 @@ fn sync_allowed_groups_view(
 /// Rebuild the banned-residents view.
 /// Rebuild each window's banned-residents view.
 fn sync_banned_view(
-    mut windows: Query<(&AboutRegionState, &mut BannedView, &AboutRegionUi)>,
+    mut windows: Query<(
+        &AboutRegionState,
+        &mut BannedView,
+        &mut AboutRegionBuilt,
+        &AboutRegionUi,
+    )>,
     avatars: Res<AvatarState>,
     groups: Res<GroupsModel>,
     mut lists: Query<&mut VirtualList>,
 ) {
-    for (state, view, ui) in &mut windows {
-        let view = view.into_inner();
-        sync_access_view(
+    let names = NameRevisions::read(&avatars, &groups);
+    for (state, mut view, mut built, ui) in &mut windows {
+        let Some(rows) = resolved_access_rows(
             AccessList::Banned,
             state.banned_revision,
             &state.banned,
-            &mut view.rows,
-            &mut view.built,
-            ui.access.banned_viewport,
+            &view.rows,
+            &mut built.banned,
             &avatars,
             &groups,
-            avatars.is_changed() || groups.is_changed(),
-            &mut lists,
-        );
+            names,
+        ) else {
+            continue;
+        };
+        view.rows = rows;
+        set_item_count(&mut lists, ui.access.banned_viewport, view.rows.len());
     }
 }
 
-/// The shared rebuild of an access-list view (resolving names) + item count.
+/// One access list's rows, resolved — or `None` when the view already shows them.
+///
+/// Two gates. The name caches' **own revisions** decide whether the names are
+/// worth resolving again; `Res<AvatarState>::is_changed()` would not, since an
+/// avatar walking past sets it (see [`crate::name_revisions`]). Then the
+/// resolved rows are compared with what the view shows, so a name that did
+/// resolve re-binds this list only when it belongs to somebody in it — and most
+/// names belong to nobody in it.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the shared access-view rebuild threads the list kind, its revision, the row sink, the \
-              viewport, the avatar / group name sources, and the names-changed flag"
+    reason = "the shared access-view resolve threads the list kind, its revision, the ids, the \
+              rows to compare against, the build record, and the avatar / group name sources"
 )]
-fn sync_access_view(
+fn resolved_access_rows(
     list: AccessList,
     revision: u64,
     ids: &[Uuid],
-    rows: &mut Vec<AccessRowData>,
-    built: &mut u64,
-    viewport: Option<Entity>,
+    current: &[AccessRowData],
+    built: &mut ViewBuilt,
     avatars: &AvatarState,
     groups: &GroupsModel,
-    names_changed: bool,
-    lists: &mut Query<&mut VirtualList>,
-) {
-    if *built == revision && !names_changed {
-        return;
+    names: NameRevisions,
+) -> Option<Vec<AccessRowData>> {
+    if !built.due(revision, names) {
+        return None;
     }
-    *built = revision;
-    rows.clear();
-    rows.extend(ids.iter().map(|id| AccessRowData {
-        name: if list.is_group() {
-            groups
-                .group_name(GroupKey::from(*id))
-                .map_or_else(|| format!("({id})"), str::to_owned)
-        } else {
-            avatars.label_text(AgentKey::from(*id))
-        },
-        id: *id,
-    }));
+    let rows: Vec<AccessRowData> = ids
+        .iter()
+        .map(|id| AccessRowData {
+            name: if list.is_group() {
+                groups
+                    .group_name(GroupKey::from(*id))
+                    .map_or_else(|| format!("({id})"), str::to_owned)
+            } else {
+                avatars.label_text(AgentKey::from(*id))
+            },
+            id: *id,
+        })
+        .collect();
+    (rows != current).then_some(rows)
+}
+
+/// Point a virtual list at a row count.
+fn set_item_count(lists: &mut Query<&mut VirtualList>, viewport: Option<Entity>, count: usize) {
     if let Some(viewport) = viewport
-        && let Ok(mut virtual_list) = lists.get_mut(viewport)
+        && let Ok(mut list) = lists.get_mut(viewport)
     {
-        virtual_list.item_count = rows.len();
+        list.item_count = count;
     }
 }
 

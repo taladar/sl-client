@@ -4007,6 +4007,9 @@ pub struct AvatarState {
     /// given still shows it: [`Self::name_entry`] folds it in as the record is
     /// created. Session state — the store is what persists.
     name_aliases: HashMap<AgentKey, NameAlias>,
+    /// Bumped whenever the name cache is written — a record ingested, the
+    /// aliases replaced. Read through [`names_revision`](Self::names_revision).
+    names_revision: u64,
     /// Group titles from each avatar object's NameValue `Title` — the classic
     /// mechanism the reference reads for other avatars' tags. (The own
     /// avatar's fresher title comes from `ActiveGroupChanged` via
@@ -4201,6 +4204,24 @@ fn provisional_label(agent: AgentKey) -> String {
 }
 
 impl AvatarState {
+    /// How many times the name cache has been written — a record ingested, the
+    /// aliases replaced.
+    ///
+    /// The signal a view that **draws resolved names** should rebuild on: it
+    /// stores the value it resolved at and compares, the way the friends and
+    /// groups models' `revision` is already used.
+    ///
+    /// This resource's own change tick will not do that job. `AvatarState` is
+    /// written by every avatar that moves, streams in, changes appearance or is
+    /// re-costed, so `Res<AvatarState>::is_changed()` is true on most frames in
+    /// a crowded region and says nothing whatever about names — About Land
+    /// rebuilt every owner and access row, a `translator.get()` and a `format!`
+    /// apiece, many times a second while it was open.
+    #[must_use]
+    pub const fn names_revision(&self) -> u64 {
+        self.names_revision
+    }
+
     /// The tag text for an agent: its display name when resolved, else its
     /// legacy name, else a provisional id fragment until either arrives.
     pub fn label_text(&self, agent: AgentKey) -> String {
@@ -4282,6 +4303,7 @@ impl AvatarState {
             record.alias = aliases.get(agent).cloned();
         }
         self.name_aliases = aliases;
+        self.names_revision = self.names_revision.wrapping_add(1);
     }
 
     /// The record for `agent`, created if this is the first thing known about
@@ -4290,6 +4312,13 @@ impl AvatarState {
     /// too.
     fn name_entry(&mut self, agent: AgentKey) -> &mut NameRecord {
         let alias = self.name_aliases.get(&agent).cloned();
+        // Bumped for the *touch*, not for a proven change: the caller takes a
+        // `&mut` and decides for itself whether to write through it, so this is
+        // an upper bound on "a name moved". Erring that way is the cheap
+        // direction — a name ingest is a rare, bounded event, and a spurious
+        // rebuild of a few table rows costs nothing, while missing a real one
+        // leaves a resident showing as a UUID until something else moves.
+        self.names_revision = self.names_revision.wrapping_add(1);
         let record = self.names.entry(agent).or_default();
         if record.alias != alias {
             record.alias = alias;
@@ -7513,10 +7542,10 @@ mod tests {
     use std::collections::HashMap;
 
     use super::{
-        MuteModel, PROVISIONAL_ID_CHARS, PatchKey, TerrainState, provisional_label, target_for,
-        used_baked_slots,
+        AvatarState, MuteModel, PROVISIONAL_ID_CHARS, PatchKey, TerrainState, provisional_label,
+        target_for, used_baked_slots,
     };
-    use pretty_assertions::assert_eq;
+    use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_bevy::{
         AgentKey, MuteEntry, MuteFlags, MuteType, RegionHandle, ScriptLanguage, ScriptTarget,
         TerrainLayerType, TerrainPatch, TextureEntry, TextureFace, TextureKey, Uuid,
@@ -7650,6 +7679,41 @@ mod tests {
         let label = provisional_label(agent);
         assert_eq!(label.chars().count(), PROVISIONAL_ID_CHARS);
         assert!(agent.uuid().simple().to_string().starts_with(&label));
+    }
+
+    /// The name-cache revision moves for a name and for nothing else.
+    ///
+    /// The distinction a table of resolved names lives on: `AvatarState` is
+    /// written by every avatar that moves or streams in, so its change tick is
+    /// set on most frames in a crowded region and says nothing about names. A
+    /// view that rebuilds on the tick rebuilds constantly for no reason
+    /// (`viewer-audit-about-land-row-rebuild`); one that rebuilds on this
+    /// rebuilds when a name arrives.
+    #[test]
+    fn the_name_revision_moves_for_names_and_nothing_else() {
+        let agent = AgentKey::from(Uuid::from_u128(0xa1));
+        let mut avatars = AvatarState::default();
+        let quiet = avatars.names_revision();
+
+        // An avatar arriving where the viewer can see it is not a name.
+        let _previous = avatars
+            .coarse_region
+            .insert(agent, RegionHandle::new(0x1234));
+        assert_eq!(
+            avatars.names_revision(),
+            quiet,
+            "an avatar moving into view is not a name resolving"
+        );
+
+        // A name learned from traffic is.
+        avatars.note_legacy_name(agent, "Somebody Resident");
+        let named = avatars.names_revision();
+        assert_ne!(named, quiet);
+        assert_eq!(avatars.label_text(agent), "Somebody Resident");
+
+        // So is an alias replacing one, which renames them everywhere at once.
+        avatars.set_name_aliases(HashMap::new());
+        assert_ne!(avatars.names_revision(), named);
     }
 
     /// A texture entry carrying an `IMG_USE_BAKED_*` sentinel yields that region's

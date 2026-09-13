@@ -81,6 +81,7 @@ use crate::inventory_properties::format_unix_date;
 use crate::land_environment::{
     LandEnvironmentPlugin, LandEnvironmentSubject, LandPanelKind, spawn_land_environment_panel,
 };
+use crate::name_revisions::{NameRevisions, ViewBuilt};
 use crate::ui::{column, row};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
@@ -589,7 +590,7 @@ impl AboutLandDirty {
 // ---------------------------------------------------------------------------
 
 /// A resolved object-owner row.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 struct OwnerRowData {
     /// The owner-kind label (Resident / Group).
     kind: String,
@@ -605,12 +606,10 @@ struct OwnerRowData {
 struct OwnersView {
     /// The rows in display order.
     rows: Vec<OwnerRowData>,
-    /// The [`AboutLandState::owners_revision`] this view was built from.
-    built: u64,
 }
 
 /// A resolved access-list row.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 struct AccessRowData {
     /// The resident agent id (for removal).
     id: Uuid,
@@ -625,8 +624,6 @@ struct AccessRowData {
 struct AllowView {
     /// The rows in display order.
     rows: Vec<AccessRowData>,
-    /// The [`AboutLandState::allow_revision`] this view was built from.
-    built: u64,
 }
 
 /// The ban-list table view, for one window.
@@ -634,8 +631,19 @@ struct AllowView {
 struct BanView {
     /// The rows in display order.
     rows: Vec<AccessRowData>,
-    /// The [`AboutLandState::ban_revision`] this view was built from.
-    built: u64,
+}
+
+/// What each of one window's three name-resolving views was last built from.
+///
+/// Beside the views, not inside them — see [`ViewBuilt`].
+#[derive(Component, Debug, Default)]
+struct AboutLandBuilt {
+    /// The object-owners table.
+    owners: ViewBuilt,
+    /// The allow list.
+    allow: ViewBuilt,
+    /// The ban list.
+    ban: ViewBuilt,
 }
 
 // ---------------------------------------------------------------------------
@@ -1688,6 +1696,7 @@ fn open_about_land(
                 OwnersView::default(),
                 AllowView::default(),
                 BanView::default(),
+                AboutLandBuilt::default(),
                 ui,
             ));
             continue;
@@ -2089,9 +2098,10 @@ fn drive_owner_tallies(
 fn refresh_on_names(
     avatars: Res<AvatarState>,
     groups: Res<GroupsModel>,
+    mut built: Local<NameRevisions>,
     mut windows: Query<&mut AboutLandDirty>,
 ) {
-    if !avatars.is_changed() && !groups.is_changed() {
+    if !built.advance(NameRevisions::read(&avatars, &groups)) {
         return;
     }
     for mut dirty in &mut windows {
@@ -2665,23 +2675,32 @@ fn aim_environment_panel(
 // Table view sync + populate + bind.
 // ---------------------------------------------------------------------------
 
-/// Rebuild the object-owners view (resolving names) when the tally or the name
-/// caches change, and keep the virtual list's item count in step.
 /// Rebuild each window's object-owners view (resolving names) when its tally or
 /// the name caches change, and keep its virtual list's item count in step.
+///
+/// Two gates, and both matter. The **caches' own revisions** decide whether the
+/// names are worth resolving again — not `Res<AvatarState>::is_changed()`, which
+/// an avatar walking past sets (see [`crate::name_revisions`]). Then the
+/// resolved rows are compared with what the view already shows, so the name that
+/// did resolve rebuilds this table only if it belongs to somebody in it.
 fn sync_owners_view(
-    mut windows: Query<(&AboutLandState, &mut OwnersView, &AboutLandUi)>,
+    mut windows: Query<(
+        &AboutLandState,
+        &mut OwnersView,
+        &mut AboutLandBuilt,
+        &AboutLandUi,
+    )>,
     avatars: Res<AvatarState>,
     groups: Res<GroupsModel>,
     translator: Translator,
     mut lists: Query<&mut VirtualList>,
 ) {
-    for (state, mut view, ui) in &mut windows {
-        if view.built == state.owners_revision && !avatars.is_changed() && !groups.is_changed() {
+    let names = NameRevisions::read(&avatars, &groups);
+    for (state, mut view, mut built, ui) in &mut windows {
+        if !built.owners.due(state.owners_revision, names) {
             continue;
         }
-        view.built = state.owners_revision;
-        view.rows = state
+        let rows: Vec<OwnerRowData> = state
             .owners
             .iter()
             .map(|owner| {
@@ -2701,6 +2720,10 @@ fn sync_owners_view(
                 }
             })
             .collect();
+        if rows == view.rows {
+            continue;
+        }
+        view.rows = rows;
         if let Some(viewport) = ui.object_handles.owners_viewport
             && let Ok(mut list) = lists.get_mut(viewport)
         {
@@ -2709,76 +2732,91 @@ fn sync_owners_view(
     }
 }
 
-/// Rebuild the allow-list view.
 /// Rebuild each window's allow-list view.
 fn sync_allow_view(
-    mut windows: Query<(&AboutLandState, &mut AllowView, &AboutLandUi)>,
+    mut windows: Query<(
+        &AboutLandState,
+        &mut AllowView,
+        &mut AboutLandBuilt,
+        &AboutLandUi,
+    )>,
     avatars: Res<AvatarState>,
+    groups: Res<GroupsModel>,
     translator: Translator,
     mut lists: Query<&mut VirtualList>,
 ) {
-    for (state, view, ui) in &mut windows {
-        let view = view.into_inner();
-        sync_access_view(
+    let names = NameRevisions::read(&avatars, &groups);
+    for (state, mut view, mut built, ui) in &mut windows {
+        let Some(rows) = resolved_access_rows(
             state.allow_revision,
             &state.access_allow,
-            &mut view.rows,
-            &mut view.built,
-            ui.access_handles.allow_viewport,
+            &view.rows,
+            &mut built.allow,
             &avatars,
-            avatars.is_changed(),
+            names,
             &translator,
+        ) else {
+            continue;
+        };
+        view.rows = rows;
+        set_item_count(
             &mut lists,
+            ui.access_handles.allow_viewport,
+            view.rows.len(),
         );
     }
 }
 
-/// Rebuild the ban-list view.
 /// Rebuild each window's ban-list view.
 fn sync_ban_view(
-    mut windows: Query<(&AboutLandState, &mut BanView, &AboutLandUi)>,
+    mut windows: Query<(
+        &AboutLandState,
+        &mut BanView,
+        &mut AboutLandBuilt,
+        &AboutLandUi,
+    )>,
     avatars: Res<AvatarState>,
+    groups: Res<GroupsModel>,
     translator: Translator,
     mut lists: Query<&mut VirtualList>,
 ) {
-    for (state, view, ui) in &mut windows {
-        let view = view.into_inner();
-        sync_access_view(
+    let names = NameRevisions::read(&avatars, &groups);
+    for (state, mut view, mut built, ui) in &mut windows {
+        let Some(rows) = resolved_access_rows(
             state.ban_revision,
             &state.access_ban,
-            &mut view.rows,
-            &mut view.built,
-            ui.access_handles.ban_viewport,
+            &view.rows,
+            &mut built.ban,
             &avatars,
-            avatars.is_changed(),
+            names,
             &translator,
-            &mut lists,
-        );
+        ) else {
+            continue;
+        };
+        view.rows = rows;
+        set_item_count(&mut lists, ui.access_handles.ban_viewport, view.rows.len());
     }
 }
 
-/// The shared rebuild of an access-list view (resolving names) + item count.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the shared access-view rebuild threads the source revision, the row sink, the \
-              viewport, and the name / translator sources"
-)]
-fn sync_access_view(
+/// An access list's rows, resolved — or `None` when the view already shows them.
+///
+/// `None` covers the two cheap answers: nothing has moved since the last pass
+/// (no names resolved), and something moved but not a name **this** list draws,
+/// which is the common case in a busy region. Returning the rows is what marks
+/// the view changed and re-binds them, so it is worth the comparison.
+fn resolved_access_rows(
     revision: u64,
     entries: &[ParcelAccessEntry],
-    rows: &mut Vec<AccessRowData>,
-    built: &mut u64,
-    viewport: Option<Entity>,
+    current: &[AccessRowData],
+    built: &mut ViewBuilt,
     avatars: &AvatarState,
-    avatars_changed: bool,
+    names: NameRevisions,
     translator: &Translator,
-    lists: &mut Query<&mut VirtualList>,
-) {
-    if *built == revision && !avatars_changed {
-        return;
+) -> Option<Vec<AccessRowData>> {
+    if !built.due(revision, names) {
+        return None;
     }
-    *built = revision;
-    *rows = entries
+    let rows: Vec<AccessRowData> = entries
         .iter()
         .map(|entry| AccessRowData {
             id: entry.id,
@@ -2786,10 +2824,15 @@ fn sync_access_view(
             expiry: expiry_text(entry.time, translator),
         })
         .collect();
+    (rows != current).then_some(rows)
+}
+
+/// Point a virtual list at a row count.
+fn set_item_count(lists: &mut Query<&mut VirtualList>, viewport: Option<Entity>, count: usize) {
     if let Some(viewport) = viewport
         && let Ok(mut list) = lists.get_mut(viewport)
     {
-        list.item_count = rows.len();
+        list.item_count = count;
     }
 }
 
@@ -4186,16 +4229,18 @@ mod tests {
     mod instances {
         use super::super::{
             AboutLandAction, AboutLandDirty, AboutLandPlugin, AboutLandState, AboutLandSubject,
-            OpenAboutLand, OwnerTallyQueue, parcel_key,
+            OpenAboutLand, OwnerTallyQueue, OwnersView, parcel_key,
         };
         use crate::floater::{Floater, FloaterCommand, FloaterOp, FloaterPlugin};
         use crate::ui::UiRoot;
         use crate::world_api::{AgentRegionPosition, AvatarState, GroupPicked, GroupsModel};
+        use bevy::ecs::change_detection::Tick;
         use bevy::prelude::*;
         use pretty_assertions::{assert_eq, assert_ne};
         use sl_client_bevy::{
-            AgentKey, CircuitId, Command, GroupKey, RegionLocalParcelId, ScopedParcelId,
-            SlAgentParcel, SlCommand, SlEvent, SlIdentity, Uuid,
+            AgentKey, CircuitId, Command, GroupKey, OwnerKey, ParcelObjectOwner, RegionHandle,
+            RegionLocalParcelId, ScopedParcelId, SlAgentParcel, SlCommand, SlEvent, SlIdentity,
+            Uuid,
         };
 
         /// A boxed error so tests use `?` rather than the disallowed
@@ -4258,6 +4303,100 @@ mod tests {
                 .query_filtered::<Entity, With<AboutLandState>>()
                 .iter(app.world())
                 .collect()
+        }
+
+        /// When one window's object-owners view was last written.
+        ///
+        /// The rebuild this task is about is invisible in the rows — they come
+        /// out the same — so what is asserted is that the view was not written
+        /// at all. Writing it is what re-binds every row's text.
+        fn owners_written(app: &App, window: Entity) -> Option<Tick> {
+            app.world()
+                .entity(window)
+                .get_ref::<OwnersView>()
+                .map(|view| view.last_changed())
+        }
+
+        /// **The audit's case.** A crowded region writes `AvatarState` many
+        /// times a second, and most names that resolve belong to somebody this
+        /// parcel's owner table has never heard of. Neither may rebuild it.
+        ///
+        /// Both gates are exercised here: the first step moves the resource
+        /// without moving a name, the second moves a name that is not in the
+        /// list, and only the third — the listed owner's own name — is allowed
+        /// through.
+        #[test]
+        fn only_a_name_this_table_shows_rebuilds_it() -> Result<(), TestError> {
+            let owner = AgentKey::from(Uuid::from_u128(0x0e));
+            let stranger = AgentKey::from(Uuid::from_u128(0x5a));
+            let mut app = land_app();
+            open(&mut app, 7);
+            let window = *windows(&mut app).first().ok_or("no window opened")?;
+
+            // One owner on the parcel, whose name has not resolved yet.
+            {
+                let mut state = app
+                    .world_mut()
+                    .get_mut::<AboutLandState>(window)
+                    .ok_or("the window has no state")?;
+                state.owners = vec![ParcelObjectOwner {
+                    owner: OwnerKey::Agent(owner),
+                    count: 3,
+                    online_status: false,
+                }];
+                state.owners_revision = state.owners_revision.wrapping_add(1);
+            }
+            app.update();
+            let built = owners_written(&app, window).ok_or("the window has no owners view")?;
+            assert_eq!(
+                app.world()
+                    .get::<OwnersView>(window)
+                    .map(|view| view.rows.len()),
+                Some(1),
+                "the tally never reached the table"
+            );
+
+            // An avatar walks into view: `AvatarState` is written, no name resolves.
+            let _previous = app
+                .world_mut()
+                .resource_mut::<AvatarState>()
+                .coarse_region
+                .insert(stranger, RegionHandle::new(1));
+            app.update();
+            assert_eq!(
+                owners_written(&app, window),
+                Some(built),
+                "an avatar moving into view rebuilt the owner table"
+            );
+
+            // A name resolves — for somebody who owns nothing on this parcel.
+            app.world_mut()
+                .resource_mut::<AvatarState>()
+                .note_legacy_name(stranger, "Nobody Here");
+            app.update();
+            assert_eq!(
+                owners_written(&app, window),
+                Some(built),
+                "a stranger's name rebuilt the owner table"
+            );
+
+            // The listed owner's own name resolves, and must land.
+            app.world_mut()
+                .resource_mut::<AvatarState>()
+                .note_legacy_name(owner, "Parcel Owner");
+            app.update();
+            assert_ne!(
+                owners_written(&app, window),
+                Some(built),
+                "the owner's own name never reached the table"
+            );
+            assert_eq!(
+                app.world()
+                    .get::<OwnersView>(window)
+                    .and_then(|view| view.rows.first().map(|row| row.name.clone())),
+                Some("Parcel Owner".to_owned())
+            );
+            Ok(())
         }
 
         /// Two parcels are two windows, each keyed by its own scoped id.
