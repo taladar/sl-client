@@ -37,7 +37,8 @@ use sl_client_bevy::{Command, ObjectTransform, Permissions, SlCommand, Vector};
 use crate::edit_math::{clamp_scale, euler_deg_to_rotation, rotation_to_euler_deg};
 use crate::edit_params::set_disabled_class;
 use crate::floater::{
-    DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater,
+    DeferredFloaterContent, Floater, FloaterCaps, FloaterHandle, FloaterSpec, floater_panel,
+    spawn_floater,
 };
 use crate::gizmos::{EditPerm, perm_notice};
 use crate::i18n::{TransArgs, Translated, Translator};
@@ -309,6 +310,35 @@ pub fn build_tools_floater_spec() -> FloaterSpec {
     }
 }
 
+/// Open the Build Tools floater **on `tool`** — the body every entry point that
+/// opens the window with a manipulator already in mind shares (the object and
+/// land pies' **Create** slices, the object and attachment pies' **Edit**
+/// slice).
+///
+/// The reference's equivalents each do exactly this pair: `LLObjectBuild` /
+/// `LLLandBuild` show the build floater and `selectTool(LLToolCompCreate)`,
+/// `handle_object_edit` shows it and `setEditTool(LLToolCompTranslate)`. A plain
+/// open — `Ctrl+B`, the Build menu, the toolbar button — goes through neither,
+/// and the window's own open edge answers it instead: with nothing selected it
+/// lands on [`EditTool::Create`].
+///
+/// The panel is resolved by stable id ([`BUILD_TOOLS_FLOATER_ID`]), never
+/// through this module's `BuildToolsUi` resource: a lazily-built floater has no
+/// such resource until this very open.
+pub fn open_build_tools_with(
+    tool: EditTool,
+    floaters: &Query<(Entity, &Floater)>,
+    panels: &mut Query<&mut UiPanelShown>,
+    state: &mut EditToolState,
+) {
+    if let Some(panel) = floater_panel(floaters, BUILD_TOOLS_FLOATER_ID)
+        && let Ok(mut shown) = panels.get_mut(panel)
+    {
+        shown.0 = true;
+    }
+    state.tool = tool;
+}
+
 /// Spawn the Build Tools floater: tool buttons, toggles, grid unit, the
 /// selection summary, the nine transform fields, and the placeholder tab
 /// shell.
@@ -331,7 +361,11 @@ fn spawn_build_floater(mut commands: Commands, root: Option<Res<UiRoot>>) {
 /// [`DeferredFloaterContent`]): fill the content slot and insert
 /// [`BuildToolsUi`], whose appearance wakes its `Option<Res<BuildToolsUi>>`
 /// consumers.
-fn build_build_tools_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
+fn build_build_tools_content(
+    In(handle): In<FloaterHandle>,
+    mut commands: Commands,
+    state: Res<EditToolState>,
+) {
     let content = commands
         .spawn((
             Node {
@@ -352,6 +386,11 @@ fn build_build_tools_content(In(handle): In<FloaterHandle>, mut commands: Comman
     // one focus stop, arrow keys move the selection. The labels are the existing
     // `build-tool-*` Fluent keys; the selection is mirrored to and from
     // `EditToolState::tool` by the two sync systems.
+    //
+    // The dot starts on the tool the *state* is in, not on `EditTool::default()`:
+    // this content is built on the floater's first open, by which time that open
+    // may already have chosen Create (`mirror_floater_into_state`), and a group
+    // spawned on the default would show a dot the world is not in.
     let tool_labels: [String; 5] = [
         "build-tool-create".to_owned(),
         "build-tool-move".to_owned(),
@@ -365,7 +404,7 @@ fn build_build_tools_content(In(handle): In<FloaterHandle>, mut commands: Comman
         &RadioSpec {
             element: "build-tool",
             labels: &tool_labels,
-            active: EditTool::default().radio_index(),
+            active: state.tool.radio_index(),
             tab_index: 1,
             font_size: TOOL_FONT_SIZE,
             layout: RadioLayout::Row,
@@ -860,8 +899,25 @@ pub(crate) fn spawn_row_label(
 }
 
 /// Mirror the floater's visibility into [`EditToolState::active`] — an open
-/// Build Tools window *is* edit mode — and clear the selection when it closes
-/// (which also deselects on the wire).
+/// Build Tools window *is* edit mode — clear the selection when it closes
+/// (which also deselects on the wire), and open on [`EditTool::Create`] when
+/// there is nothing to manipulate.
+///
+/// The open edge is the reference's `LLToolMgr::enterBuildMode`, which selects
+/// `LLToolCompCreate` on every plain entry (the `Ctrl+B` accelerator, the Build
+/// menu item, the toolbar button): a build window opened with nothing selected
+/// is a build window opened in order to make something, and the Move
+/// manipulator it used to land on had no target. A **non-empty** selection
+/// leaves the resting tool alone — that is the pie ▸ Edit path
+/// (`handle_object_edit`), which shows the window and fills the selection in one
+/// system, so whatever runs later sees the two together and never mistakes it
+/// for a plain open. That path picks its own manipulator explicitly, exactly as
+/// the reference's `setEditTool(LLToolCompTranslate)` does; an unresolvable pick
+/// leaves the selection empty and lands here on Create, which is the right
+/// answer for a window opened on nothing.
+///
+/// The close edge already clears the selection, so the next plain open is an
+/// empty one and reaches Create without any further state.
 fn mirror_floater_into_state(
     ui: Option<Res<BuildToolsUi>>,
     panels: Query<&UiPanelShown>,
@@ -873,7 +929,11 @@ fn mirror_floater_into_state(
         .unwrap_or(false);
     if state.active != shown {
         state.active = shown;
-        if !shown && !selection.is_empty() {
+        if shown {
+            if selection.is_empty() && state.tool != EditTool::Create {
+                state.tool = EditTool::Create;
+            }
+        } else if !selection.is_empty() {
             selection.clear();
         }
     }
@@ -887,11 +947,22 @@ fn mirror_floater_into_state(
 /// `Ctrl+Shift` chord is a transient [`EditToolState::held_override`] preview
 /// ([`apply_tool_modifier_override`]) and deliberately does not move the radio
 /// dot, exactly as the reference's radio stays on the committed tool.
+///
+/// **A freshly spawned group is not a pick.** The floater's content is built
+/// lazily on its first open ([`DeferredFloaterContent`]), and Bevy's
+/// [`Changed`] fires when a component is *added* as well as when it is written
+/// — so without the `is_added` guard the newborn radio would push its own
+/// initial index over whatever that same open just chose ([`EditTool::Create`],
+/// for a window opened on nothing). The state is the source of truth at spawn
+/// time; [`sync_radio_from_build_tool`] carries it the other way.
 fn sync_build_tool_from_radio(
-    radios: Query<&RadioSelection, (With<BuildToolRadio>, Changed<RadioSelection>)>,
+    radios: Query<Ref<RadioSelection>, (With<BuildToolRadio>, Changed<RadioSelection>)>,
     mut state: ResMut<EditToolState>,
 ) {
     for selection in &radios {
+        if selection.is_added() {
+            continue;
+        }
         if let Some(&tool) = BUILD_TOOLS.get(selection.active)
             && state.tool != tool
         {
@@ -901,19 +972,25 @@ fn sync_build_tool_from_radio(
 }
 
 /// Mirror [`EditToolState::tool`] back onto the radio group if the resting tool
-/// changes from somewhere other than the group (a future shortcut, a test),
-/// keeping the dot in step. The radio widget's own reconcile then follows the
-/// selection write. Guarded on a real difference, so the click path — which
+/// changes from somewhere other than the group (the open edge, a shortcut, a
+/// test), keeping the dot in step. The radio widget's own reconcile then follows
+/// the selection write. Guarded on a real difference, so the click path — which
 /// already moved the selection — does not loop.
+///
+/// A **newly spawned** group is reconciled too, whether or not the state moved
+/// this frame: the lazily-built content can be spawned a frame after the open
+/// edge wrote the tool, and the resource's change tick would have gone stale by
+/// then, leaving the dot on a tool the world is not in.
 fn sync_radio_from_build_tool(
     state: Res<EditToolState>,
     mut radios: Query<&mut RadioSelection, With<BuildToolRadio>>,
 ) {
-    if !state.is_changed() {
-        return;
-    }
+    let state_changed = state.is_changed();
     let index = state.tool.radio_index();
     for mut selection in &mut radios {
+        if !(state_changed || selection.is_added()) {
+            continue;
+        }
         if selection.active != index {
             selection.active = index;
         }

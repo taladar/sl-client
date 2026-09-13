@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 310 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 39 |
-| done | 1118 |
+| bugs | 38 |
+| done | 1119 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1672** |
@@ -1157,7 +1157,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (39)
+## bugs (38)
 
 ### viewer
 
@@ -1203,8 +1203,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Eight copied texture-poll systems each leak Image assets for the session
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
   — Mesh-head brow spikes forward from face-bone shape deformation
-- [`viewer-build-tools-default-to-create`](bugs/viewer-build-tools-default-to-create.md)
-  — The build window opens on a manipulator with nothing to manipulate
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
   — Check clouds vs the waterline at the horizon against Firestorm
 - [`viewer-combo-stops-opening`](bugs/viewer-combo-stops-opening.md) — A combo
@@ -1251,7 +1249,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1118)
+## done (1119)
 
 ### protocol
 
@@ -1647,6 +1645,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Performance — gate all build-tool systems on build mode being active
 - [`viewer-build-tool-modify-permission-gate`](done/viewer-build-tool-modify-permission-gate.md)
   — Build tools — gate modifications on modify/move permission + grey the
+- [`viewer-build-tools-default-to-create`](done/viewer-build-tools-default-to-create.md)
+  — The build window opens on a manipulator with nothing to manipulate
 - [`viewer-build-ui-firestorm-audit`](done/viewer-build-ui-firestorm-audit.md) —
   Systematic side-by-side audit of the whole build UI vs Firestorm
 - [`viewer-build-undo-redo`](done/viewer-build-undo-redo.md) — Object-edit

@@ -20,6 +20,12 @@
 //! down now and each slice lights up when its feature lands — one `when` edit,
 //! address unchanged. Wired for real:
 //!
+//! - **Create** → the Build Tools floater on the Create tool
+//!   ([`crate::edit_tool::open_build_tools_with`]), the reference's
+//!   `Object.Build`: the next click in the world rezzes rather than
+//!   manipulates.
+//! - **Edit** → the same floater on the **move** manipulator, with the picked
+//!   object selected (the reference's `Object.Edit`).
 //! - **Touch** → [`Command::TouchObject`] on the picked prim, carrying the
 //!   [`SurfaceInfo`] of the right-click's own ray hit (what a script reads back
 //!   through `llDetectedTouch*`), enabled only for an object whose linkset
@@ -115,6 +121,7 @@ use crate::world_api::DerenderKind;
 use crate::world_api::ObjectState;
 use crate::world_api::RequestBlock;
 use crate::world_api::SelfGroundSit;
+use crate::world_api::{EditTool, EditToolState};
 
 /// The `element` the object pie attributes its [`UiAction`]s to.
 pub(crate) const OBJECT_MENU_ELEMENT: &str = "object-menu";
@@ -700,7 +707,14 @@ pub(crate) static OBJECT_PIE: PieMenuDef = PieMenuDef {
             content: PieContent::Action(PieAction {
                 label: "Create",
                 action: "build",
-                when: Some(UNIMPLEMENTED),
+                // Unconditional: the reference gates this on `EnableEdit`
+                // (`enable_object_edit`), which asks whether the *selection* is
+                // editable — a question a slice whose whole purpose is to start
+                // building with nothing selected cannot usefully answer. What
+                // actually bounds a rez is the parcel's build rights, which the
+                // simulator enforces on the `ObjectAdd` and which this viewer
+                // does not model client-side yet.
+                when: None,
             }),
         },
         PieEntry {
@@ -888,29 +902,30 @@ fn capture_object_menu_name(
 /// shared by the object pie and the attachment pies.
 ///
 /// The reference's `Object.Edit` (`handle_object_edit` in `llviewermenu.cpp`)
-/// shows the `build` floater and switches to the basic toolset, acting on
+/// shows the `build` floater, switches to the basic toolset and picks the
+/// translate manipulator (`setEditTool(LLToolCompTranslate)`), acting on
 /// whatever the right-click already selected; the attachment path
 /// (`handle_attachment_edit`) first deselects and selects the worn object, which
 /// is what the selection rewrite below does for both callers.
+///
+/// Picking the manipulator here is what keeps this path off
+/// [`EditTool::Create`]: a plain open of the build window with nothing selected
+/// lands on Create (`mirror_floater_into_state`), and the resting tool after a
+/// build session *is* Create, so an Edit that only opened the window would land
+/// on the tool that rezzes rather than the one that moves.
 ///
 /// `edit_linked` picks the reference's per-prim vs whole-linkset selection: with
 /// "Edit linked parts" on, the picked prim is selected, otherwise its root.
 pub(crate) fn edit_picked_object(
     summary: &crate::world_api::ObjectPickSummary,
-    edit_linked: bool,
+    tool: &mut EditToolState,
     floaters: &Query<(Entity, &crate::floater::Floater)>,
     panels: &mut Query<&mut crate::ui::UiPanelShown>,
     selection: &mut crate::world_api::SelectionSet,
     state: &ObjectState,
 ) {
-    // Resolved by stable id, not the module resource: a lazily-built Build
-    // Tools floater has no `BuildToolsUi` until this very open.
-    if let Some(panel) =
-        crate::floater::floater_panel(floaters, crate::edit_tool::BUILD_TOOLS_FLOATER_ID)
-        && let Ok(mut shown) = panels.get_mut(panel)
-    {
-        shown.0 = true;
-    }
+    let edit_linked = tool.edit_linked;
+    crate::edit_tool::open_build_tools_with(EditTool::Move, floaters, panels, tool);
     let (scoped, full) = if edit_linked {
         (summary.picked_scoped, summary.picked_full)
     } else {
@@ -938,7 +953,7 @@ fn handle_object_menu_actions(
     target: Res<ObjectMenuTarget>,
     inventory: Res<InventoryModel>,
     mut ground_sit: ResMut<SelfGroundSit>,
-    tool: Res<crate::world_api::EditToolState>,
+    mut tool: ResMut<EditToolState>,
     floaters: Query<(Entity, &crate::floater::Floater)>,
     mut panels: Query<&mut crate::ui::UiPanelShown>,
     mut selection: ResMut<crate::world_api::SelectionSet>,
@@ -968,15 +983,30 @@ fn handle_object_menu_actions(
             continue;
         }
         // Edit (the reference's pie Edit): open the Build Tools floater —
-        // which *is* edit mode — and make the picked object the selection.
+        // which *is* edit mode — on the move manipulator, and make the picked
+        // object the selection.
         if action.action == "edit" {
             edit_picked_object(
                 &hit.summary,
-                tool.edit_linked,
+                &mut tool,
                 &floaters,
                 &mut panels,
                 &mut selection,
                 &state,
+            );
+            continue;
+        }
+        // Create (the reference's pie Create → `LLObjectBuild`): open the Build
+        // Tools floater on the Create tool, so the next click in the world rezzes
+        // rather than manipulates. The reference leaves the selection alone here
+        // and so does this: the window opens on Create whatever is selected,
+        // because the slice *says* create.
+        if action.action == "build" {
+            crate::edit_tool::open_build_tools_with(
+                EditTool::Create,
+                &floaters,
+                &mut panels,
+                &mut tool,
             );
             continue;
         }
@@ -1336,12 +1366,18 @@ mod tests {
     #[test]
     fn unimplemented_entries_are_disabled_but_present() -> Result<(), TestError> {
         let plain = resolve_slots(&OBJECT_PIE, &PieConditions::default());
-        for (point, name) in [(Compass::NorthEast, "Create"), (Compass::SouthWest, "Pay")] {
-            assert!(
-                !slot_at(&plain, point)?.enabled,
-                "{name} is a placeholder and must read disabled until it is wired"
-            );
-        }
+        assert!(
+            !slot_at(&plain, Compass::SouthWest)?.enabled,
+            "Pay is a placeholder and must read disabled until it is wired"
+        );
+        // Create is wired (viewer-build-tools-default-to-create) and
+        // unconditional: the reference gates it on whether the *selection* is
+        // editable, which says nothing about a slice whose purpose is to build
+        // with nothing selected.
+        assert!(
+            slot_at(&plain, Compass::NorthEast)?.enabled,
+            "Create is wired and must read enabled with no conditions held"
+        );
         // Edit is wired (viewer-object-edit-floater-shell) and unconditional,
         // like the reference: it opens the build tools on any object.
         assert!(
@@ -1358,7 +1394,7 @@ mod tests {
         // hold it, and they light up. The live viewer never does this.
         let held = resolve_slots(&OBJECT_PIE, &PieConditions::new([UNIMPLEMENTED]));
         assert!(
-            slot_at(&held, Compass::NorthEast)?.enabled,
+            slot_at(&held, Compass::SouthWest)?.enabled,
             "holding the sentinel proves it is the only thing gating the placeholder"
         );
         // The empty (runtime-filled) Attach HUD sub-pie renders disabled.

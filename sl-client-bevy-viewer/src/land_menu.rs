@@ -19,13 +19,17 @@
 //! (the muscle memory) is laid down now and each slice lights up when its
 //! feature lands — one `when` edit, address unchanged:
 //!
-//! - **Create** and **Edit Terrain** wait for the build / terraform tools.
+//! - **Edit Terrain** waits for the terraform tools.
 //! - **Go Here** waits for autopilot.
 //! - **Mute Part. Own.** waits for particle picking
 //!   (`viewer-particle-pick-mute`), like the object pie's twin slice.
 //! - **Buy Pass** and **Buy This Land** wait for the land-buy flows.
 //!
-//! Wired for real: **Sit Here** → ground sit ([`Command::SitOnGround`]),
+//! Wired for real: **Create** → the Build Tools floater on the Create tool
+//! ([`crate::edit_tool::open_build_tools_with`]), the reference's `Land.Build`:
+//! the next click on this ground rezzes the base type the create panel offers.
+//!
+//! **Sit Here** → ground sit ([`Command::SitOnGround`]),
 //! standing the avatar up first when it is object-seated, as the reference's
 //! `Land.Sit` does. The reference then *autopilots* to the clicked point and
 //! sits there; without autopilot (`Go Here` above) ours sits in place — the
@@ -55,10 +59,12 @@ use bevy::prelude::*;
 use sl_client_bevy::{Command, SlAgentParcel, SlCommand};
 
 use crate::about_land::{AboutLandSubject, OpenAboutLand};
+use crate::floater::Floater;
 use crate::menu::UNIMPLEMENTED;
 use crate::pie_menu::{Compass, OpenPieMenu, PieAction, PieContent, PieEntry, PieMenuDef};
+use crate::ui::UiPanelShown;
 use crate::ui_element::UiAction;
-use crate::world_api::SelfGroundSit;
+use crate::world_api::{EditTool, EditToolState, SelfGroundSit};
 
 /// The `element` the land pie attributes its [`UiAction`]s to.
 pub(crate) const LAND_MENU_ELEMENT: &str = "land-menu";
@@ -82,7 +88,12 @@ pub(crate) static LAND_PIE: PieMenuDef = PieMenuDef {
             content: PieContent::Action(PieAction {
                 label: "Create",
                 action: "build",
-                when: Some(UNIMPLEMENTED),
+                // Unconditional, as the object pie's twin slice is: the
+                // reference's `EnableEdit` asks whether the current *selection*
+                // is editable, which says nothing about whether one may build
+                // here, and the parcel's build rights are the simulator's to
+                // enforce on the `ObjectAdd`.
+                when: None,
             }),
         },
         PieEntry {
@@ -184,8 +195,9 @@ impl Plugin for LandMenuPlugin {
 
 /// Turn a resolved terrain pick into an open pie.
 ///
-/// No conditions: the land pie's only live slice (Sit Here) is unconditional,
-/// and every placeholder is gated on the never-supplied [`UNIMPLEMENTED`].
+/// No conditions: the land pie's live slices (Create, Sit Here, About Land) are
+/// unconditional, and every placeholder is gated on the never-supplied
+/// [`UNIMPLEMENTED`].
 fn open_land_menu(
     mut requests: MessageReader<OpenLandMenu>,
     mut pies: MessageWriter<OpenPieMenu>,
@@ -204,13 +216,24 @@ fn open_land_menu(
 
 /// Dispatch a picked land-menu slice to the command behind it.
 ///
-/// Only Sit Here and About Land are wired; every other slice is a disabled
-/// placeholder that never emits, so the fall-through is intentionally silent.
+/// Only Create, Sit Here and About Land are wired; every other slice is a
+/// disabled placeholder that never emits, so the fall-through is intentionally
+/// silent.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries: the action \
+              stream, the agent's parcel and the pick's ground point, the seated state, the \
+              edit-tool state and the floater / panel queries the Create slice opens the build \
+              window through, and the two effect channels"
+)]
 fn handle_land_menu_actions(
     mut actions: MessageReader<UiAction>,
     parcel: Res<SlAgentParcel>,
     target: Res<LandMenuTarget>,
     mut ground_sit: ResMut<SelfGroundSit>,
+    mut tool: ResMut<EditToolState>,
+    floaters: Query<(Entity, &Floater)>,
+    mut panels: Query<&mut UiPanelShown>,
     mut commands: MessageWriter<SlCommand>,
     mut about_land: MessageWriter<OpenAboutLand>,
 ) {
@@ -219,6 +242,18 @@ fn handle_land_menu_actions(
             continue;
         }
         match action.action {
+            // Create (the reference's `Land.Build` → `LLLandBuild`): open the
+            // Build Tools floater on the Create tool, so the next click on this
+            // ground rezzes. The reference also deselects the *parcel* first;
+            // this viewer holds no parcel selection to drop.
+            "build" => {
+                crate::edit_tool::open_build_tools_with(
+                    EditTool::Create,
+                    &floaters,
+                    &mut panels,
+                    &mut tool,
+                );
+            }
             "sit-here" => {
                 // The reference's `LLLandSit` stands an already-seated avatar up
                 // before sitting on the ground; an object-seated avatar would
@@ -344,8 +379,12 @@ mod tests {
         let about = slot_at(&plain, Compass::East)?;
         assert_eq!(about.outcome, SlotOutcome::Action("about-land"));
         assert!(about.enabled, "About Land must be live unconditionally");
+        // Create is wired (viewer-build-tools-default-to-create): live
+        // unconditionally, like the object pie's twin slice.
+        let create = slot_at(&plain, Compass::NorthEast)?;
+        assert_eq!(create.outcome, SlotOutcome::Action("build"));
+        assert!(create.enabled, "Create must be live unconditionally");
         for (point, name) in [
-            (Compass::NorthEast, "Create"),
             (Compass::North, "Go Here"),
             (Compass::West, "Mute Part. Own."),
             (Compass::SouthWest, "Buy Pass"),
@@ -361,7 +400,7 @@ mod tests {
         // and they light up. The live viewer never does this.
         let held = resolve_slots(&LAND_PIE, &PieConditions::new([UNIMPLEMENTED]));
         assert!(
-            slot_at(&held, Compass::NorthEast)?.enabled,
+            slot_at(&held, Compass::North)?.enabled,
             "holding the sentinel proves it is the only thing gating a placeholder"
         );
         Ok(())

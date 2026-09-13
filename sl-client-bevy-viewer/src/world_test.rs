@@ -479,6 +479,14 @@ pub(crate) fn world_app_with_build_tools() -> Result<App, Box<dyn core::error::E
 /// is set through the manager's own [`FloaterGeometry`](crate::floater::FloaterGeometry)
 /// restore path — the same one the persisted-geometry seed uses — so nothing
 /// here bypasses the window's own clamping.
+///
+/// Finally it **picks the move manipulator**. A plain open with nothing selected
+/// lands on [`EditTool::Create`](crate::world_api::EditTool::Create) — the
+/// reference's `enterBuildMode`, and the subject of its own tests — under which
+/// a click in the world rezzes a prim instead of (only) selecting one. Every
+/// test that opens the window in order to *select something and edit it* wants
+/// the manipulator, so the fixture says so out loud rather than leaning on
+/// whatever the open edge chose.
 pub(crate) fn open_build_floater(app: &mut App) {
     /// Where the parked window's top-leading corner sits, logical pixels.
     const PARK_AT: Vec2 = Vec2::new(24.0, 4.0);
@@ -503,6 +511,10 @@ pub(crate) fn open_build_floater(app: &mut App) {
         }
     }
     settle(app, 4);
+    app.world_mut()
+        .resource_mut::<crate::world_api::EditToolState>()
+        .tool = crate::world_api::EditTool::Move;
+    settle(app, 2);
 }
 
 /// [`world_app_with_ui`] **with the input group underneath it** — the fixture
@@ -4687,8 +4699,9 @@ mod pie_dispatch_tests {
     use crate::object_menu::{FLAGS_HANDLE_TOUCH, OBJECT_MENU_ELEMENT};
     use crate::ui_element::UiAction;
     use crate::world_api::{
-        ConversationKey, DerenderKind, EditToolState, OpenAddToContactSet, OpenAvatarProfile,
-        OpenConversation, RequestBlock, RequestFriendship, SelectionSet, SelfGroundSit,
+        ConversationKey, DerenderKind, EditTool, EditToolState, OpenAddToContactSet,
+        OpenAvatarProfile, OpenConversation, RequestBlock, RequestFriendship, SelectionSet,
+        SelfGroundSit,
     };
 
     /// A boxed error so tests can use `?` instead of the disallowed
@@ -4971,6 +4984,41 @@ mod pie_dispatch_tests {
         assert!(
             is_selected(&app, child) && !is_selected(&app, root),
             "with Edit Linked Parts on, Edit selects the picked part"
+        );
+        Ok(())
+    }
+
+    /// **Edit opens on a manipulator, Create opens on the Create tool**: the two
+    /// object-pie slices that enter build mode with a tool already in mind, as
+    /// the reference's `handle_object_edit` (`setEditTool(LLToolCompTranslate)`)
+    /// and `LLObjectBuild` (`selectTool(LLToolCompCreate)`) do.
+    ///
+    /// The resting tool is deliberately Create to start with — the state left
+    /// behind by a build session — because that is the case an Edit slice which
+    /// only opened the window would get wrong: the user asks to edit an object
+    /// and lands in the tool that rezzes prims.
+    #[test]
+    fn edit_picks_the_manipulator_and_create_picks_the_create_tool() -> Result<(), TestError> {
+        let (mut app, _root, _child) = linkset_world()?;
+        app.world_mut().resource_mut::<EditToolState>().tool = EditTool::Create;
+
+        commit(&mut app, OBJECT_MENU_ELEMENT, "edit");
+        assert_eq!(
+            app.world().resource::<EditToolState>().tool,
+            EditTool::Move,
+            "Edit must open the build tools on the move manipulator"
+        );
+
+        commit(&mut app, OBJECT_MENU_ELEMENT, "build");
+        assert_eq!(
+            app.world().resource::<EditToolState>().tool,
+            EditTool::Create,
+            "Create must open the build tools on the Create tool"
+        );
+        assert_eq!(
+            command_names(&mut app),
+            Vec::<&str>::new(),
+            "neither slice is a wire message — both are the build window"
         );
         Ok(())
     }
@@ -5522,6 +5570,30 @@ mod pie_dispatch_tests {
         assert!(
             !opened.iter().any(|request| request.read_only),
             "the land pie's About Land is the editable view"
+        );
+        Ok(())
+    }
+
+    /// **Create on land opens the build tools on the Create tool**: the
+    /// reference's `Land.Build` (`LLLandBuild`), which shows the build floater
+    /// and `selectTool(LLToolCompCreate)`. Right-clicking bare ground and
+    /// choosing Create is a request to make something *there*, so the tool the
+    /// next click uses is the one that rezzes — never the manipulator the last
+    /// build session happened to rest on.
+    #[test]
+    fn land_create_opens_the_build_tools_on_the_create_tool() -> Result<(), TestError> {
+        let (mut app, _at) = land_world()?;
+        app.world_mut().resource_mut::<EditToolState>().tool = EditTool::Stretch;
+        commit(&mut app, LAND_MENU_ELEMENT, "build");
+        assert_eq!(
+            app.world().resource::<EditToolState>().tool,
+            EditTool::Create,
+            "the land pie's Create must leave the build tools on the Create tool"
+        );
+        assert_eq!(
+            command_names(&mut app),
+            Vec::<&str>::new(),
+            "Create opens a window; nothing goes on the wire until something is rezzed"
         );
         Ok(())
     }

@@ -836,7 +836,7 @@ const FLAGS_HANDLE_TOUCH: u32 = 1 << 7;
 fn handle_attachment_menu_actions(
     mut actions: MessageReader<UiAction>,
     target: Res<AttachmentMenuTarget>,
-    tool: Res<crate::world_api::EditToolState>,
+    mut tool: ResMut<crate::world_api::EditToolState>,
     floaters: Query<(Entity, &crate::floater::Floater)>,
     mut panels: Query<&mut crate::ui::UiPanelShown>,
     mut selection: ResMut<crate::world_api::SelectionSet>,
@@ -857,7 +857,7 @@ fn handle_attachment_menu_actions(
         if action.action == "edit" {
             crate::object_menu::edit_picked_object(
                 &summary,
-                tool.edit_linked,
+                &mut tool,
                 &floaters,
                 &mut panels,
                 &mut selection,

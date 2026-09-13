@@ -52,7 +52,7 @@ mod tests {
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
 
-    use sl_client_bevy::{Command, ScopedObjectId, Vector};
+    use sl_client_bevy::{Command, ObjectKey, ScopedObjectId, Uuid, Vector};
     use sl_viewer_testkit::{box_of, find_by_name, interact};
 
     use crate::world_api::{EditTool, EditToolState, SelectionSet};
@@ -747,7 +747,7 @@ mod tests {
         assert_eq!(
             app.world().resource::<EditToolState>().tool,
             EditTool::Move,
-            "the floater opens on the move tool"
+            "the fixture opens the window on the move manipulator"
         );
 
         // Click each option in turn: the radio order is the `BUILD_TOOLS` order.
@@ -764,15 +764,8 @@ mod tests {
         // …and back the other way.
         app.world_mut().resource_mut::<EditToolState>().tool = EditTool::Rotate;
         settle(&mut app, 3);
-        let radio = find_by_name(&mut app, "build-tool:radio-group")
-            .ok_or("the tool radio group is not in the window")?;
-        let active = app
-            .world()
-            .get::<crate::ui_radio::RadioSelection>(radio)
-            .map(|selection| selection.active)
-            .ok_or("the tool radio group carries no selection")?;
         assert_eq!(
-            active,
+            radio_dot(&mut app)?,
             EditTool::Rotate.radio_index(),
             "a tool changed from elsewhere must move the dot"
         );
@@ -884,7 +877,11 @@ mod tests {
         );
 
         // Select something, then close: the selection must not outlive the
-        // window.
+        // window. The manipulator is picked first because a plain open lands on
+        // Create (see `an_open_on_nothing_lands_on_the_create_tool`), under
+        // which a click in the world is a rez as well as a selection.
+        app.world_mut().resource_mut::<EditToolState>().tool = EditTool::Move;
+        settle(&mut app, 2);
         let (scoped, _at) = select_a_fixture_prim(&mut app)?;
         press_ctrl_b(&mut app);
         assert!(
@@ -896,6 +893,102 @@ mod tests {
             "closing the build window must clear the selection"
         );
         Ok(())
+    }
+
+    /// **A build window opened on nothing opens on Create — dot and all.**
+    ///
+    /// The reference's `LLToolMgr::enterBuildMode` selects `LLToolCompCreate`
+    /// on every plain entry, and for good reason: a Move manipulator with an
+    /// empty selection has nothing to manipulate, so the window would open on a
+    /// tool that cannot do anything. The *dot* is asserted alongside the state
+    /// because the window's content is built lazily on this very open, and a
+    /// radio group spawned on the tool-enum default would push that default
+    /// straight back over the open's choice — a first open that behaved
+    /// differently from every later one.
+    #[test]
+    fn an_open_on_nothing_lands_on_the_create_tool() -> Result<(), TestError> {
+        // Deliberately *not* `build_tools_app`: that fixture picks the
+        // manipulator for the tests that are about manipulating.
+        let mut app = world_app_with_build_tools()?;
+        press_ctrl_b(&mut app);
+        assert_eq!(
+            app.world().resource::<EditToolState>().tool,
+            EditTool::Create,
+            "a build window opened with nothing selected must open on Create"
+        );
+        assert_eq!(
+            radio_dot(&mut app)?,
+            EditTool::Create.radio_index(),
+            "the freshly built tool radio must show the tool the open chose"
+        );
+
+        // A manipulator picked, the window closed — which clears the selection —
+        // and opened again: back to Create, because the second open is an empty
+        // one too.
+        app.world_mut().resource_mut::<EditToolState>().tool = EditTool::Rotate;
+        settle(&mut app, 2);
+        press_ctrl_b(&mut app);
+        press_ctrl_b(&mut app);
+        assert_eq!(
+            app.world().resource::<EditToolState>().tool,
+            EditTool::Create,
+            "reopening on an empty selection must land on Create again"
+        );
+        assert_eq!(
+            radio_dot(&mut app)?,
+            EditTool::Create.radio_index(),
+            "the dot must follow the reopen, not stay on the tool last used"
+        );
+        Ok(())
+    }
+
+    /// **An open that arrives with a selection keeps the manipulator.**
+    ///
+    /// This is the pie ▸ Edit shape: one system shows the window *and* fills the
+    /// selection, so whatever runs later sees the two together and must not read
+    /// it as a window opened on nothing. Were the open edge to flip to Create
+    /// here, right-clicking an object and choosing Edit would drop the user into
+    /// the tool that rezzes prims, with the object they asked to edit selected
+    /// underneath it.
+    #[test]
+    fn an_open_with_a_selection_keeps_the_manipulator() -> Result<(), TestError> {
+        let mut app = world_app_with_build_tools()?;
+        let scoped = crate::world_test::seed_prim(&mut app, FIXTURE_AT);
+        settle(&mut app, 5);
+        let entity = entity_of(&mut app, scoped).ok_or("the fixture prim never spawned")?;
+        app.world_mut().resource_mut::<EditToolState>().tool = EditTool::Rotate;
+        app.world_mut().resource_mut::<SelectionSet>().insert(
+            scoped,
+            ObjectKey::from(Uuid::from_u128(1)),
+            entity,
+        );
+
+        press_ctrl_b(&mut app);
+        assert!(
+            app.world().resource::<EditToolState>().active,
+            "the window must have opened"
+        );
+        assert_eq!(
+            app.world().resource::<EditToolState>().tool,
+            EditTool::Rotate,
+            "an open that already has a selection must leave the resting tool alone"
+        );
+        assert_eq!(
+            radio_dot(&mut app)?,
+            EditTool::Rotate.radio_index(),
+            "the freshly built radio must show the kept tool, not the enum default"
+        );
+        Ok(())
+    }
+
+    /// Which option the tool radio's dot sits on.
+    fn radio_dot(app: &mut App) -> Result<usize, TestError> {
+        let radio = find_by_name(app, "build-tool:radio-group")
+            .ok_or("the tool radio group is not in the window")?;
+        app.world()
+            .get::<crate::ui_radio::RadioSelection>(radio)
+            .map(|selection| selection.active)
+            .ok_or_else(|| TestError::from("the tool radio group carries no selection"))
     }
 
     /// Press `Ctrl+B` and let the toggle settle.
