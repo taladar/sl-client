@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 313 |
+| ready | 312 |
 | blocked | 41 |
 | in-progress | 22 |
 | bugs | 33 |
-| done | 1127 |
+| done | 1128 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1678** |
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (313)
+## ready (312)
 
 ### protocol
 
@@ -640,8 +640,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-movement-controls-floater`](ready/viewer-movement-controls-floater.md)
   — Movement controls floater + stand / stop-flying buttons (blocked by
   `viewer-ui-widget-scaffold` (done))
-- [`viewer-multiline-field-fills-its-floater`](ready/viewer-multiline-field-fills-its-floater.md)
-  — A multi-line field that grows with the window around it
 - [`viewer-name-tags-click-select`](ready/viewer-name-tags-click-select.md) —
   Name tags — click a tag to select the avatar
 - [`viewer-name-tags-decorations`](ready/viewer-name-tags-decorations.md) — Name
@@ -1244,7 +1242,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1127)
+## done (1128)
 
 ### protocol
 
@@ -2043,6 +2041,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-movement-camera-input-tests`](done/viewer-movement-camera-input-tests.md)
   — Movement keys and camera modes, headless (blocked by
   `viewer-world-test-harness` (done))
+- [`viewer-multiline-field-fills-its-floater`](done/viewer-multiline-field-fills-its-floater.md)
+  — A multi-line field that grows with the window around it
 - [`viewer-music-controls-push-chat-bar`](done/viewer-music-controls-push-chat-bar.md)
   — Parcel music controls push the nearby chat bar up when they appear
 - [`viewer-muted-residents-text-still-shown`](done/viewer-muted-residents-text-still-shown.md)

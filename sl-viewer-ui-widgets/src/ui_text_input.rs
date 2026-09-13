@@ -162,6 +162,11 @@ const DEFAULT_VISIBLE_LINES: f32 = 3.0;
 /// field wraps its prose here rather than overflowing.
 const MULTILINE_MAX_WIDTH: f32 = 360.0;
 
+/// The width a **filling** multi-line field opens at, in `"0"`-glyph advances —
+/// about the same reading measure as [`MULTILINE_MAX_WIDTH`], expressed as an
+/// intrinsic control size so it can be stretched past rather than capped at.
+const MULTILINE_FILL_WIDTH_GLYPHS: f32 = 44.0;
+
 /// The default font size of a field's text, in logical pixels.
 const DEFAULT_FONT_SIZE: f32 = 15.0;
 
@@ -368,26 +373,37 @@ pub struct TextInputSpec {
     /// ([`crate::ui_search`]) does this, decorating the box around the field
     /// rather than the field.
     pub decorated: bool,
-    /// Whether a single-line field **flex-grows to fill** its parent instead of
-    /// taking its intrinsic glyph-width (`false`, the default). A filled field
-    /// has no `visible_width`; it takes the room its container gives it and
-    /// scrolls. Ignored for the multi-line kind. Used by the search-field widget,
-    /// whose box sets the width and lets the field fill it up to the clear button.
+    /// Whether the field **flex-grows to fill** its parent instead of taking
+    /// its intrinsic size (`false`, the default).
     ///
-    /// There is deliberately no height-filling counterpart for a multi-line
-    /// field, and it is worth writing down why, because the obvious way to build
-    /// one is a trap. A field's height comes from a `ContentSize` measure
-    /// (`TextInputMeasure`: `visible_lines` × the resolved line height), and
-    /// `bevy_ui` resolves that measure's constraints as
+    /// A filled **single-line** field has no `visible_width`: it takes the room
+    /// its container gives it and scrolls. Used by the search-field widget,
+    /// whose box sets the width and lets the field fill it up to the clear
+    /// button.
+    ///
+    /// A filled **multi-line** field grows on **both** axes: it drops the
+    /// wrapping bound that otherwise keeps it to a reading measure, and takes
+    /// the height its container has spare. That is what makes an editor's body
+    /// grow when its window is resized — a floater hands its content slot a
+    /// definite size once it has one, and the field takes the leftover.
+    ///
+    /// **`flex_grow` and nothing else**, and it is worth writing down why,
+    /// because the obvious way to let such a field *shrink* is a trap. Its
+    /// height comes from a `ContentSize` measure (`TextInputMeasure`:
+    /// `visible_lines` × the resolved line height), and `bevy_ui` resolves that
+    /// measure's constraints as
     /// `effective = known.or(preferred.or(min).maybe_clamp(min, max))`
-    /// (`measurement::resolve_axis`). So a `min_height` added to let the field
-    /// shrink does not *floor* the intrinsic height — it **replaces** it. A
-    /// `min_height: 0` erases it altogether, and the field then lays out at zero
-    /// in any container with no spare height to grow it back: no text at all.
+    /// (`measurement::resolve_axis`). The style carries no explicit height, so
+    /// `preferred` is `None` and a `min_height` added to let the field shrink
+    /// becomes the `effective` size outright — `min_height: 0` lays the field
+    /// out at zero, no text at all. `flex_grow` touches none of that: the
+    /// measure stays the flex **base** size, so the field still opens at its
+    /// declared lines in a content-driven window and only grows past them where
+    /// there is room.
     ///
-    /// A window too short for its field's declared lines is therefore the
-    /// **window's** problem, not the field's; the notecard and script editors
-    /// are content-driven for exactly this reason.
+    /// A window too *short* for its field's declared lines is therefore still
+    /// the **window's** problem: the field holds its intrinsic height and the
+    /// content slot clips.
     pub fill: bool,
     /// Whether the field spawns [read-only](ReadOnlyField) (`false`, the
     /// default): greyed and unchangeable, but still selectable and copyable.
@@ -480,6 +496,18 @@ pub fn spawn_text_input(commands: &mut Commands, parent: Entity, spec: &TextInpu
     editor.max_characters = spec.max_characters;
     if multiline {
         editor.visible_lines = Some(spec.visible_lines);
+        if spec.fill {
+            // A filling field needs an intrinsic **width**, and this is the
+            // whole reason it is expressed in glyph advances rather than left
+            // to the wrapping bound. Without one the measure answers "whatever
+            // is available", and in a content-driven window that is the width
+            // of the *screen*: the floater shrink-wraps to its content, the
+            // content asks for everything, and the window opens across the
+            // display (caught by the floater sweeps, 2026-09-13). With one, an
+            // unsized window opens at a reading measure and a sized one
+            // stretches the field past it.
+            editor.visible_width = Some(MULTILINE_FILL_WIDTH_GLYPHS);
+        }
     } else {
         // A single line high. A filling field takes the width its container gives
         // it (no intrinsic width); an ordinary one is sized by glyph-width — a
@@ -508,16 +536,26 @@ pub fn spawn_text_input(commands: &mut Commands, parent: Entity, spec: &TextInpu
     if spec.decorated {
         node.border = UiRect::all(Val::Px(FIELD_BORDER_WIDTH));
     }
-    // A multi-line field wraps its prose at a bound (convention 2); a single-line
-    // field's width is its intrinsic control size (set on the editor above) unless
-    // it fills, in which case it grows to its container and shrinks below its
-    // content so the container's width — not the text — decides the field's.
+    // A multi-line field wraps its prose at a bound (convention 2) unless it
+    // fills, in which case its container's width decides where it wraps; a
+    // single-line field's width is its intrinsic control size (set on the editor
+    // above) unless it fills, in which case it grows to its container and shrinks
+    // below its content so the container's width — not the text — decides the
+    // field's.
     //
-    // A multi-line field's *height* stays untouched — never a `min_height`, not
-    // even zero, which would replace the intrinsic height rather than floor it.
-    // See [`TextInputSpec::fill`].
+    // A field's *height* stays untouched — never a `min_height`, not even zero,
+    // which would replace the intrinsic height rather than floor it. See
+    // [`TextInputSpec::fill`].
     if multiline {
-        node.max_width = Val::Px(MULTILINE_MAX_WIDTH);
+        if spec.fill {
+            // Grows into whatever the container has spare — see
+            // [`TextInputSpec::fill`] for why this is `flex_grow` alone. Its
+            // width comes from the intrinsic measure set on the editor above,
+            // not from a wrapping bound, because a bound would cap the growth.
+            node.flex_grow = 1.0;
+        } else {
+            node.max_width = Val::Px(MULTILINE_MAX_WIDTH);
+        }
     } else if spec.fill {
         node.flex_grow = 1.0;
         node.min_width = Val::Px(0.0);

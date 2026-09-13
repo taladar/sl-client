@@ -96,9 +96,9 @@ const CHECKED_GLYPH: &str = "\u{2611}";
 /// The empty-box glyph for an unticked toggle (`☐`).
 const UNCHECKED_GLYPH: &str = "\u{2610}";
 
-/// The body field's height, in visible text lines. The window is sized by this
-/// (it is content-driven), not the other way round — a field's height is its
-/// intrinsic control size and cannot be flexed; see `ui_text_input`'s `fill`.
+/// The body field's height, in visible text lines — what the window opens at,
+/// being content-driven. It is a *starting* size, not a cap: the body fills, so
+/// a resized window gives it every line that fits (`ui_text_input`'s `fill`).
 const BODY_VISIBLE_LINES: f32 = 22.0;
 
 /// The tallest the compile-diagnostics list grows before it scrolls, in logical
@@ -201,9 +201,10 @@ pub fn script_editor_floater_spec() -> FloaterSpec {
         // used to open at a rect measured against the read-only block, the
         // editable body is taller than that, and the content slot clips — so
         // the Save & Compile row and the diagnostics under it were cut off the
-        // bottom of the window. A field's height is intrinsic and cannot be
-        // flexed into a rect (`ui_text_input`'s `fill`), so the window follows
-        // the field. The grip resizes it from there.
+        // bottom of the window. The field's declared lines size the window
+        // instead. The grip resizes it from there, and the body **grows with
+        // it**: the field fills, so the slot's spare height is the body's
+        // (`ui_text_input`'s `fill`).
         default_size: None,
         min_size: Some(Vec2::new(300.0, 200.0)),
         dock_host: None,

@@ -141,6 +141,9 @@ pub(crate) fn spawn_body_field(
             font_size,
             visible_lines,
             tab_index: 1,
+            // An editor's body is the part of its window worth making bigger,
+            // so it takes the room a resized floater gives its content slot.
+            fill: true,
             ..crate::ui_text_input::TextInputSpec::new(
                 element,
                 crate::ui_text_input::TextInputKind::Multiline,
