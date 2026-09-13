@@ -527,6 +527,15 @@ impl Plugin for ViewerWorldPlugins {
         app.add_message::<WearableAssetFetched>();
         app.add_message::<RefetchAvatarTextures>();
         app.add_message::<crate::world_api::LocalChatNotice>();
+        // The build tools' selection, read by this group's material systems
+        // (`detach_shared_face_materials` gives a selected object's faces private
+        // materials for the editors' live previews; `apply_blinn_phong_hide`
+        // renders a selected linkset's PBR faces as Blinn-Phong) — which the
+        // object layer schedules without depending on the edit layer, so the
+        // world group must not assume `ViewerEditPlugins` is in the app. An empty
+        // selection is the right default, and `init_resource` leaves the edit
+        // layer's own registration in charge where both are present.
+        app.init_resource::<crate::world_api::SelectionSet>();
         app.add_systems(Startup, setup_avatar_body);
         app.add_systems(PreUpdate, material_cache::detach_shared_face_materials);
         app.add_systems(

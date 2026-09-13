@@ -1193,8 +1193,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-particles-dt-and-cloud-leak`](bugs/viewer-audit-particles-dt-and-cloud-leak.md)
   — Particle integration uses an unclamped dt, and a switched-off emitter leaks
   its cloud
-- [`viewer-audit-plugin-resource-registration`](bugs/viewer-audit-plugin-resource-registration.md)
-  — Two plugins read resources they never register
 - [`viewer-audit-sit-camera-gating`](bugs/viewer-audit-sit-camera-gating.md) —
   The scripted sit camera arms on any SitResult and never clears forced
   mouselook
@@ -1555,6 +1553,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   packet
 - [`viewer-audit-picker-requester-identity`](done/viewer-audit-picker-requester-identity.md)
   — Two instances of one window share a picker, and both claim its answer
+- [`viewer-audit-plugin-resource-registration`](done/viewer-audit-plugin-resource-registration.md)
+  — Two plugins read resources they never register
 - [`viewer-audit-probe-ambient-multiply`](done/viewer-audit-probe-ambient-multiply.md)
   — suppress_global_ambient multiplies an absolute producer and decays it
   geometrically

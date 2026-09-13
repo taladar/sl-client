@@ -213,6 +213,14 @@ pub struct DerenderPlugin;
 impl Plugin for DerenderPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<DerenderList>()
+            // Derendering a target drops it from the edit selection
+            // (`apply_derender_requests`), which is the build tools' resource —
+            // and the edit layer is not a dependency of the avatar layer. The
+            // shared type lives in the world API, so declare the read here: an
+            // empty selection is the right default for a host with no build
+            // tools, and `init_resource` leaves the edit layer's own registration
+            // in charge where both are present.
+            .init_resource::<crate::world_api::SelectionSet>()
             .add_message::<RequestDerender>()
             .add_message::<UnDerender>()
             .add_systems(Startup, register_derender_settings)
@@ -746,6 +754,26 @@ mod tests {
             permanent,
             added_epoch_secs: 1_700_000_000,
         }
+    }
+
+    /// The plugin registers the edit selection its request handler writes to.
+    ///
+    /// The selection is the build tools' resource and the edit layer is not a
+    /// dependency of this one, so without this a host adding derendering without
+    /// the build tools got a parameter-validation panic the first frame
+    /// `apply_derender_requests` ran.
+    #[test]
+    fn the_plugin_registers_the_selection_it_writes() {
+        use bevy::prelude::App;
+
+        let mut app = App::new();
+        app.add_plugins(super::DerenderPlugin);
+        assert!(
+            app.world()
+                .contains_resource::<crate::world_api::SelectionSet>(),
+            "SelectionSet"
+        );
+        assert!(app.world().contains_resource::<DerenderList>(), "the list");
     }
 
     /// Adding indexes the id, bumps the revision, and queues the scene purge.

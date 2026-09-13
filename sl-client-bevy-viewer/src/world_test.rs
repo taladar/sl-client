@@ -81,10 +81,10 @@ pub(crate) fn world_app() -> App {
     app.insert_resource(crate::animations::AnimationManager::new());
     app.init_resource::<crate::camera::CameraStart>();
     app.init_resource::<SlIdentity>();
-    // Resources world-group systems read but other groups own: the edit
-    // tools' selection (`detach_shared_face_materials` reads it) and the
-    // derender list (`update_objects` reads it).
-    app.init_resource::<crate::world_api::SelectionSet>();
+    // A resource world-group systems read but another group owns: the derender
+    // list (`update_objects` reads it). The edit tools' selection used to be
+    // listed here too; the world group now registers that itself, because its
+    // material systems read it without depending on the edit layer.
     app.init_resource::<crate::world_api::DerenderList>();
     // The input-context state `world_has_keyboard`-gated systems read; its
     // owning plugin is in the input group, which the fixture world skips.
@@ -288,7 +288,6 @@ fn add_input_plugins(app: &mut App) {
     // unattended screenshot run), because whether mouselook takes the pointer
     // is exactly what a test here asks.
     app.insert_resource(crate::input_context::CursorGrabAllowed(true));
-    app.init_resource::<crate::camera::CameraSpin>();
     // The cursor state `drive_cursor_grab` writes. The testkit's window is
     // spawned with `primary_cursor_options: None` — no UI tier has ever needed
     // one — so without this the grab system's query is empty and every
