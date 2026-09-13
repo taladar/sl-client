@@ -80,8 +80,8 @@ use sl_viewer_ui_core::ui::{
     spawn_ui_root,
 };
 use sl_viewer_ui_core::ui_element::{
-    AlignEdge, AlignmentGroup, ElementCx, RadialCentre, RadialPlacement, TextMayClip, UiAction,
-    UiElement,
+    AlignEdge, AlignmentGroup, ContentMayOverflow, ElementCx, RadialCentre, RadialPlacement,
+    TextMayClip, UiAction, UiElement,
 };
 use sl_viewer_ui_core::ui_ellipsis::apply_reveal_ellipsis;
 use sl_viewer_ui_core::ui_font::register_ui_fonts;
@@ -572,16 +572,28 @@ fn popover_ancestors(app: &mut App) -> HashSet<Entity> {
 /// hold. That is not the check failing to see a bug — it is the check being
 /// asked a question that stops having an answer while a floating layer is up.
 ///
+/// **A node that declares [`ContentMayOverflow`] is skipped**, for the same
+/// reason and with the same evidence as the popover case: its children are
+/// absolutely positioned by something other than taffy — a rich-text field's
+/// inline objects are placed by the text engine — so taffy's `content_size` for
+/// it is an answer to a question nobody asked. Unlike the popover skip, which
+/// the harness works out for itself, this one is a declaration the widget makes
+/// and carries a reason.
+///
 /// Returns one message per breach, so a caller can assert the whole tree at once
 /// and see everything wrong with it rather than the first thing.
 pub fn overflow_violations(app: &mut App) -> Vec<String> {
     let hosting = popover_ancestors(app);
-    let mut query = app
-        .world_mut()
-        .query::<(Entity, &ComputedNode, &Node, Option<&Name>)>();
+    let mut query = app.world_mut().query::<(
+        Entity,
+        &ComputedNode,
+        &Node,
+        Option<&Name>,
+        Option<&ContentMayOverflow>,
+    )>();
     let mut violations = Vec::new();
-    for (entity, computed, node, name) in query.iter(app.world()) {
-        if hosting.contains(&entity) {
+    for (entity, computed, node, name, declared) in query.iter(app.world()) {
+        if hosting.contains(&entity) || declared.is_some() {
             continue;
         }
         let available = computed.size;

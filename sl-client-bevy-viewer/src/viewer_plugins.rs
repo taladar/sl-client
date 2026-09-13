@@ -916,10 +916,15 @@ impl Plugin for ViewerEditPlugins {
         // made of, and the guard that asks before a close throws unsaved work
         // away (viewer-audit-asset-editor-scaffold).
         app.add_plugins(crate::asset_editor::AssetEditorScaffoldPlugin);
+        // The rich-text field (viewer-notecard-inline-items): the text widget
+        // whose flow carries objects — the notecard body's embedded items — and
+        // whose ranges can be styled. Registered before its consumers so a
+        // field spawned at start-up already has its systems.
+        app.add_plugins(sl_viewer_ui_widgets::ui_rich_text::RichTextPlugin);
         // The notecard viewer & editor floater (viewer-notecard-editor): open a
         // notecard from inventory, read it, edit its text when the item is
-        // modifiable, and save it back to agent inventory. Embedded items are
-        // listed (inline clickable rendering waits on the rich-text widget).
+        // modifiable, and save it back to agent inventory. Its embedded items
+        // are drawn inline in the body, whether it is being read or written.
         app.add_plugins(crate::edit_notecard::EditNotecardPlugin);
         app.add_plugins(crate::notecard_render::NotecardRenderPlugin);
         app.add_plugins(crate::edit_wearable::EditWearablePlugin);

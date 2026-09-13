@@ -1,28 +1,23 @@
-//! The **rich read-only rendering of a notecard body** (part of
-//! `viewer-notecard-editor`): draws a decoded [`sl_notecard::Notecard`] as
-//! flowing text with its **embedded inventory items** shown *inline* as
-//! clickable icon-and-name boxes, and its prose URLs / SLURLs / `secondlife://`
-//! app links linkified — the reference `llviewertexteditor`'s embedded-item
-//! reader, minus the *editing* half.
+//! The **embedded inventory item** a notecard body carries (part of
+//! `viewer-notecard-editor`): the clickable icon-and-name box drawn where the
+//! text references an item, and what a click on one does — the reference
+//! `llviewertexteditor`'s embedded-item segment.
 //!
-//! # Why this exists as its own path
+//! # Where the box is drawn
 //!
-//! Bevy 0.19's editable text field is `parley::PlainEditor`: one style for the
-//! whole buffer, no inline boxes. Rendering embedded items *inline while
-//! editing* waits on the inline-box rich-text widget
-//! (`viewer-lsl-editor-widget`, not yet built). But a **read-only** reader
-//! needs no caret, so it can lay the body out the way [`crate::linkified_text`]
-//! already does: **discrete pickable nodes** in a wrapping row — each embedded
-//! item a real clickable box, each prose run linkified natively — rather than
-//! hit-testing glyph rects over one laid-out block. That is faithful to the
-//! reference's *matching* semantics and is what a notecard reader needs.
+//! The body itself is one laid-out buffer: the rich-text field
+//! ([`sl_viewer_ui_widgets::ui_rich_text`]) reserves a box in the text flow at
+//! the byte offset of each item's marker code point and positions the node this
+//! module fills there. The marker itself is styled away, so what the resident
+//! sees at that point in the sentence is the item — while the character is
+//! still in the buffer, so deleting it removes the item and a save reconciles
+//! the table against what is left.
 //!
-//! # Layout
-//!
-//! The body is a column of **lines** (split on `\n`); each line is a wrapping
-//! row that interleaves linkified prose runs with the embedded-item boxes the
-//! text references positionally (a `FIRST_EMBEDDED_CHAR + index` code point
-//! stands where each item sits). A blank line keeps its height with a spacer.
+//! Before that field existed this module drew the body itself, as a column of
+//! wrapping rows of discrete nodes. That reads fine and edits not at all: a
+//! caret belongs to one laid-out buffer and cannot walk a row of sibling nodes,
+//! which is why an editable notecard used to need a *toggle* to a separate
+//! read-only preview to make its items legible.
 //!
 //! # Clicking an embedded item (reference `openEmbeddedItem`)
 //!
@@ -50,7 +45,7 @@ use sl_client_bevy::{
 
 use crate::edit_notecard::embedded_icon;
 use crate::inventory_properties::OpenItemPreview;
-use crate::linkified_text::{LinkTextStyle, populate_linkified_text};
+use crate::linkified_text::LinkTextStyle;
 use crate::notifications::{NotificationResponse, ShowNotification};
 use crate::ui_font::UiFont;
 use crate::world_api::NotecardSource;
@@ -69,99 +64,6 @@ const ITEM_BACKGROUND: Color = Color::srgba(0.20, 0.24, 0.32, 0.55);
 
 /// The embedded-item box's hovered background (brighter, to signal the click).
 const ITEM_BACKGROUND_HOVER: Color = Color::srgba(0.28, 0.36, 0.52, 0.85);
-
-// ---------------------------------------------------------------------------
-// The public builder.
-// ---------------------------------------------------------------------------
-
-/// Build the read-only rich body of `notecard` under `parent`, returning the
-/// column entity. `source` locates the notecard so a copied embedded item names
-/// the right notecard / holding prim; `style` sets the font size and colours
-/// (prose vs. link).
-pub(crate) fn spawn_notecard_body(
-    commands: &mut Commands,
-    parent: Entity,
-    notecard: &sl_notecard::Notecard,
-    source: NotecardSource,
-    style: LinkTextStyle,
-) -> Entity {
-    let column = commands
-        .spawn((
-            Node {
-                flex_direction: FlexDirection::Column,
-                width: Val::Percent(100.0),
-                ..default()
-            },
-            Name::new("notecard-body"),
-            ChildOf(parent),
-        ))
-        .id();
-    // Split on `\n`: each line lays out as its own wrapping row, so a paragraph
-    // break is a real line break rather than a run continuing on the flex row.
-    for line in notecard.text.split('\n') {
-        spawn_line(commands, column, line, notecard, source, style);
-    }
-    column
-}
-
-/// Spawn one line as a wrapping row that interleaves linkified prose runs with
-/// the embedded-item boxes the line's marker code points reference. A line with
-/// no rendered content (a blank paragraph line) keeps its height with a spacer.
-fn spawn_line(
-    commands: &mut Commands,
-    column: Entity,
-    line: &str,
-    notecard: &sl_notecard::Notecard,
-    source: NotecardSource,
-    style: LinkTextStyle,
-) {
-    let row = commands
-        .spawn((
-            Node {
-                flex_direction: FlexDirection::Row,
-                flex_wrap: FlexWrap::Wrap,
-                align_items: AlignItems::Center,
-                width: Val::Percent(100.0),
-                ..default()
-            },
-            Pickable::IGNORE,
-            ChildOf(column),
-        ))
-        .id();
-    let mut prose = String::new();
-    let mut rendered = false;
-    for character in line.chars() {
-        if let Some(index) = sl_notecard::embedded_char_index(character) {
-            // Flush the prose before this marker, then draw the item inline.
-            if !prose.is_empty() {
-                populate_linkified_text(commands, row, &prose, style);
-                prose.clear();
-                rendered = true;
-            }
-            if let Some(item) = notecard.item_by_index(index) {
-                spawn_embedded_box(commands, row, item, source, style);
-                rendered = true;
-            }
-        } else {
-            prose.push(character);
-        }
-    }
-    if !prose.is_empty() {
-        populate_linkified_text(commands, row, &prose, style);
-        rendered = true;
-    }
-    if !rendered {
-        // A blank line: a single space keeps the row's line height so paragraph
-        // spacing survives.
-        commands.spawn((
-            Text::new(" ".to_owned()),
-            UiFont::Sans.at(style.font_size),
-            TextColor(style.plain_color),
-            Pickable::IGNORE,
-            ChildOf(row),
-        ));
-    }
-}
 
 // ---------------------------------------------------------------------------
 // The embedded-item box.
@@ -248,14 +150,20 @@ fn texture_item_info(item: &sl_notecard::InventoryItem) -> ItemInfo {
     }
 }
 
-/// Spawn one inline embedded-item box (icon + name) under a line `row`.
-fn spawn_embedded_box(
+/// Spawn one inline embedded-item box (icon + name) under `parent`, returning
+/// it.
+///
+/// `parent` is the object node the rich-text field positions
+/// ([`sl_viewer_ui_widgets::ui_rich_text::spawn_rich_text_object`]): the box is
+/// its content, so the node is the size of the box and parley reserves exactly
+/// that much room in the flow.
+pub(crate) fn spawn_embedded_item_box(
     commands: &mut Commands,
-    row: Entity,
+    parent: Entity,
     item: &sl_notecard::InventoryItem,
     source: NotecardSource,
     style: LinkTextStyle,
-) {
+) -> Entity {
     let action = resolve_action(item, source);
     let item_box = commands
         .spawn((
@@ -271,7 +179,7 @@ fn spawn_embedded_box(
             TabIndex(0),
             Pickable::default(),
             EmbeddedItemBox { action },
-            ChildOf(row),
+            ChildOf(parent),
         ))
         .id();
     commands.spawn((
@@ -293,6 +201,7 @@ fn spawn_embedded_box(
         .observe(on_embedded_press)
         .observe(on_embedded_over)
         .observe(on_embedded_out);
+    item_box
 }
 
 // ---------------------------------------------------------------------------
@@ -303,13 +212,20 @@ fn spawn_embedded_box(
 /// the reference `ConfirmItemCopy` confirmation — the target is parked until the
 /// dialog is answered ([`handle_embedded_copy_confirmations`]) — so a click
 /// never silently spawns an inventory item; a profile / texture open is direct.
+///
+/// Every destination this reaches is a *viewer* channel, and this observer is
+/// attached wherever an item box is drawn — including the gallery, which spawns
+/// the notecard specimens with none of them. Bevy takes an app down when a
+/// system parameter fails validation, so the four are wrapped in [`If`]: in an
+/// app that cannot route the action the press is **inert** rather than fatal.
+/// (Found by a click on the specimen's item in the gallery, 2026-09-13.)
 fn on_embedded_press(
     press: On<Pointer<Press>>,
     boxes: Query<&EmbeddedItemBox>,
-    mut pending: ResMut<PendingEmbeddedCopies>,
-    mut notifications: MessageWriter<ShowNotification>,
-    mut profiles: MessageWriter<OpenAvatarProfile>,
-    mut previews: MessageWriter<OpenItemPreview>,
+    If(mut pending): If<ResMut<PendingEmbeddedCopies>>,
+    If(mut notifications): If<MessageWriter<ShowNotification>>,
+    If(mut profiles): If<MessageWriter<OpenAvatarProfile>>,
+    If(mut previews): If<MessageWriter<OpenItemPreview>>,
 ) {
     if press.button != PointerButton::Primary {
         return;

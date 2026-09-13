@@ -941,8 +941,6 @@ about-landmark-parcel-unnamed = (no name)
 ## The notecard viewer & editor floater (viewer-notecard-editor).
 
 notecard-save = Save
-notecard-view-preview = View items
-notecard-view-edit = Edit text
 notecard-readonly-note = You do not have permission to modify this notecard.
 notecard-status-loading = Loading…
 notecard-status-saving = Saving…

@@ -319,6 +319,12 @@ pub fn run() -> AppExit {
         .add_message::<sl_client_bevy::SlCommand>()
         .add_message::<crate::world_api::OpenWebBrowser>()
         .add_plugins(crate::linkified_text::LinkifiedTextPlugin)
+        // The rich-text field, so the notecard specimens' embedded items and
+        // link chips are placed in the flow of their text here too. Without it
+        // a body's boxes stay hidden overlays: the field would still lay its
+        // text out, but nothing would put the objects where parley reserved
+        // room for them.
+        .add_plugins(sl_viewer_ui_widgets::ui_rich_text::RichTextPlugin)
         // Seeded from `SL_VIEWER_UI_DIRECTION`, as the viewer does, so the gallery
         // can be started straight into RTL rather than only reached by pressing `D`.
         .insert_resource(UiDirection::from_env())

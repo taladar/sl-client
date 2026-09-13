@@ -102,18 +102,18 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
     },
     UiElement {
         id: "notecard-editor",
-        summary: "The notecard editor's content (viewer-notecard-editor): a view toggle, an \
-                  editable multi-line body, and a Save button. The live floater \
+        summary: "The notecard editor's content (viewer-notecard-editor): an editable body with \
+                  an embedded item in the flow of its text, and a Save button. The live floater \
                   (`crate::edit_notecard`) fetches and saves the asset; here it is static so its \
                   layout is swept.",
         spawn: crate::edit_notecard::spawn_notecard_editor_specimen,
     },
     UiElement {
         id: "notecard-reader",
-        summary: "The notecard rich read-only reader (viewer-notecard-editor / \
-                  crate::notecard_render): prose with a linkified URL and an inline clickable \
-                  embedded item (a landmark). Shown static so the interleaved run / item-box \
-                  layout is swept.",
+        summary: "A read-only notecard body (viewer-notecard-editor / crate::notecard_render): \
+                  prose with a linkified URL and an embedded item (a landmark), both drawn in the \
+                  flow of the text. Shown static so the body's own layout is swept; the boxes are \
+                  placed by the rich-text field, not by flex layout.",
         spawn: crate::edit_notecard::spawn_notecard_reader_specimen,
     },
     UiElement {

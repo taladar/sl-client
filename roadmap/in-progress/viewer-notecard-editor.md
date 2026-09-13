@@ -6,7 +6,7 @@ status: in-progress
 origin: user request (2026-07)
 refs: [viewer-lsl-editor-widget, viewer-notecard-format,
   viewer-inventory-folder-tree, viewer-url-linkification,
-  viewer-task-inventory-open-and-save-back]
+  viewer-task-inventory-open-and-save-back, viewer-notecard-inline-items]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -144,3 +144,23 @@ Still to do (each needs machinery owned by another task):
   own editors, and the **script** Save-Back-to-Object half, remain
   [[viewer-task-inventory-open-and-save-back]] — this task wired only the
   notecard case of `openItem`.
+
+## The items are in the text now (2026-09-13)
+
+[[viewer-notecard-inline-items]] built the rich-text field this task was
+waiting on and moved the body onto it, so the **view toggle is gone**: an
+embedded item is a box in the flow of the text at the byte offset of its marker,
+whether the notecard is being read or written, and a no-modify notecard is the
+same body with its mutating edits refused rather than a separate read-only
+block. The prose's links keep both of their old behaviours — a resolved chip
+when reading, styled text when editing.
+
+What is still open here:
+
+- dropping an item **at the caret** rather than appending its marker (it needs
+  the field to report the caret's byte offset);
+- the reference type-specific opens on an embedded-item click — a **sound**
+  local-play, a **material** editor, a **landmark** teleport — still folded into
+  the confirmed copy-to-inventory;
+- opening **other** task-inventory item types into their own editors, which
+  stays [[viewer-task-inventory-open-and-save-back]].

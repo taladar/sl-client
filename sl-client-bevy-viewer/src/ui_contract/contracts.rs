@@ -608,8 +608,14 @@ pub(crate) const CONTRACTS: &[ElementContract] = &[
         nodes: &[
             NodeContract::inert("notecard-body:field"),
             NodeContract::inert("notecard-save"),
-            NodeContract::inert("notecard-view-toggle"),
         ],
+    },
+    ElementContract {
+        // A no-modify notecard's body is a focus stop like any other field: it
+        // refuses the edits that would change it, but it is still clicked into,
+        // selected across and copied out of, so `Tab` reaches it.
+        element: "notecard-reader",
+        nodes: &[NodeContract::inert("notecard-body:field")],
     },
     ElementContract {
         element: "notification-toast",

@@ -102,8 +102,6 @@ animation-stop = إيقاف
 ## The notecard viewer & editor floater (viewer-notecard-editor).
 
 notecard-save = حفظ
-notecard-view-preview = عرض العناصر
-notecard-view-edit = تحرير النص
 notecard-readonly-note = ليس لديك إذن لتعديل هذه الملاحظة.
 notecard-status-loading = جارٍ التحميل…
 notecard-status-saving = جارٍ الحفظ…
