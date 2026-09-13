@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 313 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 36 |
-| done | 1124 |
+| bugs | 35 |
+| done | 1125 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1678** |
@@ -1163,7 +1163,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (36)
+## bugs (35)
 
 ### viewer
 
@@ -1193,8 +1193,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-particles-dt-and-cloud-leak`](bugs/viewer-audit-particles-dt-and-cloud-leak.md)
   — Particle integration uses an unclamped dt, and a switched-off emitter leaks
   its cloud
-- [`viewer-audit-plugin-resource-registration`](bugs/viewer-audit-plugin-resource-registration.md)
-  — Two plugins read resources they never register
 - [`viewer-audit-sit-camera-gating`](bugs/viewer-audit-sit-camera-gating.md) —
   The scripted sit camera arms on any SitResult and never clears forced
   mouselook
@@ -1250,7 +1248,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1124)
+## done (1125)
 
 ### protocol
 
@@ -1557,6 +1555,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   packet
 - [`viewer-audit-picker-requester-identity`](done/viewer-audit-picker-requester-identity.md)
   — Two instances of one window share a picker, and both claim its answer
+- [`viewer-audit-plugin-resource-registration`](done/viewer-audit-plugin-resource-registration.md)
+  — Two plugins read resources they never register
 - [`viewer-audit-probe-ambient-multiply`](done/viewer-audit-probe-ambient-multiply.md)
   — suppress_global_ambient multiplies an absolute producer and decays it
   geometrically

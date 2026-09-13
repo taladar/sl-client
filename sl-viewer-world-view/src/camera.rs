@@ -425,6 +425,21 @@ impl Plugin for CameraPlugin {
             .init_resource::<CameraAim>()
             .init_resource::<CameraTuning>()
             .init_resource::<FlycamSmoothing>()
+            // The auto-spin is this module's own resource, and the viewer's
+            // `--camera-spin` only ever *overrides* it: without this, a host that
+            // does not set the debug option at all leaves `drive_flycam` with a
+            // missing `Res<CameraSpin>`, which is a parameter-validation panic the
+            // first frame the flycam runs.
+            .init_resource::<CameraSpin>()
+            // The 6-DOF device state and its flycam sensitivities are published by
+            // `SpacenavPlugin`, which a host may legitimately leave out (no device
+            // support compiled in, a fixture world that must not be steered by
+            // whatever puck is plugged in). Their defaults are exactly "no device
+            // attached, reference sensitivities", so the camera declares the reads
+            // it makes rather than requiring that plugin: `init_resource` is
+            // idempotent, so where `SpacenavPlugin` *is* present it still owns them.
+            .init_resource::<SpacenavInput>()
+            .init_resource::<FlycamAxisSettings>()
             .add_systems(PreUpdate, sync_input_mode)
             .add_systems(
                 Update,
@@ -1505,6 +1520,30 @@ mod tests {
     use super::{facing_from_yaw, flatten, sl_heading_from_bevy_forward, third_person_eye};
     use crate::world_api::{CAMERA_OFFSET, CameraRig};
     use bevy::math::Vec3;
+
+    /// Every resource the plugin's own systems read is registered by the plugin.
+    ///
+    /// `CameraSpin` is this module's, and `SpacenavInput` / `FlycamAxisSettings`
+    /// belong to a device plugin a host may leave out — before this, adding
+    /// `CameraPlugin` alone and entering flycam was a parameter-validation panic,
+    /// and the fixture worlds papered over it by inserting `CameraSpin` by hand.
+    #[test]
+    fn the_plugin_registers_the_resources_its_systems_read() {
+        use super::{CameraMode, CameraPlugin, CameraSpin, FlycamAxisSettings, SpacenavInput};
+        use bevy::prelude::App;
+
+        let mut app = App::new();
+        app.add_plugins(CameraPlugin);
+        let world = app.world();
+        assert!(world.contains_resource::<CameraSpin>(), "CameraSpin");
+        assert!(world.contains_resource::<SpacenavInput>(), "SpacenavInput");
+        assert!(
+            world.contains_resource::<FlycamAxisSettings>(),
+            "FlycamAxisSettings"
+        );
+        // One it already owned, so a future reshuffle cannot drop the rest.
+        assert!(world.contains_resource::<CameraMode>(), "CameraMode");
+    }
 
     /// The default rig reproduces the reference rear-view offset: with the focus at
     /// the origin the camera lands 3 m behind and 0.75 m up, matching

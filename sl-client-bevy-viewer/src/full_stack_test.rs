@@ -1020,7 +1020,6 @@ fn build_viewer_app(params: LoginParams, options: HarnessOptions) -> (App, Captu
     ));
     app.insert_resource(crate::animations::AnimationManager::new());
     app.init_resource::<crate::camera::CameraStart>();
-    app.init_resource::<crate::camera::CameraSpin>();
 
     // Resources the world and render groups *read* but do not own, whose
     // owners are in the groups this harness leaves out. Bevy fails a system's

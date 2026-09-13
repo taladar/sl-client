@@ -107,7 +107,11 @@ const SEA_GRID_RADIUS_CELLS: u32 = 17;
 /// The default water height, in metres, used for the endless ocean until the agent
 /// region's handshake supplies the real one (the standard Second Life sea level;
 /// see `map.rs`).
-pub(crate) const DEFAULT_WATER_HEIGHT: f32 = 20.0;
+///
+/// Public because every other reader of a region's sea level needs the same
+/// fallback for a region that has not handshaked — the minimap's above-/below-water
+/// colour split among them.
+pub const DEFAULT_WATER_HEIGHT: f32 = 20.0;
 
 /// Two water heights within this many metres are treated as one level, when voting
 /// on what a void cell should inherit from the regions around it.

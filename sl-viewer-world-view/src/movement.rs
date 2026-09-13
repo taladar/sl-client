@@ -66,25 +66,37 @@ pub struct AvatarMovementPlugin;
 
 impl Plugin for AvatarMovementPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            drive_avatar_controls.in_set(WorldPhase::AvatarControlsDriven),
-        )
-        // The arrival slam (`crate::arrival`) belongs to the same concern — which
-        // way the own avatar faces — and feeds this driver's heading, so it is
-        // wired here rather than by the viewer. It sits between the avatar object
-        // fold and the dead-reckoner that poses the anchor from what it finds,
-        // and **before this driver**: both hold `AvatarControls`, so without that
-        // edge the frame the forced heading is taken in — and therefore the frame
-        // the arrival facing is stated to the simulator — would be whichever way
-        // the scheduler happened to resolve the ambiguity.
-        .add_systems(
-            Update,
-            crate::arrival::slam_arrival_facing
-                .after(crate::avatars::update_avatar_objects)
-                .before(crate::physics::drive_avatar_motion)
-                .before(drive_avatar_controls),
-        );
+        // The tuning is this module's own resource — the preferences UI only
+        // *refreshes* it from the settings store — and the 6-DOF device state and
+        // its avatar sensitivities are published by `SpacenavPlugin`, which a host
+        // may legitimately leave out. Every default here is the reference
+        // behaviour (`MovementTuning::default` is today's constants; a defaulted
+        // `SpacenavInput` is a centred, un-pressed device), so the driver declares
+        // the reads it makes rather than requiring either plugin. `init_resource`
+        // is idempotent, so where those plugins are present they still own these.
+        app.init_resource::<MovementTuning>()
+            .init_resource::<SpacenavInput>()
+            .init_resource::<AvatarAxisSettings>()
+            .init_resource::<AvatarNavSmoothing>()
+            .add_systems(
+                Update,
+                drive_avatar_controls.in_set(WorldPhase::AvatarControlsDriven),
+            )
+            // The arrival slam (`crate::arrival`) belongs to the same concern — which
+            // way the own avatar faces — and feeds this driver's heading, so it is
+            // wired here rather than by the viewer. It sits between the avatar object
+            // fold and the dead-reckoner that poses the anchor from what it finds,
+            // and **before this driver**: both hold `AvatarControls`, so without that
+            // edge the frame the forced heading is taken in — and therefore the frame
+            // the arrival facing is stated to the simulator — would be whichever way
+            // the scheduler happened to resolve the ambiguity.
+            .add_systems(
+                Update,
+                crate::arrival::slam_arrival_facing
+                    .after(crate::avatars::update_avatar_objects)
+                    .before(crate::physics::drive_avatar_motion)
+                    .before(drive_avatar_controls),
+            );
     }
 }
 
@@ -596,6 +608,39 @@ mod tests {
     /// Frames comfortably past [`TAKE_OFF_HOLD_FRAMES`], so a case that is about
     /// the *seconds* threshold is not accidentally decided by the frame one.
     const HELD_FRAMES: u32 = TAKE_OFF_HOLD_FRAMES + 1;
+
+    /// Every resource the plugin's own driver reads is registered by the plugin.
+    ///
+    /// `MovementTuning` is this module's (the preferences UI only refreshes it
+    /// from the settings store) and the SpaceNavigator trio belongs to a device
+    /// plugin a host may leave out — so without these, adding
+    /// `AvatarMovementPlugin` on its own was a parameter-validation panic on the
+    /// first frame.
+    #[test]
+    fn the_plugin_registers_the_resources_its_driver_reads() {
+        use super::{
+            AvatarAxisSettings, AvatarMovementPlugin, AvatarNavSmoothing, MovementTuning,
+            SpacenavInput,
+        };
+        use bevy::prelude::App;
+
+        let mut app = App::new();
+        app.add_plugins(AvatarMovementPlugin);
+        let world = app.world();
+        assert!(
+            world.contains_resource::<MovementTuning>(),
+            "MovementTuning"
+        );
+        assert!(world.contains_resource::<SpacenavInput>(), "SpacenavInput");
+        assert!(
+            world.contains_resource::<AvatarAxisSettings>(),
+            "AvatarAxisSettings"
+        );
+        assert!(
+            world.contains_resource::<AvatarNavSmoothing>(),
+            "AvatarNavSmoothing"
+        );
+    }
 
     /// Holding the ascend key past the threshold with fly permission takes off; a
     /// short hold, no permission, already flying, or the preference switched off

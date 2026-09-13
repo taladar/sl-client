@@ -60,7 +60,7 @@ use crate::skin_colors;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
-use crate::water::WaterState;
+use crate::water::{DEFAULT_WATER_HEIGHT, WaterState};
 use crate::world_api::AvatarState;
 use crate::world_api::MuteModel;
 use crate::world_api::ObjectDebugInfo;
@@ -1395,7 +1395,11 @@ fn regen_minimap_layers(
     overlay: Res<SlParcelOverlay>,
     regions: Query<(&SlRegion, Option<&SlCurrentRegion>)>,
     terrain: Res<TerrainState>,
-    water: Res<WaterState>,
+    // Optional: the learned sea levels are `WaterPlugin`'s, and the minimap is a
+    // UI panel a host may add without the water surface. Absent, every region
+    // falls back to the grid default water height — the same answer this already
+    // gives for a region whose handshake has not arrived.
+    water: Option<Res<WaterState>>,
     panels: Query<&UiPanelShown>,
 ) {
     let Some(ui) = ui else {
@@ -1472,7 +1476,10 @@ fn regen_minimap_layers(
                 handle,
                 patches: terrain.land_patches_of(handle).cloned().collect(),
                 composition: terrain.composition_of(handle).copied(),
-                water_height: water.height_of(handle).unwrap_or(20.0),
+                water_height: water
+                    .as_deref()
+                    .and_then(|water| water.height_of(handle))
+                    .unwrap_or(DEFAULT_WATER_HEIGHT),
             });
         }
         let task = AsyncComputeTaskPool::get().spawn(async move { build_terrain_maps(&samples) });
@@ -1538,7 +1545,7 @@ fn regen_minimap_layers(
                     up,
                     flags,
                     scale,
-                    water_height: region_water_height(&water, east, north),
+                    water_height: region_water_height(water.as_deref(), east, north),
                 });
             }
             let input = ObjectLayerInput {
@@ -1605,11 +1612,13 @@ fn phantom_alpha(percent: u32) -> u8 {
 }
 
 /// The water height at a global position, from the containing region's
-/// handshake (default 20 m, the grid default, when unknown).
-fn region_water_height(water: &WaterState, east: f64, north: f64) -> f32 {
+/// handshake ([`DEFAULT_WATER_HEIGHT`], the grid default, when unknown — which
+/// includes a host running without the water surface at all).
+fn region_water_height(water: Option<&WaterState>, east: f64, north: f64) -> f32 {
     region_handle_at(east, north)
-        .and_then(|handle| water.height_of(handle))
-        .unwrap_or(20.0)
+        .zip(water)
+        .and_then(|(handle, water)| water.height_of(handle))
+        .unwrap_or(DEFAULT_WATER_HEIGHT)
 }
 
 /// The grid index containing a global metre coordinate, if representable.
@@ -3542,6 +3551,21 @@ mod tests {
     use sl_client_bevy::{
         AgentKey, Friend, FriendKey, FriendRights, MuteEntry, MuteFlags, MuteType, Uuid,
     };
+
+    /// With no water surface in the app at all — the sea levels belong to
+    /// `WaterPlugin`, which the minimap does not pull in — every object is
+    /// measured against the grid's default sea level, the same answer a region
+    /// that has not handshaked yet gets.
+    #[test]
+    fn water_height_falls_back_to_the_grid_default() {
+        use super::{DEFAULT_WATER_HEIGHT, region_water_height};
+
+        let height = region_water_height(None, 256_128.0, 256_128.0);
+        assert!(
+            (height - DEFAULT_WATER_HEIGHT).abs() < 1.0e-6,
+            "fell back to {height} m, not the grid default"
+        );
+    }
 
     /// A tracked location is "reached" only within the arrival radius (3 m),
     /// horizontally — the trigger to clear a double-click-teleport beacon so it

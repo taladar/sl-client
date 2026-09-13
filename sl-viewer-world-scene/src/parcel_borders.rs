@@ -526,7 +526,11 @@ fn update_parcel_borders(
     settings: Res<ViewerSettings>,
     overlay: Res<SlParcelOverlay>,
     terrain: Res<TerrainState>,
-    water: Res<WaterState>,
+    // Optional: the sea levels are `WaterPlugin`'s, and the property lines are a
+    // separate plugin that a host may add without the water surface. Absent, every
+    // region reads as "water height not known yet" — the same state as before a
+    // region's handshake arrives, which this system already handles.
+    water: Option<Res<WaterState>>,
     regions: Query<&SlRegion>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ParcelBorderMaterial>>,
@@ -550,6 +554,7 @@ fn update_parcel_borders(
     state.active = true;
 
     let origin = terrain.origin();
+    let water_height = |region| water.as_deref().and_then(|water| water.height_of(region));
     let overlay_changed = overlay.is_changed();
     let current: HashSet<RegionHandle> = regions.iter().map(|region| region.handle).collect();
 
@@ -586,7 +591,7 @@ fn update_parcel_borders(
             None => true,
             Some(stamp) => {
                 terrain.region_revision(region) != stamp.terrain_revision
-                    || water.height_of(region).map(f32::to_bits) != stamp.water_bits
+                    || water_height(region).map(f32::to_bits) != stamp.water_bits
                     // The grid compare is O(cells), so only run it when the
                     // overlay resource actually changed this frame.
                     || (overlay_changed && overlay.grid_of(region) != Some(&stamp.grid))
@@ -616,12 +621,10 @@ fn update_parcel_borders(
         let Some(grid) = overlay.grid_of(region) else {
             continue; // grid not streamed yet; re-detected as dirty next frame
         };
-        let water_bits = water.height_of(region).map(f32::to_bits);
+        let water_bits = water_height(region).map(f32::to_bits);
         // The region's water surface (plus a hair), so a boundary crossing water
         // rides on it rather than sinking to the seabed.
-        let water_floor = water
-            .height_of(region)
-            .map(|height| height + WATER_SURFACE_EPSILON);
+        let water_floor = water_height(region).map(|height| height + WATER_SURFACE_EPSILON);
         let Some(mesh) = build_region_border_mesh(grid, region, &terrain, water_floor) else {
             continue;
         };
@@ -681,6 +684,45 @@ mod tests {
         BAND_INSET_METRES, PUBLIC_COLOR, ParcelOwnership, SIM_CROSSING_COLOR, grid_metres,
         ownership_color, region_border_edges,
     };
+
+    /// The property lines run in a host that has no water surface at all.
+    ///
+    /// The sea levels belong to `WaterPlugin`, which this plugin does not pull in;
+    /// while the read was a plain `Res<WaterState>`, adding the property lines
+    /// without the water surface failed Bevy's parameter validation on the first
+    /// frame. One region is present (and has no streamed overlay grid yet), so the
+    /// stamp comparison really evaluates the water height rather than returning
+    /// before it.
+    #[test]
+    fn the_bands_run_without_a_water_surface() {
+        use bevy::prelude::*;
+        use sl_client_bevy::{RegionHandle, SlParcelOverlay, SlRegion};
+        use sl_settings::SettingsStore;
+
+        use super::{ParcelBorderMaterial, ParcelBorderState, update_parcel_borders};
+        use crate::settings::ViewerSettings;
+        use crate::world_api::TerrainState;
+
+        let mut app = App::new();
+        app.insert_resource(ViewerSettings::from_store_for_test(SettingsStore::new()))
+            .init_resource::<SlParcelOverlay>()
+            .init_resource::<TerrainState>()
+            .init_resource::<ParcelBorderState>()
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<ParcelBorderMaterial>>()
+            .add_systems(Update, update_parcel_borders);
+        app.world_mut().spawn(SlRegion {
+            handle: RegionHandle::from_global(256_000, 256_000),
+            sim: "127.0.0.1:9000".parse().expect("a literal socket address"),
+        });
+
+        app.update();
+
+        assert!(
+            app.world().resource::<ParcelBorderState>().active,
+            "the system ran to the point of enabling itself",
+        );
+    }
 
     /// The low-bits ownership class for "owned by you".
     const SELF_OWNED: u8 = 3;
