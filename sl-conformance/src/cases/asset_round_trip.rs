@@ -385,9 +385,16 @@ async fn save_over_transaction(
             data,
         })
         .await?;
+    // Matched on the transaction this save minted, not on "the next completion":
+    // the wire completion names only the stored asset, so the transaction is
+    // what tells this save's answer from another's.
     let (asset_id, success) = session
         .wait_for(LONG_TIMEOUT, |event| match event {
-            Event::InventoryAssetSaved { asset_id, success } => Some((*asset_id, *success)),
+            Event::InventoryAssetSaved {
+                transaction_id: replied,
+                asset_id,
+                success,
+            } if *replied == Some(transaction_id) => Some((*asset_id, *success)),
             _other => None,
         })
         .await?;

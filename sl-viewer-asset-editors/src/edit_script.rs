@@ -66,7 +66,6 @@
 //! Reference (Firestorm, read-only): `llpreviewscript`, `llscripteditor`,
 //! `llfloaterscriptdebug`.
 
-use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use sl_client_bevy::{
@@ -74,6 +73,10 @@ use sl_client_bevy::{
     SlCommand, SlEvent, SlSessionEvent, Uuid,
 };
 
+use crate::asset_editor::{
+    DIM_COLOR, ERROR_COLOR, EditedText, FONT_SIZE, LABEL_COLOR, SaveEditorWindow, UnsavedWork,
+    set_status, spawn_body_field, spawn_note, spawn_save_button, spawn_status, tear_down,
+};
 use crate::floater::{
     Floater, FloaterCaps, FloaterHandle, FloaterKey, FloaterSpec, FloaterSystems, KeyedFloaterOpen,
     KeyedFloaters, host_floater,
@@ -84,20 +87,8 @@ use crate::ui_element::ElementCx;
 use crate::ui_font::UiFont;
 use crate::world_api::{OpenScript, ScriptSource};
 
-/// The editor's text font size, in logical pixels.
-const FONT_SIZE: f32 = 14.0;
-
-/// A general-purpose light label colour.
-const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
-
-/// A dimmer colour for secondary text (the read-only note, warnings).
-const DIM_COLOR: Color = Color::srgb(0.62, 0.66, 0.74);
-
 /// A green-tinted colour for a checked Running box.
 const CHECK_COLOR: Color = Color::srgb(0.55, 0.85, 0.60);
-
-/// A red-tinted colour for a failed save / compile error.
-const ERROR_COLOR: Color = Color::srgb(0.92, 0.55, 0.50);
 
 /// The check glyph for a ticked toggle (`☑`).
 const CHECKED_GLYPH: &str = "\u{2611}";
@@ -151,6 +142,7 @@ impl Plugin for EditScriptPlugin {
                 (
                     ingest_script_asset,
                     report_script_running,
+                    save_script,
                     report_script_save,
                 )
                     .chain()
@@ -176,9 +168,11 @@ struct ScriptEditorState {
     target: ScriptTarget,
     /// The asset id awaited (`FetchAsset` sent), matched on `AssetReceived`.
     pending_load: Option<Uuid>,
-    /// Whether a save is in flight (matched on the next `ScriptUploaded` /
-    /// `AssetUploadFailed`). A save is user-triggered one at a time.
-    saving: bool,
+    /// The source a save in flight put on the wire, or `None` when none is —
+    /// matched on the next `ScriptUploaded` / `AssetUploadFailed`, since a save
+    /// is user-triggered one at a time. The text is kept because it, and not
+    /// whatever is in the field when the reply lands, is what was stored.
+    saving: Option<String>,
     /// The editable body field, when the script is modifiable.
     body_field: Option<Entity>,
     /// The status text node (loading / saving / result), when present.
@@ -287,20 +281,23 @@ fn build_script_window(commands: &mut Commands, handle: FloaterHandle, open: &Op
         ScriptSource::Task { task_id, item_id } if open.editable => Some((task_id, item_id)),
         ScriptSource::Task { .. } | ScriptSource::Agent { .. } => None,
     };
-    commands.entity(handle.root).insert(ScriptEditorState {
-        content: handle.content,
-        source: open.source,
-        editable: open.editable,
-        target: open.target,
-        pending_load: Some(open.asset_id),
-        saving: false,
-        body_field: None,
-        status: Some(status),
-        errors: None,
-        running: None,
-        running_glyph: None,
-        pending_running,
-    });
+    commands.entity(handle.root).insert((
+        UnsavedWork::default(),
+        ScriptEditorState {
+            content: handle.content,
+            source: open.source,
+            editable: open.editable,
+            target: open.target,
+            pending_load: Some(open.asset_id),
+            saving: None,
+            body_field: None,
+            status: Some(status),
+            errors: None,
+            running: None,
+            running_glyph: None,
+            pending_running,
+        },
+    ));
 }
 
 // ---------------------------------------------------------------------------
@@ -311,7 +308,7 @@ fn build_script_window(commands: &mut Commands, handle: FloaterHandle, open: &Op
 /// UTF-8 text, then build the read-only or editable body.
 fn ingest_script_asset(
     mut events: MessageReader<SlEvent>,
-    mut windows: Query<&mut ScriptEditorState>,
+    mut windows: Query<(Entity, &mut ScriptEditorState)>,
     children: Query<&Children>,
     mut commands: Commands,
 ) {
@@ -321,7 +318,7 @@ fn ingest_script_asset(
     if frame.is_empty() {
         return;
     }
-    for mut state in &mut windows {
+    for (window, mut state) in &mut windows {
         for event in &frame {
             let SlSessionEvent::AssetReceived(asset) = &event.0 else {
                 continue;
@@ -354,6 +351,14 @@ fn ingest_script_asset(
             state.status = built.status;
             state.errors = built.errors;
             state.running_glyph = built.running_glyph;
+            // The source as it arrived is the baseline the unsaved-work guard
+            // measures against; a read-only window has no buffer to lose and so
+            // never gets one.
+            if let Some(field) = built.body_field {
+                commands
+                    .entity(window)
+                    .insert(EditedText { field, saved: text });
+            }
         }
     }
 }
@@ -375,9 +380,10 @@ struct BuiltEditor {
 /// read-only block), the Running toggle (task scripts), a Save & Compile button
 /// with a status line, and an empty diagnostics container.
 ///
-/// `live` is `true` for the real floater (the Save button and Running toggle are
-/// wired to the session) and `false` for a specimen (they are shown for layout
-/// but do nothing).
+/// `live` is `true` for the real floater (the Running toggle is wired to the
+/// session) and `false` for a specimen (it is shown for layout but does
+/// nothing). The Save button needs no such flag: it names the floater it sits
+/// in, and a specimen sits in none.
 #[expect(
     clippy::too_many_arguments,
     reason = "the editor's shape is its content, permission gate, save target, run \
@@ -398,7 +404,14 @@ fn populate_editor(
     }
 
     let body_field = if editable {
-        Some(spawn_body_field(commands, content, text, font_size))
+        Some(spawn_body_field(
+            commands,
+            content,
+            text,
+            "script-body",
+            BODY_VISIBLE_LINES,
+            font_size,
+        ))
     } else {
         spawn_readonly_body(commands, content, text, font_size);
         None
@@ -417,7 +430,7 @@ fn populate_editor(
                 ChildOf(content),
             ))
             .id();
-        let save = spawn_save_button(commands, bar, font_size);
+        let _save = spawn_save_button(commands, bar, "script-save", "script-save", font_size);
         let status = commands
             .spawn((
                 Text::default(),
@@ -447,9 +460,6 @@ fn populate_editor(
             ))
             .id();
         commands.entity(errors).observe(on_diagnostics_scroll);
-        if live && let Some(field) = body_field {
-            attach_save(commands, save, source, field);
-        }
         (Some(status), Some(errors))
     } else {
         (None, None)
@@ -463,48 +473,49 @@ fn populate_editor(
     }
 }
 
-/// Wire a Save button to upload the edited source over the source's
-/// `UpdateScript*` capability and have the simulator compile it. The current
-/// Running toggle state is carried through for a task script.
-fn attach_save(commands: &mut Commands, button: Entity, source: ScriptSource, body_field: Entity) {
-    commands.entity(button).observe(
-        move |press: On<Pointer<Press>>,
-              fields: Query<&EditableText>,
-              parents: Query<&ChildOf>,
-              floaters: Query<(Entity, &Floater)>,
-              mut windows: Query<&mut ScriptEditorState>,
-              children: Query<&Children>,
-              mut sl_commands: MessageWriter<SlCommand>,
-              mut commands: Commands| {
-            if press.button != PointerButton::Primary {
-                return;
-            }
-            // Compile *this* window's source: the button is inside it.
-            let Some(window) = host_floater(press.entity, &parents, &floaters) else {
-                return;
-            };
-            let Ok(mut state) = windows.get_mut(window) else {
-                return;
-            };
-            let Ok(field) = fields.get(body_field) else {
-                return;
-            };
-            let running = state.running.unwrap_or(true);
-            sl_commands.write(SlCommand(Command::UploadScript {
-                location: source.location(running),
-                target: state.target,
-                source: field.value().to_string().into_bytes(),
-            }));
-            state.saving = true;
-            // A fresh compile supersedes the previous run's diagnostics.
-            if let Some(errors) = state.errors {
-                tear_down(&mut commands, &children, errors);
-            }
-            if let Some(status) = state.status {
-                set_status(&mut commands, status, "script-status-saving", DIM_COLOR);
-            }
-        },
-    );
+/// Upload one window's edited source over its `UpdateScript*` capability and
+/// have the simulator compile it — the Save button's press, and equally the
+/// "Save" answer to the unsaved-work confirmation, which is why this is a system
+/// over [`SaveEditorWindow`] rather than an observer on the button.
+///
+/// The source sent is held on the window, not re-read when the reply lands: a
+/// resident who keeps typing while the compile is in flight has not saved *that*
+/// text, and clearing the unsaved-work mark against the buffer as it stands
+/// afterwards would claim they had.
+fn save_script(
+    mut requests: MessageReader<SaveEditorWindow>,
+    mut windows: Query<&mut ScriptEditorState>,
+    fields: Query<&EditableText>,
+    children: Query<&Children>,
+    mut sl_commands: MessageWriter<SlCommand>,
+    mut commands: Commands,
+) {
+    for request in requests.read() {
+        let Ok(mut state) = windows.get_mut(request.window) else {
+            continue;
+        };
+        let (Some(field_entity), true) = (state.body_field, state.editable) else {
+            continue;
+        };
+        let Ok(field) = fields.get(field_entity) else {
+            continue;
+        };
+        let source = field.value().to_string();
+        let running = state.running.unwrap_or(true);
+        sl_commands.write(SlCommand(Command::UploadScript {
+            location: state.source.location(running),
+            target: state.target,
+            source: source.clone().into_bytes(),
+        }));
+        state.saving = Some(source);
+        // A fresh compile supersedes the previous run's diagnostics.
+        if let Some(errors) = state.errors {
+            tear_down(&mut commands, &children, errors);
+        }
+        if let Some(status) = state.status {
+            set_status(&mut commands, status, "script-status-saving", DIM_COLOR);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -551,7 +562,7 @@ fn report_script_running(
 /// outcome; an [`SlSessionEvent::AssetUploadFailed`] is a transport failure.
 fn report_script_save(
     mut events: MessageReader<SlEvent>,
-    mut windows: Query<&mut ScriptEditorState>,
+    mut windows: Query<(&mut ScriptEditorState, Option<&mut EditedText>)>,
     mut inventory: Option<ResMut<crate::inventory::InventoryModel>>,
     children: Query<&Children>,
     translator: Translator,
@@ -561,11 +572,11 @@ fn report_script_save(
     if frame.is_empty() {
         return;
     }
-    for mut state in &mut windows {
+    for (mut state, mut edited) in &mut windows {
         for event in &frame {
-            if !state.saving {
+            let Some(stored) = state.saving.clone() else {
                 continue;
-            }
+            };
             match &event.0 {
                 SlSessionEvent::ScriptUploaded {
                     new_asset,
@@ -573,7 +584,16 @@ fn report_script_save(
                     errors,
                     ..
                 } => {
-                    state.saving = false;
+                    state.saving = None;
+                    // The source that went out is now what is stored, so it is
+                    // the new baseline the unsaved-work guard measures against —
+                    // and a window whose close was waiting on this save can now
+                    // close. A *failed compile* still stored the source (the
+                    // simulator saves and then compiles), so this is not gated
+                    // on `compiled`.
+                    if let Some(edited) = edited.as_mut() {
+                        edited.saved = stored;
+                    }
                     // Follow the item onto the asset the save wrote, or the
                     // next open of this script fetches the source as it was
                     // *before* — see the notecard editor for the same
@@ -607,7 +627,10 @@ fn report_script_save(
                 }
                 SlSessionEvent::AssetUploadFailed { reason } => {
                     warn!("script save failed: {reason}");
-                    state.saving = false;
+                    // Nothing was stored, so the baseline stands and the work is
+                    // still unsaved — a window that was closing on this save
+                    // stays up with the failure on screen.
+                    state.saving = None;
                     if let Some(status) = state.status {
                         set_status(
                             &mut commands,
@@ -626,69 +649,6 @@ fn report_script_save(
 // ---------------------------------------------------------------------------
 // Content builders.
 // ---------------------------------------------------------------------------
-
-/// Despawn every child of `parent`.
-fn tear_down(commands: &mut Commands, children: &Query<&Children>, parent: Entity) {
-    if let Ok(existing) = children.get(parent) {
-        for child in existing.iter().collect::<Vec<_>>() {
-            commands.entity(child).despawn();
-        }
-    }
-}
-
-/// Spawn a fresh status line under `parent`, driven by a Fluent key.
-fn spawn_status(
-    commands: &mut Commands,
-    parent: Entity,
-    key: &'static str,
-    color: Color,
-) -> Entity {
-    commands
-        .spawn((
-            Text::default(),
-            Translated::new(key),
-            UiFont::Sans.at(FONT_SIZE),
-            TextColor(color),
-            ChildOf(parent),
-        ))
-        .id()
-}
-
-/// Repoint an existing status node at a new Fluent key and colour.
-fn set_status(commands: &mut Commands, status: Entity, key: &'static str, color: Color) {
-    commands
-        .entity(status)
-        .insert((Translated::new(key), TextColor(color)));
-}
-
-/// Spawn the read-only note shown above a no-modify script's source.
-fn spawn_note(commands: &mut Commands, parent: Entity, key: &'static str, font_size: f32) {
-    commands.spawn((
-        Text::default(),
-        Translated::new(key),
-        UiFont::Sans.at(font_size),
-        TextColor(DIM_COLOR),
-        ChildOf(parent),
-    ));
-}
-
-/// Spawn the editable multi-line body field, returning its entity.
-fn spawn_body_field(commands: &mut Commands, parent: Entity, text: &str, font_size: f32) -> Entity {
-    crate::ui_text_input::spawn_text_input(
-        commands,
-        parent,
-        &crate::ui_text_input::TextInputSpec {
-            initial: text.to_owned(),
-            font_size,
-            visible_lines: BODY_VISIBLE_LINES,
-            tab_index: 1,
-            ..crate::ui_text_input::TextInputSpec::new(
-                "script-body",
-                crate::ui_text_input::TextInputKind::Multiline,
-            )
-        },
-    )
-}
 
 /// Spawn the read-only body: a bounded, clipped block showing the script source
 /// in a monospace font (no caret, no edit).
@@ -840,33 +800,6 @@ fn on_diagnostics_scroll(
         position.0.y = (position.0.y - event.y * LINE_SCROLL_PIXELS).max(0.0);
     }
     event.propagate(false);
-}
-
-/// Spawn the Save & Compile button, returning its entity for the caller to wire.
-fn spawn_save_button(commands: &mut Commands, parent: Entity, font_size: f32) -> Entity {
-    commands
-        .spawn((
-            Button,
-            TabIndex(2),
-            Node {
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(Color::srgb(0.32, 0.36, 0.44)),
-            BackgroundColor(Color::srgb(0.13, 0.15, 0.20)),
-            Pickable::default(),
-            Name::new("script-save"),
-            ChildOf(parent),
-        ))
-        .with_child((
-            Text::default(),
-            Translated::new("script-save"),
-            UiFont::Sans.at(font_size),
-            TextColor(LABEL_COLOR),
-            Pickable::IGNORE,
-        ))
-        .id()
 }
 
 // ---------------------------------------------------------------------------

@@ -240,6 +240,7 @@ pub enum FloaterSystems {
 impl Plugin for FloaterPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<FloaterCommand>()
+            .add_message::<FloaterCloseRequested>()
             .init_resource::<FloaterZTop>()
             .init_resource::<ActiveFloater>()
             .init_resource::<DefaultDockHost>()
@@ -675,6 +676,39 @@ pub struct FloaterCommand {
     pub floater: Entity,
     /// What to do to it.
     pub op: FloaterOp,
+}
+
+/// A floater that has to be **asked** before it closes.
+///
+/// While [`armed`](Self::armed) is set, a [`FloaterOp::Close`] on this floater
+/// is turned into a [`FloaterCloseRequested`] instead of being carried out, and
+/// the window stays exactly as it is until its owner says otherwise. The owner
+/// answers by disarming the guard and re-issuing the close (or by not closing at
+/// all) — nothing here decides, because only the feature knows what the question
+/// is and what the answer costs.
+///
+/// This exists because a close is otherwise unconditional and irreversible: a
+/// keyed window is **despawned** by the close pass, taking its unsaved work with
+/// it, and there is nothing left afterwards to ask about. The reference viewer
+/// draws the same line at the same place (`LLFloater::canClose`, which
+/// `LLPreviewNotecard` and `LLPreviewLSL` override to raise their save prompt).
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct ConfirmBeforeClose {
+    /// Whether a close must currently be asked about. A guard left permanently
+    /// armed would make the window unclosable, so an owner arms it only while
+    /// there is genuinely something to lose.
+    pub armed: bool,
+}
+
+/// A close that a [`ConfirmBeforeClose`] floater's owner has to answer.
+///
+/// The close has **not** happened: the window is untouched, and it stays that
+/// way until the owner disarms the guard and writes the [`FloaterOp::Close`]
+/// again.
+#[derive(Message, Debug, Clone, Copy)]
+pub struct FloaterCloseRequested {
+    /// The floater that was asked to close.
+    pub floater: Entity,
 }
 
 /// Whether a floater was shown as of the last [`raise_floaters_on_open`] pass —
@@ -1737,6 +1771,8 @@ fn apply_floater_commands(
     mut z_top: ResMut<FloaterZTop>,
     mut active: ResMut<ActiveFloater>,
     mut panels: Query<&mut UiPanelShown>,
+    guards: Query<&ConfirmBeforeClose>,
+    mut close_requests: MessageWriter<FloaterCloseRequested>,
     dock_host: Res<DefaultDockHost>,
     root: Res<UiRoot>,
 ) {
@@ -1754,6 +1790,16 @@ fn apply_floater_commands(
             }
             FloaterOp::Close => {
                 if !floater.caps.closable {
+                    continue;
+                }
+                // A guarded window's owner answers first. Nothing is touched
+                // here — not the active floater, not the panel flag — because a
+                // close that has only been *asked for* must leave the window
+                // usable if the answer turns out to be "no".
+                if guards.get(command.floater).is_ok_and(|guard| guard.armed) {
+                    close_requests.write(FloaterCloseRequested {
+                        floater: command.floater,
+                    });
                     continue;
                 }
                 if active.0 == Some(command.floater) {
@@ -2402,13 +2448,14 @@ pub fn register_floater_layout(app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::{
-        ActiveFloater, CASCADE_STEP, DefaultDockHost, DeferredFloaterContent, Floater, FloaterCaps,
-        FloaterCommand, FloaterHandle, FloaterKey, FloaterOp, FloaterParts, FloaterSpec,
-        FloaterSystems, FloaterZTop, KeyedFloaterOpen, KeyedFloaters, MIN_VISIBLE, RESIZE_FLOOR,
-        apply_floater_commands, apply_floater_content, apply_floater_glyphs, apply_floater_inset,
-        build_deferred_floater_content, clamp_floaters_on_screen, clamp_position, drag_position,
-        floater_panel, highlight_active_floater, raise_floaters_on_open, resize_size, snap_rect_of,
-        spawn_floater, toggle_floater,
+        ActiveFloater, CASCADE_STEP, ConfirmBeforeClose, DefaultDockHost, DeferredFloaterContent,
+        Floater, FloaterCaps, FloaterCloseRequested, FloaterCommand, FloaterHandle, FloaterKey,
+        FloaterOp, FloaterParts, FloaterSpec, FloaterSystems, FloaterZTop, KeyedFloaterOpen,
+        KeyedFloaters, MIN_VISIBLE, RESIZE_FLOOR, apply_floater_commands, apply_floater_content,
+        apply_floater_glyphs, apply_floater_inset, build_deferred_floater_content,
+        clamp_floaters_on_screen, clamp_position, drag_position, floater_panel,
+        highlight_active_floater, raise_floaters_on_open, resize_size, snap_rect_of, spawn_floater,
+        toggle_floater,
     };
     use bevy::picking::backend::HitData;
     use bevy::picking::pointer::PointerId;
@@ -2428,6 +2475,7 @@ mod tests {
     fn floater_app() -> (App, Entity, Entity) {
         let mut app = App::new();
         app.add_message::<FloaterCommand>()
+            .add_message::<FloaterCloseRequested>()
             .init_resource::<FloaterZTop>()
             .init_resource::<ActiveFloater>()
             .insert_resource(UiDirection::Ltr)
@@ -3042,6 +3090,56 @@ mod tests {
             None,
             "closing the active floater clears it"
         );
+        Ok(())
+    }
+
+    /// An **armed** [`ConfirmBeforeClose`] turns a close into a question: the
+    /// window is left exactly as it was — still shown, still active — and its
+    /// owner is handed a [`FloaterCloseRequested`] to answer.
+    ///
+    /// This is the whole point of the guard. A keyed editor window is despawned
+    /// by the close pass, so a close that goes through before the "you have
+    /// unsaved changes" question is answered has already thrown the answer away.
+    #[test]
+    fn an_armed_guard_turns_a_close_into_a_request() -> Result<(), TestError> {
+        let (mut app, root, _host) = floater_app();
+        let floater = spawn_one(&mut app, root);
+        // A floater is spawned hidden and opened by its feature; this one is
+        // open, because a close is only interesting on a window that is up.
+        app.world_mut()
+            .entity_mut(floater)
+            .insert((UiPanelShown(true), ConfirmBeforeClose { armed: true }));
+        command(&mut app, floater, FloaterOp::BringToFront);
+
+        command(&mut app, floater, FloaterOp::Close);
+        let shown = app
+            .world()
+            .get::<UiPanelShown>(floater)
+            .ok_or("the floater lost its `UiPanelShown`")?;
+        assert!(shown.0, "a guarded close must leave the window open");
+        assert_eq!(
+            app.world().resource::<ActiveFloater>().0,
+            Some(floater),
+            "a close that did not happen must not clear the active floater"
+        );
+        let asked: Vec<Entity> = app
+            .world()
+            .resource::<Messages<FloaterCloseRequested>>()
+            .iter_current_update_messages()
+            .map(|request| request.floater)
+            .collect();
+        assert_eq!(asked, vec![floater], "the owner was not asked");
+
+        // Disarming is how the owner says yes, and the same close then lands.
+        app.world_mut()
+            .entity_mut(floater)
+            .insert(ConfirmBeforeClose { armed: false });
+        command(&mut app, floater, FloaterOp::Close);
+        let shown = app
+            .world()
+            .get::<UiPanelShown>(floater)
+            .ok_or("the floater lost its `UiPanelShown`")?;
+        assert!(!shown.0, "a disarmed guard must not block the close");
         Ok(())
     }
 

@@ -43,16 +43,16 @@ use super::{
     CHAT_SESSION_FETCH_HISTORY_TAG, ChatLifecycleView, ChatSession, ChatSessionInfo,
     ChatSessionKind, ChatSessionLifecycle, Circuit, DEFAULT_DRAW_DISTANCE, EXPERIENCE_QUERY_TAG,
     FolderState, FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION,
-    INVENTORY_FETCH_MAX_ATTEMPTS, Inventory, InventoryOwner, LAND_RESOURCE_DETAIL_TAG,
-    LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT, MAX_XFER_DOWNLOAD_BYTES, MessageCursor,
-    OfferedUpload, PING_INTERVAL, PendingHandover, PendingInvite, RELIABLE_REPLY_GRACE,
-    ReliableSeverity, SIT_TIMEOUT, ScriptGrant, ScriptHolder, ServerHistoryFetch,
-    ServerHistoryMessage, ServerHistoryState, Session, SessionMessage, SessionState, SitState,
-    TELEPORT_TIMEOUT, TEXTURE_DOWNLOAD_MAX_ATTEMPTS, TEXTURE_DOWNLOAD_STALL_TIMEOUT,
-    TYPING_TIMEOUT, TakenControls, TeleportPhase, TextureDownload, TransferDownload,
-    TransferProgress, TransferPurpose, VoiceChannelInfo, XFER_OFFER_TIMEOUT, XFER_REFUSED_RESULT,
-    XFER_STALL_TIMEOUT, XFER_TIMEOUT_RESULT, XferDownload, XferPurpose, XferUpload, deadline,
-    merge_deadline,
+    INVENTORY_FETCH_MAX_ATTEMPTS, INVENTORY_SAVE_TIMEOUT, Inventory, InventoryOwner,
+    LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT, MAX_XFER_DOWNLOAD_BYTES,
+    MessageCursor, OfferedUpload, PING_INTERVAL, PendingHandover, PendingInventorySave,
+    PendingInvite, RELIABLE_REPLY_GRACE, ReliableSeverity, SIT_TIMEOUT, ScriptGrant, ScriptHolder,
+    ServerHistoryFetch, ServerHistoryMessage, ServerHistoryState, Session, SessionMessage,
+    SessionState, SitState, TELEPORT_TIMEOUT, TEXTURE_DOWNLOAD_MAX_ATTEMPTS,
+    TEXTURE_DOWNLOAD_STALL_TIMEOUT, TYPING_TIMEOUT, TakenControls, TeleportPhase, TextureDownload,
+    TransferDownload, TransferProgress, TransferPurpose, VoiceChannelInfo, XFER_OFFER_TIMEOUT,
+    XFER_REFUSED_RESULT, XFER_STALL_TIMEOUT, XFER_TIMEOUT_RESULT, XferDownload, XferPurpose,
+    XferUpload, deadline, merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
@@ -231,6 +231,7 @@ impl Session {
             xfer_uploads: BTreeMap::new(),
             secure_session_id: Uuid::nil(),
             pending_asset_uploads: BTreeMap::new(),
+            pending_inventory_saves: BTreeMap::new(),
             next_xfer_id: XferId(1),
             pending_task_inventory: BTreeMap::new(),
             pending_task_inventory_unresolved: VecDeque::new(),
@@ -3952,9 +3953,17 @@ impl Session {
             AnyMessage::AssetUploadComplete(complete) => {
                 // The simulator stored (or rejected) a legacy asset upload — the
                 // completion of a [`Session::save_inventory_asset`]. Surface it so
-                // an editor can confirm its Save landed.
+                // an editor can confirm its Save landed, named by the transaction
+                // it started: the completion carries only the stored asset, and
+                // the registry is what turns that back into the caller's token.
+                let asset_id = complete.asset_block.uuid;
+                let transaction_id = self
+                    .pending_inventory_saves
+                    .remove(&asset_id)
+                    .map(|save| save.transaction_id);
                 self.events.push_back(Event::InventoryAssetSaved {
-                    asset_id: complete.asset_block.uuid,
+                    transaction_id,
+                    asset_id,
                     success: complete.asset_block.success,
                 });
             }
@@ -5749,7 +5758,39 @@ impl Session {
                 request: Diagnostic::ASSET_UPLOAD_REQUEST.to_owned(),
                 sequence: None,
             });
+            // The offer expiring *is* this save's answer, so its registration
+            // goes with it rather than waiting out the longer save timeout and
+            // reporting the same failure twice.
+            let transaction_id = self
+                .pending_inventory_saves
+                .remove(&asset_id)
+                .map(|save| save.transaction_id);
             self.events.push_back(Event::InventoryAssetSaved {
+                transaction_id,
+                asset_id,
+                success: false,
+            });
+        }
+        // A save the simulator neither pulled nor answered. An inlined payload
+        // has no offer to expire, so without this the caller waits forever.
+        let expired_saves: Vec<Uuid> = self
+            .pending_inventory_saves
+            .iter()
+            .filter(|(_, save)| now >= save.expires)
+            .map(|(asset_id, _)| *asset_id)
+            .collect();
+        for asset_id in expired_saves {
+            let transaction_id = self
+                .pending_inventory_saves
+                .remove(&asset_id)
+                .map(|save| save.transaction_id);
+            tracing::warn!(%asset_id, "inventory asset save was never completed; giving up");
+            self.push_diagnostic(Diagnostic::ExpectedReplyMissing {
+                request: Diagnostic::ASSET_UPLOAD_REQUEST.to_owned(),
+                sequence: None,
+            });
+            self.events.push_back(Event::InventoryAssetSaved {
+                transaction_id,
                 asset_id,
                 success: false,
             });
@@ -5817,6 +5858,9 @@ impl Session {
         }
         for offer in self.pending_asset_uploads.values() {
             merge_deadline(&mut earliest, Some(offer.expires));
+        }
+        for save in self.pending_inventory_saves.values() {
+            merge_deadline(&mut earliest, Some(save.expires));
         }
         for asked in &self.pending_task_inventory_unresolved {
             merge_deadline(&mut earliest, Some(deadline(*asked, RELIABLE_REPLY_GRACE)));
@@ -10909,6 +10953,16 @@ impl Session {
             now,
         )?;
         circuit.send_update_inventory_item(item, transaction_id.get(), callback_id, now)?;
+        // Register the save under the id its completion will name, so the result
+        // can be handed back to *this* caller rather than to whoever happens to
+        // be waiting when some other save completes.
+        let _prev = self.pending_inventory_saves.insert(
+            asset_id,
+            PendingInventorySave {
+                transaction_id,
+                expires: deadline(now, INVENTORY_SAVE_TIMEOUT),
+            },
+        );
         if !inline {
             let _prev = self.pending_asset_uploads.insert(
                 asset_id,

@@ -283,6 +283,12 @@ pub(crate) fn install_element_hosting(app: &mut App) {
     app.add_message::<crate::emoji_picker::OpenEmojiPicker>();
     app.add_message::<sl_client_bevy::SlCommand>();
     app.add_message::<crate::world_api::OpenWebBrowser>();
+    // The asset editors' Save button names the floater it sits in and asks for
+    // that window to be saved. A specimen sits in no window, so the ask is never
+    // made — but the channel has to exist for the observer's parameters to
+    // resolve, or the sweep's press is a failed observer rather than an inert
+    // button.
+    app.add_message::<crate::asset_editor::SaveEditorWindow>();
     // `browser-view`: every pointer and key observer reads the surface
     // table before it reaches the disabled check. Empty is the right
     // fixture — no CEF, no engine, and the widget stays the placeholder.

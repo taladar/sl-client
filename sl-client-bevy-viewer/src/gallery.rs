@@ -321,6 +321,12 @@ pub fn run() -> AppExit {
         // it but `log_actions`, which is exactly the point: in this binary every
         // click is inert by construction.
         .add_message::<UiAction>()
+        // The asset editors' Save button names the floater it sits in and asks
+        // for that window to be saved. A specimen sits in no window, so the ask
+        // is never made — but the channel has to exist for the observer's
+        // parameters to resolve at all, or pressing Save in the gallery is a
+        // failed system rather than an inert button.
+        .add_message::<crate::asset_editor::SaveEditorWindow>()
         .insert_resource(ClearColor(BACKGROUND))
         .add_systems(
             Startup,

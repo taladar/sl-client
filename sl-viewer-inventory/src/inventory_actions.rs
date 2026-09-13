@@ -64,9 +64,9 @@ use crate::ui::focus_within;
 use crate::ui_element::UiAction;
 use crate::virtual_list::VirtualRow;
 use crate::world_api::InputContext;
-use crate::world_api::PendingItemCreations;
 use crate::world_api::StartConference;
 use crate::world_api::{ConversationKey, OpenConversation};
+use crate::world_api::{ItemCreationFinished, PendingItemCreations};
 use crate::world_api::{PendingSettingsCreations, SettingsItemCreated};
 
 /// The `element` the inventory context menus attribute their [`UiAction`]s to.
@@ -2741,6 +2741,7 @@ pub(crate) fn default_wearable_asset(
 fn handle_item_creations(
     mut events: MessageReader<SlEvent>,
     mut pending: ResMut<PendingItemCreations>,
+    mut finished: MessageWriter<ItemCreationFinished>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     for event in events.read() {
@@ -2755,15 +2756,27 @@ fn handle_item_creations(
                 ..
             } => {
                 if let Some(creation) = pending.take_next() {
+                    let item_id = InventoryKey::from(*item);
                     commands.write(SlCommand(Command::ChangeInventoryItemFlags {
-                        item_id: InventoryKey::from(*item),
+                        item_id,
                         flags: creation.flags,
                     }));
                     query_folder_page(creation.folder, &mut commands);
+                    // Tell whoever asked for it that it landed; the reply names
+                    // no requester, so the ticket is the only thing that can.
+                    finished.write(ItemCreationFinished {
+                        ticket: creation.ticket,
+                        item: Some(item_id),
+                    });
                 }
             }
             SlSessionEvent::AssetUploadFailed { .. } => {
-                let _dropped = pending.take_next();
+                if let Some(creation) = pending.take_next() {
+                    finished.write(ItemCreationFinished {
+                        ticket: creation.ticket,
+                        item: None,
+                    });
+                }
             }
             _other => {}
         }
@@ -2941,7 +2954,7 @@ fn dispatch_create(
             expected_upload_cost: 0,
             data: text.into_bytes(),
         }));
-        pending_creations.enqueue(u32::from(slot.to_code()), dest);
+        let _ticket = pending_creations.enqueue(u32::from(slot.to_code()), dest);
         return true;
     }
     // The settings creators. Shared with the My Environments library window,
@@ -3145,6 +3158,7 @@ impl Plugin for InventoryActionsPlugin {
             .init_resource::<ActiveGestures>()
             .init_resource::<PendingShare>()
             .init_resource::<PendingItemCreations>()
+            .add_message::<ItemCreationFinished>()
             .init_resource::<SettingsInventorySupport>()
             .add_systems(
                 Update,

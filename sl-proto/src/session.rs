@@ -1,7 +1,7 @@
 //! The sans-I/O session state machine: login, circuit establishment,
 //! keep-alive, and clean logout, driven entirely by passed-in time.
 
-use crate::bookkeeping_ids::{PingId, TransferId, XferId};
+use crate::bookkeeping_ids::{PingId, TransactionId, TransferId, XferId};
 use crate::mute::MuteList;
 use crate::scoped_id::{CircuitId, ScopedObjectId};
 use crate::types::{
@@ -844,6 +844,17 @@ pub const XFER_STALL_TIMEOUT: Duration = Duration::from_secs(30);
 /// ("registered xfer never requested, xfer dropped").
 pub const XFER_OFFER_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// How long a legacy [`Session::save_inventory_asset`] waits for its
+/// `AssetUploadComplete` before the save is reported failed.
+///
+/// The save's only completion is a message the simulator may simply never send
+/// — an inlined payload it drops on the floor has no `Xfer` offer to expire
+/// either — and an editor waiting on one would sit on "Saving…" for the rest of
+/// the session. Longer than [`XFER_OFFER_TIMEOUT`] on purpose: an oversized
+/// save that is never pulled is already reported by its offer expiring, and
+/// that is the more specific answer of the two.
+pub const INVENTORY_SAVE_TIMEOUT: Duration = Duration::from_secs(120);
+
 /// The `Result` code an `AbortXfer` carries when *this* side gives up on a
 /// stalled transfer: the reference's `LL_ERR_TCP_TIMEOUT` (`llcircuit.h`), which
 /// is what `LLXfer::abort` sends in the same situation.
@@ -1348,6 +1359,19 @@ struct OfferedUpload {
     /// The complete bytes held for the simulator's pull.
     data: Vec<u8>,
     /// When the offer is withdrawn and [`data`](Self::data) dropped.
+    expires: Instant,
+}
+
+/// A legacy asset save waiting for the simulator's `AssetUploadComplete`.
+///
+/// The completion names only the stored asset, so the transaction the caller
+/// minted is held here to be handed back with the result — see
+/// [`Event::InventoryAssetSaved::transaction_id`](crate::Event::InventoryAssetSaved).
+#[derive(Debug)]
+struct PendingInventorySave {
+    /// The transaction the save was started with.
+    transaction_id: TransactionId,
+    /// When the save is given up on and reported failed.
     expires: Instant,
 }
 
@@ -1867,6 +1891,17 @@ pub struct Session {
     /// [`Event::InventoryAssetSaved`](crate::Event::InventoryAssetSaved) so the
     /// save's caller is not left waiting.
     pending_asset_uploads: BTreeMap<Uuid, OfferedUpload>,
+    /// Legacy asset saves ([`Session::save_inventory_asset`]) awaiting their
+    /// `AssetUploadComplete`, keyed by the **predicted asset id** the completion
+    /// names — which is the only thing the wire completion carries, so this is
+    /// what turns it back into the transaction the caller started.
+    ///
+    /// Every save is registered, inlined or not: the small ones (the common
+    /// case) never reach [`pending_asset_uploads`](Self::pending_asset_uploads)
+    /// at all, and they need correlating just as much. An entry the simulator
+    /// never answers is withdrawn after [`INVENTORY_SAVE_TIMEOUT`], surfacing a
+    /// failed [`Event::InventoryAssetSaved`](crate::Event::InventoryAssetSaved).
+    pending_inventory_saves: BTreeMap<Uuid, PendingInventorySave>,
     /// A monotonic counter for generating `Xfer` ids (never zero).
     next_xfer_id: XferId,
     /// Objects whose task inventory a [`Session::fetch_task_inventory`] asked

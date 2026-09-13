@@ -51,6 +51,7 @@ use sl_client_bevy::{
 };
 use sl_client_bevy::{SaleType, avatar_texture};
 
+use crate::asset_editor::{SaveEditorWindow, UnsavedWork};
 use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatars::OwnLocalBake;
 use crate::bake_inputs::{OwnBakeInputs, shape_is_male};
@@ -65,8 +66,8 @@ use crate::ui_font::UiFont;
 use crate::ui_radio::{RadioLayout, RadioSelection, RadioSpec, spawn_radio_group};
 use crate::ui_texture_picker::{TextureSwatchValue, spawn_texture_swatch};
 use crate::world_api::DecodedTextures;
-use crate::world_api::PendingItemCreations;
 use crate::world_api::TexturePicked;
+use crate::world_api::{ItemCreationFinished, ItemCreationTicket, PendingItemCreations};
 
 /// The Shape gender radio group's element id.
 const GENDER_ELEMENT: &str = "wearable-gender";
@@ -198,8 +199,25 @@ struct WearEdit {
     shape_dirty: bool,
     /// A texture / tint change is awaiting a bake re-composite.
     bake_dirty: bool,
-    /// A Save is in flight (match the next `InventoryAssetSaved`).
-    saving: bool,
+    /// The transaction an in-place Save put on the wire, or `None` when none is
+    /// in flight.
+    ///
+    /// The completion (`InventoryAssetSaved`) names the stored asset, not the
+    /// item, so this is the only thing that tells *this* editor's result from
+    /// another save's — matching on "a save completed while we were saving"
+    /// reports whichever one finishes first, whosever it was.
+    saving: Option<TransactionId>,
+    /// This editor's claim on the shared creation queue for a **Save As** in
+    /// flight, or `None` when none is — which is also how "a copy is on the
+    /// wire" is known, since the two are the same fact.
+    ///
+    /// The copy is minted by the CAPS uploader, whose reply carries no
+    /// correlation id, so the viewer's one ordered creation queue is what says
+    /// which creation is whose, and this is the editor's place in it.
+    creation: Option<ItemCreationTicket>,
+    /// Whether the edit has moved since it was opened, reverted, or last saved —
+    /// what the close guard asks about, and what a Revert has to undo.
+    dirty: bool,
     /// The status readout node.
     status: Option<Entity>,
 }
@@ -227,7 +245,11 @@ impl Plugin for EditWearablePlugin {
                     note_edited_texture_decoded,
                     drive_wearable_preview,
                     sync_wearable_sliders,
+                    save_wearable,
                     report_wearable_save,
+                    report_wearable_save_as,
+                    end_wearable_edit_on_close,
+                    track_wearable_unsaved,
                     scroll_wearable_list,
                 )
                     .chain(),
@@ -264,9 +286,13 @@ fn spawn_wearable_editor(mut commands: Commands, root: Res<UiRoot>) {
     } = spawn_floater(&mut commands, root.0, wearable_editor_floater_spec());
     // Subject-bound: it opens on whatever item you clicked, so its geometry is
     // meaningless across sessions.
-    commands
-        .entity(panel)
-        .insert(crate::floater_persist::FloaterPersistExempt);
+    commands.entity(panel).insert((
+        crate::floater_persist::FloaterPersistExempt,
+        // The edit previews on the avatar and is not stored until a Save, so a
+        // close with the sliders moved throws real work away — the scaffold's
+        // guard asks first ([`track_wearable_unsaved`]).
+        UnsavedWork::default(),
+    ));
     commands.insert_resource(WearEditorUi {
         panel,
         content,
@@ -521,7 +547,9 @@ fn open_wearable_editor(
         pending_textures: HashSet::new(),
         shape_dirty: true,
         bake_dirty: true,
-        saving: false,
+        saving: None,
+        creation: None,
+        dirty: false,
         status: Some(status),
     });
 
@@ -758,6 +786,7 @@ fn on_wear_slider_change(
     commands.entity(change.source).insert(SliderValue(clamped));
     if let Some(edit) = state.active.as_mut() {
         let _prev = edit.edited.params.insert(info.id, clamped);
+        edit.dirty = true;
         if info.is_bake {
             edit.bake_dirty = true;
         } else {
@@ -783,6 +812,7 @@ fn apply_wear_gender_radio(
         if edit.edited.params.get(&id).copied() != Some(male) {
             let _prev = edit.edited.params.insert(id, male);
             edit.shape_dirty = true;
+            edit.dirty = true;
         }
     }
 }
@@ -808,6 +838,7 @@ fn apply_wear_texture_picked(
             pick.texture.uuid(),
         );
         edit.bake_dirty = true;
+        edit.dirty = true;
         if let Ok(mut value) = values.get_mut(pick.requester) {
             value.0 = pick.texture;
         }
@@ -838,6 +869,7 @@ fn apply_wear_tint_picked(
         let _prev = edit.edited.params.insert(g, srgba.green.clamp(0.0, 1.0));
         let _prev = edit.edited.params.insert(b, srgba.blue.clamp(0.0, 1.0));
         edit.bake_dirty = true;
+        edit.dirty = true;
         if let Ok(mut value) = values.get_mut(pick.requester) {
             value.0 = pick.color;
         }
@@ -952,15 +984,21 @@ fn sync_wearable_sliders(
 // ---------------------------------------------------------------------------
 
 /// A chrome button press: Save (in place), Save As (new item), or Revert.
+///
+/// Save is not carried out here — it is written as a [`SaveEditorWindow`] for
+/// [`save_wearable`], the same message the unsaved-work confirmation's "Save"
+/// answer writes, so the button and the confirmation cannot come to save
+/// different things.
 #[expect(
     clippy::too_many_arguments,
-    reason = "Save touches the whole editor context: the button, the edit state, the bake inputs \
-              and local bake for a Revert preview, the avatar-param library, the pending-upload \
-              queue, and the command channel"
+    reason = "Save As and Revert touch the whole editor context: the button, the edit state, the \
+              bake inputs and local bake for a Revert preview, the avatar-param library, the \
+              pending-upload queue, and the command channel"
 )]
 fn on_wear_button(
     press: On<Pointer<Press>>,
     buttons: Query<&WearButton>,
+    ui: Option<Res<WearEditorUi>>,
     mut state: ResMut<WearEditState>,
     mut inputs: ResMut<OwnBakeInputs>,
     mut texture_manager: ResMut<TextureManager>,
@@ -969,6 +1007,7 @@ fn on_wear_button(
     mut local_bake: ResMut<OwnLocalBake>,
     mut pending: ResMut<PendingItemCreations>,
     mut commands: MessageWriter<SlCommand>,
+    mut saves: MessageWriter<SaveEditorWindow>,
     mut texts: Query<&mut Text>,
 ) {
     if press.button != PointerButton::Primary {
@@ -980,20 +1019,14 @@ fn on_wear_button(
     let Some(edit) = state.active.as_mut() else {
         return;
     };
-    let perms = wearable_permissions(&edit.item);
     match kind {
         WearButton::Save => {
-            let data = edit.edited.to_text(&perms).into_bytes();
-            commands.write(SlCommand(Command::SaveInventoryAsset {
-                item: Box::new(to_wire_item(&edit.item)),
-                asset_type: asset_type_of(edit.wearable_type),
-                transaction_id: TransactionId::from(Uuid::new_v4()),
-                data,
-            }));
-            edit.saving = true;
-            set_status(&mut texts, edit.status, "Saving…");
+            if let Some(ui) = ui.as_deref() {
+                saves.write(SaveEditorWindow { window: ui.panel });
+            }
         }
         WearButton::SaveAs => {
+            let perms = wearable_permissions(&edit.item);
             let name = format!("{} (copy)", edit.item.name);
             let mut copy = edit.edited.clone();
             copy.name.clone_from(&name);
@@ -1010,8 +1043,15 @@ fn on_wear_button(
                 expected_upload_cost: 0,
                 data,
             }));
-            pending.enqueue(u32::from(edit.wearable_type.to_code()), edit.item.folder_id);
-            set_status(&mut texts, edit.status, "Saved a copy to inventory.");
+            // The copy has been *asked for*, not made: the bytes are on their way
+            // to the CAPS uploader and the grid has yet to say whether it kept
+            // them. Announcing the copy here — which is what this did — is a
+            // claim about something that has not happened, and a refused upload
+            // left it standing. The ticket is this editor's claim on the one
+            // ordered creation queue; `report_wearable_save_as` answers on it.
+            edit.creation =
+                Some(pending.enqueue(u32::from(edit.wearable_type.to_code()), edit.item.folder_id));
+            set_status(&mut texts, edit.status, "Saving a copy…");
         }
         WearButton::Revert => {
             edit.edited.clone_from(&edit.original);
@@ -1021,12 +1061,51 @@ fn on_wear_button(
             inputs.reassemble(&store, library.as_deref());
             local_bake.invalidate();
             edit.shape_dirty = true;
+            // Back to what was opened on, so there is nothing unsaved left to
+            // ask about on a close.
+            edit.dirty = false;
             set_status(&mut texts, edit.status, "Reverted.");
         }
     }
 }
 
-/// Report a Save's outcome from the [`InventoryAssetSaved`] reply.
+/// Write the edit back onto the **same** item over the legacy transaction
+/// upload, and remember the transaction so the completion can be told from
+/// somebody else's.
+fn save_wearable(
+    mut requests: MessageReader<SaveEditorWindow>,
+    ui: Option<Res<WearEditorUi>>,
+    mut state: ResMut<WearEditState>,
+    mut commands: MessageWriter<SlCommand>,
+    mut texts: Query<&mut Text>,
+) {
+    let Some(ui) = ui.as_deref() else {
+        requests.clear();
+        return;
+    };
+    for request in requests.read() {
+        if request.window != ui.panel {
+            continue;
+        }
+        let Some(edit) = state.active.as_mut() else {
+            continue;
+        };
+        let perms = wearable_permissions(&edit.item);
+        let data = edit.edited.to_text(&perms).into_bytes();
+        let transaction_id = TransactionId::from(Uuid::new_v4());
+        commands.write(SlCommand(Command::SaveInventoryAsset {
+            item: Box::new(to_wire_item(&edit.item)),
+            asset_type: asset_type_of(edit.wearable_type),
+            transaction_id,
+            data,
+        }));
+        edit.saving = Some(transaction_id);
+        set_status(&mut texts, edit.status, "Saving…");
+    }
+}
+
+/// Report an in-place Save's outcome from the [`InventoryAssetSaved`] reply that
+/// names **this** editor's transaction.
 fn report_wearable_save(
     mut events: MessageReader<SlEvent>,
     mut state: ResMut<WearEditState>,
@@ -1037,13 +1116,123 @@ fn report_wearable_save(
         return;
     };
     for event in events.read() {
-        if let SlSessionEvent::InventoryAssetSaved { success, .. } = &event.0
-            && edit.saving
-        {
-            edit.saving = false;
-            let message = if *success { "Saved." } else { "Save failed." };
-            set_status(&mut texts, edit.status, message);
+        let SlSessionEvent::InventoryAssetSaved {
+            transaction_id,
+            success,
+            ..
+        } = &event.0
+        else {
+            continue;
+        };
+        // Ours only if it names the transaction this editor minted. Without the
+        // check, any save completing while this one is in flight — another
+        // editor's, or an earlier save of this one that timed out — is reported
+        // here as this save's result.
+        if edit.saving.is_none() || *transaction_id != edit.saving {
+            continue;
         }
+        edit.saving = None;
+        if *success {
+            // Stored, so the edit *is* what the item holds now: nothing unsaved
+            // is left, a Revert should go back to this rather than to what was
+            // opened on, and a close waiting on the save may go ahead.
+            edit.original.clone_from(&edit.edited);
+            edit.dirty = false;
+        }
+        let message = if *success { "Saved." } else { "Save failed." };
+        set_status(&mut texts, edit.status, message);
+    }
+}
+
+/// Report a **Save As** landing — or failing — on the ticket this editor took
+/// out of the shared creation queue.
+fn report_wearable_save_as(
+    mut finished: MessageReader<ItemCreationFinished>,
+    mut state: ResMut<WearEditState>,
+    mut texts: Query<&mut Text>,
+) {
+    let Some(edit) = state.active.as_mut() else {
+        finished.clear();
+        return;
+    };
+    for creation in finished.read() {
+        if edit.creation != Some(creation.ticket) {
+            continue;
+        }
+        edit.creation = None;
+        let message = if creation.item.is_some() {
+            "Saved a copy to inventory."
+        } else {
+            "Saving a copy failed."
+        };
+        set_status(&mut texts, edit.status, message);
+    }
+}
+
+/// End the edit when the window closes: restore the worn wearable the editor
+/// opened on and drop the live edit.
+///
+/// Closing is the one answer the guard does not stop — either the resident
+/// saved first (in which case the restored asset *is* what they saved), or they
+/// said the work could go. Either way the preview must not outlive the window:
+/// [`OwnBakeInputs::set_preview_asset`] substitutes the edit into the worn
+/// outfit, so leaving it in place keeps the avatar wearing an unsaved edit with
+/// no window left to save, revert or even see it in — and the next open would
+/// read that preview back as if it were what is worn.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "restoring the preview is the Revert path, which reads the edit state, the bake \
+              inputs, the texture manager and store, the param library and the local bake"
+)]
+fn end_wearable_edit_on_close(
+    ui: Option<Res<WearEditorUi>>,
+    panels: Query<&UiPanelShown, Changed<UiPanelShown>>,
+    mut state: ResMut<WearEditState>,
+    mut inputs: ResMut<OwnBakeInputs>,
+    mut texture_manager: ResMut<TextureManager>,
+    store: Res<DecodedTextures>,
+    library: Option<Res<AvatarAssetLibrary>>,
+    mut local_bake: ResMut<OwnLocalBake>,
+    mut works: Query<&mut UnsavedWork>,
+) {
+    let Some(ui) = ui.as_deref() else {
+        return;
+    };
+    let Ok(shown) = panels.get(ui.panel) else {
+        return;
+    };
+    if shown.0 {
+        return;
+    }
+    let Some(edit) = state.active.take() else {
+        return;
+    };
+    inputs.set_preview_asset(edit.original.clone());
+    inputs.request_asset_textures(&edit.original, &mut texture_manager, &store);
+    inputs.reassemble(&store, library.as_deref());
+    local_bake.invalidate();
+    if let Ok(mut work) = works.get_mut(ui.panel) {
+        *work = UnsavedWork::default();
+    }
+}
+
+/// Keep the editor floater's close guard in step with the edit: while the
+/// wearable on screen differs from what was opened on (or last saved), closing
+/// the window would throw that away, and the scaffold asks first.
+fn track_wearable_unsaved(
+    ui: Option<Res<WearEditorUi>>,
+    state: Res<WearEditState>,
+    mut windows: Query<&mut UnsavedWork>,
+) {
+    let Some(ui) = ui.as_deref() else {
+        return;
+    };
+    let Ok(mut work) = windows.get_mut(ui.panel) else {
+        return;
+    };
+    let dirty = state.active.as_ref().is_some_and(|edit| edit.dirty);
+    if work.dirty != dirty {
+        work.dirty = dirty;
     }
 }
 
@@ -1134,5 +1323,268 @@ fn set_status(texts: &mut Query<&mut Text>, node: Option<Entity>, message: &str)
         && let Ok(mut text) = texts.get_mut(node)
     {
         message.clone_into(&mut text.0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{WearEdit, WearEditState, report_wearable_save, report_wearable_save_as};
+    use crate::world_api::PendingItemCreations;
+    use bevy::prelude::*;
+    use pretty_assertions::assert_eq;
+    use sl_client_bevy::{
+        AgentKey, AssetType, InventoryFolderKey, InventoryKey, InventoryType, ItemInfo, OwnerKey,
+        Permissions, Permissions5, SlEvent, SlSessionEvent, TransactionId, Uuid, WearableAsset,
+        WearableType,
+    };
+    use std::collections::{BTreeMap, HashSet};
+
+    /// A boxed error so tests can use `?` rather than the disallowed `unwrap` /
+    /// `expect`.
+    type TestError = Box<dyn core::error::Error>;
+
+    /// The shirt the editor is editing.
+    fn shirt() -> ItemInfo {
+        ItemInfo {
+            item_id: InventoryKey::from(Uuid::from_u128(0x11)),
+            folder_id: InventoryFolderKey::from(Uuid::from_u128(0x22)),
+            name: "A shirt".to_owned(),
+            description: String::new(),
+            asset_id: Uuid::from_u128(0x33),
+            asset_type: AssetType::Clothing,
+            inv_type: InventoryType::Wearable,
+            flags: 0,
+            sale: sl_client_bevy::SaleInfo::default(),
+            creation_date: 0,
+            owner: OwnerKey::Agent(AgentKey::from(Uuid::from_u128(0x44))),
+            last_owner_id: Uuid::nil(),
+            creator_id: AgentKey::from(Uuid::from_u128(0x44)),
+            group: None,
+            permissions: Permissions5 {
+                base: Permissions::from_bits(0x7fff_ffff),
+                owner: Permissions::from_bits(0x7fff_ffff),
+                group: Permissions::empty(),
+                everyone: Permissions::empty(),
+                next_owner: Permissions::from_bits(0x0008_2000),
+            },
+        }
+    }
+
+    /// An editor with an open, modified edit and a status readout, plus the
+    /// systems that report a save's outcome.
+    fn editor_app() -> (App, Entity) {
+        let mut app = App::new();
+        app.add_message::<SlEvent>()
+            .add_message::<crate::world_api::ItemCreationFinished>()
+            .init_resource::<WearEditState>()
+            .init_resource::<PendingItemCreations>()
+            .add_systems(Update, (report_wearable_save, report_wearable_save_as));
+        let status = app.world_mut().spawn(Text::new(String::new())).id();
+        let asset = WearableAsset {
+            version: super::WEARABLE_VERSION,
+            name: "A shirt".to_owned(),
+            wearable_type: WearableType::Shirt,
+            params: BTreeMap::new(),
+            textures: BTreeMap::new(),
+        };
+        app.world_mut().resource_mut::<WearEditState>().active = Some(WearEdit {
+            item: shirt(),
+            wearable_type: WearableType::Shirt,
+            original: asset.clone(),
+            edited: asset,
+            tint_params: None,
+            tint_swatch: None,
+            gender_param: None,
+            height_label: None,
+            pending_textures: HashSet::new(),
+            shape_dirty: false,
+            bake_dirty: false,
+            saving: None,
+            creation: None,
+            dirty: true,
+            status: Some(status),
+        });
+        app.update();
+        (app, status)
+    }
+
+    /// What the status readout says.
+    fn status_of(app: &App, status: Entity) -> String {
+        app.world()
+            .get::<Text>(status)
+            .map(|text| text.0.clone())
+            .unwrap_or_default()
+    }
+
+    /// A completion that names **another** transaction is not this editor's
+    /// result.
+    ///
+    /// This is the defect the correlation exists for: the editor used to take
+    /// any `InventoryAssetSaved` arriving while it was saving as its own, so an
+    /// unrelated save — an earlier one of its own that timed out, another
+    /// surface's — decided what it told the resident about theirs.
+    #[test]
+    fn a_foreign_completion_is_not_this_save() -> Result<(), TestError> {
+        let (mut app, status) = editor_app();
+        let ours = TransactionId::from(Uuid::from_u128(0xAA));
+        let theirs = TransactionId::from(Uuid::from_u128(0xBB));
+        if let Some(edit) = app
+            .world_mut()
+            .resource_mut::<WearEditState>()
+            .active
+            .as_mut()
+        {
+            edit.saving = Some(ours);
+        }
+
+        app.world_mut()
+            .write_message(SlEvent(SlSessionEvent::InventoryAssetSaved {
+                transaction_id: Some(theirs),
+                asset_id: Uuid::from_u128(0xB0),
+                success: false,
+            }));
+        app.update();
+        assert_eq!(
+            status_of(&app, status),
+            "",
+            "another save's failure was reported as this editor's"
+        );
+        assert!(
+            app.world()
+                .resource::<WearEditState>()
+                .active
+                .as_ref()
+                .is_some_and(|edit| edit.saving == Some(ours)),
+            "another save's completion cleared this editor's in-flight save"
+        );
+
+        // Ours lands, and it is ours that is reported.
+        app.world_mut()
+            .write_message(SlEvent(SlSessionEvent::InventoryAssetSaved {
+                transaction_id: Some(ours),
+                asset_id: Uuid::from_u128(0xA0),
+                success: true,
+            }));
+        app.update();
+        assert_eq!(status_of(&app, status), "Saved.");
+        let state = app.world().resource::<WearEditState>();
+        let edit = state.active.as_ref().ok_or("the edit went away")?;
+        assert_eq!(edit.saving, None, "the save is no longer in flight");
+        assert!(
+            !edit.dirty,
+            "a stored edit is no longer unsaved work to ask about"
+        );
+        Ok(())
+    }
+
+    /// A refused save leaves the work unsaved, so a close still asks and a
+    /// Revert still has somewhere to go back to.
+    #[test]
+    fn a_refused_save_leaves_the_work_unsaved() -> Result<(), TestError> {
+        let (mut app, status) = editor_app();
+        let ours = TransactionId::from(Uuid::from_u128(0xCC));
+        if let Some(edit) = app
+            .world_mut()
+            .resource_mut::<WearEditState>()
+            .active
+            .as_mut()
+        {
+            edit.saving = Some(ours);
+        }
+        app.world_mut()
+            .write_message(SlEvent(SlSessionEvent::InventoryAssetSaved {
+                transaction_id: Some(ours),
+                asset_id: Uuid::from_u128(0xC0),
+                success: false,
+            }));
+        app.update();
+        assert_eq!(status_of(&app, status), "Save failed.");
+        let state = app.world().resource::<WearEditState>();
+        let edit = state.active.as_ref().ok_or("the edit went away")?;
+        assert!(edit.dirty, "a refused save must not clear the unsaved work");
+        Ok(())
+    }
+
+    /// **Save As** reports the copy when the grid has actually made one — and
+    /// says so when it has not.
+    ///
+    /// The editor used to announce "Saved a copy to inventory." the instant the
+    /// bytes were queued, which is a claim about something that had not happened
+    /// yet; a refused upload left that claim standing.
+    #[test]
+    fn save_as_reports_the_copy_it_actually_got() -> Result<(), TestError> {
+        let (mut app, status) = editor_app();
+        // The ticket comes out of the real queue, the way the button takes one.
+        let ticket = app
+            .world_mut()
+            .resource_mut::<PendingItemCreations>()
+            .enqueue(
+                u32::from(WearableType::Shirt.to_code()),
+                InventoryFolderKey::from(Uuid::from_u128(0x22)),
+            );
+        let other = app
+            .world_mut()
+            .resource_mut::<PendingItemCreations>()
+            .enqueue(
+                u32::from(WearableType::Pants.to_code()),
+                InventoryFolderKey::from(Uuid::from_u128(0x99)),
+            );
+        if let Some(edit) = app
+            .world_mut()
+            .resource_mut::<WearEditState>()
+            .active
+            .as_mut()
+        {
+            edit.creation = Some(ticket);
+        }
+
+        // Somebody else's creation on the shared queue is not this Save As.
+        app.world_mut()
+            .write_message(crate::world_api::ItemCreationFinished {
+                ticket: other,
+                item: Some(InventoryKey::from(Uuid::from_u128(0xEE))),
+            });
+        app.update();
+        assert_eq!(
+            status_of(&app, status),
+            "",
+            "another creation was reported as this editor's copy"
+        );
+
+        app.world_mut()
+            .write_message(crate::world_api::ItemCreationFinished {
+                ticket,
+                item: Some(InventoryKey::from(Uuid::from_u128(0xFF))),
+            });
+        app.update();
+        assert_eq!(status_of(&app, status), "Saved a copy to inventory.");
+        Ok(())
+    }
+
+    /// A Save As the grid refuses says so, instead of leaving a success on
+    /// screen.
+    #[test]
+    fn a_refused_save_as_says_so() -> Result<(), TestError> {
+        let (mut app, status) = editor_app();
+        let ticket = app
+            .world_mut()
+            .resource_mut::<PendingItemCreations>()
+            .enqueue(
+                u32::from(WearableType::Shirt.to_code()),
+                InventoryFolderKey::from(Uuid::from_u128(0x22)),
+            );
+        if let Some(edit) = app
+            .world_mut()
+            .resource_mut::<WearEditState>()
+            .active
+            .as_mut()
+        {
+            edit.creation = Some(ticket);
+        }
+        app.world_mut()
+            .write_message(crate::world_api::ItemCreationFinished { ticket, item: None });
+        app.update();
+        assert_eq!(status_of(&app, status), "Saving a copy failed.");
+        Ok(())
     }
 }

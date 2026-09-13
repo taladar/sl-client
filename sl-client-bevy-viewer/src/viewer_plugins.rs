@@ -908,6 +908,10 @@ impl Plugin for ViewerEditPlugins {
         // (viewer-prim-inventory-editing): the prim task-inventory list, its
         // per-object cache, and the add / remove / rename / copy-out actions.
         app.add_plugins(crate::edit_contents::EditContentsPlugin);
+        // The scaffold the asset editors share: the chrome their windows are
+        // made of, and the guard that asks before a close throws unsaved work
+        // away (viewer-audit-asset-editor-scaffold).
+        app.add_plugins(crate::asset_editor::AssetEditorScaffoldPlugin);
         // The notecard viewer & editor floater (viewer-notecard-editor): open a
         // notecard from inventory, read it, edit its text when the item is
         // modifiable, and save it back to agent inventory. Embedded items are

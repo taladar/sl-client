@@ -135,6 +135,7 @@ pub(crate) use sl_viewer_preferences::debug_settings;
 pub(crate) use sl_viewer_world_avatar::derender;
 pub(crate) use sl_viewer_world_scene::diagnostics;
 mod double_click_teleport;
+pub(crate) use sl_viewer_asset_editors::asset_editor;
 pub(crate) use sl_viewer_asset_editors::edit_notecard;
 pub(crate) use sl_viewer_asset_editors::edit_script;
 pub(crate) use sl_viewer_asset_editors::edit_wearable;

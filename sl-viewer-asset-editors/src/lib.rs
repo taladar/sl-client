@@ -41,6 +41,7 @@ pub(crate) use sl_viewer_world_avatar::avatars;
 pub(crate) use sl_viewer_world_avatar::bake_inputs;
 pub(crate) use sl_viewer_world_objects::textures;
 
+pub mod asset_editor;
 pub mod edit_notecard;
 pub mod edit_script;
 pub mod edit_wearable;

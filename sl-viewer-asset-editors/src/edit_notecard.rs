@@ -71,6 +71,11 @@ use sl_client_bevy::{
     SlCommand, SlEvent, SlSessionEvent, UpdatableAssetType, Uuid,
 };
 
+use crate::asset_editor::{
+    CONTROL_BACKGROUND, CONTROL_BORDER, DIM_COLOR, ERROR_COLOR, EditedText, FONT_SIZE, LABEL_COLOR,
+    SaveEditorWindow, UnsavedWork, set_status, spawn_body_field, spawn_note, spawn_save_button,
+    spawn_status, tear_down,
+};
 use crate::floater::{
     Floater, FloaterCaps, FloaterHandle, FloaterKey, FloaterSpec, FloaterSystems, KeyedFloaterOpen,
     KeyedFloaters, host_floater,
@@ -82,18 +87,6 @@ use crate::ui::{column, row};
 use crate::ui_element::{ElementCx, TextMayClip};
 use crate::ui_font::UiFont;
 use crate::world_api::{NotecardDropTarget, NotecardSource, OpenNotecard};
-
-/// The editor's text font size, in logical pixels.
-const FONT_SIZE: f32 = 14.0;
-
-/// A general-purpose light label colour.
-const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
-
-/// A dimmer colour for secondary text (the read-only note, the status line).
-const DIM_COLOR: Color = Color::srgb(0.62, 0.66, 0.74);
-
-/// A red-tinted colour for a failed-save status.
-const ERROR_COLOR: Color = Color::srgb(0.92, 0.55, 0.50);
 
 /// The body field's height, in visible text lines. The window is sized by this
 /// (it is content-driven), not the other way round — a field's height is its
@@ -143,6 +136,7 @@ impl Plugin for EditNotecardPlugin {
                     (
                         ingest_notecard_asset,
                         ingest_added_items,
+                        save_notecard,
                         // After the drop that appends an item's marker, so a
                         // shown preview picks it up in the same frame.
                         refresh_notecard_preview,
@@ -171,12 +165,24 @@ struct NotecardEditorState {
     baseline: Option<sl_notecard::Notecard>,
     /// The asset id awaited (`FetchAsset` sent), matched on `AssetReceived`.
     pending_load: Option<Uuid>,
-    /// The item id of an in-flight save, matched on the upload result.
-    pending_save: Option<Uuid>,
+    /// The save in flight, matched on the upload result; `None` when none is.
+    pending_save: Option<NotecardSaveInFlight>,
     /// The editable body field, when the notecard is modifiable.
     body_field: Option<Entity>,
     /// The status text node (loading / saving / result), when present.
     status: Option<Entity>,
+}
+
+/// One notecard save on the wire: which item it wrote, and the text it wrote.
+///
+/// The text is what makes the unsaved-work mark honest — see
+/// [`save_notecard`].
+#[derive(Debug, Clone)]
+struct NotecardSaveInFlight {
+    /// The inventory item the save named, matched against the reply's.
+    item: Uuid,
+    /// The text that went out, which becomes the new baseline when it lands.
+    text: String,
 }
 
 /// The notecard editor floater's [`FloaterSpec`] — shared with the `FLOATERS`
@@ -270,16 +276,19 @@ fn build_notecard_window(commands: &mut Commands, handle: FloaterHandle, open: &
         "notecard-status-loading",
         DIM_COLOR,
     );
-    commands.entity(handle.root).insert(NotecardEditorState {
-        content: handle.content,
-        source: open.source,
-        editable: open.editable,
-        baseline: None,
-        pending_load: Some(open.asset_id),
-        pending_save: None,
-        body_field: None,
-        status: Some(status),
-    });
+    commands.entity(handle.root).insert((
+        UnsavedWork::default(),
+        NotecardEditorState {
+            content: handle.content,
+            source: open.source,
+            editable: open.editable,
+            baseline: None,
+            pending_load: Some(open.asset_id),
+            pending_save: None,
+            body_field: None,
+            status: Some(status),
+        },
+    ));
 }
 
 // ---------------------------------------------------------------------------
@@ -290,7 +299,7 @@ fn build_notecard_window(commands: &mut Commands, handle: FloaterHandle, open: &
 /// then build the read-only or editable body and the embedded-item list.
 fn ingest_notecard_asset(
     mut events: MessageReader<SlEvent>,
-    mut windows: Query<&mut NotecardEditorState>,
+    mut windows: Query<(Entity, &mut NotecardEditorState)>,
     children: Query<&Children>,
     mut commands: Commands,
 ) {
@@ -300,7 +309,7 @@ fn ingest_notecard_asset(
     if frame.is_empty() {
         return;
     }
-    for mut state in &mut windows {
+    for (window, mut state) in &mut windows {
         for event in &frame {
             let SlSessionEvent::AssetReceived(asset) = &event.0 else {
                 continue;
@@ -337,11 +346,19 @@ fn ingest_notecard_asset(
                 &notecard,
                 editable,
                 source,
-                editable.then_some(source),
                 FONT_SIZE,
             );
             state.body_field = built.body_field;
             state.status = built.status;
+            // The text as it arrived is the baseline the unsaved-work guard
+            // measures against; a read-only window has no buffer to lose and so
+            // never gets one.
+            if let Some(field) = built.body_field {
+                commands.entity(window).insert(EditedText {
+                    field,
+                    saved: notecard.text.clone(),
+                });
+            }
             state.baseline = Some(notecard);
         }
     }
@@ -388,21 +405,21 @@ struct BuiltEditor {
 /// drawn inline and clickable, its prose linkified. An editable notecard shows
 /// the plain text field by default, with a **toggle to that same read-only
 /// preview** so its embedded items stay reachable until the inline-box editor
-/// widget lands, plus a Save button wired to `save_target` and a status line.
-/// The preview is *seeded* from `notecard` here and follows the edit buffer from
-/// then on ([`refresh_notecard_preview`]).
+/// widget lands, plus a Save button and a status line. The preview is *seeded*
+/// from `notecard` here and follows the edit buffer from then on
+/// ([`refresh_notecard_preview`]).
 ///
-/// `source` locates the notecard (so a copied embedded item names the right
-/// notecard / holding prim); `save_target` is where to write edits back, or
-/// `None` for a specimen with no live notecard (the Save button is shown for
-/// layout but does nothing).
+/// `source` locates the notecard, so a copied embedded item names the right
+/// notecard / holding prim. Where a save goes is not a parameter: the Save
+/// button names the **window** it sits in and [`save_notecard`] reads that
+/// window's own source, so a specimen — which sits in no window — shows the
+/// button for layout and saves nothing.
 fn populate_editor(
     commands: &mut Commands,
     content: Entity,
     notecard: &sl_notecard::Notecard,
     editable: bool,
     source: NotecardSource,
-    save_target: Option<NotecardSource>,
     font_size: f32,
 ) -> BuiltEditor {
     let style = LinkTextStyle::at(font_size);
@@ -421,7 +438,14 @@ fn populate_editor(
     // private-use marker in the buffer so a round-trip never corrupts an item;
     // the preview is where those items become legible and clickable meanwhile.
     let (toggle_button, toggle_label) = spawn_view_toggle(commands, content, font_size);
-    let body_field = spawn_body_field(commands, content, &notecard.text, font_size);
+    let body_field = spawn_body_field(
+        commands,
+        content,
+        &notecard.text,
+        "notecard-body",
+        BODY_VISIBLE_LINES,
+        font_size,
+    );
     let reader = spawn_reader_block(commands, content, notecard, source, style, false);
     commands.entity(toggle_button).insert(NotecardViewToggle {
         edit_field: body_field,
@@ -442,7 +466,7 @@ fn populate_editor(
             ChildOf(content),
         ))
         .id();
-    let save = spawn_save_button(commands, bar, font_size);
+    let _save = spawn_save_button(commands, bar, "notecard-save", "notecard-save", font_size);
     // The status node sits after the Save button, empty until a save runs.
     let status = commands
         .spawn((
@@ -452,10 +476,6 @@ fn populate_editor(
             ChildOf(bar),
         ))
         .id();
-    if let Some(target) = save_target {
-        attach_save(commands, save, target, body_field, status);
-    }
-
     BuiltEditor {
         body_field: Some(body_field),
         status: Some(status),
@@ -498,8 +518,8 @@ fn spawn_view_toggle(commands: &mut Commands, parent: Entity, font_size: f32) ->
                 align_self: AlignSelf::FlexStart,
                 ..default()
             },
-            BorderColor::all(Color::srgb(0.32, 0.36, 0.44)),
-            BackgroundColor(Color::srgb(0.13, 0.15, 0.20)),
+            BorderColor::all(CONTROL_BORDER),
+            BackgroundColor(CONTROL_BACKGROUND),
             Pickable::default(),
             Name::new("notecard-view-toggle"),
             ChildOf(parent),
@@ -694,56 +714,57 @@ fn on_reader_scroll(mut event: On<Pointer<Scroll>>, mut positions: Query<&mut Sc
     event.propagate(false);
 }
 
-/// Wire a Save button to reconcile the edited text against the baseline and
-/// write it back over the source's `Update*Inventory` capability (agent or
-/// task, per [`NotecardSource`]).
-fn attach_save(
-    commands: &mut Commands,
-    button: Entity,
-    source: NotecardSource,
-    body_field: Entity,
-    status: Entity,
+/// Reconcile one window's edited text against its baseline and write it back
+/// over the source's `Update*Inventory` capability (agent or task, per
+/// [`NotecardSource`]).
+///
+/// The Save button's press and the "Save" answer to the unsaved-work
+/// confirmation both arrive here as a [`SaveEditorWindow`], so the two cannot
+/// come to save different things.
+fn save_notecard(
+    mut requests: MessageReader<SaveEditorWindow>,
+    mut windows: Query<&mut NotecardEditorState>,
+    fields: Query<&EditableText>,
+    mut sl_commands: MessageWriter<SlCommand>,
+    mut commands: Commands,
 ) {
-    commands.entity(button).observe(
-        move |press: On<Pointer<Press>>,
-              fields: Query<&EditableText>,
-              parents: Query<&ChildOf>,
-              floaters: Query<(Entity, &Floater)>,
-              mut windows: Query<&mut NotecardEditorState>,
-              mut sl_commands: MessageWriter<SlCommand>,
-              mut commands: Commands| {
-            if press.button != PointerButton::Primary {
-                return;
-            }
-            // Save *this* window's notecard: the button is inside it, so the
-            // window is the floater the press sits under.
-            let Some(window) = host_floater(press.entity, &parents, &floaters) else {
-                return;
+    for request in requests.read() {
+        let Ok(mut state) = windows.get_mut(request.window) else {
+            continue;
+        };
+        let (Some(field_entity), true) = (state.body_field, state.editable) else {
+            continue;
+        };
+        let Ok(field) = fields.get(field_entity) else {
+            continue;
+        };
+        // Borrow the baseline just long enough to reconcile, then release it
+        // before mutating the state below.
+        let edited = field.value().to_string();
+        let data = {
+            let Some(baseline) = state.baseline.as_ref() else {
+                continue;
             };
-            let Ok(mut state) = windows.get_mut(window) else {
-                return;
-            };
-            let Ok(field) = fields.get(body_field) else {
-                return;
-            };
-            // Borrow the baseline just long enough to reconcile, then release it
-            // before mutating the state below.
-            let edited = field.value().to_string();
-            let data = {
-                let Some(baseline) = state.baseline.as_ref() else {
-                    return;
-                };
-                baseline.with_edited_text(&edited).encode()
-            };
-            sl_commands.write(SlCommand(Command::UpdateInventoryAsset {
-                location: source.location(),
-                asset_type: UpdatableAssetType::Notecard,
-                data,
-            }));
-            state.pending_save = Some(source.item_id().uuid());
+            baseline.with_edited_text(&edited).encode()
+        };
+        let source = state.source;
+        sl_commands.write(SlCommand(Command::UpdateInventoryAsset {
+            location: source.location(),
+            asset_type: UpdatableAssetType::Notecard,
+            data,
+        }));
+        state.pending_save = Some(NotecardSaveInFlight {
+            item: source.item_id().uuid(),
+            // Held rather than re-read from the field when the reply lands: a
+            // resident who keeps typing while the save is in flight has not
+            // saved *that* text, and clearing the unsaved-work mark against the
+            // buffer as it then stands would claim they had.
+            text: edited,
+        });
+        if let Some(status) = state.status {
             set_status(&mut commands, status, "notecard-status-saving", DIM_COLOR);
-        },
-    );
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -755,7 +776,7 @@ fn attach_save(
 /// is pending is treated as its result.
 fn report_notecard_save(
     mut events: MessageReader<SlEvent>,
-    mut windows: Query<&mut NotecardEditorState>,
+    mut windows: Query<(&mut NotecardEditorState, Option<&mut EditedText>)>,
     mut inventory: Option<ResMut<crate::inventory::InventoryModel>>,
     mut commands: Commands,
 ) {
@@ -763,9 +784,9 @@ fn report_notecard_save(
     if frame.is_empty() {
         return;
     }
-    for mut state in &mut windows {
+    for (mut state, mut edited) in &mut windows {
         for event in &frame {
-            let Some(pending) = state.pending_save else {
+            let Some(pending) = state.pending_save.clone() else {
                 continue;
             };
             match &event.0 {
@@ -780,10 +801,16 @@ fn report_notecard_save(
                     // so a mismatching upload (a baked texture, another floater's
                     // asset) is not ours. A `None` item id is accepted as ours
                     // rather than leaving the status stuck on "saving".
-                    if matches!(new_inventory_item, Some(id) if *id != pending) {
+                    if matches!(new_inventory_item, Some(id) if *id != pending.item) {
                         continue;
                     }
                     state.pending_save = None;
+                    // What went out is now what is stored, so it is the new
+                    // baseline the unsaved-work guard measures against — and a
+                    // window whose close was waiting on this save can close.
+                    if let Some(edited) = edited.as_mut() {
+                        edited.saved = pending.text;
+                    }
                     // The save wrote a **new** asset and the grid rebound the
                     // item to it. Point the inventory model at it too, or the
                     // next open of this notecard fetches the asset it had
@@ -803,6 +830,9 @@ fn report_notecard_save(
                 }
                 SlSessionEvent::AssetUploadFailed { reason } => {
                     warn!("notecard save failed: {reason}");
+                    // Nothing was stored, so the baseline stands and the work is
+                    // still unsaved: a window that was closing on this save
+                    // stays up with the failure on screen.
                     state.pending_save = None;
                     if let Some(status) = state.status {
                         set_status(
@@ -994,96 +1024,6 @@ const fn notecard_sale_type(sale_type: SaleType) -> sl_notecard::SaleType {
 // Content builders.
 // ---------------------------------------------------------------------------
 
-/// Despawn every child of `parent`.
-fn tear_down(commands: &mut Commands, children: &Query<&Children>, parent: Entity) {
-    if let Ok(existing) = children.get(parent) {
-        for child in existing.iter().collect::<Vec<_>>() {
-            commands.entity(child).despawn();
-        }
-    }
-}
-
-/// Spawn a fresh status line under `parent`, driven by a Fluent key.
-fn spawn_status(
-    commands: &mut Commands,
-    parent: Entity,
-    key: &'static str,
-    color: Color,
-) -> Entity {
-    commands
-        .spawn((
-            Text::default(),
-            crate::i18n::Translated::new(key),
-            UiFont::Sans.at(FONT_SIZE),
-            TextColor(color),
-            ChildOf(parent),
-        ))
-        .id()
-}
-
-/// Repoint an existing status node at a new Fluent key and colour.
-fn set_status(commands: &mut Commands, status: Entity, key: &'static str, color: Color) {
-    commands
-        .entity(status)
-        .insert((crate::i18n::Translated::new(key), TextColor(color)));
-}
-
-/// Spawn the read-only note shown above a no-modify notecard's text.
-fn spawn_note(commands: &mut Commands, parent: Entity, key: &'static str, font_size: f32) {
-    commands.spawn((
-        Text::default(),
-        crate::i18n::Translated::new(key),
-        UiFont::Sans.at(font_size),
-        TextColor(DIM_COLOR),
-        ChildOf(parent),
-    ));
-}
-
-/// Spawn the editable multi-line body field, returning its entity.
-fn spawn_body_field(commands: &mut Commands, parent: Entity, text: &str, font_size: f32) -> Entity {
-    crate::ui_text_input::spawn_text_input(
-        commands,
-        parent,
-        &crate::ui_text_input::TextInputSpec {
-            initial: text.to_owned(),
-            font_size,
-            visible_lines: BODY_VISIBLE_LINES,
-            tab_index: 1,
-            ..crate::ui_text_input::TextInputSpec::new(
-                "notecard-body",
-                crate::ui_text_input::TextInputKind::Multiline,
-            )
-        },
-    )
-}
-
-/// Spawn the Save button, returning its entity for the caller to wire.
-fn spawn_save_button(commands: &mut Commands, parent: Entity, font_size: f32) -> Entity {
-    commands
-        .spawn((
-            Button,
-            bevy::input_focus::tab_navigation::TabIndex(2),
-            Node {
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(Color::srgb(0.32, 0.36, 0.44)),
-            BackgroundColor(Color::srgb(0.13, 0.15, 0.20)),
-            Pickable::default(),
-            Name::new("notecard-save"),
-            ChildOf(parent),
-        ))
-        .with_child((
-            Text::default(),
-            crate::i18n::Translated::new("notecard-save"),
-            UiFont::Sans.at(font_size),
-            TextColor(LABEL_COLOR),
-            Pickable::IGNORE,
-        ))
-        .id()
-}
-
 /// The emoji glyph for an embedded item, keyed on its asset class — matching
 /// [`crate::inventory::item_icon`]'s vocabulary, but over [`sl_notecard`]'s own
 /// asset-type enum. Shared with the rich reader ([`crate::notecard_render`]).
@@ -1136,7 +1076,7 @@ pub fn spawn_notecard_editor_specimen(
     let source = NotecardSource::Agent {
         item_id: InventoryKey::from(Uuid::nil()),
     };
-    populate_editor(commands, col, &notecard, true, source, None, cx.font_size);
+    populate_editor(commands, col, &notecard, true, source, cx.font_size);
     col
 }
 
@@ -1192,7 +1132,7 @@ pub fn spawn_notecard_reader_specimen(
     let source = NotecardSource::Agent {
         item_id: InventoryKey::from(Uuid::nil()),
     };
-    populate_editor(commands, col, &notecard, false, source, None, cx.font_size);
+    populate_editor(commands, col, &notecard, false, source, cx.font_size);
     col
 }
 

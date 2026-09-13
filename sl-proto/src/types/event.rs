@@ -1688,8 +1688,20 @@ pub enum Event {
     /// An oversized save whose bytes the simulator never pulled also lands here
     /// with `success == false`, once its upload offer expires
     /// ([`XFER_OFFER_TIMEOUT`](crate::XFER_OFFER_TIMEOUT)) — the save has no
-    /// other completion path, so without it the caller would wait forever.
+    /// other completion path, so without it the caller would wait forever. So
+    /// does a save the simulator simply never answers, after
+    /// [`INVENTORY_SAVE_TIMEOUT`](crate::INVENTORY_SAVE_TIMEOUT).
     InventoryAssetSaved {
+        /// The [`TransactionId`] the save was started with
+        /// ([`Session::save_inventory_asset`](crate::Session::save_inventory_asset)),
+        /// or `None` for a completion the session has no record of asking for.
+        ///
+        /// This is the correlation token, and the only one there is: the wire
+        /// completion names the stored asset, not the item, so an editor with a
+        /// save in flight tells its own result from another save's by the
+        /// transaction it minted — without it, whichever save completes first
+        /// is reported to whoever is waiting.
+        transaction_id: Option<TransactionId>,
         /// The stored asset's UUID (`combine(transaction_id, secure_session_id)`).
         asset_id: Uuid,
         /// Whether the simulator accepted and stored the asset.

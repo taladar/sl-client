@@ -2073,11 +2073,16 @@ pub struct OpenNotecard {
 pub struct PendingItemCreations {
     /// The in-flight creations, oldest first.
     queue: VecDeque<PendingItemCreation>,
+    /// The next ticket to hand out.
+    next_ticket: u64,
 }
 
 /// One in-flight item-minting upload.
 #[derive(Debug, Clone, Copy)]
 pub struct PendingItemCreation {
+    /// This creation's ticket, echoed on the [`ItemCreationFinished`] that
+    /// answers it.
+    pub ticket: ItemCreationTicket,
     /// The `flags` byte to stamp on the fresh item — a wearable's slot code, a
     /// settings kind's subtype.
     pub flags: u32,
@@ -2085,11 +2090,47 @@ pub struct PendingItemCreation {
     pub folder: InventoryFolderKey,
 }
 
+/// A claim on one queued creation, handed out by
+/// [`PendingItemCreations::enqueue`] and echoed back on the
+/// [`ItemCreationFinished`] that answers it.
+///
+/// The upload reply carries no correlation id of its own, and the queue is
+/// shared: the inventory's New Clothes creator and the appearance editor's Save
+/// As both put wearable creations through it. A ticket is what lets a producer
+/// say "that one was mine" without either guessing from the flags (two
+/// creations of one slot are indistinguishable) or counting replies (which is
+/// only true while nobody else is uploading).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ItemCreationTicket(u64);
+
+/// What became of one queued creation, published by the single consumer of
+/// [`PendingItemCreations`] so whoever started it can say so.
+///
+/// Without this an upload that mints an item has no outcome at all on the
+/// surface that asked for it: the appearance editor's Save As used to announce
+/// "Saved a copy to inventory." the instant the bytes were queued, which is a
+/// claim about something that had not happened yet and might not.
+#[derive(Message, Debug, Clone, Copy)]
+pub struct ItemCreationFinished {
+    /// The creation this answers.
+    pub ticket: ItemCreationTicket,
+    /// The fresh item, or `None` when the upload failed.
+    pub item: Option<InventoryKey>,
+}
+
 impl PendingItemCreations {
     /// Enqueue a creation so the fresh item's flags are stamped and its folder
-    /// refreshed when the upload reply lands.
-    pub fn enqueue(&mut self, flags: u32, folder: InventoryFolderKey) {
-        self.queue.push_back(PendingItemCreation { flags, folder });
+    /// refreshed when the upload reply lands, returning the ticket its
+    /// [`ItemCreationFinished`] will carry.
+    pub fn enqueue(&mut self, flags: u32, folder: InventoryFolderKey) -> ItemCreationTicket {
+        let ticket = ItemCreationTicket(self.next_ticket);
+        self.next_ticket = self.next_ticket.saturating_add(1);
+        self.queue.push_back(PendingItemCreation {
+            ticket,
+            flags,
+            folder,
+        });
+        ticket
     }
 
     /// Take the oldest in-flight creation — the reply that just landed is its

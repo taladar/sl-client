@@ -53,7 +53,10 @@ mod test {
         ChatLifecycleView, ChatSessionKind, ImSessionId, InviteChannel, Reliability,
         chatterbox_invitation_to_llsd,
     };
-    use sl_proto::{STANDARD_REGION_SIZE_METRES, TELEPORT_FINISH_LOCATION_ID, TeleportFinishInfo};
+    use sl_proto::{
+        INVENTORY_SAVE_TIMEOUT, STANDARD_REGION_SIZE_METRES, TELEPORT_FINISH_LOCATION_ID,
+        TeleportFinishInfo,
+    };
     use sl_wire::messages::{
         AbortXfer, AbortXferXferIDBlock, CompleteAgentMovement,
         CompleteAgentMovementAgentDataBlock, CompletePingCheck, CompletePingCheckPingIDBlock,
@@ -5712,9 +5715,13 @@ mod test {
         assert!(
             client_events.iter().any(|e| matches!(
                 e,
-                Event::InventoryAssetSaved { asset_id, success: true } if *asset_id == expected_asset
+                Event::InventoryAssetSaved {
+                    transaction_id,
+                    asset_id,
+                    success: true
+                } if *asset_id == expected_asset && *transaction_id == Some(txn)
             )),
-            "expected InventoryAssetSaved, got {client_events:?}"
+            "expected InventoryAssetSaved naming the transaction, got {client_events:?}"
         );
         Ok(())
     }
@@ -5799,9 +5806,62 @@ mod test {
         assert!(
             client_events.iter().any(|e| matches!(
                 e,
-                Event::InventoryAssetSaved { asset_id, success: true } if *asset_id == expected_asset
+                Event::InventoryAssetSaved {
+                    transaction_id,
+                    asset_id,
+                    success: true
+                } if *asset_id == expected_asset && *transaction_id == Some(txn)
             )),
-            "expected InventoryAssetSaved, got {client_events:?}"
+            "expected InventoryAssetSaved naming the transaction, got {client_events:?}"
+        );
+        Ok(())
+    }
+
+    /// A save the simulator **never answers** is given up on rather than left
+    /// pending for ever.
+    ///
+    /// An inlined payload (the common case) registers no `Xfer` offer, so there
+    /// is no offer expiry to fall back on: without its own deadline the save has
+    /// no completion path at all, and the editor waiting on one sits on
+    /// "Saving…" for the rest of the session. The failure names the transaction,
+    /// so it reaches the caller that started it and nobody else.
+    #[test]
+    fn an_unanswered_save_is_given_up_on() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, _sim) = setup(now)?;
+        let txn = TransactionId::new(uuid::Uuid::from_u128(0xFEED));
+        client.save_inventory_asset(
+            &wearable_item(),
+            AssetType::Clothing,
+            vec![1_u8; 8],
+            txn,
+            now,
+        )?;
+        // Deliberately not pumped: the simulator is not listening.
+        let _startup = drain_client(&mut client);
+
+        client.handle_timeout(now + INVENTORY_SAVE_TIMEOUT);
+        let events = drain_client(&mut client);
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                Event::InventoryAssetSaved {
+                    transaction_id,
+                    success: false,
+                    ..
+                } if *transaction_id == Some(txn)
+            )),
+            "the save was never given up on, got {events:?}"
+        );
+
+        // And only once: the registration is gone with it.
+        client.handle_timeout(now + INVENTORY_SAVE_TIMEOUT + INVENTORY_SAVE_TIMEOUT);
+        let again = drain_client(&mut client);
+        assert!(
+            !again
+                .iter()
+                .any(|event| matches!(event, Event::InventoryAssetSaved { .. })),
+            "the same save was given up on twice, got {again:?}"
         );
         Ok(())
     }
