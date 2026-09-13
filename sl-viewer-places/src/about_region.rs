@@ -66,7 +66,8 @@
 //! Replies update values *in place*: value labels via `set_value_node`,
 //! checkbox glyphs via `set_check_visual`, the maturity combo by writing its
 //! [`ComboSelection`](crate::ui_combo), edit fields by seeding
-//! `EditableText::editor_mut().set_text` on a fresh region, and the four estate
+//! `EditableText::editor_mut().set_text` (through the crate's `edit_fields`,
+//! which keeps an unapplied edit out of that write), and the four estate
 //! access lists (managers, allowed residents, allowed groups, banned residents)
 //! through the **table widget** ([`crate::ui_table`]) — a bounded, scrolling
 //! viewport that pools and binds its rows, never despawning them. Churn is the
@@ -76,8 +77,10 @@
 //! # Editing and disabled controls
 //!
 //! The editable region settings mutate a single [`RegionInfoUpdate`] draft,
-//! seeded from the live region each time its data changes; the **Apply** button
-//! commits it with [`Command::SetRegionInfo`]. The estate access **Add** /
+//! seeded from the live region when the window opens and **merged** with every
+//! record that arrives after — an unapplied edit is the manager's and is kept,
+//! everything else is the grid's to state (`refresh_on_region`); the **Apply**
+//! button commits it with [`Command::SetRegionInfo`]. The estate access **Add** /
 //! **Remove** buttons mutate a list with [`Command::UpdateEstateAccess`], and the
 //! Debug tab's restart controls send [`Command::RestartRegion`]. When the agent
 //! is not an estate manager every editable control carries
@@ -115,6 +118,7 @@ use sl_client_bevy::{
 };
 use sl_viewer_notices::experience_profile::{OpenExperienceProfile, maturity_key};
 
+use crate::edit_fields::{FieldSeed, seed_one_field, set_combo};
 use crate::floater::{
     Floater, FloaterCaps, FloaterHandle, FloaterKey, FloaterSpec, FloaterSystems, KeyedFloaterOpen,
     KeyedFloaters, host_floater,
@@ -382,9 +386,22 @@ struct AboutRegionState {
     terrain_draft: RegionTerrainUpdate,
     /// The editable estate-flags draft (access / limit / voice / teleport bits).
     estate_draft: EstateFlags,
-    /// Whether the region drafts have been seeded from region data since the
-    /// last change; a fresh region (or a `RegionInfo` reply) reseeds them.
-    draft_seeded: bool,
+    /// The three records the drafts were last seeded or merged from — the
+    /// **base** of their three-way merge, and `None` until the first region
+    /// record arrives (which is also what "the drafts are not seeded yet"
+    /// means).
+    ///
+    /// A draft field that still equals its base is one this manager has not
+    /// edited, so an arriving record owns it; a field that has moved away is a
+    /// pending edit and is kept. See [`RegionInfoUpdate::merge_unedited`].
+    seeded: Option<RegionBases>,
+    /// What the region and terrain text fields were last written with, or `None`
+    /// before the first write.
+    ///
+    /// The text fields are not mirrored into the drafts until **Apply** reads
+    /// them, so the merge cannot see typing in flight and this is what does —
+    /// the same shape About Land uses. See [`FieldSeed`].
+    shown_fields: Option<RegionFieldText>,
     /// Whether the estate-flags draft has been seeded from the estate reply.
     estate_seeded: bool,
     /// The estate configuration (name / owner / abuse email), from `getinfo`.
@@ -434,7 +451,106 @@ struct AboutRegionState {
     default_experience: Option<ExperienceKey>,
 }
 
+/// The three records the region drafts are merged against, read from the live
+/// region together — [`seed_draft`], [`seed_debug_draft`] and
+/// [`seed_terrain_draft`] all answer the same `RegionHandshake` plus `RegionInfo`
+/// pair, so they arrive and advance as one.
+#[derive(Debug, Clone, PartialEq)]
+struct RegionBases {
+    /// The Region tab's nine fields.
+    info: RegionInfoUpdate,
+    /// The Debug tab's three toggles.
+    debug: RegionDebugUpdate,
+    /// The Terrain tab's nine fields.
+    terrain: RegionTerrainUpdate,
+}
+
+impl RegionBases {
+    /// Read all three from the live region identity and limits.
+    fn read(identity: &SlRegionIdentity, limits: Option<&SlRegionLimits>) -> Self {
+        Self {
+            info: seed_draft(identity, limits),
+            debug: seed_debug_draft(identity, limits),
+            terrain: seed_terrain_draft(identity, limits),
+        }
+    }
+}
+
+/// The Region / Estate form's thirteen editable text values, rendered.
+///
+/// Both what a seeding pass is about to write and what the previous pass wrote,
+/// so the two can be compared field by field — see
+/// [`AboutRegionState::shown_fields`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct RegionFieldText {
+    /// The maximum concurrent agents.
+    agent_limit: String,
+    /// The object-bonus multiplier.
+    object_bonus: String,
+    /// The water height, in metres.
+    water_height: String,
+    /// The terrain raise limit, in metres.
+    raise_limit: String,
+    /// The terrain lower limit, in metres.
+    lower_limit: String,
+    /// The four per-corner blend-start heights, in slot order.
+    start_heights: [String; 4],
+    /// The four per-corner blend ranges, in slot order.
+    height_ranges: [String; 4],
+}
+
+impl RegionFieldText {
+    /// Render the region and terrain drafts' editable text values.
+    fn from_drafts(info: &RegionInfoUpdate, terrain: &RegionTerrainUpdate) -> Self {
+        Self {
+            agent_limit: info.agent_limit.to_string(),
+            object_bonus: format!("{:.2}", info.object_bonus),
+            water_height: format!("{:.2}", terrain.water_height),
+            raise_limit: format!("{:.2}", terrain.terrain_raise_limit),
+            lower_limit: format!("{:.2}", terrain.terrain_lower_limit),
+            start_heights: terrain.start_heights.map(|start| format!("{start:.2}")),
+            height_ranges: terrain.height_ranges.map(|range| format!("{range:.2}")),
+        }
+    }
+}
+
 impl AboutRegionState {
+    /// Fold a freshly read region record into the three drafts, keeping this
+    /// manager's pending edits and taking the grid's word for everything else,
+    /// and report whether any draft field moved.
+    ///
+    /// The first record has no base to merge against, so it simply seeds — and
+    /// that is also what a fresh open resets to, by clearing
+    /// [`seeded`](Self::seeded).
+    ///
+    /// Every region record comes through here, not only the `RegionInfo` a
+    /// simulator pushes to the whole region when another estate manager saves.
+    /// Three things arrive on this path and the merge is the right answer to all
+    /// of them: a foreign push (carry their change), the read-back this floater
+    /// asks for after its own **Apply** (agrees with the drafts, so nothing
+    /// moves), and an ordinary refresh. Telling them apart is not possible — the
+    /// pushed `RegionInfo` and the requested one are the same message.
+    fn merge_region(&mut self, fresh: RegionBases) -> bool {
+        let moved = match self.seeded.as_ref() {
+            Some(base) => {
+                let info = self.draft.merge_unedited(&base.info, &fresh.info);
+                let debug = self.debug_draft.merge_unedited(&base.debug, &fresh.debug);
+                let terrain = self
+                    .terrain_draft
+                    .merge_unedited(&base.terrain, &fresh.terrain);
+                info || debug || terrain
+            }
+            None => {
+                self.draft = fresh.info.clone();
+                self.debug_draft = fresh.debug;
+                self.terrain_draft = fresh.terrain.clone();
+                true
+            }
+        };
+        self.seeded = Some(fresh);
+        moved
+    }
+
     /// Clear the estate access lists (on a fresh `getinfo`), bumping revisions so
     /// the views rebind to the empty lists before the reply chunks arrive.
     fn clear_access(&mut self) {
@@ -573,20 +689,25 @@ struct AboutRegionDirty {
     covenant_values: bool,
     /// The checkbox glyphs / control-enable states need refreshing.
     controls: bool,
-    /// The edit fields / maturity combo need reseeding from the draft.
-    seed_fields: bool,
+    /// How much of the edit fields' text (and the maturity combo / swatches) the
+    /// next seeding pass may rewrite from the drafts.
+    seed_fields: FieldSeed,
 }
 
 impl AboutRegionDirty {
-    /// Mark every panel dirty (a fresh open / a region change).
-    const fn mark_all(&mut self) {
+    /// Mark every panel dirty, seeding the text fields as `seed` says.
+    ///
+    /// [`FieldSeed::All`] belongs to a fresh open, where the widgets' text has
+    /// nothing to do with the subject about to be read; [`FieldSeed::Unedited`]
+    /// to a record arriving under a form somebody may be typing in.
+    const fn mark_all(&mut self, seed: FieldSeed) {
         self.region_values = true;
         self.debug_values = true;
         self.terrain_values = true;
         self.estate_values = true;
         self.covenant_values = true;
         self.controls = true;
-        self.seed_fields = true;
+        self.seed_fields = seed;
     }
 }
 
@@ -2003,11 +2124,17 @@ fn open_about_region(
 
 /// Reset a window's drafts and access lists for a fresh open, so the replies
 /// the open asks for reseed everything.
+///
+/// Re-opening is how a resident asks for newer data, and it is the one moment
+/// that deliberately throws a half-finished form away: dropping the merge base
+/// makes the next record seed rather than merge, and [`FieldSeed::All`] lets it
+/// rewrite every text field.
 fn restart_region_open(state: &mut AboutRegionState, dirty: &mut AboutRegionDirty) {
-    state.draft_seeded = false;
+    state.seeded = None;
+    state.shown_fields = None;
     state.estate_seeded = false;
     state.clear_access();
-    dirty.mark_all();
+    dirty.mark_all(FieldSeed::All);
 }
 
 // ---------------------------------------------------------------------------
@@ -2175,9 +2302,20 @@ fn request_name(agent: AgentKey, commands: &mut MessageWriter<SlCommand>) {
 ///
 /// A window is **current** while its region is the one the agent is in. That
 /// window takes the live record (a `RegionHandshake`, a `RegionInfo` reply, a
-/// teleport) and reseeds its drafts from it; every other window keeps the last
+/// teleport) and folds it into its drafts; every other window keeps the last
 /// snapshot it had and loses its write rights, because every write this floater
 /// makes goes out on the current circuit and would land on the wrong region.
+///
+/// # Folded in, not re-seeded
+///
+/// The record is **merged** rather than assigned. A `RegionInfo` arrives unasked
+/// whenever any estate manager in the region saves, and re-seeding from it threw
+/// away every box the person at this keyboard had ticked and every number they
+/// had typed and not yet applied. Worse than it sounds, because
+/// `SlRegionIdentity` and `SlRegionLimits` are **inserted** rather than mutated
+/// (`sl-client-bevy`'s world layer) and an insert marks a component changed in
+/// Bevy whether or not anything in it moved — so a `RegionInfo` reporting
+/// nothing new wiped the form too.
 #[expect(
     clippy::type_complexity,
     reason = "the region query needs the identity plus the optional limits with change detection"
@@ -2201,7 +2339,10 @@ fn refresh_on_region(
             // Re-arm the experiences GET: a window walked back into asks again,
             // since the lists may have moved while it was frozen.
             state.experiences_requested = false;
-            dirty.mark_all();
+            // Walking out of a region and back in is not a fresh open: the
+            // drafts are still this manager's, so the rights repaint must not
+            // rewrite a field they had typed in.
+            dirty.mark_all(FieldSeed::Unedited);
         }
         if !is_current {
             continue;
@@ -2211,19 +2352,26 @@ fn refresh_on_region(
         };
         let changed =
             identity.is_changed() || limits.as_ref().is_some_and(|limits| limits.is_changed());
-        if !changed && state.draft_seeded {
+        if !changed && state.seeded.is_some() {
             continue;
         }
         state.identity = Some(identity.0.clone());
         state.can_manage = identity.0.is_estate_manager;
-        state.draft = seed_draft(identity, limits.as_deref());
-        state.debug_draft = seed_debug_draft(identity, limits.as_deref());
-        state.terrain_draft = seed_terrain_draft(identity, limits.as_deref());
-        state.draft_seeded = true;
+        // `FieldSeed::All` only where there was no form to protect: the first
+        // record a window ever reads, and the one a re-open asked for.
+        let seed = if state.seeded.is_some() {
+            FieldSeed::Unedited
+        } else {
+            FieldSeed::All
+        };
+        state.merge_region(RegionBases::read(identity, limits.as_deref()));
         if !identity.0.sim_owner.is_nil() {
             request_name(AgentKey::from(identity.0.sim_owner), &mut commands);
         }
-        dirty.mark_all();
+        // Marked whatever the merge decided: the read-only panels show the
+        // snapshot, which moved even when no draft field did, and the rights may
+        // have changed with it.
+        dirty.mark_all(seed);
     }
 }
 
@@ -2336,77 +2484,121 @@ fn refresh_on_names(
 // Seed edit fields / combo.
 // ---------------------------------------------------------------------------
 
-/// Seed the region and terrain edit fields, the maturity combo, and the terrain
-/// texture-swatch labels from the drafts on a fresh region.
 /// Seed each window's region and terrain edit fields, maturity combo and
 /// terrain texture-swatch labels from its drafts.
+///
+/// [`FieldSeed::All`] on a fresh open, [`FieldSeed::Unedited`] after a record
+/// arrived and moved the drafts under the manager. In the second mode a text
+/// field is only rewritten if it still reads exactly what was last seeded into
+/// it, so a number typed and not yet applied is never overwritten by another
+/// manager's save landing mid-edit.
+///
+/// The combo and the swatches need no such guard: a pick writes straight into
+/// the draft ([`apply_combo_edits`], [`apply_texture_edits`]), so the merge sees
+/// it and keeps it, and re-seeding from the draft writes the pick back.
 fn seed_edit_fields(
-    mut windows: Query<(&mut AboutRegionDirty, &AboutRegionUi, &AboutRegionState)>,
+    mut windows: Query<(&mut AboutRegionDirty, &AboutRegionUi, &mut AboutRegionState)>,
     mut fields: Query<&mut EditableText>,
     mut combos: Query<&mut ComboSelection>,
     mut swatches: Query<&mut TextureSwatchValue>,
 ) {
-    for (mut dirty, ui, state) in &mut windows {
-        if !dirty.seed_fields {
+    for (mut dirty, ui, mut state) in &mut windows {
+        let mode = dirty.seed_fields;
+        if mode == FieldSeed::None {
             continue;
         }
-        dirty.seed_fields = false;
-        set_field_text(
+        dirty.seed_fields = FieldSeed::None;
+        let wanted = RegionFieldText::from_drafts(&state.draft, &state.terrain_draft);
+        // What the previous pass wrote, against which a field that has been
+        // typed in no longer reads.
+        let shown = mode.previous(state.shown_fields.as_ref()).cloned();
+        // What each field is left having been *given*: the value this pass wrote,
+        // or the one the previous pass wrote where it declined to write at all.
+        let mut left = wanted.clone();
+        // Each row carries its own slot in `left`, so there is no index to keep
+        // in step with the field order.
+        let rows: [(Option<Entity>, &str, Option<&str>, &mut String); 5] = [
+            (
+                ui.region.agent_limit_field,
+                &wanted.agent_limit,
+                shown.as_ref().map(|shown| shown.agent_limit.as_str()),
+                &mut left.agent_limit,
+            ),
+            (
+                ui.region.object_bonus_field,
+                &wanted.object_bonus,
+                shown.as_ref().map(|shown| shown.object_bonus.as_str()),
+                &mut left.object_bonus,
+            ),
+            (
+                ui.terrain.water_field,
+                &wanted.water_height,
+                shown.as_ref().map(|shown| shown.water_height.as_str()),
+                &mut left.water_height,
+            ),
+            (
+                ui.terrain.raise_field,
+                &wanted.raise_limit,
+                shown.as_ref().map(|shown| shown.raise_limit.as_str()),
+                &mut left.raise_limit,
+            ),
+            (
+                ui.terrain.lower_field,
+                &wanted.lower_limit,
+                shown.as_ref().map(|shown| shown.lower_limit.as_str()),
+                &mut left.lower_limit,
+            ),
+        ];
+        for (field, want, previous, slot) in rows {
+            seed_one_field(&mut fields, field, want, previous, slot);
+        }
+        // The eight per-corner band fields, which are arrays rather than named
+        // rows and so are walked by slot.
+        seed_band_fields(
             &mut fields,
-            ui.region.agent_limit_field,
-            &state.draft.agent_limit.to_string(),
+            &ui.terrain.start_fields,
+            &wanted.start_heights,
+            shown.as_ref().map(|shown| &shown.start_heights),
+            &mut left.start_heights,
         );
-        set_field_text(
+        seed_band_fields(
             &mut fields,
-            ui.region.object_bonus_field,
-            &format!("{:.2}", state.draft.object_bonus),
+            &ui.terrain.range_fields,
+            &wanted.height_ranges,
+            shown.as_ref().map(|shown| &shown.height_ranges),
+            &mut left.height_ranges,
         );
+        state.shown_fields = Some(left);
         set_combo(
             &mut combos,
             ui.region.maturity_combo,
             maturity_index(state.draft.maturity),
         );
-        // Terrain fields + swatch labels.
-        let terrain = &state.terrain_draft;
-        set_field_text(
-            &mut fields,
-            ui.terrain.water_field,
-            &format!("{:.2}", terrain.water_height),
-        );
-        set_field_text(
-            &mut fields,
-            ui.terrain.raise_field,
-            &format!("{:.2}", terrain.terrain_raise_limit),
-        );
-        set_field_text(
-            &mut fields,
-            ui.terrain.lower_field,
-            &format!("{:.2}", terrain.terrain_lower_limit),
-        );
-        for (slot, start) in ui
-            .terrain
-            .start_fields
-            .iter()
-            .zip(terrain.start_heights.iter())
-        {
-            set_field_text(&mut fields, *slot, &format!("{start:.2}"));
-        }
-        for (slot, range) in ui
-            .terrain
-            .range_fields
-            .iter()
-            .zip(terrain.height_ranges.iter())
-        {
-            set_field_text(&mut fields, *slot, &format!("{range:.2}"));
-        }
         for (node, texture) in ui
             .terrain
             .textures
             .iter()
-            .zip(terrain.detail_textures.iter())
+            .zip(state.terrain_draft.detail_textures.iter())
         {
             set_swatch(&mut swatches, *node, *texture);
         }
+    }
+}
+
+/// Seed one array of four per-corner terrain band fields, slot by slot.
+fn seed_band_fields(
+    fields: &mut Query<&mut EditableText>,
+    slots: &[Option<Entity>; 4],
+    wanted: &[String; 4],
+    shown: Option<&[String; 4]>,
+    left: &mut [String; 4],
+) {
+    for (index, (slot, want)) in slots.iter().zip(wanted.iter()).enumerate() {
+        let previous = shown.and_then(|shown| shown.get(index)).map(String::as_str);
+        let Some(left) = left.get_mut(index) else {
+            continue;
+        };
+        seed_one_field(fields, *slot, want, previous, left);
     }
 }
 
@@ -4145,32 +4337,6 @@ fn set_check_visual(
     }
 }
 
-/// Seed a text field's content in place, skipping an actively-edited field.
-#[expect(
-    clippy::cmp_owned,
-    reason = "the editor's SplitString has no borrow-free comparison against &str; this guard runs \
-              only on a discrete reseed, not per frame"
-)]
-fn set_field_text(fields: &mut Query<&mut EditableText>, field: Option<Entity>, value: &str) {
-    if let Some(field) = field
-        && let Ok(mut editable) = fields.get_mut(field)
-        && !editable.is_composing()
-        && editable.value().to_string() != value
-    {
-        editable.editor_mut().set_text(value);
-    }
-}
-
-/// Set a combo's selection in place (a programmatic write emits no `ComboChanged`).
-fn set_combo(combos: &mut Query<&mut ComboSelection>, combo: Option<Entity>, active: usize) {
-    if let Some(combo) = combo
-        && let Ok(mut selection) = combos.get_mut(combo)
-        && selection.active != active
-    {
-        selection.active = active;
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Spawn helpers.
 // ---------------------------------------------------------------------------
@@ -4497,14 +4663,24 @@ fn spawn_remove_button(commands: &mut Commands, cell: Entity, list: AccessList, 
 mod tests {
     use super::{
         AboutRegionState, AccessList, CheckKind, ExperienceList, MAX_ESTATE_EXPERIENCES,
-        PICK_ALLOWED, PICK_BANNED, PICK_KICK, PICK_MANAGER, PICK_TELEPORT, freshest_region_flags,
-        maturity_from_index, maturity_index,
+        PICK_ALLOWED, PICK_BANNED, PICK_KICK, PICK_MANAGER, PICK_TELEPORT, RegionBases,
+        freshest_region_flags, maturity_from_index, maturity_index,
     };
     use crate::world_api::ExperiencePickerFilter;
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_bevy::{
-        EstateAccessDelta, EstateFlags, ExperienceKey, Maturity, OwnerKey, RegionInfoUpdate, Uuid,
+        EstateAccessDelta, EstateFlags, ExperienceKey, Maturity, OwnerKey, RegionDebugUpdate,
+        RegionInfoUpdate, RegionTerrainUpdate, Uuid,
     };
+
+    /// The three drafts as the grid last stated them, all at their defaults.
+    fn bases() -> RegionBases {
+        RegionBases {
+            info: RegionInfoUpdate::default(),
+            debug: RegionDebugUpdate::default(),
+            terrain: RegionTerrainUpdate::default(),
+        }
+    }
 
     /// The maturity ↔ combo-index mapping round-trips for every real rating, and
     /// the combo indices agree with the option key order.
@@ -4631,6 +4807,93 @@ mod tests {
         assert_eq!(freshest_region_flags(handshake, Some(0)), 0);
         // Before any RegionInfo the handshake is all there is.
         assert_eq!(freshest_region_flags(handshake, None), handshake);
+    }
+
+    /// The first record a window reads has no base to merge against, so it seeds
+    /// all three drafts outright — which is also what a re-open resets to.
+    #[test]
+    fn the_first_record_seeds_rather_than_merges() {
+        let mut state = AboutRegionState::default();
+        let first = RegionBases {
+            info: RegionInfoUpdate {
+                agent_limit: 77,
+                ..RegionInfoUpdate::default()
+            },
+            debug: RegionDebugUpdate {
+                disable_scripts: true,
+                ..RegionDebugUpdate::default()
+            },
+            terrain: RegionTerrainUpdate {
+                water_height: 33.0,
+                ..RegionTerrainUpdate::default()
+            },
+        };
+        assert!(state.merge_region(first.clone()));
+        assert_eq!(state.draft, first.info);
+        assert_eq!(state.debug_draft, first.debug);
+        assert_eq!(state.terrain_draft, first.terrain);
+        assert_eq!(state.seeded, Some(first));
+    }
+
+    /// The bug this floater was filed for: a `RegionInfo` the simulator pushes
+    /// because another estate manager saved must reach the fields this manager
+    /// has not touched, and must leave the ones they have.
+    ///
+    /// Re-seeding was unconditional, so three ticked boxes and a typed agent
+    /// limit vanished the moment anyone in the region pressed Apply — and,
+    /// because the world layer *inserts* the region components rather than
+    /// mutating them, a `RegionInfo` reporting nothing new wiped the form too.
+    #[expect(
+        clippy::float_cmp,
+        reason = "the merge carries a field's bits across verbatim, so the value asserted \
+                  here is the literal the record was built from, exactly"
+    )]
+    #[test]
+    fn a_push_leaves_the_edits_this_manager_has_not_applied() {
+        let mut state = AboutRegionState {
+            seeded: Some(bases()),
+            ..AboutRegionState::default()
+        };
+        // Ticked, typed, picked — none of it applied.
+        state.draft.block_fly = true;
+        state.draft.agent_limit = 60;
+        state.debug_draft.disable_scripts = true;
+        state.terrain_draft.detail_textures = [Uuid::from_u128(9); 4];
+
+        // Another manager raised the object bonus and the water.
+        let mut fresh = bases();
+        fresh.info.object_bonus = 3.0;
+        fresh.terrain.water_height = 25.0;
+        assert!(state.merge_region(fresh.clone()));
+
+        assert!(state.draft.block_fly);
+        assert_eq!(state.draft.agent_limit, 60);
+        assert!(state.debug_draft.disable_scripts);
+        assert_eq!(state.terrain_draft.detail_textures, [Uuid::from_u128(9); 4]);
+        assert_eq!(
+            state.draft.object_bonus, 3.0,
+            "an Apply now carries their change forward instead of reverting it"
+        );
+        assert_eq!(state.terrain_draft.water_height, 25.0);
+        assert_eq!(
+            state.seeded,
+            Some(fresh),
+            "the base advances, so the same record twice is one change"
+        );
+    }
+
+    /// A record identical to the one the drafts were merged from moves nothing —
+    /// which is what the read-back after this floater's own **Apply** is, and
+    /// what an insert-marked-changed `RegionInfo` carrying no news is.
+    #[test]
+    fn an_unchanged_record_moves_no_draft() {
+        let mut state = AboutRegionState {
+            seeded: Some(bases()),
+            ..AboutRegionState::default()
+        };
+        state.draft.agent_limit = 60;
+        assert!(!state.merge_region(bases()));
+        assert_eq!(state.draft.agent_limit, 60);
     }
 
     /// Each estate experience list opens its picker with the reference's own
@@ -4790,13 +5053,14 @@ mod tests {
     /// a window keeps once the agent has left its region.
     mod instances {
         use super::super::{
-            AboutRegionAction, AboutRegionPlugin, AboutRegionState, OpenAboutRegion, WriteButton,
-            region_key,
+            AboutRegionAction, AboutRegionPlugin, AboutRegionState, AboutRegionUi, OpenAboutRegion,
+            WriteButton, region_key,
         };
         use crate::floater::{Floater, FloaterCommand, FloaterOp, FloaterPlugin};
         use crate::ui::UiRoot;
         use crate::world_api::{AvatarState, GroupPicked, GroupsModel};
         use bevy::prelude::*;
+        use bevy::text::EditableText;
         use bevy::ui::InteractionDisabled;
         use pretty_assertions::assert_eq;
         use sl_client_bevy::{
@@ -4921,6 +5185,116 @@ mod tests {
                 .collect();
             assert!(keys.contains(&Some(&region_key(&first))));
             assert!(keys.contains(&Some(&region_key(&second))));
+            Ok(())
+        }
+
+        /// A number this manager typed and has not applied survives a
+        /// `RegionInfo` push, while every field they left alone takes the
+        /// pushed value.
+        ///
+        /// The text half of [[viewer-region-push-discards-pending-edits]]: the
+        /// three drafts are merged, but a text field is not mirrored into a
+        /// draft until **Apply** reads it, so the merge cannot see typing in
+        /// flight. The widget is compared against what it was last *given*
+        /// instead.
+        #[test]
+        fn typing_survives_a_region_push() -> Result<(), TestError> {
+            let here = region(0xA1, "Alpha");
+            let mut app = region_app();
+            stand_in(&mut app, &here);
+            open(&mut app);
+            let window = windows(&mut app)
+                .into_iter()
+                .find_map(|(window, id, _current)| (id == here.region_id).then_some(window))
+                .ok_or("the region has no window")?;
+            let (water, start) = {
+                let ui = app
+                    .world()
+                    .get::<AboutRegionUi>(window)
+                    .ok_or("the window has no content")?;
+                (
+                    ui.terrain.water_field.ok_or("no water field")?,
+                    *ui.terrain.start_fields.first().ok_or("no start field")?,
+                )
+            };
+            let start = start.ok_or("no start field")?;
+            assert_eq!(field_text(&app, water)?, "20.00");
+            assert_eq!(field_text(&app, start)?, "0.00");
+
+            // The manager retypes the water height and has not pressed Apply.
+            type_into(&mut app, water, "99.00")?;
+
+            // Another manager saves: the region record arrives again, moved.
+            let mut pushed = here.clone();
+            pushed.water_height = 25.0;
+            pushed.terrain.start_heights = [1.0; 4];
+            stand_in(&mut app, &pushed);
+
+            assert_eq!(
+                field_text(&app, water)?,
+                "99.00",
+                "the push ate a number this manager had typed"
+            );
+            assert_eq!(
+                field_text(&app, start)?,
+                "1.00",
+                "a field nobody touched must take the pushed value"
+            );
+            // And the typed field is now what the *next* push compares against,
+            // so it is not read as having changed back to the grid's value.
+            let mut again = pushed.clone();
+            again.terrain.start_heights = [2.0; 4];
+            stand_in(&mut app, &again);
+            assert_eq!(field_text(&app, water)?, "99.00");
+            assert_eq!(field_text(&app, start)?, "2.00");
+            Ok(())
+        }
+
+        /// Re-opening **is** the way to throw a half-finished form away: it
+        /// re-asks the grid, and the answer seeds every field afresh.
+        #[test]
+        fn reopening_discards_the_typing_it_re_asks_for() -> Result<(), TestError> {
+            let here = region(0xA1, "Alpha");
+            let mut app = region_app();
+            stand_in(&mut app, &here);
+            open(&mut app);
+            let window = windows(&mut app)
+                .into_iter()
+                .find_map(|(window, id, _current)| (id == here.region_id).then_some(window))
+                .ok_or("the region has no window")?;
+            let water = app
+                .world()
+                .get::<AboutRegionUi>(window)
+                .and_then(|ui| ui.terrain.water_field)
+                .ok_or("no water field")?;
+            type_into(&mut app, water, "99.00")?;
+
+            open(&mut app);
+            // The re-open drops the merge base; the next record seeds outright.
+            stand_in(&mut app, &here);
+            assert_eq!(field_text(&app, water)?, "20.00");
+            Ok(())
+        }
+
+        /// One edit field's current text.
+        fn field_text(app: &App, field: Entity) -> Result<String, TestError> {
+            Ok(app
+                .world()
+                .get::<EditableText>(field)
+                .ok_or("that entity is not an edit field")?
+                .value()
+                .to_string())
+        }
+
+        /// Type into an edit field, the way a resident does, and let the frame
+        /// that follows see it.
+        fn type_into(app: &mut App, field: Entity, text: &str) -> Result<(), TestError> {
+            app.world_mut()
+                .get_mut::<EditableText>(field)
+                .ok_or("that entity is not an edit field")?
+                .editor_mut()
+                .set_text(text);
+            app.update();
             Ok(())
         }
 

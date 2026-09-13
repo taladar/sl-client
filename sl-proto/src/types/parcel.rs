@@ -11,6 +11,7 @@ use sl_wire::{RegionHandle, RegionLocalObjectId, RegionLocalParcelId};
 use uuid::Uuid;
 
 use crate::types::LandArea;
+use crate::types::merge::merge_unedited;
 
 /// How many parcels a `ParcelProperties` reply describes, the `RequestResult`
 /// field. A "not found / no access" reply arrives as [`NoData`](Self::NoData)
@@ -1086,29 +1087,14 @@ impl Default for ParcelUpdate {
     }
 }
 
-impl ParcelUpdate {
-    /// Carry a freshly read record into every field of this form the resident
-    /// has **not** edited, and report whether anything moved.
-    ///
-    /// The three-way merge an About Land form needs to converge. `base` is the
-    /// record this form was seeded from, `self` is the form as it stands, and
-    /// `fresh` is the record the simulator most recently reported. A field of
-    /// `self` that still equals `base` is one nobody here has touched, so it is
-    /// the grid's to state and takes the pushed value; a field that has moved
-    /// away from `base` is the resident's pending edit and is kept.
+merge_unedited! {
+    /// The three-way merge an About Land form needs to converge.
     ///
     /// This is what stops a save from reverting somebody else. A
     /// `ParcelPropertiesUpdate` carries the **whole** record (see
     /// [`ParcelInfo::to_update`]), so a form populated once at open re-asserts
     /// every field as it stood then — silently undoing whatever another
-    /// resident changed in between. Nothing on the grid side can stop that: a
-    /// simulator cannot tell a re-asserted field from an unchanged one, and
-    /// Second Life has no edit lock to have prevented the overlap. Convergence
-    /// is therefore the viewer's job, and this is where it happens.
-    ///
-    /// The caller advances `base` to `fresh` afterwards, so a field the
-    /// resident edited to the value the grid already holds stops counting as an
-    /// edit — the two agree, and there is nothing left to protect.
+    /// resident changed in between.
     #[expect(
         clippy::float_cmp,
         reason = "the question is whether a value moved at all, not whether two \
@@ -1116,62 +1102,25 @@ impl ParcelUpdate {
                   decode of the same wire field, so a difference of any size is a \
                   real edit and must be kept"
     )]
-    pub fn merge_unedited(&mut self, base: &Self, fresh: &Self) -> bool {
-        // Destructured without a `..` rest pattern on purpose: a field added to
-        // `ParcelUpdate` and forgotten here is then a compile error, and one
-        // added to the destructure but forgotten in `carry!` is an unused
-        // binding. The hazard this whole conversion family has is a forgotten
-        // field, so neither list is allowed to drift in silence.
-        let Self {
-            local_id,
-            parcel_flags,
-            sale_price,
-            name,
-            description,
-            music_url,
-            media_url,
-            media_id,
-            media_auto_scale,
-            group_id,
-            pass_price,
-            pass_hours,
-            category,
-            auth_buyer_id,
-            snapshot_id,
-            user_location,
-            user_look_at,
-            landing_type,
-        } = fresh;
-        let mut moved = false;
-        macro_rules! carry {
-            ($($field:ident),+ $(,)?) => {$(
-                if self.$field == base.$field && self.$field != *$field {
-                    self.$field = $field.clone();
-                    moved = true;
-                }
-            )+};
-        }
-        carry!(
-            local_id,
-            parcel_flags,
-            sale_price,
-            name,
-            description,
-            music_url,
-            media_url,
-            media_id,
-            media_auto_scale,
-            group_id,
-            pass_price,
-            pass_hours,
-            category,
-            auth_buyer_id,
-            snapshot_id,
-            user_location,
-            user_look_at,
-            landing_type,
-        );
-        moved
+    ParcelUpdate {
+        local_id,
+        parcel_flags,
+        sale_price,
+        name,
+        description,
+        music_url,
+        media_url,
+        media_id,
+        media_auto_scale,
+        group_id,
+        pass_price,
+        pass_hours,
+        category,
+        auth_buyer_id,
+        snapshot_id,
+        user_location,
+        user_look_at,
+        landing_type,
     }
 }
 

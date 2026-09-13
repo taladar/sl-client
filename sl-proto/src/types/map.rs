@@ -3,6 +3,7 @@
 use std::net::SocketAddr;
 
 use super::Maturity;
+use crate::types::merge::merge_unedited;
 use sl_types::key::{ObjectKey, TextureKey};
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
@@ -231,6 +232,34 @@ impl Default for RegionInfoUpdate {
     }
 }
 
+merge_unedited! {
+    /// The three-way merge the Region / Estate form's **Region** tab needs.
+    ///
+    /// `setregioninfo` carries the whole form, so an estate manager with three
+    /// boxes ticked and an agent limit typed would otherwise re-assert all nine
+    /// fields as the region stood when the floater last read it — reverting
+    /// whatever another manager saved in between, and losing their own pending
+    /// edits the moment the simulator pushes that save to the region.
+    #[expect(
+        clippy::float_cmp,
+        reason = "the question is whether a value moved at all, not whether two \
+                  computations agree to a tolerance: both sides come from the same \
+                  decode of the same wire field, so a difference of any size is a \
+                  real edit and must be kept"
+    )]
+    RegionInfoUpdate {
+        block_terraform,
+        block_fly,
+        allow_damage,
+        allow_land_resell,
+        agent_limit,
+        object_bonus,
+        maturity,
+        restrict_pushobject,
+        allow_parcel_changes,
+    }
+}
+
 /// The region-debug toggles to apply via
 /// [`Session::set_region_debug`](crate::Session::set_region_debug)
 /// (`EstateOwnerMessage` method `setregiondebug`). Each disables a subsystem
@@ -243,6 +272,17 @@ pub struct RegionDebugUpdate {
     pub disable_collisions: bool,
     /// Disable object physics region-wide.
     pub disable_physics: bool,
+}
+
+merge_unedited! {
+    /// The three-way merge the Region / Estate form's **Debug** tab needs, for
+    /// the same reason as [`RegionInfoUpdate::merge_unedited`]: `setregiondebug`
+    /// carries all three toggles at once.
+    RegionDebugUpdate {
+        disable_scripts,
+        disable_collisions,
+        disable_physics,
+    }
 }
 
 /// The region-terrain settings to apply via
@@ -292,6 +332,36 @@ impl Default for RegionTerrainUpdate {
             start_heights: [0.0; 4],
             height_ranges: [0.0; 4],
         }
+    }
+}
+
+merge_unedited! {
+    /// The three-way merge the Region / Estate form's **Terrain** tab needs.
+    ///
+    /// The widest of the three: nine fields, three of them arrays of four — the
+    /// detail textures behind a picker each, the two per-corner bands behind a
+    /// number field each — all re-sent together by `setregionterrain` /
+    /// `texturedetail` / `textureheights`.
+    ///
+    /// An array is merged **whole**: retyping one corner makes all four that
+    /// manager's, since a partial array has no meaning to compare against.
+    #[expect(
+        clippy::float_cmp,
+        reason = "the question is whether a value moved at all, not whether two \
+                  computations agree to a tolerance: both sides come from the same \
+                  decode of the same wire field, so a difference of any size is a \
+                  real edit and must be kept"
+    )]
+    RegionTerrainUpdate {
+        water_height,
+        terrain_raise_limit,
+        terrain_lower_limit,
+        use_estate_sun,
+        fixed_sun,
+        sun_hour,
+        detail_textures,
+        start_heights,
+        height_ranges,
     }
 }
 
@@ -721,10 +791,13 @@ pub struct NeighborInfo {
 
 #[cfg(test)]
 mod tests {
-    use super::{MapRequestFlags, Vector};
+    use super::{
+        MapRequestFlags, Maturity, RegionDebugUpdate, RegionInfoUpdate, RegionTerrainUpdate, Vector,
+    };
     use pretty_assertions::assert_eq;
     use sl_types::map::{GridCoordinates, RegionCoordinates};
     use sl_wire::RegionHandle;
+    use uuid::Uuid;
 
     #[test]
     fn map_request_flag_constants_match_the_viewer() {
@@ -781,5 +854,115 @@ mod tests {
             z: position.z(),
         };
         assert_eq!(RegionCoordinates::from(wire), position);
+    }
+
+    /// The bug the region form was filed for: a `RegionInfo` the simulator
+    /// pushes because *another* estate manager saved must reach the fields this
+    /// manager has not touched, and must not touch the ones they have.
+    ///
+    /// Without it, Apply re-asserted all nine fields as the region stood when
+    /// the floater last read it — and the push itself wiped the form, because
+    /// re-seeding it was unconditional.
+    #[expect(
+        clippy::float_cmp,
+        reason = "the merge carries a field's bits across verbatim, so the value asserted \
+                  here is the literal the record was built from, exactly"
+    )]
+    #[test]
+    fn a_region_push_reaches_the_fields_this_manager_did_not_edit() {
+        let base = RegionInfoUpdate::default();
+        let mut form = base.clone();
+        // This manager ticked one box and typed a limit, and has not applied.
+        form.block_fly = true;
+        form.agent_limit = 60;
+
+        // Another manager raised the object bonus and blocked terraforming.
+        let fresh = RegionInfoUpdate {
+            object_bonus: 2.0,
+            block_terraform: true,
+            ..base.clone()
+        };
+        assert!(form.merge_unedited(&base, &fresh));
+
+        assert!(
+            form.block_fly,
+            "a pending tick is the manager's, not the grid's"
+        );
+        assert_eq!(form.agent_limit, 60);
+        assert_eq!(
+            form.object_bonus, 2.0,
+            "an Apply now carries their change forward instead of reverting it"
+        );
+        assert!(form.block_terraform);
+    }
+
+    /// Merging advances nothing by itself, so the caller's base advance is what
+    /// makes the form settle rather than re-applying the same record forever —
+    /// including the read-back the floater asks for after its own Apply.
+    #[test]
+    fn a_repeated_region_record_is_one_change() {
+        let base = RegionInfoUpdate::default();
+        let mut form = base.clone();
+        let fresh = RegionInfoUpdate {
+            maturity: Maturity::Adult,
+            ..base.clone()
+        };
+        assert!(form.merge_unedited(&base, &fresh));
+        let base = fresh.clone();
+        assert!(
+            !form.merge_unedited(&base, &fresh),
+            "the same record twice is a change once"
+        );
+        assert_eq!(form.maturity, Maturity::Adult);
+    }
+
+    /// The Debug tab's three toggles, merged the same way — all-bool, so this is
+    /// the one of the three with no float comparison in it.
+    #[test]
+    fn a_region_debug_push_keeps_the_pending_toggle() {
+        let base = RegionDebugUpdate::default();
+        let mut form = base;
+        form.disable_scripts = true;
+
+        let fresh = RegionDebugUpdate {
+            disable_physics: true,
+            ..base
+        };
+        assert!(form.merge_unedited(&base, &fresh));
+        assert!(form.disable_scripts);
+        assert!(form.disable_physics);
+        assert!(!form.disable_collisions);
+    }
+
+    /// The Terrain tab, whose nine fields include the three arrays — a
+    /// per-corner band the manager has retyped must survive a push that moves
+    /// another.
+    #[expect(
+        clippy::float_cmp,
+        reason = "the merge carries a field's bits across verbatim, so the value asserted \
+                  here is the literal the record was built from, exactly"
+    )]
+    #[test]
+    fn a_terrain_push_merges_per_corner_bands_as_whole_arrays() {
+        let base = RegionTerrainUpdate::default();
+        let mut form = base.clone();
+        form.start_heights = [3.0, 0.0, 0.0, 0.0];
+        form.detail_textures = [Uuid::from_u128(7); 4];
+
+        let fresh = RegionTerrainUpdate {
+            water_height: 25.0,
+            height_ranges: [9.0; 4],
+            ..base.clone()
+        };
+        assert!(form.merge_unedited(&base, &fresh));
+
+        assert_eq!(
+            form.start_heights,
+            [3.0, 0.0, 0.0, 0.0],
+            "the array moved as a whole, so the whole array is this manager's"
+        );
+        assert_eq!(form.detail_textures, [Uuid::from_u128(7); 4]);
+        assert_eq!(form.water_height, 25.0);
+        assert_eq!(form.height_ranges, [9.0; 4]);
     }
 }

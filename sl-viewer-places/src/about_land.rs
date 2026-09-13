@@ -71,6 +71,7 @@ use sl_client_bevy::{
     SlSessionEvent, TextureKey, Uuid,
 };
 
+use crate::edit_fields::{FieldSeed, seed_one_field, set_combo};
 use crate::floater::{
     Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterKey, FloaterOp, FloaterSpec,
     FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater,
@@ -545,27 +546,6 @@ impl FieldText {
             pass_hours: format!("{:.0}", draft.pass_hours),
         }
     }
-}
-
-/// How much of the edit fields' text the next [`seed_edit_fields`] pass may
-/// rewrite.
-///
-/// The six text fields are the one part of the form that is **not** mirrored
-/// into [`AboutLandState::draft`] until **Apply** reads them, so the resident's
-/// pending typing lives in the widget rather than in the draft. That makes the
-/// draft's three-way merge blind to it, and this is how the widgets get the
-/// same protection.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-enum FieldSeed {
-    /// Leave the fields alone.
-    #[default]
-    None,
-    /// Rewrite every field — a fresh subject, whose text has nothing to do with
-    /// what the widgets are showing.
-    All,
-    /// Rewrite only a field whose text still equals what was last seeded into
-    /// it, leaving anything the resident has typed since.
-    Unedited,
 }
 
 /// Which sub-panels need an in-place value refresh this frame, for one window.
@@ -2200,13 +2180,9 @@ fn seed_edit_fields(
         // What the previous pass wrote. In `Unedited` mode a field that no longer
         // reads as it was written has been typed in, and is left alone; in `All`
         // mode the subject itself changed, so the old text means nothing.
-        let shown = match mode {
-            FieldSeed::None | FieldSeed::All => None,
-            FieldSeed::Unedited => state.shown_fields.clone(),
-        };
-        // What this pass leaves on screen: the value it wrote, or the resident's
-        // own text where it declined to write. Recording the latter is what stops
-        // the *next* push from reading the typing as "changed back".
+        let shown = mode.previous(state.shown_fields.as_ref()).cloned();
+        // What each field is left having been *given*: the value this pass wrote,
+        // or the one the previous pass wrote where it declined to write at all.
         let mut left = wanted.clone();
         // Each row carries its own slot in `left`, so there is no index to keep in
         // step with the field order.
@@ -2249,34 +2225,10 @@ fn seed_edit_fields(
             ),
         ];
         for (field, want, previous, slot) in rows {
-            if let Some(previous) = previous
-                && !field_reads(&fields, field, previous)
-            {
-                if let Some(text) = field_text(&fields, field) {
-                    *slot = text;
-                }
-                continue;
-            }
-            set_field_text(&mut fields, field, want);
+            seed_one_field(&mut fields, field, want, previous, slot);
         }
         state.shown_fields = Some(left);
     }
-}
-
-/// A field's current text, if it exists.
-fn field_text(fields: &Query<&mut EditableText>, field: Option<Entity>) -> Option<String> {
-    fields
-        .get(field?)
-        .ok()
-        .map(|editable| editable.value().to_string())
-}
-
-/// Whether `field`'s current text is exactly `value`.
-///
-/// A missing field reads as matching, so a form built without it is seeded
-/// rather than skipped.
-fn field_reads(fields: &Query<&mut EditableText>, field: Option<Entity>, value: &str) -> bool {
-    field_text(fields, field).is_none_or(|text| text == value)
 }
 
 /// Grey each window's write buttons and every editable control to follow the
@@ -4074,32 +4026,6 @@ fn set_check_visual(
         && *color != label_color
     {
         *color = label_color;
-    }
-}
-
-/// Seed a text field's content in place, skipping an actively-edited field.
-#[expect(
-    clippy::cmp_owned,
-    reason = "the editor's SplitString has no borrow-free comparison against &str; this guard runs \
-              only on a discrete open, not per frame"
-)]
-fn set_field_text(fields: &mut Query<&mut EditableText>, field: Option<Entity>, value: &str) {
-    if let Some(field) = field
-        && let Ok(mut editable) = fields.get_mut(field)
-        && !editable.is_composing()
-        && editable.value().to_string() != value
-    {
-        editable.editor_mut().set_text(value);
-    }
-}
-
-/// Set a combo's selection in place (a programmatic write emits no `ComboChanged`).
-fn set_combo(combos: &mut Query<&mut ComboSelection>, combo: Option<Entity>, active: usize) {
-    if let Some(combo) = combo
-        && let Ok(mut selection) = combos.get_mut(combo)
-        && selection.active != active
-    {
-        selection.active = active;
     }
 }
 

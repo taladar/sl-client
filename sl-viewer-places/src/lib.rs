@@ -45,5 +45,6 @@ pub(crate) use sl_viewer_world_api as world_api;
 pub mod about_land;
 pub mod about_landmark;
 pub mod about_region;
+mod edit_fields;
 pub mod telehub;
 pub mod top_objects;

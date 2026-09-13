@@ -1233,8 +1233,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — An object-owner tally says nothing about which parcel it counted
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
-- [`viewer-region-push-discards-pending-edits`](bugs/viewer-region-push-discards-pending-edits.md)
-  — A region push throws away the estate manager's unapplied edits
 - [`viewer-rigged-attachments-wearer-not-resolved`](bugs/viewer-rigged-attachments-wearer-not-resolved.md)
   — Worn rigged attachments (e.g. own shoes) don't render — wearer never
   resolved / too many rigged-pending objects
@@ -2628,6 +2626,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-region-options-general`](done/viewer-region-options-general.md) —
   Region / Estate floater — region (general) tab (blocked by
   `viewer-region-options-debug` (done))
+- [`viewer-region-push-discards-pending-edits`](done/viewer-region-push-discards-pending-edits.md)
+  — A region push throws away the estate manager's unapplied edits
 - [`viewer-region-telehub`](done/viewer-region-telehub.md) — Telehub management
   floater
 - [`viewer-region-top-objects`](done/viewer-region-top-objects.md) — Top objects

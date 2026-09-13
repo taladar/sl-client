@@ -22,6 +22,7 @@ mod group;
 mod inventory;
 mod land;
 mod map;
+mod merge;
 mod name;
 mod nearby;
 mod object;
