@@ -1205,8 +1205,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-crossing-movement-locks-up`](bugs/viewer-crossing-movement-locks-up.md)
   — Movement locks up after a region crossing (stand-up anim, esp. onto lower
   terrain)
-- [`viewer-disabled-field-selection-flash`](bugs/viewer-disabled-field-selection-flash.md)
-  — A disabled text field flashes a selection, and cannot be copied from
 - [`viewer-hair-dome-stays-grey`](bugs/viewer-hair-dome-stays-grey.md) — The
   default hair dome intermittently stays grey for a whole session
 - [`viewer-hover-tooltip-202ms-frame-spike`](bugs/viewer-hover-tooltip-202ms-frame-spike.md)
@@ -1743,6 +1741,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-dialog-script-load-url`](done/viewer-dialog-script-load-url.md) —
   Script web-page request dialog (llLoadURL) (blocked by
   `viewer-ui-notification-host` (done))
+- [`viewer-disabled-field-selection-flash`](done/viewer-disabled-field-selection-flash.md)
+  — A disabled text field flashes a selection, and cannot be copied from
 - [`viewer-do-not-disturb-away`](done/viewer-do-not-disturb-away.md) — Away /
   auto-AFK / Do-Not-Disturb modes + autoresponse (blocked by
   `viewer-chat-input-bar` (done))

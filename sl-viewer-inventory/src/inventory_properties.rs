@@ -635,13 +635,19 @@ fn build_properties_content(
         // A price only means something for an item that is **for sale**, and the
         // commit path knows it: it applies a typed price only when a sale
         // exists. Showing a live field for a not-for-sale item therefore
-        // offered an edit that was silently dropped, so the field is disabled
-        // (greyed, and it refuses focus) until For Sale is ticked — which is
-        // what the reference does with its price spinner. Ticking the box
-        // re-opens the window, so the field comes back live with the value it
-        // was showing.
+        // offered an edit that was silently dropped, so the field is closed to
+        // editing (and greyed) until For Sale is ticked — which is what the
+        // reference does with its price spinner. Ticking the box re-opens the
+        // window, so the field comes back live with the value it was showing.
+        //
+        // Closed to *editing*, not to reading: the number is still the price
+        // this item last carried, and the owner may well want to copy it. So it
+        // is read-only rather than disabled — greyed and unchangeable, but
+        // selectable and copyable (`ui_text_input`'s two stances).
         if !item.sale.is_for_sale() {
-            commands.entity(field).insert(bevy::ui::InteractionDisabled);
+            commands
+                .entity(field)
+                .insert(crate::ui_text_input::ReadOnlyField);
         }
         field
     });
@@ -910,8 +916,8 @@ fn commit_text_edits(
     if let Some(description) = read(ui.desc_field) {
         description.trim().clone_into(&mut item.description);
     }
-    // A price is only editable while the item is offered (the field is disabled
-    // otherwise), so only then can there be a typed one to commit.
+    // A price is only editable while the item is offered (the field is
+    // read-only otherwise), so only then can there be a typed one to commit.
     if item.sale.is_for_sale()
         && let Some(price) = read(ui.price_field).and_then(|price| price.trim().parse::<u64>().ok())
     {
@@ -1568,8 +1574,10 @@ mod tests {
         /// The commit applies a typed price only to an item that is for sale
         /// (a price without a sale has nowhere to live, on the wire or in
         /// `ItemInfo`), so a live price field on a not-for-sale item offered an
-        /// edit that was silently dropped. It is disabled until For Sale is
-        /// ticked — the reference's own gating of its price spinner.
+        /// edit that was silently dropped. It is read-only until For Sale is
+        /// ticked — the reference's own gating of its price spinner, except
+        /// that the number stays selectable and copyable, because what it says
+        /// is still true.
         #[test]
         fn the_price_field_is_dead_until_the_item_is_for_sale() -> Result<(), TestError> {
             let not_for_sale = item(0xC3, "A lamp");
@@ -1591,17 +1599,17 @@ mod tests {
                     .get::<ItemPropertiesUi>(window)
                     .and_then(|ui| ui.price_field)
                     .ok_or("an editable item has no price field")?;
-                let disabled = app
+                let read_only = app
                     .world()
-                    .get::<bevy::ui::InteractionDisabled>(price)
+                    .get::<crate::ui_text_input::ReadOnlyField>(price)
                     .is_some();
-                fields.push((item_id, disabled));
+                fields.push((item_id, read_only));
             }
-            fields.sort_by_key(|(item_id, _disabled)| item_id.to_string());
+            fields.sort_by_key(|(item_id, _read_only)| item_id.to_string());
             assert_eq!(
                 fields,
                 vec![(not_for_sale.item_id, true), (for_sale.item_id, false)],
-                "the not-for-sale item's price must be disabled, the for-sale one's live"
+                "the not-for-sale item's price must be read-only, the for-sale one's live"
             );
             Ok(())
         }

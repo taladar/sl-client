@@ -1212,7 +1212,7 @@ struct MatWidgets<'w, 's> {
 /// Enable or disable every [`MatControl`] material-channel control on the same
 /// gate the Texture tab uses — a modifiable primary selection — pointer-disabling
 /// them (and greying a disabled text field's font, via
-/// [`crate::ui_text_input`]'s `reflect_disabled_text_color`) when the primary is
+/// [`crate::ui_text_input`]'s `reflect_uneditable_text_color`) when the primary is
 /// not modifiable. The row **labels / values** grey through the shared page walk
 /// (`grey_texture_tab`, driven by the Texture tab's own gate on the same
 /// condition), so this system owns only the interaction-disable. Applied on the

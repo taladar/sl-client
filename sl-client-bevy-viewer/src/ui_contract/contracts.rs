@@ -74,6 +74,27 @@ const CLICK_TAKES_THE_CARET: Probe = Probe {
     },
 };
 
+/// The read-only field specimen, for [`CLICK_TAKES_THE_CARET_READ_ONLY`].
+const FOCUSED_READ_ONLY_FIELD: &str = "text-input-read-only:field";
+
+/// A click on a **read-only** field must leave the keyboard on it too.
+///
+/// The one reaction that separates the two greyed stances: a disabled field
+/// refuses the caret (and so cannot be copied from), a read-only one takes it
+/// and keeps it, which is what puts a selection within reach of `Ctrl+C`. Both
+/// look identical, so only a probe can tell them apart.
+const CLICK_TAKES_THE_CARET_READ_ONLY: Probe = Probe {
+    what: "the clicked read-only field holds the keyboard",
+    check: |app: &mut App| {
+        let Some(focused) = app.world().resource::<InputFocus>().get() else {
+            return false;
+        };
+        app.world()
+            .get::<Name>(focused)
+            .is_some_and(|name| name.as_str() == FOCUSED_READ_ONLY_FIELD)
+    },
+};
+
 /// The gallery specimen's sun trackball.
 const SUN_TRACKBALL: &str = "gallery-sun:trackball";
 
@@ -1032,6 +1053,16 @@ pub(crate) const CONTRACTS: &[ElementContract] = &[
     ElementContract {
         element: "text-input-multiline",
         nodes: &[NodeContract::inert("text-input-multiline:field")],
+    },
+    ElementContract {
+        element: "text-input-read-only",
+        nodes: &[NodeContract::new(
+            "text-input-read-only:field",
+            &[Row::leaves(
+                Gesture::PrimaryClick,
+                CLICK_TAKES_THE_CARET_READ_ONLY,
+            )],
+        )],
     },
     ElementContract {
         element: "text-input-unsigned",

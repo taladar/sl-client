@@ -67,6 +67,12 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
         spawn: crate::ui_text_input::spawn_multiline_specimen,
     },
     UiElement {
+        id: "text-input-read-only",
+        summary: "The read-only single-line field: greyed like a disabled one, but its text can \
+                  still be selected and copied — only changing it is refused.",
+        spawn: crate::ui_text_input::spawn_read_only_specimen,
+    },
+    UiElement {
         id: "text-input-float",
         summary: "The signed-decimal numeric field: accepts an optional `-`, digits and one `.`; \
                   a bad character is rejected as typed and a bad arrangement reverted.",
