@@ -22,13 +22,20 @@
 //!
 //! The cap takes the **whole** set rather than a delta, so every add and remove
 //! posts all three lists and the region's reply replaces them — an edit it
-//! refused visibly reverts instead of appearing to have stuck. Two deliberate
-//! divergences from the reference: it writes the incremental
-//! `estateexperiencedelta` estate message *as well*, behind a "this estate /
-//! all estates" confirmation, and neither the message nor the all-estates
-//! scope is in our protocol surface; and it also reads the reply's `default`
-//! key to pin the estate's default experience into the Key list as a
-//! non-removable row, which our decoded event does not carry.
+//! refused visibly reverts instead of appearing to have stuck.
+//!
+//! The reply may name a fourth thing beside the three arrays: the estate's
+//! **default experience** (`default`). As in the reference, it is pinned into
+//! the Key list whether or not the trusted array names it, its row offers no
+//! Remove, and neither the Allowed nor the Blocked picker offers it — the
+//! estate's own default is not something to allow or to block. A reply that
+//! omits the key leaves the last default standing rather than clearing it,
+//! because that is what `content.has("default")` means.
+//!
+//! One deliberate divergence from the reference remains: it writes the
+//! incremental `estateexperiencedelta` estate message *as well*, behind a "this
+//! estate / all estates" confirmation, and neither the message nor the
+//! all-estates scope is in our protocol surface.
 //!
 //! # One window per region
 //!
@@ -79,6 +86,16 @@
 //! `setregiondebug` toggles, the terrain `setregionterrain` fields) are shown as
 //! **permanently disabled** controls reflecting the grid's value, not as prose.
 //!
+//! # The windows this one opens
+//!
+//! The Region tab's **Manage Telehub…** opens [`crate::telehub`], the estate
+//! owner's view of the region's telehub and its spawn points. It is an
+//! estate-manager write button like the two Teleport Home ones beside it, and
+//! it is the only way into that window — as in the reference, where it lives on
+//! `panel_region_general.xml`. Unlike the reference, opening it does **not**
+//! hide this floater: that made sense for a singleton over the build tools, and
+//! hiding one of several keyed windows the person opened would not.
+//!
 //! Reference (Firestorm, read-only): `llfloaterregioninfo.cpp`,
 //! `panel_region_*.xml`; the `EstateOwnerMessage` `setregioninfo` /
 //! `estateaccessdelta` / `restart` methods.
@@ -92,9 +109,9 @@ use bevy::ui::InteractionDisabled;
 use sl_client_bevy::{
     AgentKey, Asset, AssetKey, AssetType, Command, EstateAccessDelta, EstateAccessKind,
     EstateCovenant, EstateFlags, EstateInfo, EstateInfoUpdate, ExperienceInfo, ExperienceKey,
-    GroupKey, LandArea, Maturity, OwnerKey, ProductType, RegionDebugUpdate, RegionFlags,
-    RegionIdentity, RegionInfoUpdate, RegionName, RegionTerrainUpdate, SlCommand, SlCurrentRegion,
-    SlEvent, SlRegionIdentity, SlRegionLimits, SlSessionEvent, TextureKey, Uuid,
+    GroupKey, LandArea, LandStatReportType, Maturity, OwnerKey, ProductType, RegionDebugUpdate,
+    RegionFlags, RegionIdentity, RegionInfoUpdate, RegionName, RegionTerrainUpdate, SlCommand,
+    SlCurrentRegion, SlEvent, SlRegionIdentity, SlRegionLimits, SlSessionEvent, TextureKey, Uuid,
 };
 use sl_viewer_notices::experience_profile::{OpenExperienceProfile, maturity_key};
 
@@ -108,6 +125,8 @@ use crate::land_environment::{
     AllowEnvironmentOverrideRequested, LandEnvironmentPlugin, LandEnvironmentSubject,
     LandPanelKind, spawn_land_environment_panel,
 };
+use crate::telehub::{OpenTelehub, TelehubPlugin};
+use crate::top_objects::{OpenTopObjects, TopObjectsPlugin};
 use crate::ui::{column, row};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
@@ -405,6 +424,14 @@ struct AboutRegionState {
     /// Whether the `RegionExperiences` GET has gone out for this window's
     /// region since it last became current.
     experiences_requested: bool,
+    /// The estate's default experience, from the reply's `default` key.
+    ///
+    /// Kept once read and never cleared by a reply that omits the key — the
+    /// reference's `mDefaultExperience` is assigned only under
+    /// `content.has("default")`. It is shown in the **Key** list whether or not
+    /// the trusted array names it, cannot be removed there, and is offered by
+    /// neither the Allowed nor the Blocked picker.
+    default_experience: Option<ExperienceKey>,
 }
 
 impl AboutRegionState {
@@ -430,16 +457,37 @@ impl AboutRegionState {
 
     /// Replace the three experience lists from a `RegionExperiences` reply,
     /// bumping every revision so all three views rebind.
+    ///
+    /// The estate's [`default_experience`](Self::default_experience) is
+    /// appended to the **Key** list if the reply's trusted array did not
+    /// already name it, which is what the reference does before handing the
+    /// list to its panel (`processResponse`: `trusted.append(mDefaultExperience)`).
+    /// It appends into a `std::set`, so the append is a no-op for a default the
+    /// array already carried — and it *does* already carry it after any write,
+    /// because the panel posts the list it is showing.
     fn set_experiences(
         &mut self,
         allowed: Vec<ExperienceKey>,
         blocked: Vec<ExperienceKey>,
-        trusted: Vec<ExperienceKey>,
+        mut trusted: Vec<ExperienceKey>,
     ) {
+        if let Some(default) = self.default_experience
+            && !trusted.contains(&default)
+        {
+            trusted.push(default);
+        }
         self.experiences = [trusted, allowed, blocked];
         for revision in &mut self.experience_revisions {
             *revision = revision.wrapping_add(1);
         }
+    }
+
+    /// Whether `id` is a row this window refuses to take off `list`: the
+    /// estate's default experience, in the **Key** list the reference pins it
+    /// into (`LLPanelExperienceListEditor::setStickyFunction`, set on the
+    /// trusted panel alone).
+    fn experience_is_sticky(&self, list: ExperienceList, id: ExperienceKey) -> bool {
+        list == ExperienceList::Trusted && self.default_experience == Some(id)
     }
 
     /// Add an experience to one list, answering whether it was added — a
@@ -460,7 +508,14 @@ impl AboutRegionState {
     }
 
     /// Drop an experience from one list, answering whether it was there.
+    ///
+    /// A [sticky](Self::experience_is_sticky) row is refused: the estate's
+    /// default experience is not something the estate can stop trusting, and
+    /// the region would put it straight back.
     fn remove_experience(&mut self, list: ExperienceList, id: ExperienceKey) -> bool {
+        if self.experience_is_sticky(list, id) {
+            return false;
+        }
         let index = list.index();
         let Some(ids) = self.experiences.get_mut(index) else {
             return false;
@@ -589,6 +644,9 @@ struct ExperienceRowData {
     rating: String,
     /// The experience the row stands for (for Remove / Profile).
     id: ExperienceKey,
+    /// Whether this row refuses Remove — the estate's default experience in the
+    /// Key list ([`AboutRegionState::experience_is_sticky`]).
+    sticky: bool,
 }
 
 /// The three estate experience lists' view models — one component, because the
@@ -1105,6 +1163,13 @@ enum AboutRegionAction {
     /// Open the experience picker to add to one of the estate's three
     /// experience lists.
     AddExperience(ExperienceList),
+    /// Open the Telehub window ([`crate::telehub`]) on this region.
+    ManageTelehub,
+    /// Open the Top Objects window ([`crate::top_objects`]) on the region's
+    /// top-colliders report.
+    TopColliders,
+    /// Open the Top Objects window on the region's top-scripts report.
+    TopScripts,
 }
 
 /// A marker on a terrain texture-swatch button carrying which detail slot it
@@ -1130,6 +1195,16 @@ impl Plugin for AboutRegionPlugin {
         // brings its systems.
         if !app.is_plugin_added::<LandEnvironmentPlugin>() {
             app.add_plugins(LandEnvironmentPlugin);
+        }
+        // The Region tab's Manage Telehub… button writes `OpenTelehub`, and a
+        // message nothing registered panics on the first write — so the window
+        // it opens comes with the button.
+        if !app.is_plugin_added::<TelehubPlugin>() {
+            app.add_plugins(TelehubPlugin);
+        }
+        // Same for the Debug tab's two report buttons and the window they open.
+        if !app.is_plugin_added::<TopObjectsPlugin>() {
+            app.add_plugins(TopObjectsPlugin);
         }
         app.add_message::<OpenAboutRegion>()
             .add_systems(
@@ -1399,6 +1474,14 @@ fn build_region_tab(commands: &mut Commands, panel: Entity) -> RegionHandles {
         7,
         true,
     );
+    spawn_action_button(
+        commands,
+        actions,
+        "about-region-manage-telehub",
+        AboutRegionAction::ManageTelehub,
+        8,
+        true,
+    );
     handles
 }
 
@@ -1434,6 +1517,27 @@ fn build_debug_tab(commands: &mut Commands, panel: Entity) -> DebugHandles {
         1,
     );
 
+    // The two report buttons, where the reference puts them — above the restart
+    // controls, since asking a region what is costing it the most is what one
+    // does *before* restarting it.
+    let reports = spawn_row(commands, panel);
+    spawn_action_button(
+        commands,
+        reports,
+        "about-region-top-colliders",
+        AboutRegionAction::TopColliders,
+        2,
+        true,
+    );
+    spawn_action_button(
+        commands,
+        reports,
+        "about-region-top-scripts",
+        AboutRegionAction::TopScripts,
+        3,
+        true,
+    );
+
     let restart_row = spawn_labeled_row(commands, panel, "about-region-restart-delay");
     handles.restart_field = Some(spawn_edit_field(
         commands,
@@ -1441,7 +1545,7 @@ fn build_debug_tab(commands: &mut Commands, panel: Entity) -> DebugHandles {
         "about-region-restart-field",
         TextInputKind::NonNegativeInteger,
         6.0,
-        2,
+        4,
         5,
     ));
     let actions = spawn_row(commands, panel);
@@ -1450,7 +1554,7 @@ fn build_debug_tab(commands: &mut Commands, panel: Entity) -> DebugHandles {
         actions,
         "about-region-restart",
         AboutRegionAction::Restart,
-        3,
+        5,
         true,
     );
     spawn_action_button(
@@ -1458,7 +1562,7 @@ fn build_debug_tab(commands: &mut Commands, panel: Entity) -> DebugHandles {
         actions,
         "about-region-cancel-restart",
         AboutRegionAction::CancelRestart,
-        4,
+        6,
         true,
     );
     handles
@@ -1824,7 +1928,11 @@ fn spawn_bounded_table(
 /// The region's own id where the grid sent one, and its handle otherwise (an
 /// OpenSim region can answer a handshake before its `RegionInfo2` block is
 /// known) — either way, two regions are two subjects.
-fn region_key(identity: &RegionIdentity) -> FloaterKey {
+///
+/// Shared with the windows this one opens *on its region*
+/// ([`crate::top_objects`]), so a child window is the same instance-per-region
+/// its opener is, keyed the same way.
+pub(crate) fn region_key(identity: &RegionIdentity) -> FloaterKey {
     if identity.region_id.is_nil() {
         FloaterKey::subject(&format!("handle/{}", identity.region_handle.get()))
     } else {
@@ -1974,11 +2082,21 @@ fn ingest_about_region_events(
                     allowed,
                     blocked,
                     trusted,
+                    default_experience,
                 } => {
                     // The reply is the whole of the estate's three lists,
                     // whether it answers the GET or a POST — so it replaces
                     // them, and an optimistic edge the region refused reverts
                     // here rather than standing.
+                    //
+                    // The default is remembered across a reply that does not
+                    // name one, exactly as the reference's `mDefaultExperience`
+                    // is: `processResponse` assigns it only under
+                    // `content.has("default")`, so an omission says the reply
+                    // did not mention the default, not that there is none.
+                    if let Some(id) = default_experience {
+                        state.default_experience = Some(*id);
+                    }
                     state.set_experiences(allowed.clone(), blocked.clone(), trusted.clone());
                 }
                 SlSessionEvent::ExperienceInfo(infos) => {
@@ -3022,6 +3140,7 @@ fn sync_experiences_view(
                             translator.get(maturity_key(info.maturity))
                         }),
                         id: *id,
+                        sticky: state.experience_is_sticky(list, *id),
                     }
                 })
                 .collect();
@@ -3074,8 +3193,15 @@ fn populate_experience_rows(
 
 /// Bind each pooled experience row to its window's resolved name and rating,
 /// and reveal that window's Remove buttons only when the agent may manage its
-/// estate. Profile stays offered either way — reading an experience's page is
-/// not an estate write.
+/// estate — and, within a manageable estate, only on rows that are not
+/// [sticky](AboutRegionState::experience_is_sticky). Profile stays offered
+/// either way — reading an experience's page is not an estate write.
+///
+/// The reference *greys* Remove for a sticky selection rather than hiding it
+/// (`LLPanelExperienceListEditor::checkButtonsEnabled`), because its Remove is
+/// one button for the whole list and has to stay put while the selection moves.
+/// Ours is a button per row, so hiding it is the same statement made in the
+/// place it is about: this row is not one you can take off the list.
 fn bind_experience_rows(
     windows: Query<(
         Entity,
@@ -3113,11 +3239,6 @@ fn bind_experience_rows(
                 data.map_or("", |row| row.rating.as_str()),
             );
         }
-        let want = if state.can_manage {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        };
         for (entity, button) in &row_buttons {
             if button.action != ExperienceRowAction::Remove {
                 continue;
@@ -3125,6 +3246,17 @@ fn bind_experience_rows(
             if host_floater(entity, &parents, &floaters) != Some(window) {
                 continue;
             }
+            let sticky = rows
+                .get(button.row)
+                .ok()
+                .and_then(|(row, _child_of, _cells)| row.index)
+                .and_then(|index| view.rows(button.list).get(index))
+                .is_some_and(|data| data.sticky);
+            let want = if state.can_manage && !sticky {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            };
             if let Ok(mut vis) = visibility.get_mut(entity)
                 && *vis != want
             {
@@ -3319,10 +3451,13 @@ fn on_about_region_action(
     parents: Query<&ChildOf>,
     floaters: Query<(Entity, &Floater)>,
     fields: Query<&EditableText>,
+    regions: Query<&SlRegionIdentity, With<SlCurrentRegion>>,
     mut sl_commands: MessageWriter<SlCommand>,
     mut pickers: MessageWriter<OpenAvatarPicker>,
     mut group_pickers: MessageWriter<OpenGroupPicker>,
     mut experience_pickers: MessageWriter<OpenExperiencePicker>,
+    mut telehubs: MessageWriter<OpenTelehub>,
+    mut reports: MessageWriter<OpenTopObjects>,
 ) {
     if press.button != PointerButton::Primary {
         return;
@@ -3447,6 +3582,35 @@ fn on_about_region_action(
                 requester: press.entity,
                 field: list.pick_tag(),
                 filter: list.filter(),
+                // The estate's own default is neither something to allow nor
+                // something to block, so the two pickers that could offer it do
+                // not (`refreshFromRegion` adds a `FilterMatching` for it to
+                // each). The Key picker keeps it: that list is where it lives.
+                excluded: match list {
+                    ExperienceList::Trusted => None,
+                    ExperienceList::Allowed | ExperienceList::Blocked => state.default_experience,
+                },
+            });
+        }
+        AboutRegionAction::ManageTelehub => {
+            telehubs.write(OpenTelehub);
+        }
+        // The report windows are keyed by region, like this one. The region is
+        // read from the *current* one rather than from `state`: both buttons
+        // are write buttons, so they are only reachable in a window about the
+        // region the agent is in — which is also the only region a report could
+        // be asked of.
+        AboutRegionAction::TopColliders | AboutRegionAction::TopScripts => {
+            let Some(identity) = regions.iter().next().map(|region| region.0.clone()) else {
+                return;
+            };
+            reports.write(OpenTopObjects {
+                report: if matches!(action, AboutRegionAction::TopColliders) {
+                    LandStatReportType::TopColliders
+                } else {
+                    LandStatReportType::TopScripts
+                },
+                region: Box::new(identity),
             });
         }
     }
@@ -4569,6 +4733,57 @@ mod tests {
         // The other two lists were never touched by any of it.
         assert!(state.experiences(ExperienceList::Trusted).is_empty());
         assert!(state.experiences(ExperienceList::Blocked).is_empty());
+    }
+
+    /// The estate's default experience is pinned into the Key list, refuses to
+    /// be removed there, and rides back out in the POST — the reference's
+    /// `processResponse` appends it to `trusted` and `sendUpdate` then posts
+    /// the list it is showing.
+    #[test]
+    fn the_estate_default_is_a_key_row_that_will_not_leave() {
+        let trusted = ExperienceKey::from(Uuid::from_u128(0xc));
+        let default = ExperienceKey::from(Uuid::from_u128(0xd));
+        let mut state = AboutRegionState {
+            default_experience: Some(default),
+            ..AboutRegionState::default()
+        };
+
+        // The reply's trusted array does not name it; the Key list still shows
+        // it, after the ids the grid did send.
+        state.set_experiences(Vec::new(), Vec::new(), vec![trusted]);
+        assert_eq!(
+            state.experiences(ExperienceList::Trusted),
+            [trusted, default]
+        );
+
+        assert!(state.experience_is_sticky(ExperienceList::Trusted, default));
+        assert!(
+            !state.remove_experience(ExperienceList::Trusted, default),
+            "the estate's default must not come off the Key list"
+        );
+        assert_eq!(
+            state.experiences(ExperienceList::Trusted),
+            [trusted, default]
+        );
+        // Only the Key list is sticky: the reference sets the sticky function
+        // on the trusted panel alone.
+        assert!(!state.experience_is_sticky(ExperienceList::Allowed, default));
+
+        // The write carries it, which is why the next reply's trusted array
+        // does name it — and the append must not then double it.
+        let (_allowed, _blocked, posted_trusted) = state.experiences_update();
+        assert_eq!(posted_trusted, vec![trusted, default]);
+        state.set_experiences(Vec::new(), Vec::new(), posted_trusted);
+        assert_eq!(
+            state.experiences(ExperienceList::Trusted),
+            [trusted, default]
+        );
+
+        // With no default known, the Key list is only what the grid sent.
+        let mut plain = AboutRegionState::default();
+        plain.set_experiences(Vec::new(), Vec::new(), vec![trusted]);
+        assert_eq!(plain.experiences(ExperienceList::Trusted), [trusted]);
+        assert!(plain.remove_experience(ExperienceList::Trusted, trusted));
     }
 
     /// **One window per region** (`viewer-keyed-floater-audit`), and the freeze

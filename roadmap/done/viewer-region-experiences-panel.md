@@ -165,11 +165,10 @@ floater's search tab too, which had the same row).
   confirmation. Neither that message nor an all-estates scope exists in our
   protocol surface; the cap POST alone is what this task specified, and it is
   what the reference's own `sendUpdate` path uses.
-- **No default experience.** The reference reads the reply's `default` key and
-  pins that experience into the Key list as a non-removable row. Our decoded
-  `Event::RegionExperiences` carries only the three arrays, so the row is
-  simply absent — the round-trip still preserves whatever the grid sent.
-  Filed as [[viewer-region-experiences-default-experience]].
+- ~~**No default experience.**~~ Landed 2026-09-12 as
+  [[viewer-region-experiences-default-experience]]: the reply's `default` key
+  is decoded, pinned into the Key list as a row with no Remove, and kept out of
+  the Allowed and Blocked pickers.
 - **No acquire / purchase.** As on the Owned tab, there is no purchase command
   in our protocol surface.
 

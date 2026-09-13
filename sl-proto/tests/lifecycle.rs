@@ -13341,6 +13341,81 @@ mod test {
         Ok(())
     }
 
+    /// A named-object return whose list is longer than a datagram holds goes out
+    /// as several messages — every id exactly once, each message carrying the
+    /// same parcel and return type. This is the region top-objects return, whose
+    /// list is as long as the report the simulator sent.
+    #[test]
+    fn a_long_object_return_splits_into_several_messages() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
+        drain(&mut session)?;
+
+        let ids: Vec<ObjectKey> = (0..90_u128)
+            .map(|index| ObjectKey::from(uuid::Uuid::from_u128(0x5000 + index)))
+            .collect();
+        // The whole region (`-1`), as the reference's top-objects return sends it.
+        session.return_parcel_objects(
+            ScopedParcelId::new(circuit, sl_proto::RegionLocalParcelId(-1)),
+            ParcelReturnType::NONE,
+            &[],
+            &ids,
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+
+        let returns: Vec<_> = sent
+            .iter()
+            .filter_map(|m| match m {
+                AnyMessage::ParcelReturnObjects(message) => Some(message),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            returns.len() > 1,
+            "90 ids should not have been sent as one message"
+        );
+        let mut carried: Vec<uuid::Uuid> = Vec::new();
+        for message in &returns {
+            assert_eq!(message.parcel_data.local_id, -1);
+            assert_eq!(message.parcel_data.return_type, ParcelReturnType::NONE.0);
+            carried.extend(message.task_i_ds.iter().map(|block| block.task_id));
+        }
+        assert_eq!(
+            carried,
+            ids.iter().map(ObjectKey::uuid).collect::<Vec<_>>(),
+            "every id, once, in order"
+        );
+        Ok(())
+    }
+
+    /// An **empty** id list is not an empty request: it means "every object of
+    /// this type", and still goes out as exactly one message.
+    #[test]
+    fn an_object_disable_with_no_ids_is_still_one_message() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
+        drain(&mut session)?;
+
+        session.disable_parcel_objects(
+            ScopedParcelId::new(circuit, sl_proto::RegionLocalParcelId(7)),
+            ParcelReturnType::OTHER,
+            &[],
+            &[],
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+
+        let disables: Vec<_> = sent
+            .iter()
+            .filter(|m| matches!(m, AnyMessage::ParcelDisableObjects(_)))
+            .collect();
+        assert_eq!(disables.len(), 1);
+        Ok(())
+    }
+
     #[test]
     fn parcel_dwell_reply_surfaces_event() -> Result<(), TestError> {
         let now = Instant::now();
@@ -18903,12 +18978,22 @@ mod test {
         Ok(())
     }
 
-    /// A `RegionExperiences` reply surfaces the region's allow/block/trust lists.
+    /// A `RegionExperiences` reply surfaces the region's allow/block/trust
+    /// lists, and the estate's `default` experience when the grid names one.
     #[test]
     fn region_experiences_surfaces_lists() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
         drain(&mut session)?;
+
+        let read = |session: &mut sl_proto::Session, xml: &str| -> Result<Event, TestError> {
+            let body = sl_proto::parse_llsd_xml(xml)?;
+            session.handle_caps_event("RegionExperiences", &body, now)?;
+            drain_events(session)
+                .into_iter()
+                .find(|event| matches!(event, Event::RegionExperiences { .. }))
+                .ok_or_else(|| "expected a RegionExperiences event".into())
+        };
 
         let xml = "<llsd><map>\
             <key>allowed</key><array>\
@@ -18916,24 +19001,39 @@ mod test {
             <key>blocked</key><array></array>\
             <key>trusted</key><array>\
             <uuid>33333333-3333-3333-3333-333333333333</uuid></array></map></llsd>";
-        let body = sl_proto::parse_llsd_xml(xml)?;
-        session.handle_caps_event("RegionExperiences", &body, now)?;
-
-        let event = drain_events(&mut session)
-            .into_iter()
-            .find(|event| matches!(event, Event::RegionExperiences { .. }))
-            .ok_or("expected a RegionExperiences event")?;
         let Event::RegionExperiences {
             allowed,
             blocked,
             trusted,
-        } = event
+            default_experience,
+        } = read(&mut session, xml)?
         else {
             return Err("expected RegionExperiences".into());
         };
         assert_eq!(allowed.len(), 1);
         assert!(blocked.is_empty());
         assert_eq!(trusted.len(), 1);
+        // A grid with no estate default omits the key.
+        assert_eq!(default_experience, None);
+
+        let xml = "<llsd><map>\
+            <key>allowed</key><array></array>\
+            <key>blocked</key><array></array>\
+            <key>trusted</key><array></array>\
+            <key>default</key>\
+            <uuid>44444444-4444-4444-4444-444444444444</uuid></map></llsd>";
+        let Event::RegionExperiences {
+            default_experience, ..
+        } = read(&mut session, xml)?
+        else {
+            return Err("expected RegionExperiences".into());
+        };
+        assert_eq!(
+            default_experience,
+            Some(sl_types::key::ExperienceKey::from(uuid::Uuid::parse_str(
+                "44444444-4444-4444-4444-444444444444"
+            )?))
+        );
         Ok(())
     }
 

@@ -46,6 +46,7 @@ pub(crate) use sl_viewer_world_objects::texture_anim;
 pub(crate) use sl_viewer_world_objects::textures;
 
 pub mod beacons;
+pub mod debug_beacons;
 pub mod diagnostics;
 pub mod entity_diagnostics;
 pub mod environment;

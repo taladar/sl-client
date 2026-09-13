@@ -2219,33 +2219,34 @@ impl SimCaps {
     }
 
     /// Serves the `RegionExperiences` surface. GET answers the region's
-    /// stored allowed / blocked / trusted lists; POST parses the
-    /// same-shaped body, replaces the lists wholesale
-    /// ([`SimSession::apply_region_experiences`]), and echoes the stored
-    /// triple. A malformed POST body → `400`; other methods → `405`.
+    /// stored allowed / blocked / trusted lists, plus the estate's `default`
+    /// experience when it has one; POST parses the same-shaped body, replaces
+    /// the three lists wholesale
+    /// ([`SimSession::apply_region_experiences`]), and echoes what is stored.
+    /// A malformed POST body → `400`; other methods → `405`.
+    ///
+    /// The POST's echo carries the default too, exactly as the GET does: the
+    /// reference re-reads the reply through the same `processResponse`, and a
+    /// reply that dropped the key would leave the panel's sticky row on the
+    /// last thing it read rather than on what the estate now says.
     fn dispatch_region_experiences(
         sim: &mut SimSession,
         request: &CapsRequest<'_>,
     ) -> CapsResponse {
         match request.method {
-            "GET" => {
-                let (allowed, blocked, trusted) = sim.experiences().region_lists();
-                CapsResponse::llsd_xml(build_region_experiences_response(
-                    &allowed, &blocked, &trusted,
-                ))
-            }
+            "GET" => CapsResponse::llsd_xml(build_region_experiences_response(
+                &sim.experiences().region_lists(),
+            )),
             "POST" => {
                 let Ok(body) = std::str::from_utf8(request.body) else {
                     return CapsResponse::bad_request();
                 };
-                let Ok((allowed, blocked, trusted)) = parse_region_experiences_request(body) else {
+                let Ok(posted) = parse_region_experiences_request(body) else {
                     return CapsResponse::bad_request();
                 };
-                let (allowed, blocked, trusted) =
-                    sim.apply_region_experiences(allowed, blocked, trusted);
-                CapsResponse::llsd_xml(build_region_experiences_response(
-                    &allowed, &blocked, &trusted,
-                ))
+                let stored =
+                    sim.apply_region_experiences(posted.allowed, posted.blocked, posted.trusted);
+                CapsResponse::llsd_xml(build_region_experiences_response(&stored))
             }
             _ => CapsResponse::method_not_allowed(),
         }

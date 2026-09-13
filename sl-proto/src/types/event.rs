@@ -1601,6 +1601,15 @@ pub enum Event {
         blocked: Vec<ExperienceKey>,
         /// The experiences the region trusts (privileged, key-grid scope).
         trusted: Vec<ExperienceKey>,
+        /// The estate's **default experience**, when the reply named one.
+        ///
+        /// The reference appends it to the trusted list and refuses to remove
+        /// it there (`LLPanelRegionExperiences::processResponse` →
+        /// `setStickyFunction`), and filters it out of the Allowed and Blocked
+        /// pickers. A grid without an estate default omits the key, which is
+        /// [`None`] here — the key's absence says nothing about the previous
+        /// reply, so a consumer keeps the default it last read.
+        default_experience: Option<ExperienceKey>,
     },
     /// The reply to an `ExperienceQuery` capability GET (the runtime
     /// [`Command::QueryParcelExperiences`](crate::Command::QueryParcelExperiences)):

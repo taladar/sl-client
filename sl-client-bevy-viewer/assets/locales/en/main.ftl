@@ -582,11 +582,14 @@ about-region-allow-join-divide = Allow land join / divide
 # Region tab: estate-manager actions.
 about-region-teleport-home-one = Teleport Home One Resident…
 about-region-teleport-home-all = Teleport Home All Residents…
+about-region-manage-telehub = Manage Telehub…
 
 # Debug tab.
 about-region-disable-scripts = Disable scripts
 about-region-disable-collisions = Disable collisions
 about-region-disable-physics = Disable physics
+about-region-top-colliders = Get Top Colliders…
+about-region-top-scripts = Get Top Scripts…
 about-region-restart-delay = Restart in (seconds):
 about-region-restart = Restart Region
 about-region-cancel-restart = Cancel Restart
@@ -676,6 +679,54 @@ about-region-experiences-add-trusted = Add Key Experience…
 about-region-experiences-add-allowed = Add Allowed Experience…
 about-region-experiences-add-blocked = Add Blocked Experience…
 about-region-experiences-profile = Profile
+
+## The Telehub window (viewer-region-telehub) — the region's telehub object and
+## its spawn points, reached from the Region tab's Manage Telehub… button.
+
+telehub-title = Telehub
+telehub-status-connected = Telehub connected to object { $object }
+telehub-status-not-connected = No telehub connected.
+telehub-status-loading = (asking the region about its telehub…)
+telehub-help-connected = To remove, click Disconnect.
+telehub-help-not-connected = Select an object and click Connect Telehub.
+telehub-connect = Connect Telehub
+telehub-disconnect = Disconnect
+telehub-spawn-points = Spawn points (positions, not objects):
+telehub-spawn-position = Position
+telehub-add-spawn = Add Spawn
+telehub-remove-spawn = Remove Spawn
+telehub-spawn-help = Select an object and click "Add Spawn" to record its position. You can then move or delete that object. Positions are relative to the telehub's centre. Select an entry in the list to mark it in the world.
+
+## The Top Objects window (viewer-region-top-objects) — the region's top
+## script users / top colliders, reached from the Debug tab's two buttons.
+
+top-objects-title-scripts = Top Scripts
+top-objects-title-colliders = Top Colliders
+top-objects-loading = Asking the region…
+top-objects-none = None found.
+top-objects-left-region = This report is about a region you have left.
+top-objects-summary-scripts = { $count } scripts taking a total of { $time }
+top-objects-summary-colliders = Top { $count } objects experiencing many potential collisions
+top-objects-col-score = Score
+top-objects-col-time = Time
+top-objects-col-name = Name
+top-objects-col-owner = Owner
+top-objects-col-location = Location
+top-objects-col-parcel = Parcel
+top-objects-col-date = Date
+top-objects-col-memory = Memory (KB)
+top-objects-col-urls = URLs
+top-objects-object-id = Object ID:
+top-objects-object-name = Object name:
+top-objects-owner = Owner:
+top-objects-parcel = Parcel:
+top-objects-filter = Filter
+top-objects-show-beacon = Show Beacon
+top-objects-return-selected = Return Selected
+top-objects-return-all = Return All
+top-objects-disable-selected = Disable Selected
+top-objects-disable-all = Disable All
+top-objects-refresh = Refresh
 
 ## The land-environment panel (viewer-region-environment-panel) — the Region /
 ## Estate floater's Environment tab and About Land's.

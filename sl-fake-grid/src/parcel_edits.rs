@@ -24,12 +24,14 @@
 use std::time::Instant;
 
 use sl_proto::{
-    ParcelInfo, ParcelStatus, RegionIdentity, RegionLocalParcelId, ServerEvent, SimSession,
+    LandStatExtended, LandStatItem, LandStatReportType, ParcelInfo, ParcelStatus, RegionIdentity,
+    RegionLocalParcelId, ServerEvent, SimSession,
 };
 use sl_types::key::{AgentKey, OwnerKey};
+use sl_types::map::RegionCoordinates;
 use sl_types::money::LindenAmount;
 
-use crate::world::{RegionChange, SceneFixtures, region_limits};
+use crate::world::{AvatarIdentity, RegionChange, SceneFixtures, region_limits};
 
 /// The sequence id of an unsolicited parcel push — what a simulator re-sends a
 /// changed parcel under, and what the arrival burst already uses.
@@ -42,8 +44,8 @@ const UNSOLICITED_SEQUENCE_ID: i32 = 0;
 /// on looking.
 pub(crate) fn answer_parcel_edit(
     world: &mut SceneFixtures,
-    identity: &RegionIdentity,
-    agent_id: AgentKey,
+    region: &RegionIdentity,
+    agent: &AvatarIdentity,
     sim: &mut SimSession,
     event: &ServerEvent,
     now: Instant,
@@ -91,7 +93,7 @@ pub(crate) fn answer_parcel_edit(
         } => {
             let owner = match (is_group_owned, group_id) {
                 (true, Some(group)) => OwnerKey::Group(*group),
-                _ => OwnerKey::Agent(agent_id),
+                _ => OwnerKey::Agent(agent.agent_id),
             };
             set_owner(world, *local_id, owner, ParcelStatus::Leased);
             return Some(push_parcel(world, *local_id, sim, now));
@@ -111,7 +113,7 @@ pub(crate) fn answer_parcel_edit(
             set_owner(
                 world,
                 *local_id,
-                OwnerKey::Agent(AgentKey::from(identity.sim_owner)),
+                OwnerKey::Agent(AgentKey::from(region.sim_owner)),
                 ParcelStatus::Abandoned,
             );
             return Some(push_parcel(world, *local_id, sim, now));
@@ -121,7 +123,7 @@ pub(crate) fn answer_parcel_edit(
             set_owner(
                 world,
                 *local_id,
-                OwnerKey::Agent(AgentKey::from(identity.sim_owner)),
+                OwnerKey::Agent(AgentKey::from(region.sim_owner)),
                 ParcelStatus::Leased,
             );
             return Some(push_parcel(world, *local_id, sim, now));
@@ -139,9 +141,7 @@ pub(crate) fn answer_parcel_edit(
             let doomed: Vec<sl_proto::RegionLocalObjectId> = world
                 .objects
                 .iter()
-                .filter(|object| {
-                    world.parcel_at_position(&object.motion.position) == Some(*local_id)
-                })
+                .filter(|object| on_scope(world, object, *local_id))
                 .filter(|object| {
                     task_ids.contains(&object.full_id)
                         || owner_ids
@@ -162,6 +162,31 @@ pub(crate) fn answer_parcel_edit(
                 tracing::warn!("killing a returned object failed: {error}");
             }
             return Some(changes);
+        }
+        // Stopping the named objects' scripts. A fake region runs none, so the
+        // whole of what a real grid does here is unobservable — but the request
+        // is a real one (the top-objects window's Disable), and an unanswered
+        // event is indistinguishable from a grid that does not understand it.
+        // Accepting it and leaving the objects where they are is the honest
+        // answer, and says so.
+        ServerEvent::DisableParcelObjects {
+            local_id,
+            task_ids,
+            owner_ids,
+            ..
+        } => {
+            let stilled = world
+                .objects
+                .iter()
+                .filter(|object| on_scope(world, object, *local_id))
+                .filter(|object| {
+                    task_ids.contains(&object.full_id) || owner_ids.contains(&object.owner_id)
+                })
+                .count();
+            tracing::debug!(
+                "a client disabled the scripts of {stilled} object(s); this region runs none"
+            );
+            return Some(Vec::new());
         }
         // "Show me what I would be returning": the simulator highlights the
         // objects in the viewer rather than changing anything.
@@ -217,28 +242,195 @@ pub(crate) fn answer_parcel_edit(
             }
             held.extend(entries.iter().copied());
         }
-        // The top-scripts / top-colliders report. A fake region runs no
-        // scripts and simulates no physics, so the honest answer is an empty
-        // report rather than no answer at all — a viewer that gets nothing
-        // waits out its own timeout and shows the same empty list.
+        // The top-scripts / top-colliders report, built from what the scene
+        // says its objects cost ([`ObjectCost`]). A fake region runs no scripts
+        // and simulates no physics, so a report can only be a scene's own
+        // statement — and a scene that states nothing is answered with an empty
+        // report rather than with no answer at all, since a viewer that gets
+        // nothing waits out its own timeout and shows the same empty list.
+        //
+        // Over the **event queue**, because that is where a region with one
+        // answers this (OpenSim's `SendLandStatReply` only falls back to the UDP
+        // packet when it has no queue, and the message is `UDPDeprecated` for
+        // the same reason). A grid that answered by packet would let a viewer
+        // that only understands the packet pass here and fail on every real
+        // grid.
         ServerEvent::RequestLandStat {
             report_type,
             request_flags,
-            ..
+            filter,
+            local_id,
         } => {
-            if let Err(error) = sim.send_land_stat_reply(*report_type, *request_flags, 0, &[], now)
-            {
-                tracing::warn!("answering a land stat request failed: {error}");
-            }
+            let rows = land_stat_rows(
+                world,
+                agent,
+                *report_type,
+                *request_flags,
+                filter,
+                *local_id,
+            );
+            let total = u32::try_from(rows.len()).unwrap_or(u32::MAX);
+            sim.enqueue_land_stat_reply(*report_type, *request_flags, total, &rows);
         }
         ServerEvent::RequestRegionInfo => {
-            if let Err(error) = sim.send_region_info(&region_limits(identity), now) {
+            if let Err(error) = sim.send_region_info(&region_limits(region), now) {
                 tracing::warn!("answering a region info request failed: {error}");
             }
         }
         _other => return None,
     }
     Some(Vec::new())
+}
+
+/// Whether an object is in scope for a return or a disable addressed to
+/// `local_id`.
+///
+/// A parcel's id means "standing on that parcel". **`-1` means the whole
+/// region**, and it is how the top-objects return names objects wherever they
+/// stand — the reference sends `LocalID = -1` with `RT_NONE` and an explicit
+/// task-id list, and OpenSim branches on exactly that
+/// (`LandManagementModule::ReturnObjectsInParcel`). A grid that only matched by
+/// parcel would accept that request and silently do nothing.
+fn on_scope(
+    world: &SceneFixtures,
+    object: &sl_proto::Object,
+    local_id: RegionLocalParcelId,
+) -> bool {
+    local_id == WHOLE_REGION || world.parcel_at_position(&object.motion.position) == Some(local_id)
+}
+
+/// The whole region, as the scope of a return or a disable.
+const WHOLE_REGION: RegionLocalParcelId = RegionLocalParcelId(-1);
+
+/// The most rows one report carries — OpenSim's own cap, and the reason a
+/// report is "top objects" rather than "every object".
+const MAX_REPORT_ROWS: usize = 100;
+
+/// The `RequestFlags` bit that scopes a report to one parcel
+/// (`STAT_FILTER_BY_PARCEL`).
+const FILTER_BY_PARCEL: u32 = 0x0000_0001;
+
+/// The `RequestFlags` bit that narrows a report to an owner name
+/// (`STAT_FILTER_BY_OWNER`).
+const FILTER_BY_OWNER: u32 = 0x0000_0002;
+
+/// The `RequestFlags` bit that narrows a report to an object name
+/// (`STAT_FILTER_BY_OBJECT`).
+const FILTER_BY_OBJECT: u32 = 0x0000_0004;
+
+/// The `RequestFlags` bit that narrows a report to a parcel name
+/// (`STAT_FILTER_BY_PARCEL_NAME`).
+const FILTER_BY_PARCEL_NAME: u32 = 0x0000_0008;
+
+/// The rows of a top-objects report: every object the scene says costs
+/// something in the unit this report asks for, narrowed by the request's scope
+/// and filter, highest first, capped at [`MAX_REPORT_ROWS`].
+///
+/// The filter is the region's work, not the viewer's — the viewer sends a string
+/// and a flag saying what it applies to, and gets back a report already
+/// narrowed. Matching is a case-insensitive `contains`, as OpenSim's own
+/// handler does it.
+fn land_stat_rows(
+    world: &SceneFixtures,
+    agent: &AvatarIdentity,
+    report_type: LandStatReportType,
+    request_flags: u32,
+    filter: &str,
+    parcel_local_id: RegionLocalParcelId,
+) -> Vec<LandStatItem> {
+    let needle = filter.trim().to_lowercase();
+    let has_filter = !needle.is_empty() && request_flags & FILTER_BY_ANY_NAME != 0;
+    let mut rows: Vec<LandStatItem> = world
+        .all_objects()
+        .into_iter()
+        .filter_map(|object| {
+            let cost = world.object_costs.get(&object.local_id)?;
+            let score = cost.score_for(report_type)?;
+            let parcel = world.parcel_at_position(&object.motion.position);
+            // `ParcelLocalID` scopes the report; the reference sends `0` for
+            // the whole region, and OpenSim only honours the scope when the
+            // by-parcel flag is set.
+            if (parcel_local_id.0 != 0 || request_flags & FILTER_BY_PARCEL != 0)
+                && parcel != Some(parcel_local_id)
+            {
+                return None;
+            }
+            let properties = world.properties_of(object.local_id);
+            let task_name = properties
+                .as_ref()
+                .map_or_else(String::new, |properties| properties.name.clone());
+            let owner_name = owner_name_of(world, agent, object.owner_id);
+            let parcel_name = parcel
+                .and_then(|local_id| world.parcel_by_local_id(local_id))
+                .map_or_else(String::new, |parcel| parcel.name.clone());
+            if has_filter {
+                let subject = if request_flags & FILTER_BY_OWNER != 0 {
+                    &owner_name
+                } else if request_flags & FILTER_BY_OBJECT != 0 {
+                    &task_name
+                } else {
+                    &parcel_name
+                };
+                if !subject.to_lowercase().contains(&needle) {
+                    return None;
+                }
+            }
+            Some(LandStatItem {
+                task_local_id: object.local_id,
+                task_id: object.full_id,
+                location: RegionCoordinates::new(
+                    object.motion.position.x,
+                    object.motion.position.y,
+                    object.motion.position.z,
+                ),
+                score,
+                task_name,
+                owner_name,
+                // The event-queue form of the reply carries this half, and the
+                // viewer has four columns for it.
+                extended: Some(LandStatExtended {
+                    mono_score: 0.0,
+                    owner_id: Some(AgentKey::from(object.owner_id)),
+                    parcel_name,
+                    public_urls: cost.public_urls,
+                    script_size_bytes: cost.script_memory_bytes,
+                    timestamp: properties.map_or(0, |properties| {
+                        u32::try_from(properties.creation_date).unwrap_or(u32::MAX)
+                    }),
+                }),
+            })
+        })
+        .collect();
+    // Highest first, as the report is defined: "top" objects.
+    rows.sort_by(|left, right| {
+        right
+            .score
+            .raw()
+            .partial_cmp(&left.score.raw())
+            .unwrap_or(core::cmp::Ordering::Equal)
+    });
+    rows.truncate(MAX_REPORT_ROWS);
+    rows
+}
+
+/// Any of the three name-filter bits.
+const FILTER_BY_ANY_NAME: u32 = FILTER_BY_OWNER | FILTER_BY_OBJECT | FILTER_BY_PARCEL_NAME;
+
+/// The legacy name of an object's owner. The arriving agent is the only account
+/// a fake grid knows by name; anything else is named by the scene's NPCs, and an
+/// owner that is neither reads as the empty string a report carries for an owner
+/// the region cannot resolve.
+fn owner_name_of(world: &SceneFixtures, agent: &AvatarIdentity, owner_id: uuid::Uuid) -> String {
+    if owner_id == agent.agent_id.uuid() {
+        return format!("{} {}", agent.first_name, agent.last_name);
+    }
+    world
+        .npcs
+        .iter()
+        .find(|npc| npc.identity.agent_id.uuid() == owner_id)
+        .map_or_else(String::new, |npc| {
+            format!("{} {}", npc.identity.first_name, npc.identity.last_name)
+        })
 }
 
 /// Sets a parcel's owner and ownership status, and takes it off the market:

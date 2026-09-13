@@ -155,8 +155,8 @@ use sl_wire::messages::{
 use sl_wire::{
     AnyMessage, CircuitCode, ControlFlags, EventQueueEvent, ExperienceEnvironmentPush,
     ExperienceEvent, ExperienceInfo, ExperiencePermission, ExperienceUpdate, GlobalCoordinates,
-    Llsd, MessageId, PacketFlags, Permissions, Permissions5, Reader, RegionHandle,
-    RegionLocalObjectId, RegionLocalParcelId, SequenceNumber, WireError, Writer,
+    Llsd, MessageId, PacketFlags, Permissions, Permissions5, Reader, RegionExperienceLists,
+    RegionHandle, RegionLocalObjectId, RegionLocalParcelId, SequenceNumber, WireError, Writer,
     build_event_queue_response, encode_datagram, parse_datagram, zero_decode,
 };
 use uuid::Uuid;
@@ -179,10 +179,10 @@ use crate::session::{
     chatterbox_invitation_to_llsd, chatterbox_session_start_reply_to_llsd,
     crossed_region_to_caps_llsd, display_name_update_to_llsd, enable_simulator_to_caps_llsd,
     establish_agent_communication_to_llsd, full_update_block, instant_message,
-    nav_mesh_status_to_llsd, open_region_info_to_llsd, parcel_properties_to_llsd,
-    parcel_properties_to_wire, region_handshake_message, required_voice_version_to_llsd,
-    set_display_name_reply_to_llsd, shape_from_object_shape_block, sim_console_response_to_llsd,
-    teleport_finish_to_llsd, unpack_uuids, windlight_refresh_to_llsd,
+    land_stat_reply_to_caps_llsd, nav_mesh_status_to_llsd, open_region_info_to_llsd,
+    parcel_properties_to_llsd, parcel_properties_to_wire, region_handshake_message,
+    required_voice_version_to_llsd, set_display_name_reply_to_llsd, shape_from_object_shape_block,
+    sim_console_response_to_llsd, teleport_finish_to_llsd, unpack_uuids, windlight_refresh_to_llsd,
 };
 use crate::sim_experiences::SimExperiences;
 use crate::sim_inventory::{SimInventoryError, SimInventoryTree};
@@ -4414,14 +4414,15 @@ impl SimSession {
 
     /// Replaces the region's experience lists wholesale (the
     /// `RegionExperiences` POST) and surfaces
-    /// [`ServerEvent::RegionExperiencesSet`]. Returns the stored triple for
-    /// the reply's echo.
+    /// [`ServerEvent::RegionExperiencesSet`]. Returns the stored lists for
+    /// the reply's echo — including the estate's default experience, which the
+    /// POST does not carry and therefore does not change.
     pub(crate) fn apply_region_experiences(
         &mut self,
         allowed: Vec<ExperienceKey>,
         blocked: Vec<ExperienceKey>,
         trusted: Vec<ExperienceKey>,
-    ) -> (Vec<ExperienceKey>, Vec<ExperienceKey>, Vec<ExperienceKey>) {
+    ) -> RegionExperienceLists {
         let stored =
             self.experiences
                 .apply_region_lists(allowed.clone(), blocked.clone(), trusted.clone());
@@ -5412,7 +5413,7 @@ impl SimSession {
                     location_x: item.location.x(),
                     location_y: item.location.y(),
                     location_z: item.location.z(),
-                    score: item.score,
+                    score: item.score.raw(),
                     task_name: with_nul(&item.task_name),
                     owner_name: with_nul(&item.owner_name),
                 })
@@ -9657,6 +9658,28 @@ impl SimSession {
         self.enqueue_caps_event(
             "AgentStateUpdate",
             agent_state_update_to_llsd(can_modify_navmesh),
+        );
+    }
+
+    /// Enqueues a CAPS `LandStatReply`: the region's top-scripts / top-colliders
+    /// report, answering a `LandStatRequest`.
+    ///
+    /// **This is the form a real simulator answers with.** The UDP
+    /// [`send_land_stat_reply`](Self::send_land_stat_reply) is the fallback for a
+    /// region with no event queue (the reference's own branch, and why the
+    /// message is marked `UDPDeprecated`); only this form carries the
+    /// `DataExtended` half of each row
+    /// ([`LandStatExtended`](crate::LandStatExtended)).
+    pub fn enqueue_land_stat_reply(
+        &mut self,
+        report_type: LandStatReportType,
+        request_flags: u32,
+        total_object_count: u32,
+        items: &[LandStatItem],
+    ) {
+        self.enqueue_caps_event(
+            "LandStatReply",
+            land_stat_reply_to_caps_llsd(report_type, request_flags, total_object_count, items),
         );
     }
 

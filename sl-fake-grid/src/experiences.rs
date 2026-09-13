@@ -81,6 +81,13 @@ const OFFSET_ARENA: u128 = 3;
 /// fixture resident and blocked by the agent.
 const OFFSET_WORKSHOP: u128 = 4;
 
+/// The catalogue offset of the estate's **default experience** — the one the
+/// `RegionExperiences` reply names in its `default` key, which the viewer must
+/// show in the Key list without offering to remove it. Land-scoped and
+/// unprivileged, so its exclusion from the Allowed and Blocked pickers is
+/// visible: without the exclusion it is exactly what the Allowed picker offers.
+const OFFSET_ESTATE_DEFAULT: u128 = 5;
+
 /// The catalogue offset the numbered trials start one past.
 const OFFSET_FILLER_BASE: u128 = 0x100;
 
@@ -119,10 +126,10 @@ fn owner_identity() -> AvatarIdentity {
     )
 }
 
-/// The catalogue's records: four hand-written ones covering the corners of the
-/// record (grid-wide, privileged, group-owned, private) and a run of
-/// identical-but-numbered trials, one longer than a page, that make a search
-/// page (see the module docs).
+/// The catalogue's records: five hand-written ones covering the corners of the
+/// record (grid-wide, privileged, group-owned, private, and the estate's
+/// default) and a run of identical-but-numbered trials, one longer than a page,
+/// that make a search page (see the module docs).
 ///
 /// The private one is here to be *not* found: `SimExperiences::find` hides
 /// private records from the search surface as the grid does, and a fixture with
@@ -172,6 +179,16 @@ pub fn catalogue() -> Vec<ExperienceInfo> {
             description: "Private and suspended: search must not list this one.".to_owned(),
             properties: ExperienceProperties(PROPERTY_PRIVATE | PROPERTY_SUSPENDED),
             quota: 0,
+            maturity: MATURITY_PG,
+            ..ExperienceInfo::default()
+        },
+        ExperienceInfo {
+            public_id: experience_key(OFFSET_ESTATE_DEFAULT),
+            name: "Fake Grid Estate Default".to_owned(),
+            owner: agent_owner,
+            description: "The estate's default experience: shown, never removed.".to_owned(),
+            properties: ExperienceProperties(0),
+            quota: 128,
             maturity: MATURITY_PG,
             ..ExperienceInfo::default()
         },
@@ -252,6 +269,13 @@ pub fn seed_catalogue(sim: &mut SimSession) {
         vec![filler_key(2)],
         vec![experience_key(OFFSET_WEATHER)],
     );
+    // The estate's default experience — the reply's fourth key, and a row the
+    // panel must show in the Key list *and* refuse to remove. Seeded as a
+    // fourth id, in none of the three lists, so the sticky row can only have
+    // come from `default`: a default that was also in `trusted` would show up
+    // either way and prove nothing.
+    sim.experiences_mut()
+        .set_region_default_experience(Some(experience_key(OFFSET_ESTATE_DEFAULT)));
     // A group's experience list is a statement about the group, not about
     // whoever is logged in, so it belongs on this side of the split.
     sim.experiences_mut().set_group(
@@ -498,6 +522,43 @@ mod tests {
                 .infos
                 .iter()
                 .any(|info| info.public_id == workshop)
+        );
+    }
+
+    /// The estate's default experience is seeded, resolvable by id, and in
+    /// **none** of the three region lists — so a Key row carrying it can only
+    /// have come from the reply's `default` key, and the Allowed picker's
+    /// exclusion of it has something to exclude (it is land-scoped, which is
+    /// exactly what that picker otherwise offers).
+    #[test]
+    fn the_estate_default_is_a_fourth_id_the_lists_do_not_name() {
+        let agent = test_agent();
+        let sim = seeded_session(&agent);
+        let store = sim.experiences();
+        let lists = store.region_lists();
+        let default = experience_key(OFFSET_ESTATE_DEFAULT);
+        assert_eq!(lists.default_experience, Some(default));
+        for (name, ids) in [
+            ("allowed", &lists.allowed),
+            ("blocked", &lists.blocked),
+            ("trusted", &lists.trusted),
+        ] {
+            assert!(
+                !ids.contains(&default),
+                "the estate default is also in the {name} list, so a sticky row proves nothing"
+            );
+        }
+        let record = store.infos(&[default]);
+        assert_eq!(
+            record.first().map(|info| info.missing),
+            Some(false),
+            "the estate default must resolve, or its Key row shows a bare id"
+        );
+        assert!(
+            record
+                .first()
+                .is_some_and(|info| !info.properties.is_grid()),
+            "the estate default must be land-scoped for the Allowed picker's exclusion to bite"
         );
     }
 

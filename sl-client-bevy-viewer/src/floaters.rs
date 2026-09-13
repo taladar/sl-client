@@ -480,6 +480,17 @@ pub(crate) const FLOATERS: &[FloaterElement] = &[
         ),
     },
     FloaterElement {
+        id: "telehub",
+        summary: "Telehub: the region's telehub object and its spawn points — Connect / \
+                  Disconnect over the current selection, and the spawn-point list with Add / \
+                  Remove Spawn.",
+        spec: crate::telehub::telehub_floater_spec,
+        content: FloaterContent::Stub(
+            "The status and help lines, the Connect / Disconnect row, the spawn-point list and \
+             its Add / Remove Spawn row.",
+        ),
+    },
+    FloaterElement {
         id: "texture-picker",
         summary: "Pick: Texture — the inventory swatch grid, the quick-choice row and the \
                   OK / Cancel reply protocol every texture swatch is written against. One \
@@ -487,6 +498,27 @@ pub(crate) const FLOATERS: &[FloaterElement] = &[
         spec: crate::ui_texture_picker::texture_picker_floater_spec,
         content: FloaterContent::Stub(
             "The inventory swatch grid, the quick-choice row and the OK / Cancel reply row.",
+        ),
+    },
+    FloaterElement {
+        id: "top-colliders",
+        summary: "Top Colliders: the objects a region spends the most collisions on — the \
+                  sortable report, the three region-side filters, and the return / disable / \
+                  beacon actions over what it lists. One window per region.",
+        spec: crate::top_objects::top_colliders_floater_spec,
+        content: FloaterContent::Stub(
+            "The summary line, the score / name / owner / location / parcel / date list, the \
+             selected object's id, the three filter rows and the action row.",
+        ),
+    },
+    FloaterElement {
+        id: "top-scripts",
+        summary: "Top Scripts: the objects a region spends the most script time on — the same \
+                  report with the script memory and public-URL columns. One window per region.",
+        spec: crate::top_objects::top_scripts_floater_spec,
+        content: FloaterContent::Stub(
+            "The summary line, the time / name / owner / location / parcel / date / memory / \
+             URLs list, the selected object's id, the three filter rows and the action row.",
         ),
     },
     FloaterElement {

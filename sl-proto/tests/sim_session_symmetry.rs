@@ -33,13 +33,15 @@ mod test {
         CreateGroupParams, Event, FolderType, FriendKey, GridCoordinates, GroupKey, GroupNoticeKey,
         GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, GroupRoleUpdateType,
         InterestsUpdate, InventoryCallbackId, InventoryFolderKey, InventoryKey, InventoryType,
-        LindenAmount, LoginParams, LureId, Maturity, MoneyTransactionType, MuteFlags, MuteType,
-        NewInventoryItem, ObjectExtraParams, ObjectKey, PickKey, PickUpdate, PrimShapeParams,
-        ProductType, ProfileUpdate, QueryId, RegionHandle, RegionIdentity, RegionLocalObjectId,
+        LandStatExtended, LandStatItem, LandStatReportType, LandStatScore, LindenAmount,
+        LoginParams, LureId, Maturity, MoneyTransactionType, MuteFlags, MuteType, NewInventoryItem,
+        ObjectExtraParams, ObjectKey, PickKey, PickUpdate, PrimShapeParams, ProductType,
+        ProfileUpdate, QueryId, RegionHandle, RegionIdentity, RegionLocalObjectId,
         RegionTerrainComposition, RezAttachment, ScopedObjectId, ServerEvent, Session, SimSession,
         TextureKey, Wearable, WearableType, group_powers, parse_event_queue_response,
     };
     use sl_types::lsl::{Rotation, Vector};
+    use sl_types::map::RegionCoordinates;
     use sl_wire::{
         AnyMessage, CircuitCode, LoginRequest, LoginResponse, LoginSuccess, MessageId, PacketFlags,
         Reader, StartLocation, Writer, parse_datagram, zero_decode,
@@ -1262,6 +1264,85 @@ mod test {
         deliver_caps(&mut client, &mut sim, now)?;
         let members: Vec<AgentKey> = client.session_voice_members(kind).collect();
         assert!(members.is_empty(), "the LEAVE update removed the peer");
+        Ok(())
+    }
+
+    /// The top-objects report as a region with an event queue answers it — the
+    /// path every real simulator takes, and the only one that carries the
+    /// `DataExtended` half of a row.
+    #[test]
+    fn land_stat_reply_reaches_client_via_caps() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        let task = ObjectKey::from(uuid::Uuid::from_u128(0x70B_5C0E));
+        let owner = AgentKey::from(uuid::Uuid::from_u128(0x0FFE));
+        let sent = LandStatItem {
+            task_local_id: RegionLocalObjectId(4_294_967_000),
+            task_id: task,
+            location: RegionCoordinates::new(128.0, 64.5, 25.0),
+            score: LandStatScore::ScriptTime(Duration::from_micros(850)),
+            task_name: "busy script".to_owned(),
+            owner_name: "Test Resident".to_owned(),
+            extended: Some(LandStatExtended {
+                mono_score: 0.25,
+                owner_id: Some(owner),
+                parcel_name: "Sandbox".to_owned(),
+                public_urls: 2,
+                script_size_bytes: 4096.0,
+                timestamp: 1_700_000_000,
+            }),
+        };
+
+        sim.enqueue_land_stat_reply(
+            LandStatReportType::TopScripts,
+            4,
+            7,
+            std::slice::from_ref(&sent),
+        );
+        let events = deliver_caps(&mut client, &mut sim, now)?;
+
+        let (report_type, request_flags, total, items) = events
+            .into_iter()
+            .find_map(|event| match event {
+                Event::LandStatReply {
+                    report_type,
+                    request_flags,
+                    total_object_count,
+                    items,
+                } => Some((report_type, request_flags, total_object_count, items)),
+                _ => None,
+            })
+            .ok_or("expected a LandStatReply client event")?;
+        assert_eq!(report_type, LandStatReportType::TopScripts);
+        assert_eq!(request_flags, 4);
+        assert_eq!(total, 7);
+        assert_eq!(items, vec![sent], "every field survives the round trip");
+        Ok(())
+    }
+
+    /// A report of no rows carries neither row array — and still reaches the
+    /// client as a report, which is what makes an empty answer different from
+    /// no answer at all.
+    #[test]
+    fn an_empty_land_stat_reply_is_still_a_reply() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+
+        sim.enqueue_land_stat_reply(LandStatReportType::TopColliders, 0, 0, &[]);
+        let events = deliver_caps(&mut client, &mut sim, now)?;
+
+        let items = events
+            .into_iter()
+            .find_map(|event| match event {
+                Event::LandStatReply {
+                    report_type: LandStatReportType::TopColliders,
+                    items,
+                    ..
+                } => Some(items),
+                _ => None,
+            })
+            .ok_or("expected a LandStatReply client event")?;
+        assert!(items.is_empty());
         Ok(())
     }
 }

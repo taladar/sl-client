@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use sl_types::key::ExperienceKey;
 use sl_wire::{
     ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceSearchPage,
-    ExperienceUpdate, PROPERTY_INVALID, SEARCH_PAGE_SIZE,
+    ExperienceUpdate, PROPERTY_INVALID, RegionExperienceLists, SEARCH_PAGE_SIZE,
 };
 use uuid::Uuid;
 
@@ -53,6 +53,10 @@ pub struct SimExperiences {
     region_blocked: Vec<ExperienceKey>,
     /// The region's trusted experiences (`RegionExperiences`).
     region_trusted: Vec<ExperienceKey>,
+    /// The estate's default experience (`RegionExperiences`' `default` key),
+    /// when it has one. Not part of the POST — see
+    /// [`set_region_default_experience`](Self::set_region_default_experience).
+    region_default: Option<ExperienceKey>,
     /// Which experiences each parcel admits (`ExperienceQuery`), keyed by the
     /// region-local parcel id. A parcel with **no** entry admits everything —
     /// see [`parcel_admits`](Self::parcel_admits).
@@ -112,6 +116,18 @@ impl SimExperiences {
         self.region_allowed = allowed;
         self.region_blocked = blocked;
         self.region_trusted = trusted;
+    }
+
+    /// Declares the estate's **default experience** — the `default` key the
+    /// `RegionExperiences` GET may carry beside the three arrays.
+    ///
+    /// Its own setter rather than a fourth argument to
+    /// [`set_region_lists`](Self::set_region_lists), because it is not part of
+    /// the same statement: the three lists are what the estate's managers
+    /// edited and what the POST replaces wholesale, while the default is an
+    /// estate property the viewer may only read.
+    pub const fn set_region_default_experience(&mut self, id: Option<ExperienceKey>) {
+        self.region_default = id;
     }
 
     /// Declares which experiences the parcel `parcel_id` admits
@@ -278,15 +294,16 @@ impl SimExperiences {
         self.creator.contains(&id)
     }
 
-    /// The region's `(allowed, blocked, trusted)` lists — the
-    /// `RegionExperiences` reply payload.
+    /// The region's allowed / blocked / trusted lists and its default
+    /// experience — the `RegionExperiences` reply payload.
     #[must_use]
-    pub fn region_lists(&self) -> (Vec<ExperienceKey>, Vec<ExperienceKey>, Vec<ExperienceKey>) {
-        (
-            self.region_allowed.clone(),
-            self.region_blocked.clone(),
-            self.region_trusted.clone(),
-        )
+    pub fn region_lists(&self) -> RegionExperienceLists {
+        RegionExperienceLists {
+            allowed: self.region_allowed.clone(),
+            blocked: self.region_blocked.clone(),
+            trusted: self.region_trusted.clone(),
+            default_experience: self.region_default,
+        }
     }
 
     /// Applies one `ExperiencePreferences` mutation: `Allow` / `Block` move
@@ -340,14 +357,19 @@ impl SimExperiences {
     }
 
     /// Replaces the region's allowed / blocked / trusted lists wholesale —
-    /// the `RegionExperiences` POST semantics. Returns the stored triple
+    /// the `RegionExperiences` POST semantics. Returns the stored lists
     /// for the reply's echo.
+    ///
+    /// The estate's default experience is **not** touched: the POST body has no
+    /// `default` key, and the id does travel back inside `trusted` (the
+    /// reference's panel appends it there before posting), so a POST that
+    /// replaced the default from its body would clear it on every estate edit.
     pub(crate) fn apply_region_lists(
         &mut self,
         allowed: Vec<ExperienceKey>,
         blocked: Vec<ExperienceKey>,
         trusted: Vec<ExperienceKey>,
-    ) -> (Vec<ExperienceKey>, Vec<ExperienceKey>, Vec<ExperienceKey>) {
+    ) -> RegionExperienceLists {
         self.region_allowed = allowed;
         self.region_blocked = blocked;
         self.region_trusted = trusted;
@@ -559,14 +581,24 @@ mod tests {
         );
     }
 
-    /// The region-list replacement is wholesale and echoes the stored
-    /// triple.
+    /// The region-list replacement is wholesale and echoes the stored lists.
+    /// The estate's default experience is not part of the POST, so it survives
+    /// the replacement and rides out on every echo.
     #[test]
     fn apply_region_lists_replaces_wholesale() {
         let mut store = SimExperiences::default();
         store.set_region_lists(vec![key(1)], vec![key(2)], vec![key(3)]);
+        store.set_region_default_experience(Some(key(9)));
         let echoed = store.apply_region_lists(vec![key(4)], vec![], vec![key(5)]);
-        assert_eq!(echoed, (vec![key(4)], vec![], vec![key(5)]));
+        assert_eq!(
+            echoed,
+            RegionExperienceLists {
+                allowed: vec![key(4)],
+                blocked: vec![],
+                trusted: vec![key(5)],
+                default_experience: Some(key(9)),
+            }
+        );
         assert_eq!(store.region_lists(), echoed);
     }
 }

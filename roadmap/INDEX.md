@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 313 |
+| ready | 310 |
 | blocked | 41 |
 | in-progress | 22 |
 | bugs | 38 |
-| done | 1114 |
+| done | 1118 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1670** |
+| **total** | **1671** |
 
 ## ideas (100)
 
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (313)
+## ready (310)
 
 ### protocol
 
@@ -788,18 +788,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Eight ported notifications for a refused entry, and nothing raises one
 - [`viewer-region-estate-object-return`](ready/viewer-region-estate-object-return.md)
   — Region Debug tab — estate-wide object return by resident
-- [`viewer-region-experiences-default-experience`](ready/viewer-region-experiences-default-experience.md)
-  — RegionExperiences — the estate's default experience
 - [`viewer-region-restart-schedule`](ready/viewer-region-restart-schedule.md) —
   Region restart schedule + restart countdown (blocked by
   `viewer-region-options-general` (done))
 - [`viewer-region-script-count-monitor`](ready/viewer-region-script-count-monitor.md)
   — Announce region script-count changes to chat
-- [`viewer-region-telehub`](ready/viewer-region-telehub.md) — Telehub management
-  floater
-- [`viewer-region-top-objects`](ready/viewer-region-top-objects.md) — Top
-  objects — top scripts / top colliders (blocked by `viewer-ui-widget-scaffold`
-  (done), `viewer-ui-virtualized-list` (done))
 - [`viewer-region-tracker`](ready/viewer-region-tracker.md) — Region tracker —
   watch regions, notify on status (blocked by `viewer-ui-widget-scaffold`
   (done), `viewer-ui-notification-host` (done))
@@ -1256,7 +1249,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1114)
+## done (1118)
 
 ### protocol
 
@@ -2620,6 +2613,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-region-estate-group-picker`](done/viewer-region-estate-group-picker.md)
   — Group picker for the Region/Estate Access → Allowed Groups list
+- [`viewer-region-experiences-default-experience`](done/viewer-region-experiences-default-experience.md)
+  — RegionExperiences — the estate's default experience
 - [`viewer-region-experiences-panel`](done/viewer-region-experiences-panel.md) —
   Region / Estate floater — Experiences tab
 - [`viewer-region-name-connecting-after-crossing`](done/viewer-region-name-connecting-after-crossing.md)
@@ -2631,6 +2626,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-region-options-general`](done/viewer-region-options-general.md) —
   Region / Estate floater — region (general) tab (blocked by
   `viewer-region-options-debug` (done))
+- [`viewer-region-telehub`](done/viewer-region-telehub.md) — Telehub management
+  floater
+- [`viewer-region-top-objects`](done/viewer-region-top-objects.md) — Top objects
+  — top scripts / top colliders
 - [`viewer-remote-parcel-id-uncorrelated`](done/viewer-remote-parcel-id-uncorrelated.md)
   — A resolved parcel id names no question, so two askers cannot be told apart
 - [`viewer-remove-attachment-message-is-a-no-op`](done/viewer-remove-attachment-message-is-a-no-op.md)
@@ -3697,6 +3696,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`server-fake-grid-agent-experiences`](done/server-fake-grid-agent-experiences.md)
   — Fake grid — the agent's own five experience lists
+- [`server-fake-grid-top-objects-report`](done/server-fake-grid-top-objects-report.md)
+  — Fake grid — a top-objects report with rows in it, and a return that finds
+  them
 
 ## deferred (26)
 

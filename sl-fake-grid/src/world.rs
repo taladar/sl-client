@@ -16,18 +16,18 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::estate::EstateFixture;
 use crate::fixtures::{NpcAppearance, NpcFixture};
 use crate::terrain::TerrainFixture;
 use sl_proto::{
     AnimationKey, AssetKey, AssetSource as _, AssetType, GlobalCoordinates, InventoryItem,
-    InventoryType, Object, ObjectExtraParams, ObjectMotion, ObjectPlayingAnimation,
-    ObjectProperties, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelDetails,
-    ParcelInfo, ParcelRequestResult, ParcelStatus, PrimShape, PrimShapeParams, RegionIdentity,
-    RegionLocalObjectId, RegionLocalParcelId, RegionTerrainComposition, SaleType, ServerEvent,
-    SimSession, TaskInventoryItem, TerrainLayerType, TransactionId, pcode,
+    InventoryType, LandStatReportType, LandStatScore, Object, ObjectExtraParams, ObjectMotion,
+    ObjectPlayingAnimation, ObjectProperties, ParcelAccessEntry, ParcelAccessScope, ParcelCategory,
+    ParcelDetails, ParcelInfo, ParcelRequestResult, ParcelStatus, PrimShape, PrimShapeParams,
+    RegionIdentity, RegionLocalObjectId, RegionLocalParcelId, RegionTerrainComposition, SaleType,
+    ServerEvent, SimSession, TaskInventoryItem, TerrainLayerType, TransactionId, pcode,
 };
 use sl_types::key::{AgentKey, InventoryFolderKey, InventoryKey, ObjectKey, OwnerKey, ParcelKey};
 use sl_types::lsl::{Rotation, Vector};
@@ -112,6 +112,17 @@ pub struct SceneFixtures {
     ///
     /// [`objects`]: Self::objects
     pub task_inventories: BTreeMap<RegionLocalObjectId, TaskInventory>,
+    /// What each object **costs the region**, keyed by its region-local id:
+    /// the numbers a `LandStatRequest` reports and a fake region cannot measure,
+    /// because it runs no scripts and simulates no physics.
+    ///
+    /// So a scene states them. An object with no entry costs nothing and never
+    /// reaches a report, which is the state of every prim a fixture did not
+    /// speak about — and of every prim in a scene that declares none, whose
+    /// report is empty exactly as it was before this existed.
+    ///
+    /// [`objects`]: Self::objects
+    pub object_costs: BTreeMap<RegionLocalObjectId, ObjectCost>,
     /// The region-local id the arriving agent's own avatar object gets. A
     /// real simulator mints one per avatar; with one agent per session a
     /// fixed id is enough, but it must not collide with [`objects`].
@@ -505,6 +516,7 @@ impl SceneFixtures {
             npcs: Vec::new(),
             object_animations: Vec::new(),
             task_inventories: BTreeMap::new(),
+            object_costs: BTreeMap::new(),
             avatar_local_id: RegionLocalObjectId(1),
             last_minted_local_id: RegionLocalObjectId(0),
             undo: BTreeMap::new(),
@@ -829,6 +841,84 @@ fn overlay_class(parcel: &ParcelInfo, viewer: AgentKey) -> u8 {
         OwnerKey::Agent(agent) if agent == viewer => OVERLAY_OWNED_BY_REQUESTER,
         OwnerKey::Agent(_) => OVERLAY_OWNED_BY_OTHER,
         OwnerKey::Group(_) => OVERLAY_OWNED_BY_GROUP,
+    }
+}
+
+/// What one object costs the region it stands in — a scene's answer to the two
+/// questions a `LandStatRequest` asks, plus the extras the reply's
+/// `DataExtended` half carries.
+///
+/// Every field is **stated by the fixture**, not measured: the fake grid runs no
+/// scripts and steps no physics, so a report of what they cost can only be a
+/// scene saying what it wants a viewer to be shown. That is the same bargain the
+/// rest of the fixtures make (a prim's shape is stated, not tessellated), and it
+/// is what lets the top-objects windows be exercised with no grid at all.
+///
+/// A cost of zero in a report's own unit keeps the object **out** of that
+/// report, the way a simulator's own threshold does: OpenSim skips a script
+/// under a millisecond that holds no URL and no memory.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct ObjectCost {
+    /// Script time used over the region's measurement window — the score of a
+    /// top-scripts report.
+    pub script_time: Duration,
+    /// Potential collisions taken part in — the score of a top-colliders
+    /// report.
+    pub collisions: f32,
+    /// The script memory the object holds, in bytes (`DataExtended`'s `Size`).
+    /// OpenSim never reports this; Second Life does.
+    pub script_memory_bytes: f32,
+    /// How many public URLs the object's scripts hold (`DataExtended`'s
+    /// `PublicURLs`).
+    pub public_urls: i32,
+}
+
+impl ObjectCost {
+    /// An object that spends `script_time` running scripts and nothing else.
+    #[must_use]
+    pub const fn scripted(script_time: Duration) -> Self {
+        Self {
+            script_time,
+            collisions: 0.0,
+            script_memory_bytes: 0.0,
+            public_urls: 0,
+        }
+    }
+
+    /// An object that takes part in `collisions` collisions and nothing else.
+    #[must_use]
+    pub const fn colliding(collisions: f32) -> Self {
+        Self {
+            script_time: Duration::ZERO,
+            collisions,
+            script_memory_bytes: 0.0,
+            public_urls: 0,
+        }
+    }
+
+    /// The same cost, with the script memory and URL count a `DataExtended`
+    /// block carries.
+    #[must_use]
+    pub const fn with_resources(mut self, script_memory_bytes: f32, public_urls: i32) -> Self {
+        self.script_memory_bytes = script_memory_bytes;
+        self.public_urls = public_urls;
+        self
+    }
+
+    /// This cost in the unit `report_type` asks for, or `None` when the object
+    /// does not belong in that report at all.
+    #[must_use]
+    pub fn score_for(&self, report_type: LandStatReportType) -> Option<LandStatScore> {
+        match report_type {
+            LandStatReportType::TopScripts => {
+                (!self.script_time.is_zero()).then_some(LandStatScore::ScriptTime(self.script_time))
+            }
+            LandStatReportType::TopColliders => {
+                (self.collisions > 0.0).then_some(LandStatScore::Collisions(self.collisions))
+            }
+            // A report this build does not know has no unit to answer in.
+            _unknown => None,
+        }
     }
 }
 
@@ -1607,7 +1697,7 @@ pub(crate) fn answer_world_request(
         return changes;
     }
     if let Some(changes) =
-        crate::parcel_edits::answer_parcel_edit(world, region, identity.agent_id, sim, event, now)
+        crate::parcel_edits::answer_parcel_edit(world, region, identity, sim, event, now)
     {
         return changes;
     }

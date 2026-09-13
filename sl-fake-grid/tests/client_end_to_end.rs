@@ -448,6 +448,163 @@ mod test {
         Ok(())
     }
 
+    /// **A top-objects report has rows in it, and the return the report's own
+    /// actions send finds them.**
+    ///
+    /// The whole protocol surface of the Top Scripts / Top Colliders windows
+    /// with no grid, no scripts and no viewer: the report itself (over the
+    /// event queue, which is where a region with one answers this), its
+    /// `DataExtended` half, the region-side name filter, and the region-wide
+    /// return the window sends — `LocalID = -1` with an explicit task-id list,
+    /// which a grid matching only by parcel would accept and silently ignore.
+    #[tokio::test]
+    async fn a_top_objects_report_lists_the_scene_and_a_return_finds_it() -> Result<(), TestError> {
+        let mut running = start().await?;
+        let circuit = running.circuit;
+        let whole_region =
+            sl_client_tokio::ScopedParcelId::new(circuit, sl_client_tokio::RegionLocalParcelId(0));
+
+        // The stock scene's one scripted object, scored by what the fixture
+        // says it costs.
+        running
+            .commands
+            .send(Command::RequestLandStat {
+                report_type: sl_client_tokio::LandStatReportType::TopScripts,
+                request_flags: 0,
+                filter: String::new(),
+                parcel_local_id: whole_region,
+            })
+            .await?;
+        let items = running
+            .wait_for(|event| match event {
+                Event::LandStatReply {
+                    report_type: sl_client_tokio::LandStatReportType::TopScripts,
+                    items,
+                    ..
+                } => Some(items.clone()),
+                _ => None,
+            })
+            .await?;
+        let row = items.first().ok_or("the report named no object")?;
+        assert_eq!(items.len(), 1);
+        assert_eq!(row.task_id, sl_fake_grid::scenario::stock_scripted_object());
+        assert_eq!(
+            row.score,
+            sl_client_tokio::LandStatScore::ScriptTime(sl_fake_grid::scenario::STOCK_SCRIPT_TIME)
+        );
+        // The `DataExtended` half the event-queue form carries — the four
+        // columns a viewer draws from it.
+        let extended = row
+            .extended
+            .as_ref()
+            .ok_or("the row carried no extended data")?;
+        assert_eq!(
+            extended.parcel_name,
+            sl_fake_grid::scenario::STOCK_PARCEL_NAME
+        );
+        // A byte count carried as a float: compared by its bits, since the
+        // fixture's value travels the wire unchanged rather than being
+        // computed.
+        assert_eq!(
+            extended.script_size_bytes.to_bits(),
+            sl_fake_grid::scenario::STOCK_SCRIPT_MEMORY_BYTES.to_bits()
+        );
+        assert_eq!(extended.public_urls, 1);
+
+        // The filter is the region's work: a name that matches nothing empties
+        // the report, and the object's own name fills it again.
+        for (filter, expected) in [("nothing here", 0), (&row.task_name, 1)] {
+            running
+                .commands
+                .send(Command::RequestLandStat {
+                    report_type: sl_client_tokio::LandStatReportType::TopScripts,
+                    // STAT_FILTER_BY_OBJECT
+                    request_flags: 0x0000_0004,
+                    filter: filter.to_owned(),
+                    parcel_local_id: whole_region,
+                })
+                .await?;
+            let narrowed = running
+                .wait_for(|event| match event {
+                    Event::LandStatReply { items, .. } => Some(items.len()),
+                    _ => None,
+                })
+                .await?;
+            assert_eq!(narrowed, expected, "filtering by object name `{filter}`");
+        }
+
+        // A collider report is a different list, and the stock scene has
+        // nothing in it — an empty report, not a missing one.
+        running
+            .commands
+            .send(Command::RequestLandStat {
+                report_type: sl_client_tokio::LandStatReportType::TopColliders,
+                request_flags: 0,
+                filter: String::new(),
+                parcel_local_id: whole_region,
+            })
+            .await?;
+        let colliders = running
+            .wait_for(|event| match event {
+                Event::LandStatReply {
+                    report_type: sl_client_tokio::LandStatReportType::TopColliders,
+                    items,
+                    ..
+                } => Some(items.len()),
+                _ => None,
+            })
+            .await?;
+        assert_eq!(colliders, 0);
+
+        // The return the window sends: the whole region, `RT_NONE`, the task
+        // ids the report named. The object dies.
+        running
+            .commands
+            .send(Command::ReturnParcelObjects {
+                local_id: sl_client_tokio::ScopedParcelId::new(
+                    circuit,
+                    sl_client_tokio::RegionLocalParcelId(-1),
+                ),
+                return_type: sl_client_tokio::ParcelReturnType::NONE,
+                owner_ids: Vec::new(),
+                task_ids: vec![row.task_id],
+            })
+            .await?;
+        running
+            .wait_for(|event| match event {
+                Event::ObjectRemoved { local_id, .. }
+                    if local_id.id == sl_fake_grid::scenario::STOCK_SCRIPTED_OBJECT_LOCAL_ID =>
+                {
+                    Some(())
+                }
+                _ => None,
+            })
+            .await?;
+
+        // And with the object gone, so is the report.
+        running
+            .commands
+            .send(Command::RequestLandStat {
+                report_type: sl_client_tokio::LandStatReportType::TopScripts,
+                request_flags: 0,
+                filter: String::new(),
+                parcel_local_id: whole_region,
+            })
+            .await?;
+        let after = running
+            .wait_for(|event| match event {
+                Event::LandStatReply {
+                    report_type: sl_client_tokio::LandStatReportType::TopScripts,
+                    items,
+                    ..
+                } => Some(items.len()),
+                _ => None,
+            })
+            .await?;
+        assert_eq!(after, 0);
+        Ok(())
+    }
+
     /// The region's ground arrives as the full spiral of land patches, every
     /// one stamped with the region handle, carrying the heights the fixture
     /// declares — plus the wind layer's two patches.

@@ -4,7 +4,10 @@
 //! the options a parcel owner sets. [`about_region`] is its region and estate
 //! counterpart, down to the terrain textures and the estate manager list.
 //! [`about_landmark`] is the small one: a landmark item's destination, and the
-//! teleport to it.
+//! teleport to it. [`telehub`] hangs off [`about_region`]: the region's telehub
+//! object and the spawn points arriving teleports are placed on, and so does
+//! [`top_objects`]: which of the region's objects cost it the most, and the
+//! estate actions over them.
 //!
 //! All three are read-mostly views over parcel and region state the world
 //! layer already holds, plus the wire calls that change it.
@@ -24,11 +27,13 @@ pub(crate) use sl_viewer_inventory::inventory;
 pub(crate) use sl_viewer_inventory::inventory_properties;
 pub(crate) use sl_viewer_map::world_map;
 pub(crate) use sl_viewer_notices::ui_name_link;
+pub(crate) use sl_viewer_notifications as notifications;
 pub(crate) use sl_viewer_pickers::ui_texture_picker;
 pub(crate) use sl_viewer_platform::clipboard;
 pub(crate) use sl_viewer_ui_core::i18n;
 pub(crate) use sl_viewer_ui_core::ui;
 pub(crate) use sl_viewer_ui_core::ui_font;
+pub(crate) use sl_viewer_ui_core::ui_format;
 pub(crate) use sl_viewer_ui_core::virtual_list;
 pub(crate) use sl_viewer_ui_widgets::floater;
 pub(crate) use sl_viewer_ui_widgets::ui_combo;
@@ -40,3 +45,5 @@ pub(crate) use sl_viewer_world_api as world_api;
 pub mod about_land;
 pub mod about_landmark;
 pub mod about_region;
+pub mod telehub;
+pub mod top_objects;

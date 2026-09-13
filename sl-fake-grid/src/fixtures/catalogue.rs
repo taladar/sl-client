@@ -12,6 +12,9 @@
 //! arrival point, spaced far enough apart that each projects to its own patch
 //! of screen.
 
+use std::collections::BTreeMap;
+use std::time::Duration;
+
 use sl_proto::{
     AnimationKey, AssetKey, EnvironmentSettings, FlexibleData, InMemoryAssetSource, LightData,
     LightImage, MediaEntry, ObjectMediaState, ParticleSystem, ReflectionProbe, RegionLocalObjectId,
@@ -26,7 +29,9 @@ use sl_wire::{LegacyMaterial, ReflectionProbeFlags};
 use super::RegionFixture;
 use super::npcs::{NpcAppearance, NpcFixture};
 use super::prims::{FaceStyle, PrimFixture, SculptKind, linkset};
-use crate::world::{AvatarIdentity, ObjectAnimationFixture, SceneFixtures, region_wide_parcel};
+use crate::world::{
+    AvatarIdentity, ObjectAnimationFixture, ObjectCost, SceneFixtures, region_wide_parcel,
+};
 
 /// The catalogue parcel's name.
 pub const CATALOGUE_PARCEL_NAME: &str = "Fake Grid Catalogue";
@@ -343,6 +348,7 @@ pub fn catalogue() -> RegionFixture {
         CATALOGUE_DWELL,
     );
     world.objects = objects(owner);
+    world.object_costs = object_costs();
     world.npcs = vec![npc(), seated_npc()];
     world.object_animations = animesh_animations();
 
@@ -357,6 +363,32 @@ pub fn catalogue() -> RegionFixture {
         // test that wants one of them to move states that itself.
         timeline: crate::Timeline::new(),
     }
+}
+
+/// What three of the catalogue's prims cost the region — the fixture half of a
+/// top-objects report, since a fake region measures nothing
+/// ([`ObjectCost`](crate::world::ObjectCost)).
+///
+/// Three rather than one, and two of them scripted, so a report has an **order**
+/// to get wrong and the two reports are not the same list: `plain-box` is the
+/// busiest script, `checker-box` the lesser one and also the only object holding
+/// script memory and a public URL (the two `DataExtended` columns a viewer draws
+/// from), and `sphere` collides without running anything at all.
+fn object_costs() -> BTreeMap<RegionLocalObjectId, ObjectCost> {
+    [
+        (
+            "plain-box",
+            ObjectCost::scripted(Duration::from_millis(4_210)),
+        ),
+        (
+            "checker-box",
+            ObjectCost::scripted(Duration::from_millis(1_250)).with_resources(8_192.0, 2),
+        ),
+        ("sphere", ObjectCost::colliding(17.0)),
+    ]
+    .into_iter()
+    .filter_map(|(name, cost)| entry(name).map(|entry| (entry.local_id, cost)))
+    .collect()
 }
 
 /// The catalogue's objects, in row order. Every builder method of
