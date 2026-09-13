@@ -1558,7 +1558,7 @@ fn manipulation_frame(
 
 /// A Bevy world rotation as the equivalent Second Life world rotation (strip
 /// the basis change off the left).
-fn sl_world_rotation(bevy_rotation: Quat) -> Quat {
+pub(crate) fn sl_world_rotation(bevy_rotation: Quat) -> Quat {
     sl_to_bevy_rotation().inverse().mul_quat(bevy_rotation)
 }
 

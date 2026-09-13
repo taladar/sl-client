@@ -1880,6 +1880,7 @@ pub fn promote_selection_to_roots(selection: &mut SelectionSet, objects: &Object
                 properties: None,
                 // Promoting to the whole linkset drops any per-face selection.
                 faces: None,
+                last_face: crate::world_api::FIRST_FACE,
             }
         } else {
             // Root known but not resolvable to a scene entity: leave as-is.

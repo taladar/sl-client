@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 310 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 36 |
-| done | 1121 |
+| bugs | 35 |
+| done | 1122 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1672** |
@@ -1157,7 +1157,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (36)
+## bugs (35)
 
 ### viewer
 
@@ -1194,8 +1194,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   mouselook
 - [`viewer-audit-system-ordering-claims`](bugs/viewer-audit-system-ordering-claims.md)
   — Update tuples claim a pipeline order the scheduler does not enforce
-- [`viewer-audit-texture-align-material-channels`](bugs/viewer-audit-texture-align-material-channels.md)
-  — Align planar faces does not propagate to the normal and specular transforms
 - [`viewer-audit-ui-texture-poll-leak`](bugs/viewer-audit-ui-texture-poll-leak.md)
   — Eight copied texture-poll systems each leak Image assets for the session
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
@@ -1244,7 +1242,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1121)
+## done (1122)
 
 ### protocol
 
@@ -1577,6 +1575,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Inactive tab panels keep their keyboard tab stops
 - [`viewer-audit-table-interaction-disabled`](done/viewer-audit-table-interaction-disabled.md)
   — The table widget ignores InteractionDisabled
+- [`viewer-audit-texture-align-material-channels`](done/viewer-audit-texture-align-material-channels.md)
+  — Align planar faces does not propagate to the normal and specular transforms
 - [`viewer-audit-toast-starvation-dnd-queue`](done/viewer-audit-toast-starvation-dnd-queue.md)
   — A low-priority toast can be queued forever, and the DND hold list is
   unbounded

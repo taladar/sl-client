@@ -1897,18 +1897,34 @@ fn apply_edit_to_faces(
 }
 
 /// The Align-planar-faces action (implemented in [`crate::edit_texture_align`]).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy observer's parameters are its injected resources / queries: the press and its \
+              button marker, the selection / object state the walk reads, the per-face lookup, the \
+              legacy materials an aligned face's normal / specular transforms come from, the world \
+              transforms the inter-object term needs, and the command writer"
+)]
 fn handle_tex_align_press(
     press: On<Pointer<Press>>,
     _buttons: Query<&TexAlignButton>,
     selection: Res<SelectionSet>,
     objects: Res<ObjectState>,
     prim_faces: PrimFaceLookup,
+    legacy: Res<crate::legacy_materials::LegacyMaterialManager>,
+    globals: Query<&GlobalTransform>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     if press.button != PointerButton::Primary {
         return;
     }
-    crate::edit_texture_align::align_planar_faces(&selection, &objects, &prim_faces, &mut commands);
+    crate::edit_texture_align::align_planar_faces(
+        &selection,
+        &objects,
+        &prim_faces,
+        &legacy,
+        &globals,
+        &mut commands,
+    );
 }
 
 // ---------------------------------------------------------------------------

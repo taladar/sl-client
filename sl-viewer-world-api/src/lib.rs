@@ -67,6 +67,10 @@ pub fn shows_autoresponse(settings: Option<&ViewerSettings>) -> bool {
     .any(|name| settings.is_some_and(|settings| settings.store().get_bool(name).unwrap_or(false)))
 }
 
+/// The Linden face a whole-object selection counts as last-touched — the
+/// reference's `LLSelectNode::selectAllTEs` resetting `mLastTESelected` to `0`.
+pub const FIRST_FACE: PrimFaceId = PrimFaceId::new(0);
+
 /// One selected object in the [`SelectionSet`].
 #[derive(Debug, Clone)]
 pub struct SelectedNode {
@@ -89,6 +93,16 @@ pub struct SelectedNode {
     /// object selection — and `Some(set)` means exactly those Linden face
     /// indices (the reference's per-`LLSelectNode` texture-entry flags).
     pub faces: Option<HashSet<PrimFaceId>>,
+    /// The **last face this node's selection touched** — the reference's
+    /// `LLSelectNode::mLastTESelected`, set by every per-face select *and*
+    /// deselect and reset to face `0` whenever the whole object is selected.
+    ///
+    /// It is the anchor the Texture tab's planar align measures from
+    /// (`LLSelectedTE::getFace`, via `getLastSelectedTE`), which is why a
+    /// deselect moves it too: the reference only asks whether the face it names
+    /// is *still* selected, and falls back to the first face of the selection
+    /// walk when it is not.
+    pub last_face: PrimFaceId,
 }
 
 impl SelectedNode {
@@ -140,6 +154,7 @@ impl SelectionSet {
             entity,
             properties: None,
             faces: None,
+            last_face: FIRST_FACE,
         });
     }
 
@@ -161,6 +176,7 @@ impl SelectionSet {
         if let Some(index) = self.selected.iter().position(|node| node.scoped == scoped) {
             let mut node = self.selected.remove(index);
             node.faces = Some(faces);
+            node.last_face = face;
             self.selected.clear();
             self.selected.push(node);
         } else {
@@ -171,6 +187,7 @@ impl SelectionSet {
                 entity,
                 properties: None,
                 faces: Some(faces),
+                last_face: face,
             });
         }
     }
@@ -215,6 +232,10 @@ impl SelectionSet {
                 if !set.remove(&face) {
                     set.insert(face);
                 }
+                // The reference's `selectTE` moves `mLastTESelected` on a
+                // deselect too; `getLastSelectedTE` then rejects it because the
+                // face is no longer selected.
+                node.last_face = face;
                 set.is_empty()
             };
             if emptied {
@@ -235,6 +256,7 @@ impl SelectionSet {
             entity,
             properties: None,
             faces: Some(faces),
+            last_face: face,
         });
     }
 
@@ -7539,17 +7561,19 @@ impl PipelineStats {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
 
     use super::{
-        AvatarState, MuteModel, PROVISIONAL_ID_CHARS, PatchKey, TerrainState, provisional_label,
-        target_for, used_baked_slots,
+        AvatarState, FIRST_FACE, MuteModel, PROVISIONAL_ID_CHARS, PatchKey, SelectionSet,
+        TerrainState, provisional_label, target_for, used_baked_slots,
     };
+    use bevy::prelude::Entity;
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_bevy::{
-        AgentKey, MuteEntry, MuteFlags, MuteType, RegionHandle, ScriptLanguage, ScriptTarget,
-        TerrainLayerType, TerrainPatch, TextureEntry, TextureFace, TextureKey, Uuid,
-        avatar_texture, encode_texture_entry,
+        AgentKey, CircuitId, MuteEntry, MuteFlags, MuteType, ObjectKey, PrimFaceId, RegionHandle,
+        RegionLocalObjectId, ScopedObjectId, ScriptLanguage, ScriptTarget, TerrainLayerType,
+        TerrainPatch, TextureEntry, TextureFace, TextureKey, Uuid, avatar_texture,
+        encode_texture_entry,
     };
 
     /// The region and grid position the terrain test patches use.
@@ -7737,5 +7761,49 @@ mod tests {
         assert!(used_baked_slots(&encode_texture_entry(&ordinary)).is_empty());
         // An empty blob decodes to no faces, so no slots.
         assert!(used_baked_slots(&[]).is_empty());
+    }
+
+    /// A node's `last_face` follows the reference's `mLastTESelected`: it starts
+    /// at face `0` for a whole-object selection, moves to every picked face, and
+    /// moves on an **un-pick** too — the planar align that reads it is what asks
+    /// whether that face is still selected, not this.
+    #[test]
+    fn the_last_touched_face_follows_every_pick() {
+        let entity = Entity::PLACEHOLDER;
+        let scoped = ScopedObjectId {
+            circuit: CircuitId::new(1),
+            id: RegionLocalObjectId(9),
+        };
+        let full = ObjectKey::from(Uuid::from_u128(9));
+
+        // A whole-object selection anchors on face 0.
+        let mut set = SelectionSet::default();
+        set.insert(scoped, full, entity);
+        assert_eq!(set.primary().map(|node| node.last_face), Some(FIRST_FACE));
+
+        // A plain face click moves it to that face.
+        set.select_only_face(scoped, full, entity, PrimFaceId::new(3));
+        assert_eq!(
+            set.primary().map(|node| node.last_face),
+            Some(PrimFaceId::new(3))
+        );
+
+        // So does a shift-click that adds a face...
+        set.toggle_face(scoped, full, entity, PrimFaceId::new(5));
+        assert_eq!(
+            set.primary().map(|node| node.last_face),
+            Some(PrimFaceId::new(5))
+        );
+        // ... and one that takes it away again.
+        set.toggle_face(scoped, full, entity, PrimFaceId::new(5));
+        assert_eq!(
+            set.primary().map(|node| node.last_face),
+            Some(PrimFaceId::new(5))
+        );
+        assert_eq!(
+            set.primary_faces().map(HashSet::len),
+            Some(1),
+            "un-picking face 5 leaves only face 3 selected"
+        );
     }
 }
