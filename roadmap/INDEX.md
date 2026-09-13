@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 310 |
+| ready | 313 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 34 |
-| done | 1123 |
+| bugs | 35 |
+| done | 1125 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1672** |
+| **total** | **1678** |
 
 ## ideas (100)
 
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (310)
+## ready (313)
 
 ### protocol
 
@@ -566,6 +566,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-inventory-bulk-permissions`](ready/viewer-inventory-bulk-permissions.md)
   — Bulk next-owner permissions editor (blocked by `viewer-ui-widget-scaffold`
   (done))
+- [`viewer-inventory-double-click-actions`](ready/viewer-inventory-double-click-actions.md)
+  — What a double-click opens, per inventory item type
 - [`viewer-inventory-favorites`](ready/viewer-inventory-favorites.md) —
   Inventory favorites — star items, folders and outfits (AISv3)
 - [`viewer-inventory-link-replace`](ready/viewer-inventory-link-replace.md) —
@@ -638,6 +640,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-movement-controls-floater`](ready/viewer-movement-controls-floater.md)
   — Movement controls floater + stand / stop-flying buttons (blocked by
   `viewer-ui-widget-scaffold` (done))
+- [`viewer-multiline-field-fills-its-floater`](ready/viewer-multiline-field-fills-its-floater.md)
+  — A multi-line field that grows with the window around it
 - [`viewer-name-tags-click-select`](ready/viewer-name-tags-click-select.md) —
   Name tags — click a tag to select the avatar
 - [`viewer-name-tags-decorations`](ready/viewer-name-tags-decorations.md) — Name
@@ -646,6 +650,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Neighbour-region parcel tracking (About Land on neighbours)
 - [`viewer-network-debug-tools`](ready/viewer-network-debug-tools.md) — Network
   / world debug tools
+- [`viewer-notecard-embedded-item-opens`](ready/viewer-notecard-embedded-item-opens.md)
+  — Opening an embedded item, instead of copying it
 - [`viewer-notification-history`](ready/viewer-notification-history.md) —
   Notification list / history panel (blocked by `viewer-ui-notification-host`
   (done))
@@ -1157,7 +1163,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (34)
+## bugs (35)
 
 ### viewer
 
@@ -1203,12 +1209,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-crossing-movement-locks-up`](bugs/viewer-crossing-movement-locks-up.md)
   — Movement locks up after a region crossing (stand-up anim, esp. onto lower
   terrain)
-- [`viewer-disabled-field-selection-flash`](bugs/viewer-disabled-field-selection-flash.md)
-  — A disabled text field flashes a selection, and cannot be copied from
 - [`viewer-hair-dome-stays-grey`](bugs/viewer-hair-dome-stays-grey.md) — The
   default hair dome intermittently stays grey for a whole session
 - [`viewer-hover-tooltip-202ms-frame-spike`](bugs/viewer-hover-tooltip-202ms-frame-spike.md)
   — update_hover_tooltip spikes to 202 ms on a single frame
+- [`viewer-inventory-permission-suffix-layout`](bugs/viewer-inventory-permission-suffix-layout.md)
+  — An inventory row drifts left, and its permission suffix oscillates
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)
@@ -1218,6 +1224,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Mouselook — parts of the own avatar's head render from the inside
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
+- [`viewer-notecard-copied-item-loses-permissions`](bugs/viewer-notecard-copied-item-loses-permissions.md)
+  — An item copied out of a notecard arrives with no permissions
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
   — Own avatar looks broken after a teleport
 - [`viewer-own-avatar-facing-drifts-idle`](bugs/viewer-own-avatar-facing-drifts-idle.md)
@@ -1240,7 +1248,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1123)
+## done (1125)
 
 ### protocol
 
@@ -1743,6 +1751,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-dialog-script-load-url`](done/viewer-dialog-script-load-url.md) —
   Script web-page request dialog (llLoadURL) (blocked by
   `viewer-ui-notification-host` (done))
+- [`viewer-disabled-field-selection-flash`](done/viewer-disabled-field-selection-flash.md)
+  — A disabled text field flashes a selection, and cannot be copied from
 - [`viewer-do-not-disturb-away`](done/viewer-do-not-disturb-away.md) — Away /
   auto-AFK / Do-Not-Disturb modes + autoresponse (blocked by
   `viewer-chat-input-bar` (done))
@@ -2061,6 +2071,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A see-through container in front of a field clears its focus, at random
 - [`viewer-notecard-format`](done/viewer-notecard-format.md) — Notecard format —
   a pure crate (sl-notecard)
+- [`viewer-notecard-inline-items`](done/viewer-notecard-inline-items.md) — A
+  rich-text field, and a notecard body with its items in it
 - [`viewer-notecard-preview-ignores-unsaved-text`](done/viewer-notecard-preview-ignores-unsaved-text.md)
   — The notecard's View Items preview shows the loaded text, not what you typed
 - [`viewer-notification-catalogue`](done/viewer-notification-catalogue.md) —

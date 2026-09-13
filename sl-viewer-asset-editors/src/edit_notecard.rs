@@ -7,49 +7,51 @@
 //! other notecards a resident drops inline). The pure [`sl_notecard`] crate
 //! decodes and re-encodes that container; this module is the widget over it.
 //!
-//! # What this surface does today, and what waits on the rich-text widget
+//! # One body, items and all
 //!
-//! The reference viewer renders each embedded item as a **clickable inline
-//! box** in the *editable* text flow (`llviewertexteditor`'s embedded-item
-//! machinery). Rendering them inline *while editing* needs a rich-text editor
-//! with inline boxes and per-range brushes — the parley `PlainEditor` fork
-//! tracked by `viewer-lsl-editor-widget`, which is not yet built. A
-//! **read-only** view needs no caret, so this editor:
+//! The reference viewer draws each embedded item as a **clickable box in the
+//! text flow** (`llviewertexteditor`'s embedded-item machinery), whether the
+//! notecard is being read or written. So does this editor, on the rich-text
+//! field ([`sl_viewer_ui_widgets::ui_rich_text`]): the buffer keeps each item's
+//! private-use marker code point — it is what a deletion deletes and what
+//! [`sl_notecard::Notecard::with_edited_text`] reconciles the item table
+//! against on save — the field takes the marker off the screen, and the box for
+//! that item is laid out in the flow exactly where the marker sits.
 //!
-//! - shows a no-modify notecard as the **rich read-only reader**
-//!   ([`crate::notecard_render`]): its embedded items drawn inline as clickable
-//!   icon-and-name boxes, its prose URLs / SLURLs linkified — the reference's
-//!   reader, minus editing;
-//! - edits a modifiable notecard's **text** in the reusable multi-line field
-//!   ([`crate::ui_text_input`], a stock `EditableText`), preserving each embedded
-//!   item's private-use marker code point in the buffer so a round-trip never
-//!   corrupts or orphans an item ([`sl_notecard::Notecard::with_edited_text`]
-//!   reconciles the item table against the markers on save) — and offers a
-//!   **toggle to that same rich read-only preview**, so its embedded items stay
-//!   reachable and clickable until the inline-box editor widget lands (in the
-//!   plain field the markers render as placeholder glyphs). The preview shows
-//!   the notecard **as it stands in the field**, unsaved text and all: it is
-//!   rebuilt from the edit buffer, reconciled the way a save is, whenever the
-//!   buffer has moved since it was last drawn;
+//! There used to be a **toggle** here, between a plain edit field that showed
+//! the markers as placeholder glyphs and a separate read-only preview that
+//! showed the items. That was the shape of the thing while Bevy's editable text
+//! was `parley::PlainEditor` with one style for the whole buffer and no inline
+//! boxes; the workspace's parley fork now lets a field carry both, so the two
+//! views are one and there is nothing to switch between.
+//!
+//! What the editor does:
+//!
+//! - **reads** a notecard as flowing text with its embedded items inline and
+//!   clickable ([`crate::notecard_render`] fills each box, and a click copies,
+//!   opens a profile or previews a texture) and its prose URLs / SLURLs
+//!   linkified;
+//! - **edits** a modifiable notecard's text in that same body, so an item stays
+//!   visible, clickable and in place while the prose around it is typed;
 //! - lets a resident **drag an inventory item onto the editor to add it** as an
 //!   embedded item (`crate::inventory_drag`'s notecard drop target);
-//! - saves back to **agent** inventory over `UpdateNotecardAgentInventory` or,
-//!   for a notecard opened from a prim's contents, to that object's **task**
+//! - **saves** back to **agent** inventory over `UpdateNotecardAgentInventory`
+//!   or, for a notecard opened from a prim's contents, to that object's **task**
 //!   inventory over `UpdateNotecardTaskInventory` — one
 //!   [`Command::UpdateInventoryAsset`] whose [`NotecardSource`] picks the
 //!   capability and the "opened-from-task" provenance the reference carries.
 //!
-//! Deferred to `viewer-lsl-editor-widget` (needing its inline boxes): drawing
-//! embedded items **inline in the editable flow** and dropping an item **at the
-//! caret** rather than appended.
+//! Still deferred (it needs the field to report where the caret is): dropping an
+//! item **at the caret** rather than appending its marker to the end.
 //!
 //! # Read-only when you cannot modify
 //!
 //! Editability is gated on the item's owner mask carrying `MODIFY` (the
 //! reference's `LLPreviewNotecard::canModify`). A no-modify notecard — a freebie
-//! someone handed you — opens as the rich read-only reader with a note and no
-//! Save button, so its text is never presented as editable when a save would be
-//! refused.
+//! someone handed you — opens with a note and no Save button, and its body
+//! refuses the keystrokes that would change it while staying selectable,
+//! copyable and clickable, so its text is never presented as editable when a
+//! save would be refused.
 //!
 //! # One window per notecard
 //!
@@ -57,12 +59,15 @@
 //! notecard opens a second window rather than re-pointing the first, which is
 //! what the reference does (`LLPreviewNotecard` is registered per item id) and
 //! what keeps a window's **unsaved text** from vanishing because someone opened
-//! another notecard. Each window's state — the notecard it shows, the baseline
-//! its embedded-item markers reconcile against, its in-flight load / save, its
-//! field entities — is a component on that window, and closing one ends it.
+//! another notecard. Each window's state — the notecard it shows, its in-flight
+//! load / save, its field entities — is a component on that window, and closing
+//! one ends it; the body's own state (its item table, its boxes) is a component
+//! on the field.
 //!
 //! Reference (Firestorm, read-only): `llpreviewnotecard`, `llfloaternotecard`,
 //! `llviewertexteditor`.
+
+use std::collections::HashMap;
 
 use bevy::prelude::*;
 use bevy::text::EditableText;
@@ -72,32 +77,31 @@ use sl_client_bevy::{
 };
 
 use crate::asset_editor::{
-    CONTROL_BACKGROUND, CONTROL_BORDER, DIM_COLOR, ERROR_COLOR, EditedText, FONT_SIZE, LABEL_COLOR,
-    SaveEditorWindow, UnsavedWork, set_status, spawn_body_field, spawn_note, spawn_save_button,
-    spawn_status, tear_down,
+    DIM_COLOR, ERROR_COLOR, EditedText, FONT_SIZE, SaveEditorWindow, UnsavedWork, set_status,
+    spawn_note, spawn_save_button, spawn_status, tear_down,
 };
 use crate::floater::{
-    Floater, FloaterCaps, FloaterHandle, FloaterKey, FloaterSpec, FloaterSystems, KeyedFloaterOpen,
-    KeyedFloaters, host_floater,
+    FloaterCaps, FloaterHandle, FloaterKey, FloaterSpec, FloaterSystems, KeyedFloaterOpen,
+    KeyedFloaters,
 };
+use sl_viewer_ui_widgets::ui_rich_text::{
+    RichTextClass, RichTextContent, RichTextObject, RichTextRange, RichTextRangeActivated,
+    RichTextSpec, RichTextStyle, spawn_rich_text, spawn_rich_text_object,
+};
+
 use crate::inventory::AddEmbeddedItem;
-use crate::linkified_text::LinkTextStyle;
-use crate::notecard_render::spawn_notecard_body;
+use crate::linkified_text::{LinkActivated, LinkTextStyle, populate_linkified_text};
+use crate::notecard_render::spawn_embedded_item_box;
 use crate::ui::{column, row};
 use crate::ui_element::{ElementCx, TextMayClip};
 use crate::ui_font::UiFont;
+use crate::url_linkify::{TextRun, linkify};
 use crate::world_api::{NotecardDropTarget, NotecardSource, OpenNotecard};
 
 /// The body field's height, in visible text lines. The window is sized by this
 /// (it is content-driven), not the other way round — a field's height is its
 /// intrinsic control size and cannot be flexed; see `ui_text_input`'s `fill`.
 const BODY_VISIBLE_LINES: f32 = 18.0;
-
-/// The read-only body block's viewport height, in logical pixels.
-const READONLY_BODY_HEIGHT: f32 = 320.0;
-
-/// The read-only body block's width bound, in logical pixels.
-const READONLY_BODY_WIDTH: f32 = 460.0;
 
 // ---------------------------------------------------------------------------
 // Messages.
@@ -137,13 +141,16 @@ impl Plugin for EditNotecardPlugin {
                         ingest_notecard_asset,
                         ingest_added_items,
                         save_notecard,
-                        // After the drop that appends an item's marker, so a
-                        // shown preview picks it up in the same frame.
-                        refresh_notecard_preview,
                         report_notecard_save,
                     )
                         .chain()
                         .run_if(any_with_component::<NotecardEditorState>),
+                    // Not gated on a window: a gallery specimen has a body and
+                    // no window, and its items are part of what the layout
+                    // sweeps measure.
+                    (rebuild_notecard_body, activate_notecard_link)
+                        .chain()
+                        .run_if(any_with_component::<NotecardBody>),
                 )
                     .chain(),
             );
@@ -160,9 +167,6 @@ struct NotecardEditorState {
     source: NotecardSource,
     /// Whether this window's notecard is editable, fixed for its life.
     editable: bool,
-    /// The originally decoded notecard, kept as the baseline the edited text's
-    /// embedded-item markers resolve against on save.
-    baseline: Option<sl_notecard::Notecard>,
     /// The asset id awaited (`FetchAsset` sent), matched on `AssetReceived`.
     pending_load: Option<Uuid>,
     /// The save in flight, matched on the upload result; `None` when none is.
@@ -282,7 +286,6 @@ fn build_notecard_window(commands: &mut Commands, handle: FloaterHandle, open: &
             content: handle.content,
             source: open.source,
             editable: open.editable,
-            baseline: None,
             pending_load: Some(open.asset_id),
             pending_save: None,
             body_field: None,
@@ -333,7 +336,6 @@ fn ingest_notecard_asset(
                     );
                     state.status = Some(status);
                     state.body_field = None;
-                    state.baseline = None;
                     continue;
                 }
             };
@@ -359,7 +361,6 @@ fn ingest_notecard_asset(
                     saved: notecard.text.clone(),
                 });
             }
-            state.baseline = Some(notecard);
         }
     }
 }
@@ -400,14 +401,17 @@ struct BuiltEditor {
     status: Option<Entity>,
 }
 
-/// Build the editor's content under `content`. A no-modify notecard is the
-/// **rich read-only reader** ([`crate::notecard_render`]) — its embedded items
-/// drawn inline and clickable, its prose linkified. An editable notecard shows
-/// the plain text field by default, with a **toggle to that same read-only
-/// preview** so its embedded items stay reachable until the inline-box editor
-/// widget lands, plus a Save button and a status line. The preview is *seeded*
-/// from `notecard` here and follows the edit buffer from then on
-/// ([`refresh_notecard_preview`]).
+/// Build the editor's content under `content`: the rich-text body, and — when
+/// the notecard is modifiable — a Save button and a status line.
+///
+/// **One body, both modes.** The embedded items are drawn in the flow of the
+/// text itself ([`crate::notecard_render`] fills the boxes the rich-text field
+/// reserves), so a modifiable notecard shows them exactly where a read-only one
+/// does and there is nothing to toggle between. What the two modes differ in is
+/// the prose's links: a read-only body draws each as the *resolved* chip the
+/// rest of the viewer draws (an avatar's name, a location's pin), while an
+/// editable one leaves the URL text alone — it is text the resident is editing —
+/// and styles it in place.
 ///
 /// `source` locates the notecard, so a copied embedded item names the right
 /// notecard / holding prim. Where a save goes is not a parameter: the Save
@@ -424,39 +428,47 @@ fn populate_editor(
 ) -> BuiltEditor {
     let style = LinkTextStyle::at(font_size);
 
-    // A no-modify notecard: the note, then the rich reader (items inline).
+    // A no-modify notecard says so before its body, and then reads the same.
     if !editable {
         spawn_note(commands, content, "notecard-readonly-note", font_size);
-        spawn_reader_block(commands, content, notecard, source, style, true);
-        return BuiltEditor::default();
     }
 
-    // Editable: a view toggle, the plain edit field (shown) and the rich reader
-    // (hidden) — the toggle flips which is displayed, and the reader's body is
-    // rebuilt from the edit buffer whenever what it shows has gone stale
-    // ([`refresh_notecard_preview`]). The plain field keeps each embedded item's
-    // private-use marker in the buffer so a round-trip never corrupts an item;
-    // the preview is where those items become legible and clickable meanwhile.
-    let (toggle_button, toggle_label) = spawn_view_toggle(commands, content, font_size);
-    let body_field = spawn_body_field(
+    let handle = spawn_rich_text(
         commands,
         content,
-        &notecard.text,
-        "notecard-body",
-        BODY_VISIBLE_LINES,
-        font_size,
+        &RichTextSpec {
+            initial: notecard.text.clone(),
+            tab_index: 1,
+            font_size,
+            visible_lines: BODY_VISIBLE_LINES,
+            read_only: !editable,
+            classes: vec![RichTextClass {
+                color: style.link_color,
+                underline: true,
+                clickable: true,
+            }],
+            ..RichTextSpec::new("notecard-body")
+        },
     );
-    let reader = spawn_reader_block(commands, content, notecard, source, style, false);
-    commands.entity(toggle_button).insert(NotecardViewToggle {
-        edit_field: body_field,
-        reader,
-        label: toggle_label,
-        preview: false,
+    // The model is seeded here rather than left to the first rebuild pass, so
+    // the body's items are drawn on the frame it is built — and so a **specimen**,
+    // which no system ever visits, still shows them.
+    let mut body = NotecardBody {
+        overlay: handle.overlay,
+        baseline: notecard.clone(),
+        source,
+        read_only: !editable,
         font_size,
-        // The reader was just built from this text, so a flip to preview with
-        // nothing typed since rebuilds nothing.
-        shown_text: notecard.text.clone(),
-    });
+        shown_text: None,
+        objects: HashMap::new(),
+    };
+    let model = build_body_model(commands, &mut body, &notecard.text);
+    body.shown_text = Some(notecard.text.clone());
+    commands.entity(handle.field).insert((body, model));
+
+    if !editable {
+        return BuiltEditor::default();
+    }
 
     let bar = commands
         .spawn((
@@ -477,241 +489,237 @@ fn populate_editor(
         ))
         .id();
     BuiltEditor {
-        body_field: Some(body_field),
+        body_field: Some(handle.field),
         status: Some(status),
     }
 }
 
-/// A view-mode toggle on an editable notecard: which of the plain edit field or
-/// the rich read-only preview is shown. Carried by the toggle button so its
-/// observer can flip the two `display`s and its own label, and so
-/// [`refresh_notecard_preview`] can tell what the reader currently shows from
-/// what the resident has since typed.
-#[derive(Component, Debug, Clone)]
-struct NotecardViewToggle {
-    /// The plain multi-line edit field (shown when not previewing).
-    edit_field: Entity,
-    /// The rich read-only reader (shown when previewing).
-    reader: Entity,
-    /// The toggle button's own label node (retitled on flip).
-    label: Entity,
-    /// Whether the read-only preview is currently shown.
-    preview: bool,
-    /// The font size the reader's body is built at, kept so a rebuild matches
-    /// the window it lives in.
-    font_size: f32,
-    /// The **edit-buffer text** the reader's body was last built from. The
-    /// reader is rebuilt only when the buffer has moved away from this, so a
-    /// flip with nothing typed since costs nothing and keeps its scroll.
-    shown_text: String,
-}
+// ---------------------------------------------------------------------------
+// The body: what the buffer's markers and URLs are drawn as.
+// ---------------------------------------------------------------------------
 
-/// Spawn the view-mode toggle button, returning `(button, label)`.
-fn spawn_view_toggle(commands: &mut Commands, parent: Entity, font_size: f32) -> (Entity, Entity) {
-    let button = commands
-        .spawn((
-            Button,
-            bevy::input_focus::tab_navigation::TabIndex(0),
-            Node {
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(2.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                align_self: AlignSelf::FlexStart,
-                ..default()
-            },
-            BorderColor::all(CONTROL_BORDER),
-            BackgroundColor(CONTROL_BACKGROUND),
-            Pickable::default(),
-            Name::new("notecard-view-toggle"),
-            ChildOf(parent),
-        ))
-        .id();
-    let label = commands
-        .spawn((
-            Text::default(),
-            crate::i18n::Translated::new("notecard-view-preview"),
-            UiFont::Sans.at(font_size),
-            TextColor(LABEL_COLOR),
-            Pickable::IGNORE,
-            ChildOf(button),
-        ))
-        .id();
-    commands.entity(button).observe(on_toggle_view);
-    (button, label)
-}
+/// The style class index links wear in the body — the single class
+/// [`populate_editor`] declares.
+const LINK_CLASS: usize = 0;
 
-/// Flip an editable notecard between the plain edit field and the rich
-/// read-only preview on a primary press.
+/// One notecard body's live state, on the rich-text field itself.
 ///
-/// The preview's **content** is not built here: a flip only changes which node
-/// is displayed, and [`refresh_notecard_preview`] brings the reader up to the
-/// edit buffer before it is seen. The hidden field also gives up focus, so
-/// keystrokes aimed at an invisible editor cannot go on editing behind the
-/// preview.
-fn on_toggle_view(
-    press: On<Pointer<Press>>,
-    mut toggles: Query<&mut NotecardViewToggle>,
-    mut nodes: Query<&mut Node>,
-    mut focus: ResMut<bevy::input_focus::InputFocus>,
-    mut commands: Commands,
-) {
-    if press.button != PointerButton::Primary {
-        return;
-    }
-    let Ok(mut toggle) = toggles.get_mut(press.entity) else {
-        return;
-    };
-    toggle.preview = !toggle.preview;
-    let (preview, edit_field, reader, label) = (
-        toggle.preview,
-        toggle.edit_field,
-        toggle.reader,
-        toggle.label,
-    );
-    if preview && focus.get() == Some(edit_field) {
-        focus.clear();
-    }
-    if let Ok(mut node) = nodes.get_mut(edit_field) {
-        node.display = if preview {
-            Display::None
-        } else {
-            Display::Flex
-        };
-    }
-    if let Ok(mut node) = nodes.get_mut(reader) {
-        node.display = if preview {
-            Display::Flex
-        } else {
-            Display::None
-        };
-    }
-    let key = if preview {
-        "notecard-view-edit"
-    } else {
-        "notecard-view-preview"
-    };
-    commands
-        .entity(label)
-        .insert(crate::i18n::Translated::new(key));
-}
-
-/// Bring a **shown** preview up to the edit buffer: rebuild the reader's body
-/// from what the resident has typed, reconciled against the window's baseline
-/// the way a save is.
-///
-/// The reader used to be built once, from the notecard as it arrived, so the
-/// preview showed the notecard as *loaded or last saved* rather than what was
-/// typed — on a new notecard, an empty preview beside a field with text in it.
-///
-/// It rebuilds only when the buffer has actually moved (`shown_text`), so this
-/// is a user-paced teardown on a genuine content change, not per-frame churn:
-/// a flip with nothing typed since rebuilds nothing and keeps its scroll, and a
-/// preview nobody is looking at is not built at all. The reconciliation is
-/// [`sl_notecard::Notecard::with_edited_text`] — the same call the Save button
-/// makes — so an item deleted from the text is gone from the preview, a
-/// duplicated marker shows twice, and an item dropped in since the load appears
-/// as its own clickable box.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected queries: the toggles to refresh, the \
-              window (found through its parent chain and its floater) whose baseline the markers \
-              resolve against, the field they are typed in, and the reader's children and scroll \
-              the rebuild replaces"
-)]
-fn refresh_notecard_preview(
-    mut toggles: Query<(Entity, &mut NotecardViewToggle)>,
-    windows: Query<&NotecardEditorState>,
-    parents: Query<&ChildOf>,
-    floaters: Query<(Entity, &Floater)>,
-    fields: Query<&EditableText>,
-    children: Query<&Children>,
-    mut scrolls: Query<&mut ScrollPosition>,
-    mut commands: Commands,
-) {
-    for (button, mut toggle) in &mut toggles {
-        if !toggle.preview {
-            continue;
-        }
-        let Ok(field) = fields.get(toggle.edit_field) else {
-            continue;
-        };
-        // Compared before it is materialised: a preview nobody has typed into
-        // since costs a string comparison, not an allocation, per frame.
-        if field.value() == toggle.shown_text.as_str() {
-            continue;
-        }
-        // The toggle sits inside its own notecard window, which is where the
-        // baseline the markers resolve against lives.
-        let Some(state) =
-            host_floater(button, &parents, &floaters).and_then(|window| windows.get(window).ok())
-        else {
-            continue;
-        };
-        let Some(baseline) = state.baseline.as_ref() else {
-            continue;
-        };
-        let edited = field.value().to_string();
-        let previewed = baseline.with_edited_text(&edited);
-        let (reader, style) = (toggle.reader, LinkTextStyle::at(toggle.font_size));
-        tear_down(&mut commands, &children, reader);
-        spawn_notecard_body(&mut commands, reader, &previewed, state.source, style);
-        // The body is a different length now, so a scroll offset measured
-        // against the old one means nothing; start the new one at the top.
-        if let Ok(mut scroll) = scrolls.get_mut(reader) {
-            scroll.0.y = 0.0;
-        }
-        toggle.shown_text = edited;
-    }
-}
-
-/// Spawn the rich read-only reader in a bounded, wheel-scrollable block. Shown
-/// or hidden per `visible` (an editable notecard builds it hidden behind the
-/// edit field).
-fn spawn_reader_block(
-    commands: &mut Commands,
-    parent: Entity,
-    notecard: &sl_notecard::Notecard,
+/// The **baseline** lives here rather than on the window because it is the
+/// body's: it is the item table the buffer's markers resolve against while the
+/// resident types, and the table [`sl_notecard::Notecard::with_edited_text`]
+/// reconciles against when the Save button reads the field.
+#[derive(Component, Debug)]
+struct NotecardBody {
+    /// The rich-text field's overlay, which the item and link boxes are spawned
+    /// under.
+    overlay: Entity,
+    /// The notecard as it was loaded, plus every item dropped in since — the
+    /// table a marker code point in the buffer names an item from.
+    baseline: sl_notecard::Notecard,
+    /// Where the notecard lives, so a copied embedded item names the right
+    /// notecard and holding prim.
     source: NotecardSource,
-    style: LinkTextStyle,
-    visible: bool,
-) -> Entity {
-    let block = commands
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                // A reading measure, and a *bound* rather than a size: the
-                // window is content-driven, so without it a long unbroken run
-                // of prose would decide how wide the notecard window opens.
-                max_width: Val::Px(READONLY_BODY_WIDTH),
-                max_height: Val::Px(READONLY_BODY_HEIGHT),
-                overflow: Overflow::scroll_y(),
-                flex_direction: FlexDirection::Column,
-                display: if visible {
-                    Display::Flex
-                } else {
-                    Display::None
-                },
-                ..default()
-            },
-            ScrollPosition::default(),
-            Pickable::default(),
-            Name::new("notecard-reader"),
-            ChildOf(parent),
-        ))
-        .id();
-    commands.entity(block).observe(on_reader_scroll);
-    spawn_notecard_body(commands, block, notecard, source, style);
-    block
+    /// Whether the body is read-only, which is what decides whether a link is
+    /// drawn as a resolved chip or styled in place.
+    read_only: bool,
+    /// The font size the boxes are built at.
+    font_size: f32,
+    /// The buffer the current model was built from. `None` only while the body
+    /// is being built — a sentinel rather than an empty string, because an empty
+    /// notecard would otherwise look like one that had already been drawn.
+    shown_text: Option<String>,
+    /// The boxes currently spawned, by what they stand for, so typing prose
+    /// around them moves them rather than rebuilding them.
+    objects: HashMap<NotecardObjectKey, Entity>,
 }
 
-/// Scroll the reader block with the mouse wheel (its own `ScrollPosition`),
-/// matching the search / world-map result lists.
-fn on_reader_scroll(mut event: On<Pointer<Scroll>>, mut positions: Query<&mut ScrollPosition>) {
-    /// Logical pixels one wheel notch scrolls.
-    const LINE_SCROLL_PIXELS: f32 = 24.0;
-    if let Ok(mut position) = positions.get_mut(event.entity) {
-        position.0.y = (position.0.y - event.y * LINE_SCROLL_PIXELS).max(0.0);
+/// What a box in the body stands for — the key a box is reused by.
+///
+/// Reuse is the point: a resident typing a word before an item must not cost a
+/// despawn and respawn of that item's box (the floaters' build-once rule), and a
+/// link whose label is still resolving must not lose the request it made.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum NotecardObjectKey {
+    /// The `ordinal`-th occurrence of the marker for the embedded item at
+    /// `index` in the notecard's table. An ordinal, because the reference lets a
+    /// resident copy-paste a marker and get the item twice.
+    Item {
+        /// The item's index in the notecard's table.
+        index: u32,
+        /// Which occurrence of that marker this box is, from the top.
+        ordinal: usize,
+    },
+    /// The `ordinal`-th link to `url` in the body (read-only bodies only).
+    Link {
+        /// The link's canonical URL.
+        url: String,
+        /// Which occurrence of that URL this box is, from the top.
+        ordinal: usize,
+    },
+}
+
+/// Rebuild a body's model whenever its buffer has moved: which box sits at which
+/// byte offset, and which ranges are hidden or styled as links.
+///
+/// The buffer is compared before anything is built, so this is user-paced work
+/// on a real edit rather than per-frame churn — and boxes are matched by
+/// [`NotecardObjectKey`], so the common edit (typing prose) spawns and despawns
+/// nothing at all and only moves what is already there.
+fn rebuild_notecard_body(
+    mut bodies: Query<(&mut NotecardBody, &EditableText, &mut RichTextContent)>,
+    mut commands: Commands,
+) {
+    for (mut body, editable, mut content) in &mut bodies {
+        let text = editable.value().to_string();
+        if body.shown_text.as_deref() == Some(text.as_str()) {
+            continue;
+        }
+        let model = build_body_model(&mut commands, &mut body, &text);
+        content.set_if_neq(model);
+        body.shown_text = Some(text);
     }
-    event.propagate(false);
+}
+
+/// Build the body's model for `text`: one box per embedded-item marker, one per
+/// link when the body is read-only, and the ranges that hide or colour them.
+///
+/// Boxes already standing for the same thing are reused; the ones nothing in the
+/// new text stands for are despawned.
+fn build_body_model(
+    commands: &mut Commands,
+    body: &mut NotecardBody,
+    text: &str,
+) -> RichTextContent {
+    let style = LinkTextStyle::at(body.font_size);
+    let (overlay, source, read_only) = (body.overlay, body.source, body.read_only);
+    let mut previous = core::mem::take(&mut body.objects);
+    let mut kept: HashMap<NotecardObjectKey, Entity> = HashMap::new();
+    let mut model = RichTextContent::default();
+
+    // The embedded items: a marker code point stands where each one sits.
+    let mut ordinals: HashMap<u32, usize> = HashMap::new();
+    for (offset, character) in text.char_indices() {
+        let Some(index) = sl_notecard::embedded_char_index(character) else {
+            continue;
+        };
+        let Some(item) = body.baseline.item_by_index(index) else {
+            continue;
+        };
+        let ordinal = ordinals.entry(index).or_insert(0);
+        let key = NotecardObjectKey::Item {
+            index,
+            ordinal: *ordinal,
+        };
+        *ordinal = ordinal.saturating_add(1);
+        let object = previous.remove(&key).unwrap_or_else(|| {
+            let object = spawn_rich_text_object(commands, overlay);
+            spawn_embedded_item_box(commands, object, item, source, style);
+            object
+        });
+        kept.insert(key, object);
+        model.objects.push(RichTextObject {
+            entity: object,
+            index: offset,
+        });
+        // The marker itself is kept in the buffer and taken off the screen: it
+        // is what a deletion deletes and what a save reconciles against.
+        model.ranges.push(RichTextRange {
+            range: offset..offset.saturating_add(character.len_utf8()),
+            style: RichTextStyle::Hidden,
+        });
+    }
+
+    // The prose's links.
+    let mut offset = 0_usize;
+    let mut link_ordinals: HashMap<String, usize> = HashMap::new();
+    for run in linkify(text) {
+        let link = match run {
+            TextRun::Plain(plain) => {
+                offset = offset.saturating_add(plain.len());
+                continue;
+            }
+            TextRun::Link(link) => link,
+        };
+        let range = offset..offset.saturating_add(link.matched.len());
+        offset = range.end;
+        // The segmenter's runs are the source string in order, and this is what
+        // says so: a run that does not sit where it claims is dropped rather
+        // than styling a range of somebody else's text.
+        if text.get(range.clone()) != Some(link.matched.as_str()) {
+            continue;
+        }
+        if !read_only {
+            model.ranges.push(RichTextRange {
+                range,
+                style: RichTextStyle::Class(LINK_CLASS),
+            });
+            continue;
+        }
+        // A read-only body draws the link the way the rest of the viewer does —
+        // an agent link as that avatar's name, with its icon and its tooltip —
+        // which means drawing a box over the hidden URL text.
+        let ordinal = link_ordinals.entry(link.url.clone()).or_insert(0);
+        let key = NotecardObjectKey::Link {
+            url: link.url.clone(),
+            ordinal: *ordinal,
+        };
+        *ordinal = ordinal.saturating_add(1);
+        let object = previous.remove(&key).unwrap_or_else(|| {
+            let object = spawn_rich_text_object(commands, overlay);
+            populate_linkified_text(commands, object, &link.matched, style);
+            object
+        });
+        kept.insert(key, object);
+        model.objects.push(RichTextObject {
+            entity: object,
+            index: range.start,
+        });
+        model.ranges.push(RichTextRange {
+            range,
+            style: RichTextStyle::Hidden,
+        });
+    }
+
+    for (_key, object) in previous {
+        commands.entity(object).despawn();
+    }
+    body.objects = kept;
+    model
+}
+
+/// Open a link the resident pressed in an **editable** body.
+///
+/// A read-only body's links are real link nodes and dispatch themselves; an
+/// editable body's are ranges of the text being edited, so the press arrives as
+/// a [`RichTextRangeActivated`] naming the range and the URL is re-read from the
+/// buffer — which is also what keeps a half-typed URL from opening the link it
+/// used to be.
+fn activate_notecard_link(
+    mut activations: MessageReader<RichTextRangeActivated>,
+    bodies: Query<&EditableText, With<NotecardBody>>,
+    mut links: MessageWriter<LinkActivated>,
+) {
+    for activation in activations.read() {
+        if activation.class != LINK_CLASS {
+            continue;
+        }
+        let Ok(editable) = bodies.get(activation.field) else {
+            continue;
+        };
+        let text = editable.value().to_string();
+        let Some(pressed) = text.get(activation.range.clone()) else {
+            continue;
+        };
+        for run in linkify(pressed) {
+            if let TextRun::Link(link) = run {
+                links.write(LinkActivated {
+                    target: link.target,
+                    url: link.url,
+                });
+                break;
+            }
+        }
+    }
 }
 
 /// Reconcile one window's edited text against its baseline and write it back
@@ -724,7 +732,7 @@ fn on_reader_scroll(mut event: On<Pointer<Scroll>>, mut positions: Query<&mut Sc
 fn save_notecard(
     mut requests: MessageReader<SaveEditorWindow>,
     mut windows: Query<&mut NotecardEditorState>,
-    fields: Query<&EditableText>,
+    fields: Query<(&EditableText, &NotecardBody)>,
     mut sl_commands: MessageWriter<SlCommand>,
     mut commands: Commands,
 ) {
@@ -735,18 +743,11 @@ fn save_notecard(
         let (Some(field_entity), true) = (state.body_field, state.editable) else {
             continue;
         };
-        let Ok(field) = fields.get(field_entity) else {
+        let Ok((field, body)) = fields.get(field_entity) else {
             continue;
         };
-        // Borrow the baseline just long enough to reconcile, then release it
-        // before mutating the state below.
         let edited = field.value().to_string();
-        let data = {
-            let Some(baseline) = state.baseline.as_ref() else {
-                continue;
-            };
-            baseline.with_edited_text(&edited).encode()
-        };
+        let data = body.baseline.with_edited_text(&edited).encode();
         let source = state.source;
         sl_commands.write(SlCommand(Command::UpdateInventoryAsset {
             location: source.location(),
@@ -861,45 +862,37 @@ fn report_notecard_save(
 /// draws it inline; the read-only preview shows it as a clickable item at once.
 fn ingest_added_items(
     mut adds: MessageReader<AddEmbeddedItem>,
-    mut windows: Query<&mut NotecardEditorState>,
-    mut fields: Query<&mut EditableText>,
+    windows: Query<&NotecardEditorState>,
+    mut fields: Query<(&mut EditableText, &mut NotecardBody)>,
 ) {
     for add in adds.read() {
         // The drop names the window it landed on, so the item joins *that*
         // notecard rather than whichever one was opened last.
-        let Ok(mut state) = windows.get_mut(add.editor) else {
+        let Ok(state) = windows.get(add.editor) else {
             continue;
         };
-        // Only a modifiable notecard with a live edit field and baseline can
-        // take an added item.
+        // Only a modifiable notecard with a live body can take an added item.
         if !state.editable {
             continue;
         }
         let Some(field_entity) = state.body_field else {
             continue;
         };
-        if state.baseline.is_none() {
+        let Ok((mut editable, mut body)) = fields.get_mut(field_entity) else {
             continue;
-        }
+        };
         // The item's index is its position in the table, so appending it gives
         // it the next index — which no marker already in the text can alias
         // (`with_edited_text` resolves markers by position).
-        let next_index = state.baseline.as_ref().map_or(0, |notecard| {
-            u32::try_from(notecard.items.len()).unwrap_or(u32::MAX)
-        });
+        let next_index = u32::try_from(body.baseline.items.len()).unwrap_or(u32::MAX);
         let Some(marker) = sl_notecard::embedded_char(next_index) else {
             warn!("notecard already holds the maximum embedded items; drop ignored");
             continue;
         };
-        let embedded = to_embedded_item(&add.item);
-        if let Some(baseline) = state.baseline.as_mut() {
-            baseline.items.push(embedded);
-        }
-        if let Ok(mut editable) = fields.get_mut(field_entity) {
-            let mut value = editable.value().to_string();
-            value.push(marker);
-            editable.editor_mut().set_text(&value);
-        }
+        body.baseline.items.push(to_embedded_item(&add.item));
+        let mut value = editable.value().to_string();
+        value.push(marker);
+        editable.editor_mut().set_text(&value);
     }
 }
 
@@ -1452,23 +1445,25 @@ mod tests {
         }
     }
 
-    /// **The View Items preview shows what you typed**
-    /// (`viewer-notecard-preview-ignores-unsaved-text`): the reader was built
-    /// once from the notecard as it arrived, so the preview showed the loaded
-    /// or last-saved text — on a new notecard, an empty preview beside a field
-    /// with text in it.
-    mod preview {
+    /// **The body is one flowing text with its items in it**
+    /// (`viewer-notecard-inline-items`): the model the rich-text field lays out
+    /// — a box per embedded item, at the byte offset of the marker that names
+    /// it, with that marker taken off the screen.
+    ///
+    /// These tests replaced a set that drove a **toggle** between a plain edit
+    /// field and a separate read-only preview. The bug that set was written for
+    /// (a preview showing the notecard as loaded rather than as typed) cannot
+    /// occur here: there is one buffer, and the boxes are placed against it.
+    mod body {
         use super::super::{
-            NotecardEditorState, NotecardViewToggle, ingest_added_items, ingest_notecard_asset,
-            open_notecard, refresh_notecard_preview,
+            NotecardBody, NotecardEditorState, ingest_added_items, ingest_notecard_asset,
+            open_notecard, rebuild_notecard_body,
         };
         use crate::floater::FloaterPlugin;
         use crate::inventory::AddEmbeddedItem;
         use crate::ui::UiRoot;
         use crate::world_api::{NotecardSource, OpenNotecard};
-        use bevy::input_focus::{FocusCause, InputFocus};
-        use bevy::picking::backend::HitData;
-        use bevy::picking::pointer::PointerId;
+        use bevy::input_focus::InputFocus;
         use bevy::prelude::*;
         use bevy::text::EditableText;
         use pretty_assertions::assert_eq;
@@ -1477,6 +1472,7 @@ mod tests {
             OwnerKey, Permissions, Permissions5, SaleInfo, SlCommand, SlEvent, SlSessionEvent,
             Uuid,
         };
+        use sl_viewer_ui_widgets::ui_rich_text::{RichTextContent, RichTextStyle};
 
         /// A boxed error so tests can use `?` rather than the disallowed
         /// `unwrap` / `expect`.
@@ -1492,8 +1488,9 @@ mod tests {
         const LOADED_TEXT: &str = "as it was saved";
 
         /// An app with the floater manager, the open path and the per-window
-        /// pass this bug lives in — the asset ingest that builds the editor,
-        /// the drop that adds an embedded item, and the preview refresh.
+        /// pass that fills a window: the asset ingest that builds the body, the
+        /// drop that adds an embedded item, and the rebuild that turns the
+        /// buffer into the field's model.
         fn editor_app() -> App {
             let mut app = App::new();
             app.add_message::<SlCommand>()
@@ -1510,7 +1507,7 @@ mod tests {
                         open_notecard,
                         ingest_notecard_asset,
                         ingest_added_items,
-                        refresh_notecard_preview,
+                        rebuild_notecard_body,
                     )
                         .chain(),
                 );
@@ -1520,14 +1517,17 @@ mod tests {
             app
         }
 
-        /// Open the notecard editable and hand it a body, so the window is the
-        /// one a resident sees: a field with `text` in it and a preview built
-        /// from the same.
-        fn open_with_body(app: &mut App, text: &str) -> Result<(), TestError> {
+        /// Open the notecard and hand it a body carrying `text` and `items`.
+        fn open_with(
+            app: &mut App,
+            editable: bool,
+            text: &str,
+            items: Vec<sl_notecard::InventoryItem>,
+        ) {
             app.world_mut().write_message(OpenNotecard {
                 name: "A notecard".to_owned(),
                 asset_id: Uuid::from_u128(NOTECARD_ASSET),
-                editable: true,
+                editable,
                 source: NotecardSource::Agent {
                     item_id: InventoryKey::from(Uuid::from_u128(NOTECARD_ITEM)),
                 },
@@ -1535,7 +1535,7 @@ mod tests {
             app.update();
             let data = sl_notecard::Notecard {
                 source_version: sl_notecard::NotecardVersion::V2,
-                items: Vec::new(),
+                items,
                 text: text.to_owned(),
             }
             .encode();
@@ -1546,7 +1546,9 @@ mod tests {
                     data,
                 }))));
             app.update();
-            Ok(())
+            // One more pass: the body is spawned by the ingest's commands, so
+            // its first model is built on the frame after.
+            app.update();
         }
 
         /// The one open window.
@@ -1558,25 +1560,27 @@ mod tests {
                 .ok_or_else(|| TestError::from("no notecard window is open"))
         }
 
-        /// The view toggle button and the reader block it shows.
-        fn toggle(app: &mut App) -> Result<(Entity, Entity), TestError> {
+        /// The body field of the one open window.
+        fn body_field(app: &mut App) -> Result<Entity, TestError> {
             app.world_mut()
-                .query::<(Entity, &NotecardViewToggle)>()
+                .query_filtered::<Entity, With<NotecardBody>>()
                 .iter(app.world())
-                .map(|(button, toggle)| (button, toggle.reader))
                 .next()
-                .ok_or_else(|| TestError::from("the editable notecard has no view toggle"))
+                .ok_or_else(|| TestError::from("the window has no body"))
         }
 
-        /// Type `text` into the window's body field the way a keystroke would —
-        /// the buffer is what the preview must follow.
-        fn type_into_field(app: &mut App, text: &str) -> Result<(), TestError> {
-            let window = window(app)?;
-            let field = app
-                .world()
-                .get::<NotecardEditorState>(window)
-                .and_then(|state| state.body_field)
-                .ok_or("the editable notecard has no body field")?;
+        /// The body's model, as the rich-text field will lay it out.
+        fn model(app: &mut App) -> Result<RichTextContent, TestError> {
+            let field = body_field(app)?;
+            app.world()
+                .get::<RichTextContent>(field)
+                .cloned()
+                .ok_or_else(|| TestError::from("the body has no model"))
+        }
+
+        /// Set the body's buffer the way typing does.
+        fn type_into_body(app: &mut App, text: &str) -> Result<(), TestError> {
+            let field = body_field(app)?;
             let mut editable = app
                 .world_mut()
                 .get_mut::<EditableText>(field)
@@ -1586,35 +1590,10 @@ mod tests {
             Ok(())
         }
 
-        /// Press the view toggle the way a click does, then settle a frame.
-        fn press_toggle(app: &mut App) -> Result<(), TestError> {
-            let (button, _reader) = toggle(app)?;
-            let event = Pointer::new(
-                PointerId::Mouse,
-                bevy::picking::pointer::Location {
-                    target: bevy::camera::NormalizedRenderTarget::None {
-                        width: 800,
-                        height: 600,
-                    },
-                    position: Vec2::ZERO,
-                },
-                Press {
-                    button: PointerButton::Primary,
-                    hit: HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
-                    count: 1,
-                },
-                button,
-            );
-            app.world_mut().trigger(event);
-            app.update();
-            Ok(())
-        }
-
-        /// Every text run the reader draws, in tree order — what the resident
-        /// reads in the preview.
-        fn reader_text(app: &App, reader: Entity) -> Vec<String> {
+        /// Every text run under `entity`, in tree order — what a box reads as.
+        fn text_under(app: &App, entity: Entity) -> Vec<String> {
             let mut runs = Vec::new();
-            let mut stack = vec![reader];
+            let mut stack = vec![entity];
             while let Some(entity) = stack.pop() {
                 if let Some(text) = app.world().get::<Text>(entity) {
                     runs.push(text.0.clone());
@@ -1624,6 +1603,26 @@ mod tests {
                 }
             }
             runs
+        }
+
+        /// A landmark embedded in the notecard's table.
+        fn embedded_landmark(name: &str) -> sl_notecard::InventoryItem {
+            sl_notecard::InventoryItem {
+                item_id: sl_types::key::Key(Uuid::from_u128(0xE1)),
+                parent_id: sl_types::key::NULL_KEY,
+                permissions: sl_notecard::Permissions::default(),
+                metadata: None,
+                asset_id: sl_types::key::Key(Uuid::from_u128(0xE2)),
+                asset_id_encoding: sl_notecard::AssetIdEncoding::Plain,
+                asset_type: sl_notecard::AssetType::Landmark,
+                inventory_type: sl_notecard::InventoryType::Landmark,
+                flags: 0,
+                sale_info: sl_notecard::SaleInfo::default(),
+                name: name.to_owned(),
+                description: String::new(),
+                creation_date: 0,
+                unknown_fields: Vec::new(),
+            }
         }
 
         /// An inventory item a resident drags onto the open notecard.
@@ -1653,131 +1652,150 @@ mod tests {
             }
         }
 
-        /// The bug: text typed since the load must be what **View Items**
-        /// shows, not the notecard as it arrived.
+        /// An embedded item is a box at its marker's byte offset, and the marker
+        /// is hidden — the editable body included, which is what the toggle
+        /// used to stand in for.
         #[test]
-        fn the_preview_shows_text_typed_since_the_load() -> Result<(), TestError> {
+        fn an_item_is_a_box_where_its_marker_sits() -> Result<(), TestError> {
+            let marker = sl_notecard::embedded_char(0).ok_or("no marker")?;
+            let text = format!("visit {marker} today");
+            let offset = text.find(marker).ok_or("no marker in the fixture")?;
             let mut app = editor_app();
-            open_with_body(&mut app, LOADED_TEXT)?;
-            let (_button, reader) = toggle(&mut app)?;
+            open_with(&mut app, true, &text, vec![embedded_landmark("Our Home")]);
+
+            let model = model(&mut app)?;
+            let object = model
+                .objects
+                .first()
+                .ok_or("the body drew no box for the embedded item")?;
+            assert_eq!(object.index, offset, "the box is not where the marker is");
             assert!(
-                reader_text(&app, reader)
+                model
+                    .ranges
                     .iter()
-                    .any(|run| run == LOADED_TEXT),
-                "the preview did not start from the loaded notecard"
-            );
-
-            type_into_field(&mut app, "what the resident typed")?;
-            press_toggle(&mut app)?;
-
-            let shown = reader_text(&app, reader);
-            assert!(
-                shown.iter().any(|run| run == "what the resident typed"),
-                "the preview shows {shown:?}, not the unsaved text"
+                    .any(|styled| styled.style == RichTextStyle::Hidden
+                        && styled.range.start == offset),
+                "the marker was left on the screen: {:?}",
+                model.ranges
             );
             assert!(
-                !shown.iter().any(|run| run == LOADED_TEXT),
-                "the preview still shows the notecard as it was loaded"
+                text_under(&app, object.entity)
+                    .iter()
+                    .any(|run| run == "Our Home"),
+                "the box does not name the item"
             );
             Ok(())
         }
 
-        /// A brand-new notecard: an empty body typed into must preview as the
-        /// typed line, not as the empty notecard it was created as.
+        /// Typing prose around an item **moves** its box rather than rebuilding
+        /// it: the same entity, at its new offset. A rebuild per keystroke is
+        /// what the floaters' build-once rule forbids, and it would also throw
+        /// away a link box's in-flight name lookup.
         #[test]
-        fn an_empty_notecard_previews_what_was_typed_into_it() -> Result<(), TestError> {
+        fn typing_moves_a_box_it_does_not_rebuild_it() -> Result<(), TestError> {
+            let marker = sl_notecard::embedded_char(0).ok_or("no marker")?;
             let mut app = editor_app();
-            open_with_body(&mut app, "")?;
-            let (_button, reader) = toggle(&mut app)?;
+            open_with(
+                &mut app,
+                true,
+                &format!("a{marker}"),
+                vec![embedded_landmark("Our Home")],
+            );
+            let before = model(&mut app)?
+                .objects
+                .first()
+                .copied()
+                .ok_or("no box for the item")?;
 
-            type_into_field(&mut app, "the first line")?;
-            press_toggle(&mut app)?;
+            type_into_body(&mut app, &format!("abcd{marker}"))?;
 
+            let after = model(&mut app)?
+                .objects
+                .first()
+                .copied()
+                .ok_or("the box vanished when prose was typed")?;
+            assert_eq!(
+                after.entity, before.entity,
+                "the item's box was despawned and respawned for a keystroke"
+            );
             assert!(
-                reader_text(&app, reader)
-                    .iter()
-                    .any(|run| run == "the first line"),
-                "a new notecard's preview stayed empty"
+                after.index > before.index,
+                "the box did not follow the text that was typed before it"
             );
             Ok(())
         }
 
-        /// An item dropped **since the load** appears in the preview as its own
-        /// box, because the rebuild reconciles the markers against the window's
-        /// baseline exactly as a save does.
+        /// An item dropped **since the load** joins the table and appears as its
+        /// own box, because the drop appends its marker to the buffer the model
+        /// is built from.
         #[test]
-        fn an_item_dropped_since_the_load_appears_in_the_preview() -> Result<(), TestError> {
+        fn an_item_dropped_since_the_load_appears_as_a_box() -> Result<(), TestError> {
             let mut app = editor_app();
-            open_with_body(&mut app, LOADED_TEXT)?;
-            let (_button, reader) = toggle(&mut app)?;
+            open_with(&mut app, true, LOADED_TEXT, Vec::new());
             let editor = window(&mut app)?;
+            assert!(model(&mut app)?.objects.is_empty());
 
             app.world_mut().write_message(AddEmbeddedItem {
                 item: dropped_item("Our Home"),
                 editor,
             });
             app.update();
-            press_toggle(&mut app)?;
+            app.update();
 
-            let shown = reader_text(&app, reader);
+            let model = model(&mut app)?;
+            let object = model
+                .objects
+                .first()
+                .ok_or("the dropped item drew no box")?;
             assert!(
-                shown.iter().any(|run| run == "Our Home"),
-                "the preview shows {shown:?} — the dropped item is missing"
+                text_under(&app, object.entity)
+                    .iter()
+                    .any(|run| run == "Our Home"),
+                "the box does not name the dropped item"
             );
             Ok(())
         }
 
-        /// The rebuild is **paid for a change, not for a flip**: toggling with
-        /// nothing typed since leaves the reader's body exactly as it was, so
-        /// the preview keeps its scroll and the editor keeps the
-        /// build-once-update-on-change rule the floaters are held to.
+        /// A **read-only** body draws each link as the resolved chip the rest of
+        /// the viewer draws, over the hidden URL text; an **editable** one
+        /// leaves the URL as the text it is and styles it in place.
         #[test]
-        fn a_flip_with_nothing_typed_rebuilds_nothing() -> Result<(), TestError> {
-            let mut app = editor_app();
-            open_with_body(&mut app, LOADED_TEXT)?;
-            let (_button, reader) = toggle(&mut app)?;
-            let body = app
-                .world()
-                .get::<Children>(reader)
-                .and_then(|children| children.iter().next())
-                .ok_or("the reader has no body")?;
+        fn a_link_is_a_chip_to_read_and_a_styled_range_to_edit() -> Result<(), TestError> {
+            let text = "see https://example.com now";
 
-            press_toggle(&mut app)?;
-
-            let after = app
-                .world()
-                .get::<Children>(reader)
-                .and_then(|children| children.iter().next())
-                .ok_or("the reader lost its body")?;
+            let mut reading = editor_app();
+            open_with(&mut reading, false, text, Vec::new());
+            let read_model = model(&mut reading)?;
             assert_eq!(
-                after, body,
-                "an unchanged preview was torn down and rebuilt anyway"
+                read_model.objects.len(),
+                1,
+                "a read-only body should draw the link as a box"
             );
-            Ok(())
-        }
+            assert!(
+                read_model
+                    .ranges
+                    .iter()
+                    .all(|styled| styled.style == RichTextStyle::Hidden),
+                "the URL under the box should be hidden: {:?}",
+                read_model.ranges
+            );
 
-        /// The field the preview hides gives up focus, so keystrokes aimed at
-        /// an invisible editor cannot go on editing behind the preview.
-        #[test]
-        fn the_hidden_field_gives_up_focus() -> Result<(), TestError> {
-            let mut app = editor_app();
-            open_with_body(&mut app, LOADED_TEXT)?;
-            let editor = window(&mut app)?;
-            let field = app
-                .world()
-                .get::<NotecardEditorState>(editor)
-                .and_then(|state| state.body_field)
-                .ok_or("the editable notecard has no body field")?;
-            app.world_mut()
-                .resource_mut::<InputFocus>()
-                .set(field, FocusCause::Pressed);
-
-            press_toggle(&mut app)?;
-
+            let mut editing = editor_app();
+            open_with(&mut editing, true, text, Vec::new());
+            let edit_model = model(&mut editing)?;
+            assert!(
+                edit_model.objects.is_empty(),
+                "an editable body should leave the URL as text, not draw a box over it"
+            );
+            let styled = edit_model
+                .ranges
+                .first()
+                .ok_or("the editable body did not style its link")?;
+            assert_eq!(styled.style, RichTextStyle::Class(super::super::LINK_CLASS));
             assert_eq!(
-                app.world().resource::<InputFocus>().get(),
-                None,
-                "the hidden edit field kept the keyboard"
+                text.get(styled.range.clone()),
+                Some("https://example.com"),
+                "the styled range is not the link"
             );
             Ok(())
         }

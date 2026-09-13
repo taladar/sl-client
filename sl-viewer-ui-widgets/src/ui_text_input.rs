@@ -67,6 +67,31 @@
 //! cannot type into. Reading a committed value out is [`TextInputKind::parse`]'s
 //! job, and it returns `None` for those incomplete states.
 //!
+//! # Three stances: editable, read-only, disabled
+//!
+//! A field is **editable** by default. Two markers take that away, and they are
+//! not the same thing:
+//!
+//! - [`InteractionDisabled`](bevy::ui::InteractionDisabled) — **inert**. Greyed,
+//!   refuses focus (`clear_disabled_field_focus`), and takes no queued edit at
+//!   all: not a keystroke, not a caret move, not a selection. This is the
+//!   reference's stance for a greyed `LLLineEditor`, and the one a control the
+//!   agent has no right to touch wants.
+//! - [`ReadOnlyField`] — **readable but unchangeable**. Greyed the same way, but
+//!   it keeps focus, the caret, selection and `Ctrl+C`, and refuses only the
+//!   edits that would *change* the text (typing, paste, cut, delete, an IME
+//!   commit). A value worth showing is usually worth copying — an id, a price, a
+//!   name the user wants to paste elsewhere — and that is what the surrounding
+//!   platform does with a read-only control.
+//!
+//! Both are enforced in one place, `refuse_edits_an_uneditable_field_must_not_take`,
+//! which filters each field's queued [`TextEdit`]s **before** `bevy_text` drains
+//! them. Filtering the queue rather than the gesture is what keeps a disabled
+//! field from *flashing* a selection it is about to discard: the press still
+//! reaches the widget (that is `bevy_ui_widgets`' observer, not ours), but the
+//! selection it queues never reaches the buffer, so nothing is ever painted and
+//! then taken back.
+//!
 //! # Constructible without wiring
 //!
 //! Per the registry rule (`ui_element`): a field holds and edits its own
@@ -101,10 +126,11 @@ use sl_viewer_ui_core::ui_font::UiFont;
 /// A field's text colour.
 const FIELD_TEXT_COLOR: Color = Color::WHITE;
 
-/// A **disabled** field's text colour — a muted grey so a field the user cannot
-/// edit (e.g. one greyed for lack of modify permission) reads plainly as
-/// uneditable while its value stays legible, the reference's disabled-field look.
-const FIELD_DISABLED_TEXT_COLOR: Color = Color::srgb(0.45, 0.47, 0.52);
+/// An **uneditable** field's text colour — a muted grey so a field the user
+/// cannot change (one [disabled](bevy::ui::InteractionDisabled) for lack of
+/// modify permission, or one marked [`ReadOnlyField`]) reads plainly as such
+/// while its value stays legible, the reference's disabled-field look.
+const FIELD_UNEDITABLE_TEXT_COLOR: Color = Color::srgb(0.45, 0.47, 0.52);
 
 /// A field's recessed background — darker than the surrounding panel, so the
 /// editable area reads as a well the text sits in.
@@ -363,6 +389,13 @@ pub struct TextInputSpec {
     /// **window's** problem, not the field's; the notecard and script editors
     /// are content-driven for exactly this reason.
     pub fill: bool,
+    /// Whether the field spawns [read-only](ReadOnlyField) (`false`, the
+    /// default): greyed and unchangeable, but still selectable and copyable.
+    ///
+    /// A consumer whose field only *becomes* unchangeable later inserts and
+    /// removes the marker itself, exactly as it would
+    /// [`InteractionDisabled`](bevy::ui::InteractionDisabled).
+    pub read_only: bool,
 }
 
 impl TextInputSpec {
@@ -382,6 +415,7 @@ impl TextInputSpec {
             max_characters: None,
             decorated: true,
             fill: false,
+            read_only: false,
         }
     }
 
@@ -396,6 +430,22 @@ impl TextInputSpec {
         }
     }
 }
+
+/// Marks a field **read-only**: its text may be selected, moved through and
+/// copied, but never changed.
+///
+/// The middle stance between an editable field and a
+/// [disabled](bevy::ui::InteractionDisabled) one (see the [module
+/// documentation](self)). Insert it to take editing away from a field whose
+/// value is still worth reading — the item-properties price of an item that is
+/// not for sale — and remove it to give editing back; both are ordinary
+/// component operations a consumer can do at any time, like
+/// `InteractionDisabled` itself. [`TextInputSpec::read_only`] spawns a field
+/// wearing it.
+///
+/// A field wearing **both** markers is disabled: inert wins over readable.
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct ReadOnlyField;
 
 /// A numeric field's structural-validation state: its kind and the last value that
 /// passed `TextInputKind::accepts`, which `enforce_numeric_intermediate`
@@ -506,6 +556,9 @@ pub fn spawn_text_input(commands: &mut Commands, parent: Entity, spec: &TextInpu
             BorderColor::all(FIELD_BORDER),
             BackgroundColor(FIELD_BACKGROUND),
         ));
+    }
+    if spec.read_only {
+        field.insert(ReadOnlyField);
     }
     if let Some(filter) = spec.kind.char_filter() {
         field.insert(EditableTextFilter::new(filter));
@@ -806,17 +859,34 @@ fn drive_caret_blink(
     }
 }
 
-/// Grey a text field's font while it is [disabled](bevy::ui::InteractionDisabled),
-/// restoring the normal colour when it is re-enabled — so a field the caller has
-/// disabled (a build control greyed for lack of modify permission, an
-/// unselected-state field) reads plainly as uneditable, not identical to an
-/// active one. Writes only on a real change.
-fn reflect_disabled_text_color(
-    mut fields: Query<(&mut TextColor, Has<bevy::ui::InteractionDisabled>), With<EditableText>>,
+/// Grey a text field's font while it cannot be edited — while it is
+/// [disabled](bevy::ui::InteractionDisabled) or [`ReadOnlyField`] — restoring
+/// the normal colour when editing comes back, so a field the caller has closed
+/// to typing (a build control greyed for lack of modify permission, a price
+/// that is not being asked) reads plainly as such, not identical to an active
+/// one. Writes only on a real change.
+///
+/// Both stances share one grey deliberately: what they have in common is what
+/// the user needs to see at a glance — *you cannot type here*. Which of the two
+/// it is shows itself the moment they try to select.
+#[expect(
+    clippy::type_complexity,
+    reason = "the query is one colour to write and the two markers that decide it; naming the \
+              tuple would hide which two stances share the grey"
+)]
+fn reflect_uneditable_text_color(
+    mut fields: Query<
+        (
+            &mut TextColor,
+            Has<bevy::ui::InteractionDisabled>,
+            Has<ReadOnlyField>,
+        ),
+        With<EditableText>,
+    >,
 ) {
-    for (mut color, disabled) in &mut fields {
-        let want = if disabled {
-            FIELD_DISABLED_TEXT_COLOR
+    for (mut color, disabled, read_only) in &mut fields {
+        let want = if disabled || read_only {
+            FIELD_UNEDITABLE_TEXT_COLOR
         } else {
             FIELD_TEXT_COLOR
         };
@@ -851,7 +921,7 @@ impl Plugin for TextInputPlugin {
             (
                 install_caret_style,
                 toggle_overwrite_mode,
-                reflect_disabled_text_color,
+                reflect_uneditable_text_color,
             ),
         );
         app.add_systems(
@@ -861,6 +931,14 @@ impl Plugin for TextInputPlugin {
                 // never holds focus when the frame's edits apply — it cannot be
                 // typed into, not merely greyed.
                 clear_disabled_field_focus.before(EditableTextSystems),
+                // Also before the drain: a queue is where a refused gesture is
+                // stopped, so nothing an uneditable field may not take ever
+                // reaches the buffer (and so is never painted and taken back).
+                // After the overwrite rewrite, whose extra `Delete`s are
+                // mutations this must refuse too.
+                refuse_edits_an_uneditable_field_must_not_take
+                    .after(apply_overwrite_edits)
+                    .before(EditableTextSystems),
                 // Before `bevy_text` drains the queued edits, so an overwrite
                 // rewrite still reaches this frame's `apply_text_edits`.
                 apply_overwrite_edits.before(EditableTextSystems),
@@ -883,15 +961,147 @@ impl Plugin for TextInputPlugin {
 /// Drop input focus from a [disabled](bevy::ui::InteractionDisabled) text field
 /// before the frame's edits apply, so a field a consumer has disabled (e.g. a
 /// parcel control the agent lacks rights to change) cannot be focused or typed
-/// into — the interaction half of the disabled look [`reflect_disabled_text_color`]
-/// paints. Runs each frame: a click that momentarily focuses a disabled field is
-/// undone here before `bevy_text` drains any keystroke.
+/// into — the interaction half of the greyed look
+/// [`reflect_uneditable_text_color`] paints. Runs each frame: a click that
+/// momentarily focuses a disabled field is undone here before `bevy_text`
+/// drains any keystroke.
+///
+/// Deliberately blind to [`ReadOnlyField`]: a read-only field *keeps* its
+/// focus, because focus is what `Ctrl+C` needs to reach it.
 fn clear_disabled_field_focus(
     mut focus: ResMut<InputFocus>,
     disabled: Query<(), (With<EditableText>, With<bevy::ui::InteractionDisabled>)>,
 ) {
     if focus.get().is_some_and(|entity| disabled.contains(entity)) {
         focus.clear();
+    }
+}
+
+/// What a queued [`TextEdit`] would do to a field, as far as a field that
+/// cannot be freely edited has to care.
+///
+/// The three-way split is the whole of the read-only / disabled rule: a
+/// disabled field takes only [`Clears`](Self::Clears), a read-only one takes
+/// [`Reads`](Self::Reads) as well, and an editable one is never asked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EditEffect {
+    /// It **changes the text** — typing, pasting, cutting, deleting, or an IME
+    /// composition on its way into the buffer.
+    Mutates,
+    /// It **reads** the text: a caret move, a selection, a copy. Nothing in the
+    /// buffer changes, and the user gets something out of it.
+    Reads,
+    /// It **gives state up**: collapsing a selection back to a caret, or
+    /// clearing an in-progress IME composition. Always allowed, because
+    /// refusing it is what would leave a selection stranded on a field that has
+    /// just lost focus.
+    Clears,
+}
+
+/// What `edit` would do to a field, for [`field_permits`].
+///
+/// Every variant is named rather than swept up by a wildcard: a new upstream
+/// [`TextEdit`] must be classified deliberately, not silently let through into
+/// a field that refuses editing.
+fn edit_effect(edit: &TextEdit) -> EditEffect {
+    match edit {
+        TextEdit::Cut
+        | TextEdit::Paste
+        | TextEdit::Insert(_)
+        | TextEdit::Backspace
+        | TextEdit::BackspaceWord
+        | TextEdit::Delete
+        | TextEdit::DeleteWord
+        | TextEdit::ImeCommit { .. } => EditEffect::Mutates,
+        // An empty preedit *clears* a composition; a non-empty one puts text
+        // (which `EditableText::value` excludes, but the field still shows)
+        // into the buffer.
+        TextEdit::ImeSetCompose { value, .. } => {
+            if value.is_empty() {
+                EditEffect::Clears
+            } else {
+                EditEffect::Mutates
+            }
+        }
+        TextEdit::CollapseSelection => EditEffect::Clears,
+        TextEdit::Copy
+        | TextEdit::Left(_)
+        | TextEdit::Right(_)
+        | TextEdit::WordLeft(_)
+        | TextEdit::WordRight(_)
+        | TextEdit::Up(_)
+        | TextEdit::Down(_)
+        | TextEdit::TextStart(_)
+        | TextEdit::TextEnd(_)
+        | TextEdit::HardLineStart(_)
+        | TextEdit::HardLineEnd(_)
+        | TextEdit::LineStart(_)
+        | TextEdit::LineEnd(_)
+        | TextEdit::SelectAll
+        | TextEdit::SelectAllIfCollapsed
+        | TextEdit::MoveToPoint(_)
+        | TextEdit::SelectWordAtPoint(_)
+        | TextEdit::SelectLineAtPoint(_)
+        | TextEdit::SelectedHardLineAtPoint(_)
+        | TextEdit::ExtendSelectionToPoint(_)
+        | TextEdit::ShiftClickExtension(_) => EditEffect::Reads,
+    }
+}
+
+/// Whether a field that is `disabled` (or, when `false`, merely
+/// [read-only](ReadOnlyField)) may take `edit`.
+fn field_permits(edit: &TextEdit, disabled: bool) -> bool {
+    match edit_effect(edit) {
+        EditEffect::Mutates => false,
+        EditEffect::Reads => !disabled,
+        EditEffect::Clears => true,
+    }
+}
+
+/// Drop from every uneditable field's queue the edits it must not take, before
+/// `bevy_text` drains it: **all of them** for a
+/// [disabled](bevy::ui::InteractionDisabled) field bar the ones that give state
+/// up, and the text-changing ones for a [`ReadOnlyField`].
+///
+/// This is where the disabled field's *selection flash* dies. A press on a
+/// disabled field still runs `bevy_ui_widgets`' own observer — that is an
+/// upstream global observer, and nothing this widget owns can pre-empt it — so
+/// a double-click queues a `SelectWordAtPoint` whatever we do. Refusing the
+/// queued edit stops it one step later but a frame *earlier* than the old
+/// behaviour, where the selection applied, was painted, and was undone only
+/// when the focus drop reached `on_focus_lost` the frame after: a selection
+/// that appeared and vanished on a field that was never editable.
+///
+/// The read-only half is the same mechanism with a smaller refusal, which is
+/// what makes a read-only field selectable and copyable without opening a
+/// single mutation path: `Ctrl+C` queues a [`TextEdit::Copy`] like anywhere
+/// else, and nothing in the queue can change the buffer.
+#[expect(
+    clippy::type_complexity,
+    reason = "the filter is the whole rule — the fields that wear either marker — and the fetch \
+              says which one; a type alias would put them in different places"
+)]
+fn refuse_edits_an_uneditable_field_must_not_take(
+    mut fields: Query<
+        (&mut EditableText, Has<bevy::ui::InteractionDisabled>),
+        Or<(With<bevy::ui::InteractionDisabled>, With<ReadOnlyField>)>,
+    >,
+) {
+    for (mut field, disabled) in &mut fields {
+        // The read runs through `as_ref` so a field with nothing to refuse is
+        // not marked changed — an idle greyed field must not hand the numeric
+        // validator and the layout work sixty times a second.
+        if field
+            .as_ref()
+            .pending_edits
+            .iter()
+            .all(|edit| field_permits(edit, disabled))
+        {
+            continue;
+        }
+        field
+            .pending_edits
+            .retain(|edit| field_permits(edit, disabled));
     }
 }
 
@@ -1024,6 +1234,21 @@ pub fn spawn_unsigned_specimen(commands: &mut Commands, parent: Entity, cx: Elem
     )
 }
 
+/// Spawn the read-only field specimen — the greyed, selectable, uneditable
+/// stance, swept beside the live single-line field it is otherwise identical to.
+pub fn spawn_read_only_specimen(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
+    spawn_text_input(
+        commands,
+        parent,
+        &TextInputSpec {
+            initial: cx.text(SAMPLE_TEXT),
+            font_size: cx.font_size,
+            read_only: true,
+            ..TextInputSpec::new("text-input-read-only", TextInputKind::Line)
+        },
+    )
+}
+
 // ---------------------------------------------------------------------------
 // The live demo panel (`F6`, or `SL_VIEWER_TEXT_INPUT_DEMO` for the screenshot
 // harness) — the by-hand proof surface, in the pattern of `ui_text`'s `F4`
@@ -1063,7 +1288,22 @@ const DEMO_LABEL_COLOR: Color = Color::srgb(0.72, 0.78, 0.88);
 /// The one-line instruction shown above the demo's fields.
 const DEMO_TITLE: &str = "Text-input demo (F8) - Tab between the fields and type / use your IME. \
      The numeric fields reject a bad character as you type, and revert a bad arrangement (a \
-     second '.', a misplaced '-'); the single-line field scrolls, the multi-line one wraps.";
+     second '.', a misplaced '-'); the single-line field scrolls, the multi-line one wraps. The \
+     read-only field can be selected and copied (Ctrl+C) but never typed into; the disabled one \
+     takes nothing at all, and must not flash a selection when double-clicked.";
+
+/// Which of the three stances (see the [module documentation](self)) a demo row's
+/// field is spawned in — the hand-testable half of the read-only / disabled
+/// split, which no headless test can check the *look* of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DemoStance {
+    /// An ordinary editable field.
+    Editable,
+    /// Greyed, selectable, copyable, unchangeable ([`ReadOnlyField`]).
+    ReadOnly,
+    /// Greyed and inert ([`InteractionDisabled`](bevy::ui::InteractionDisabled)).
+    Disabled,
+}
 
 /// Whether the demo panel is currently shown. Toggled by `DEMO_TOGGLE_KEY`;
 /// hidden by default.
@@ -1148,28 +1388,65 @@ pub fn setup_text_input_demo(
     // One labelled row per kind, tab-ordered top to bottom. The multi-line field
     // is prefilled with prose; the numeric ones with valid sample values.
     let rows = [
-        ("Single line", TextInputKind::Line, String::new()),
+        (
+            "Single line",
+            TextInputKind::Line,
+            String::new(),
+            DemoStance::Editable,
+        ),
         (
             "Multi line",
             TextInputKind::Multiline,
             SAMPLE_TEXT.to_owned(),
+            DemoStance::Editable,
         ),
-        ("Float (+/-)", TextInputKind::Float, "-3.5".to_owned()),
-        ("Integer (+/-)", TextInputKind::Integer, "-42".to_owned()),
+        (
+            "Float (+/-)",
+            TextInputKind::Float,
+            "-3.5".to_owned(),
+            DemoStance::Editable,
+        ),
+        (
+            "Integer (+/-)",
+            TextInputKind::Integer,
+            "-42".to_owned(),
+            DemoStance::Editable,
+        ),
         (
             "Positive integer",
             TextInputKind::NonNegativeInteger,
             "128".to_owned(),
+            DemoStance::Editable,
+        ),
+        (
+            "Read-only",
+            TextInputKind::Line,
+            SAMPLE_TEXT.to_owned(),
+            DemoStance::ReadOnly,
+        ),
+        (
+            "Disabled",
+            TextInputKind::Line,
+            SAMPLE_TEXT.to_owned(),
+            DemoStance::Disabled,
         ),
     ];
-    for (index, (label, kind, initial)) in rows.into_iter().enumerate() {
+    for (index, (label, kind, initial, stance)) in rows.into_iter().enumerate() {
         let tab_index = i32::try_from(index).unwrap_or(0);
-        spawn_demo_row(&mut commands, panel, label, kind, initial, tab_index);
+        spawn_demo_row(
+            &mut commands,
+            panel,
+            label,
+            kind,
+            initial,
+            tab_index,
+            stance,
+        );
     }
 }
 
-/// Spawn one labelled demo row: the label beside a field of `kind`, prefilled with
-/// `initial` and slotted at `tab_index` in the panel's tab order.
+/// Spawn one labelled demo row: the label beside a field of `kind` in `stance`,
+/// prefilled with `initial` and slotted at `tab_index` in the panel's tab order.
 fn spawn_demo_row(
     commands: &mut Commands,
     panel: Entity,
@@ -1177,6 +1454,7 @@ fn spawn_demo_row(
     kind: TextInputKind,
     initial: String,
     tab_index: i32,
+    stance: DemoStance,
 ) {
     let row_entity = commands
         .spawn((
@@ -1199,9 +1477,13 @@ fn spawn_demo_row(
         &TextInputSpec {
             initial,
             tab_index,
+            read_only: stance == DemoStance::ReadOnly,
             ..TextInputSpec::new("text-input-demo", kind)
         },
     );
+    if stance == DemoStance::Disabled {
+        commands.entity(field).insert(bevy::ui::InteractionDisabled);
+    }
     // A numeric row carries a live read-out of its parsed value, so the by-hand
     // tester can see what `parse` makes of what they type (and that an
     // intermediate state has no value yet).
@@ -1272,8 +1554,9 @@ mod tests {
     use super::{
         CURSOR_FLASH_DELAY_SECS, NumericField, TextInputKind, TextInputSpec, TextInputValue,
         accepts_float_intermediate, accepts_integer_intermediate, accepts_unsigned_integer,
-        caret_visible, overwrite_rewritten_edits, reconcile_numeric_field,
+        caret_visible, field_permits, overwrite_rewritten_edits, reconcile_numeric_field,
     };
+    use bevy::math::Vec2;
     use bevy::text::{EditableText, FontCx, LayoutCx, TextEdit};
     use pretty_assertions::assert_eq;
 
@@ -1574,6 +1857,86 @@ mod tests {
         };
         assert_eq!(ok.sanitised_initial(), "-3.5");
     }
+
+    /// **The one table behind both uneditable stances.** A disabled field takes
+    /// nothing but the edits that give state up; a read-only one also takes the
+    /// ones that read — every caret move, every selection, and the copy that is
+    /// the whole point of the stance — while both refuse every edit that would
+    /// change the text.
+    ///
+    /// Driven as a function because the alternative is a wired test per
+    /// `TextEdit` variant: this is where an upstream variant that slipped into
+    /// the wrong bucket shows up.
+    #[test]
+    fn an_uneditable_field_takes_only_the_edits_it_may() {
+        let mutations = [
+            TextEdit::Insert("x".into()),
+            TextEdit::Paste,
+            TextEdit::Cut,
+            TextEdit::Backspace,
+            TextEdit::BackspaceWord,
+            TextEdit::Delete,
+            TextEdit::DeleteWord,
+            TextEdit::ImeCommit { value: "x".into() },
+            TextEdit::ImeSetCompose {
+                value: "x".into(),
+                cursor: None,
+            },
+        ];
+        for edit in &mutations {
+            assert!(
+                !field_permits(edit, true),
+                "a disabled field must refuse {edit:?}"
+            );
+            assert!(
+                !field_permits(edit, false),
+                "a read-only field must refuse {edit:?}"
+            );
+        }
+
+        let reads = [
+            TextEdit::Copy,
+            TextEdit::SelectAll,
+            TextEdit::SelectAllIfCollapsed,
+            TextEdit::MoveToPoint(Vec2::ZERO),
+            TextEdit::SelectWordAtPoint(Vec2::ZERO),
+            TextEdit::SelectLineAtPoint(Vec2::ZERO),
+            TextEdit::SelectedHardLineAtPoint(Vec2::ZERO),
+            TextEdit::ExtendSelectionToPoint(Vec2::ZERO),
+            TextEdit::ShiftClickExtension(Vec2::ZERO),
+            TextEdit::Left(true),
+            TextEdit::Right(false),
+            TextEdit::WordLeft(true),
+            TextEdit::WordRight(false),
+            TextEdit::Up(false),
+            TextEdit::Down(false),
+            TextEdit::TextStart(false),
+            TextEdit::TextEnd(true),
+            TextEdit::HardLineStart(false),
+            TextEdit::HardLineEnd(false),
+            TextEdit::LineStart(false),
+            TextEdit::LineEnd(true),
+        ];
+        for edit in &reads {
+            assert!(
+                !field_permits(edit, true),
+                "a disabled field must refuse {edit:?} — taking it is what flashed a selection"
+            );
+            assert!(
+                field_permits(edit, false),
+                "a read-only field must take {edit:?}: reading is not editing"
+            );
+        }
+
+        for edit in [TextEdit::CollapseSelection, TextEdit::clear_ime_compose()] {
+            assert!(
+                field_permits(&edit, true),
+                "even a disabled field must be able to give state up ({edit:?}), or a selection \
+                 made before it was disabled would be stranded on it"
+            );
+            assert!(field_permits(&edit, false), "and so must a read-only one");
+        }
+    }
 }
 
 /// The widget **under real keystrokes** ([[viewer-ui-keyboard-text-harness]]):
@@ -1786,5 +2149,131 @@ mod typed_tests {
         interact::type_str(&mut app, "c");
         assert_eq!(value(&mut app), "ab", "a disabled field takes no input");
         Ok(())
+    }
+
+    /// **A disabled field never flashes a selection.** Double-clicking one used
+    /// to select a word, paint it, and discard it a frame or two later when the
+    /// focus drop reached `on_focus_lost` — a gesture granted and then taken
+    /// back on a field that was never editable.
+    ///
+    /// So the assertion is not "the selection is gone afterwards" — the old
+    /// behaviour passes that, and passes it by exactly the mechanism that is
+    /// the bug. It is that **no frame** of the gesture, or after it, ever holds
+    /// one; and because the flash lasted a single frame (the one the second
+    /// press landed in, undone the next when the focus drop reached
+    /// `on_focus_lost`), the check runs after every frame the double-click is
+    /// made of rather than once at the end.
+    #[test]
+    fn a_disabled_field_never_flashes_a_selection() -> Result<(), TestError> {
+        let mut app = typed_field_app(spec(TextInputKind::Line, "alpha"))?;
+        let field =
+            crate::ui_test::find_by_name(&mut app, FIELD).ok_or("the field did not spawn")?;
+        app.world_mut()
+            .entity_mut(field)
+            .insert(bevy::ui::InteractionDisabled);
+        settle(&mut app);
+
+        // The double click spelled out, so every frame of it can be sampled:
+        // press, release, press, release, each its own frame.
+        let at = interact::centre_of(&mut app, FIELD).ok_or("the field did not lay out")?;
+        interact::hover(&mut app, at);
+        for click in 0..2 {
+            interact::press(&mut app, MouseButton::Left);
+            assert!(
+                selection_is_collapsed(&app, field),
+                "press {click} painted a selection on a disabled field"
+            );
+            interact::release(&mut app, MouseButton::Left);
+            assert!(
+                selection_is_collapsed(&app, field),
+                "release {click} painted a selection on a disabled field"
+            );
+        }
+        for frame in 0..4 {
+            app.update();
+            assert!(
+                selection_is_collapsed(&app, field),
+                "frame {frame} after the double-click showed a selection on a disabled field"
+            );
+        }
+        Ok(())
+    }
+
+    /// **A read-only field can be selected and copied, and changed by nothing.**
+    /// The other half of the stance: the gesture a disabled field must refuse
+    /// outright is one a read-only field must *keep* — a selection that
+    /// survives, and a `Ctrl+C` that reaches the clipboard — while every edit
+    /// that would touch the buffer is refused.
+    #[test]
+    fn a_read_only_field_selects_and_copies_but_never_changes() -> Result<(), TestError> {
+        let mut app = typed_field_app(TextInputSpec {
+            read_only: true,
+            ..spec(TextInputKind::Line, "alpha")
+        })?;
+        let field =
+            crate::ui_test::find_by_name(&mut app, FIELD).ok_or("the field did not spawn")?;
+
+        // A double-click selects, and — unlike a disabled field — keeps both the
+        // selection and the focus that `Ctrl+C` needs to reach the field.
+        let at = interact::centre_of(&mut app, FIELD).ok_or("the field did not lay out")?;
+        interact::double_click(&mut app, at, MouseButton::Left);
+        settle(&mut app);
+        assert!(
+            !selection_is_collapsed(&app, field),
+            "a read-only field must keep the selection a double-click makes"
+        );
+        assert_eq!(
+            app.world()
+                .resource::<bevy::input_focus::InputFocus>()
+                .get(),
+            Some(field),
+            "and must keep the focus, or `Ctrl+C` has nowhere to land"
+        );
+
+        // Nothing may change the text: typing, backspace, delete, or a paste of
+        // something the clipboard is holding.
+        app.world_mut()
+            .resource_mut::<bevy::clipboard::Clipboard>()
+            .set_text("beta")?;
+        interact::type_str(&mut app, "z");
+        interact::tap(&mut app, KeyCode::Backspace, Key::Backspace);
+        interact::tap(&mut app, KeyCode::Delete, Key::Delete);
+        interact::with_modifier(&mut app, KeyCode::ControlLeft, Key::Control, |app| {
+            interact::type_str(app, "v");
+        });
+        settle(&mut app);
+        assert_eq!(
+            value(&mut app),
+            "alpha",
+            "a read-only field refuses every edit that would change it"
+        );
+        assert!(
+            !selection_is_collapsed(&app, field),
+            "and the refused keystrokes leave the selection standing"
+        );
+
+        // And the copy itself: select all, `Ctrl+C`, and the text is on the
+        // clipboard — the half the bug report asked for by name.
+        interact::with_modifier(&mut app, KeyCode::ControlLeft, Key::Control, |app| {
+            interact::type_str(app, "a");
+            interact::type_str(app, "c");
+        });
+        settle(&mut app);
+        let copied = app
+            .world_mut()
+            .resource_mut::<bevy::clipboard::Clipboard>()
+            .fetch_text()
+            .poll_result()
+            .ok_or("the clipboard read never resolved")??;
+        assert_eq!(copied, "alpha", "`Ctrl+C` copies a read-only field's text");
+        Ok(())
+    }
+
+    /// Whether `field`'s selection is collapsed to a bare caret — i.e. nothing
+    /// is highlighted.
+    fn selection_is_collapsed(app: &App, field: Entity) -> bool {
+        app.world()
+            .get::<bevy::text::EditableText>(field)
+            .is_none_or(|editable| editable.editor.raw_selection().is_collapsed())
     }
 }

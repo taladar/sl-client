@@ -309,6 +309,29 @@ pub struct TextMayClip {
     pub reason: &'static str,
 }
 
+/// A declared **overflow**: this node's `content_size` may exceed its own box,
+/// because the node does not lay its content out — something else does.
+///
+/// The layout harness holds every node to "your content fits your box", and that
+/// is right for anything taffy places. It stops having an answer for a node
+/// whose children are absolutely positioned *by a different engine* — taffy
+/// folds such a child's box into the parent's `content_size` whether or not the
+/// parent was ever supposed to hold it. The harness already skips the ancestors
+/// of an open popover for exactly this reason; this is the same statement made
+/// by a widget about itself.
+///
+/// Two kinds of node legitimately carry it, and nothing else should: an overlay
+/// whose children are positioned by a text engine (a rich-text field's inline
+/// objects), and a viewport that clips what does not fit on purpose. Like
+/// [`TextMayClip`], it is a **declaration** with a [`reason`](Self::reason) a
+/// reviewer can argue with, not a switch to reach for when a check is
+/// inconvenient.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ContentMayOverflow {
+    /// Why this node's content is allowed to exceed its box.
+    pub reason: &'static str,
+}
+
 /// A declared **radial** placement: this node must lie in the named direction
 /// from its group's [`RadialCentre`], to within [`tolerance`](Self::tolerance).
 ///

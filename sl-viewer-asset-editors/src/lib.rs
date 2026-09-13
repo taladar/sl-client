@@ -1,7 +1,7 @@
 //! Editors for the assets an inventory item points at.
 //!
-//! A notecard ([`edit_notecard`]) with its embedded items and the renderer
-//! that lays one out for reading ([`notecard_render`]); a script
+//! A notecard ([`edit_notecard`]) with its embedded items drawn in the flow of
+//! its text ([`notecard_render`]); a script
 //! ([`edit_script`]), whether it lives in inventory or in an object's
 //! contents, with its compile and run state; and a wearable
 //! ([`edit_wearable`]), whose edits preview on the avatar before they are
@@ -27,6 +27,7 @@ pub(crate) use sl_viewer_kit::avatar_assets;
 pub(crate) use sl_viewer_notices::linkified_text;
 pub(crate) use sl_viewer_notifications as notifications;
 pub(crate) use sl_viewer_pickers::ui_texture_picker;
+pub(crate) use sl_viewer_platform::url_linkify;
 pub(crate) use sl_viewer_ui_core::i18n;
 pub(crate) use sl_viewer_ui_core::ui;
 pub(crate) use sl_viewer_ui_core::ui_element;

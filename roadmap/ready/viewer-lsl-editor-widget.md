@@ -5,7 +5,7 @@ topic: viewer
 status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-lsl-script-editor
 blocked_by: [viewer-ui-text-foundation, viewer-ui-text-input-widget]
-refs: [viewer-notecard-editor]
+refs: [viewer-notecard-editor, viewer-notecard-inline-items]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -58,3 +58,21 @@ Reference (Firestorm, read-only): `llscripteditor`, `llpreviewscript`,
 Add the script editor's **find/replace** floater
 (`floater_search_replace.xml`): find next/previous, replace one/all,
 case-sensitivity toggle, operating on the editor buffer.
+
+## Half of it is built (2026-09-13)
+
+[[viewer-notecard-inline-items]] needed the same two things and built them
+rather than a second design: the workspace's **parley fork** gained
+`PlainEditor::set_range_styles` (a style property scoped to a byte range —
+which is what a token colour is) and `set_inline_boxes`, and the **Bevy fork**
+gained `ComputedTextBlock::set_entities` so an editable field's per-range brush
+resolves to a real `TextColor` and `Underline`. Over those sits
+`sl-viewer-ui-widgets`' `ui_rich_text` field, with style classes and inline
+objects already working and tested.
+
+So the "fork it or overlay it" decision above is settled, and settled the way
+this task recommended. What is left here is the **editor** over that field:
+undo/redo, a gutter and line numbers, current-line highlight, find/replace and
+go-to-line, plus the benchmark of a 64 KB buffer against `PlainEditor`'s
+whole-buffer relayout — which the notecard, whose bodies are small, never had to
+answer.
