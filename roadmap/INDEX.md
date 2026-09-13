@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 312 |
+| ready | 313 |
 | blocked | 41 |
 | in-progress | 22 |
 | bugs | 43 |
-| done | 1105 |
+| done | 1106 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1665** |
+| **total** | **1667** |
 
 ## ideas (100)
 
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (312)
+## ready (313)
 
 ### protocol
 
@@ -449,6 +449,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Chat / IM transcript display and style options
 - [`viewer-collision-messages-chat`](ready/viewer-collision-messages-chat.md) —
   Collision events to nearby chat
+- [`viewer-color-picker-face-pipette`](ready/viewer-color-picker-face-pipette.md)
+  — Colour picker pipette — sample a prim face's stored tint (blocked by
+  `viewer-ui-color-picker-advanced` (done))
+- [`viewer-color-picker-lsl-vector`](ready/viewer-color-picker-lsl-vector.md) —
+  Colour picker — the LSL vector tab and Copy LSL (blocked by
+  `viewer-ui-color-picker-advanced` (done))
 - [`viewer-combat-health-indicator`](ready/viewer-combat-health-indicator.md) —
   Combat health meter (HealthMessage)
 - [`viewer-consolidate-double-click-interval`](ready/viewer-consolidate-double-click-interval.md)
@@ -901,9 +907,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   UI regression baselines — recorded geometry that may not drift by accident
   (blocked by `viewer-ui-test-harness` (done), `viewer-test-baseline-format`
   (done))
-- [`viewer-ui-color-picker-advanced`](ready/viewer-ui-color-picker-advanced.md)
-  — Color picker — SV square, hue strip, palette & eyedropper (blocked by
-  `viewer-ui-color-picker` (done))
 - [`viewer-ui-settings-binding-combo`](ready/viewer-ui-settings-binding-combo.md)
   — Combo↔settings two-way binding (blocked by `viewer-ui-combo-widget` (done),
   `viewer-ui-settings-binding` (done))
@@ -1266,7 +1269,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1105)
+## done (1106)
 
 ### protocol
 
@@ -2806,6 +2809,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   toolbar (button bar) (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-color-picker`](done/viewer-ui-color-picker.md) — Color picker
   floater + swatch widget (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-ui-color-picker-advanced`](done/viewer-ui-color-picker-advanced.md) —
+  Color picker — SV square, hue strip, palette & eyedropper (blocked by
+  `viewer-ui-color-picker` (done))
 - [`viewer-ui-combo-widget`](done/viewer-ui-combo-widget.md) — Reusable combo /
   dropdown widget (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-context-menu`](done/viewer-ui-context-menu.md) — Line-based

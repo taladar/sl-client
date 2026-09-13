@@ -269,6 +269,12 @@ pub fn run() -> AppExit {
         // The sun / moon trackball's drawing half (viewer-ui-virtual-trackball):
         // places each marker from its aim and paints the below-horizon state.
         .add_plugins(crate::ui_trackball::TrackballPlugin)
+        // The colour picker's runtime half: it *builds* the hue × saturation
+        // picture the field is drawn with, syncs both markers and both slider
+        // sets, and registers the `ColorPicked` its reply row writes. Without it
+        // the picker's field is a flat grey box and pressing Cancel kills the
+        // gallery on an unregistered message.
+        .add_plugins(crate::ui_color_picker::ColorPickerPlugin)
         // The text-input widget's runtime half: the numeric fields' whole-string
         // validator, so a bad arrangement reverts in the gallery too.
         .add_plugins(crate::ui_text_input::TextInputPlugin)

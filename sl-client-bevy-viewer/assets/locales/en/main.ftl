@@ -1386,6 +1386,14 @@ color-picker-preview = Preview
 color-picker-original = Original
 color-picker-ok = OK
 color-picker-cancel = Cancel
+# The eyedropper: arms a one-click sample of whatever is under the pointer,
+# anywhere on screen.
+color-picker-pipette = Pick
+# Dragging the current-colour swatch onto a palette cell below saves it there.
+color-picker-drag-hint = (Drag below to save.)
+# Hand the colour to whatever is being tinted while it is still being chosen,
+# rather than only when OK is pressed.
+color-picker-apply-now = Apply now
 # The virtual trackball's compass ring: the four cardinal points, drawn round
 # the disc a sun or moon is aimed on. Single letters in English; a translation
 # uses whatever its own compass does (German O for east, not E).

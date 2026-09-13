@@ -144,13 +144,11 @@ pub(crate) const FLOATERS: &[FloaterElement] = &[
     },
     FloaterElement {
         id: "color-picker",
-        summary: "Color Picker: the shared swatch-driven picker — a saturation/value field, the \
-                  channel sliders and the reply row. Subject-bound to whatever swatch opened it.",
+        summary: "Color Picker: the shared swatch-driven picker — the hue × saturation field and \
+                  luminance strip, the R/G/B and H/S/L sliders, the hex field, the saved palette \
+                  and the reply row. Subject-bound to whatever swatch opened it.",
         spec: crate::ui_color_picker::color_picker_floater_spec,
-        content: FloaterContent::Stub(
-            "The saturation / value field, the hue and alpha tracks, the channel fields and the \
-             OK / Cancel reply row.",
-        ),
+        content: FloaterContent::Specimen(crate::ui_color_picker::spawn_color_picker_specimen),
     },
     FloaterElement {
         id: "contact-set-config",
