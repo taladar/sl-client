@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 313 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 33 |
-| done | 1127 |
+| bugs | 32 |
+| done | 1128 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1678** |
@@ -1163,7 +1163,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (33)
+## bugs (32)
 
 ### viewer
 
@@ -1179,9 +1179,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   fallback lies to the UI
 - [`viewer-audit-camera-reset-resnap`](bugs/viewer-audit-camera-reset-resnap.md)
   — Escape out of flycam interpolates between two unrelated poses
-- [`viewer-audit-collider-settle-treadmill`](bugs/viewer-audit-collider-settle-treadmill.md)
-  — A mesh with no physics block rebuilds its collider and the BVH every frame
-  forever
 - [`viewer-audit-env-overrides-preferences`](bugs/viewer-audit-env-overrides-preferences.md)
   — Environment variables silently override live graphics preferences
 - [`viewer-audit-media-url-scheme-allowlist`](bugs/viewer-audit-media-url-scheme-allowlist.md)
@@ -1244,7 +1241,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1127)
+## done (1128)
 
 ### protocol
 
@@ -1523,6 +1520,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-asset-editor-scaffold`](done/viewer-audit-asset-editor-scaffold.md)
   — The wearable editor reports a save that has not happened, and claims other
   editors' results
+- [`viewer-audit-collider-settle-treadmill`](done/viewer-audit-collider-settle-treadmill.md)
+  — A mesh with no physics block rebuilds its collider and the BVH every frame
+  forever
 - [`viewer-audit-command-result-diagnostics`](done/viewer-audit-command-result-diagnostics.md)
   — The bevy command dispatcher discards 300 protocol send results with no log
 - [`viewer-audit-diagnostic-stream-unread`](done/viewer-audit-diagnostic-stream-unread.md)

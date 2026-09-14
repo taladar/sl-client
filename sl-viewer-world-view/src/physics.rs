@@ -81,7 +81,7 @@ use sl_client_bevy::{
 
 use crate::avatars::update_avatar_objects;
 use crate::coords::{region_offset_bevy, sl_rotation_to_quat, sl_to_bevy_rotation, sl_to_bevy_vec};
-use crate::meshes::MeshManager;
+use crate::meshes::{MeshManager, MeshPhysicsAvailability};
 use crate::objects::{GeometryHolder, ObjectCategory, ObjectSlMotion, SceneObject, update_objects};
 use crate::raycast_index::{DynamicColliders, RaycastIndexColliders};
 use crate::world_api::ObjectState;
@@ -1486,10 +1486,10 @@ pub(crate) struct RefinedCollider {
     /// The physics-shape type the collider was built for, or [`None`] while the
     /// object's physics data has not yet arrived (a placeholder cuboid stands in).
     shape: Option<PhysicsShapeType>,
-    /// Whether the collider is the real geometry-derived shape (`true`) or a
-    /// stand-in cuboid awaiting the shape data / the object's tessellated geometry
-    /// (`false`) — the latter is retried each frame until the geometry is ready.
-    from_geometry: bool,
+    /// What this collider is still waiting for, if anything — a stand-in cuboid
+    /// awaiting the object's tessellated geometry, or a visual-geometry shape
+    /// awaiting the mesh's lighter uploaded physics shape. See [`ColliderWait`].
+    wait: ColliderWait,
     /// The object scale (floored extents, metres per axis) the collider was built
     /// for, so a genuine resize rebuilds it.
     scale: [f32; 3],
@@ -1503,6 +1503,82 @@ const fn shape_wants_geometry(shape: PhysicsShapeType) -> bool {
         shape,
         PhysicsShapeType::Prim | PhysicsShapeType::ConvexHull | PhysicsShapeType::Other(_)
     )
+}
+
+/// What an object's current collision shape is still waiting for — the whole of
+/// "is it worth building this one again?" in one value, recorded on the collider
+/// when it is installed and consulted by [`collider_wait_due`] on the frames after.
+///
+/// Both collider builders used to record this as a bare "is it final?" flag and
+/// answer *no* for two unrelated situations: geometry that has not streamed in yet
+/// (which arrives, and announces itself no other way, so the retry is right) and a
+/// mesh standing on its heavy visual geometry while its light uploaded physics
+/// shape fetches (where the retry is right only until that fetch *answers*). A mesh
+/// that carries no physics block never answers with a shape, so the second case
+/// used to retry every frame forever — re-gathering the geometry, rebuilding the
+/// trimesh, re-inserting the collider and rebuilding the raycast BVH behind it
+/// (`viewer-audit-collider-settle-treadmill`). Naming the wait is what lets
+/// "no physics block" settle while "not fetched yet" keeps trying.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ColliderWait {
+    /// Nothing. This is the shape the object keeps until the object itself changes
+    /// (a resize, a new physics-shape type), which the ordinary staleness tests
+    /// catch.
+    Nothing,
+    /// The object's tessellated geometry, not yet spawned / uploaded. Retried every
+    /// frame: its arrival is not observable any other way, and until there are
+    /// vertices the retry builds nothing.
+    Geometry,
+    /// The named mesh's uploaded physics shape, which would replace a stand-in built
+    /// from the visual geometry. Retried only once that fetch resolves, one way or
+    /// the other.
+    MeshPhysics(MeshKey),
+}
+
+/// What a collider just built from an object's **visual geometry** is still waiting
+/// for. `mesh` is the object's mesh id and that mesh's physics availability, or
+/// [`None`] for a plain prim / sculpt, whose tessellated geometry is the final word.
+///
+/// The invariant this exists to make assertable: a mesh whose physics is terminally
+/// [`Absent`](MeshPhysicsAvailability::Absent), with usable geometry to stand on,
+/// settles.
+const fn geometry_collider_wait(
+    mesh: Option<(MeshKey, MeshPhysicsAvailability)>,
+    points_empty: bool,
+) -> ColliderWait {
+    if points_empty {
+        // Nothing was built from: a placeholder cuboid stands in until the faces
+        // arrive.
+        return ColliderWait::Geometry;
+    }
+    match mesh {
+        // The physics fetch has not answered yet, so this heavier shape is a
+        // stand-in worth replacing when it does.
+        Some((key, MeshPhysicsAvailability::Pending)) => ColliderWait::MeshPhysics(key),
+        // `Absent` is an answer: the mesh carries no physics block, so the visual
+        // geometry *is* its final collision shape. `Ready` reaches here only when the
+        // decoded physics turned out to hold no usable shape — equally final. And a
+        // plain prim never had anything else coming.
+        _ => ColliderWait::Nothing,
+    }
+}
+
+/// Whether a collider that recorded `wait` is worth building again this frame.
+/// `physics` answers where a mesh's uploaded physics shape stands —
+/// [`MeshManager::physics_availability`] in the viewer, a fixed answer in the tests.
+///
+/// The one case that must say *no* is a wait on a physics fetch that has not
+/// answered: rebuilding then produces the identical shape from the identical
+/// geometry, at the cost of a trimesh and a raycast-BVH rebuild.
+fn collider_wait_due(
+    wait: ColliderWait,
+    physics: impl FnOnce(MeshKey) -> MeshPhysicsAvailability,
+) -> bool {
+    match wait {
+        ColliderWait::Nothing => false,
+        ColliderWait::Geometry => true,
+        ColliderWait::MeshPhysics(key) => physics(key) != MeshPhysicsAvailability::Pending,
+    }
 }
 
 /// Whether two floored collider-extent triples differ enough to warrant a rebuild.
@@ -1641,23 +1717,27 @@ pub(crate) fn refine_physical_colliders(
         let scale_changed = existing.is_none_or(|state| extents_differ(state.scale, scale));
         let shape_changed = existing.is_none_or(|state| state.shape != desired);
         // A geometry-needing shape whose collider is still the placeholder cuboid /
-        // visual-geometry fallback: retry each frame until the meshes are uploaded
-        // (or, for a mesh object, until its lighter physics shape is decoded).
-        let geometry_pending = existing.is_some_and(|state| !state.from_geometry)
-            && desired.is_some_and(shape_wants_geometry);
-        if !(scale_changed || shape_changed || geometry_pending) {
+        // visual-geometry fallback: retry until the meshes are uploaded (or, for a
+        // mesh object, until its lighter physics shape resolves — *not* every frame
+        // for one that will never have one).
+        let waiting = existing.is_some_and(|state| {
+            collider_wait_due(state.wait, |key| mesh_manager.physics_availability(key))
+        }) && desired.is_some_and(shape_wants_geometry);
+        if !(scale_changed || shape_changed || waiting) {
             continue;
         }
         let [ex, ey, ez] = scale;
 
         match desired {
             // Physics data not yet learned: keep the P31.2 placeholder cuboid, sized
-            // to the current scale, until the shape type arrives.
+            // to the current scale, until the shape type arrives. It waits on the
+            // shape *data*, whose arrival `shape_changed` catches, not on anything
+            // this collider could be rebuilt from.
             None => {
                 commands.entity(entity).insert(RefinedCollider {
                     collider: Some(SharedShape::cuboid(ex, ey, ez)),
                     shape: None,
-                    from_geometry: false,
+                    wait: ColliderWait::Nothing,
                     scale,
                 });
             }
@@ -1667,7 +1747,7 @@ pub(crate) fn refine_physical_colliders(
                 commands.entity(entity).insert(RefinedCollider {
                     collider: None,
                     shape: desired,
-                    from_geometry: true,
+                    wait: ColliderWait::Nothing,
                     scale,
                 });
             }
@@ -1681,8 +1761,10 @@ pub(crate) fn refine_physical_colliders(
                 let mesh_key = object_state
                     .static_collider_facts(&scene.scoped_id)
                     .and_then(|facts| facts.mesh);
+                let mut mesh = None;
                 if let Some(mesh_key) = mesh_key {
                     mesh_manager.request_physics(mesh_key);
+                    mesh = Some((mesh_key, mesh_manager.physics_availability(mesh_key)));
                     if let Some(collider) = mesh_manager
                         .physics(mesh_key)
                         .and_then(|physics| mesh_physics_collider(physics, scale))
@@ -1691,7 +1773,7 @@ pub(crate) fn refine_physical_colliders(
                         commands.entity(entity).insert(RefinedCollider {
                             collider: Some(collider),
                             shape: desired,
-                            from_geometry: true,
+                            wait: ColliderWait::Nothing,
                             scale,
                         });
                         continue;
@@ -1719,21 +1801,23 @@ pub(crate) fn refine_physical_colliders(
                     commands.entity(entity).insert(RefinedCollider {
                         collider,
                         shape: desired,
-                        from_geometry: false,
+                        wait: geometry_collider_wait(mesh, true),
                         scale,
                     });
                     continue;
                 }
                 let point_count = points.len();
+                let wait = geometry_collider_wait(mesh, false);
                 let collider = prim_geometry_collider(Some(shape), points, indices, scale);
                 debug!("physical object {entity} → {shape:?} collider from {point_count} vertices");
-                // A mesh on the visual fallback keeps `from_geometry: false` so it
-                // retries for the lighter physics shape; a plain prim's tessellated
-                // geometry is final (`true`).
+                // A mesh whose physics fetch has not answered yet keeps waiting on it,
+                // so the lighter shape replaces this one when it lands; a plain prim's
+                // tessellated geometry — and a mesh that turns out to carry no physics
+                // block — is final.
                 commands.entity(entity).insert(RefinedCollider {
                     collider: Some(collider),
                     shape: desired,
-                    from_geometry: mesh_key.is_none(),
+                    wait,
                     scale,
                 });
             }
@@ -1885,11 +1969,12 @@ pub(crate) struct StaticCollider {
     /// The physics-shape type the collider was built for (`None` = unknown, the
     /// default), so a later `ObjectPhysicsProperties` push that changes it rebuilds.
     shape: Option<PhysicsShapeType>,
-    /// `true` once the collider is the intended final shape (mesh physics for a mesh,
-    /// tessellated geometry for a prim); `false` for a transient placeholder cuboid
-    /// (a mesh awaiting its physics blocks, or geometry not yet uploaded), which is
-    /// retried under the budget each frame until the real shape is in hand.
-    settled: bool,
+    /// What this collider is still waiting for, if anything: [`ColliderWait::Nothing`]
+    /// once it is the intended final shape (mesh physics for a mesh, tessellated
+    /// geometry for a prim, or the visual geometry of a mesh that carries no physics
+    /// block), else the thing whose arrival would replace it — which is what decides
+    /// whether the scanner re-queues it.
+    wait: ColliderWait,
 }
 
 /// Whether a prim category gets a static-index collider. Plain prims, sculpts, and
@@ -1962,9 +2047,9 @@ pub(crate) struct StaticBuildTask {
     non_solid: bool,
     /// The physics shape the collider is being built for.
     shape: Option<PhysicsShapeType>,
-    /// Whether this is the intended final shape (vs a mesh's visual-geometry fallback
-    /// awaiting its lighter physics shape, which is retried).
-    settled: bool,
+    /// What the collider being built will still be waiting for once it is installed
+    /// (see [`StaticCollider::wait`]).
+    wait: ColliderWait,
 }
 
 /// One prim needing a static-index collider built this frame, with the world
@@ -2089,9 +2174,12 @@ pub(crate) fn build_static_colliders(
             .map(|data| data.physics_shape_type);
         let non_solid = facts.phantom || shape == Some(PhysicsShapeType::None);
         // Skip prims whose collider is already the intended shape at the current
-        // scale / layer / shape — the steady-state majority.
+        // scale / layer / shape — the steady-state majority. A collider that is not
+        // the final shape re-queues only when what it waits on could have changed:
+        // re-queueing one whose mesh will never have a physics block rebuilds the
+        // shape and the raycast BVH every frame for the life of the prim.
         let needs_build = existing.is_none_or(|state| {
-            !state.settled
+            collider_wait_due(state.wait, |key| mesh_manager.physics_availability(key))
                 || extents_differ(state.scale, scale)
                 || state.non_solid != non_solid
                 || state.shape != shape
@@ -2128,45 +2216,25 @@ pub(crate) fn build_static_colliders(
         // Gather the shape source on the main thread (asset access), deciding the
         // intended shape vs a not-ready placeholder; `None` job = geometry / physics
         // not available yet.
-        let (job, settled): (Option<ColliderBuildJob>, bool) = match item.mesh {
-            Some(mesh_key) => {
-                // Trigger the on-demand physics-block fetch for this (near-camera)
-                // mesh; use it once decoded, else fall back to the visual geometry.
-                mesh_manager.request_physics(mesh_key);
-                if let Some(physics) = mesh_manager.physics(mesh_key) {
-                    (
-                        Some(ColliderBuildJob::MeshPhysics(
-                            Arc::clone(physics),
-                            item.scale,
-                        )),
-                        true,
-                    )
-                } else {
-                    let (points, indices) = gather_object_geometry(
-                        item.entity,
-                        item.scale,
-                        &children_q,
-                        &holders,
-                        &mesh_handles,
-                        &meshes,
-                    );
-                    if points.is_empty() {
-                        (None, false)
-                    } else {
-                        // A valid (heavier) fallback while the physics fetches; keep
-                        // `settled = false` so it retries for the lighter shape.
-                        (
-                            Some(ColliderBuildJob::Geometry {
-                                points,
-                                indices,
-                                shape: item.shape,
-                                extents: item.scale,
-                            }),
-                            false,
-                        )
-                    }
-                }
-            }
+        // Trigger the on-demand physics-block fetch for this (near-camera) mesh; use
+        // it once decoded, else fall back to the visual geometry. The availability
+        // read alongside it is what tells "still fetching" (fall back and try again
+        // later) from "there is no physics block" (fall back for good).
+        let mesh = item.mesh.map(|mesh_key| {
+            mesh_manager.request_physics(mesh_key);
+            (mesh_key, mesh_manager.physics_availability(mesh_key))
+        });
+        let (job, wait): (Option<ColliderBuildJob>, ColliderWait) = match item
+            .mesh
+            .and_then(|mesh_key| mesh_manager.physics(mesh_key))
+        {
+            Some(physics) => (
+                Some(ColliderBuildJob::MeshPhysics(
+                    Arc::clone(physics),
+                    item.scale,
+                )),
+                ColliderWait::Nothing,
+            ),
             None => {
                 let (points, indices) = gather_object_geometry(
                     item.entity,
@@ -2176,8 +2244,9 @@ pub(crate) fn build_static_colliders(
                     &mesh_handles,
                     &meshes,
                 );
+                let wait = geometry_collider_wait(mesh, points.is_empty());
                 if points.is_empty() {
-                    (None, false)
+                    (None, wait)
                 } else {
                     (
                         Some(ColliderBuildJob::Geometry {
@@ -2186,7 +2255,7 @@ pub(crate) fn build_static_colliders(
                             shape: item.shape,
                             extents: item.scale,
                         }),
-                        true,
+                        wait,
                     )
                 }
             }
@@ -2204,7 +2273,7 @@ pub(crate) fn build_static_colliders(
                         scale: item.scale,
                         non_solid: item.non_solid,
                         shape: item.shape,
-                        settled: false,
+                        wait,
                     });
                 }
             }
@@ -2217,7 +2286,7 @@ pub(crate) fn build_static_colliders(
                     scale: item.scale,
                     non_solid: item.non_solid,
                     shape: item.shape,
-                    settled,
+                    wait,
                 });
             }
         }
@@ -2253,7 +2322,7 @@ pub(crate) fn apply_static_colliders(
             scale: build.scale,
             non_solid: build.non_solid,
             shape: build.shape,
-            settled: build.settled,
+            wait: build.wait,
         });
     }
 }
@@ -3421,7 +3490,7 @@ mod tests {
     #[test]
     fn finished_collider_builds_install_and_clear_the_task()
     -> Result<(), Box<dyn core::error::Error>> {
-        use super::{StaticBuildTask, StaticCollider, apply_static_colliders};
+        use super::{ColliderWait, StaticBuildTask, StaticCollider, apply_static_colliders};
         use bevy::prelude::{App, Update};
         use bevy::tasks::AsyncComputeTaskPool;
         use parry3d::shape::SharedShape;
@@ -3430,17 +3499,17 @@ mod tests {
         let mut app = App::new();
         app.add_systems(Update, apply_static_colliders);
 
-        let build = |settled| StaticBuildTask {
+        let build = |wait| StaticBuildTask {
             task: AsyncComputeTaskPool::get()
                 .spawn(async move { SharedShape::cuboid(1.0, 1.0, 1.0) }),
             scale: [1.0, 1.0, 1.0],
             non_solid: false,
             shape: None,
-            settled,
+            wait,
         };
 
-        let prim = app.world_mut().spawn(build(true)).id();
-        let doomed = app.world_mut().spawn(build(true)).id();
+        let prim = app.world_mut().spawn(build(ColliderWait::Nothing)).id();
+        let doomed = app.world_mut().spawn(build(ColliderWait::Nothing)).id();
 
         // The prim whose build lands while it is gone simply is not in the query.
         app.world_mut().entity_mut(doomed).despawn();
@@ -3468,6 +3537,85 @@ mod tests {
         Ok(())
     }
 
+    /// The invariant the whole of `viewer-audit-collider-settle-treadmill` turns
+    /// on: a mesh whose physics fetch has answered "there is no physics block",
+    /// standing on usable visual geometry, is **finished**. Before the fix it kept
+    /// waiting — and a wait that can never end is a re-gather, a re-trimesh, a
+    /// re-inserted collider and a full raycast-BVH rebuild, every frame, for the
+    /// life of the prim.
+    #[test]
+    fn a_mesh_with_no_physics_block_settles_on_its_visual_geometry() {
+        use super::{ColliderWait, MeshPhysicsAvailability, geometry_collider_wait};
+        use sl_client_bevy::{MeshKey, Uuid};
+
+        let mesh = MeshKey::from(Uuid::from_u128(0x0C01_11DE));
+
+        assert_eq!(
+            geometry_collider_wait(Some((mesh, MeshPhysicsAvailability::Absent)), false),
+            ColliderWait::Nothing,
+            "a mesh that carries no physics block has its final shape already"
+        );
+        assert_eq!(
+            geometry_collider_wait(Some((mesh, MeshPhysicsAvailability::Pending)), false),
+            ColliderWait::MeshPhysics(mesh),
+            "one whose fetch has not answered is standing in, and says so"
+        );
+        assert_eq!(
+            geometry_collider_wait(Some((mesh, MeshPhysicsAvailability::Ready)), false),
+            ColliderWait::Nothing,
+            "and one that fell back despite a decoded shape has nothing better coming"
+        );
+        assert_eq!(
+            geometry_collider_wait(None, false),
+            ColliderWait::Nothing,
+            "a plain prim's tessellated geometry is the whole story"
+        );
+        assert_eq!(
+            geometry_collider_wait(Some((mesh, MeshPhysicsAvailability::Absent)), true),
+            ColliderWait::Geometry,
+            "with no vertices to build from, the placeholder waits on the geometry \
+             whatever the physics says"
+        );
+    }
+
+    /// What each recorded wait costs on the frames after: geometry is re-checked
+    /// (its arrival is announced no other way, and the check builds nothing until
+    /// there are vertices), an unanswered physics fetch is **not** (the rebuild
+    /// would be byte-identical), and an answered one is — once.
+    #[test]
+    fn only_a_wait_that_could_have_ended_re_queues_a_collider() {
+        use super::{ColliderWait, MeshPhysicsAvailability, collider_wait_due};
+        use sl_client_bevy::{MeshKey, Uuid};
+
+        let mesh = MeshKey::from(Uuid::from_u128(0x0C01_11DF));
+        let due = |wait, availability| collider_wait_due(wait, |_key| availability);
+
+        assert!(
+            !due(ColliderWait::Nothing, MeshPhysicsAvailability::Pending),
+            "a settled collider is never re-queued"
+        );
+        assert!(
+            due(ColliderWait::Geometry, MeshPhysicsAvailability::Pending),
+            "a placeholder keeps looking for the geometry"
+        );
+        assert!(
+            !due(
+                ColliderWait::MeshPhysics(mesh),
+                MeshPhysicsAvailability::Pending
+            ),
+            "an unanswered physics fetch is not worth rebuilding for"
+        );
+        for answered in [
+            MeshPhysicsAvailability::Ready,
+            MeshPhysicsAvailability::Absent,
+        ] {
+            assert!(
+                due(ColliderWait::MeshPhysics(mesh), answered),
+                "{answered:?} is an answer, so the stand-in is rebuilt once and settles"
+            );
+        }
+    }
+
     /// The moving-collider set must hold each physical prim's *current-frame*
     /// pose: `sync_dynamic_colliders` runs after `drive_physical_objects`, but that
     /// driver writes the local `Transform` and propagation only refreshes the
@@ -3479,7 +3627,7 @@ mod tests {
     /// with a ray: it hits at the `Transform` pose and misses at the stale one.
     #[test]
     fn dynamic_colliders_take_the_current_frame_pose() {
-        use super::{RefinedCollider, sync_dynamic_colliders};
+        use super::{ColliderWait, RefinedCollider, sync_dynamic_colliders};
         use bevy::prelude::{App, GlobalTransform, Update};
         use sl_viewer_kit::raycast_index::DynamicColliders;
         use std::collections::HashSet;
@@ -3499,7 +3647,7 @@ mod tests {
             RefinedCollider {
                 collider: Some(SharedShape::ball(1.0)),
                 shape: Some(PhysicsShapeType::Prim),
-                from_geometry: true,
+                wait: ColliderWait::Nothing,
                 scale: [1.0, 1.0, 1.0],
             },
         ));
