@@ -185,6 +185,19 @@ impl SlParcelOverlay {
         self.grid().is_some_and(ParcelOverlayGrid::is_complete)
     }
 
+    /// Put an already-assembled grid in place as `region`'s overlay, for unit
+    /// tests of a consumer (the property-line bands) that need a region to have
+    /// a grid without driving a whole session's chunk stream through the
+    /// world-maintenance system.
+    ///
+    /// Not `#[cfg(test)]`: the consumers live in other crates, and a `cfg(test)`
+    /// item is not compiled when a *dependent* crate runs its tests. The
+    /// `_for_test` name is the documentation — nothing in a running viewer
+    /// should call it.
+    pub fn insert_grid_for_test(&mut self, region: RegionHandle, grid: ParcelOverlayGrid) {
+        self.grids.insert(region, grid);
+    }
+
     /// Folds one pushed overlay chunk into its region's grid, creating the
     /// grid (sized for a standard 256 m region) on the first chunk. An untagged
     /// chunk (region handle 0 — the source circuit was not yet associated)

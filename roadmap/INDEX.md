@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 313 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 32 |
-| done | 1129 |
+| bugs | 31 |
+| done | 1130 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1679** |
@@ -1163,7 +1163,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (32)
+## bugs (31)
 
 ### viewer
 
@@ -1185,8 +1185,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Parcel media URLs reach CEF and GStreamer with no scheme allowlist
 - [`viewer-audit-parcel-audio-autoplay`](bugs/viewer-audit-parcel-audio-autoplay.md)
   — A transient empty parcel resets the user's stop decision and re-autoplays
-- [`viewer-audit-parcel-borders-retessellation`](bugs/viewer-audit-parcel-borders-retessellation.md)
-  — A region with parcels but no terrain re-tessellates its overlay every frame
 - [`viewer-audit-particles-dt-and-cloud-leak`](bugs/viewer-audit-particles-dt-and-cloud-leak.md)
   — Particle integration uses an unclamped dt, and a switched-off emitter leaks
   its cloud
@@ -1241,7 +1239,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1129)
+## done (1130)
 
 ### protocol
 
@@ -1549,6 +1547,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-parcel-access-list-accumulate`](done/viewer-audit-parcel-access-list-accumulate.md)
   — Editing a multi-packet parcel ban list unbans everyone not in the last
   packet
+- [`viewer-audit-parcel-borders-retessellation`](done/viewer-audit-parcel-borders-retessellation.md)
+  — A region with parcels but no terrain re-tessellates its overlay every frame
 - [`viewer-audit-picker-requester-identity`](done/viewer-audit-picker-requester-identity.md)
   — Two instances of one window share a picker, and both claim its answer
 - [`viewer-audit-plugin-resource-registration`](done/viewer-audit-plugin-resource-registration.md)
