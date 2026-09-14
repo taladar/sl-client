@@ -42,8 +42,7 @@ use crate::camera::FocusTarget;
 use crate::media_diagnostics::MediaDiagnostics;
 use crate::media_engine::{MediaEngineKind, MediaEngineSystems, MediaSurfaces};
 use crate::media_prim::{MediaData, MediaPrimState, media_permission_allows};
-use crate::system_browser::normalize_web_url;
-use crate::system_browser::open_in_system_browser;
+use crate::system_browser::{ExternalUrl, normalize_web_url, open_in_system_browser};
 use crate::ui::{LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::UiAction;
 use crate::ui_font::UiFont;
@@ -928,7 +927,15 @@ fn handle_media_control_actions(
                 }
             }
             "mute-toggle" => slot.surface.set_muted(!slot.surface.muted()),
-            "open-external" => open_in_system_browser(&slot.status.url),
+            // The page's *current* URL, which the page chose by navigating:
+            // remote data, filtered at the sink like any other.
+            "open-external" => {
+                if let Ok(url) = ExternalUrl::parse(&slot.status.url).inspect_err(|error| {
+                    warn!("media page not opened in the system browser: {error}");
+                }) {
+                    open_in_system_browser(&url);
+                }
+            }
             "zoom-toggle" => {
                 if bar_state.zoomed == Some(target) {
                     *camera_focus = FocusTarget::Avatar;

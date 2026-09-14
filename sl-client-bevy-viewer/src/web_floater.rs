@@ -20,7 +20,7 @@ use crate::browser_widget::{BrowserView, BrowserViewSpec, ValidatedMediaUrl, spa
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::Translated;
 use crate::media_engine::{MediaEngineSystems, MediaSurfaces};
-use crate::system_browser::{normalize_web_url, open_in_system_browser};
+use crate::system_browser::{ExternalUrl, normalize_web_url, open_in_system_browser};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::UiAction;
 use crate::ui_font::UiFont;
@@ -341,7 +341,15 @@ fn handle_web_actions(
                     slot.surface.reload();
                 }
             }
-            "open-external" => open_in_system_browser(&slot.status.url),
+            // The page's *current* URL, which the page chose by navigating:
+            // remote data, filtered at the sink like any other.
+            "open-external" => {
+                if let Ok(url) = ExternalUrl::parse(&slot.status.url).inspect_err(|error| {
+                    warn!("web page not opened in the system browser: {error}");
+                }) {
+                    open_in_system_browser(&url);
+                }
+            }
             _ => {}
         }
     }

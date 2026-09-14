@@ -43,7 +43,7 @@ use sl_client_bevy::{AgentKey, Command, GroupKey, SlCommand};
 
 use crate::i18n::Translator;
 use crate::parcel_names::ParcelNames;
-use crate::system_browser::open_in_system_browser;
+use crate::system_browser::{ExternalUrl, open_in_system_browser};
 use crate::ui::UiRoot;
 use crate::ui_element::{ElementCx, TextMayClip};
 use crate::ui_font::UiFont;
@@ -341,6 +341,12 @@ fn on_link_press(
 /// browser ([`OpenWebBrowser`]), an external host in the system browser — the
 /// reference internal-vs-external distinction. Non-`Web` targets are left for the
 /// SLURL dispatcher.
+///
+/// What counts as a link here is the linkifier's regex, run over chat, a
+/// notice or an IM — text anyone can send. The external branch therefore
+/// re-validates the scheme at the sink ([`ExternalUrl`]) rather than trusting
+/// that match: the linkifier also matches `ftp://`, which the desktop hands to
+/// whatever claims that scheme.
 fn dispatch_web_links(
     mut activated: MessageReader<LinkActivated>,
     mut browsers: MessageWriter<OpenWebBrowser>,
@@ -353,8 +359,10 @@ fn dispatch_web_links(
             browsers.write(OpenWebBrowser {
                 url: Some(event.url.clone()),
             });
-        } else {
-            open_in_system_browser(&event.url);
+        } else if let Ok(url) = ExternalUrl::parse(&event.url)
+            .inspect_err(|error| warn!("link not opened in the system browser: {error}"))
+        {
+            open_in_system_browser(&url);
         }
     }
 }

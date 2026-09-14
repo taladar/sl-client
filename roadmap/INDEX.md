@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 313 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 30 |
-| done | 1133 |
+| bugs | 29 |
+| done | 1134 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1681** |
@@ -1163,7 +1163,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (30)
+## bugs (29)
 
 ### viewer
 
@@ -1188,8 +1188,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-sit-camera-gating`](bugs/viewer-audit-sit-camera-gating.md) —
   The scripted sit camera arms on any SitResult and never clears forced
   mouselook
-- [`viewer-audit-system-browser-scheme-allowlist`](bugs/viewer-audit-system-browser-scheme-allowlist.md)
-  — Any scheme a chat link or SLURL names is handed to xdg-open
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
   — Mesh-head brow spikes forward from face-bone shape deformation
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
@@ -1236,7 +1234,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1133)
+## done (1134)
 
 ### protocol
 
@@ -1577,6 +1575,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-stale-globaltransform-readers`](done/viewer-audit-stale-globaltransform-readers.md)
   — Depth-reconstructing passes and the interest camera read a frame-old camera
   pose
+- [`viewer-audit-system-browser-scheme-allowlist`](done/viewer-audit-system-browser-scheme-allowlist.md)
+  — Any scheme a chat link or SLURL names is handed to xdg-open
 - [`viewer-audit-system-ordering-claims`](done/viewer-audit-system-ordering-claims.md)
   — Update tuples claim a pipeline order the scheduler does not enforce
 - [`viewer-audit-tab-panel-focus-order`](done/viewer-audit-tab-panel-focus-order.md)
