@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 313 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 34 |
-| done | 1127 |
+| bugs | 31 |
+| done | 1131 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1679** |
+| **total** | **1680** |
 
 ## ideas (100)
 
@@ -266,6 +266,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Session and SimSession are god objects with 12k-line impl blocks
 - [`protocol-audit-wire-error-contract`](ready/protocol-audit-wire-error-contract.md)
   — sl-wire's public parse surface has five different failure disciplines
+- [`protocol-fetch-inventory-items-request`](ready/protocol-fetch-inventory-items-request.md)
+  — Fetching inventory items by id (FetchInventory2's request half)
 - [`protocol-sl-llsd-serde`](ready/protocol-sl-llsd-serde.md) — serde
   Serialize/Deserialize derives for sl-llsd (Llsd) types
 - [`protocol-sl-lsl-serde`](ready/protocol-sl-lsl-serde.md) — serde support for
@@ -640,8 +642,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-movement-controls-floater`](ready/viewer-movement-controls-floater.md)
   — Movement controls floater + stand / stop-flying buttons (blocked by
   `viewer-ui-widget-scaffold` (done))
-- [`viewer-multiline-field-fills-its-floater`](ready/viewer-multiline-field-fills-its-floater.md)
-  — A multi-line field that grows with the window around it
 - [`viewer-name-tags-click-select`](ready/viewer-name-tags-click-select.md) —
   Name tags — click a tag to select the avatar
 - [`viewer-name-tags-decorations`](ready/viewer-name-tags-decorations.md) — Name
@@ -1163,7 +1163,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (34)
+## bugs (31)
 
 ### viewer
 
@@ -1179,9 +1179,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   fallback lies to the UI
 - [`viewer-audit-camera-reset-resnap`](bugs/viewer-audit-camera-reset-resnap.md)
   — Escape out of flycam interpolates between two unrelated poses
-- [`viewer-audit-collider-settle-treadmill`](bugs/viewer-audit-collider-settle-treadmill.md)
-  — A mesh with no physics block rebuilds its collider and the BVH every frame
-  forever
 - [`viewer-audit-env-overrides-preferences`](bugs/viewer-audit-env-overrides-preferences.md)
   — Environment variables silently override live graphics preferences
 - [`viewer-audit-media-url-scheme-allowlist`](bugs/viewer-audit-media-url-scheme-allowlist.md)
@@ -1198,8 +1195,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   mouselook
 - [`viewer-audit-system-ordering-claims`](bugs/viewer-audit-system-ordering-claims.md)
   — Update tuples claim a pipeline order the scheduler does not enforce
-- [`viewer-audit-ui-texture-poll-leak`](bugs/viewer-audit-ui-texture-poll-leak.md)
-  — Eight copied texture-poll systems each leak Image assets for the session
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
   — Mesh-head brow spikes forward from face-bone shape deformation
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
@@ -1222,8 +1217,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Mouselook — parts of the own avatar's head render from the inside
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
-- [`viewer-notecard-copied-item-loses-permissions`](bugs/viewer-notecard-copied-item-loses-permissions.md)
-  — An item copied out of a notecard arrives with no permissions
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
   — Own avatar looks broken after a teleport
 - [`viewer-own-avatar-facing-drifts-idle`](bugs/viewer-own-avatar-facing-drifts-idle.md)
@@ -1246,7 +1239,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1127)
+## done (1131)
 
 ### protocol
 
@@ -1525,6 +1518,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-asset-editor-scaffold`](done/viewer-audit-asset-editor-scaffold.md)
   — The wearable editor reports a save that has not happened, and claims other
   editors' results
+- [`viewer-audit-collider-settle-treadmill`](done/viewer-audit-collider-settle-treadmill.md)
+  — A mesh with no physics block rebuilds its collider and the BVH every frame
+  forever
 - [`viewer-audit-command-result-diagnostics`](done/viewer-audit-command-result-diagnostics.md)
   — The bevy command dispatcher discards 300 protocol send results with no log
 - [`viewer-audit-diagnostic-stream-unread`](done/viewer-audit-diagnostic-stream-unread.md)
@@ -1588,6 +1584,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   unbounded
 - [`viewer-audit-tonemap-legacy-sky`](done/viewer-audit-tonemap-legacy-sky.md) —
   ACES tonemapping is applied to legacy skies the reference exempts
+- [`viewer-audit-ui-texture-poll-leak`](done/viewer-audit-ui-texture-poll-leak.md)
+  — Eight copied texture-poll systems each leak Image assets for the session
 - [`viewer-audit-ui-widget-per-frame-writes`](done/viewer-audit-ui-widget-per-frame-writes.md)
   — The colour picker writes unguarded every frame and defeats the layout gate
 - [`viewer-audit-underwater-fog-nan`](done/viewer-audit-underwater-fog-nan.md) —
@@ -2045,6 +2043,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-movement-camera-input-tests`](done/viewer-movement-camera-input-tests.md)
   — Movement keys and camera modes, headless (blocked by
   `viewer-world-test-harness` (done))
+- [`viewer-multiline-field-fills-its-floater`](done/viewer-multiline-field-fills-its-floater.md)
+  — A multi-line field that grows with the window around it
 - [`viewer-music-controls-push-chat-bar`](done/viewer-music-controls-push-chat-bar.md)
   — Parcel music controls push the nearby chat bar up when they appear
 - [`viewer-muted-residents-text-still-shown`](done/viewer-muted-residents-text-still-shown.md)
@@ -2069,6 +2069,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A notecard created on OpenSim opened as "could not be read"
 - [`viewer-nonblocking-overlay-steals-focus`](done/viewer-nonblocking-overlay-steals-focus.md)
   — A see-through container in front of a field clears its focus, at random
+- [`viewer-notecard-copied-item-loses-permissions`](done/viewer-notecard-copied-item-loses-permissions.md)
+  — An item copied out of a notecard arrives with no permissions
 - [`viewer-notecard-format`](done/viewer-notecard-format.md) — Notecard format —
   a pure crate (sl-notecard)
 - [`viewer-notecard-inline-items`](done/viewer-notecard-inline-items.md) — A

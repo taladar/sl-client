@@ -947,6 +947,7 @@ notecard-status-saving = Saving…
 notecard-status-saved = Saved.
 notecard-status-save-failed = Save failed.
 notecard-status-decode-failed = This notecard could not be read.
+notecard-status-drop-restricted = That item's next-owner permissions are restricted, so it cannot go in a notecard.
 
 ## The LSL script editor floater (viewer-lsl-editor-save-compile).
 

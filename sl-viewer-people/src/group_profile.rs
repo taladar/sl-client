@@ -59,7 +59,7 @@ use sl_client_bevy::{
     AgentKey, Command, GroupKey, GroupMember, GroupNotice, GroupNoticeKey, GroupProfile, GroupRole,
     GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember, GroupRoleMemberChange,
     GroupRoleUpdateType, GroupTitle, ImDialog, LindenAmount, SlCommand, SlEvent, SlSessionEvent,
-    TextureKey, UpdateGroupInfoParams, Uuid, group_powers, to_bevy_image,
+    TextureKey, UpdateGroupInfoParams, Uuid, group_powers,
 };
 
 use crate::floater::{
@@ -82,9 +82,8 @@ use crate::ui_table::{
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
-use crate::world_api::AVATAR_BOOST_PRIORITY;
 use crate::world_api::AvatarState;
-use crate::world_api::{BoostTexture, DecodedTextures};
+use crate::world_api::ui_texture::{PendingUiTexture, UiTexturePlugin};
 use crate::world_api::{GroupsModel, OpenGroupProfile};
 
 /// The chrome font size, in logical pixels.
@@ -486,8 +485,6 @@ pub(crate) struct GroupProfileState {
     list_in_profile: bool,
     /// The selected role's powers edit draft, initialised when a role is selected.
     role_power_draft: u64,
-    /// Insignia texture awaited from the pipeline, with the node to hand it to.
-    pending_texture: Option<(TextureKey, Entity)>,
     /// Bumped when the member roster changes, so the members view rebuilds.
     members_revision: u64,
     /// Bumped when the notice list changes, so the notices view rebuilds.
@@ -844,13 +841,17 @@ pub struct GroupProfilePlugin;
 
 impl Plugin for GroupProfilePlugin {
     /// Register the open message, the requested-notice set, the table settings,
-    /// and the open / ingest / rebuild / poll systems.
+    /// and the open / ingest / rebuild systems (the insignia is filled in by the
+    /// shared UI-texture poll).
     ///
     /// Nothing spawns at `Startup`: a group-profile window exists only while a
     /// group's profile is open, so `open_group_profile` both spawns the
     /// instance and builds its content. The per-window systems are gated on
     /// there being a window at all, so a session with none costs no dispatch.
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<UiTexturePlugin>() {
+            app.add_plugins(UiTexturePlugin);
+        }
         app.init_resource::<RequestedGroupNotices>()
             .add_message::<OpenGroupProfile>()
             .add_systems(Startup, register_group_profile_settings)
@@ -872,7 +873,6 @@ impl Plugin for GroupProfilePlugin {
                         rebuild_details_area,
                         rebuild_compose_area,
                         rebuild_notice_body,
-                        poll_group_profile_texture,
                     )
                         .chain()
                         .run_if(any_with_component::<GroupProfileState>),
@@ -1589,18 +1589,17 @@ fn notice_column_ordering(column: usize, left: &NoticeRow, right: &NoticeRow) ->
 /// reply, so no node is spawned and despawned in the same frame.
 fn build_general_tab(
     mut windows: Query<(
-        &mut GroupProfileState,
+        &GroupProfileState,
         &mut GroupProfileDirty,
         &mut GroupProfileUi,
     )>,
     avatars: Res<AvatarState>,
     groups: Res<GroupsModel>,
-    mut boost: MessageWriter<BoostTexture>,
     children: Query<&Children>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
     mut commands: Commands,
 ) {
-    for (mut state, mut dirty, mut ui) in &mut windows {
+    for (state, mut dirty, mut ui) in &mut windows {
         if !dirty.general && !dirty.general_values {
             continue;
         }
@@ -1647,37 +1646,22 @@ fn build_general_tab(
             ui.charter_field = None;
             ui.fee_field = None;
             ui.general_handles = GeneralHandles::default();
-            build_general_structure(
-                &mut commands,
-                panel,
-                target,
-                &profile,
-                sig,
-                &mut state,
-                &mut boost,
-                &mut ui,
-            );
+            build_general_structure(&mut commands, panel, target, &profile, sig, state, &mut ui);
             ui.general_sig = Some(sig);
         }
-        update_general_values(&ui, &profile, &state, &avatars, &mut texts);
+        update_general_values(&ui, &profile, state, &avatars, &mut texts);
     }
 }
 
 /// Spawn the General tab's fixed skeleton for `sig`, storing handles to every
 /// value node in [`GroupProfileUi::general_handles`]. Called once per structure.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a build helper threading the spawn target, the group + profile, the \
-              signature, and the state / texture / handle sinks"
-)]
 fn build_general_structure(
     commands: &mut Commands,
     panel: Entity,
     target: GroupKey,
     profile: &GroupProfile,
     sig: GeneralSig,
-    state: &mut GroupProfileState,
-    boost: &mut MessageWriter<BoostTexture>,
+    state: &GroupProfileState,
     ui: &mut GroupProfileUi,
 ) {
     // Insignia beside the identity facts.
@@ -1690,7 +1674,7 @@ fn build_general_structure(
             ChildOf(panel),
         ))
         .id();
-    spawn_insignia(commands, top, profile.insignia_id, state, boost);
+    spawn_insignia(commands, top, profile.insignia_id);
     let facts = commands
         .spawn((
             Node {
@@ -2977,48 +2961,12 @@ fn send_accept_notices(
 }
 
 // ---------------------------------------------------------------------------
-// Insignia texture polling.
-// ---------------------------------------------------------------------------
-
-/// Swap the group insignia into its box once the pipeline decodes it.
-fn poll_group_profile_texture(
-    mut windows: Query<&mut GroupProfileState>,
-    store: Res<DecodedTextures>,
-    mut images: ResMut<Assets<Image>>,
-    children: Query<&Children>,
-    mut commands: Commands,
-) {
-    for mut state in &mut windows {
-        let Some((key, node)) = state.pending_texture else {
-            continue;
-        };
-        let Ok(mut entity) = commands.get_entity(node) else {
-            state.pending_texture = None;
-            continue;
-        };
-        if let Some(decoded) = store.get(key) {
-            let handle = images.add(to_bevy_image(decoded));
-            entity.insert(ImageNode::new(handle));
-            // Drop the "(loading)" label under the image.
-            despawn_children(&children, &mut commands, node);
-            state.pending_texture = None;
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Small spawn helpers.
 // ---------------------------------------------------------------------------
 
 /// The group insignia: request the texture and show a placeholder until it
 /// decodes.
-fn spawn_insignia(
-    commands: &mut Commands,
-    parent: Entity,
-    insignia_id: Option<TextureKey>,
-    state: &mut GroupProfileState,
-    boost: &mut MessageWriter<BoostTexture>,
-) {
+fn spawn_insignia(commands: &mut Commands, parent: Entity, insignia_id: Option<TextureKey>) {
     let node = commands
         .spawn((
             Node {
@@ -3039,11 +2987,9 @@ fn spawn_insignia(
         return;
     };
     spawn_key_label(commands, node, "group-profile-loading", DIM_LABEL_COLOR);
-    boost.write(BoostTexture {
-        key,
-        priority: AVATAR_BOOST_PRIORITY,
-    });
-    state.pending_texture = Some((key, node));
+    commands
+        .entity(node)
+        .insert(PendingUiTexture::over_placeholder(key));
 }
 
 /// A labelled row: the translated label leading, the caller's content after.

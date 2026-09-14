@@ -2840,7 +2840,7 @@ pub(crate) fn teleport_finish_from_llsd(body: &Llsd) -> Option<CapsTeleportFinis
         .and_then(Llsd::as_binary)?
         .try_into()
         .ok()?;
-    let port = u16::try_from(info.get("SimPort").and_then(Llsd::as_i32)?).ok()?;
+    let port = info.get("SimPort").and_then(llsd_port)?;
     // The seed capability is required for the teleport; an empty or unparsable
     // value drops the whole `TeleportFinish` (surfaced as a CAPS-decode failure).
     let seed = sl_wire::url_from_wire(
@@ -2881,7 +2881,7 @@ pub(crate) fn enable_simulator_from_caps_llsd(body: &Llsd) -> Option<(u64, Socke
     let info = body.get("SimulatorInfo").and_then(|s| s.index(0))?;
     let handle = info.get("Handle").map(llsd_u64)?;
     let octets: [u8; 4] = info.get("IP").and_then(Llsd::as_binary)?.try_into().ok()?;
-    let port = u16::try_from(info.get("Port").and_then(Llsd::as_i32)?).ok()?;
+    let port = info.get("Port").and_then(llsd_port)?;
     Some((
         handle,
         SocketAddr::new(IpAddr::V4(Ipv4Addr::from(octets)), port),
@@ -2900,7 +2900,7 @@ pub(crate) fn crossed_region_from_caps_llsd(body: &Llsd) -> Option<(u64, SocketA
         .and_then(Llsd::as_binary)?
         .try_into()
         .ok()?;
-    let port = u16::try_from(region.get("SimPort").and_then(Llsd::as_i32)?).ok()?;
+    let port = region.get("SimPort").and_then(llsd_port)?;
     // The seed capability is required for the handover; an empty or unparsable
     // value drops the whole `CrossedRegion` (surfaced as a CAPS-decode failure).
     let seed = sl_wire::url_from_wire(
@@ -3540,8 +3540,35 @@ pub(crate) fn llsd_u32(value: &Llsd) -> u32 {
                 .or_else(|| s.trim().parse().ok())
                 .unwrap_or(0)
         }
-        Llsd::Integer(i) => u32::try_from(*i).unwrap_or(0),
+        // A **bit pattern**, not a range conversion: a mask with the top bit set
+        // is written `<integer>-1</integer>`, and `try_from` would discard it as
+        // out of range where the reference reads it straight back out of the
+        // two's complement (`sl-wire`'s `upload_mask` documents the same rule).
+        Llsd::Integer(i) => i.cast_unsigned(),
         _ => 0,
+    }
+}
+
+/// Reads an IP port from an LLSD value: an integer, a 2- or 4-byte big-endian
+/// binary element, or a decimal string.
+///
+/// Tolerant for the reason [`llsd_u32`] is — an LLSD writer chooses the
+/// encoding, and this workspace has now been bitten twice by assuming the
+/// integer form. The stakes are higher here than a wrong number: each caller
+/// takes the port with `?`, so a port it cannot read drops the whole
+/// `TeleportFinish` / `CrossedRegion` / `EnableSimulator` it was part of, and
+/// the teleport simply never happens.
+fn llsd_port(value: &Llsd) -> Option<u16> {
+    match value {
+        Llsd::Integer(i) => u16::try_from(*i).ok(),
+        Llsd::Binary(bytes) if bytes.len() == 2 => Some(
+            bytes
+                .iter()
+                .fold(0u16, |acc, &byte| (acc << 8) | u16::from(byte)),
+        ),
+        Llsd::Binary(bytes) if bytes.len() >= 4 => u16::try_from(llsd_u32(value)).ok(),
+        Llsd::String(text) => text.trim().parse().ok(),
+        _ => None,
     }
 }
 
@@ -4378,6 +4405,14 @@ pub(crate) fn bulk_update_inventory_from_llsd(
 
 /// Builds an [`InventoryItem`] from a `BulkUpdateInventory` CAPS `ItemData`
 /// entry (`CamelCase` keys, flat — permissions are not nested as in AIS).
+///
+/// The five permission masks and `Flags` are `U32` template fields, and an
+/// LLSD-carried `U32` is a **4-byte big-endian binary** element, not an integer
+/// (the reference's `ll_U32_from_sd`; OpenSim's `LLSDxmlEncode2.AddElem(name,
+/// uint)` writes the same). Reading them as integers yielded 0 for every mask,
+/// so an item the grid pushed — a copy taken out of a notecard, a give, a
+/// paste — landed in the tree reading "(no copy) (no modify) (no transfer)"
+/// however full its permissions actually were. [`u32_member`] takes either form.
 pub(crate) fn bulk_update_item_from_llsd(item: &Llsd) -> Option<InventoryItem> {
     Some(InventoryItem {
         item_id: InventoryKey::from(uuid_member(item, "ItemID")),
@@ -4387,7 +4422,7 @@ pub(crate) fn bulk_update_item_from_llsd(item: &Llsd) -> Option<InventoryItem> {
         asset_id: uuid_member(item, "AssetID"),
         item_type: i8::try_from(i32_member(item, "Type")).unwrap_or(-1),
         inv_type: i8::try_from(i32_member(item, "InvType")).unwrap_or(-1),
-        flags: i32_member(item, "Flags").cast_unsigned(),
+        flags: u32_member(item, "Flags"),
         sale_type: u8::try_from(i32_member(item, "SaleType")).unwrap_or(0),
         sale_price: crate::types::linden_price_from_wire(
             i32_member(item, "SaleType") != 0,
@@ -4407,11 +4442,11 @@ pub(crate) fn bulk_update_item_from_llsd(item: &Llsd) -> Option<InventoryItem> {
         creator_id: AgentKey::from(uuid_member(item, "CreatorID")),
         group: crate::types::group_from_wire(uuid_member(item, "GroupID")),
         permissions: Permissions5 {
-            base: Permissions::from_bits(i32_member(item, "BaseMask").cast_unsigned()),
-            owner: Permissions::from_bits(i32_member(item, "OwnerMask").cast_unsigned()),
-            group: Permissions::from_bits(i32_member(item, "GroupMask").cast_unsigned()),
-            everyone: Permissions::from_bits(i32_member(item, "EveryoneMask").cast_unsigned()),
-            next_owner: Permissions::from_bits(i32_member(item, "NextOwnerMask").cast_unsigned()),
+            base: Permissions::from_bits(u32_member(item, "BaseMask")),
+            owner: Permissions::from_bits(u32_member(item, "OwnerMask")),
+            group: Permissions::from_bits(u32_member(item, "GroupMask")),
+            everyone: Permissions::from_bits(u32_member(item, "EveryoneMask")),
+            next_owner: Permissions::from_bits(u32_member(item, "NextOwnerMask")),
         },
     })
 }
@@ -4538,11 +4573,14 @@ pub(crate) fn inventory_folder_from_llsd(category: &Llsd) -> InventoryFolder {
 pub(crate) fn inventory_item_from_llsd(item: &Llsd) -> Option<InventoryItem> {
     let permissions = item.get("permissions");
     let sale_info = item.get("sale_info");
-    let perm = |key: &str| {
-        permissions
-            .map_or(0, |p| i32_member(p, key))
-            .cast_unsigned()
-    };
+    // A `U32` on the wire, and an LLSD writer may send one as a 4-byte
+    // big-endian **binary** element rather than an integer — read tolerantly, as
+    // the reference's `ll_U32_from_sd` does. The descendents body this parser
+    // usually sees carries integers, which is why reading them as `i32` worked
+    // for as long as it did; the same fields in the event queue's
+    // `BulkUpdateInventory` are binary, and an item read through *this* path
+    // from any such writer had every permission it owns silently zeroed.
+    let perm = |key: &str| permissions.map_or(0, |p| u32_member(p, key));
     let perm_uuid = |key: &str| permissions.map_or_else(Uuid::nil, |p| uuid_member_lenient(p, key));
     Some(InventoryItem {
         item_id: InventoryKey::from(uuid_member_lenient(item, "item_id")),
@@ -4552,7 +4590,7 @@ pub(crate) fn inventory_item_from_llsd(item: &Llsd) -> Option<InventoryItem> {
         asset_id: uuid_member_lenient(item, "asset_id"),
         item_type: i8::try_from(i32_member(item, "type")).unwrap_or(-1),
         inv_type: i8::try_from(i32_member(item, "inv_type")).unwrap_or(-1),
-        flags: i32_member(item, "flags").cast_unsigned(),
+        flags: u32_member(item, "flags"),
         sale_type: sale_info.map_or(0, |s| u8::try_from(i32_member(s, "sale_type")).unwrap_or(0)),
         sale_price: crate::types::linden_price_from_wire(
             sale_info.map_or(0, |s| i32_member(s, "sale_type")) != 0,
@@ -5917,6 +5955,10 @@ pub fn bulk_update_inventory_to_llsd(
 /// Serializes an [`InventoryItem`] as a flat `BulkUpdateInventory` `ItemData`
 /// entry (inverse of [`bulk_update_item_from_llsd`]). `last_owner_id` has no
 /// place in this wire form (the parser leaves it nil), so it is not emitted.
+///
+/// The `U32` fields (the five masks and `Flags`) go out as the big-endian
+/// binary a `U32` takes in an LLSD message — what a real simulator sends, so a
+/// client fed by this serializer is fed the shape it has to survive.
 pub(crate) fn bulk_update_item_to_llsd(item: &InventoryItem) -> Result<Llsd, sl_wire::WireError> {
     let (owner_id, group_id) = crate::types::object_owner_to_wire(item.owner, item.group);
     Ok(llsd_map(vec![
@@ -5927,7 +5969,7 @@ pub(crate) fn bulk_update_item_to_llsd(item: &InventoryItem) -> Result<Llsd, sl_
         ("AssetID", Llsd::Uuid(item.asset_id)),
         ("Type", Llsd::Integer(i32::from(item.item_type))),
         ("InvType", Llsd::Integer(i32::from(item.inv_type))),
-        ("Flags", Llsd::Integer(item.flags.cast_signed())),
+        ("Flags", llsd_u32_binary(item.flags)),
         ("SaleType", Llsd::Integer(i32::from(item.sale_type))),
         (
             "SalePrice",
@@ -5941,25 +5983,16 @@ pub(crate) fn bulk_update_item_to_llsd(item: &InventoryItem) -> Result<Llsd, sl_
         ("CreatorID", Llsd::Uuid(item.creator_id.uuid())),
         ("GroupID", Llsd::Uuid(group_id)),
         ("GroupOwned", Llsd::Boolean(item.owner.is_group())),
-        (
-            "BaseMask",
-            Llsd::Integer(item.permissions.base.bits().cast_signed()),
-        ),
-        (
-            "OwnerMask",
-            Llsd::Integer(item.permissions.owner.bits().cast_signed()),
-        ),
-        (
-            "GroupMask",
-            Llsd::Integer(item.permissions.group.bits().cast_signed()),
-        ),
+        ("BaseMask", llsd_u32_binary(item.permissions.base.bits())),
+        ("OwnerMask", llsd_u32_binary(item.permissions.owner.bits())),
+        ("GroupMask", llsd_u32_binary(item.permissions.group.bits())),
         (
             "EveryoneMask",
-            Llsd::Integer(item.permissions.everyone.bits().cast_signed()),
+            llsd_u32_binary(item.permissions.everyone.bits()),
         ),
         (
             "NextOwnerMask",
-            Llsd::Integer(item.permissions.next_owner.bits().cast_signed()),
+            llsd_u32_binary(item.permissions.next_owner.bits()),
         ),
     ]))
 }
@@ -6653,9 +6686,10 @@ pub(crate) fn parcel_properties_to_wire(
     })
 }
 
-/// Encodes a `u32` as the 4-byte big-endian LLSD binary element OpenSim uses
-/// for `uint` fields (`ParcelFlags`, `AuctionID`); the client's [`llsd_u32`]
-/// reads it back.
+/// Encodes a `u32` as the 4-byte big-endian LLSD binary element a `U32` takes
+/// in an LLSD message — what the reference's `ll_U32_from_sd` reads and what
+/// OpenSim writes for a `uint` field (`ParcelFlags`, `AuctionID`, an inventory
+/// item's permission masks); the client's [`llsd_u32`] reads it back.
 fn llsd_u32_binary(value: u32) -> Llsd {
     Llsd::Binary(vec![
         low_byte(value >> 24),
@@ -6929,8 +6963,9 @@ mod caps_serializer_tests {
         teleport_finish_from_llsd, teleport_finish_to_llsd,
     };
     use super::{
-        STANDARD_REGION_SIZE_METRES, TELEPORT_FINISH_LOCATION_ID, TeleportFinishInfo, ipv4_octets,
-        llsd_map, llsd_u32, region_coords_to_llsd, u32_to_llsd, u64_to_llsd, vec3_to_llsd,
+        STANDARD_REGION_SIZE_METRES, TELEPORT_FINISH_LOCATION_ID, TeleportFinishInfo,
+        inventory_item_from_llsd, ipv4_octets, llsd_map, llsd_port, llsd_u32,
+        region_coords_to_llsd, u32_to_llsd, u64_to_llsd, vec3_to_llsd,
     };
     use crate::types::{
         Event, GroupMember, GroupMembership, ImDialog, InstantMessage, InventoryFolder,
@@ -7931,6 +7966,166 @@ mod caps_serializer_tests {
             Some((transaction_id, folders, items))
         );
         Ok(())
+    }
+
+    /// A `BulkUpdateInventory` whose `U32` fields are the big-endian binary a
+    /// real grid sends — OpenSim's `LLSDxmlEncode2.AddElem(name, uint)`, and
+    /// the reference's `ll_U32_from_sd` on the reading side. Read as integers
+    /// these came back 0, and the full-permission copy taken out of a notecard
+    /// showed up as "(no copy) (no modify) (no transfer)".
+    #[test]
+    fn bulk_update_inventory_reads_binary_u32_masks() {
+        // Written out as the bytes on the wire rather than through the
+        // encoder, so the byte order is asserted and not assumed.
+        let full = 0x0009_e000_u32;
+        let item = llsd_map(vec![
+            ("ItemID", Llsd::Uuid(Uuid::from_u128(0xb1))),
+            ("FolderID", Llsd::Uuid(Uuid::from_u128(0xb2))),
+            ("AssetID", Llsd::Uuid(Uuid::from_u128(0xb3))),
+            ("CreatorID", Llsd::Uuid(Uuid::from_u128(0xb4))),
+            ("OwnerID", Llsd::Uuid(Uuid::from_u128(0xb5))),
+            ("GroupID", Llsd::Uuid(Uuid::nil())),
+            ("GroupOwned", Llsd::Boolean(false)),
+            ("Name", Llsd::String("TestLandmark".to_owned())),
+            ("Description", Llsd::String(String::new())),
+            ("Type", Llsd::Integer(3)),
+            ("InvType", Llsd::Integer(3)),
+            ("SaleType", Llsd::Integer(0)),
+            ("SalePrice", Llsd::Integer(0)),
+            ("CreationDate", Llsd::Integer(1_788_700_000)),
+            ("BaseMask", Llsd::Binary(vec![0x00, 0x09, 0xe0, 0x00])),
+            ("OwnerMask", Llsd::Binary(vec![0x00, 0x09, 0xe0, 0x00])),
+            ("GroupMask", Llsd::Binary(vec![0x00, 0x00, 0x00, 0x00])),
+            ("EveryoneMask", Llsd::Binary(vec![0x00, 0x08, 0xa0, 0x00])),
+            ("NextOwnerMask", Llsd::Binary(vec![0x00, 0x08, 0xe0, 0x07])),
+            ("Flags", Llsd::Binary(vec![0x00, 0x00, 0x00, 0x01])),
+            ("CallbackID", Llsd::Binary(vec![0x00, 0x00, 0x00, 0x00])),
+        ]);
+        let body = llsd_map(vec![
+            (
+                "AgentData",
+                Llsd::Array(vec![llsd_map(vec![(
+                    "TransactionID",
+                    Llsd::Uuid(Uuid::from_u128(0xb0)),
+                )])]),
+            ),
+            ("FolderData", Llsd::Array(Vec::new())),
+            ("ItemData", Llsd::Array(vec![item])),
+        ]);
+        // Every mask and the flags of every item the body carried, so "no item
+        // at all" fails as loudly as a zeroed one. All of these read 0 while
+        // the masks were parsed as integers.
+        let read: Vec<(Permissions5, u32)> = bulk_update_inventory_from_llsd(&body)
+            .into_iter()
+            .flat_map(|(_transaction, _folders, items)| items)
+            .map(|item| (item.permissions, item.flags))
+            .collect();
+        assert_eq!(
+            read,
+            vec![(
+                Permissions5 {
+                    base: Permissions::from_bits(full),
+                    owner: Permissions::from_bits(full),
+                    group: Permissions::NONE,
+                    everyone: Permissions::from_bits(0x0008_a000),
+                    next_owner: Permissions::from_bits(0x0008_e007),
+                },
+                1
+            )]
+        );
+    }
+
+    /// A port is read from whatever shape the writer chose. It matters more
+    /// than a wrong number would: each caller takes it with `?`, so a port that
+    /// cannot be read drops the whole `TeleportFinish` / `CrossedRegion` /
+    /// `EnableSimulator` — a teleport that simply never happens.
+    #[test]
+    fn a_port_is_read_from_every_shape_a_writer_may_send() {
+        assert_eq!(llsd_port(&Llsd::Integer(9000)), Some(9000));
+        // Two bytes big-endian, the natural binary form of a `U16`…
+        assert_eq!(llsd_port(&Llsd::Binary(vec![0x23, 0x28])), Some(9000));
+        // …and four, the form a writer that treats every number as a `uint`
+        // sends.
+        assert_eq!(
+            llsd_port(&Llsd::Binary(vec![0x00, 0x00, 0x23, 0x28])),
+            Some(9000)
+        );
+        assert_eq!(llsd_port(&Llsd::String("9000".to_owned())), Some(9000));
+        // A port that does not fit is refused rather than truncated into a
+        // plausible wrong one.
+        assert_eq!(llsd_port(&Llsd::Integer(70_000)), None);
+        assert_eq!(llsd_port(&Llsd::Undef), None);
+    }
+
+    /// A mask is a **bit pattern**: one with the reserved top bit set travels as
+    /// a negative LLSD integer, and reading it with a range conversion threw it
+    /// away — `PERM_ALL` plus the reserved bit came back as no permissions at
+    /// all rather than as itself.
+    #[test]
+    fn a_mask_with_the_top_bit_survives_as_an_integer() {
+        assert_eq!(llsd_u32(&Llsd::Integer(-1)), 0xffff_ffff);
+        assert_eq!(llsd_u32(&Llsd::Integer(0x7fff_ffff)), 0x7fff_ffff);
+        assert_eq!(
+            llsd_u32(&Llsd::Binary(vec![0xff, 0xff, 0xff, 0xff])),
+            0xffff_ffff
+        );
+    }
+
+    /// The **descendents / per-item** item parser reads the same `U32` fields,
+    /// and had the same defect one function over: a folder fetch and a
+    /// `FetchInventory2` reply both decode through `inventory_item_from_llsd`,
+    /// which read every mask and `flags` as an integer.
+    ///
+    /// It went unnoticed because it depends on the *writer*: the descendents
+    /// bodies this grid sends carry integers, so the masks arrived intact and
+    /// nothing looked wrong. Against a writer that sends the binary form — the
+    /// one OpenSim uses for the event queue's `BulkUpdateInventory`, and the one
+    /// this workspace's own simulator side now emits — every item fetched by
+    /// folder would have arrived with no permissions and no flags.
+    #[test]
+    fn a_fetched_item_reads_binary_u32_masks() {
+        // Bytes on the wire, as above: the byte order is asserted, not assumed.
+        let item = llsd_map(vec![
+            ("item_id", Llsd::Uuid(Uuid::from_u128(0xc1))),
+            ("parent_id", Llsd::Uuid(Uuid::from_u128(0xc2))),
+            ("asset_id", Llsd::Uuid(Uuid::from_u128(0xc3))),
+            ("name", Llsd::String("TestLandmark".to_owned())),
+            ("desc", Llsd::String(String::new())),
+            ("type", Llsd::Integer(3)),
+            ("inv_type", Llsd::Integer(3)),
+            ("created_at", Llsd::Integer(1_788_700_000)),
+            ("flags", Llsd::Binary(vec![0x00, 0x00, 0x00, 0x01])),
+            (
+                "permissions",
+                llsd_map(vec![
+                    ("base_mask", Llsd::Binary(vec![0x00, 0x09, 0xe0, 0x00])),
+                    ("owner_mask", Llsd::Binary(vec![0x00, 0x09, 0xe0, 0x00])),
+                    ("group_mask", Llsd::Binary(vec![0x00, 0x00, 0x00, 0x00])),
+                    ("everyone_mask", Llsd::Binary(vec![0x00, 0x08, 0xa0, 0x00])),
+                    (
+                        "next_owner_mask",
+                        Llsd::Binary(vec![0x00, 0x08, 0xe0, 0x07]),
+                    ),
+                    ("owner_id", Llsd::Uuid(Uuid::from_u128(0xc4))),
+                    ("creator_id", Llsd::Uuid(Uuid::from_u128(0xc5))),
+                ]),
+            ),
+            ("sale_info", llsd_map(vec![("sale_type", Llsd::Integer(0))])),
+        ]);
+        let read = inventory_item_from_llsd(&item).map(|item| (item.permissions, item.flags));
+        assert_eq!(
+            read,
+            Some((
+                Permissions5 {
+                    base: Permissions::from_bits(0x0009_e000),
+                    owner: Permissions::from_bits(0x0009_e000),
+                    group: Permissions::NONE,
+                    everyone: Permissions::from_bits(0x0008_a000),
+                    next_owner: Permissions::from_bits(0x0008_e007),
+                },
+                1
+            ))
+        );
     }
 
     #[test]

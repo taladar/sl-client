@@ -17,6 +17,7 @@
 //! underneath the world.
 
 pub mod rlv;
+pub mod ui_texture;
 pub mod world_scoped;
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};

@@ -46,7 +46,7 @@ use std::collections::BTreeMap;
 
 use sl_client_bevy::{
     AssetType, Command, GroupKey, GroupNoticeItem, GroupNoticeKey, GroupNoticeReceived, SlCommand,
-    SlEvent, SlSessionEvent, TextureKey, Uuid, to_bevy_image,
+    SlEvent, SlSessionEvent, TextureKey, Uuid,
 };
 use sl_l10n::{DateTimeLength, DateTimeStyle};
 
@@ -64,10 +64,9 @@ use crate::slt;
 use crate::ui::{column, row};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
-use crate::world_api::AVATAR_BOOST_PRIORITY;
 use crate::world_api::GroupsModel;
 use crate::world_api::OpenGroupProfile;
-use crate::world_api::{BoostTexture, DecodedTextures};
+use crate::world_api::ui_texture::{PendingUiTexture, UiTexturePlugin};
 use crate::world_api::{ConversationKey, OpenConversation};
 
 /// The catalogue-template sentinel a group-notice toast reports as (it is not a
@@ -179,26 +178,17 @@ const ICON_BACKDROP: Color = Color::srgba(0.0, 0.0, 0.0, 0.35);
 pub struct GroupNoticePlugin;
 
 impl Plugin for GroupNoticePlugin {
-    /// Ingest received notices (into the shared toast channel), re-raise ones
-    /// persisted from a previous session, and poll their insignia textures.
+    /// Ingest received notices (into the shared toast channel) and re-raise ones
+    /// persisted from a previous session; the shared UI-texture poll fills their
+    /// insignia boxes in.
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<UiTexturePlugin>() {
+            app.add_plugins(UiTexturePlugin);
+        }
         app.add_systems(Startup, register_group_notice_settings)
-            .add_systems(
-                Update,
-                (
-                    ingest_group_notices,
-                    reload_group_notices,
-                    poll_group_notice_insignia,
-                ),
-            );
+            .add_systems(Update, (ingest_group_notices, reload_group_notices));
     }
 }
-
-/// Marks an insignia image box awaiting its texture, carrying the texture id the
-/// pipeline decodes. [`poll_group_notice_insignia`] swaps the [`ImageNode`] in and
-/// clears the marker once the texture is ready.
-#[derive(Component, Debug)]
-struct PendingInsignia(TextureKey);
 
 /// Read the event stream; for each received group notice (that the Notices tab did
 /// not itself request), decode it and raise a card into the shared toast channel —
@@ -207,8 +197,8 @@ struct PendingInsignia(TextureKey);
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources / queries: the event \
-              stream, the shared channel + manager it raises into, the group model + texture \
-              manager + translator it renders from, the requested-notice set it consults, the \
+              stream, the shared channel + manager it raises into, the group model + \
+              translator it renders from, the requested-notice set it consults, the \
               toast-gate settings, and the command writer + commands it acts through"
 )]
 fn ingest_group_notices(
@@ -218,7 +208,6 @@ fn ingest_group_notices(
     mut manager: ResMut<NotificationManager>,
     groups: Res<GroupsModel>,
     mut requested: ResMut<RequestedGroupNotices>,
-    mut boost: MessageWriter<BoostTexture>,
     translator: Translator,
     mut sl_commands: MessageWriter<SlCommand>,
     mut persist: MessageWriter<PersistNotification>,
@@ -264,7 +253,6 @@ fn ingest_group_notices(
             &notice,
             &groups,
             &translator,
-            &mut boost,
         );
         persist_group_notice(&mut persist, id, &notice);
     }
@@ -274,19 +262,11 @@ fn ingest_group_notices(
 /// [`PersistedKind::Custom`] entries [`crate::notification_persist`] reloads at
 /// login): decode each back into a [`GroupNoticeReceived`], pop its card, and
 /// re-persist it (a fresh id) so it keeps surviving relogs until answered.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the reload \
-              stream, the shared channel + manager it raises into, the group model + texture \
-              manager + translator it renders from, and the persistence channel it re-persists \
-              through"
-)]
 fn reload_group_notices(
     mut reloads: MessageReader<ReloadPersistedNotification>,
     channel: Option<Res<NotificationChannelRoot>>,
     mut manager: ResMut<NotificationManager>,
     groups: Res<GroupsModel>,
-    mut boost: MessageWriter<BoostTexture>,
     translator: Translator,
     mut persist: MessageWriter<PersistNotification>,
     mut commands: Commands,
@@ -309,7 +289,6 @@ fn reload_group_notices(
             &notice,
             &groups,
             &translator,
-            &mut boost,
         );
         persist_group_notice(&mut persist, id, &notice);
     }
@@ -366,7 +345,8 @@ struct GroupNoticeCardContent {
 enum Insignia {
     /// No insignia: show the generic group glyph.
     Glyph,
-    /// Request this texture and swap it in once decoded ([`poll_group_notice_insignia`]).
+    /// Request this texture and swap it in once decoded (the shared
+    /// [`PendingUiTexture`] poll).
     Pending(TextureKey),
 }
 
@@ -519,8 +499,9 @@ fn build_group_notice_card(
 }
 
 /// Build one group-notice card from a decoded notice, adopt it into the shared
-/// toast channel, request its insignia texture, and wire the live actions. The
-/// card is an [`Alert`](NotificationKind::Alert): it **sticks** (never auto-fades)
+/// toast channel, and wire the live actions — the insignia box asks for its own
+/// texture through [`PendingUiTexture`]. The card is an
+/// [`Alert`](NotificationKind::Alert): it **sticks** (never auto-fades)
 /// and only leaves when the user actively clicks OK / × — display alone never
 /// marks the notice seen, so the server may redeliver an unclosed notice on the
 /// next login.
@@ -531,7 +512,6 @@ fn spawn_group_notice_card(
     notice: &GroupNoticeReceived,
     groups: &GroupsModel,
     translator: &Translator,
-    boost: &mut MessageWriter<BoostTexture>,
 ) -> NotificationId {
     let group_name = groups
         .group_name(notice.group_id)
@@ -577,14 +557,6 @@ fn spawn_group_notice_card(
         notice.subject.clone(),
     );
 
-    // Request the insignia texture the build marked pending.
-    if let Some(key) = insignia_key {
-        boost.write(BoostTexture {
-            key,
-            priority: AVATAR_BOOST_PRIORITY,
-        });
-    }
-
     // OK / close ×: resolve the toast through the host's teardown — a user close,
     // the only thing that ends the notice.
     let root = card.root;
@@ -621,7 +593,7 @@ fn spawn_group_notice_card(
 }
 
 /// Spawn the insignia box and its placeholder: the group image once decoded (a
-/// loading label until then, via [`PendingInsignia`]), or a generic group glyph
+/// loading label until then, via [`PendingUiTexture`]), or a generic group glyph
 /// when there is no insignia.
 fn spawn_insignia(
     commands: &mut Commands,
@@ -664,35 +636,10 @@ fn spawn_insignia(
                 Pickable::IGNORE,
                 ChildOf(box_entity),
             ));
-            commands.entity(box_entity).insert(PendingInsignia(*key));
+            commands
+                .entity(box_entity)
+                .insert(PendingUiTexture::over_placeholder(*key));
         }
-    }
-}
-
-/// Swap each pending insignia into its box once the pipeline decodes the texture,
-/// dropping the loading placeholder.
-fn poll_group_notice_insignia(
-    pending: Query<(Entity, &PendingInsignia)>,
-    store: Res<DecodedTextures>,
-    mut images: ResMut<Assets<Image>>,
-    children: Query<&Children>,
-    mut commands: Commands,
-) {
-    for (box_entity, PendingInsignia(key)) in &pending {
-        let Some(decoded) = store.get(*key) else {
-            continue;
-        };
-        let handle = images.add(to_bevy_image(decoded));
-        // Drop the loading placeholder, then show the image on the box.
-        if let Ok(kids) = children.get(box_entity) {
-            for child in kids {
-                commands.entity(*child).despawn();
-            }
-        }
-        commands
-            .entity(box_entity)
-            .insert(ImageNode::new(handle))
-            .remove::<PendingInsignia>();
     }
 }
 

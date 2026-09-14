@@ -28,6 +28,8 @@ sl-viewer-kit = { path = "../sl-viewer-kit", version = "0.1.0" }
 sl-viewer-settings = { workspace = true }
 
 [dev-dependencies]
+# For the decoded-texture fixtures the UI-texture poll's tests upload.
+bytes = { workspace = true }
 pretty_assertions = { workspace = true }
 
 [lints]

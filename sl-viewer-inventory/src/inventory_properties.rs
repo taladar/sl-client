@@ -62,7 +62,7 @@ use bevy::text::EditableText;
 use sl_client_bevy::{
     AnimationKey, AssetKey, Command, InventoryItem, InventoryKey, InventoryType, ItemInfo,
     LindenAmount, Permissions, SaleInfo, SaleType, SettingsKind, SlCommand, SlIdentity, TextureKey,
-    TransactionId, Uuid, to_bevy_image,
+    TransactionId, Uuid,
 };
 
 use crate::floater::{
@@ -73,8 +73,7 @@ use crate::i18n::Translated;
 use crate::inventory::query_folder_page;
 use crate::ui::row;
 use crate::ui_font::UiFont;
-use crate::world_api::AVATAR_BOOST_PRIORITY;
-use crate::world_api::{BoostTexture, DecodedTextures};
+use crate::world_api::ui_texture::{PendingUiTexture, UiTexturePlugin};
 
 /// The chrome font size, in logical pixels.
 const PROPS_FONT_SIZE: f32 = 14.0;
@@ -204,6 +203,9 @@ impl Plugin for InventoryPropertiesPlugin {
     /// properties floater and both previews — opens per subject, so the open
     /// system spawns the instance and builds its content.
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<UiTexturePlugin>() {
+            app.add_plugins(UiTexturePlugin);
+        }
         app.add_message::<OpenItemProperties>()
             .add_message::<OpenItemPreview>()
             .add_systems(
@@ -217,7 +219,6 @@ impl Plugin for InventoryPropertiesPlugin {
                     open_properties.after(FloaterSystems::Commands),
                     commit_text_edits.run_if(any_with_component::<ItemPropertiesState>),
                     open_previews.after(FloaterSystems::Commands),
-                    poll_texture_preview,
                 )
                     .chain(),
             );
@@ -1023,17 +1024,6 @@ const fn civil_from_days(days: i64) -> (i64, u8, u8) {
 // Previews.
 // ---------------------------------------------------------------------------
 
-/// One texture-preview window's subject and in-flight decode — a **component
-/// on the window**, since the floater opens per texture ([`FloaterKey`]) and
-/// two of them can be waiting on the pipeline at once.
-#[derive(Component, Debug)]
-struct TexturePreviewState {
-    /// The texture this window shows.
-    texture: TextureKey,
-    /// The placeholder node awaiting the decoded image; `None` once filled.
-    pending: Option<Entity>,
-}
-
 /// One animation-preview window's subject — a **component on the window**, read
 /// by its own Play / Stop buttons (which resolve their window with
 /// [`host_floater`]) so two open previews drive their own animation.
@@ -1058,16 +1048,9 @@ fn animation_preview_key(animation: AssetKey) -> FloaterKey {
 /// Route an Open to its type's preview floater — a window per asset for the two
 /// this module draws, and the owning floater's own open message for the types
 /// that have one.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the open stream, the \
-              keyed-window opener, the texture pipeline, the spawn output, and the four \
-              messages the types this module does not draw are handed on with"
-)]
 fn open_previews(
     mut opens: MessageReader<OpenItemPreview>,
     mut floaters: KeyedFloaters,
-    mut boost: MessageWriter<BoostTexture>,
     mut commands: Commands,
     mut notecard_opens: MessageWriter<crate::world_api::OpenNotecard>,
     mut script_opens: MessageWriter<crate::world_api::OpenScript>,
@@ -1137,14 +1120,9 @@ fn open_previews(
                         TextColor(DIM_LABEL_COLOR),
                     ))
                     .id();
-                boost.write(BoostTexture {
-                    key,
-                    priority: AVATAR_BOOST_PRIORITY,
-                });
-                commands.entity(handle.root).insert(TexturePreviewState {
-                    texture: key,
-                    pending: Some(placeholder),
-                });
+                commands
+                    .entity(placeholder)
+                    .insert(PendingUiTexture::over_placeholder(key));
             }
             InventoryType::Landmark => {
                 // The full About Landmark floater owns this type.
@@ -1316,38 +1294,6 @@ pub fn parse_landmark(text: &str) -> Option<LandmarkAsset> {
             position: (position.x(), position.y(), position.z()),
         }),
         sl_client_bevy::WireLandmarkAsset::Global(_) => None,
-    }
-}
-
-/// Swap each waiting texture preview's placeholder for the decoded image once
-/// the texture pipeline holds it.
-///
-/// Every open window asks the same store for its own texture, so two decoding
-/// at once is the normal case: each fills the placeholder it spawned, and drops
-/// its pending node when it has.
-fn poll_texture_preview(
-    mut windows: Query<&mut TexturePreviewState>,
-    store: Res<DecodedTextures>,
-    mut images: ResMut<Assets<Image>>,
-    children: Query<&Children>,
-    mut commands: Commands,
-) {
-    for mut state in &mut windows {
-        let Some(node) = state.pending else {
-            continue;
-        };
-        let Some(decoded) = store.get(state.texture) else {
-            continue;
-        };
-        let handle = images.add(to_bevy_image(decoded));
-        // Replace the placeholder's children with the image.
-        if let Ok(existing) = children.get(node) {
-            for child in existing.iter().collect::<Vec<_>>() {
-                commands.entity(child).despawn();
-            }
-        }
-        commands.entity(node).insert(ImageNode::new(handle));
-        state.pending = None;
     }
 }
 
@@ -1747,11 +1693,12 @@ mod tests {
     /// inventory row's Open entry writes.
     mod previews {
         use super::super::{
-            AnimationPreviewState, OpenItemPreview, TexturePreviewState, animation_preview_key,
-            texture_preview_key,
+            AnimationPreviewState, OpenItemPreview, animation_preview_key,
+            texture_preview_floater_spec, texture_preview_key,
         };
         use super::{TestError, owner, properties_app};
         use crate::floater::{Floater, FloaterCommand, FloaterOp};
+        use crate::world_api::ui_texture::PendingUiTexture;
         use crate::world_api::{BoostTexture, DecodedTextures};
         use bevy::prelude::*;
         use pretty_assertions::assert_eq;
@@ -1804,12 +1751,15 @@ mod tests {
             app.update();
         }
 
-        /// Every live texture-preview window, as (entity, texture) pairs.
-        fn texture_windows(app: &mut App) -> Vec<(Entity, TextureKey)> {
+        /// Every live texture-preview window, as (entity, key) pairs — the
+        /// window's [`FloaterKey`] **is** its subject, one window per texture.
+        fn texture_windows(app: &mut App) -> Vec<(Entity, crate::floater::FloaterKey)> {
+            let previews = texture_preview_floater_spec().id;
             app.world_mut()
-                .query::<(Entity, &TexturePreviewState)>()
+                .query::<(Entity, &Floater)>()
                 .iter(app.world())
-                .map(|(entity, state)| (entity, state.texture))
+                .filter(|(_window, floater)| floater.id == previews)
+                .filter_map(|(window, floater)| floater.key().cloned().map(|key| (window, key)))
                 .collect()
         }
 
@@ -1822,12 +1772,15 @@ mod tests {
                 .collect()
         }
 
-        /// How many texture fetches this app has asked for, all frames counted
-        /// — the message is the only observable "it went and got it again".
-        fn fetches(app: &App) -> usize {
-            app.world()
-                .resource::<Messages<BoostTexture>>()
-                .iter_current_update_messages()
+        /// How many texture fetches have been asked for since this was last
+        /// called — the message is the only observable "it went and got it".
+        /// Drained rather than read, because the box asks for its texture the
+        /// frame **after** it is spawned (the shared poll's request pass) and a
+        /// per-frame read would miss it.
+        fn fetches(app: &mut App) -> usize {
+            app.world_mut()
+                .resource_mut::<Messages<BoostTexture>>()
+                .drain()
                 .count()
         }
 
@@ -1854,9 +1807,10 @@ mod tests {
                 2,
                 "the second texture reused the first window"
             );
-            let shown: Vec<TextureKey> = windows.iter().map(|(_window, key)| *key).collect();
-            assert!(shown.contains(&TextureKey::from(first.asset_id)));
-            assert!(shown.contains(&TextureKey::from(second.asset_id)));
+            let shown: Vec<crate::floater::FloaterKey> =
+                windows.into_iter().map(|(_window, key)| key).collect();
+            assert!(shown.contains(&texture_preview_key(TextureKey::from(first.asset_id))));
+            assert!(shown.contains(&texture_preview_key(TextureKey::from(second.asset_id))));
             let open_keys = keys(&mut app);
             assert!(open_keys.contains(&texture_preview_key(TextureKey::from(first.asset_id))));
             assert!(open_keys.contains(&texture_preview_key(TextureKey::from(second.asset_id))));
@@ -1888,11 +1842,17 @@ mod tests {
             let item = texture(0xA1, 0x1A, "Bark");
             let mut app = properties_app();
             open(&mut app, &item);
-            assert_eq!(fetches(&app), 1, "the first open fetches");
+            app.update();
+            assert_eq!(fetches(&mut app), 1, "the first open fetches");
             open(&mut app, &item);
+            app.update();
 
             assert_eq!(texture_windows(&mut app).len(), 1);
-            assert_eq!(fetches(&app), 0, "the re-open fetched the texture again");
+            assert_eq!(
+                fetches(&mut app),
+                0,
+                "the re-open fetched the texture again"
+            );
         }
 
         /// Each window fills the placeholder **it** spawned: a decode answers
@@ -1916,27 +1876,23 @@ mod tests {
                 .insert(TextureKey::from(first.asset_id), decoded);
             app.update();
 
-            let waiting: Vec<(TextureKey, bool)> = app
+            let waiting: Vec<TextureKey> = app
                 .world_mut()
-                .query::<&TexturePreviewState>()
+                .query::<&PendingUiTexture>()
                 .iter(app.world())
-                .map(|state| (state.texture, state.pending.is_some()))
+                .map(PendingUiTexture::key)
                 .collect();
-            let pending_of = |asset: Uuid| {
-                waiting.iter().find_map(|(key, pending)| {
-                    (*key == TextureKey::from(asset)).then_some(*pending)
-                })
-            };
             assert_eq!(
-                pending_of(first.asset_id),
-                Some(false),
-                "the decoded texture's window is still waiting"
+                waiting,
+                vec![TextureKey::from(second.asset_id)],
+                "the decode did not fill exactly the window that asked for it"
             );
-            assert_eq!(
-                pending_of(second.asset_id),
-                Some(true),
-                "the other window took a decode that was not its texture"
-            );
+            let filled = app
+                .world_mut()
+                .query::<&ImageNode>()
+                .iter(app.world())
+                .count();
+            assert_eq!(filled, 1, "the decoded image is not on exactly one box");
             Ok(())
         }
 
@@ -1972,7 +1928,7 @@ mod tests {
             let target = texture_windows(&mut app)
                 .into_iter()
                 .find_map(|(window, key)| {
-                    (key == TextureKey::from(first.asset_id)).then_some(window)
+                    (key == texture_preview_key(TextureKey::from(first.asset_id))).then_some(window)
                 })
                 .ok_or("the first texture has no window")?;
 
@@ -1987,8 +1943,8 @@ mod tests {
             let left = texture_windows(&mut app);
             assert_eq!(left.len(), 1);
             assert_eq!(
-                left.first().map(|(_window, key)| *key),
-                Some(TextureKey::from(second.asset_id))
+                left.into_iter().next().map(|(_window, key)| key),
+                Some(texture_preview_key(TextureKey::from(second.asset_id)))
             );
             Ok(())
         }
