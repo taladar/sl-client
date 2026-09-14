@@ -42,9 +42,7 @@
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui::InteractionDisabled;
-use bevy::ui_widgets::{
-    Activate, Button, Slider, SliderRange, SliderStep, SliderThumb, SliderValue,
-};
+use bevy::ui_widgets::{Activate, Button, SliderRange, SliderStep};
 use sl_audio::{Bus, Mixer};
 use sl_client_bevy::SlAgentParcel;
 use sl_gst::{AudioStreamPlayer, AudioStreamState, ValidatedMediaUrl};
@@ -54,9 +52,10 @@ use crate::media_diagnostics::MediaDiagnostics;
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{SettingBinding, bound_slider};
 use crate::ui::BottomArea;
-use crate::ui::{LogicalInset, LogicalRect, row};
+use crate::ui::row;
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
+use crate::ui_slider::{SliderStyle, SliderWidgetPlugin, spawn_slider};
 use crate::volume_panel::{bus_mute_setting, bus_volume_setting};
 
 /// The `element` the bar attributes its actions to.
@@ -77,12 +76,17 @@ const BAR_FONT_SIZE: f32 = 12.0;
 /// beyond).
 const TITLE_MAX_WIDTH: f32 = 260.0;
 
-/// The volume slider track's width, in logical pixels.
-const VOLUME_TRACK_WIDTH: f32 = 90.0;
-/// The volume slider thumb's width, in logical pixels.
-const VOLUME_THUMB_WIDTH: f32 = 10.0;
-/// The volume slider track / thumb height, in logical pixels.
-const VOLUME_TRACK_HEIGHT: f32 = 12.0;
+/// How the stream volume slider is drawn — the volume panel's own style, since
+/// the two sit side by side in the same bar and share a bus.
+const SLIDER: SliderStyle = SliderStyle {
+    track_width: 90.0,
+    track_height: 12.0,
+    border: 1.0,
+    border_color: BUTTON_BORDER,
+    track_fill: TRACK_FILL,
+    thumb_width: 10.0,
+    thumb_fill: THUMB_FILL,
+};
 
 /// The cluster's backdrop (matches the toolbar's dark surface).
 const BAR_BACKGROUND: Color = Color::srgba(0.08, 0.09, 0.12, 0.92);
@@ -143,17 +147,15 @@ struct ParcelAudioUi {
     title: Entity,
 }
 
-/// A marker on the volume slider's thumb node, so it slides to the bound
-/// value.
-#[derive(Component, Debug, Clone, Copy)]
-struct VolumeThumb;
-
 /// The parcel streaming-audio plugin.
 #[derive(Debug)]
 pub struct ParcelAudioPlugin;
 
 impl Plugin for ParcelAudioPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<SliderWidgetPlugin>() {
+            app.add_plugins(SliderWidgetPlugin);
+        }
         app.init_resource::<ParcelAudio>()
             .add_systems(Startup, register_parcel_audio_settings)
             .add_systems(
@@ -164,7 +166,6 @@ impl Plugin for ParcelAudioPlugin {
                     handle_parcel_audio_actions,
                     request_parcel_audio_diagnosis,
                     sync_parcel_audio_ui,
-                    drive_volume_thumb,
                 )
                     .chain(),
             );
@@ -268,8 +269,13 @@ pub(crate) fn spawn_parcel_audio_bar(
         spawn_glyph_button(&mut commands, cluster, "▶", "play-stop", 20);
     let (mute_button, mute_label) =
         spawn_glyph_button(&mut commands, cluster, "🔊", "mute-toggle", 21);
-    let slider = commands
-        .spawn((
+    spawn_slider(
+        &mut commands,
+        cluster,
+        SLIDER,
+        22,
+        0.0,
+        (
             bound_slider(
                 // The inline stream volume *is* the music bus (the volume
                 // panel's `music_volume`), so the two stay in lockstep.
@@ -277,37 +283,9 @@ pub(crate) fn spawn_parcel_audio_bar(
                 SliderRange::new(0.0, 1.0),
                 SliderStep(0.05),
             ),
-            Node {
-                width: Val::Px(VOLUME_TRACK_WIDTH),
-                height: Val::Px(VOLUME_TRACK_HEIGHT),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(BUTTON_BORDER),
-            BackgroundColor(TRACK_FILL),
-            TabIndex(22),
-            Pickable::default(),
             Name::new("parcel-audio-volume"),
-            ChildOf(cluster),
-        ))
-        .id();
-    commands.spawn((
-        SliderThumb,
-        Node {
-            position_type: PositionType::Absolute,
-            width: Val::Px(VOLUME_THUMB_WIDTH),
-            height: Val::Px(VOLUME_TRACK_HEIGHT),
-            ..default()
-        },
-        LogicalInset(LogicalRect {
-            inline_start: Val::Px(0.0),
-            ..LogicalRect::ZERO
-        }),
-        BackgroundColor(THUMB_FILL),
-        VolumeThumb,
-        Pickable::IGNORE,
-        ChildOf(slider),
-    ));
+        ),
+    );
     commands.insert_resource(ParcelAudioUi {
         marker,
         play_label,
@@ -629,30 +607,6 @@ fn sync_parcel_audio_ui(
     }
 }
 
-/// Keep the volume slider's thumb at the bound value (the value itself is
-/// synced from the store by [`crate::settings_binding`]).
-fn drive_volume_thumb(
-    sliders: Query<(&SliderValue, &SliderRange, &Children), With<Slider>>,
-    mut thumbs: Query<&mut LogicalInset, With<VolumeThumb>>,
-) {
-    for (value, range, children) in &sliders {
-        let span = range.span();
-        let fraction = if span > f32::EPSILON {
-            ((value.0 - range.start()) / span).clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
-        let offset = fraction * (VOLUME_TRACK_WIDTH - VOLUME_THUMB_WIDTH);
-        for child in children {
-            if let Ok(mut inset) = thumbs.get_mut(*child)
-                && inset.0.inline_start != Val::Px(offset)
-            {
-                inset.0.inline_start = Val::Px(offset);
-            }
-        }
-    }
-}
-
 /// The gallery specimen: the cluster's resting layout — a sample now-playing
 /// title, the play and mute buttons and the volume slider at half — static,
 /// so the bar is swept across scripts / sizes / directions like every
@@ -720,32 +674,7 @@ pub fn spawn_parcel_audio_specimen(
             ChildOf(button),
         ));
     }
-    let track = commands
-        .spawn((
-            Node {
-                width: Val::Px(VOLUME_TRACK_WIDTH),
-                height: Val::Px(VOLUME_TRACK_HEIGHT),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(BUTTON_BORDER),
-            BackgroundColor(TRACK_FILL),
-            ChildOf(cluster),
-        ))
-        .id();
-    commands.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            width: Val::Px(VOLUME_THUMB_WIDTH),
-            height: Val::Px(VOLUME_TRACK_HEIGHT),
-            ..default()
-        },
-        LogicalInset(LogicalRect {
-            inline_start: Val::Px((VOLUME_TRACK_WIDTH - VOLUME_THUMB_WIDTH) * 0.5),
-            ..LogicalRect::ZERO
-        }),
-        BackgroundColor(THUMB_FILL),
-        ChildOf(track),
-    ));
+    // Static: no `Slider`, so the thumb stays at the half the specimen draws.
+    spawn_slider(commands, cluster, SLIDER, 0, 0.5, ());
     cluster
 }

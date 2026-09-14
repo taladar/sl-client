@@ -40,92 +40,23 @@ mod tests {
     const SCALE_FACTORS: [f32; 3] = [1.0, 1.5, 2.0];
 
     // -----------------------------------------------------------------------
-    // The harness has to have teeth. These two tests are about the *checks*,
-    // not about the UI: a suite whose checks cannot fail is a suite that
-    // reports success because it looked at nothing.
+    // The harness has to have teeth. This test is about the *checks*, not about
+    // the UI: a suite whose checks cannot fail is a suite that reports success
+    // because it looked at nothing.
+    //
+    // The measure itself is checked a layer down, in the harness's own
+    // `measure_tests` — a wrap width taken from the content box, and a hanging
+    // space that is not content. Both were `viewer-text-node-padding-measure`,
+    // both are fixed in the Bevy fork, and neither needs a registry to state.
     // -----------------------------------------------------------------------
 
-    /// The known-bad structure from `viewer-text-node-padding-measure`, which is
-    /// the reason this harness exists: a `Text` node carrying **its own** padding
-    /// and border is laid out with the wrong wrap width, so it gets one fewer
-    /// line than it draws and the last line hangs out of the bottom.
+    /// Prose decorated the way the convention says — the box on a **container**,
+    /// the `Text` a plain child — must be clean.
     ///
-    /// This asserts the bug is **still present** and that the check **sees it**.
-    /// Both halves matter. It is the proof that `overflow_violations` has teeth —
-    /// a check that cannot fail protects nothing — and it is a canary: when Bevy
-    /// fixes the measure upstream this test starts failing, which is precisely
-    /// when we want to be told, so the workaround can go.
-    ///
-    /// Diagnosing this by hand cost a login to OpenSim, a temporary debug key in
-    /// the demo panel, and six rounds of a human pressing it and reporting
-    /// numbers. It is a pure function of a font, a string and a width.
-    #[test]
-    fn a_text_node_may_not_carry_its_own_padding() {
-        let test = LayoutTest::new();
-        let mut app = test.build();
-        let text = app
-            .world_mut()
-            .spawn((
-                Text::new(
-                    "A much longer label, of the length a translated string reaches when the \
-                     original was written in English and measured once, which is exactly the \
-                     case a fixed pixel rect gets wrong.",
-                ),
-                UiFont::Sans.at(15.0),
-                Node {
-                    // The bug: padding and a border on the text node itself.
-                    padding: UiRect {
-                        left: Val::Px(24.0),
-                        right: Val::Px(8.0),
-                        top: Val::Px(4.0),
-                        bottom: Val::Px(4.0),
-                    },
-                    border: UiRect {
-                        left: Val::Px(4.0),
-                        ..UiRect::ZERO
-                    },
-                    ..default()
-                },
-                Name::new("text-with-its-own-padding"),
-            ))
-            .id();
-        // Inside a bounded panel, because that is where the bug lives: the wrap
-        // width has to arrive from the *parent's* content box for the measure to
-        // subtract it wrongly. A text node bounded by its own `max_width` lays
-        // out correctly and would make this test quietly vacuous.
-        app.world_mut()
-            .spawn((
-                Node {
-                    // A column, as every real panel is: in a row the child would
-                    // be stretched instead of bounded, and the measure would
-                    // never be handed the too-wide width that is the bug.
-                    flex_direction: FlexDirection::Column,
-                    padding: UiRect::all(Val::Px(12.0)),
-                    max_width: Val::Px(560.0),
-                    ..default()
-                },
-                Name::new("bounding-panel"),
-            ))
-            .add_child(text);
-        settle(&mut app);
-
-        let violations = overflow_violations(&mut app);
-        assert!(
-            !violations.is_empty(),
-            "a `Text` node carrying its own padding is the known upstream measure bug \
-             (viewer-text-node-padding-measure) and `overflow_violations` must report it. \
-             If this now passes, Bevy has fixed the measure: drop the workaround in \
-             `crate::ui_element::spawn_label` and this test with it."
-        );
-    }
-
-    /// The same text, decorated the way the convention says — the box on a
-    /// **container**, the `Text` a plain child — must be clean.
-    ///
-    /// The other half of the pair above, and the one that makes it meaningful. A
-    /// check that fires on the bad structure proves nothing on its own; it has to
-    /// also *not* fire on the good one, or it is simply a check that always
-    /// fires.
+    /// The convention outlived the bug that prompted it (a text run is not a
+    /// box), and this is what holds the harness to it: `overflow_violations`
+    /// must not fire on the structure every panel in the viewer uses, or it is
+    /// simply a check that always fires.
     #[test]
     fn the_same_text_in_a_decorated_container_is_clean() {
         let test = LayoutTest::new();
@@ -181,9 +112,9 @@ mod tests {
     ///
     /// 1. **No wrap.** The over-long name in the real (`label_clip_node` +
     ///    `TextLayout::no_wrap`) column comes out one line, and — self-calibrating,
-    ///    like the padding pair above — clearly shorter than the *same* name in a
-    ///    plain wrapping column, so the test has teeth (it would not pass vacuously
-    ///    if the name happened to fit).
+    ///    the way the measure tests below the harness are — clearly shorter than
+    ///    the *same* name in a plain wrapping column, so the test has teeth (it
+    ///    would not pass vacuously if the name happened to fit).
     /// 2. **Ellipsis trigger.** `ui_ellipsis::ellipsis_wanted` is true for the
     ///    clip holding the long name (its content is wider than its box) and
     ///    false for a clip holding a short one — the exact condition

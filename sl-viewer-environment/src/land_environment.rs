@@ -79,7 +79,6 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui_widgets::{SliderRange, SliderValue, ValueChange};
@@ -92,13 +91,13 @@ use sl_viewer_notifications::{NotificationResponse, ShowNotification};
 use sl_viewer_ui_core::i18n::{Translated, Translator};
 use sl_viewer_ui_core::ui::{column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
+use sl_viewer_ui_widgets::ui_slider::{SliderStyle, spawn_slider};
 use sl_viewer_ui_widgets::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use sl_viewer_world_api::{OpenSettingsPicker, SettingsPicked};
 
 use crate::rows::{ButtonPaint, SliderRow, paint_action_button, spawn_action_button};
 use crate::style::{
-    ACTION_BACKGROUND, CONTROL_BORDER, DIM_LABEL_COLOR, FONT_SIZE, HEADING_SIZE, LABEL_COLOR,
-    THUMB_FILL, TRACK_FILL,
+    ACTION_BACKGROUND, DIM_LABEL_COLOR, FONT_SIZE, HEADING_SIZE, LABEL_COLOR, TRACK_FILL,
 };
 
 /// The element-id prefix every control in a land-environment panel is named by.
@@ -914,8 +913,19 @@ fn spawn_day_slider(
         DaySlider::Length => "day-length",
         DaySlider::Offset => "day-offset",
     };
-    let track = commands
-        .spawn((
+    // The day sliders are wider than the shared environment rows', and the only
+    // sliders in this panel, so they carry their own width over the same style.
+    let style = SliderStyle {
+        track_width: 160.0,
+        ..crate::rows::SLIDER
+    };
+    let track = spawn_slider(
+        commands,
+        row_entity,
+        style,
+        *tab,
+        0.0,
+        (
             bevy::ui_widgets::Slider::default(),
             SliderValue(min),
             SliderRange::new(min, max),
@@ -926,34 +936,10 @@ fn spawn_day_slider(
             },
             PanelOf(panel),
             which,
-            Node {
-                width: Val::Px(160.0),
-                height: Val::Px(12.0),
-                border: UiRect::all(Val::Px(1.0)),
-                ..Node::default()
-            },
-            BorderColor::all(CONTROL_BORDER),
-            BackgroundColor(TRACK_FILL),
-            TabIndex(*tab),
             Name::new(format!("{ELEMENT}-{slug}:slider")),
-            ChildOf(row_entity),
-        ))
-        .with_child((
-            bevy::ui_widgets::SliderThumb,
-            Node {
-                position_type: PositionType::Absolute,
-                width: Val::Px(9.0),
-                height: Val::Px(12.0),
-                ..Node::default()
-            },
-            sl_viewer_ui_core::ui::LogicalInset(sl_viewer_ui_core::ui::LogicalRect {
-                inline_start: Val::Px(0.0),
-                ..sl_viewer_ui_core::ui::LogicalRect::ZERO
-            }),
-            BackgroundColor(THUMB_FILL),
-        ))
-        .observe(on_day_slider_changed)
-        .id();
+        ),
+    );
+    commands.entity(track).observe(on_day_slider_changed);
     *tab = tab.saturating_add(1);
     track
 }

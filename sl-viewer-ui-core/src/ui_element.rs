@@ -85,9 +85,8 @@ pub struct UiAction {
 /// A sample of one writing system, for the matrix.
 ///
 /// Two lengths because they fail differently: a short label overflows its own
-/// box, while a long one forces the wrap that
-/// `viewer-text-node-padding-measure` gets wrong — and a matrix carrying only
-/// one of them misses half the bugs.
+/// box, while a long one forces the wrap `viewer-text-node-padding-measure` got
+/// wrong — and a matrix carrying only one of them misses half the bugs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScriptSample {
     /// The script's name, for a failure message and the gallery's label.
@@ -447,32 +446,21 @@ const SAMPLE_PROSE: &str = "A much longer label, of the length a translated stri
 
 /// Spawn a text label: the text as a plain child of its own padded, bounded box.
 ///
-/// # An upstream measure bug shapes this, and the matrix found its real extent
+/// # A text run is not a box, and that outlived the bug that taught it
 ///
-/// `viewer-text-node-padding-measure`: `bevy_ui` resolves the wrong available
-/// width for a text node. The known face of it was **never put padding or a
-/// border on a `Text` node itself** — the measure over-estimates the width, fits
-/// one more word per line, arrives at one fewer line, and the node is laid out
-/// shorter than the text it draws, so the last line hangs out of the bottom. The
-/// documented workaround was to move the decoration onto a container.
+/// `viewer-text-node-padding-measure` was the reason this shape exists: a `Text`
+/// node carrying **its own** padding or border was measured at its border box,
+/// so it was laid out one line shorter than the text it then drew at the
+/// narrower content box, and the last line hung out of the bottom. The
+/// workaround was to move the decoration onto a container. That bug is **fixed**
+/// (in the Bevy fork; the harness's `measure_tests` is what keeps it fixed), so
+/// this is no longer a constraint the compiler cannot see — but the structure
+/// stays, because it was the right structure anyway: a text run is a run, and a
+/// box around it is a box around it.
 ///
-/// The matrix showed that workaround does not go far enough. The measure loses
-/// **anything that narrows a text node's width other than its own parent's
-/// padding**, and it does so silently:
-///
-/// | what narrows the text | measured | its box | over by |
-/// | --- | --- | --- | --- |
-/// | a 4 px border on the container | 388 | 384 | 4 |
-/// | a 4 px sibling accent bar | 390 | 387 | 3 |
-///
-/// Neither is visible in English, where the wrap lands short of the boundary by
-/// luck. Both show up in Arabic and under pseudolocalisation, which land on it.
-///
-/// So this label carries **no decoration at all** beside its text: padding on the
-/// parent, and nothing else competing for the inline axis. That is a real
-/// constraint on the whole UI until the upstream bug is fixed, and it is written
-/// down in the bug's roadmap file rather than only here. The scaffold's `F5`
-/// panel still demonstrates a logical accent bar, and still shows the artefact.
+/// So this label carries no decoration beside its text: padding on the parent,
+/// and nothing else competing for the inline axis. The scaffold's `F5` panel
+/// still demonstrates a logical accent bar.
 pub fn spawn_label(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
     commands
         .spawn((

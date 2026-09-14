@@ -442,6 +442,21 @@ unescaped_backticks = "deny"
 #   *clears* the focus another hit just acquired — so clicking a field under a
 #   transparent overlay worked or did nothing depending on `EntityHashMap`
 #   order, i.e. on entity ids;
+# - a `bevy_ui` text-measure fix that wraps a text node at its **content box**
+#   rather than its border box. `TextMeasure::measure` preferred taffy's
+#   `known_width` (the border box) over `available_width` (the same width with
+#   the node's own padding, border and scrollbar gutter already subtracted), so
+#   a `Text` node carrying its own padding was measured at a width the renderer
+#   never wraps it at and came out short by a line per padding's worth of extra
+#   width — the text then drew outside the bottom of its own box;
+# - a `bevy_text` fix that sizes a text block by the width it was **broken at**,
+#   counting the hanging space only where it fits: the space a soft wrap breaks
+#   at hangs past the wrap width (as in CSS), so `parley::Layout::full_width`
+#   made every wrapping label report a content width up to a quarter em wider
+#   than the box it had just been fitted to, and every ancestor inherited the
+#   error — while plain `width` is no better, since it shrinks an unbounded run
+#   to its ink and a run ending in a space then breaks at the space when it is
+#   laid out again at that width, taking a line it draws nothing on;
 # - a `bevy_text` `ComputedTextBlock::set_entities`, so a widget can name the
 #   entities an *editable* field's brush sections resolve against. The renderer
 #   reads a glyph's colour (and its underline) from the entity a brush's
@@ -456,28 +471,28 @@ unescaped_backticks = "deny"
 # bevy_render (a registry one and a fork one) that do not unify. Pinned to a rev
 # (not the branch) for reproducibility. To bump Bevy: re-cut the branch off the
 # new tag, re-apply the skin.rs/mod.rs diff, and update the rev on every line.
-bevy = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_a11y = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_android = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_animation = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_animation_macros = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_anti_alias = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_app = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_asset = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_asset_macros = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_audio = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_camera = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_clipboard = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_color = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_core_pipeline = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_derive = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_dev_tools = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_diagnostic = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_ecs = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_ecs_macro_logic = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_ecs_macros = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_encase_derive = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_feathers = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
+bevy = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_a11y = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_android = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_animation = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_animation_macros = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_anti_alias = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_app = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_asset = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_asset_macros = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_audio = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_camera = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_clipboard = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_color = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_core_pipeline = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_derive = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_dev_tools = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_diagnostic = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_ecs = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_ecs_macro_logic = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_ecs_macros = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_encase_derive = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_feathers = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
 # bevy_flair 0.8.0 + the recalculate_style-on-Reset fix (debug-build panic /
 # release-build silent reset downgrade when a freshly spawned widget is swept
 # into a sibling/descendant recalculation in the same frame) — submitted
@@ -488,49 +503,49 @@ bevy_flair_core = { git = "https://github.com/taladar/bevy_flair.git", rev = "ae
 bevy_flair_core_macros = { git = "https://github.com/taladar/bevy_flair.git", rev = "aef41d88cc21228b378f81779c85b656ba7a53a5" }
 bevy_flair_css_parser = { git = "https://github.com/taladar/bevy_flair.git", rev = "aef41d88cc21228b378f81779c85b656ba7a53a5" }
 bevy_flair_style = { git = "https://github.com/taladar/bevy_flair.git", rev = "aef41d88cc21228b378f81779c85b656ba7a53a5" }
-bevy_gilrs = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_gizmos = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_gizmos_macros = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_gizmos_render = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_gltf = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_image = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_input = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_input_focus = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_internal = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_light = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_log = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_macro_utils = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_material = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_material_macros = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_math = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_mesh = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_pbr = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_picking = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_platform = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_post_process = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_ptr = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_reflect = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_reflect_derive = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_render = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_render_macros = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_scene = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_scene_macros = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_shader = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_sprite = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_sprite_render = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_state = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_state_macros = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_tasks = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_text = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_time = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_transform = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_ui = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_ui_render = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_ui_widgets = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_utils = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_window = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_winit = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
-bevy_world_serialization = { git = "https://github.com/taladar/bevy.git", rev = "db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f" }
+bevy_gilrs = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_gizmos = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_gizmos_macros = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_gizmos_render = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_gltf = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_image = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_input = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_input_focus = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_internal = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_light = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_log = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_macro_utils = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_material = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_material_macros = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_math = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_mesh = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_pbr = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_picking = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_platform = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_post_process = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_ptr = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_reflect = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_reflect_derive = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_render = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_render_macros = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_scene = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_scene_macros = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_shader = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_sprite = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_sprite_render = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_state = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_state_macros = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_tasks = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_text = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_time = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_transform = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_ui = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_ui_render = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_ui_widgets = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_utils = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_window = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_winit = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
+bevy_world_serialization = { git = "https://github.com/taladar/bevy.git", rev = "7d929a808e349bab905f02ef725d83205a9aa62a" }
 fontique = { git = "https://github.com/taladar/parley.git", rev = "c09599ff507f49e5f383850e6b1e52674e4c654f" }
 parley = { git = "https://github.com/taladar/parley.git", rev = "c09599ff507f49e5f383850e6b1e52674e4c654f" }
 

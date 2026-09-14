@@ -48,14 +48,13 @@
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui::{Checked, InteractionDisabled};
-use bevy::ui_widgets::{
-    Activate, Button, Slider, SliderRange, SliderStep, SliderThumb, SliderValue, ValueChange,
-};
+use bevy::ui_widgets::{Activate, Button, SliderRange, SliderStep, SliderValue, ValueChange};
 use sl_client_bevy::{EnvironmentAsset, SkySettings};
 use sl_settings::{Scope, SettingKind, SettingValue};
 use sl_viewer_environment::knobs::{AimKnobs, SkyKnob};
 use sl_viewer_environment::rows::{
-    AimTrackball, RowsPlugin, spawn_slider, spawn_trackball_row, tag_aim_slider,
+    AimTrackball, RowsPlugin, spawn_slider_row as spawn_env_slider_row, spawn_trackball_row,
+    tag_aim_slider,
 };
 use sl_viewer_ui_widgets::ui_trackball::TrackballAim;
 
@@ -71,10 +70,11 @@ use crate::settings::ViewerSettings;
 use crate::settings_binding::{ComboBindingValues, SettingBinding, bound_checkbox, bound_slider};
 use crate::sky::day_position;
 use crate::sky_presets::FixedSky;
-use crate::ui::{LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_combo::{ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_element::ElementCx;
 use crate::ui_font::UiFont;
+use crate::ui_slider::{SliderStyle, spawn_slider};
 use crate::ui_tab::{
     DEFAULT_ELLIPSIS, TabPlacement, TabSpec, fill_tab_container, spawn_tab_container,
 };
@@ -91,12 +91,16 @@ const SECTION_FONT: f32 = 14.0;
 /// The gap between rows.
 const ROW_GAP: f32 = 8.0;
 
-/// A slider track's width, in logical pixels.
-const TRACK_WIDTH: f32 = 120.0;
-/// A slider thumb's width, in logical pixels.
-const THUMB_WIDTH: f32 = 12.0;
-/// A slider track's / thumb's height, in logical pixels.
-const TRACK_HEIGHT: f32 = 14.0;
+/// How this window's sliders are drawn.
+const SLIDER: SliderStyle = SliderStyle {
+    track_width: 120.0,
+    track_height: 14.0,
+    border: 2.0,
+    border_color: CONTROL_BORDER,
+    track_fill: TRACK_FILL,
+    thumb_width: 12.0,
+    thumb_fill: THUMB_FILL,
+};
 /// A checkbox box's side, in logical pixels.
 const CHECK_SIZE: f32 = 16.0;
 /// The minimum width of a slider row's trailing value readout.
@@ -749,7 +753,7 @@ fn build_environment_prologue(commands: &mut Commands, panel: Entity, seed: &str
             .insert(PhotoEnvGated)
             .observe(on_photo_trackball_aim);
         for knob in [knobs.azimuth, knobs.elevation] {
-            let slider = spawn_slider(
+            let slider = spawn_env_slider_row(
                 commands,
                 column,
                 AIM_ELEMENT,
@@ -1057,10 +1061,6 @@ struct PhotoValueLabel {
     integer: bool,
 }
 
-/// Marks a setting slider's thumb, so it slides to the bound value.
-#[derive(Component, Debug, Clone, Copy)]
-struct PhotoSliderThumb;
-
 /// Marks a setting checkbox's box, so its fill tracks `Checked`.
 #[derive(Component, Debug, Clone, Copy)]
 struct PhotoCheckboxBox;
@@ -1092,7 +1092,6 @@ impl Plugin for PhototoolsPlugin {
                 (
                     sync_environment_controls,
                     update_photo_values,
-                    drive_photo_thumbs,
                     drive_photo_checkboxes,
                     drive_photo_button_labels,
                 ),
@@ -1349,43 +1348,21 @@ fn spawn_slider_row(
             ChildOf(row_entity),
         ))
         .id();
+    let track = spawn_slider(
+        commands,
+        group,
+        SLIDER,
+        0,
+        0.0,
+        bound_slider(
+            row_binding(row_def),
+            SliderRange::new(min, max),
+            SliderStep(step),
+        ),
+    );
     commands
-        .spawn((
-            bound_slider(
-                row_binding(row_def),
-                SliderRange::new(min, max),
-                SliderStep(step),
-            ),
-            Node {
-                width: Val::Px(TRACK_WIDTH),
-                height: Val::Px(TRACK_HEIGHT),
-                border: UiRect::all(Val::Px(2.0)),
-                flex_shrink: 0.0,
-                ..default()
-            },
-            BorderColor::all(CONTROL_BORDER),
-            BackgroundColor(TRACK_FILL),
-            TabIndex(0),
-            Name::new(format!("{}:slider", row_def.element)),
-            ChildOf(group),
-        ))
-        .with_children(|track| {
-            track.spawn((
-                SliderThumb,
-                Node {
-                    position_type: PositionType::Absolute,
-                    width: Val::Px(THUMB_WIDTH),
-                    height: Val::Px(TRACK_HEIGHT),
-                    ..default()
-                },
-                LogicalInset(LogicalRect {
-                    inline_start: Val::Px(0.0),
-                    ..LogicalRect::ZERO
-                }),
-                BackgroundColor(THUMB_FILL),
-                PhotoSliderThumb,
-            ));
-        });
+        .entity(track)
+        .insert(Name::new(format!("{}:slider", row_def.element)));
     // A right-aligning slot with a *minimum* width, so the readout column lines
     // up but a long value or a large UI font grows it rather than clipping. The
     // `Text` itself stays content-sized: a width on the leaf makes bevy_text
@@ -1559,27 +1536,6 @@ const fn i32_to_f32(value: i32) -> f32 {
 )]
 const fn u32_to_f32(value: u32) -> f32 {
     value as f32
-}
-
-/// Slide each slider's thumb to its value within the range.
-fn drive_photo_thumbs(
-    sliders: Query<(&SliderValue, &SliderRange, &Children), With<Slider>>,
-    mut thumbs: Query<&mut LogicalInset, With<PhotoSliderThumb>>,
-) {
-    for (value, range, children) in &sliders {
-        let span = range.span();
-        let fraction = if span > f32::EPSILON {
-            ((value.0 - range.start()) / span).clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
-        let offset = fraction * (TRACK_WIDTH - THUMB_WIDTH);
-        for child in children {
-            if let Ok(mut inset) = thumbs.get_mut(*child) {
-                inset.0.inline_start = Val::Px(offset);
-            }
-        }
-    }
 }
 
 /// Colour each checkbox's box from its `Checked` state.
@@ -1808,32 +1764,9 @@ fn spawn_specimen_slider_row(
         TextColor(LABEL_COLOR),
         ChildOf(row_entity),
     ));
-    commands
-        .spawn((
-            Node {
-                width: Val::Px(TRACK_WIDTH),
-                height: Val::Px(TRACK_HEIGHT),
-                border: UiRect::all(Val::Px(2.0)),
-                flex_shrink: 0.0,
-                ..default()
-            },
-            BorderColor::all(CONTROL_BORDER),
-            BackgroundColor(TRACK_FILL),
-            ChildOf(row_entity),
-        ))
-        .with_child((
-            Node {
-                position_type: PositionType::Absolute,
-                width: Val::Px(THUMB_WIDTH),
-                height: Val::Px(TRACK_HEIGHT),
-                ..default()
-            },
-            LogicalInset(LogicalRect {
-                inline_start: Val::Px(fraction.clamp(0.0, 1.0) * (TRACK_WIDTH - THUMB_WIDTH)),
-                ..LogicalRect::ZERO
-            }),
-            BackgroundColor(THUMB_FILL),
-        ));
+    // Static: no `Slider`, so the thumb is drawn at the specimen's fraction and
+    // stays there.
+    spawn_slider(commands, row_entity, SLIDER, 0, fraction, ());
     commands.spawn((
         Text::new(cx.text(value)),
         cx.font(UiFont::Sans),

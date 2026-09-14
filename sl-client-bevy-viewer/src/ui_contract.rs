@@ -151,8 +151,8 @@ pub(crate) enum LayoutClaim {
     /// A pin that merely tolerated a bug would go on passing for years after
     /// the fix and quietly stop meaning anything; a pin that asserts the bug is
     /// present fails the day someone fixes it, and tells them to delete the
-    /// row. It is the same canary shape as
-    /// `a_text_node_may_not_carry_its_own_padding`.
+    /// row. It is the same canary shape as the harness's own
+    /// `a_grid_row_takes_its_height_from_a_wrap_that_never_happens`.
     KnownBroken(&'static str),
 }
 

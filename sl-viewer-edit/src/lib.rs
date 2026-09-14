@@ -42,6 +42,7 @@ pub(crate) use sl_viewer_ui_widgets::menu;
 pub(crate) use sl_viewer_ui_widgets::ui_color_picker;
 pub(crate) use sl_viewer_ui_widgets::ui_combo;
 pub(crate) use sl_viewer_ui_widgets::ui_radio;
+pub(crate) use sl_viewer_ui_widgets::ui_slider;
 pub(crate) use sl_viewer_ui_widgets::ui_tab;
 pub(crate) use sl_viewer_ui_widgets::ui_text_input;
 pub(crate) use sl_viewer_world_api as world_api;

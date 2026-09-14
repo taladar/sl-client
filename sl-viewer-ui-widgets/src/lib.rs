@@ -54,6 +54,7 @@ pub mod ui_combo;
 pub mod ui_radio;
 pub mod ui_rich_text;
 pub mod ui_search;
+pub mod ui_slider;
 pub mod ui_tab;
 pub mod ui_table;
 pub mod ui_text_input;

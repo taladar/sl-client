@@ -36,6 +36,7 @@ pub(crate) use sl_viewer_ui_widgets::floater;
 pub(crate) use sl_viewer_ui_widgets::floater_persist;
 pub(crate) use sl_viewer_ui_widgets::ui_color_picker;
 pub(crate) use sl_viewer_ui_widgets::ui_radio;
+pub(crate) use sl_viewer_ui_widgets::ui_slider;
 pub(crate) use sl_viewer_ui_widgets::ui_text_input;
 pub(crate) use sl_viewer_world_api as world_api;
 pub(crate) use sl_viewer_world_avatar::avatars;

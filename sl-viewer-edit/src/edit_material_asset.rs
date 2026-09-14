@@ -21,7 +21,7 @@
 
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
-use bevy::ui_widgets::{Slider, SliderRange, SliderStep, SliderThumb, SliderValue, ValueChange};
+use bevy::ui_widgets::{Slider, SliderRange, SliderStep, SliderValue, ValueChange};
 use sl_client_bevy::{
     AssetKey, AssetUpdateLocation, Command, GltfAlphaMode, GltfMaterial, GltfTexture, ItemInfo,
     SlCommand, SlEvent, SlSessionEvent, TextureKey, UpdatableAssetType, Uuid,
@@ -32,23 +32,26 @@ use crate::floater::{FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater};
 use crate::inventory::OpenMaterialEditor;
 use crate::material_preview::MaterialPreview;
 use crate::materials::MaterialManager;
-use crate::ui::{LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, row};
+use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, row};
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_font::UiFont;
+use crate::ui_slider::{SliderStyle, SliderWidgetPlugin, spawn_slider};
 use crate::ui_texture_picker::{TextureSwatchValue, spawn_texture_swatch};
 use crate::world_api::TexturePicked;
 
 /// The chrome font size, in logical pixels.
 const FONT: f32 = 13.0;
 
-/// A slider track's width, in logical pixels.
-const TRACK_WIDTH: f32 = 140.0;
-
-/// A slider track's height.
-const TRACK_HEIGHT: f32 = 12.0;
-
-/// A slider thumb's width.
-const THUMB_WIDTH: f32 = 9.0;
+/// How a material factor's slider is drawn.
+const SLIDER: SliderStyle = SliderStyle {
+    track_width: 140.0,
+    track_height: 12.0,
+    border: 1.0,
+    border_color: CONTROL_BORDER,
+    track_fill: TRACK_FILL,
+    thumb_width: 9.0,
+    thumb_fill: THUMB_FILL,
+};
 
 /// The preview sphere pane's side length, in logical pixels.
 const PREVIEW_SIZE: f32 = 128.0;
@@ -198,6 +201,9 @@ pub struct EditMaterialAssetPlugin;
 impl Plugin for EditMaterialAssetPlugin {
     /// Register the open message, state and systems; spawn the hidden floater.
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<SliderWidgetPlugin>() {
+            app.add_plugins(SliderWidgetPlugin);
+        }
         app.init_resource::<MatEditState>()
             .add_message::<OpenMaterialEditor>()
             .add_systems(
@@ -551,8 +557,13 @@ fn spawn_factor_slider(
             ChildOf(row_entity),
         ))
         .id();
-    commands
-        .spawn((
+    let track = spawn_slider(
+        commands,
+        row_entity,
+        SLIDER,
+        *tab,
+        0.0,
+        (
             Slider::default(),
             SliderValue(value.clamp(0.0, 1.0)),
             SliderRange::new(0.0, 1.0),
@@ -561,33 +572,10 @@ fn spawn_factor_slider(
                 kind,
                 label: readout,
             },
-            Node {
-                width: Val::Px(TRACK_WIDTH),
-                height: Val::Px(TRACK_HEIGHT),
-                border: UiRect::all(Val::Px(1.0)),
-                ..Default::default()
-            },
-            BorderColor::all(CONTROL_BORDER),
-            BackgroundColor(TRACK_FILL),
-            TabIndex(*tab),
             Name::new("material-factor-slider"),
-            ChildOf(row_entity),
-        ))
-        .observe(on_mat_slider_change)
-        .with_child((
-            SliderThumb,
-            Node {
-                position_type: PositionType::Absolute,
-                width: Val::Px(THUMB_WIDTH),
-                height: Val::Px(TRACK_HEIGHT),
-                ..Default::default()
-            },
-            LogicalInset(LogicalRect {
-                inline_start: Val::Px(0.0),
-                ..LogicalRect::ZERO
-            }),
-            BackgroundColor(THUMB_FILL),
-        ));
+        ),
+    );
+    commands.entity(track).observe(on_mat_slider_change);
     *tab = tab.saturating_add(1);
 }
 
@@ -808,19 +796,13 @@ fn drive_material_preview(
     edit.dirty = false;
 }
 
-/// Keep each factor slider's thumb + readout in sync with its [`SliderValue`].
+/// Keep each factor slider's **readout** in sync with its [`SliderValue`]. The
+/// thumb is `sl_viewer_ui_widgets::ui_slider`'s to place.
 fn sync_material_sliders(
-    sliders: Query<(&MatFactorSlider, &SliderValue, &Children)>,
-    mut insets: Query<&mut LogicalInset, With<SliderThumb>>,
+    sliders: Query<(&MatFactorSlider, &SliderValue)>,
     mut texts: Query<&mut Text>,
 ) {
-    for (info, value, children) in &sliders {
-        let offset = value.0.clamp(0.0, 1.0) * (TRACK_WIDTH - THUMB_WIDTH);
-        for child in children.iter() {
-            if let Ok(mut inset) = insets.get_mut(child) {
-                inset.0.inline_start = Val::Px(offset);
-            }
-        }
+    for (info, value) in &sliders {
         if let Ok(mut text) = texts.get_mut(info.label) {
             let want = format!("{:.2}", value.0);
             if text.0 != want {

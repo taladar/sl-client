@@ -32,8 +32,7 @@ use bevy::input_focus::{FocusedInput, InputFocus};
 use bevy::prelude::*;
 use bevy::text::{EditableText, FontCx, LayoutCx};
 use bevy::ui_widgets::{
-    Activate, Button, Slider, SliderDragState, SliderRange, SliderStep, SliderThumb, SliderValue,
-    ValueChange,
+    Activate, Button, Slider, SliderDragState, SliderRange, SliderStep, SliderValue, ValueChange,
 };
 use sl_cef::{PlaybackState, ValidatedMediaUrl};
 use sl_client_bevy::{Command, SlCommand};
@@ -43,9 +42,10 @@ use crate::media_diagnostics::MediaDiagnostics;
 use crate::media_engine::{MediaEngineKind, MediaEngineSystems, MediaSurfaces};
 use crate::media_prim::{MediaData, MediaPrimState, media_permission_allows};
 use crate::system_browser::{ExternalUrl, normalize_web_url, open_in_system_browser};
-use crate::ui::{LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::UiAction;
 use crate::ui_font::UiFont;
+use crate::ui_slider::{SliderStyle, SliderWidgetPlugin, spawn_slider};
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::world_api::MediaFocus;
 use crate::world_api::MediaTarget;
@@ -70,21 +70,16 @@ const BAR_LABEL: Color = Color::srgb(0.9, 0.9, 0.92);
 /// Bar text colour for unavailable actions.
 const BAR_LABEL_DIM: Color = Color::srgb(0.45, 0.45, 0.5);
 
-/// The seek scrubber track's width, in logical pixels.
-const SCRUB_TRACK_WIDTH: f32 = 220.0;
-/// The seek scrubber thumb's width, in logical pixels.
-const SCRUB_THUMB_WIDTH: f32 = 10.0;
-/// The seek scrubber track / thumb height, in logical pixels.
-const SCRUB_TRACK_HEIGHT: f32 = 12.0;
-/// The scrubber track's fill.
-const SCRUB_TRACK_FILL: Color = Color::srgb(0.16, 0.19, 0.25);
-/// The scrubber thumb's fill.
-const SCRUB_THUMB_FILL: Color = Color::srgb(0.62, 0.72, 0.86);
-
-/// A marker on the seek scrubber's thumb node, so it slides to the playback
-/// position.
-#[derive(Component, Debug, Clone, Copy)]
-struct ScrubThumb;
+/// How the seek scrubber is drawn.
+const SCRUBBER: SliderStyle = SliderStyle {
+    track_width: 220.0,
+    track_height: 12.0,
+    border: 1.0,
+    border_color: Color::srgb(0.3, 0.3, 0.35),
+    track_fill: Color::srgb(0.16, 0.19, 0.25),
+    thumb_width: 10.0,
+    thumb_fill: Color::srgb(0.62, 0.72, 0.86),
+};
 
 /// The bar's entities.
 #[derive(Resource)]
@@ -137,6 +132,9 @@ pub(crate) struct MediaControlsPlugin;
 
 impl Plugin for MediaControlsPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<SliderWidgetPlugin>() {
+            app.add_plugins(SliderWidgetPlugin);
+        }
         app.init_resource::<MediaControlsState>()
             .add_systems(
                 Startup,
@@ -279,44 +277,21 @@ fn spawn_scrub_row(commands: &mut Commands, bar: Entity) -> (Entity, Entity, Ent
             ChildOf(bar),
         ))
         .id();
-    let slider = commands
-        .spawn((
+    let slider = spawn_slider(
+        commands,
+        scrub_row,
+        SCRUBBER,
+        38,
+        0.0,
+        (
             Slider::default(),
             SliderValue(0.0),
             SliderRange::new(0.0, 1.0),
             SliderStep(1.0),
-            Node {
-                width: Val::Px(SCRUB_TRACK_WIDTH),
-                height: Val::Px(SCRUB_TRACK_HEIGHT),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(Color::srgb(0.3, 0.3, 0.35)),
-            BackgroundColor(SCRUB_TRACK_FILL),
-            TabIndex(38),
-            Pickable::default(),
             Name::new("media-controls-scrubber"),
-            ChildOf(scrub_row),
-        ))
-        .observe(on_scrub_change)
-        .id();
-    commands.spawn((
-        SliderThumb,
-        Node {
-            position_type: PositionType::Absolute,
-            width: Val::Px(SCRUB_THUMB_WIDTH),
-            height: Val::Px(SCRUB_TRACK_HEIGHT),
-            ..default()
-        },
-        LogicalInset(LogicalRect {
-            inline_start: Val::Px(0.0),
-            ..LogicalRect::ZERO
-        }),
-        BackgroundColor(SCRUB_THUMB_FILL),
-        ScrubThumb,
-        Pickable::IGNORE,
-        ChildOf(slider),
-    ));
+        ),
+    );
+    commands.entity(slider).observe(on_scrub_change);
     let time_text = commands
         .spawn((
             Text::default(),
@@ -362,7 +337,6 @@ fn drive_scrub_visual(
     prim_state: Res<MediaPrimState>,
     surfaces: NonSend<MediaSurfaces>,
     sliders: Query<(&SliderValue, &SliderRange, &SliderDragState), With<Slider>>,
-    mut thumbs: Query<&mut LogicalInset, With<ScrubThumb>>,
     mut commands: Commands,
 ) {
     let Some(ui) = ui else { return };
@@ -392,18 +366,6 @@ fn drive_scrub_visual(
             commands
                 .entity(ui.scrub_slider)
                 .insert(SliderValue(position));
-        }
-    }
-    let span = range.span();
-    let fraction = if span > f32::EPSILON {
-        ((value.0 - range.start()) / span).clamp(0.0, 1.0)
-    } else {
-        0.0
-    };
-    let offset = fraction * (SCRUB_TRACK_WIDTH - SCRUB_THUMB_WIDTH);
-    for mut inset in &mut thumbs {
-        if inset.0.inline_start != Val::Px(offset) {
-            inset.0.inline_start = Val::Px(offset);
         }
     }
 }

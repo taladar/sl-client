@@ -104,7 +104,7 @@ use sl_viewer_world_scene::environment::EnvironmentState;
 use crate::knobs::{ColorKnob, SkyKnob, TextureKnob, WaterKnob};
 use crate::land_environment::{LandDayCycleEdited, OpenLandDayCycle};
 use crate::rows::{
-    AimTrackball, paint_action_button, spawn_action_button, spawn_color_row, spawn_slider,
+    AimTrackball, paint_action_button, spawn_action_button, spawn_color_row, spawn_slider_row,
     spawn_texture_row, spawn_trackball_row, tag_aim_slider,
 };
 use crate::settings_editor::EditedItem;
@@ -1101,7 +1101,7 @@ fn spawn_pages(
             let Some(column_entity) = slider_column(slider_columns, index, page.sky.len()) else {
                 continue;
             };
-            let track = spawn_slider(
+            let track = spawn_slider_row(
                 commands,
                 column_entity,
                 element,
@@ -1120,7 +1120,7 @@ fn spawn_pages(
             let Some(column_entity) = slider_column(slider_columns, index, page.water.len()) else {
                 continue;
             };
-            let track = spawn_slider(
+            let track = spawn_slider_row(
                 commands,
                 column_entity,
                 element,
