@@ -581,10 +581,20 @@ pub(crate) fn reset_camera_view(
     if !context.is_world() || !keyboard.just_pressed(KeyCode::Escape) {
         return;
     }
+    let was_flycam = *mode == CameraMode::Flycam;
     *mode = CameraMode::ThirdPerson;
     *focus = FocusTarget::Avatar;
     if let Ok(mut rig) = cameras.single_mut() {
         rig.reset_orbit();
+        if was_flycam {
+            // Leaving flycam **warps**, exactly as [`toggle_flycam`] and
+            // `sit_camera::clear_sit_camera_on_stand` do: the flycam pose and the
+            // rear-view follow pose are unrelated, so easing between them flies the
+            // camera through the scene. Leaving mouselook (or resetting the orbit
+            // while already in third person) deliberately keeps gliding — those
+            // poses *are* related, and the glide is the seamless transition.
+            rig.resnap();
+        }
     }
     info!("camera: reset to third-person rear view");
 }
@@ -978,8 +988,15 @@ pub(crate) fn drive_flycam(
                 // (the camera looks down its local `-Z`).
                 let leveled =
                     Quat::from_mat3(&Mat3::from_cols(level_right, up, vscale(forward, -1.0)));
-                let ease = (flycam_settings.feathering * dt).min(1.0);
-                transform.rotation = transform.rotation.slerp(leveled, ease).normalize();
+                // Only ease when the horizon is actually off level. The slerp
+                // approaches `leveled` asymptotically and never lands on it, so an
+                // unguarded write marks the camera `Changed` every frame a flycam
+                // sits still — the same invariant `camera_pose_moved` guards for
+                // the other two modes.
+                if rotation_moved(transform.rotation, leveled, CAMERA_SETTLE_ROT_EPSILON) {
+                    let ease = (flycam_settings.feathering * dt).min(1.0);
+                    transform.rotation = transform.rotation.slerp(leveled, ease).normalize();
+                }
             }
         }
     }
@@ -1175,7 +1192,14 @@ pub(crate) fn position_camera(
             aim_out.sl_yaw = sl_heading_from_bevy_forward(look_forward);
             let mut posed = Transform::from_translation(eye);
             posed.rotation = look;
-            *transform = posed;
+            // Mouselook builds its pose directly rather than through
+            // [`apply_pose`] (the aim is set from the mouse with no smoothing, so
+            // there is nothing to ease), but it owes the same write guard: the eye
+            // is eased toward the animated head joint and so never settles
+            // exactly. See [`camera_pose_moved`].
+            if camera_pose_moved(&transform, &posed) {
+                *transform = posed;
+            }
         }
         CameraMode::ThirdPerson => {
             // A scripted sit camera (the seat set `llSetCamera*Offset`) overrides the
@@ -1243,8 +1267,11 @@ pub(crate) fn position_camera(
             if collide {
                 eye = collide_camera(&index, &dynamic, focus, eye, &own_avatar_entities);
             }
-            apply_pose(
-                &mut transform,
+            // `&transform` reads through the `Mut` without marking it; the write
+            // below is the only mutable deref, so a settled camera stays
+            // unchanged for this frame's change-driven consumers.
+            if let Some(posed) = apply_pose(
+                &transform,
                 &mut rig,
                 eye,
                 focus,
@@ -1252,16 +1279,58 @@ pub(crate) fn position_camera(
                 &time,
                 tuning.smoothing_half_life,
                 false,
-            );
+            ) {
+                *transform = posed;
+            }
         }
     }
 }
 
-/// Ease the camera from its smoothed pose toward `(eye, focus)` and write the
-/// transform, seeding (snapping) on the first frame so it does not glide in from
-/// the origin. `half_life` is the exponential easing's half-life in seconds
-/// ([`CameraTuning::smoothing_half_life`]); zero (or less) snaps every frame.
-/// `snap` bypasses the smoothing (mouselook, where a lag reads as sluggish aim).
+/// Whether `new` differs from `current` by more than the sub-perceptible settle
+/// epsilons ([`CAMERA_SETTLE_POS_EPSILON_SQ`] / [`CAMERA_SETTLE_ROT_EPSILON`]) —
+/// i.e. whether the camera pose is worth writing at all.
+///
+/// Every camera mode routes its transform write through this. The exponential
+/// smoothing the modes use approaches its target asymptotically and never settles
+/// *exactly*, so an unguarded write marks the camera `Changed` every single frame
+/// even when parked — which defeats every change-driven consumer that gates on
+/// camera movement, `GlobalTransform` propagation and frustum recomputation
+/// included. The caller must also keep the write itself inside the `if`:
+/// `Mut<Transform>` marks the component changed on the *first* mutable deref, so
+/// passing `&mut transform` into a function that decides not to write is already
+/// too late.
+fn camera_pose_moved(current: &Transform, new: &Transform) -> bool {
+    current.translation.distance_squared(new.translation) > CAMERA_SETTLE_POS_EPSILON_SQ
+        || rotation_moved(current.rotation, new.rotation, CAMERA_SETTLE_ROT_EPSILON)
+}
+
+/// Whether `current` and `new` differ by more than `epsilon` radians.
+///
+/// Deliberately **not** `Quat::angle_between`. That is `acos(dot)`, and a
+/// near-identity `dot` sits where `f32` has only ~6e-8 of resolution: feed it a
+/// quaternion and its own `f32` round-trip and the arc-cosine already reports
+/// **~8e-4 rad**, well above [`CAMERA_SETTLE_ROT_EPSILON`]. A settle test written
+/// that way can never say "settled" — which is why the camera kept rewriting its
+/// transform every frame even with a guard in place.
+///
+/// Comparing components stays linear where `acos` is not: a rotation of `θ` about
+/// any axis moves the quaternion components by `≈ θ/2`, and component resolution
+/// near 1 is that same ~6e-8 — four orders below the epsilon this is asked about.
+fn rotation_moved(current: Quat, new: Quat, epsilon: f32) -> bool {
+    !current.abs_diff_eq(new, epsilon * 0.5)
+}
+
+/// Ease the camera from its smoothed pose toward `(eye, focus)` and return the
+/// transform to write, seeding (snapping) on the first frame so it does not glide
+/// in from the origin. `half_life` is the exponential easing's half-life in
+/// seconds ([`CameraTuning::smoothing_half_life`]); zero (or less) snaps every
+/// frame. `snap` bypasses the smoothing (mouselook, where a lag reads as sluggish
+/// aim).
+///
+/// Returns `None` when the eased pose has settled onto the one the transform
+/// already holds ([`camera_pose_moved`]) — the caller must then leave the
+/// `Mut<Transform>` untouched rather than writing an identical value, which is why
+/// this takes `&Transform` and hands the pose back instead of writing it.
 ///
 /// `follow_avatar` selects **rigid follow**: the focus is taken from the live
 /// avatar every frame with no world-space easing, and only the eye's **offset from
@@ -1273,12 +1342,13 @@ pub(crate) fn position_camera(
 /// pose in world space as before — a static point has nothing to trail.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the camera pose write needs the transform and rig it writes, the desired eye / \
-              focus pair, the follow mode, the frame time, and the two smoothing controls — \
-              bundling them into a struct for one internal call site would only obscure it"
+    reason = "the camera pose write needs the transform it eases from and the rig it writes, the \
+              desired eye / focus pair, the follow mode, the frame time, and the two smoothing \
+              controls — bundling them into a struct for one internal call site would only \
+              obscure it"
 )]
 fn apply_pose(
-    transform: &mut Transform,
+    transform: &Transform,
     rig: &mut CameraRig,
     eye: Vec3,
     focus: Vec3,
@@ -1286,7 +1356,7 @@ fn apply_pose(
     time: &Time,
     half_life: f32,
     snap: bool,
-) {
+) -> Option<Transform> {
     let (final_eye, final_focus) = if !rig.seeded || snap {
         (eye, focus)
     } else {
@@ -1325,20 +1395,11 @@ fn apply_pose(
         vadd(final_eye, transform.forward().as_vec3())
     };
     let new_transform = Transform::from_translation(final_eye).looking_at(target, Vec3::Y);
-    // Only write when the pose actually moved beyond a sub-perceptible epsilon.
-    // The exponential smoothing above approaches its target asymptotically and
-    // never settles *exactly*, so an unguarded write would mark the camera
-    // `Changed` every single frame even when parked — which defeats every
-    // change-driven consumer that gates on camera movement (e.g. the async
-    // shadow-cull dispatch). A `snap` always writes.
-    let settled = transform
-        .translation
-        .distance_squared(new_transform.translation)
-        <= CAMERA_SETTLE_POS_EPSILON_SQ
-        && transform.rotation.angle_between(new_transform.rotation) <= CAMERA_SETTLE_ROT_EPSILON;
-    if snap || !settled {
-        *transform = new_transform;
-    }
+    // Only ask for a write when the pose actually moved beyond a sub-perceptible
+    // epsilon — see [`camera_pose_moved`]. A `snap` always writes: it is a
+    // deliberate discontinuity, and a consumer that gates on camera movement has
+    // to see it even when the two poses happen to coincide.
+    (snap || camera_pose_moved(transform, &new_transform)).then_some(new_transform)
 }
 
 /// Pull the camera `eye` in toward `focus` if a world surface obstructs the line
@@ -1658,6 +1719,24 @@ mod tests {
         let focus_off = Vec3::new(0.0, 0.5, 0.0);
         let climb = Vec3::new(0.0, 0.1, 0.0);
 
+        // One frame, driven exactly as the camera systems drive it: read the
+        // transform, write it back only when `apply_pose` says the pose moved.
+        let frame =
+            |transform: &mut Transform, rig: &mut CameraRig, anchor: Vec3, follow_avatar: bool| {
+                if let Some(posed) = apply_pose(
+                    transform,
+                    rig,
+                    vadd(anchor, eye_off),
+                    vadd(anchor, focus_off),
+                    follow_avatar,
+                    &time,
+                    SMOOTH_HALF_LIFE,
+                    false,
+                ) {
+                    *transform = posed;
+                }
+            };
+
         // Run a constant-velocity climb through the smoother and return the final
         // smoothed eye and focus once it has settled.
         let settle = |follow_avatar: bool| -> (Vec3, Vec3, Vec3) {
@@ -1666,28 +1745,10 @@ mod tests {
             let mut anchor = Vec3::new(100.0, 20.0, 50.0);
             // Seed on the first frame (snaps), then climb for long enough to reach
             // steady state.
-            apply_pose(
-                &mut transform,
-                &mut rig,
-                vadd(anchor, eye_off),
-                vadd(anchor, focus_off),
-                follow_avatar,
-                &time,
-                SMOOTH_HALF_LIFE,
-                false,
-            );
+            frame(&mut transform, &mut rig, anchor, follow_avatar);
             for _frame in 0..60 {
                 anchor = vadd(anchor, climb);
-                apply_pose(
-                    &mut transform,
-                    &mut rig,
-                    vadd(anchor, eye_off),
-                    vadd(anchor, focus_off),
-                    follow_avatar,
-                    &time,
-                    SMOOTH_HALF_LIFE,
-                    false,
-                );
+                frame(&mut transform, &mut rig, anchor, follow_avatar);
             }
             (rig.smoothed_eye, rig.smoothed_focus, vadd(anchor, eye_off))
         };
@@ -1768,30 +1829,19 @@ mod tests {
         time.advance_by(Duration::from_secs_f32(1.0 / 60.0));
         let mut rig = CameraRig::default();
         let mut transform = Transform::default();
+        let mut frame = |eye: Vec3, focus: Vec3| {
+            if let Some(posed) =
+                apply_pose(&transform, &mut rig, eye, focus, false, &time, 0.0, false)
+            {
+                transform = posed;
+            }
+        };
         // Seed far away, then ask for a distant pose with half-life 0: it must
         // land exactly on it in a single frame.
-        apply_pose(
-            &mut transform,
-            &mut rig,
-            Vec3::ZERO,
-            Vec3::new(0.0, 0.0, -1.0),
-            false,
-            &time,
-            0.0,
-            false,
-        );
+        frame(Vec3::ZERO, Vec3::new(0.0, 0.0, -1.0));
         let eye = Vec3::new(50.0, 10.0, -20.0);
         let focus = vadd(eye, Vec3::new(0.0, 0.0, -1.0));
-        apply_pose(
-            &mut transform,
-            &mut rig,
-            eye,
-            focus,
-            false,
-            &time,
-            0.0,
-            false,
-        );
+        frame(eye, focus);
         assert!(
             vsub(rig.smoothed_eye, eye).length() < 1.0e-5,
             "half-life 0 snaps: {:?}",
@@ -1850,6 +1900,371 @@ mod tests {
             CameraMode::Flycam,
             Action::ToggleFlycam,
             CameraMode::ThirdPerson,
+        );
+    }
+
+    /// `Escape` out of flycam **warps** to the rear view, exactly as the flycam
+    /// toggle does, and `Escape` from the other two modes keeps gliding.
+    ///
+    /// The flycam pose and the follow pose are unrelated, so an interpolation
+    /// between them flies the camera through the scene — which is why
+    /// `toggle_flycam` resnaps. `reset_camera_view` reached third person by the
+    /// same door and did not, so leaving flycam by `Escape` glided where leaving it
+    /// by the toggle warped. Mouselook and a plain third-person reset stay seeded:
+    /// those poses *are* related and the glide is the seamless transition.
+    #[test]
+    fn escape_warps_out_of_flycam_but_glides_out_of_the_rest() {
+        use super::{CameraMode, FocusTarget, InputContext, ViewerCamera, reset_camera_view};
+        use bevy::prelude::*;
+        use pretty_assertions::assert_eq;
+
+        // Press `Escape` from `start` with an already-seeded rig and hand back the
+        // rig it left behind — `seeded` says whether the next frame glides.
+        let escape_from = |start: CameraMode| -> Option<CameraRig> {
+            let mut app = App::new();
+            app.insert_resource(start)
+                .init_resource::<FocusTarget>()
+                .init_resource::<InputContext>()
+                .init_resource::<ButtonInput<KeyCode>>()
+                .add_systems(Update, reset_camera_view);
+            let rig = CameraRig {
+                seeded: true,
+                ..CameraRig::default()
+            };
+            app.world_mut().spawn((ViewerCamera, rig));
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(KeyCode::Escape);
+            app.update();
+            assert_eq!(
+                *app.world().resource::<CameraMode>(),
+                CameraMode::ThirdPerson,
+                "escape from {start:?} lands in third person"
+            );
+            let mut rigs = app.world_mut().query::<&CameraRig>();
+            rigs.iter(app.world()).next().cloned()
+        };
+
+        // Whichever mode it came from, `Escape` resets the orbit; only flycam warps.
+        for (start, want_seeded, note) in [
+            (
+                CameraMode::Flycam,
+                false,
+                "escape out of flycam warps instead of flying through the scene",
+            ),
+            (
+                CameraMode::Mouselook,
+                true,
+                "escape out of mouselook keeps the zoom-through glide",
+            ),
+            (
+                CameraMode::ThirdPerson,
+                true,
+                "a plain orbit reset glides back",
+            ),
+        ] {
+            let rig = escape_from(start);
+            assert_eq!(
+                rig.as_ref().map(|rig| rig.seeded),
+                Some(want_seeded),
+                "{note}"
+            );
+            assert!(
+                rig.is_some_and(|rig| (rig.azimuth - CameraRig::default().azimuth).abs() < 1.0e-6),
+                "escape resets the orbit whichever mode it came from ({start:?})"
+            );
+        }
+    }
+
+    /// A settled pose is not written again: `apply_pose` hands back `None` once the
+    /// eased pose is within the settle epsilons of the transform the camera already
+    /// holds, so the `Mut<Transform>` is never dereferenced and the camera stops
+    /// marking itself `Changed` every frame while parked. A `snap` still writes.
+    #[test]
+    fn a_settled_pose_is_not_written_again() {
+        use super::{CameraRig, SMOOTH_HALF_LIFE, apply_pose, vadd};
+        use bevy::prelude::{Time, Transform};
+        use pretty_assertions::assert_eq;
+        use std::time::Duration;
+
+        let mut time = Time::default();
+        time.advance_by(Duration::from_secs_f32(1.0 / 60.0));
+        let mut rig = CameraRig::default();
+        let mut transform = Transform::default();
+        let eye = Vec3::new(10.0, 2.0, -5.0);
+        let focus = vadd(eye, Vec3::NEG_Z);
+
+        // Ease onto a parked pose until the writes stop, then assert they stay
+        // stopped: the smoothing is asymptotic, so "stopped" is the guard working,
+        // not the maths landing exactly.
+        let mut wrote_in_a_row = 0_u32;
+        for _frame in 0..600 {
+            if let Some(posed) = apply_pose(
+                &transform,
+                &mut rig,
+                eye,
+                focus,
+                false,
+                &time,
+                SMOOTH_HALF_LIFE,
+                false,
+            ) {
+                transform = posed;
+                wrote_in_a_row = 0;
+            } else {
+                wrote_in_a_row += 1;
+                if wrote_in_a_row >= 10 {
+                    break;
+                }
+            }
+        }
+        assert_eq!(
+            wrote_in_a_row, 10,
+            "a parked camera settles and stops rewriting its transform"
+        );
+
+        // Moving the target again writes, and a snap writes even onto a pose the
+        // camera is already sitting on.
+        assert!(
+            apply_pose(
+                &transform,
+                &mut rig,
+                vadd(eye, Vec3::new(5.0, 0.0, 0.0)),
+                vadd(focus, Vec3::new(5.0, 0.0, 0.0)),
+                false,
+                &time,
+                SMOOTH_HALF_LIFE,
+                false,
+            )
+            .is_some(),
+            "a moved target writes again"
+        );
+        assert!(
+            apply_pose(
+                &transform,
+                &mut rig,
+                transform.translation,
+                vadd(transform.translation, transform.forward().as_vec3()),
+                false,
+                &time,
+                SMOOTH_HALF_LIFE,
+                true,
+            )
+            .is_some(),
+            "a snap is a deliberate discontinuity and always writes"
+        );
+    }
+
+    /// A rotation has not moved from itself, and a real turn still registers.
+    ///
+    /// The first half is not as trivial as it looks: spelled the obvious way —
+    /// `Quat::angle_between` — an `f32` quaternion compared against *itself*
+    /// reports ~8e-4 rad, because `acos` near `dot == 1` amplifies the ~6e-8 of
+    /// `f32` resolution left there. That is above [`CAMERA_SETTLE_ROT_EPSILON`],
+    /// so the settle test could never be satisfied and the camera rewrote (and
+    /// `Changed`-marked) its transform on every frame it stood still.
+    #[test]
+    fn a_rotation_has_not_moved_from_itself() {
+        use super::{CAMERA_SETTLE_ROT_EPSILON, rotation_moved};
+        use bevy::prelude::{Quat, Transform};
+
+        // A pose a camera actually holds, not a hand-written unit quaternion.
+        let rotation = Transform::from_translation(Vec3::new(20.0, 5.0, -32.0))
+            .looking_at(Vec3::new(20.0, 3.0, -40.0), Vec3::Y)
+            .rotation;
+        assert!(
+            !rotation_moved(rotation, rotation, CAMERA_SETTLE_ROT_EPSILON),
+            "a rotation has not moved from itself"
+        );
+        assert!(
+            rotation_moved(
+                rotation,
+                rotation * Quat::from_rotation_y(0.01),
+                CAMERA_SETTLE_ROT_EPSILON,
+            ),
+            "and half a degree of turn is a move"
+        );
+    }
+
+    /// A parked third-person camera stops marking its `Transform` as changed.
+    ///
+    /// `apply_pose` has always guarded the *value* write, but the call site passed
+    /// `&mut transform` — and `Mut<Transform>`'s first mutable deref marks the
+    /// component changed whatever the callee then decides. So the guard only ever
+    /// saved the assignment, never the `Changed` flag, and every change-driven
+    /// consumer that gates on camera movement saw a camera that moved every frame.
+    /// `apply_pose` now hands the pose back and the system writes it inside the
+    /// `if`, which is what this pins.
+    #[test]
+    fn a_parked_third_person_camera_stops_marking_itself_changed() {
+        use super::{
+            CameraAim, CameraMode, CameraTuning, FocusTarget, ViewerCamera, position_camera,
+        };
+        use crate::raycast_index::{DynamicColliders, StaticRaycastIndex};
+        use crate::world_api::{AvatarState, ObjectState};
+        use bevy::prelude::*;
+        use pretty_assertions::assert_eq;
+        use sl_client_bevy::SlIdentity;
+        use std::time::Duration;
+
+        /// How many frames marked the camera's `Transform` as changed.
+        #[derive(Resource, Default)]
+        struct Writes(u32);
+
+        fn count_writes(
+            mut writes: ResMut<Writes>,
+            cameras: Query<(), (With<ViewerCamera>, Changed<Transform>)>,
+        ) {
+            writes.0 += u32::try_from(cameras.iter().count()).unwrap_or(u32::MAX);
+        }
+
+        let mut app = App::new();
+        // A focus *point* rather than the avatar: the follow-the-avatar branch
+        // needs a whole rigged agent, and the smoothing under test is the same.
+        app.insert_resource(CameraMode::ThirdPerson)
+            .insert_resource(FocusTarget::Point(Vec3::new(20.0, 3.0, -40.0)))
+            .init_resource::<CameraTuning>()
+            .init_resource::<SlIdentity>()
+            .init_resource::<AvatarState>()
+            .init_resource::<ObjectState>()
+            .init_resource::<crate::sit_camera::SitCamera>()
+            .init_resource::<Time>()
+            .init_resource::<StaticRaycastIndex>()
+            .init_resource::<DynamicColliders>()
+            .init_resource::<CameraAim>()
+            .init_resource::<Writes>()
+            .add_systems(Update, (position_camera, count_writes).chain());
+        // A non-zero eye offset from the focus point, so the look direction is
+        // well-defined rather than the degenerate fully-zoomed-in case.
+        let rig = CameraRig {
+            point_offset: Vec3::new(0.0, 2.0, 8.0),
+            ..CameraRig::default()
+        };
+        app.world_mut()
+            .spawn((ViewerCamera, rig, Transform::default()));
+
+        // Run a stretch of frames and report how many of them marked the camera's
+        // `Transform` changed.
+        let run = |app: &mut App, frames: u32| -> u32 {
+            app.world_mut().resource_mut::<Writes>().0 = 0;
+            for _frame in 0..frames {
+                app.world_mut()
+                    .resource_mut::<Time>()
+                    .advance_by(Duration::from_secs_f32(1.0 / 60.0));
+                app.update();
+            }
+            app.world().resource::<Writes>().0
+        };
+
+        // Frame one seeds (an unseeded rig snaps, and the freshly spawned component
+        // is `Changed` regardless); nothing after it moves, so nothing after it
+        // writes. Before the fix this was 600.
+        assert_eq!(
+            run(&mut app, 600),
+            1,
+            "a camera parked on a fixed focus point writes once and then stays quiet"
+        );
+
+        // Moving the focus makes it glide again — the guard must not freeze the
+        // camera — and then settle back to silence.
+        app.world_mut()
+            .insert_resource(FocusTarget::Point(Vec3::new(-15.0, 9.0, 12.0)));
+        let gliding = run(&mut app, 600);
+        assert!(
+            (2..600).contains(&gliding),
+            "a moved focus glides and then settles: {gliding} write(s) in 600 frames"
+        );
+        assert_eq!(
+            run(&mut app, 60),
+            0,
+            "and the settled camera marks itself changed on no frame at all"
+        );
+    }
+
+    /// A flycam sitting still with a level horizon stops writing its transform.
+    ///
+    /// AutoLeveling slerps toward the level orientation every frame, and a slerp
+    /// approaches its target asymptotically, so the unguarded write marked the
+    /// camera `Changed` on every single frame of an idle flycam — the same
+    /// invariant `apply_pose` documents for the other two modes.
+    #[test]
+    fn an_idle_level_flycam_stops_writing_its_transform() {
+        use super::{
+            Action, CameraMode, CameraSpin, FlycamAxisSettings, FlycamSmoothing, InputContext,
+            SpacenavInput, ViewerCamera, drive_flycam,
+        };
+        use bevy::input::mouse::AccumulatedMouseMotion;
+        use bevy::prelude::*;
+        use pretty_assertions::assert_eq;
+        use std::time::Duration;
+
+        /// How many frames marked the camera's `Transform` as changed.
+        #[derive(Resource, Default)]
+        struct Writes(u32);
+
+        fn count_writes(
+            mut writes: ResMut<Writes>,
+            cameras: Query<(), (With<ViewerCamera>, Changed<Transform>)>,
+        ) {
+            writes.0 += u32::try_from(cameras.iter().count()).unwrap_or(u32::MAX);
+        }
+
+        let mut app = App::new();
+        app.insert_resource(CameraMode::Flycam)
+            .init_resource::<ButtonInput<Action>>()
+            .init_resource::<SpacenavInput>()
+            .init_resource::<FlycamAxisSettings>()
+            .init_resource::<CameraSpin>()
+            .init_resource::<Time>()
+            .init_resource::<AccumulatedMouseMotion>()
+            .init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<InputContext>()
+            .init_resource::<FlycamSmoothing>()
+            .init_resource::<Writes>()
+            .add_systems(Update, (drive_flycam, count_writes).chain());
+        // A level camera: identity leaves `right` on `+X` (horizontal) and `forward`
+        // on `-Z`, which is exactly what AutoLeveling converges to.
+        app.world_mut().spawn((ViewerCamera, Transform::default()));
+
+        for _frame in 0..10 {
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(Duration::from_secs_f32(1.0 / 60.0));
+            app.update();
+        }
+        // The spawn frame is the one legitimate write (a freshly inserted component
+        // is `Changed`); every frame after it must be silent.
+        assert_eq!(
+            app.world().resource::<Writes>().0,
+            1,
+            "an idle level flycam writes its transform only on the spawn frame"
+        );
+
+        // And a rolled camera still levels: the guard must not freeze the horizon.
+        let rolled = Quat::from_rotation_z(0.5);
+        let mut cameras = app
+            .world_mut()
+            .query_filtered::<&mut Transform, With<ViewerCamera>>();
+        for mut transform in cameras.iter_mut(app.world_mut()) {
+            transform.rotation = rolled;
+        }
+        for _frame in 0..120 {
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(Duration::from_secs_f32(1.0 / 60.0));
+            app.update();
+        }
+        let mut cameras = app
+            .world_mut()
+            .query_filtered::<&Transform, With<ViewerCamera>>();
+        let transform = cameras.iter(app.world()).next().copied();
+        assert!(
+            transform.is_some_and(|transform| transform.rotation.angle_between(rolled) > 0.1),
+            "AutoLeveling still eases a rolled horizon back to level: {transform:?}"
+        );
+        assert!(
+            transform.is_some_and(|transform| transform.right().as_vec3().y.abs() < 1.0e-2),
+            "the levelled camera's right axis is horizontal: {transform:?}"
         );
     }
 }
