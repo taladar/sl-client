@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 313 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 30 |
-| done | 1132 |
+| bugs | 29 |
+| done | 1133 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1680** |
@@ -1163,14 +1163,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (30)
+## bugs (29)
 
 ### viewer
 
 - [`viewer-animesh-intermittent-render`](bugs/viewer-animesh-intermittent-render.md)
   — Animesh intermittently fails to render (timing race, not deterministic)
-- [`viewer-audio-tests-open-real-devices`](bugs/viewer-audio-tests-open-real-devices.md)
-  — Unit tests open real audio devices on the developer's machine
 - [`viewer-audit-account-dir-index-repoint`](bugs/viewer-audit-account-dir-index-repoint.md)
   — A skipped rename still repoints the UUID index, handing one avatar another's
   data
@@ -1236,7 +1234,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1132)
+## done (1133)
 
 ### protocol
 
@@ -1507,6 +1505,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Worn rigid attachments freeze at the T-pose instead of following the
 - [`viewer-audio-backend`](done/viewer-audio-backend.md) — Audio backend —
   device, decode, listener & mixer
+- [`viewer-audio-tests-open-real-devices`](done/viewer-audio-tests-open-real-devices.md)
+  — Unit tests open real audio devices on the developer's machine
 - [`viewer-audit-about-land-row-rebuild`](done/viewer-audit-about-land-row-rebuild.md)
   — About Land rebuilds every owner and access row whenever any avatar name
   resolves

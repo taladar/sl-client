@@ -16,12 +16,17 @@
 //! [`crate::settings::ViewerSettings`]'s `load` — always before the
 //! floater's deferred first-open build, so binding the keys here is safe.
 //!
-//! The **output device** combo starts from the device names enumerated at
-//! tab-build time ([`Mixer::output_devices`]) and **re-enumerates while the
-//! preferences floater is open** (`refresh_output_device_options`, every
-//! `DEVICE_POLL_SECONDS`) so a hot-plugged PipeWire / PulseAudio device
-//! appears without a restart — a poll, because cpal has no device-change
-//! notification to subscribe to. The options update in place through
+//! The **output device** combo starts with nothing but the system-default
+//! entry and is filled — and **re-enumerated** — while the preferences floater
+//! is open (`refresh_output_device_options`, every `DEVICE_POLL_SECONDS`), so a
+//! hot-plugged PipeWire / PulseAudio device appears without a restart — a poll,
+//! because cpal has no device-change notification to subscribe to. The first
+//! refresh runs on the frame the floater opens (its poll timer starts due), so
+//! the list is there by the time anyone can look at it. Enumeration goes
+//! through the carried [`OutputDeviceEnumerator`], never the host directly:
+//! asking the sound card what it has is hardware access, and an app that did
+//! not add [`crate::audio::AudioPlugin`] — every test harness, the gallery —
+//! must not do it. The options update in place through
 //! [`SetComboOptions`] (deferred while the popover is open); the paired
 //! [`ComboBindingValues`] moves in the same pass so option index ↔ setting
 //! value never skews. The device *names* ride the Fluent key-fallback: the
@@ -41,12 +46,13 @@
 //! Reference (Firestorm, read-only): `panel_preferences_sound.xml`,
 //! `llfloaterpreference.cpp`.
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::ui_widgets::{SliderRange, SliderStep};
-use sl_audio::{Bus, Mixer};
+use sl_audio::Bus;
 use sl_settings::SettingValue;
 
-use crate::audio::OutputDeviceStatus;
+use crate::audio::{OutputDeviceEnumerator, OutputDeviceStatus};
 use crate::preferences::{
     PreferencesUi, spawn_pref_checkbox, spawn_pref_combo, spawn_pref_combo_with_anchor,
     spawn_pref_note, spawn_pref_section, spawn_pref_slider,
@@ -194,10 +200,13 @@ pub(crate) fn build_audio_tab(commands: &mut Commands, panel: Entity) {
     );
 
     spawn_pref_section(commands, panel, "preferences-section-audio-device");
-    // The build hook has no resource access, so the requested device is not
-    // known here; `refresh_output_device_options` runs on the frame the floater
-    // opens (its poll timer starts due) and supplies it.
-    let options = device_options(Mixer::output_devices(), "");
+    // The build hook has no resource access, so neither the requested device nor
+    // the enumerator is reachable here — and enumerating the host directly
+    // instead would be exactly the hardware access this module refuses to do
+    // outside an app that asked for audio. So the combo is born holding only the
+    // system default; `refresh_output_device_options` runs on the frame the
+    // floater opens (its poll timer starts due) and supplies the rest.
+    let options = device_options(Vec::new(), "");
     let option_refs: Vec<(&str, SettingValue)> = options
         .iter()
         .map(|(key, value)| (key.as_str(), value.clone()))
@@ -219,6 +228,27 @@ pub(crate) fn build_audio_tab(commands: &mut Commands, panel: Entity) {
     commands.entity(note).insert(OutputDeviceNote);
 }
 
+/// The "is the preferences floater open?" question, grouped so a system takes
+/// one param rather than two. The floater's root is the shell's
+/// [`PreferencesUi`] resource, which only exists once the floater has been
+/// built at all — a deferred first open, so its absence is simply "closed".
+#[derive(SystemParam)]
+struct PreferencesFloater<'w, 's> {
+    /// The preferences shell's entities, absent before the first open.
+    ui: Option<Res<'w, PreferencesUi>>,
+    /// The shown flag lives on the panel root.
+    panels: Query<'w, 's, &'static UiPanelShown>,
+}
+
+impl PreferencesFloater<'_, '_> {
+    /// Whether the preferences floater is currently shown.
+    fn is_open(&self) -> bool {
+        self.ui
+            .as_ref()
+            .is_some_and(|ui| self.panels.get(ui.root).is_ok_and(|shown| shown.0))
+    }
+}
+
 /// Re-enumerate the output devices while the preferences floater is open and
 /// push any change into the device combo: the option labels through
 /// [`SetComboOptions`] (an equal list is a no-op there), the paired
@@ -226,17 +256,24 @@ pub(crate) fn build_audio_tab(commands: &mut Commands, panel: Entity) {
 /// when the enumeration has lost it (see [`device_options`]), and the note under
 /// the combo says so. Closed, the poll timer resets so the next open
 /// re-enumerates immediately.
+///
+/// Without an [`OutputDeviceEnumerator`] this does nothing at all: no app that
+/// skipped [`crate::audio::AudioPlugin`] has any business opening the machine's
+/// sound devices, and the combo is left holding the system default the tab
+/// build gave it.
 fn refresh_output_device_options(
     time: Res<Time>,
     mut next_poll: Local<Option<f32>>,
-    ui: Option<Res<PreferencesUi>>,
+    floater: PreferencesFloater,
     status: Res<OutputDeviceStatus>,
-    panels: Query<&UiPanelShown>,
+    enumerator: Option<Res<OutputDeviceEnumerator>>,
     mut combos: Query<(Entity, &mut ComboBindingValues), With<OutputDeviceCombo>>,
     mut writer: MessageWriter<SetComboOptions>,
 ) {
-    let open = ui.is_some_and(|ui| panels.get(ui.root).is_ok_and(|shown| shown.0));
-    if !open {
+    let Some(enumerator) = enumerator else {
+        return;
+    };
+    if !floater.is_open() {
         *next_poll = None;
         return;
     }
@@ -249,7 +286,7 @@ fn refresh_output_device_options(
     }
     *next_poll = Some(now + DEVICE_POLL_SECONDS);
 
-    let options = device_options(Mixer::output_devices(), &status.requested);
+    let options = device_options(enumerator.devices(), &status.requested);
     for (combo, mut values) in &mut combos {
         let new_values: Vec<SettingValue> =
             options.iter().map(|(_, value)| value.clone()).collect();
@@ -311,8 +348,8 @@ mod tests {
     use sl_settings::SettingValue;
 
     use super::{
-        OutputDeviceCombo, OutputDeviceNote, OutputDeviceStatus, device_options, mute_row_key,
-        volume_row_key,
+        OutputDeviceCombo, OutputDeviceEnumerator, OutputDeviceNote, OutputDeviceStatus,
+        device_options, mute_row_key, volume_row_key,
     };
     use crate::preferences::PreferencesUi;
     use crate::settings_binding::ComboBindingValues;
@@ -426,12 +463,9 @@ mod tests {
         );
     }
 
-    /// The device poll runs only while the preferences floater is open, and
-    /// its first pass writes the binding values with the system default
-    /// leading (whatever real devices the host enumerates follow).
-    #[test]
-    fn device_refresh_gated_on_the_open_floater() {
-        let mut app = App::new();
+    /// A fixture app holding the refresh system, the combo and a closed
+    /// floater. Returns the floater root and the combo entity.
+    fn refresh_fixture(app: &mut App) -> (Entity, Entity) {
         app.add_plugins(MinimalPlugins)
             .add_message::<SetComboOptions>()
             .init_resource::<OutputDeviceStatus>()
@@ -448,26 +482,73 @@ mod tests {
             .world_mut()
             .spawn((OutputDeviceCombo, ComboBindingValues(Vec::new())))
             .id();
-        app.update();
-        let closed_len = app
-            .world()
-            .entity(combo)
-            .get::<ComboBindingValues>()
-            .map_or(usize::MAX, |values| values.0.len());
-        assert_eq!(closed_len, 0, "a closed floater polls nothing");
+        (root, combo)
+    }
+
+    /// Open the fixture's floater and run a frame.
+    fn open_floater(app: &mut App, root: Entity) {
         if let Some(mut shown) = app.world_mut().entity_mut(root).get_mut::<UiPanelShown>() {
             shown.0 = true;
         }
         app.update();
-        let first = app
-            .world()
+    }
+
+    /// The values the combo's binding currently offers.
+    fn combo_values(app: &App, combo: Entity) -> Vec<SettingValue> {
+        app.world()
             .entity(combo)
             .get::<ComboBindingValues>()
-            .and_then(|values| values.0.first().cloned());
+            .map(|values| values.0.clone())
+            .unwrap_or_default()
+    }
+
+    /// The device poll runs only while the preferences floater is open, and its
+    /// first pass writes the binding values with the system default leading and
+    /// the enumerated devices behind it.
+    ///
+    /// The device list comes from an injected enumerator, not the machine: a
+    /// test that called the host would open every ALSA control device on
+    /// whatever box is running the suite, and would assert against whatever
+    /// hardware that box happens to have.
+    #[test]
+    fn device_refresh_gated_on_the_open_floater() {
+        let mut app = App::new();
+        let (root, combo) = refresh_fixture(&mut app);
+        app.insert_resource(OutputDeviceEnumerator(|| {
+            vec!["Speakers".to_owned(), "Headset".to_owned()]
+        }));
+        app.update();
         assert_eq!(
-            first,
-            Some(SettingValue::String(String::new())),
-            "open: the system default leads the refreshed values"
+            combo_values(&app, combo),
+            Vec::new(),
+            "a closed floater polls nothing"
+        );
+        open_floater(&mut app, root);
+        assert_eq!(
+            combo_values(&app, combo),
+            vec![
+                SettingValue::String(String::new()),
+                SettingValue::String("Speakers".to_owned()),
+                SettingValue::String("Headset".to_owned()),
+            ],
+            "open: the system default leads, the enumerated devices follow"
+        );
+    }
+
+    /// Without an enumerator the refresh does nothing — not even for an open
+    /// floater. This is what keeps a `cargo nextest` run off the machine's
+    /// sound card: the tab's systems are schedulable in any app (the plugin
+    /// says so), but only one that added the audio plugin may enumerate, and
+    /// enumeration is a real device open.
+    #[test]
+    fn without_an_enumerator_nothing_is_enumerated() {
+        let mut app = App::new();
+        let (root, combo) = refresh_fixture(&mut app);
+        open_floater(&mut app, root);
+        assert_eq!(
+            combo_values(&app, combo),
+            Vec::new(),
+            "no enumerator, no device list — and no host enumeration"
         );
     }
 }

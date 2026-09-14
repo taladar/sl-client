@@ -39,6 +39,11 @@
 //!   every five seconds — only once it is enumerable again, so a
 //!   device that comes back is picked up without a restart and one that does
 //!   not costs a host enumeration rather than a failed stream open.
+//!
+//!   Every such enumeration goes through [`OutputDeviceEnumerator`], the
+//!   resource this plugin inserts. Listing the machine's devices opens them,
+//!   and only an app that asked for audio may do that — see that type for why
+//!   a `cargo nextest` run must not.
 
 use bevy::prelude::*;
 
@@ -105,6 +110,9 @@ impl Plugin for AudioPlugin {
             }
         }
         app.init_resource::<OutputDeviceStatus>()
+            // Only an app that asked for audio may enumerate the machine's
+            // devices; see [`OutputDeviceEnumerator`].
+            .insert_resource(OutputDeviceEnumerator(Mixer::output_devices))
             .add_systems(Last, (apply_output_device, drive_audio).chain());
     }
 }
@@ -220,6 +228,38 @@ pub struct OutputDeviceStatus {
     pub unavailable: bool,
 }
 
+/// Permission — and the means — to enumerate the machine's audio output
+/// devices, inserted by [`AudioPlugin`] and read by whatever surfaces the
+/// device list (the preferences audio tab).
+///
+/// Enumeration is **hardware access**: the host opens every ALSA control device
+/// to ask what it supports, which registers this process with the sound server
+/// for as long as it takes. That is fine in a viewer the user launched to hear
+/// something; it is not fine in a `cargo nextest` run, where the suite would be
+/// reaching for a shared, mutable, machine-global resource it has no business
+/// touching — and where the resulting clients are indistinguishable at a glance
+/// from a viewer that failed to shut down.
+///
+/// So the enumerator is *carried*, not called statically: an app that did not
+/// add [`AudioPlugin`] has no resource here, and every reader of it does
+/// nothing rather than falling back to the host. The same seam lets a test
+/// hand in a synthetic device list and assert on the surface it drives without
+/// a sound card in the loop. (`sl-viewer-spacenav`'s `DeviceRead` is the same
+/// idea for the 6-DOF puck, for the same reason.)
+#[derive(Resource, Debug, Clone, Copy)]
+pub struct OutputDeviceEnumerator(
+    /// Enumerate the output devices, by name.
+    pub fn() -> Vec<String>,
+);
+
+impl OutputDeviceEnumerator {
+    /// The names of the output devices this machine has right now.
+    #[must_use]
+    pub fn devices(&self) -> Vec<String> {
+        (self.0)()
+    }
+}
+
 /// The output-device applier's own state, kept across frames in a `Local`.
 #[derive(Debug, Default)]
 struct DeviceApply {
@@ -273,6 +313,7 @@ fn apply_output_device(
     time: Res<Time>,
     settings: Option<Res<ViewerSettings>>,
     mixer: Option<NonSendMut<Mixer>>,
+    enumerator: Option<Res<OutputDeviceEnumerator>>,
     mut state: Local<DeviceApply>,
     mut status: ResMut<OutputDeviceStatus>,
 ) {
@@ -292,7 +333,9 @@ fn apply_output_device(
         Some(selection) => Some(selection),
         None if state.unavailable && now >= state.next_retry => {
             state.next_retry = now + DEVICE_RETRY_SECONDS;
-            device_retry(&stored, &Mixer::output_devices())
+            // Every enumeration in the viewer goes through the carried
+            // enumerator, so "who may touch the sound card" has one answer.
+            enumerator.and_then(|devices| device_retry(&stored, &devices.devices()))
         }
         None => None,
     };

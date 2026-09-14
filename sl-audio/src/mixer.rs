@@ -375,12 +375,9 @@ impl Mixer {
     /// [`Mixer::output_devices`], or [`AudioError::Stream`] if the device is
     /// there but could not be opened.
     pub fn start(&mut self, device: &DeviceSelection) -> Result<(), AudioError> {
-        let device_id = match device {
-            DeviceSelection::Default => None,
-            DeviceSelection::Named(name) => Some(
-                Self::find_output_device(name).ok_or_else(|| AudioError::NoDevice(name.clone()))?,
-            ),
-        };
+        let device_id = Self::select_output_device(device, || {
+            firewheel::cpal::default_host_enumerator().output_devices()
+        })?;
         let cpal_config = CpalConfig {
             output: CpalOutputConfig {
                 device_id,
@@ -393,6 +390,36 @@ impl Mixer {
         self.sample_rate = Some(stream.info().sample_rate);
         self.stream = Some(stream);
         Ok(())
+    }
+
+    /// Resolve a [`DeviceSelection`] to the cpal device id to open: `None` for
+    /// the system default, the enumerated id for a name the host has, and
+    /// [`AudioError::NoDevice`] for one it does not.
+    ///
+    /// `enumerate` is called **only** for a named selection, and only once: a
+    /// default start must not pay for a host enumeration, which opens every
+    /// ALSA control device on the machine to ask what it supports.
+    ///
+    /// Split out of [`Mixer::start`] so the "a missing name is refused, never
+    /// silently the default" rule can be checked against a device list the test
+    /// wrote — the same check through `start` would enumerate the sound card of
+    /// whatever machine is running the suite, and would assert against whatever
+    /// hardware that machine happens to have.
+    fn select_output_device<F>(
+        device: &DeviceSelection,
+        enumerate: F,
+    ) -> Result<Option<firewheel::cpal::DeviceId>, AudioError>
+    where
+        F: FnOnce() -> Vec<firewheel::cpal::DeviceInfo>,
+    {
+        match device {
+            DeviceSelection::Default => Ok(None),
+            DeviceSelection::Named(name) => enumerate()
+                .into_iter()
+                .find(|found| found.name.as_deref() == Some(name.as_str()))
+                .map(|found| Some(found.id))
+                .ok_or_else(|| AudioError::NoDevice(name.clone())),
+        }
     }
 
     /// Whether the output device is open and processing.
@@ -425,15 +452,6 @@ impl Mixer {
             .into_iter()
             .filter_map(|d| d.name)
             .collect()
-    }
-
-    /// Resolve a device name to its id on the default host.
-    fn find_output_device(name: &str) -> Option<firewheel::cpal::DeviceId> {
-        firewheel::cpal::default_host_enumerator()
-            .output_devices()
-            .into_iter()
-            .find(|d| d.name.as_deref() == Some(name))
-            .map(|d| d.id)
     }
 
     /// Whether the output stream is still healthy (a device unplug shows here).
@@ -967,24 +985,64 @@ mod tests {
         }
     }
 
+    /// One synthetic enumerated output device, so the selection rule can be
+    /// checked against a known list instead of the machine's sound card.
+    ///
+    /// `available_hosts` names the backends cpal was *compiled* with; it opens
+    /// nothing, unlike the device enumeration these tests exist to avoid.
+    fn device(name: &str) -> firewheel::cpal::DeviceInfo {
+        let Some(host) = firewheel::cpal::cpal::available_hosts().first().copied() else {
+            unreachable!("cpal always compiles in at least one host")
+        };
+        firewheel::cpal::DeviceInfo {
+            id: firewheel::cpal::DeviceId::new(host, format!("sl-audio-test:{name}")),
+            name: Some(name.to_owned()),
+            is_default: false,
+        }
+    }
+
     /// A named device the host does not have is refused rather than quietly
     /// opening the system default: cpal reads "no device id" as "the default",
     /// so mapping a missing name to `None` would report success on a device the
     /// caller never asked for, and every layer above would go on saying the
-    /// named one was playing. The name below cannot be a real device, and the
-    /// check happens before any stream is opened, so this touches no hardware.
+    /// named one was playing. The device the host *does* have is offered here
+    /// precisely so a fall back to it would be visible.
     #[test]
     fn a_named_device_that_is_not_there_is_an_error() {
-        let Ok(mut mixer) = Mixer::new(&MixerConfig::default()) else {
-            unreachable!("graph builds without a device")
-        };
         let name = "sl-audio test: no such output device \u{1f50a}";
-        let started = mixer.start(&DeviceSelection::Named(name.to_owned()));
+        let selected =
+            Mixer::select_output_device(&DeviceSelection::Named(name.to_owned()), || {
+                vec![device("Speakers")]
+            });
         assert!(
-            matches!(started, Err(AudioError::NoDevice(ref got)) if got == name),
-            "an absent named device is NoDevice, got {started:?}"
+            matches!(selected, Err(AudioError::NoDevice(ref got)) if got == name),
+            "an absent named device is NoDevice, got {selected:?}"
         );
-        assert!(!mixer.is_started(), "and nothing was opened in its place");
+    }
+
+    /// The other two arms of the same rule: the system default resolves to
+    /// cpal's "no device id" **without** enumerating at all (a host enumeration
+    /// opens every control device on the machine, and a default start has no
+    /// use for one), and a name the host does have resolves to that device's id.
+    #[test]
+    fn the_default_does_not_enumerate_and_a_known_name_resolves() {
+        let selected = Mixer::select_output_device(&DeviceSelection::Default, || {
+            unreachable!("the system default must not enumerate the host")
+        });
+        assert!(
+            matches!(selected, Ok(None)),
+            "the default is cpal's no-device-id, got {selected:?}"
+        );
+
+        let wanted = device("Headset");
+        let selected =
+            Mixer::select_output_device(&DeviceSelection::Named("Headset".to_owned()), || {
+                vec![device("Speakers"), wanted.clone()]
+            });
+        assert!(
+            matches!(selected, Ok(Some(ref id)) if *id == wanted.id),
+            "a name the host has resolves to that device, got {selected:?}"
+        );
     }
 
     #[test]
