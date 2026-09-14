@@ -112,3 +112,37 @@ this one had been missed.
   reference would have refused).
 - The grid-side record above, read straight out of `Asset.db` /
   `inventory.db`, which is what settled where the permissions were *not* lost.
+
+## The same defect, one function over (2026-09-14)
+
+An audit of every `U32` read in the session's LLSD parsers — prompted by asking
+whether anything *else* confuses `u32` and `i32` — found
+**`inventory_item_from_llsd`** doing exactly what `bulk_update_item_from_llsd`
+had been doing: reading the five masks and `flags` with `i32_member`. That
+parser decodes the **folder fetch** (`FetchInventoryDescendents2` /
+`FetchLibDescendents2`) and the **per-item fetch** reply, which is how most of
+an inventory arrives.
+
+It hid for the same reason, and the reason is worth keeping: **it depends on the
+writer.** The descendents bodies this grid sends carry integers, so the masks
+arrived intact and nothing looked wrong — the live probe taken while chasing
+this bug read `647168` from a folder fetch and full permissions from the DB.
+Against a writer that sends the binary form, every item fetched by folder would
+have arrived with no permissions and no flags — and this workspace's own
+simulator side now emits exactly that form for `BulkUpdateInventory`, so its two
+halves disagreed about the same field.
+
+Fixed to read tolerantly, with
+`conversions::caps_serializer_tests::a_fetched_item_reads_binary_u32_masks`
+written in the same idiom as the first: the bytes are spelled out on the wire,
+so the byte order is asserted rather than assumed.
+
+The rest of the audit came back clean. The other `i32_member` / `as_i32` sites
+read genuinely signed fields (`sale_price`, `created_at`, `version`,
+`descendents`, the type codes, the environment's day length and offset, and the
+whole `ParcelProperties` block, whose one `uint` was fixed when this trap was
+first found). Two known exceptions, left alone deliberately: `SimPort` / `Port`
+are `U16` read as integers — the same writer dependency, but a failure there is
+a region that will not connect rather than a silent zero — and `sl-wire`'s
+`upload_mask`, which documents its `as_i32` (LL sends `<integer>` for an upload
+reply's masks, reserved top bit and all).

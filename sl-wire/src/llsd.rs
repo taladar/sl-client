@@ -430,12 +430,36 @@ fn caps_upload_mask(root: &Llsd, key: &str) -> u32 {
 
 /// Reads an optional permission-mask / flags map member as a `u32`, or `None`
 /// when the member is absent (as opposed to present and zero, which several
-/// upload-completion fields distinguish). The wire carries masks as LLSD
-/// `<integer>` (`i32`): LL's masks run to `PERM_ALL` (`0x7fffffff`) and read
-/// back as themselves, and one carrying the reserved top bit reads back from
-/// its two's-complement encoding rather than being discarded.
+/// upload-completion fields distinguish).
+///
+/// An **integer** is read as a bit pattern rather than a range-checked value:
+/// LL's masks run to `PERM_ALL` (`0x7fffffff`) and read back as themselves, and
+/// one carrying the reserved top bit reads back out of its two's complement
+/// rather than being discarded.
+///
+/// A **binary** element is read too, big-endian, because an LLSD writer chooses
+/// the encoding and a `uint` is exactly the field OpenSim writes as four bytes
+/// (`LLSDxmlEncode2.AddElem(name, uint)`). Assuming the integer form is what
+/// zeroed every permission mask on an inventory item pushed over the event
+/// queue, twice, in two different parsers; nothing about that assumption was
+/// safer here.
 fn upload_mask(root: &Llsd, key: &str) -> Option<u32> {
-    root.get(key).and_then(Llsd::as_i32).map(i32::cast_unsigned)
+    match root.get(key)? {
+        Llsd::Integer(value) => Some(value.cast_unsigned()),
+        Llsd::Binary(bytes) if bytes.len() >= 4 => Some(
+            bytes
+                .iter()
+                .take(4)
+                .fold(0u32, |acc, &byte| (acc << 8) | u32::from(byte)),
+        ),
+        Llsd::String(text) => {
+            let trimmed = text.trim().trim_start_matches("0x");
+            u32::from_str_radix(trimmed, 16)
+                .ok()
+                .or_else(|| text.trim().parse().ok())
+        }
+        _other => None,
+    }
 }
 
 /// Builds the LLSD-XML metadata body for the first step of an
