@@ -523,7 +523,12 @@ pub fn load_account_settings(
         &context.avatar,
         agent.uuid(),
     ) {
-        Ok(dir) => settings.load_account(&dir),
+        Ok(dir) => {
+            if let Some(collision) = dir.outcome.collision_warning(&context.avatar) {
+                warn!("settings: {collision}");
+            }
+            settings.load_account(&dir.path);
+        }
         Err(error) => warn!(
             "settings: could not resolve account directory under {}: {error}",
             base.display()

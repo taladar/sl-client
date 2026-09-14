@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 313 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 29 |
-| done | 1133 |
+| bugs | 28 |
+| done | 1134 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1680** |
@@ -1163,15 +1163,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (29)
+## bugs (28)
 
 ### viewer
 
 - [`viewer-animesh-intermittent-render`](bugs/viewer-animesh-intermittent-render.md)
   — Animesh intermittently fails to render (timing race, not deterministic)
-- [`viewer-audit-account-dir-index-repoint`](bugs/viewer-audit-account-dir-index-repoint.md)
-  — A skipped rename still repoints the UUID index, handing one avatar another's
-  data
 - [`viewer-audit-camera-reset-resnap`](bugs/viewer-audit-camera-reset-resnap.md)
   — Escape out of flycam interpolates between two unrelated poses
 - [`viewer-audit-env-overrides-preferences`](bugs/viewer-audit-env-overrides-preferences.md)
@@ -1234,7 +1231,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1133)
+## done (1134)
 
 ### protocol
 
@@ -1510,6 +1507,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-about-land-row-rebuild`](done/viewer-audit-about-land-row-rebuild.md)
   — About Land rebuilds every owner and access row whenever any avatar name
   resolves
+- [`viewer-audit-account-dir-index-repoint`](done/viewer-audit-account-dir-index-repoint.md)
+  — A skipped rename still repoints the UUID index, handing one avatar another's
+  data
 - [`viewer-audit-app-exit-discarded`](done/viewer-audit-app-exit-discarded.md) —
   The viewer exits 0 on a failing AppExit
 - [`viewer-audit-asset-editor-scaffold`](done/viewer-audit-asset-editor-scaffold.md)

@@ -641,7 +641,12 @@ async fn run_repl(args: RunArgs) -> Result<(), Error> {
             let grid = sl_account_dirs::grid_dir_name(&url);
             let name = sl_account_dirs::avatar_dir_name(avatar.first(), avatar.last());
             match sl_account_dirs::reconcile_account_dir(&base, &grid, &name, uuid) {
-                Ok(dir) => Some(dir),
+                Ok(dir) => {
+                    if let Some(collision) = dir.outcome.collision_warning(&name) {
+                        tracing::warn!("chat-log: {collision}");
+                    }
+                    Some(dir.path)
+                }
                 Err(error) => {
                     tracing::warn!("chat-log: could not resolve account directory: {error}");
                     Some(base)

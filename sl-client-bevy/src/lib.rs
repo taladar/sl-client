@@ -1229,7 +1229,12 @@ fn resolve_account_directories(
             &account.avatar,
             uuid,
         ) {
-            Ok(dir) => Some(dir),
+            Ok(dir) => {
+                if let Some(collision) = dir.outcome.collision_warning(&account.avatar) {
+                    tracing::warn!("under {}: {collision}", accounts_base.display());
+                }
+                Some(dir.path)
+            }
             Err(error) => {
                 tracing::warn!(
                     "could not resolve account directory under {}: {error}",
