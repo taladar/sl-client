@@ -56,9 +56,11 @@
 //!
 //! A field the resident may not modify still wants a caret, a selection and a
 //! copy — the reference's no-modify notecard is readable and copyable, just not
-//! writable. [`RichTextField::read_only`] therefore does not disable the editor:
-//! `guard_read_only_fields` drops the edits that would *change* the buffer and
-//! keeps every motion and selection edit, so the field reads as a document.
+//! writable. That stance is the text field's own
+//! ([`crate::ui_text_input::ReadOnlyField`], which refuses the edits that would
+//! *change* a buffer and keeps every motion and selection edit), so
+//! [`RichTextSpec::read_only`] simply asks for it rather than growing a second
+//! mechanism beside it.
 //!
 //! Reference (Firestorm, read-only): `llviewertexteditor` (the embedded-item
 //! segments), `lltextbase` (segment styling and hit testing).
@@ -66,9 +68,7 @@
 use core::ops::Range;
 
 use bevy::prelude::*;
-use bevy::text::{
-    ComputedTextBlock, EditableText, EditableTextSystems, TextBrush, TextEdit, TextEntity,
-};
+use bevy::text::{ComputedTextBlock, EditableText, EditableTextSystems, TextBrush, TextEntity};
 use bevy::ui::{UiSystems, widget::TextScroll};
 use parley::{Cursor, InlineBox, InlineBoxKind, PositionedLayoutItem, StyleProperty};
 
@@ -86,7 +86,8 @@ const UNMEASURED_OBJECT_WIDTH: f32 = 4.0;
 /// multiple of the field's font size.
 const UNMEASURED_OBJECT_HEIGHT: f32 = 1.2;
 
-/// The narrowest a rich-text field is laid out at, in logical pixels.
+/// The narrowest a rich-text field is laid out at, in logical pixels — and, in
+/// a container that offers no width of its own, the width it opens at.
 ///
 /// A multi-line field has an intrinsic *height* (`visible_lines`) and no
 /// intrinsic width at all: its measure takes the width it is offered, and a
@@ -96,7 +97,7 @@ const UNMEASURED_OBJECT_HEIGHT: f32 = 1.2;
 /// field narrower than one item. So a rich-text field declares a floor, the way
 /// a single-line field declares a width in glyph advances: an intrinsic control
 /// size, the sanctioned exception to the content-driven convention.
-const MIN_FIELD_WIDTH: f32 = 320.0;
+const MIN_FIELD_WIDTH: f32 = 360.0;
 
 // ---------------------------------------------------------------------------
 // The model a consumer hands over.
@@ -178,9 +179,6 @@ pub struct RichTextField {
     pub overlay: Entity,
     /// The style classes [`RichTextStyle::Class`] indexes.
     pub classes: Vec<RichTextClass>,
-    /// Whether the buffer is protected from modification while staying
-    /// selectable and copyable.
-    pub read_only: bool,
 }
 
 /// The inert nodes a field's brush sections resolve against, one per class.
@@ -245,6 +243,11 @@ pub struct RichTextSpec {
     /// The narrowest the field is laid out at, in logical pixels — its
     /// intrinsic control width (see `MIN_FIELD_WIDTH`).
     pub min_width: f32,
+    /// Whether the field **grows to fill** the space its container has spare,
+    /// instead of standing at its declared lines and reading measure. What makes
+    /// a body grow with the window around it; see
+    /// [`crate::ui_text_input::TextInputSpec::fill`].
+    pub fill: bool,
     /// Whether the buffer is protected from modification.
     pub read_only: bool,
     /// Whether the field draws its own border and background.
@@ -279,6 +282,7 @@ impl RichTextSpec {
             font_size: 14.0,
             visible_lines: 8.0,
             min_width: MIN_FIELD_WIDTH,
+            fill: false,
             read_only: false,
             decorated: true,
             classes: Vec::new(),
@@ -325,6 +329,10 @@ pub fn spawn_rich_text(
                 flex_direction: FlexDirection::Column,
                 // The field's intrinsic width floor — see `MIN_FIELD_WIDTH`.
                 min_width: Val::Px(spec.min_width),
+                // A filling field's root has to grow too, or the field has
+                // nothing to grow into: the root is the child a panel hands its
+                // spare height to.
+                flex_grow: if spec.fill { 1.0 } else { 0.0 },
                 ..default()
             },
             Name::new(format!("{}:rich-text", spec.element)),
@@ -340,6 +348,8 @@ pub fn spawn_rich_text(
             visible_lines: spec.visible_lines,
             tab_index: spec.tab_index,
             decorated: spec.decorated,
+            fill: spec.fill,
+            read_only: spec.read_only,
             ..TextInputSpec::new(spec.element, TextInputKind::Multiline)
         },
     );
@@ -382,7 +392,6 @@ pub fn spawn_rich_text(
             root,
             overlay,
             classes: spec.classes.clone(),
-            read_only: spec.read_only,
         },
         RichTextContent::default(),
         RichTextSections::default(),
@@ -691,46 +700,6 @@ fn place_rich_text_objects(
 // Read-only, and clicking a styled range.
 // ---------------------------------------------------------------------------
 
-/// Drop the queued edits that would change a read-only field's buffer, keeping
-/// the ones that only move the caret or extend the selection.
-///
-/// A read-only field is a *document*: it can be clicked into, selected across
-/// and copied out of, and the reference's no-modify notecard behaves exactly so.
-/// Refusing focus instead would take all of that away to stop the typing.
-fn guard_read_only_fields(mut fields: Query<(&RichTextField, &mut EditableText)>) {
-    for (config, mut editable) in &mut fields {
-        if !config.read_only {
-            continue;
-        }
-        let editable = editable.bypass_change_detection();
-        if editable.pending_edits.iter().any(modifies_the_buffer) {
-            editable
-                .pending_edits
-                .retain(|edit| !modifies_the_buffer(edit));
-        }
-        // A paste resolved by the clipboard on a later frame would land in the
-        // buffer behind this guard's back.
-        editable.pending_paste = None;
-    }
-}
-
-/// Whether a queued edit would change the buffer, as opposed to only moving the
-/// caret or the selection.
-const fn modifies_the_buffer(edit: &TextEdit) -> bool {
-    matches!(
-        edit,
-        TextEdit::Cut
-            | TextEdit::Paste
-            | TextEdit::Insert(_)
-            | TextEdit::Backspace
-            | TextEdit::BackspaceWord
-            | TextEdit::Delete
-            | TextEdit::DeleteWord
-            | TextEdit::ImeSetCompose { .. }
-            | TextEdit::ImeCommit { .. }
-    )
-}
-
 /// Raise [`RichTextRangeActivated`] when a press lands inside a clickable range.
 ///
 /// The press is mapped to a byte offset through the same transform `bevy_ui`
@@ -821,6 +790,15 @@ impl Plugin for RichTextPlugin {
     /// Register the activation message, the systems, and the observer that maps
     /// a press into it.
     fn build(&self, app: &mut App) {
+        // The field this is built on is the text-input widget's, and so are the
+        // stances it can be put in: the caret, the overwrite mode, and the
+        // read-only filter that keeps a no-modify body from being typed into.
+        // Brought in here rather than left to the consumer, because a consumer
+        // that forgets it gets a rich-text field that looks right and quietly
+        // accepts every keystroke.
+        if !app.is_plugin_added::<crate::ui_text_input::TextInputPlugin>() {
+            app.add_plugins(crate::ui_text_input::TextInputPlugin);
+        }
         app.add_message::<RichTextRangeActivated>()
             .add_systems(
                 PostUpdate,
@@ -837,12 +815,6 @@ impl Plugin for RichTextPlugin {
                     place_rich_text_objects.after(UiSystems::PostLayout),
                 )
                     .chain(),
-            )
-            // Before the edits are applied, which is the last moment one can be
-            // refused.
-            .add_systems(
-                PostUpdate,
-                guard_read_only_fields.before(EditableTextSystems),
             )
             .add_observer(dispatch_rich_text_range_clicks);
     }
@@ -955,6 +927,91 @@ mod tests {
         let computed = world.get::<ComputedNode>(object)?;
         let transform = world.get::<UiGlobalTransform>(object)?;
         Some(crate::ui_test::border_box(computed, transform))
+    }
+
+    /// **A filling field grows with the window around it.**
+    ///
+    /// The complaint this answers is "making the floater bigger does not make
+    /// the body bigger": an editor's body is the part of its window worth
+    /// enlarging, and a floater hands its content slot a definite size once it
+    /// has one. A field that fills takes the leftover; one that does not stands
+    /// at its declared lines however much room it is given.
+    #[test]
+    fn a_filling_field_takes_the_room_it_is_given() -> Result<(), TestError> {
+        /// The height the fixture panel is given, far more than six lines.
+        const PANEL_HEIGHT: f32 = 600.0;
+
+        let size_of = |fill: bool, panel: Node| -> Option<Vec2> {
+            let mut app = InteractionTest::new().build();
+            app.add_plugins(RichTextPlugin);
+            settle(&mut app);
+            let panel = spawn_under_root(&mut app, panel);
+            let handle = {
+                let mut commands = app.world_mut().commands();
+                spawn_rich_text(
+                    &mut commands,
+                    panel,
+                    &RichTextSpec {
+                        initial: "a line".to_owned(),
+                        visible_lines: 6.0,
+                        fill,
+                        ..RichTextSpec::new("rich-text-fill")
+                    },
+                )
+            };
+            app.world_mut().flush();
+            settle(&mut app);
+            settle(&mut app);
+            app.world()
+                .get::<ComputedNode>(handle.field)
+                .map(ComputedNode::size)
+        };
+
+        let sized = || Node {
+            width: Val::Px(420.0),
+            height: Val::Px(PANEL_HEIGHT),
+            flex_direction: FlexDirection::Column,
+            ..default()
+        };
+        let filling = size_of(true, sized()).ok_or("the filling field has no box")?;
+        let standing = size_of(false, sized()).ok_or("the standing field has no box")?;
+        assert!(
+            filling.y > standing.y,
+            "a filling field ({filling:?}) did not grow past its declared lines \
+             ({standing:?})"
+        );
+        assert!(
+            filling.y > PANEL_HEIGHT / 2.0,
+            "a filling field ({filling:?}) took only a fraction of its panel \
+             ({PANEL_HEIGHT})"
+        );
+        assert!(
+            standing.y < PANEL_HEIGHT / 2.0,
+            "a field that does not fill ({standing:?}) grew anyway"
+        );
+        assert!(
+            filling.x > standing.x,
+            "a filling field ({filling:?}) did not take its panel's width \
+             ({standing:?})"
+        );
+
+        // **And an unsized panel must not make it take the screen.** A filling
+        // field has no wrapping bound, so without an intrinsic width its measure
+        // answers "whatever is available" — which in a content-driven window is
+        // the display, and the window opens across it.
+        let unsized_panel = size_of(
+            true,
+            Node {
+                flex_direction: FlexDirection::Column,
+                ..default()
+            },
+        )
+        .ok_or("the unsized field has no box")?;
+        assert!(
+            unsized_panel.x < 600.0,
+            "a filling field in a panel with no width took {unsized_panel:?}"
+        );
+        Ok(())
     }
 
     /// The overlay covers the field: it is what clips an object to the field's

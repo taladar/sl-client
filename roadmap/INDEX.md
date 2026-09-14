@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 41 |
 | in-progress | 22 |
 | bugs | 32 |
-| done | 1128 |
+| done | 1129 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1678** |
+| **total** | **1679** |
 
 ## ideas (100)
 
@@ -266,6 +266,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Session and SimSession are god objects with 12k-line impl blocks
 - [`protocol-audit-wire-error-contract`](ready/protocol-audit-wire-error-contract.md)
   — sl-wire's public parse surface has five different failure disciplines
+- [`protocol-fetch-inventory-items-request`](ready/protocol-fetch-inventory-items-request.md)
+  — Fetching inventory items by id (FetchInventory2's request half)
 - [`protocol-sl-llsd-serde`](ready/protocol-sl-llsd-serde.md) — serde
   Serialize/Deserialize derives for sl-llsd (Llsd) types
 - [`protocol-sl-lsl-serde`](ready/protocol-sl-lsl-serde.md) — serde support for
@@ -640,8 +642,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-movement-controls-floater`](ready/viewer-movement-controls-floater.md)
   — Movement controls floater + stand / stop-flying buttons (blocked by
   `viewer-ui-widget-scaffold` (done))
-- [`viewer-multiline-field-fills-its-floater`](ready/viewer-multiline-field-fills-its-floater.md)
-  — A multi-line field that grows with the window around it
 - [`viewer-name-tags-click-select`](ready/viewer-name-tags-click-select.md) —
   Name tags — click a tag to select the avatar
 - [`viewer-name-tags-decorations`](ready/viewer-name-tags-decorations.md) — Name
@@ -1241,7 +1241,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1128)
+## done (1129)
 
 ### protocol
 
@@ -2043,6 +2043,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-movement-camera-input-tests`](done/viewer-movement-camera-input-tests.md)
   — Movement keys and camera modes, headless (blocked by
   `viewer-world-test-harness` (done))
+- [`viewer-multiline-field-fills-its-floater`](done/viewer-multiline-field-fills-its-floater.md)
+  — A multi-line field that grows with the window around it
 - [`viewer-music-controls-push-chat-bar`](done/viewer-music-controls-push-chat-bar.md)
   — Parcel music controls push the nearby chat bar up when they appear
 - [`viewer-muted-residents-text-still-shown`](done/viewer-muted-residents-text-still-shown.md)

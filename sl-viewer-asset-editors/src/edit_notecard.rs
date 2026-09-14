@@ -98,9 +98,9 @@ use crate::ui_font::UiFont;
 use crate::url_linkify::{TextRun, linkify};
 use crate::world_api::{NotecardDropTarget, NotecardSource, OpenNotecard};
 
-/// The body field's height, in visible text lines. The window is sized by this
-/// (it is content-driven), not the other way round — a field's height is its
-/// intrinsic control size and cannot be flexed; see `ui_text_input`'s `fill`.
+/// The body field's height, in visible text lines — what the window opens at,
+/// being content-driven. It is a *starting* size, not a cap: the body fills, so
+/// a resized window gives it every line that fits (`ui_text_input`'s `fill`).
 const BODY_VISIBLE_LINES: f32 = 18.0;
 
 // ---------------------------------------------------------------------------
@@ -203,9 +203,10 @@ pub fn notecard_editor_floater_spec() -> FloaterSpec {
         // than the editable body it actually opens with — and a floater's
         // content slot clips, so the Save row underneath was cut off the bottom
         // of the window at the default font size and further at every larger
-        // one. A field's height is its intrinsic control size and cannot be
-        // flexed to a rect (see `ui_text_input`'s `fill`), so the window is
-        // sized by the field instead. The grip still resizes it from there.
+        // one. The field's declared lines size the window instead. The grip
+        // resizes it from there, and the body **grows with it**: the field
+        // fills, so the slot's spare height is the body's (`ui_text_input`'s
+        // `fill`).
         default_size: None,
         min_size: Some(Vec2::new(260.0, 160.0)),
         dock_host: None,
@@ -442,6 +443,8 @@ fn populate_editor(
             font_size,
             visible_lines: BODY_VISIBLE_LINES,
             read_only: !editable,
+            // The body is what a bigger notecard window should make bigger.
+            fill: true,
             classes: vec![RichTextClass {
                 color: style.link_color,
                 underline: true,
