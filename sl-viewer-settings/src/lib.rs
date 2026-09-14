@@ -24,7 +24,12 @@
 //! [`keys`] holds the setting **names** that both the feature owning a setting
 //! and the preferences panel drawing a control for it have to agree on — the
 //! layer beneath both, so neither has to depend on the other for a string.
+//!
+//! [`env_pins`] records which of those settings a `SL_VIEWER_*` debug knob is
+//! currently holding, so the preferences control bound to one can say so
+//! instead of moving and doing nothing.
 
+pub mod env_pins;
 pub mod keys;
 
 use core::sync::atomic::{AtomicBool, Ordering};

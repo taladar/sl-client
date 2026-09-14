@@ -86,6 +86,7 @@ pub(crate) use sl_viewer_world_scene::glow;
 pub(crate) use sl_viewer_world_scene::parcel_borders;
 pub(crate) use sl_viewer_world_scene::particles;
 pub(crate) use sl_viewer_world_scene::probes;
+pub(crate) use sl_viewer_world_scene::render_overrides;
 pub(crate) use sl_viewer_world_scene::sky;
 pub(crate) use sl_viewer_world_scene::tonemap;
 pub(crate) use sl_viewer_world_view::camera;

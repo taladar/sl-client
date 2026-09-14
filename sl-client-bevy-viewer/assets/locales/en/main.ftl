@@ -3591,6 +3591,10 @@ preferences-title = Preferences
 preferences-search-placeholder = Search settings
 preferences-ok = OK
 preferences-cancel = Cancel
+# Shown beside a control whose setting a debug environment variable is holding;
+# the variable's own name follows the sentence.
+preferences-env-pin-live = Disabled — overridden for this session by
+preferences-env-pin-seed = This session started from
 # The tab strip.
 preferences-tab-general = General
 preferences-tab-graphics = Graphics

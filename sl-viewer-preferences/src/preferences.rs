@@ -40,7 +40,7 @@
 //! `floater_preferences.xml`, `llpanelpreference` (the generic
 //! `saveSettings` / `cancel` snapshot), `fssearchablecontrol.h` (the filter).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
@@ -49,6 +49,7 @@ use bevy::ui::{Checked, InteractionDisabled};
 use bevy::ui_widgets::{Activate, Button, SliderRange, SliderStep, SliderThumb, SliderValue};
 use bevy_flair::style::components::ClassList;
 use sl_settings::{Scope, SettingValue, SettingsStore};
+use sl_viewer_settings::env_pins::{EnvPinnedSettings, PinKind, log_active_env_knobs};
 
 use crate::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterCommand, FloaterHandle, FloaterOp, FloaterSpec,
@@ -95,6 +96,14 @@ const NOTE_COLOR: Color = Color::srgb(0.98, 0.82, 0.40);
 /// A note's maximum width, in logical pixels: prose wraps rather than stretching
 /// the tab's content column to the width of a sentence.
 const NOTE_MAX_WIDTH: f32 = 420.0;
+
+/// The Fluent key of the notice on a row whose setting an environment knob
+/// holds for the whole session (the control is disabled beside it).
+const ENV_PIN_LIVE_KEY: &str = "preferences-env-pin-live";
+
+/// The Fluent key of the notice on a row whose setting an environment knob only
+/// **seeded** at start-up (the control still works).
+const ENV_PIN_SEED_KEY: &str = "preferences-env-pin-seed";
 
 /// A filter-matched row label's highlight — the same warm accent
 /// [`crate::menu`] paints its menu-search hits with.
@@ -640,13 +649,15 @@ pub(crate) fn spawn_pref_note(
 // ---------------------------------------------------------------------------
 
 /// Owns the preferences floater: the chrome spawn, the deferred content build,
-/// the snapshot / revert lifecycle, the filter and the account guard.
+/// the snapshot / revert lifecycle, the filter, the account guard and the
+/// environment-pin report.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PreferencesPlugin;
 
 impl Plugin for PreferencesPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<PreferencesState>()
+        app.insert_resource(collect_env_pins())
+            .init_resource::<PreferencesState>()
             .init_resource::<PreferencesExtraHits>()
             .add_message::<PreferencesApplied>()
             .add_systems(
@@ -662,7 +673,8 @@ impl Plugin for PreferencesPlugin {
                     // application).
                     track_preferences_open_close
                         .after(crate::floater::build_deferred_floater_content),
-                    guard_account_bindings,
+                    guard_pref_bindings,
+                    annotate_env_pinned_rows,
                     select_env_preferences_tab,
                     mirror_preferences_filter,
                     apply_preferences_filter.after(mirror_preferences_filter),
@@ -671,6 +683,29 @@ impl Plugin for PreferencesPlugin {
                 ),
             );
     }
+}
+
+/// Ask every module that owns a `SL_VIEWER_*` knob over a registered setting
+/// which of its knobs are set this run, announce the answer, and log the whole
+/// active knob set beside it.
+///
+/// Done here, at plugin build, because this crate is the one place that can see
+/// all four owners at once — the render overrides and the shadow, skin and
+/// locale preferences live in three different crates below it, each holding one
+/// half of the setting-name / variable-name pair.
+///
+/// The environment is read exactly here; everything afterwards reads the
+/// resource, which is also how a test states a pinned setting without touching
+/// the process environment.
+fn collect_env_pins() -> EnvPinnedSettings {
+    let mut pins = EnvPinnedSettings::default();
+    crate::render_overrides::record_env_pins(&mut pins);
+    crate::preferences_graphics::record_env_pins(&mut pins);
+    crate::preferences_colors_skins::record_env_pins(&mut pins);
+    crate::i18n::record_env_pins(&mut pins);
+    log_active_env_knobs();
+    pins.announce();
+    pins
 }
 
 /// The preferences floater's [`FloaterSpec`] — shared with the `FLOATERS`
@@ -967,16 +1002,30 @@ fn on_preferences_cancel(
 }
 
 // ---------------------------------------------------------------------------
-// The account guard.
+// The control guards: the account scope, and the environment pins.
 // ---------------------------------------------------------------------------
 
-/// Disable every control under the floater bound to a per-avatar setting while
-/// the account scope has not loaded (pre-login) — an edit then could not be
-/// persisted. The widgets natively refuse input under [`InteractionDisabled`];
-/// insert / remove only on a state mismatch to avoid archetype churn.
-fn guard_account_bindings(
+/// Disable every control under the floater that cannot actually change what it
+/// claims to, for either of the two reasons the shell knows about:
+///
+/// - **the account guard** — a control bound to a per-avatar setting, while the
+///   account scope has not loaded (pre-login): an edit then could not be
+///   persisted;
+/// - **an environment pin** — a control whose setting a `SL_VIEWER_*` knob is
+///   holding for the session ([`EnvPinnedSettings`]): the store still records
+///   the edit and the per-frame apply pass still reads the environment, so the
+///   control would move and change nothing.
+///
+/// One system for both, because they share one piece of state: two systems
+/// inserting and removing [`InteractionDisabled`] from the same entity would
+/// each undo the other's verdict every frame.
+///
+/// The widgets natively refuse input under [`InteractionDisabled`]; insert /
+/// remove only on a state mismatch to avoid archetype churn.
+fn guard_pref_bindings(
     ui: Option<Res<PreferencesUi>>,
     settings: Option<Res<ViewerSettings>>,
+    pins: Option<Res<EnvPinnedSettings>>,
     bindings: Query<(Entity, &SettingBinding, Has<InteractionDisabled>)>,
     parents: Query<&ChildOf>,
     mut commands: Commands,
@@ -987,20 +1036,103 @@ fn guard_account_bindings(
     let Some(settings) = settings else {
         return;
     };
-    let want_disabled = !settings.account_loaded();
+    let account_guarded = !settings.account_loaded();
     for (entity, binding, disabled) in &bindings {
-        if binding.scope() != Scope::Account {
+        let pinned = pins
+            .as_deref()
+            .is_some_and(|pins| pins.disables_control(binding.name()));
+        if binding.scope() != Scope::Account && !pinned {
             continue;
         }
         if !is_descendant_of(entity, ui.root, &parents) {
             continue;
         }
+        let want_disabled = pinned || (binding.scope() == Scope::Account && account_guarded);
         if want_disabled && !disabled {
             commands.entity(entity).insert(InteractionDisabled);
         } else if !want_disabled && disabled {
             commands.entity(entity).remove::<InteractionDisabled>();
         }
     }
+}
+
+/// Marks a row that already carries its environment-pin notice, so
+/// [`annotate_env_pinned_rows`] writes one per row and then leaves it alone.
+#[derive(Component, Debug, Clone, Copy)]
+struct EnvPinNoticeShown;
+
+/// Append, to every row whose setting a `SL_VIEWER_*` knob is holding, a line
+/// naming the variable — so the control [`guard_pref_bindings`] just disabled
+/// says *why* it is dead instead of merely being dead. A
+/// [`Seed`](PinKind::Seed) pin gets the line without the disable: its control
+/// still works, it just does not describe what this run started with.
+///
+/// Runs every frame but does work once per row: the tabs build deferred (a
+/// tab's rows appear the first time its panel is opened), so there is no single
+/// moment at which every row exists.
+fn annotate_env_pinned_rows(
+    pins: Option<Res<EnvPinnedSettings>>,
+    bindings: Query<(Entity, &SettingBinding)>,
+    rows: Query<(), (With<PrefSearchRow>, Without<EnvPinNoticeShown>)>,
+    parents: Query<&ChildOf>,
+    mut commands: Commands,
+) {
+    let Some(pins) = pins else {
+        return;
+    };
+    if pins.is_empty() {
+        return;
+    }
+    // The marker below is a deferred command, so a row holding two pinned
+    // controls would otherwise be annotated twice in this one run.
+    let mut annotated: HashSet<Entity> = HashSet::new();
+    for (entity, binding) in &bindings {
+        let Some(pin) = pins.get(binding.name()) else {
+            continue;
+        };
+        // The bound widget is a descendant of its row, not the row itself (a
+        // combo binds its anchor, a text field its editable node), so climb.
+        let Some(row) = ancestor_row(entity, &rows, &parents) else {
+            continue;
+        };
+        if !annotated.insert(row) {
+            continue;
+        }
+        commands.entity(row).insert(EnvPinNoticeShown);
+        commands.spawn((
+            Text::default(),
+            Translated::new(match pin.kind() {
+                PinKind::Live => ENV_PIN_LIVE_KEY,
+                PinKind::Seed => ENV_PIN_SEED_KEY,
+            }),
+            UiFont::Sans.at(FONT),
+            TextColor(NOTE_COLOR),
+            Pickable::IGNORE,
+            ChildOf(row),
+        ));
+        commands.spawn((
+            Text::new(pin.env()),
+            UiFont::Mono.at(FONT),
+            TextColor(NOTE_COLOR),
+            Name::new(format!("preferences:env-pin:{}", pin.setting())),
+            Pickable::IGNORE,
+            ChildOf(row),
+        ));
+    }
+}
+
+/// The nearest ancestor of `entity` (itself included) that is a row still
+/// wanting its environment-pin notice, or `None` when there is none — the row
+/// already has its notice, or the binding is not inside one.
+fn ancestor_row(
+    entity: Entity,
+    rows: &Query<(), (With<PrefSearchRow>, Without<EnvPinNoticeShown>)>,
+    parents: &Query<&ChildOf>,
+) -> Option<Entity> {
+    core::iter::successors(Some(entity), |entity| {
+        parents.get(*entity).ok().map(ChildOf::parent)
+    })
+    .find(|candidate| rows.contains(*candidate))
 }
 
 // ---------------------------------------------------------------------------
@@ -1552,10 +1684,10 @@ mod tests {
     use sl_settings::{Scope, SettingValue, SettingsStore};
 
     use super::{
-        FILTER_MATCH_COLOR, LABEL_COLOR, PrefRowLabel, PrefSearchRow, PreferencesApplied,
-        PreferencesExtraHits, PreferencesState, PreferencesUi, apply_preferences_filter,
-        guard_account_bindings, on_preferences_cancel, on_preferences_ok,
-        track_preferences_open_close,
+        EnvPinNoticeShown, EnvPinnedSettings, FILTER_MATCH_COLOR, LABEL_COLOR, PinKind,
+        PrefRowLabel, PrefSearchRow, PreferencesApplied, PreferencesExtraHits, PreferencesState,
+        PreferencesUi, annotate_env_pinned_rows, apply_preferences_filter, guard_pref_bindings,
+        on_preferences_cancel, on_preferences_ok, track_preferences_open_close,
     };
     use crate::floater::FloaterCommand;
     use crate::settings::ViewerSettings;
@@ -1596,7 +1728,8 @@ mod tests {
                 Update,
                 (
                     track_preferences_open_close,
-                    guard_account_bindings,
+                    guard_pref_bindings,
+                    annotate_env_pinned_rows,
                     apply_preferences_filter,
                 ),
             );
@@ -1905,6 +2038,194 @@ mod tests {
                 .entity(account_control)
                 .contains::<InteractionDisabled>(),
             "the guard lifts once the account scope has loaded"
+        );
+        Ok(())
+    }
+
+    /// A setting an environment knob holds for the session has its control
+    /// disabled — the defect this guards against is a checkbox that moves and
+    /// changes nothing — and its row gains a notice naming the variable.
+    #[test]
+    fn env_pinned_rows_are_disabled_and_say_why() -> Result<(), TestError> {
+        let mut app = app(|store| {
+            store
+                .register("RenderGlow", SettingValue::Bool(true), "the glow pass")
+                .ok();
+            store
+                .register("RenderExposure", SettingValue::F32(1.0), "the exposure")
+                .ok();
+        });
+        let mut pins = EnvPinnedSettings::default();
+        pins.pin("RenderGlow", "SL_VIEWER_DISABLE_GLOW", "1", PinKind::Live);
+        app.insert_resource(pins);
+        let fixture = spawn_fixture(
+            &mut app,
+            [
+                SettingBinding::global("RenderGlow"),
+                SettingBinding::global("RenderExposure"),
+            ],
+            ["glow", "exposure"],
+        );
+        app.update();
+        let (pinned_row, _, pinned_control) = fixture.rows[0];
+        let (free_row, _, free_control) = fixture.rows[1];
+        assert!(
+            app.world()
+                .entity(pinned_control)
+                .contains::<InteractionDisabled>(),
+            "a control an environment knob overrides is disabled",
+        );
+        assert!(
+            !app.world()
+                .entity(free_control)
+                .contains::<InteractionDisabled>(),
+            "a control nothing overrides is untouched",
+        );
+        assert!(
+            app.world()
+                .entity(pinned_row)
+                .contains::<EnvPinNoticeShown>(),
+            "the pinned row carries its notice",
+        );
+        assert!(
+            !app.world().entity(free_row).contains::<EnvPinNoticeShown>(),
+            "the unpinned row does not",
+        );
+        let named = app
+            .world()
+            .entity(pinned_row)
+            .get::<Children>()
+            .is_some_and(|children| {
+                children.iter().any(|child| {
+                    app.world()
+                        .entity(child)
+                        .get::<Text>()
+                        .is_some_and(|text| text.0 == "SL_VIEWER_DISABLE_GLOW")
+                })
+            });
+        assert!(named, "the notice names the variable that took the setting");
+        Ok(())
+    }
+
+    /// The notice is written once: a second frame does not stack a second copy
+    /// onto the row.
+    #[test]
+    fn the_env_pin_notice_is_written_once() -> Result<(), TestError> {
+        let mut app = app(|store| {
+            store
+                .register("RenderGlow", SettingValue::Bool(true), "the glow pass")
+                .ok();
+            store
+                .register("RenderExposure", SettingValue::F32(1.0), "the exposure")
+                .ok();
+        });
+        let mut pins = EnvPinnedSettings::default();
+        pins.pin("RenderGlow", "SL_VIEWER_DISABLE_GLOW", "1", PinKind::Live);
+        app.insert_resource(pins);
+        let fixture = spawn_fixture(
+            &mut app,
+            [
+                SettingBinding::global("RenderGlow"),
+                SettingBinding::global("RenderExposure"),
+            ],
+            ["glow", "exposure"],
+        );
+        app.update();
+        let after_one = app
+            .world()
+            .entity(fixture.rows[0].0)
+            .get::<Children>()
+            .map_or(0, Children::len);
+        app.update();
+        app.update();
+        let after_three = app
+            .world()
+            .entity(fixture.rows[0].0)
+            .get::<Children>()
+            .map_or(0, Children::len);
+        assert_eq!(after_one, after_three, "the notice is not re-appended");
+        Ok(())
+    }
+
+    /// A **seed** pin says so without taking the control away: the preference
+    /// still works, it simply is not what the run started with.
+    #[test]
+    fn a_seed_pin_annotates_but_does_not_disable() -> Result<(), TestError> {
+        let mut app = app(|store| {
+            store
+                .register(
+                    "UiSkin",
+                    SettingValue::String("graphite".to_owned()),
+                    "skin",
+                )
+                .ok();
+            store
+                .register("RenderExposure", SettingValue::F32(1.0), "the exposure")
+                .ok();
+        });
+        let mut pins = EnvPinnedSettings::default();
+        pins.pin("UiSkin", "SL_VIEWER_SKIN", "azure", PinKind::Seed);
+        app.insert_resource(pins);
+        let fixture = spawn_fixture(
+            &mut app,
+            [
+                SettingBinding::global("UiSkin"),
+                SettingBinding::global("RenderExposure"),
+            ],
+            ["skin", "exposure"],
+        );
+        app.update();
+        let (seeded_row, _, seeded_control) = fixture.rows[0];
+        assert!(
+            !app.world()
+                .entity(seeded_control)
+                .contains::<InteractionDisabled>(),
+            "a seed only starts the value; the control still works",
+        );
+        assert!(
+            app.world()
+                .entity(seeded_row)
+                .contains::<EnvPinNoticeShown>(),
+            "but the row still says where the run started",
+        );
+        Ok(())
+    }
+
+    /// The account guard and an environment pin do not fight over the same
+    /// control: once the account scope loads, a pinned account-bound control
+    /// stays disabled rather than being re-enabled by the guard half.
+    #[test]
+    fn an_env_pin_outlives_the_account_guard() -> Result<(), TestError> {
+        let mut app = app(|store| {
+            store
+                .register("PerAvatar", SettingValue::Bool(false), "an account toggle")
+                .ok();
+            store
+                .register("Machine", SettingValue::Bool(false), "a global toggle")
+                .ok();
+        });
+        let mut pins = EnvPinnedSettings::default();
+        pins.pin("PerAvatar", "SL_VIEWER_SOMETHING", "1", PinKind::Live);
+        app.insert_resource(pins);
+        let fixture = spawn_fixture(
+            &mut app,
+            [
+                SettingBinding::account("PerAvatar"),
+                SettingBinding::global("Machine"),
+            ],
+            ["a", "b"],
+        );
+        app.update();
+        let (_, _, account_control) = fixture.rows[0];
+        app.world_mut()
+            .resource_mut::<ViewerSettings>()
+            .mark_account_loaded_for_test();
+        app.update();
+        assert!(
+            app.world()
+                .entity(account_control)
+                .contains::<InteractionDisabled>(),
+            "the pin keeps the control disabled after the account guard lifts",
         );
         Ok(())
     }

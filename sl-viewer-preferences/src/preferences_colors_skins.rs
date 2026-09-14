@@ -26,6 +26,7 @@
 
 use bevy::prelude::*;
 use sl_settings::{Scope, SettingValue};
+use sl_viewer_settings::env_pins::EnvPinnedSettings;
 use tracing::warn;
 
 use crate::preferences::{spawn_pref_color, spawn_pref_combo_with_anchor, spawn_pref_section};
@@ -63,6 +64,13 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         SettingValue::String(String::new()),
         "The skin's theme overlay; empty for the skin's own base",
     );
+}
+
+/// Record the `SL_VIEWER_SKIN` / `SL_VIEWER_THEME` start-up seeds against the
+/// two settings this tab binds, so a run dressed by the environment says so
+/// rather than leaving the combos quietly describing a skin it is not wearing.
+pub(crate) fn record_env_pins(pins: &mut EnvPinnedSettings) {
+    crate::skin::record_env_pins(pins, SETTING_UI_SKIN, SETTING_UI_SKIN_THEME);
 }
 
 /// The persisted skin / theme pair from a (pre-app, throwaway) settings load,

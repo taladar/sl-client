@@ -67,6 +67,7 @@ use bevy::ui::UiSystems;
 // (`pub use bevy_flair_core::*`).
 use bevy_flair::prelude::*;
 use bevy_flair::style::StyleSystems;
+use sl_viewer_settings::env_pins::{EnvPinnedSettings, PinKind};
 
 use crate::i18n::UiLocale;
 use crate::ui::{LogicalRect, UiDirection, UiRoot, UiScaffoldSystems};
@@ -100,6 +101,18 @@ const SKIN_ENV: &str = "SL_VIEWER_SKIN";
 
 /// The environment variable that seeds the initial theme overlay id.
 const THEME_ENV: &str = "SL_VIEWER_THEME";
+
+/// Record the `SL_VIEWER_SKIN` / `SL_VIEWER_THEME` seeds, if set, against the
+/// Colors & Skins settings whose names the caller supplies (they live with the
+/// preferences tab that binds them, not here).
+///
+/// [`Seed`](PinKind::Seed)s, not live pins: `apply_skin_setting` re-dresses the
+/// UI from the stored pair the moment the user edits either combo, so the
+/// controls work — they simply do not describe what this run started wearing.
+pub fn record_env_pins(pins: &mut EnvPinnedSettings, skin_setting: &str, theme_setting: &str) {
+    pins.pin_if_set(skin_setting, SKIN_ENV, PinKind::Seed);
+    pins.pin_if_set(theme_setting, THEME_ENV, PinKind::Seed);
+}
 
 /// Which skin and (optional) theme overlay the UI is currently wearing.
 ///

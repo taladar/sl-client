@@ -14,9 +14,16 @@
 //!
 //! Every variable keeps its name and its meaning; `from_env` is now the only
 //! reader of them.
+//!
+//! A knob that pins a value a **preferences control is also bound to** wins over
+//! the store every frame, which would leave that control moving and doing
+//! nothing. [`record_env_pins`] reports those to
+//! [`EnvPinnedSettings`], which is what makes the preferences row say so and
+//! disable itself.
 
 use bevy::prelude::*;
 use bevy::render::extract_resource::ExtractResource;
+use sl_viewer_settings::env_pins::{EnvPinnedSettings, PinKind};
 
 use crate::glow::{DEFAULT_STRENGTH, DEFAULT_WIDTH};
 use crate::tonemap::{DEFAULT_TONEMAP_MIX, tonemap_type_from_value};
@@ -130,6 +137,58 @@ impl RenderOverrides {
                 .map(|position| position.clamp(0.0, 1.0)),
         }
     }
+}
+
+/// Record, into `pins`, every knob above that holds a **registered,
+/// GUI-editable** setting — the ones whose preferences control would otherwise
+/// move and do nothing, because `refresh_glow` / `refresh_exposure` /
+/// `refresh_tonemap_settings` re-apply the environment value every frame.
+///
+/// The knobs with no preference behind them (`SL_VIEWER_GLOW_WIDTH`'s
+/// companions in the harness: the underwater fog, the pre-water split, the day
+/// position, the exposure coefficient, HUD particles, the force-post exemption)
+/// are deliberately absent: nothing in the UI claims to own those, so there is
+/// no second authority to report. They are still listed by
+/// [`log_active_env_knobs`](sl_viewer_settings::env_pins::log_active_env_knobs).
+///
+/// Reads the environment; call it from the same start-up pass as
+/// [`RenderOverrides::from_env`].
+pub fn record_env_pins(pins: &mut EnvPinnedSettings) {
+    pins.pin_if_set(
+        crate::glow::SETTING_ENABLED,
+        "SL_VIEWER_DISABLE_GLOW",
+        PinKind::Live,
+    );
+    pins.pin_if_set(
+        crate::glow::SETTING_STRENGTH,
+        "SL_VIEWER_GLOW_STRENGTH",
+        PinKind::Live,
+    );
+    pins.pin_if_set(
+        crate::glow::SETTING_WIDTH,
+        "SL_VIEWER_GLOW_WIDTH",
+        PinKind::Live,
+    );
+    pins.pin_if_set(
+        crate::exposure::SETTING_ENABLED,
+        "SL_VIEWER_DISABLE_DYNAMIC_EXPOSURE",
+        PinKind::Live,
+    );
+    pins.pin_if_set(
+        crate::tonemap::SETTING_TONEMAP_TYPE,
+        "SL_VIEWER_TONEMAP",
+        PinKind::Live,
+    );
+    pins.pin_if_set(
+        crate::tonemap::SETTING_TONEMAP_MIX,
+        "SL_VIEWER_TONEMAP_MIX",
+        PinKind::Live,
+    );
+    pins.pin_if_set(
+        crate::tonemap::SETTING_EXPOSURE,
+        "SL_VIEWER_EXPOSURE",
+        PinKind::Live,
+    );
 }
 
 /// Whether `key` is set at all (to anything).

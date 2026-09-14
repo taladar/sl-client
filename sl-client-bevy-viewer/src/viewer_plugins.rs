@@ -314,12 +314,14 @@ impl Plugin for ViewerRenderPlugins {
             app.add_plugins(crate::gpu_avatar_spike::GpuAvatarSpikePlugin::from_env());
             // The GPU-avatar pose pipeline (context/gpu-avatars.md §1/§2, Phases
             // 1a+1b): a compute pipeline re-runs the SL skeletal recurrence on the
-            // GPU and writes the skin palettes into Bevy's SkinUniforms buffer. The
-            // in-place path is the DEFAULT on a capable device (compute + storage
-            // buffers, checked once at startup with an automatic legacy-CPU
-            // fallback); SL_VIEWER_GPU_AVATARS overrides: `cpu`/`off` forces the
-            // legacy CPU pose path, `ghost` the Phase 1a side-by-side comparison
-            // harness (CPU in place + GPU-FK ghost 2 m aside). Env read once here.
+            // GPU and writes the skin palettes into Bevy's SkinUniforms buffer. It
+            // is the only path: Phase 4 removed the CPU joint entities, so a
+            // device without compute + storage buffers renders avatars at their
+            // bind pose rather than falling back. There is no path-selecting env
+            // knob any more (the old SL_VIEWER_GPU_AVATARS `cpu`/`off`/`ghost`
+            // went with the scaffolding); `SL_VIEWER_GPU_AVATARS_READBACK=1`, the
+            // one knob left, only turns on the palette readback + verdict log and
+            // is read once here.
             app.add_plugins(crate::gpu_avatars::GpuAvatarsPlugin::from_env());
         }
         // The reflection-probe pipeline (P33): captures a scene environment cubemap and

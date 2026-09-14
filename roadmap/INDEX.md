@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 41 |
 | in-progress | 22 |
 | bugs | 27 |
-| done | 1135 |
+| done | 1136 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1680** |
+| **total** | **1681** |
 
 ## ideas (100)
 
@@ -1169,8 +1169,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`viewer-animesh-intermittent-render`](bugs/viewer-animesh-intermittent-render.md)
   — Animesh intermittently fails to render (timing race, not deterministic)
-- [`viewer-audit-env-overrides-preferences`](bugs/viewer-audit-env-overrides-preferences.md)
-  — Environment variables silently override live graphics preferences
 - [`viewer-audit-media-url-scheme-allowlist`](bugs/viewer-audit-media-url-scheme-allowlist.md)
   — Parcel media URLs reach CEF and GStreamer with no scheme allowlist
 - [`viewer-audit-parcel-audio-autoplay`](bugs/viewer-audit-parcel-audio-autoplay.md)
@@ -1218,6 +1216,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rigged-attachments-wearer-not-resolved`](bugs/viewer-rigged-attachments-wearer-not-resolved.md)
   — Worn rigged attachments (e.g. own shoes) don't render — wearer never
   resolved / too many rigged-pending objects
+- [`viewer-setting-write-rejected-wrong-type`](bugs/viewer-setting-write-rejected-wrong-type.md)
+  — A settings write is silently rejected for the wrong integer type
 - [`viewer-sunlit-face-clips-two-channels`](bugs/viewer-sunlit-face-clips-two-channels.md)
   — A sunlit opaque face pins red and green rather than showing its texture
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
@@ -1229,7 +1229,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1135)
+## done (1136)
 
 ### protocol
 
@@ -1529,6 +1529,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Ten display sites call the wire-name accessor, so display names are ignored
 - [`viewer-audit-ellipsis-reveal-latch`](done/viewer-audit-ellipsis-reveal-latch.md)
   — A cell about one ellipsis wide latches a permanent spurious ellipsis
+- [`viewer-audit-env-overrides-preferences`](done/viewer-audit-env-overrides-preferences.md)
+  — Environment variables silently override live graphics preferences
 - [`viewer-audit-environment-parcel-reply`](done/viewer-audit-environment-parcel-reply.md)
   — A parcel environment reply is accepted as the shared one
 - [`viewer-audit-gpu-pick-slot-lifecycle`](done/viewer-audit-gpu-pick-slot-lifecycle.md)

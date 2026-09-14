@@ -63,6 +63,7 @@ use bevy_fluent::{FluentPlugin, Locale, Localization, LocalizationBuilder};
 use fluent::{FluentArgs, FluentValue};
 use fluent_content::{Content as _, Request};
 use sl_l10n::{CivilDateTime, DateTimeLength, DateTimeStyle, LocaleFormatters};
+use sl_viewer_settings::env_pins::{EnvPinnedSettings, PinKind};
 use unic_langid::{LanguageIdentifier, langid};
 
 use crate::ui::{
@@ -112,6 +113,17 @@ pub fn register_settings(settings: &mut sl_viewer_settings::ViewerSettings) {
         sl_settings::SettingValue::String(String::new()),
         "The interface language (en, ja, ar, pl, pseudo); empty = system/default",
     );
+}
+
+/// Record the `UI_LOCALE_ENV` seed, if set, against the interface-language
+/// preference it starts the viewer somewhere other than.
+///
+/// A [`Seed`](PinKind::Seed), not a live pin: `apply_locale_setting` still
+/// applies a stored (or newly picked) language, so the preference is not dead —
+/// it simply is not what this run started with, and the combo shows the stored
+/// language while the UI wears the environment one.
+pub fn record_env_pins(pins: &mut EnvPinnedSettings) {
+    pins.pin_if_set(SETTING_UI_LANGUAGE, UI_LOCALE_ENV, PinKind::Seed);
 }
 
 /// The `UI_LOCALE_ENV` value that selects the pseudolocale.

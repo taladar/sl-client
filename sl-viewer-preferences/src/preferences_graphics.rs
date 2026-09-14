@@ -51,6 +51,7 @@ use bevy::prelude::*;
 use bevy::ui_widgets::{SliderRange, SliderStep};
 use bevy::window::{PresentMode, PrimaryWindow};
 use sl_settings::{Scope, SettingValue};
+use sl_viewer_settings::env_pins::{EnvPinnedSettings, PinKind};
 
 use crate::preferences::{
     spawn_pref_checkbox, spawn_pref_combo, spawn_pref_combo_with_anchor, spawn_pref_section,
@@ -721,6 +722,35 @@ fn apply_shadow_cascades(
         if config.bounds.len() != want {
             *config = crate::sky::shadow_cascades_for(want);
         }
+    }
+}
+
+/// Record the two shadow knobs that hold a shadow preference, into `pins`.
+///
+/// `SL_VIEWER_SUN_SHADOWS` only pins when it is `0`: any other value leaves the
+/// sun's shadows on, which is exactly what [`SETTING_SHADOW_DETAIL`] then drives
+/// through [`apply_shadow_detail`]'s `stored > 0` — nothing is taken away, so
+/// nothing is reported. `SL_VIEWER_SHADOW_CASCADES` pins whenever it parses to a
+/// count, which is what [`crate::sky::shadow_cascade_count`] returns `Some` for.
+///
+/// Reads the environment through the two `sky` accessors, which resolve it once
+/// per process.
+pub(crate) fn record_env_pins(pins: &mut EnvPinnedSettings) {
+    if !crate::sky::sun_shadows_enabled() {
+        pins.pin(
+            SETTING_SHADOW_DETAIL,
+            "SL_VIEWER_SUN_SHADOWS",
+            "0",
+            PinKind::Live,
+        );
+    }
+    if let Some(count) = crate::sky::shadow_cascade_count() {
+        pins.pin(
+            SETTING_SHADOW_CASCADES,
+            "SL_VIEWER_SHADOW_CASCADES",
+            count.to_string(),
+            PinKind::Live,
+        );
     }
 }
 
