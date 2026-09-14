@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 313 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 26 |
-| done | 1137 |
+| bugs | 23 |
+| done | 1142 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1681** |
+| **total** | **1683** |
 
 ## ideas (100)
 
@@ -1163,23 +1163,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (26)
+## bugs (23)
 
 ### viewer
 
 - [`viewer-animesh-intermittent-render`](bugs/viewer-animesh-intermittent-render.md)
   — Animesh intermittently fails to render (timing race, not deterministic)
-- [`viewer-audit-media-url-scheme-allowlist`](bugs/viewer-audit-media-url-scheme-allowlist.md)
-  — Parcel media URLs reach CEF and GStreamer with no scheme allowlist
+- [`viewer-audit-cef-browser-settings-hardening`](bugs/viewer-audit-cef-browser-settings-hardening.md)
+  — An in-world media page runs on CEF's default browser settings
 - [`viewer-audit-parcel-audio-autoplay`](bugs/viewer-audit-parcel-audio-autoplay.md)
   — A transient empty parcel resets the user's stop decision and re-autoplays
-- [`viewer-audit-parcel-borders-retessellation`](bugs/viewer-audit-parcel-borders-retessellation.md)
-  — A region with parcels but no terrain re-tessellates its overlay every frame
-- [`viewer-audit-particles-dt-and-cloud-leak`](bugs/viewer-audit-particles-dt-and-cloud-leak.md)
-  — Particle integration uses an unclamped dt, and a switched-off emitter leaks
-  its cloud
-- [`viewer-audit-system-ordering-claims`](bugs/viewer-audit-system-ordering-claims.md)
-  — Update tuples claim a pipeline order the scheduler does not enforce
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
   — Mesh-head brow spikes forward from face-bone shape deformation
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
@@ -1226,7 +1219,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1137)
+## done (1142)
 
 ### protocol
 
@@ -1539,6 +1532,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   no cycle guard
 - [`viewer-audit-map-tile-transient-error`](done/viewer-audit-map-tile-transient-error.md)
   — A transient map-tile fetch error is cached as permanently missing
+- [`viewer-audit-media-url-scheme-allowlist`](done/viewer-audit-media-url-scheme-allowlist.md)
+  — Parcel media URLs reach CEF and GStreamer with no scheme allowlist
 - [`viewer-audit-name-tag-viewport-gate`](done/viewer-audit-name-tag-viewport-gate.md)
   — The name-tag viewport-changed gate is exactly inverted
 - [`viewer-audit-notification-store-overwrite`](done/viewer-audit-notification-store-overwrite.md)
@@ -1546,6 +1541,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-parcel-access-list-accumulate`](done/viewer-audit-parcel-access-list-accumulate.md)
   — Editing a multi-packet parcel ban list unbans everyone not in the last
   packet
+- [`viewer-audit-parcel-borders-retessellation`](done/viewer-audit-parcel-borders-retessellation.md)
+  — A region with parcels but no terrain re-tessellates its overlay every frame
+- [`viewer-audit-particles-dt-and-cloud-leak`](done/viewer-audit-particles-dt-and-cloud-leak.md)
+  — Particle integration uses an unclamped dt, and a switched-off emitter leaks
+  its cloud
 - [`viewer-audit-picker-requester-identity`](done/viewer-audit-picker-requester-identity.md)
   — Two instances of one window share a picker, and both claim its answer
 - [`viewer-audit-plugin-resource-registration`](done/viewer-audit-plugin-resource-registration.md)
@@ -1575,6 +1575,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-stale-globaltransform-readers`](done/viewer-audit-stale-globaltransform-readers.md)
   — Depth-reconstructing passes and the interest camera read a frame-old camera
   pose
+- [`viewer-audit-system-browser-scheme-allowlist`](done/viewer-audit-system-browser-scheme-allowlist.md)
+  — Any scheme a chat link or SLURL names is handed to xdg-open
+- [`viewer-audit-system-ordering-claims`](done/viewer-audit-system-ordering-claims.md)
+  — Update tuples claim a pipeline order the scheduler does not enforce
 - [`viewer-audit-tab-panel-focus-order`](done/viewer-audit-tab-panel-focus-order.md)
   — Inactive tab panels keep their keyboard tab stops
 - [`viewer-audit-table-interaction-disabled`](done/viewer-audit-table-interaction-disabled.md)

@@ -69,7 +69,7 @@ use sl_client_bevy::{
 
 use crate::linkified_text::LinkActivated;
 use crate::notifications::{NotificationResponse, ShowNotification};
-use crate::system_browser::open_in_system_browser;
+use crate::system_browser::{ExternalUrl, open_in_system_browser};
 use crate::url_linkify::{LinkTarget, LocationCoords, LocationKind, TextRun, linkify};
 use crate::world_api::AvatarState;
 use crate::world_api::OpenAvatarProfile;
@@ -438,13 +438,19 @@ fn request_parcel(
 
 /// Open a plain web link — the embedded browser for a trusted Second Life host,
 /// the system browser otherwise (the reference internal/external split).
+///
+/// The URL here is whatever a `secondlife:///` link carried, i.e. remote data,
+/// so the external branch passes it through the sink's scheme allowlist
+/// ([`ExternalUrl`]) rather than handing the desktop a string.
 fn open_web(url: &str, trusted: bool, out: &mut DispatchOut) {
     if trusted {
         out.browsers.write(OpenWebBrowser {
             url: Some(url.to_owned()),
         });
-    } else {
-        open_in_system_browser(url);
+    } else if let Ok(url) = ExternalUrl::parse(url)
+        .inspect_err(|error| warn!("SLURL web link not opened in the system browser: {error}"))
+    {
+        open_in_system_browser(&url);
     }
 }
 

@@ -16,6 +16,9 @@
 //! - [`clipboard`] — OS clipboard access.
 //! - [`file_dialog`] — the host's file-open dialog, through the desktop's own
 //!   file chooser.
+//! - [`system_browser`] — handing a URL to the desktop's own browser, behind
+//!   the scheme allowlist that keeps `xdg-open` from dispatching remote data
+//!   to something that is not a browser.
 //! - [`ui_perf`] — UI frame-timing counters.
 //! - [`url_linkify`] — finding URLs, SLURLs and avatar/group references in
 //!   arbitrary text so chat can render them as links.

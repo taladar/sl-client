@@ -44,7 +44,7 @@ use sl_client_bevy::{
 };
 use sl_settings::SettingValue;
 
-use crate::browser_widget::{BrowserView, BrowserViewSpec, spawn_browser_view};
+use crate::browser_widget::{BrowserView, BrowserViewSpec, ValidatedMediaUrl, spawn_browser_view};
 use crate::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater,
 };
@@ -1338,7 +1338,7 @@ fn build_search_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
         &mut commands,
         web_panel,
         &BrowserViewSpec {
-            initial_url: SL_SEARCH_URL.to_owned(),
+            initial_url: search_site_url(SL_SEARCH_URL),
             isolated: false,
             tab_index: 0,
             fixed_height: None,
@@ -2088,11 +2088,28 @@ fn navigate_web(
         // Second Life, not yet logged in: the bare search site.
         (None, None) => SL_SEARCH_URL.to_owned(),
     };
+    // On OpenSim the base URL comes from the grid (`SimulatorFeatures`), so
+    // it is checked like any other grid-supplied URL before a surface sees it.
+    let Ok(url) = ValidatedMediaUrl::parse(&url)
+        .inspect_err(|error| warn!("search web tab not navigated: {error}"))
+    else {
+        return;
+    };
     if let Ok(view) = views.get(ui.web_view)
         && let Some(slot) = view.surface.and_then(|id| surfaces.get(id))
     {
         slot.surface.navigate(&url);
     }
+}
+
+/// The Web tab's start page: a viewer- or grid-supplied search site, checked
+/// against the media scheme allowlist. A refused one leaves the tab on the
+/// empty page rather than opening it.
+fn search_site_url(text: &str) -> ValidatedMediaUrl {
+    ValidatedMediaUrl::parse(text).unwrap_or_else(|error| {
+        warn!("search site URL refused: {error}");
+        ValidatedMediaUrl::blank()
+    })
 }
 
 /// The standard-collection query parameters the reference searches by default

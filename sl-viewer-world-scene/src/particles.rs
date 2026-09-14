@@ -155,6 +155,27 @@ impl Plugin for ParticlesPlugin {
 /// emitters cannot swamp the simulation. Tunable live via [`SETTING_MAX_PARTICLES`].
 const MAX_PARTICLES: usize = 4096;
 
+/// The largest simulation step one frame may take, seconds — the reference
+/// viewer's `llmin(update_timer.getElapsedTimeAndResetF32(), 0.1f)`
+/// (`llviewerpartsim.cpp:721`), which clamps the step **once** for both the
+/// emitter and the particle integration.
+///
+/// Without it, the frame after a decode or region-crossing hitch integrates every
+/// particle across the whole gap in one step: the stream visibly jumps, and a
+/// `BOUNCE` — which mirrors the particle's position about the source plane *after*
+/// the step — throws it as far above the plane as that one step carried it below.
+/// A one-second step at 5 m/s means a 3 m jump in a single frame.
+const MAX_SIM_DT: f32 = 0.1;
+
+/// This frame's simulation step: the frame delta capped at [`MAX_SIM_DT`], applied
+/// once for the whole simulation the way the reference caps it once in
+/// `LLViewerPartSim::updateSimulation`.
+const fn sim_dt(delta: f32) -> f32 {
+    // `f32::min` returns the other operand for a NaN, so a NaN delta also lands on
+    // the cap rather than poisoning every particle position.
+    delta.min(MAX_SIM_DT)
+}
+
 /// The persisted-settings section the particle-cap setting lives under.
 const RENDER_SECTION: &[&str] = &["render"];
 
@@ -620,10 +641,11 @@ impl Emitter {
 /// source's simulation state *is* a fact about that source: the sim is then a
 /// mutable query over the sources, a source whose object despawns takes its cloud
 /// state with it, and the driver needs no snapshot of the query to release its
-/// borrow before mutating a resource. The one thing the ECS does not do for us is
-/// despawn the separate *render* entity ([`Cloud::entity`], deliberately not a
-/// child — its particles are in absolute world coordinates), so
-/// [`retire_orphaned_clouds`] reaps those.
+/// borrow before mutating a resource. What the ECS does *not* do for us is retire a
+/// cloud whose source stops emitting but whose object lives on, nor despawn the
+/// separate *render* entity ([`Cloud::entity`], deliberately not a child — its
+/// particles are in absolute world coordinates); [`retire_orphaned_clouds`] reaps
+/// both.
 #[derive(Debug, Component)]
 pub(crate) struct Cloud {
     /// The source emitter state.
@@ -883,18 +905,20 @@ pub(crate) const fn float_to_u8(value: f32) -> u8 {
 /// ([`particle.wgsl`](../particle.wgsl)); each record just carries the particle's world
 /// position, size, colour, velocity, and flags. Positions are in absolute Bevy world
 /// space (the cloud entity has an identity transform).
-fn build_cloud_instances(particles: &[Particle]) -> Vec<ParticleInstance> {
-    particles
-        .iter()
-        .map(|part| ParticleInstance {
-            position: part.pos.to_array(),
-            scale: part.scale,
-            color: part.color,
-            velocity: part.velocity.to_array(),
-            flags: part.flags,
-            glow: part.glow,
-        })
-        .collect()
+///
+/// Written into `out` in place rather than returned: this runs once per cloud per
+/// frame, and clearing-and-extending the cloud's existing buffer reuses its
+/// allocation where a fresh `Vec` would allocate one per cloud per frame.
+fn build_cloud_instances(particles: &[Particle], out: &mut Vec<ParticleInstance>) {
+    out.clear();
+    out.extend(particles.iter().map(|part| ParticleInstance {
+        position: part.pos.to_array(),
+        scale: part.scale,
+        color: part.color,
+        velocity: part.velocity.to_array(),
+        flags: part.flags,
+        glow: part.glow,
+    }));
 }
 
 /// The world-space centroid of a cloud's live particles — the transparency sort key for
@@ -919,10 +943,11 @@ fn cloud_centroid(particles: &[Particle], default: Vec3) -> Vec3 {
 ///
 /// Sources gain a [`Cloud`] the first frame they appear and lose it when the
 /// [`ObjectParticleSystem`] component is removed — a source toggled off in-world,
-/// or its object gone (which takes the `Cloud` with it). Either way
-/// [`retire_orphaned_clouds`] despawns the render entity that is left behind. The
-/// whole simulation is bounded by `MAX_PARTICLES`; particles beyond the cap are
-/// simply not emitted.
+/// or its object gone (which takes the `Cloud` with it). This system only sees
+/// sources that still *have* an `ObjectParticleSystem`, so both the leftover
+/// `Cloud` of a source toggled off in-world and the render entity left behind are
+/// reaped by [`retire_orphaned_clouds`]. The whole simulation is bounded by
+/// `MAX_PARTICLES`; particles beyond the cap are simply not emitted.
 #[expect(
     clippy::too_many_arguments,
     clippy::type_complexity,
@@ -939,6 +964,10 @@ pub(crate) fn drive_particles(
         Option<&RenderLayers>,
         Option<&mut Cloud>,
     )>,
+    // The cloud *render* entities, so this frame's instance buffer and draw
+    // parameters are rewritten in place rather than re-inserted (and reallocated)
+    // every frame. Disjoint from `sources`: a render entity is never a source.
+    mut renders: Query<(&mut ParticleInstances, &mut ParticleDrawParams)>,
     quad: Res<ParticleQuad>,
     store: Res<DecodedTextures>,
     mut images: ResMut<Assets<Image>>,
@@ -954,7 +983,9 @@ pub(crate) fn drive_particles(
     overrides: Res<RenderOverrides>,
 ) {
     let hud_disabled = overrides.hud_particles_disabled;
-    let dt = time.delta_secs();
+    // One clamped step drives both the emitter and the integration, mirroring the
+    // reference's single `llmin(..., 0.1f)` — see [`MAX_SIM_DT`].
+    let dt = sim_dt(time.delta_secs());
     let max_particles = particle_cap(settings.as_deref());
 
     // The Second Life-space source rotation is recovered from the Bevy world
@@ -1061,20 +1092,29 @@ pub(crate) fn drive_particles(
 
         // Update the per-frame render inputs on the cloud entity: the compact instance
         // buffer (the GPU expands each particle into a camera-facing billboard) and the
-        // draw parameters (texture, blend, lit/unlit, sort centre). Inserting each frame
-        // is how the render-world extract picks up the change, mirroring the visibility
-        // write below.
-        let instances = build_cloud_instances(&cloud.particles);
+        // draw parameters (texture, blend, lit/unlit, sort centre). The render world
+        // extracts both every frame, so writing them in place is enough; a cloud
+        // entity spawned this same frame is not in `renders` yet and gets them through
+        // `Commands` instead, so it carries them from its first frame.
         let sort_center = cloud_centroid(&cloud.particles, src);
-        commands.entity(cloud.entity).insert((
-            ParticleInstances { instances },
-            ParticleDrawParams {
-                texture: cloud.texture.clone(),
-                blend: particle_blend(system),
-                unlit: is_unlit(system, is_hud),
-                sort_center,
-            },
-        ));
+        let params = ParticleDrawParams {
+            texture: cloud.texture.clone(),
+            blend: particle_blend(system),
+            unlit: is_unlit(system, is_hud),
+            sort_center,
+        };
+        if let Ok((mut instances, mut draw_params)) = renders.get_mut(cloud.entity) {
+            // In place: `clear()` + `extend` reuses the cloud's existing allocation
+            // rather than dropping it for a fresh one each frame.
+            build_cloud_instances(&cloud.particles, &mut instances.instances);
+            *draw_params = params;
+        } else {
+            let mut instances = Vec::new();
+            build_cloud_instances(&cloud.particles, &mut instances);
+            commands
+                .entity(cloud.entity)
+                .insert((ParticleInstances { instances }, params));
+        }
 
         // An empty (zero-particle) cloud is hidden — kept out of the render queue —
         // rather than drawn with a zero-length instance buffer. Visibility is only
@@ -1154,24 +1194,36 @@ fn spawn_cloud_entity(
     cloud_commands.id()
 }
 
-/// Despawn every particle render entity whose source is no longer simulating — its
-/// object despawned (taking the [`Cloud`] with it), it stopped being a particle
-/// source ([`ObjectParticleSystem`] removed), or HUD particles are disabled and it
-/// is a HUD source.
+/// Retire every cloud whose source is no longer simulating — its object despawned
+/// (taking the [`Cloud`] with it), it stopped being a particle source
+/// ([`ObjectParticleSystem`] removed), or HUD particles are disabled and it is a
+/// HUD source.
 ///
-/// This is the one piece of a cloud's lifetime the ECS cannot keep for us: the
-/// render entity is not a child of its source (see [`spawn_cloud_entity`]), so
-/// nothing despawns it when the source goes. Everything else — the emitter, the
-/// particles, the resolved texture — now dies with the source entity.
+/// Two things go, because the ECS keeps neither for us:
+///
+/// - the **render entity**, which is not a child of its source (see
+///   [`spawn_cloud_entity`]), so nothing despawns it when the source goes;
+/// - the source's own [`Cloud`], when the object outlives its particle system —
+///   `llParticleSystem([])` drops the [`ObjectParticleSystem`] while the prim stays,
+///   and [`drive_particles`] only sees sources that still have one, so the cloud's
+///   particle `Vec`, cloned [`ParticleSystem`] and texture handle would otherwise
+///   sit on the prim until it despawns. A source that starts emitting again is
+///   simply seeded afresh.
+///
+/// A source whose object despawned needs neither: the `Cloud` went with the entity.
 pub(crate) fn retire_orphaned_clouds(
     mut commands: Commands,
     renders: Query<(Entity, &CloudOf)>,
     simulating: Query<(), (With<Cloud>, With<ObjectParticleSystem>)>,
+    stopped: Query<Entity, (With<Cloud>, Without<ObjectParticleSystem>)>,
 ) {
     for (render, source) in &renders {
         if simulating.get(source.0).is_err() {
             commands.entity(render).try_despawn();
         }
+    }
+    for source in &stopped {
+        commands.entity(source).remove::<Cloud>();
     }
 }
 
@@ -1671,7 +1723,8 @@ mod tests {
             pos_offset: Vec3::ZERO,
         };
         let particles = vec![part.clone(), part];
-        let instances = build_cloud_instances(&particles);
+        let mut instances = Vec::new();
+        build_cloud_instances(&particles, &mut instances);
         assert_eq!(instances.len(), 2);
         let Some(first) = instances.first() else {
             unreachable!("two instances were built")
@@ -1739,6 +1792,126 @@ mod tests {
         ];
         let centroid = cloud_centroid(&particles, Vec3::ZERO);
         assert!(centroid.abs_diff_eq(Vec3::new(1.0, 2.0, 3.0), 1.0e-6));
+    }
+
+    /// A second build into the same buffer replaces its contents and keeps its
+    /// allocation — the per-frame reuse `drive_particles` relies on.
+    #[test]
+    fn instances_are_built_in_place() {
+        let make = |y| Particle {
+            pos: Vec3::new(0.0, y, 0.0),
+            velocity: Vec3::ZERO,
+            accel: Vec3::ZERO,
+            age: 0.0,
+            max_age: 1.0,
+            flags: 0,
+            start_color: [255; 4],
+            end_color: [255; 4],
+            start_scale: [1.0, 1.0],
+            end_scale: [1.0, 1.0],
+            color: [1.0; 4],
+            scale: [1.0, 1.0],
+            start_glow: 0.0,
+            end_glow: 0.0,
+            glow: 0.0,
+            pos_offset: Vec3::ZERO,
+        };
+        let mut instances = Vec::new();
+        build_cloud_instances(&[make(1.0), make(2.0), make(3.0)], &mut instances);
+        assert_eq!(instances.len(), 3);
+        let capacity = instances.capacity();
+
+        // A shrunken cloud: the stale third record is gone, not left behind, and
+        // the buffer the render world uploads is still the same allocation.
+        build_cloud_instances(&[make(9.0)], &mut instances);
+        assert_eq!(instances.len(), 1);
+        assert_eq!(instances.capacity(), capacity, "the allocation was reused");
+        let Some(only) = instances.first() else {
+            unreachable!("one instance was built")
+        };
+        let [_, py, _] = only.position;
+        assert!(
+            (py - 9.0).abs() < 1.0e-6,
+            "the fresh particle, not a stale one"
+        );
+    }
+
+    /// The simulation step is capped at the reference's `0.1f`, so a frame hitch
+    /// advances the sim by one ordinary step rather than the whole gap.
+    #[test]
+    fn the_simulation_step_is_capped() {
+        let close = |a: f32, b: f32| (a - b).abs() < 1.0e-6;
+        assert!(
+            close(super::sim_dt(1.0 / 60.0), 1.0 / 60.0),
+            "an ordinary frame"
+        );
+        assert!(close(super::sim_dt(2.5), super::MAX_SIM_DT), "a long hitch");
+        assert!(
+            close(super::sim_dt(f32::NAN), super::MAX_SIM_DT),
+            "a NaN delta"
+        );
+    }
+
+    /// A `BOUNCE` is a position mirror about the source plane, so how far past it a
+    /// particle is thrown is exactly how far the step carried it through: capped,
+    /// no more than one step's travel; across a whole hitch in one step, metres in
+    /// a single frame. That is what the cap buys.
+    #[test]
+    fn a_bounce_particle_survives_a_frame_hitch() {
+        let src = Vec3::ZERO;
+        let launch = || Particle {
+            pos: Vec3::new(0.0, 1.0, 0.0),
+            velocity: Vec3::new(0.0, -5.0, 0.0),
+            accel: Vec3::ZERO,
+            age: 0.0,
+            max_age: 100.0,
+            flags: part_flags::BOUNCE,
+            start_color: [255; 4],
+            end_color: [255; 4],
+            start_scale: [1.0, 1.0],
+            end_scale: [1.0, 1.0],
+            color: [1.0; 4],
+            scale: [1.0, 1.0],
+            start_glow: 0.0,
+            end_glow: 0.0,
+            glow: 0.0,
+            pos_offset: Vec3::ZERO,
+        };
+
+        // Falling at 5 m/s, a capped step moves the particle 0.5 m — and a step
+        // that crosses the plane is mirrored back through it, so it moves no
+        // further than that either.
+        let step = 5.0 * super::MAX_SIM_DT;
+
+        // One unclamped second: 4 m below the plane in a single step, mirrored to
+        // 4 m above it, so the particle teleports 3 m in one frame.
+        let mut hitched = launch();
+        let before = hitched.pos;
+        assert!(
+            hitched.integrate(1.0, src, src),
+            "the particle is still alive"
+        );
+        assert!(
+            hitched.pos.distance(before) > step,
+            "an unclamped step moved the particle {} m in one frame",
+            hitched.pos.distance(before)
+        );
+
+        // The same second in capped steps: every step, bounce included, stays
+        // within one step's travel.
+        let mut capped = launch();
+        for _ in 0..10 {
+            let before = capped.pos;
+            assert!(
+                capped.integrate(super::sim_dt(1.0), src, src),
+                "the particle is still alive"
+            );
+            assert!(
+                capped.pos.distance(before) <= step + 1.0e-4,
+                "a capped step moved the particle {} m",
+                capped.pos.distance(before)
+            );
+        }
     }
 
     /// Additive-blend (destination `ONE`) systems are drawn unlit and additive; an
@@ -1829,6 +2002,71 @@ mod tests {
             app.world().get_entity(kept_render).is_err(),
             "a source that stopped emitting has its render entity reaped"
         );
+        // ...and the object, which is still very much in-world, does not go on
+        // carrying the cloud's particles, system copy and texture handle.
+        assert!(
+            !app.world().entity(kept).contains::<Cloud>(),
+            "a source that stopped emitting drops its cloud state"
+        );
         Ok(())
+    }
+
+    /// A source that stops emitting and later starts again is seeded a fresh cloud:
+    /// dropping the old one is a retirement, not a permanent disqualification.
+    #[test]
+    fn a_restarted_source_is_seeded_again() {
+        use super::{Cloud, Emitter, retire_orphaned_clouds};
+        use bevy::prelude::{App, Update};
+
+        let mut app = App::new();
+        app.add_systems(Update, retire_orphaned_clouds);
+        let source = app
+            .world_mut()
+            .spawn(ObjectParticleSystem {
+                system: live_system(),
+            })
+            .id();
+        let cloud = Cloud {
+            emitter: Emitter::new(0),
+            particles: Vec::new(),
+            entity: source,
+            system: live_system(),
+            texture: bevy::prelude::Handle::default(),
+            texture_applied: false,
+            visible: false,
+            is_hud: false,
+        };
+        app.world_mut().entity_mut(source).insert(cloud);
+
+        // Stopped: the cloud is retired.
+        app.world_mut()
+            .entity_mut(source)
+            .remove::<ObjectParticleSystem>();
+        app.update();
+        assert!(!app.world().entity(source).contains::<Cloud>());
+
+        // Emitting again: `drive_particles` sees a source with no cloud, which is
+        // exactly the first-sight case it seeds. Stand in for that seeding here and
+        // check the retirement pass leaves a live source's cloud alone.
+        app.world_mut()
+            .entity_mut(source)
+            .insert(ObjectParticleSystem {
+                system: live_system(),
+            });
+        app.world_mut().entity_mut(source).insert(Cloud {
+            emitter: Emitter::new(0),
+            particles: Vec::new(),
+            entity: source,
+            system: live_system(),
+            texture: bevy::prelude::Handle::default(),
+            texture_applied: false,
+            visible: false,
+            is_hud: false,
+        });
+        app.update();
+        assert!(
+            app.world().entity(source).contains::<Cloud>(),
+            "a live source keeps the cloud it was seeded"
+        );
     }
 }

@@ -214,13 +214,36 @@ struct ParcelBorderState {
 /// water height (as raw bits, so it compares without a float `==`), and its
 /// per-region terrain revision. A rebuild is needed exactly when one of these
 /// differs from the last build.
+///
+/// A stamp is recorded on **every** build attempt, including the ones that drew
+/// nothing (no overlay grid streamed yet, or no terrain under the bands): those
+/// inputs are exactly what changes when the missing data arrives, so the retry
+/// stays change-driven instead of re-tessellating the region every frame.
 struct RegionStamp {
-    /// The parcel-overlay grid the bands were tessellated from.
-    grid: ParcelOverlayGrid,
+    /// The parcel-overlay grid the bands were tessellated from, or `None` when
+    /// the region had no grid yet at the time of the attempt.
+    grid: Option<ParcelOverlayGrid>,
     /// The region's water height at build time (`f32::to_bits`), or `None`.
     water_bits: Option<u32>,
     /// The region's [`TerrainState::region_revision`] at build time.
     terrain_revision: u64,
+}
+
+/// Whether a region's recorded [`RegionStamp`] no longer matches its current
+/// inputs, i.e. whether its bands must be rebuilt. The grid comparison is
+/// `O(cells)`, so it is only consulted when the overlay resource actually
+/// changed this frame (`overlay_changed`) — the grid cannot have changed
+/// otherwise.
+fn stamp_is_stale(
+    stamp: &RegionStamp,
+    grid: Option<&ParcelOverlayGrid>,
+    overlay_changed: bool,
+    water_bits: Option<u32>,
+    terrain_revision: u64,
+) -> bool {
+    terrain_revision != stamp.terrain_revision
+        || water_bits != stamp.water_bits
+        || (overlay_changed && grid != stamp.grid.as_ref())
 }
 
 /// Register the property-lines settings (the master `ShowPropertyLines` toggle).
@@ -513,8 +536,10 @@ fn despawn_all(state: &mut ParcelBorderState, commands: &mut Commands) {
 /// each frame, rebuild only the regions whose stamp (parcel grid + terrain
 /// revision + water height) changed or that are newly present, despawn regions
 /// that left, and spread multi-region rebuilds over a few frames. A parked scene
-/// with a static parcel layout does no rebuilds at all. Tears the bands down when
-/// the `ShowPropertyLines` setting is off.
+/// with a static parcel layout does no rebuilds at all — including the regions
+/// that drew nothing because their overlay grid or their terrain had not arrived:
+/// those are stamped too, so their retry waits for the arrival instead of running
+/// every frame. Tears the bands down when the `ShowPropertyLines` setting is off.
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources / queries: the setting, \
@@ -589,13 +614,13 @@ fn update_parcel_borders(
     for &region in &current {
         let dirty = match state.stamps.get(&region) {
             None => true,
-            Some(stamp) => {
-                terrain.region_revision(region) != stamp.terrain_revision
-                    || water_height(region).map(f32::to_bits) != stamp.water_bits
-                    // The grid compare is O(cells), so only run it when the
-                    // overlay resource actually changed this frame.
-                    || (overlay_changed && overlay.grid_of(region) != Some(&stamp.grid))
-            }
+            Some(stamp) => stamp_is_stale(
+                stamp,
+                overlay.grid_of(region),
+                overlay_changed,
+                water_height(region).map(f32::to_bits),
+                terrain.region_revision(region),
+            ),
         };
         if dirty {
             state.pending.insert(region);
@@ -618,14 +643,31 @@ fn update_parcel_borders(
         .collect();
     for region in to_build {
         state.pending.remove(&region);
-        let Some(grid) = overlay.grid_of(region) else {
-            continue; // grid not streamed yet; re-detected as dirty next frame
-        };
-        let water_bits = water_height(region).map(f32::to_bits);
         // The region's water surface (plus a hair), so a boundary crossing water
         // rides on it rather than sinking to the seabed.
         let water_floor = water_height(region).map(|height| height + WATER_SURFACE_EPSILON);
-        let Some(mesh) = build_region_border_mesh(grid, region, &terrain, water_floor) else {
+        let stamp = RegionStamp {
+            grid: overlay.grid_of(region).cloned(),
+            water_bits: water_height(region).map(f32::to_bits),
+            terrain_revision: terrain.region_revision(region),
+        };
+        let built = stamp
+            .grid
+            .as_ref()
+            .and_then(|grid| build_region_border_mesh(grid, region, &terrain, water_floor));
+        // Stamp on every path, drawn or not. A region whose overlay grid has not
+        // streamed yet, or whose terrain has not, draws nothing — and without a
+        // stamp it reads as dirty again next frame, re-tessellating its whole
+        // grid every frame forever. The stamp's grid and terrain revision are
+        // exactly what change when the missing input arrives, so the retry
+        // happens then and only then.
+        state.stamps.insert(region, stamp);
+        let Some(mesh) = built else {
+            // Nothing to draw here (yet): drop any bands an earlier state built,
+            // rather than leaving them draped over terrain that is gone.
+            if let Some(old) = state.entities.remove(&region) {
+                commands.entity(old).despawn();
+            }
             continue;
         };
         let handle = meshes.add(mesh);
@@ -640,14 +682,6 @@ fn update_parcel_borders(
         if let Some(old) = state.entities.insert(region, entity) {
             commands.entity(old).despawn();
         }
-        state.stamps.insert(
-            region,
-            RegionStamp {
-                grid: grid.clone(),
-                water_bits,
-                terrain_revision: terrain.region_revision(region),
-            },
-        );
     }
 }
 
@@ -721,6 +755,168 @@ mod tests {
         assert!(
             app.world().resource::<ParcelBorderState>().active,
             "the system ran to the point of enabling itself",
+        );
+    }
+
+    /// A region whose bands cannot be built yet is stamped anyway, so it is not
+    /// re-tessellated every frame until its terrain streams in.
+    ///
+    /// The grid is there and the terrain is not, so every band's drape fails and
+    /// the region draws nothing. Before the fix the skip left no stamp, the
+    /// region read as dirty again on the next frame, and its whole 64×64 overlay
+    /// was tessellated every frame for as long as the terrain was missing.
+    #[test]
+    fn a_region_that_draws_nothing_is_still_stamped() {
+        use bevy::prelude::*;
+        use sl_client_bevy::{RegionHandle, SlParcelOverlay, SlRegion};
+        use sl_settings::SettingsStore;
+
+        use super::{
+            ParcelBorderMaterial, ParcelBorderState, stamp_is_stale, update_parcel_borders,
+        };
+        use crate::settings::ViewerSettings;
+        use crate::world_api::TerrainState;
+
+        let region = RegionHandle::from_global(256_000, 256_000);
+        let mut app = App::new();
+        app.insert_resource(ViewerSettings::from_store_for_test(SettingsStore::new()))
+            .init_resource::<SlParcelOverlay>()
+            .init_resource::<TerrainState>()
+            .init_resource::<ParcelBorderState>()
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<ParcelBorderMaterial>>()
+            .add_systems(Update, update_parcel_borders);
+        app.world_mut().spawn(SlRegion {
+            handle: region,
+            sim: "127.0.0.1:9000".parse().expect("a literal socket address"),
+        });
+        app.world_mut()
+            .resource_mut::<SlParcelOverlay>()
+            .insert_grid_for_test(region, grid_from(4, &[(1, 1, SELF_OWNED | WEST | SOUTH)]));
+
+        app.update();
+
+        assert!(
+            app.world().resource::<Assets<Mesh>>().is_empty(),
+            "no terrain to drape over, so no band mesh was built",
+        );
+        let state = app.world().resource::<ParcelBorderState>();
+        let stamp = state
+            .stamps
+            .get(&region)
+            .expect("the attempt that drew nothing still recorded a stamp");
+        assert!(
+            !stamp_is_stale(
+                stamp,
+                app.world().resource::<SlParcelOverlay>().grid_of(region),
+                true,
+                None,
+                0,
+            ),
+            "with nothing changed the region is clean — no per-frame rebuild",
+        );
+
+        // The terrain arriving bumps the region's revision, which is exactly what
+        // the stamp was taken against, so the retry happens then.
+        app.world_mut()
+            .resource_mut::<TerrainState>()
+            .bump_revision(region);
+        let state = app.world().resource::<ParcelBorderState>();
+        let stamp = state.stamps.get(&region).expect("still stamped");
+        assert!(
+            stamp_is_stale(
+                stamp,
+                app.world().resource::<SlParcelOverlay>().grid_of(region),
+                true,
+                None,
+                app.world()
+                    .resource::<TerrainState>()
+                    .region_revision(region),
+            ),
+            "the terrain streaming in re-dirties the region",
+        );
+
+        app.update();
+
+        let state = app.world().resource::<ParcelBorderState>();
+        pretty_assertions::assert_eq!(
+            state
+                .stamps
+                .get(&region)
+                .expect("still stamped")
+                .terrain_revision,
+            1,
+            "the retry ran and re-stamped against the new terrain revision",
+        );
+    }
+
+    /// A region with no overlay grid yet is stamped as "no grid", and the grid
+    /// arriving is what re-dirties it.
+    #[test]
+    fn a_region_with_no_grid_is_stamped_and_waits_for_one() {
+        use bevy::prelude::*;
+        use sl_client_bevy::{RegionHandle, SlParcelOverlay, SlRegion};
+        use sl_settings::SettingsStore;
+
+        use super::{
+            ParcelBorderMaterial, ParcelBorderState, stamp_is_stale, update_parcel_borders,
+        };
+        use crate::settings::ViewerSettings;
+        use crate::world_api::TerrainState;
+
+        let region = RegionHandle::from_global(256_000, 256_000);
+        let mut app = App::new();
+        app.insert_resource(ViewerSettings::from_store_for_test(SettingsStore::new()))
+            .init_resource::<SlParcelOverlay>()
+            .init_resource::<TerrainState>()
+            .init_resource::<ParcelBorderState>()
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<ParcelBorderMaterial>>()
+            .add_systems(Update, update_parcel_borders);
+        app.world_mut().spawn(SlRegion {
+            handle: region,
+            sim: "127.0.0.1:9000".parse().expect("a literal socket address"),
+        });
+
+        app.update();
+
+        let stamp_without_a_grid = {
+            let state = app.world().resource::<ParcelBorderState>();
+            let stamp = state
+                .stamps
+                .get(&region)
+                .expect("a region with no grid is stamped too");
+            assert!(stamp.grid.is_none(), "stamped as having had no grid");
+            assert!(
+                !stamp_is_stale(stamp, None, true, None, 0),
+                "and stays clean while there is still no grid",
+            );
+            stamp.terrain_revision
+        };
+        pretty_assertions::assert_eq!(stamp_without_a_grid, 0);
+
+        let grid = grid_from(4, &[(1, 1, SELF_OWNED | WEST | SOUTH)]);
+        app.world_mut()
+            .resource_mut::<SlParcelOverlay>()
+            .insert_grid_for_test(region, grid.clone());
+        let state = app.world().resource::<ParcelBorderState>();
+        let stamp = state.stamps.get(&region).expect("still stamped");
+        assert!(
+            stamp_is_stale(stamp, Some(&grid), true, None, 0),
+            "the grid arriving re-dirties the region",
+        );
+
+        app.update();
+
+        let state = app.world().resource::<ParcelBorderState>();
+        assert!(
+            state
+                .stamps
+                .get(&region)
+                .expect("still stamped")
+                .grid
+                .is_some(),
+            "the retry ran and stamped the grid it saw",
         );
     }
 

@@ -2553,7 +2553,7 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 === LICENSE Apache-2.0 === Apache License 2.0 ===
-used-by: ab_glyph 0.2.32, ab_glyph_rasterizer 0.1.10, accesskit_winit 0.32.2, aws-lc-sys 0.43.0, blake3 1.8.5, gl_generator 0.14.0, khronos_api 3.1.0, owned_ttf_parser 0.25.1, ryu 1.0.23, spirv 0.4.0+sdk-1.4.341.0, sync_wrapper 1.0.2
+used-by: ab_glyph 0.2.32, ab_glyph_rasterizer 0.1.10, accesskit_winit 0.32.2, aws-lc-sys 0.45.0, blake3 1.8.5, gl_generator 0.14.0, khronos_api 3.1.0, owned_ttf_parser 0.25.1, ryu 1.0.23, spirv 0.4.0+sdk-1.4.341.0, sync_wrapper 1.0.2
 
 Apache License
 Version 2.0, January 2004
@@ -3340,7 +3340,7 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 === LICENSE BSD-3-Clause === BSD 3-Clause "New" or "Revised" License ===
-used-by: aws-lc-sys 0.43.0, exr 1.74.2, sha1_smol 1.0.1, vorbis_rs 0.5.6
+used-by: aws-lc-sys 0.45.0, exr 1.74.2, sha1_smol 1.0.1, vorbis_rs 0.5.6
 
 Copyright (c) <year> <owner>. 
 
@@ -4208,7 +4208,7 @@ NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE US
 THIS SOFTWARE.
 
 === LICENSE ISC === ISC License ===
-used-by: rustls-webpki 0.103.13
+used-by: rustls-webpki 0.103.15
 
 Except as otherwise noted, this project is licensed under the following
 (ISC-style) terms:
@@ -4231,7 +4231,7 @@ The files under third-party/chromium are licensed as described in
 third-party/chromium/LICENSE.
 
 === LICENSE ISC === ISC License ===
-used-by: aws-lc-rs 1.17.3, aws-lc-sys 0.43.0
+used-by: aws-lc-rs 1.18.1, aws-lc-sys 0.45.0
 
 ISC License:
 
@@ -5986,7 +5986,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: hyper-rustls 0.27.9, rustls-native-certs 0.8.4, rustls 0.23.42
+used-by: hyper-rustls 0.27.9, rustls-native-certs 0.8.4, rustls 0.23.45
 
 Copyright (c) 2016 Joseph Birr-Pixton <jpixton@gmail.com>
 
@@ -12120,7 +12120,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: aws-lc-sys 0.43.0
+used-by: aws-lc-sys 0.45.0
 
 The MIT License (MIT)
 

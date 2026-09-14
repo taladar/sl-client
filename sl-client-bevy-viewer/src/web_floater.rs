@@ -16,11 +16,11 @@ use bevy::prelude::*;
 use bevy::text::{EditableText, FontCx, LayoutCx};
 use bevy::ui_widgets::{Activate, Button};
 
-use crate::browser_widget::{BrowserView, BrowserViewSpec, spawn_browser_view};
+use crate::browser_widget::{BrowserView, BrowserViewSpec, ValidatedMediaUrl, spawn_browser_view};
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::Translated;
 use crate::media_engine::{MediaEngineSystems, MediaSurfaces};
-use crate::system_browser::{normalize_web_url, open_in_system_browser};
+use crate::system_browser::{ExternalUrl, normalize_web_url, open_in_system_browser};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::UiAction;
 use crate::ui_font::UiFont;
@@ -169,7 +169,8 @@ fn spawn_web_floater(mut commands: Commands, root: Res<UiRoot>) {
         &mut commands,
         content,
         &BrowserViewSpec {
-            initial_url: String::from(DEFAULT_HOME_URL),
+            initial_url: validated_web_url(DEFAULT_HOME_URL)
+                .unwrap_or_else(|_refused| ValidatedMediaUrl::blank()),
             isolated: false,
             tab_index: 6,
             fixed_height: None,
@@ -263,11 +264,26 @@ fn on_address_key(
     let Some(url) = normalize_web_url(&editor.value().to_string()) else {
         return;
     };
+    let Ok(url) = validated_web_url(&url) else {
+        return;
+    };
     if let Ok(view) = views.get(ui.view)
         && let Some(slot) = view.surface.and_then(|id| surfaces.get(id))
     {
         slot.surface.navigate(&url);
     }
+}
+
+/// Check a URL against the media scheme allowlist before the floater's surface
+/// sees it, reporting a refusal.
+///
+/// The address bar and the [`OpenWebBrowser`] message both land here, and
+/// neither is only fed by the user: a `secondlife:///` link in chat, a profile
+/// field and a page's own popup request all open this floater, so the filter
+/// applies to the whole floater rather than to its grid-sourced callers alone.
+fn validated_web_url(text: &str) -> Result<ValidatedMediaUrl, sl_cef::MediaUrlError> {
+    ValidatedMediaUrl::parse(text)
+        .inspect_err(|error| warn!("web floater did not open a URL: {error}"))
 }
 
 /// Open the floater on an [`OpenWebBrowser`] message (menu, other floaters).
@@ -286,10 +302,11 @@ fn open_web_browser(
             shown.0 = true;
         }
         if let Some(url) = &request.url
+            && let Ok(url) = validated_web_url(url)
             && let Ok(view) = views.get(ui.view)
             && let Some(slot) = view.surface.and_then(|id| surfaces.get(id))
         {
-            slot.surface.navigate(url);
+            slot.surface.navigate(&url);
         }
     }
 }
@@ -324,7 +341,15 @@ fn handle_web_actions(
                     slot.surface.reload();
                 }
             }
-            "open-external" => open_in_system_browser(&slot.status.url),
+            // The page's *current* URL, which the page chose by navigating:
+            // remote data, filtered at the sink like any other.
+            "open-external" => {
+                if let Ok(url) = ExternalUrl::parse(&slot.status.url).inspect_err(|error| {
+                    warn!("web page not opened in the system browser: {error}");
+                }) {
+                    open_in_system_browser(&url);
+                }
+            }
             _ => {}
         }
     }
@@ -364,7 +389,10 @@ fn sync_web_floater(
     let Some(slot) = view.surface.and_then(|id| surfaces.get(id)) else {
         return;
     };
-    if let Some(popup) = slot.surface.take_popup_request() {
+    // A popup request is the *page's* choice of URL, not the user's.
+    if let Some(popup) = slot.surface.take_popup_request()
+        && let Ok(popup) = validated_web_url(&popup)
+    {
         slot.surface.navigate(&popup);
     }
     let status = &slot.status;
