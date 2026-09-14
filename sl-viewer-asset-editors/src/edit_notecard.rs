@@ -72,8 +72,8 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use sl_client_bevy::{
-    AssetKey, AssetType, Command, InventoryKey, InventoryType, ItemInfo, OwnerKey, SaleType,
-    SlCommand, SlEvent, SlSessionEvent, UpdatableAssetType, Uuid,
+    AssetKey, AssetType, Command, InventoryKey, InventoryType, ItemInfo, OwnerKey, Permissions,
+    SaleType, SlCommand, SlEvent, SlSessionEvent, UpdatableAssetType, Uuid,
 };
 
 use crate::asset_editor::{
@@ -854,16 +854,35 @@ fn report_notecard_save(
 // Drag-add: a dropped inventory item becomes an embedded item.
 // ---------------------------------------------------------------------------
 
+/// Whether an item may be embedded in a notecard at all.
+///
+/// The reference refuses the drop outright unless the item's **next-owner**
+/// mask is `PERM_ITEM_UNRESTRICTED` — copy, modify and transfer together
+/// (`LLViewerTextEditor::handleDragAndDrop`, which answers `ACCEPT_NO` with the
+/// "owner restricted" tooltip otherwise). The reason is what happens at the
+/// other end: an item copied back out of a notecard is a transfer, so the grid
+/// hands the copier the *next-owner* permissions, and embedding a restricted
+/// item would promise a copy that arrives stripped of what the resident saw.
+const fn may_embed(item: &ItemInfo) -> bool {
+    item.permissions
+        .next_owner
+        .contains(Permissions::ITEM_UNRESTRICTED)
+}
+
 /// Fold each dropped inventory item into the open notecard: add it to the
 /// baseline item table with a fresh index and append its marker code point to
 /// the edit buffer, so a Save reconciles it in via
 /// [`sl_notecard::Notecard::with_edited_text`]. The marker renders as a
 /// placeholder glyph in the plain field until the inline-box editor widget
 /// draws it inline; the read-only preview shows it as a clickable item at once.
+///
+/// An item whose next-owner permissions are restricted is refused, as the
+/// reference refuses it — see [`may_embed`].
 fn ingest_added_items(
     mut adds: MessageReader<AddEmbeddedItem>,
     windows: Query<&NotecardEditorState>,
     mut fields: Query<(&mut EditableText, &mut NotecardBody)>,
+    mut commands: Commands,
 ) {
     for add in adds.read() {
         // The drop names the window it landed on, so the item joins *that*
@@ -873,6 +892,21 @@ fn ingest_added_items(
         };
         // Only a modifiable notecard with a live body can take an added item.
         if !state.editable {
+            continue;
+        }
+        if !may_embed(&add.item) {
+            warn!(
+                "item {} has restricted next-owner permissions; not embedded",
+                add.item.item_id
+            );
+            if let Some(status) = state.status {
+                set_status(
+                    &mut commands,
+                    status,
+                    "notecard-status-drop-restricted",
+                    ERROR_COLOR,
+                );
+            }
             continue;
         }
         let Some(field_entity) = state.body_field else {
@@ -1627,6 +1661,12 @@ mod tests {
 
         /// An inventory item a resident drags onto the open notecard.
         fn dropped_item(name: &str) -> ItemInfo {
+            dropped_item_with_next_owner(name, Permissions::from_bits(0x0008_e000))
+        }
+
+        /// The same dragged item at a chosen **next-owner** mask, which is what
+        /// decides whether a notecard may hold it at all (see `may_embed`).
+        fn dropped_item_with_next_owner(name: &str, next_owner: Permissions) -> ItemInfo {
             ItemInfo {
                 item_id: InventoryKey::from(Uuid::from_u128(0xD1)),
                 folder_id: InventoryFolderKey::from(Uuid::from_u128(0xD2)),
@@ -1647,7 +1687,7 @@ mod tests {
                     owner: Permissions::from_bits(0x7fff_ffff),
                     group: Permissions::empty(),
                     everyone: Permissions::empty(),
-                    next_owner: Permissions::from_bits(0x0008_2000),
+                    next_owner,
                 },
             }
         }
@@ -1752,6 +1792,35 @@ mod tests {
                     .iter()
                     .any(|run| run == "Our Home"),
                 "the box does not name the dropped item"
+            );
+            Ok(())
+        }
+
+        /// An item whose **next-owner** permissions are restricted is refused,
+        /// as the reference refuses it: a copy taken back out of a notecard is
+        /// handed the next-owner permissions, so embedding one of these would
+        /// promise a copy that arrives stripped of what the resident saw.
+        #[test]
+        fn a_next_owner_restricted_item_is_not_embedded() -> Result<(), TestError> {
+            let mut app = editor_app();
+            open_with(&mut app, true, LOADED_TEXT, Vec::new());
+            let editor = window(&mut app)?;
+
+            // Move and transfer, but neither copy nor modify for the next
+            // owner — a "no copy" item.
+            app.world_mut().write_message(AddEmbeddedItem {
+                item: dropped_item_with_next_owner(
+                    "Borrowed Thing",
+                    Permissions::from_bits(0x0008_2000),
+                ),
+                editor,
+            });
+            app.update();
+            app.update();
+
+            assert!(
+                model(&mut app)?.objects.is_empty(),
+                "a next-owner-restricted item was embedded anyway"
             );
             Ok(())
         }

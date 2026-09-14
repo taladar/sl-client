@@ -4378,6 +4378,14 @@ pub(crate) fn bulk_update_inventory_from_llsd(
 
 /// Builds an [`InventoryItem`] from a `BulkUpdateInventory` CAPS `ItemData`
 /// entry (`CamelCase` keys, flat — permissions are not nested as in AIS).
+///
+/// The five permission masks and `Flags` are `U32` template fields, and an
+/// LLSD-carried `U32` is a **4-byte big-endian binary** element, not an integer
+/// (the reference's `ll_U32_from_sd`; OpenSim's `LLSDxmlEncode2.AddElem(name,
+/// uint)` writes the same). Reading them as integers yielded 0 for every mask,
+/// so an item the grid pushed — a copy taken out of a notecard, a give, a
+/// paste — landed in the tree reading "(no copy) (no modify) (no transfer)"
+/// however full its permissions actually were. [`u32_member`] takes either form.
 pub(crate) fn bulk_update_item_from_llsd(item: &Llsd) -> Option<InventoryItem> {
     Some(InventoryItem {
         item_id: InventoryKey::from(uuid_member(item, "ItemID")),
@@ -4387,7 +4395,7 @@ pub(crate) fn bulk_update_item_from_llsd(item: &Llsd) -> Option<InventoryItem> {
         asset_id: uuid_member(item, "AssetID"),
         item_type: i8::try_from(i32_member(item, "Type")).unwrap_or(-1),
         inv_type: i8::try_from(i32_member(item, "InvType")).unwrap_or(-1),
-        flags: i32_member(item, "Flags").cast_unsigned(),
+        flags: u32_member(item, "Flags"),
         sale_type: u8::try_from(i32_member(item, "SaleType")).unwrap_or(0),
         sale_price: crate::types::linden_price_from_wire(
             i32_member(item, "SaleType") != 0,
@@ -4407,11 +4415,11 @@ pub(crate) fn bulk_update_item_from_llsd(item: &Llsd) -> Option<InventoryItem> {
         creator_id: AgentKey::from(uuid_member(item, "CreatorID")),
         group: crate::types::group_from_wire(uuid_member(item, "GroupID")),
         permissions: Permissions5 {
-            base: Permissions::from_bits(i32_member(item, "BaseMask").cast_unsigned()),
-            owner: Permissions::from_bits(i32_member(item, "OwnerMask").cast_unsigned()),
-            group: Permissions::from_bits(i32_member(item, "GroupMask").cast_unsigned()),
-            everyone: Permissions::from_bits(i32_member(item, "EveryoneMask").cast_unsigned()),
-            next_owner: Permissions::from_bits(i32_member(item, "NextOwnerMask").cast_unsigned()),
+            base: Permissions::from_bits(u32_member(item, "BaseMask")),
+            owner: Permissions::from_bits(u32_member(item, "OwnerMask")),
+            group: Permissions::from_bits(u32_member(item, "GroupMask")),
+            everyone: Permissions::from_bits(u32_member(item, "EveryoneMask")),
+            next_owner: Permissions::from_bits(u32_member(item, "NextOwnerMask")),
         },
     })
 }
@@ -5917,6 +5925,10 @@ pub fn bulk_update_inventory_to_llsd(
 /// Serializes an [`InventoryItem`] as a flat `BulkUpdateInventory` `ItemData`
 /// entry (inverse of [`bulk_update_item_from_llsd`]). `last_owner_id` has no
 /// place in this wire form (the parser leaves it nil), so it is not emitted.
+///
+/// The `U32` fields (the five masks and `Flags`) go out as the big-endian
+/// binary a `U32` takes in an LLSD message — what a real simulator sends, so a
+/// client fed by this serializer is fed the shape it has to survive.
 pub(crate) fn bulk_update_item_to_llsd(item: &InventoryItem) -> Result<Llsd, sl_wire::WireError> {
     let (owner_id, group_id) = crate::types::object_owner_to_wire(item.owner, item.group);
     Ok(llsd_map(vec![
@@ -5927,7 +5939,7 @@ pub(crate) fn bulk_update_item_to_llsd(item: &InventoryItem) -> Result<Llsd, sl_
         ("AssetID", Llsd::Uuid(item.asset_id)),
         ("Type", Llsd::Integer(i32::from(item.item_type))),
         ("InvType", Llsd::Integer(i32::from(item.inv_type))),
-        ("Flags", Llsd::Integer(item.flags.cast_signed())),
+        ("Flags", llsd_u32_binary(item.flags)),
         ("SaleType", Llsd::Integer(i32::from(item.sale_type))),
         (
             "SalePrice",
@@ -5941,25 +5953,16 @@ pub(crate) fn bulk_update_item_to_llsd(item: &InventoryItem) -> Result<Llsd, sl_
         ("CreatorID", Llsd::Uuid(item.creator_id.uuid())),
         ("GroupID", Llsd::Uuid(group_id)),
         ("GroupOwned", Llsd::Boolean(item.owner.is_group())),
-        (
-            "BaseMask",
-            Llsd::Integer(item.permissions.base.bits().cast_signed()),
-        ),
-        (
-            "OwnerMask",
-            Llsd::Integer(item.permissions.owner.bits().cast_signed()),
-        ),
-        (
-            "GroupMask",
-            Llsd::Integer(item.permissions.group.bits().cast_signed()),
-        ),
+        ("BaseMask", llsd_u32_binary(item.permissions.base.bits())),
+        ("OwnerMask", llsd_u32_binary(item.permissions.owner.bits())),
+        ("GroupMask", llsd_u32_binary(item.permissions.group.bits())),
         (
             "EveryoneMask",
-            Llsd::Integer(item.permissions.everyone.bits().cast_signed()),
+            llsd_u32_binary(item.permissions.everyone.bits()),
         ),
         (
             "NextOwnerMask",
-            Llsd::Integer(item.permissions.next_owner.bits().cast_signed()),
+            llsd_u32_binary(item.permissions.next_owner.bits()),
         ),
     ]))
 }
@@ -6653,9 +6656,10 @@ pub(crate) fn parcel_properties_to_wire(
     })
 }
 
-/// Encodes a `u32` as the 4-byte big-endian LLSD binary element OpenSim uses
-/// for `uint` fields (`ParcelFlags`, `AuctionID`); the client's [`llsd_u32`]
-/// reads it back.
+/// Encodes a `u32` as the 4-byte big-endian LLSD binary element a `U32` takes
+/// in an LLSD message — what the reference's `ll_U32_from_sd` reads and what
+/// OpenSim writes for a `uint` field (`ParcelFlags`, `AuctionID`, an inventory
+/// item's permission masks); the client's [`llsd_u32`] reads it back.
 fn llsd_u32_binary(value: u32) -> Llsd {
     Llsd::Binary(vec![
         low_byte(value >> 24),
@@ -7931,6 +7935,73 @@ mod caps_serializer_tests {
             Some((transaction_id, folders, items))
         );
         Ok(())
+    }
+
+    /// A `BulkUpdateInventory` whose `U32` fields are the big-endian binary a
+    /// real grid sends — OpenSim's `LLSDxmlEncode2.AddElem(name, uint)`, and
+    /// the reference's `ll_U32_from_sd` on the reading side. Read as integers
+    /// these came back 0, and the full-permission copy taken out of a notecard
+    /// showed up as "(no copy) (no modify) (no transfer)".
+    #[test]
+    fn bulk_update_inventory_reads_binary_u32_masks() {
+        // Written out as the bytes on the wire rather than through the
+        // encoder, so the byte order is asserted and not assumed.
+        let full = 0x0009_e000_u32;
+        let item = llsd_map(vec![
+            ("ItemID", Llsd::Uuid(Uuid::from_u128(0xb1))),
+            ("FolderID", Llsd::Uuid(Uuid::from_u128(0xb2))),
+            ("AssetID", Llsd::Uuid(Uuid::from_u128(0xb3))),
+            ("CreatorID", Llsd::Uuid(Uuid::from_u128(0xb4))),
+            ("OwnerID", Llsd::Uuid(Uuid::from_u128(0xb5))),
+            ("GroupID", Llsd::Uuid(Uuid::nil())),
+            ("GroupOwned", Llsd::Boolean(false)),
+            ("Name", Llsd::String("TestLandmark".to_owned())),
+            ("Description", Llsd::String(String::new())),
+            ("Type", Llsd::Integer(3)),
+            ("InvType", Llsd::Integer(3)),
+            ("SaleType", Llsd::Integer(0)),
+            ("SalePrice", Llsd::Integer(0)),
+            ("CreationDate", Llsd::Integer(1_788_700_000)),
+            ("BaseMask", Llsd::Binary(vec![0x00, 0x09, 0xe0, 0x00])),
+            ("OwnerMask", Llsd::Binary(vec![0x00, 0x09, 0xe0, 0x00])),
+            ("GroupMask", Llsd::Binary(vec![0x00, 0x00, 0x00, 0x00])),
+            ("EveryoneMask", Llsd::Binary(vec![0x00, 0x08, 0xa0, 0x00])),
+            ("NextOwnerMask", Llsd::Binary(vec![0x00, 0x08, 0xe0, 0x07])),
+            ("Flags", Llsd::Binary(vec![0x00, 0x00, 0x00, 0x01])),
+            ("CallbackID", Llsd::Binary(vec![0x00, 0x00, 0x00, 0x00])),
+        ]);
+        let body = llsd_map(vec![
+            (
+                "AgentData",
+                Llsd::Array(vec![llsd_map(vec![(
+                    "TransactionID",
+                    Llsd::Uuid(Uuid::from_u128(0xb0)),
+                )])]),
+            ),
+            ("FolderData", Llsd::Array(Vec::new())),
+            ("ItemData", Llsd::Array(vec![item])),
+        ]);
+        // Every mask and the flags of every item the body carried, so "no item
+        // at all" fails as loudly as a zeroed one. All of these read 0 while
+        // the masks were parsed as integers.
+        let read: Vec<(Permissions5, u32)> = bulk_update_inventory_from_llsd(&body)
+            .into_iter()
+            .flat_map(|(_transaction, _folders, items)| items)
+            .map(|item| (item.permissions, item.flags))
+            .collect();
+        assert_eq!(
+            read,
+            vec![(
+                Permissions5 {
+                    base: Permissions::from_bits(full),
+                    owner: Permissions::from_bits(full),
+                    group: Permissions::NONE,
+                    everyone: Permissions::from_bits(0x0008_a000),
+                    next_owner: Permissions::from_bits(0x0008_e007),
+                },
+                1
+            )]
+        );
     }
 
     #[test]

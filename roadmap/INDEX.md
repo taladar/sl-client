@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 313 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 35 |
-| done | 1125 |
+| bugs | 33 |
+| done | 1127 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1678** |
@@ -1163,7 +1163,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (35)
+## bugs (33)
 
 ### viewer
 
@@ -1222,8 +1222,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Mouselook — parts of the own avatar's head render from the inside
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
-- [`viewer-notecard-copied-item-loses-permissions`](bugs/viewer-notecard-copied-item-loses-permissions.md)
-  — An item copied out of a notecard arrives with no permissions
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
   — Own avatar looks broken after a teleport
 - [`viewer-own-avatar-facing-drifts-idle`](bugs/viewer-own-avatar-facing-drifts-idle.md)
@@ -1246,7 +1244,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1125)
+## done (1127)
 
 ### protocol
 
@@ -2069,6 +2067,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A notecard created on OpenSim opened as "could not be read"
 - [`viewer-nonblocking-overlay-steals-focus`](done/viewer-nonblocking-overlay-steals-focus.md)
   — A see-through container in front of a field clears its focus, at random
+- [`viewer-notecard-copied-item-loses-permissions`](done/viewer-notecard-copied-item-loses-permissions.md)
+  — An item copied out of a notecard arrives with no permissions
 - [`viewer-notecard-format`](done/viewer-notecard-format.md) — Notecard format —
   a pure crate (sl-notecard)
 - [`viewer-notecard-inline-items`](done/viewer-notecard-inline-items.md) — A
