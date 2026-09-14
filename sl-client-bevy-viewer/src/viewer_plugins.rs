@@ -25,6 +25,8 @@ use crate::{
 
 use bevy::app::{HierarchyPropagatePlugin, PropagateSet};
 use bevy::camera::visibility::{RenderLayers, VisibilitySystems};
+use bevy::ecs::schedule::ScheduleConfigs;
+use bevy::ecs::system::ScheduleSystem;
 use bevy::light::DirectionalLightShadowMap;
 use bevy::prelude::*;
 use sl_client_bevy::{
@@ -548,88 +550,11 @@ impl Plugin for ViewerWorldPlugins {
         app.add_systems(
             Update,
             (
-                // Request the region environment (EEP) on handshake, then fold the
-                // grid's reply into `EnvironmentState` (P22.1); the sky / water /
-                // shadow phases render from it. Nested into one tuple to stay within
-                // Bevy's per-tuple system limit.
-                (
-                    // Mirror the manual transition time into the state, and
-                    // bring back the personal environment this account saved,
-                    // before anything can change either.
-                    crate::environment::sync_environment_settings,
-                    crate::environment::restore_saved_environment,
-                    request_environment,
-                    // The parcel the agent stands on, and its own environment
-                    // (the reference's ENV_PARCEL). Before the ingest, so a
-                    // reply that lands this frame is matched against the parcel
-                    // the agent is on now.
-                    crate::environment::track_agent_parcel,
-                    crate::environment::request_parcel_environment,
-                    ingest_environment,
-                    // An experience's `llSetEnvironment` push, into the layer
-                    // above the region's. After the ingest, so a region reply
-                    // landing this frame is underneath the push rather than
-                    // over it.
-                    crate::environment::ingest_experience_environment_push,
-                    // An experience is admitted per land: ask the region which
-                    // of the injecting ones the parcel just stepped onto still
-                    // allows, and release the ones it does not. After the push
-                    // ingest, so a push landing this frame is in the set the
-                    // query names.
-                    crate::environment::query_parcel_experiences,
-                    crate::environment::ingest_parcel_experiences,
-                    // Fetch + swap in a pinned Modern (`KNOWN_SKY_*`) sky once its
-                    // asset decodes; after `ingest_environment` so the shared
-                    // environment (the Modern placeholder) is current.
-                    crate::environment::resolve_modern_environment,
-                    // Install the settings asset a panel (quick preferences'
-                    // sky / water / day-cycle combos) has picked, once its
-                    // asset decodes.
-                    crate::environment::resolve_local_environment_pick,
-                    // Install whatever the RLV `@setenv_*` family has queued and
-                    // republish the rendered sky for the next `@getenv_*` read.
-                    // Last of the four so the sky it publishes is the one this
-                    // frame settled on.
-                    crate::environment::apply_rlv_environment,
-                    // Advance whichever manual cross-fade is running, and save
-                    // the personal environment whenever it settles on something
-                    // new. Last, so both see the frame's final environment.
-                    crate::environment::advance_environment_transition,
-                    crate::environment::persist_saved_environment,
-                ),
+                environment_fold_pipeline(),
                 // Trigger our own avatar's server-side bake so P14 has bakes to fetch.
                 drive_server_bake,
-                // Keep the texture store's `GetTexture` cap current, then poll
-                // finished fetches before the consumers that apply them. The
-                // blacklist mirror rides along, so a blacklisted texture asset
-                // (viewer-derender-blacklist) is refused before any fetch.
-                // Nested into one tuple to stay within Bevy's per-tuple system
-                // limit. `serve_texture_boosts` drains the fetch requests raised
-                // by the crates that only show textures and cannot reach the
-                // manager directly.
-                (
-                    update_texture_caps,
-                    sync_texture_blacklist,
-                    poll_textures,
-                    serve_texture_boosts,
-                ),
-                // The same for the mesh store's `GetMesh2` / `GetMesh` cap, plus the
-                // client-side bake inputs (P15.2): keep the wearable-asset store's
-                // `ViewerAsset` cap current, request our own outfit and fetch its
-                // wearable assets, then assemble each bake region's layer list.
-                // Nested into one tuple to stay within Bevy's per-tuple system limit.
-                (
-                    update_mesh_caps,
-                    poll_meshes,
-                    update_asset_caps,
-                    drive_wearable_requests,
-                    poll_wearable_assets,
-                    assemble_own_bake,
-                    // The worn Shape is what says whether the avatar is male,
-                    // which is one of the two facts RLV's debug-setting
-                    // allowlist cannot read out of a settings store.
-                    publish_rlv_avatar_sex,
-                ),
+                texture_store_pipeline(),
+                mesh_and_bake_pipeline(),
                 // Scene re-base on a region change, then fold terrain + object
                 // events. (The purge half of a *distant* teleport is each store's
                 // own `WorldScoped` impl, ordered ahead of this by the
@@ -668,69 +593,7 @@ impl Plugin for ViewerWorldPlugins {
                 // burst's builds spread across frames; `apply_rigged_attachments`
                 // spends from the same pool via its `.after(apply_object_meshes)` edge.
                 (apply_object_meshes, apply_object_sculpts).chain(),
-                // Apply decoded diffuse textures to parked faces, then the PBR (GLTF)
-                // render-material pipeline (P27.1): keep the material store's
-                // `ViewerAsset` cap current, register each newly-spawned face's
-                // material, fold finished material fetches into the face materials, and
-                // drop each decoded texture map into its slot. Nested into one tuple to
-                // stay within Bevy's per-tuple system limit; runs after the
-                // face-spawning systems so a face's PBR material is seen.
-                (
-                    // Amortise face-material re-preps across frames: refill the
-                    // per-frame budget, drape freshly decoded textures (deferring the
-                    // overflow past a decode burst), patch faces parked on an
-                    // already-decoded texture (a build-tool live-preview pre-fetch, then
-                    // a commit re-tessellation) that the decode-event-driven
-                    // `apply_prim_textures` alone would strand, then drain the deferred
-                    // backlog (face drapes, then the lower-priority LOD re-uploads) with
-                    // whatever budget is left. Chained so each drain sees the budget the
-                    // earlier steps spent (see `TextureApplyBudget`).
-                    (
-                        apply_prim_textures,
-                        crate::textures::patch_parked_decoded_textures,
-                        drain_deferred_face_textures,
-                        drain_lod_reuploads,
-                    )
-                        .chain(),
-                    update_material_caps,
-                    register_pbr_materials,
-                    // A render material assigned to an existing prim (build tool /
-                    // in-world retexture) refreshes its holder without re-tessellating
-                    // its faces, so register the change here — `register_pbr_materials`
-                    // only sees freshly-spawned faces.
-                    register_changed_render_materials,
-                    // Phase 3: a render material cleared in-world removes the holder,
-                    // so revert each of its faces to Blinn-Phong / diffuse (and bring
-                    // back their legacy specular / normal, no longer superseded).
-                    revert_removed_render_materials,
-                    poll_materials,
-                    apply_material_overrides,
-                    crate::materials::drive_local_overrides,
-                    apply_pbr_textures,
-                    // FIRE-35138: while the build tool's Texture tab is on the
-                    // Blinn-Phong mode, render each selected linkset's PBR faces as
-                    // Blinn-Phong so they can be judged as edited; restore PBR on
-                    // deselect / PBR tab / leaving build mode.
-                    apply_blinn_phong_hide,
-                    // The legacy (normal/specular) render-material pipeline (P27.3):
-                    // register each face carrying a `TextureEntry` material id, batch
-                    // the `RenderMaterials` cap requests, fold in the replies, and
-                    // apply the materials + their normal maps to the faces.
-                    register_legacy_materials,
-                    drive_legacy_material_requests,
-                    receive_legacy_materials,
-                    apply_legacy_materials,
-                    apply_legacy_normal_maps,
-                    apply_legacy_specular_maps,
-                    // The legacy per-face bump / shiny / glow / fullbright flags
-                    // (P27.4): register each newly-spawned bumped face and, once its
-                    // diffuse texture decodes, generate and assign its normal map
-                    // (fullbright / glow / shiny are folded in at material-build time
-                    // by `face_material`). Runs after the legacy material path so a
-                    // face's real `LLMaterial` normal map takes precedence over bump.
-                    register_bump_faces,
-                    apply_bump_normals,
-                ),
+                face_material_pipeline(),
                 // Avatar placeholder spheres: full-object avatars first, then the
                 // coarse-only ones (which dedupe against the full-object set); then
                 // fold resolved names in and float each name tag over its sphere.
@@ -884,16 +747,238 @@ impl Plugin for ViewerWorldPlugins {
             Update,
             crate::terrain::drive_terrain_lighting.after(world_api::WorldPhase::CameraPositioned),
         );
-        // The EEP settings-asset fetch cap for the World ▸ Environment Modern
-        // presets.
-        app.add_systems(
-            Update,
-            (
-                environment_assets::update_environment_asset_caps,
-                environment_assets::poll_environment_assets,
-            ),
-        );
+        app.add_systems(Update, environment_asset_pipeline());
     }
+}
+
+// ---------------------------------------------------------------------------
+// The world fold's pipelines
+// ---------------------------------------------------------------------------
+//
+// Each of the groups below is a *pipeline*: stage N's output is stage N+1's
+// input, and the prose above each one says so. They used to be scheduled as
+// plain tuples, which states no order at all -- Bevy is then free to run them
+// in any order it likes, and with a multithreaded executor it does. A stage's
+// output was therefore visible to the next stage a nondeterministic one to six
+// frames later, in an order that could differ from frame to frame. See the
+// roadmap task `viewer-audit-system-ordering-claims`.
+//
+// They are functions rather than inline tuples so the order can be *tested*:
+// `ScheduleConfigs` is a value, so a test can put one into a bare `Schedule`,
+// initialize it, and read back the order the executor will actually use. A
+// comment claiming an order cannot be tested; this can.
+
+/// The region-environment (EEP) fold: mirror the settings, restore what this
+/// account saved, request the region's and the agent's parcel's environment,
+/// fold the replies in, layer an experience's `llSetEnvironment` push over
+/// them, resolve the pinned / picked / RLV-queued settings assets, and finally
+/// advance the cross-fade and persist what it settled on.
+///
+/// Chained because every one of those steps reads what the previous one wrote
+/// into [`EnvironmentState`](crate::environment::EnvironmentState): the parcel
+/// track has to precede the request that names the parcel, the experience push
+/// has to land on top of the region reply rather than under it, and the RLV
+/// apply and the persist both have to see the environment this frame settled
+/// on. Unordered, an experience push could sit *under* the region reply that
+/// arrived in the same frame, and the saved personal environment could be a
+/// frame stale.
+fn environment_fold_pipeline() -> ScheduleConfigs<ScheduleSystem> {
+    (
+        // Mirror the manual transition time into the state, and bring back the
+        // personal environment this account saved, before anything can change
+        // either.
+        crate::environment::sync_environment_settings,
+        crate::environment::restore_saved_environment,
+        request_environment,
+        // The parcel the agent stands on, and its own environment (the
+        // reference's ENV_PARCEL). Before the ingest, so a reply that lands this
+        // frame is matched against the parcel the agent is on now.
+        crate::environment::track_agent_parcel,
+        crate::environment::request_parcel_environment,
+        ingest_environment,
+        // An experience's `llSetEnvironment` push, into the layer above the
+        // region's. After the ingest, so a region reply landing this frame is
+        // underneath the push rather than over it.
+        crate::environment::ingest_experience_environment_push,
+        // An experience is admitted per land: ask the region which of the
+        // injecting ones the parcel just stepped onto still allows, and release
+        // the ones it does not. After the push ingest, so a push landing this
+        // frame is in the set the query names.
+        crate::environment::query_parcel_experiences,
+        crate::environment::ingest_parcel_experiences,
+        // Fetch + swap in a pinned Modern (`KNOWN_SKY_*`) sky once its asset
+        // decodes; after `ingest_environment` so the shared environment (the
+        // Modern placeholder) is current.
+        crate::environment::resolve_modern_environment,
+        // Install the settings asset a panel (quick preferences' sky / water /
+        // day-cycle combos) has picked, once its asset decodes.
+        crate::environment::resolve_local_environment_pick,
+        // Install whatever the RLV `@setenv_*` family has queued and republish
+        // the rendered sky for the next `@getenv_*` read. Last of the four so
+        // the sky it publishes is the one this frame settled on.
+        crate::environment::apply_rlv_environment,
+        // Advance whichever manual cross-fade is running, and save the personal
+        // environment whenever it settles on something new. Last, so both see
+        // the frame's final environment.
+        crate::environment::advance_environment_transition,
+        crate::environment::persist_saved_environment,
+    )
+        .chain()
+}
+
+/// The texture store's fetch pipeline: keep the `GetTexture` capability URL
+/// current (and re-issue whatever was parked while it was unknown), mirror the
+/// derender blacklist so a blacklisted asset is refused *before* any fetch,
+/// poll the finished decodes, and drain the [`BoostTexture`] requests raised by
+/// the crates that only show textures and cannot reach the manager directly.
+///
+/// Chained because the cap refresh is what un-parks the requests the poll then
+/// finishes, and because the blacklist mirror is only a filter if it is in place
+/// before the requests go out. Note the consumer edge lives on
+/// [`face_material_pipeline`], which orders itself after this: the decodes this
+/// announces are what it drapes onto faces.
+fn texture_store_pipeline() -> ScheduleConfigs<ScheduleSystem> {
+    (
+        update_texture_caps,
+        sync_texture_blacklist,
+        poll_textures,
+        serve_texture_boosts,
+    )
+        .chain()
+}
+
+/// The mesh store's fetch pipeline and the client-side bake inputs (P15.2):
+/// keep the `GetMesh2` / `GetMesh` cap current and poll the decodes, then keep
+/// the wearable-asset store's `ViewerAsset` cap current, request our own outfit,
+/// fetch its wearable assets, and assemble each bake region's layer list from
+/// them.
+///
+/// Chained for the same reason as [`texture_store_pipeline`] — a cap refresh
+/// un-parks the requests the poll finishes — and because the bake half is a
+/// genuine chain: `assemble_own_bake` builds its layer lists out of exactly the
+/// wearable assets `poll_wearable_assets` has folded in, and
+/// `publish_rlv_avatar_sex` reads the worn Shape that landed with them.
+///
+/// `poll_meshes` is additionally ordered before `apply_object_meshes`, the
+/// consumer of the [`MeshDecoded`] messages it
+/// writes, so a mesh that decodes this frame is built this frame.
+fn mesh_and_bake_pipeline() -> ScheduleConfigs<ScheduleSystem> {
+    (
+        update_mesh_caps,
+        poll_meshes,
+        update_asset_caps,
+        drive_wearable_requests,
+        poll_wearable_assets,
+        assemble_own_bake,
+        // The worn Shape is what says whether the avatar is male, which is one
+        // of the two facts RLV's debug-setting allowlist cannot read out of a
+        // settings store.
+        publish_rlv_avatar_sex,
+    )
+        .chain()
+        .before(apply_object_meshes)
+}
+
+/// Apply decoded diffuse textures to parked faces, then the PBR (GLTF)
+/// render-material pipeline (P27.1), the legacy normal / specular one (P27.3),
+/// and the per-face bump flags (P27.4).
+///
+/// The whole group is one chain because it is one pipeline, stage by stage:
+/// keep the material store's `ViewerAsset` cap current, register each face that
+/// carries a material, fold the finished fetches in, layer the simulator's and
+/// the build tool's overrides on top, and only then drop each decoded texture
+/// map into its slot. Running `poll_materials` before `update_material_caps`,
+/// or `apply_pbr_textures` before the override that decides which map belongs
+/// in the slot, does not lose the work — it defers it to some later frame, in
+/// an order that can differ from one frame to the next.
+///
+/// The three sub-pipelines are ordered against each other too, and that is not
+/// incidental: `revert_removed_render_materials` brings a face's legacy
+/// specular / normal back when its PBR material is cleared, and the bump pass
+/// runs last so a face's real `LLMaterial` normal map takes precedence over a
+/// generated bump map.
+///
+/// The group's external edges are the two its prose always claimed: after
+/// [`texture_store_pipeline`], whose decodes it drapes, and after the
+/// face-spawning systems, so a face's material is registered in the frame the
+/// face appears rather than the frame after.
+fn face_material_pipeline() -> ScheduleConfigs<ScheduleSystem> {
+    (
+        // Amortise face-material re-preps across frames: refill the per-frame
+        // budget, drape freshly decoded textures (deferring the overflow past a
+        // decode burst), patch faces parked on an already-decoded texture (a
+        // build-tool live-preview pre-fetch, then a commit re-tessellation) that
+        // the decode-event-driven `apply_prim_textures` alone would strand, then
+        // drain the deferred backlog (face drapes, then the lower-priority LOD
+        // re-uploads) with whatever budget is left. Chained so each drain sees
+        // the budget the earlier steps spent (see `TextureApplyBudget`).
+        (
+            apply_prim_textures,
+            crate::textures::patch_parked_decoded_textures,
+            drain_deferred_face_textures,
+            drain_lod_reuploads,
+        )
+            .chain(),
+        (
+            update_material_caps,
+            register_pbr_materials,
+            // A render material assigned to an existing prim (build tool /
+            // in-world retexture) refreshes its holder without re-tessellating
+            // its faces, so register the change here — `register_pbr_materials`
+            // only sees freshly-spawned faces.
+            register_changed_render_materials,
+            // Phase 3: a render material cleared in-world removes the holder, so
+            // revert each of its faces to Blinn-Phong / diffuse (and bring back
+            // their legacy specular / normal, no longer superseded).
+            revert_removed_render_materials,
+            poll_materials,
+            apply_material_overrides,
+            crate::materials::drive_local_overrides,
+            apply_pbr_textures,
+            // FIRE-35138: while the build tool's Texture tab is on the
+            // Blinn-Phong mode, render each selected linkset's PBR faces as
+            // Blinn-Phong so they can be judged as edited; restore PBR on
+            // deselect / PBR tab / leaving build mode.
+            apply_blinn_phong_hide,
+        )
+            .chain(),
+        (
+            // The legacy (normal/specular) render-material pipeline (P27.3):
+            // register each face carrying a `TextureEntry` material id, batch the
+            // `RenderMaterials` cap requests, fold in the replies, and apply the
+            // materials + their normal maps to the faces.
+            register_legacy_materials,
+            drive_legacy_material_requests,
+            receive_legacy_materials,
+            apply_legacy_materials,
+            apply_legacy_normal_maps,
+            apply_legacy_specular_maps,
+            // The legacy per-face bump / shiny / glow / fullbright flags (P27.4):
+            // register each newly-spawned bumped face and, once its diffuse
+            // texture decodes, generate and assign its normal map (fullbright /
+            // glow / shiny are folded in at material-build time by
+            // `face_material`). Runs after the legacy material path so a face's
+            // real `LLMaterial` normal map takes precedence over bump.
+            register_bump_faces,
+            apply_bump_normals,
+        )
+            .chain(),
+    )
+        .chain()
+        .after(poll_textures)
+        .after(world_api::WorldPhase::ObjectsUpdated)
+        .after(apply_object_meshes)
+}
+
+/// The EEP settings-asset fetch for the World ▸ Environment Modern presets:
+/// keep the `ViewerAsset` capability URL current, then poll the fetches it
+/// un-parked. Chained for the same reason as the two stores above.
+fn environment_asset_pipeline() -> ScheduleConfigs<ScheduleSystem> {
+    (
+        environment_assets::update_environment_asset_caps,
+        environment_assets::poll_environment_assets,
+    )
+        .chain()
 }
 
 /// The build tools: the Build Tools floater and its tabs, the editors they
@@ -964,5 +1049,289 @@ impl Plugin for ViewerEditPlugins {
         // Object-edit undo / redo (viewer-build-undo-redo): Ctrl+Z / Ctrl+Y and
         // the Build menu, sending the server-side Undo / Redo for the selection.
         app.add_plugins(crate::edit_undo::EditUndoPlugin);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use core::any::TypeId;
+    use std::collections::{HashMap, HashSet};
+
+    use bevy::ecs::schedule::{NodeId, ScheduleGraph, SystemKey};
+
+    /// One stage of a pipeline: the name to report it by, and the type the
+    /// scheduler knows it as.
+    ///
+    /// The identity has to be the system's type rather than its name because
+    /// [`System::name`] is only a real name with Bevy's `debug` feature, which
+    /// this workspace does not enable — without it every system in a schedule
+    /// answers "Enable the debug feature to see the name".
+    struct Stage {
+        /// What to call the stage when an assertion about it fails.
+        name: &'static str,
+        /// The concrete system type Bevy boxed the function into.
+        system_type: TypeId,
+    }
+
+    /// Name a pipeline stage by its system function.
+    macro_rules! stage {
+        ($system:path) => {
+            Stage {
+                name: stringify!($system),
+                system_type: system_type($system),
+            }
+        };
+    }
+
+    /// The type Bevy will know `system` by once it is boxed into a schedule.
+    fn system_type<M, S: IntoSystem<(), (), M>>(system: S) -> TypeId {
+        System::system_type(&IntoSystem::into_system(system))
+    }
+
+    /// A built world-fold schedule, reduced to what an ordering assertion needs.
+    ///
+    /// Testing the *order the systems are stored in* would prove nothing: the
+    /// multithreaded executor runs whatever its dependencies allow, whenever
+    /// they allow it, so an unordered pair that happens to be stored in the
+    /// right sequence is still free to run in either. What is under test is
+    /// therefore the ordering **edges**, and that they reach from each stage to
+    /// the next.
+    struct WorldFold {
+        /// Each system in the schedule, by the type it was boxed from.
+        keys: HashMap<TypeId, SystemKey>,
+        /// For each system, the systems it is ordered ahead of.
+        before: HashMap<SystemKey, Vec<SystemKey>>,
+    }
+
+    impl WorldFold {
+        /// Build the world fold's pipelines into a schedule and flatten what it
+        /// orders.
+        ///
+        /// The object-fold systems the pipelines order themselves against are
+        /// registered too, in the shape [`ViewerWorldPlugins`] gives them: those
+        /// edges are half of what is under test, and an edge naming a system
+        /// that is not in the schedule constrains nothing.
+        fn build() -> Self {
+            let mut world = World::new();
+            let mut schedule = Schedule::default();
+            schedule.add_systems((
+                environment_fold_pipeline(),
+                texture_store_pipeline(),
+                mesh_and_bake_pipeline(),
+                face_material_pipeline(),
+                environment_asset_pipeline(),
+                (apply_object_meshes, apply_object_sculpts).chain(),
+                (recenter_objects, update_objects)
+                    .chain()
+                    .in_set(world_api::WorldPhase::ObjectsUpdated),
+            ));
+            let failure = schedule.initialize(&mut world).err();
+            assert!(
+                failure.is_none(),
+                "the world fold's schedule builds: {failure:?}"
+            );
+            let systems = schedule.systems();
+            assert!(
+                systems.is_ok(),
+                "an initialized schedule reports its systems"
+            );
+            let keys = systems
+                .into_iter()
+                .flatten()
+                .map(|(key, system)| (System::system_type(&**system), key))
+                .collect();
+            Self {
+                keys,
+                before: before_edges(schedule.graph()),
+            }
+        }
+
+        /// The schedule's key for `stage`, if it is in the schedule at all.
+        fn key(&self, stage: &Stage) -> Option<SystemKey> {
+            self.keys.get(&stage.system_type).copied()
+        }
+
+        /// Whether the schedule's ordering edges reach `later` from `earlier`.
+        fn orders(&self, earlier: SystemKey, later: SystemKey) -> bool {
+            let mut seen: HashSet<SystemKey> = HashSet::new();
+            let mut pending = vec![earlier];
+            while let Some(key) = pending.pop() {
+                for &next in self.before.get(&key).into_iter().flatten() {
+                    if next == later {
+                        return true;
+                    }
+                    if seen.insert(next) {
+                        pending.push(next);
+                    }
+                }
+            }
+            false
+        }
+
+        /// Assert the schedule orders `stages` one after another, each stage
+        /// after the one before it.
+        #[track_caller]
+        fn assert_pipeline(&self, stages: &[Stage]) {
+            let mut previous: Option<(SystemKey, &Stage)> = None;
+            for stage in stages {
+                let key = self.key(stage);
+                assert!(
+                    key.is_some(),
+                    "{} is not in the schedule at all",
+                    stage.name
+                );
+                if let (Some((earlier_key, earlier)), Some(key)) = (previous, key) {
+                    assert!(
+                        self.orders(earlier_key, key),
+                        "nothing orders {} before {}, so the scheduler may run them in \
+                         either order",
+                        earlier.name,
+                        stage.name
+                    );
+                }
+                if let Some(key) = key {
+                    previous = Some((key, stage));
+                }
+            }
+        }
+    }
+
+    /// The "runs before" relation the scheduler will enforce, from each system
+    /// to the systems it is ordered ahead of.
+    ///
+    /// Bevy states ordering between *nodes*, and a node can be a set standing
+    /// for any number of systems, so an edge only constrains real systems once
+    /// both of its ends are expanded through the hierarchy — which is what the
+    /// schedule builder does before it sorts.
+    fn before_edges(graph: &ScheduleGraph) -> HashMap<SystemKey, Vec<SystemKey>> {
+        let mut edges: HashMap<SystemKey, Vec<SystemKey>> = HashMap::new();
+        for (from, to) in graph.dependency().graph().all_edges() {
+            let mut earlier = Vec::new();
+            systems_under(graph, from, &mut earlier);
+            let mut later = Vec::new();
+            systems_under(graph, to, &mut later);
+            for key in earlier {
+                edges.entry(key).or_default().extend(later.iter().copied());
+            }
+        }
+        edges
+    }
+
+    /// Collect every system `node` stands for: itself, or — for a set —
+    /// everything anywhere beneath it in the hierarchy.
+    fn systems_under(graph: &ScheduleGraph, node: NodeId, into: &mut Vec<SystemKey>) {
+        match node {
+            NodeId::System(key) => into.push(key),
+            NodeId::Set(_) => {
+                for child in graph.hierarchy().graph().neighbors(node) {
+                    systems_under(graph, child, into);
+                }
+            }
+        }
+    }
+
+    /// The texture store keeps its cap current and mirrors the blacklist before
+    /// it polls, so a fetch that starts this frame starts against the current
+    /// cap and a blacklisted asset is refused before it is ever requested.
+    #[test]
+    fn texture_store_runs_as_a_pipeline() {
+        WorldFold::build().assert_pipeline(&[
+            stage!(update_texture_caps),
+            stage!(sync_texture_blacklist),
+            stage!(poll_textures),
+            stage!(serve_texture_boosts),
+        ]);
+    }
+
+    /// The mesh store and the bake inputs are one chain, and the decodes it
+    /// announces reach `apply_object_meshes` in the frame they land.
+    #[test]
+    fn mesh_and_bake_run_as_a_pipeline() {
+        WorldFold::build().assert_pipeline(&[
+            stage!(update_mesh_caps),
+            stage!(poll_meshes),
+            stage!(update_asset_caps),
+            stage!(drive_wearable_requests),
+            stage!(poll_wearable_assets),
+            stage!(assemble_own_bake),
+            stage!(publish_rlv_avatar_sex),
+            stage!(apply_object_meshes),
+        ]);
+    }
+
+    /// The face-material group is one pipeline end to end: diffuse drapes, then
+    /// PBR, then the legacy normal / specular path, then bump — so a face's real
+    /// `LLMaterial` normal map still beats a generated bump map.
+    #[test]
+    fn face_materials_run_as_a_pipeline() {
+        WorldFold::build().assert_pipeline(&[
+            stage!(apply_prim_textures),
+            stage!(crate::textures::patch_parked_decoded_textures),
+            stage!(drain_deferred_face_textures),
+            stage!(drain_lod_reuploads),
+            stage!(update_material_caps),
+            stage!(register_pbr_materials),
+            stage!(register_changed_render_materials),
+            stage!(revert_removed_render_materials),
+            stage!(poll_materials),
+            stage!(apply_material_overrides),
+            stage!(crate::materials::drive_local_overrides),
+            stage!(apply_pbr_textures),
+            stage!(apply_blinn_phong_hide),
+            stage!(register_legacy_materials),
+            stage!(drive_legacy_material_requests),
+            stage!(receive_legacy_materials),
+            stage!(apply_legacy_materials),
+            stage!(apply_legacy_normal_maps),
+            stage!(apply_legacy_specular_maps),
+            stage!(register_bump_faces),
+            stage!(apply_bump_normals),
+        ]);
+    }
+
+    /// The face-material group's external edges: it drapes the decodes
+    /// `poll_textures` announced this frame, onto the faces the object fold and
+    /// the mesh build spawned this frame — not next frame's.
+    #[test]
+    fn face_materials_run_after_their_inputs() {
+        let fold = WorldFold::build();
+        fold.assert_pipeline(&[stage!(poll_textures), stage!(apply_prim_textures)]);
+        fold.assert_pipeline(&[stage!(update_objects), stage!(apply_prim_textures)]);
+        fold.assert_pipeline(&[stage!(apply_object_meshes), stage!(apply_prim_textures)]);
+    }
+
+    /// The environment fold settles in one frame: the parcel is tracked before
+    /// the request that names it, an experience's push lands on top of the
+    /// region reply rather than under it, and the cross-fade and the persist
+    /// both see what the frame settled on.
+    #[test]
+    fn environment_fold_runs_as_a_pipeline() {
+        WorldFold::build().assert_pipeline(&[
+            stage!(crate::environment::sync_environment_settings),
+            stage!(crate::environment::restore_saved_environment),
+            stage!(request_environment),
+            stage!(crate::environment::track_agent_parcel),
+            stage!(crate::environment::request_parcel_environment),
+            stage!(ingest_environment),
+            stage!(crate::environment::ingest_experience_environment_push),
+            stage!(crate::environment::query_parcel_experiences),
+            stage!(crate::environment::ingest_parcel_experiences),
+            stage!(crate::environment::resolve_modern_environment),
+            stage!(crate::environment::resolve_local_environment_pick),
+            stage!(crate::environment::apply_rlv_environment),
+            stage!(crate::environment::advance_environment_transition),
+            stage!(crate::environment::persist_saved_environment),
+        ]);
+    }
+
+    /// The settings-asset store polls against the cap it just refreshed.
+    #[test]
+    fn environment_assets_run_as_a_pipeline() {
+        WorldFold::build().assert_pipeline(&[
+            stage!(environment_assets::update_environment_asset_caps),
+            stage!(environment_assets::poll_environment_assets),
+        ]);
     }
 }
