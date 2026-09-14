@@ -3805,6 +3805,9 @@ preferences-row-media-autoplay = Auto-play media on objects
 preferences-section-audio-device = Output device
 preferences-row-output-device = Output device
 preferences-audio-device-default = System default
+# Shown under the output-device combo when the chosen device could not be
+# opened: the choice is kept (and retried), but it is not what is playing.
+preferences-audio-device-unavailable = That device is not available right now, so sound is playing on the system default. Your choice is kept and will be used again as soon as the device comes back.
 # The alerts tab (viewer-preferences-alerts-tab): headline toggles, then the
 # per-notification popup list.
 preferences-section-alert-headlines = Notices

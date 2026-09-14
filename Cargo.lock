@@ -9180,6 +9180,7 @@ dependencies = [
  "sl-viewer-ui-widgets",
  "sl-viewer-world-api",
  "url",
+ "uuid",
 ]
 
 [[package]]

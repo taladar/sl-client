@@ -5707,6 +5707,22 @@ impl ObjectState {
         self.objects.get(scoped).map(|tracked| tracked.full_key)
     }
 
+    /// The **owner** and full [`ObjectKey`] of a tracked object, looked up by
+    /// its region-scoped id — the two ids a mute entry can name. In-world
+    /// collision sounds (`viewer-in-world-sounds`) resolve both in one lookup so
+    /// a collision is tested against the same owner-or-object mute predicate the
+    /// trigger and attached-sound paths use; they live on the same tracked
+    /// object, so either both are known or neither is.
+    #[must_use]
+    pub fn owner_and_key_by_scoped(
+        &self,
+        scoped: &ScopedObjectId,
+    ) -> Option<(AgentKey, ObjectKey)> {
+        self.objects
+            .get(scoped)
+            .map(|tracked| (tracked.owner_id, tracked.full_key))
+    }
+
     /// The entity of the object with region-scoped id `scoped`, or [`None`] if
     /// this viewer does not track it. Used by the object-selection core
     /// (`viewer-object-selection-core`) to resolve a simulator-forced selection

@@ -31,6 +31,7 @@ sl-viewer-ui-core = { workspace = true }
 sl-viewer-ui-widgets = { workspace = true }
 sl-viewer-world-api = { workspace = true }
 url = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

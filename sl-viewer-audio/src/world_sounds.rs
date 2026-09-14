@@ -35,7 +35,11 @@
 //! has to cap voices itself.
 //!
 //! Muting is honoured up front: a sound whose owner **or** object is on the mute
-//! list ([`MuteModel`]) is never started.
+//! list ([`MuteModel`]) is never started. Every sound path — trigger, attached
+//! and synthesized collision — goes through the one `muted` predicate, so the
+//! per-entry **object-sounds exception** (the reference's
+//! `LLMute::flagObjectSounds`: a mute whose "Block Object Sounds" toggle is off
+//! still lets that source be heard) applies uniformly.
 //!
 //! **Parcel-local sound** (`SOUND_LOCAL`) is honoured through
 //! `ParcelAudibility`, the reference viewer's `LLViewerParcelMgr::canHearSound`
@@ -64,8 +68,8 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use sl_audio::{AudioMixer as _, Bus, Importance, Mixer, SpatialParams, VoiceId};
 use sl_client_bevy::{
-    AssetKey, MuteFlags, ObjectKey, ParcelFlags, RegionHandle, SlAgentParcel, SlEvent, SlIdentity,
-    SlParcelOverlay, SlSessionEvent, Uuid,
+    AgentKey, AssetKey, MuteFlags, ObjectKey, ParcelFlags, RegionHandle, SlAgentParcel, SlEvent,
+    SlIdentity, SlParcelOverlay, SlSessionEvent, Uuid,
 };
 
 use crate::coords::{bevy_to_sl_vec, region_offset_bevy, sl_to_bevy_vec};
@@ -655,6 +659,17 @@ fn muted(mutes: &MuteModel, owner: Uuid, object: Uuid) -> bool {
         || mutes.is_muted_aspect(object, MuteFlags::ALLOW_OBJECT_SOUNDS)
 }
 
+/// Whether a synthesized collision sound between two prims is muted: [`muted`]
+/// applied to each side's (owner, object) pair, so a collision obeys exactly the
+/// mute rule — object-sounds exception included — that a trigger or an attached
+/// sound from the same object obeys. An untracked side (no ids resolved) mutes
+/// nothing: it is not on any list we can check.
+fn collision_muted(mutes: &MuteModel, pair: [Option<(AgentKey, ObjectKey)>; 2]) -> bool {
+    pair.into_iter()
+        .flatten()
+        .any(|(owner, object)| muted(mutes, owner.uuid(), object.uuid()))
+}
+
 /// The minimum time (seconds) between collision sounds for the same pair of
 /// objects, so a jittering resting contact does not machine-gun.
 const COLLISION_COOLDOWN_SECONDS: f32 = 0.15;
@@ -664,23 +679,33 @@ const COLLISION_COOLDOWN_SECONDS: f32 = 0.15;
 /// (server-driven), so there is no reliable contact velocity to scale by.
 const COLLISION_GAIN: f32 = 1.0;
 
+/// The material byte (`LL_MCODE_*`) a collision falls back to when the object
+/// is not tracked, so its real material cannot be read: `LL_MCODE_WOOD`, the
+/// material a new prim is created with.
+const DEFAULT_COLLISION_MATERIAL: u8 = 3;
+
 /// The reference viewer's default **same-material** collision sound for a prim of
 /// material byte `material` (`LL_MCODE_*`), from Firestorm's `sound_ids.cpp`.
-/// `LIGHT` (7) and anything unrecognised map to plastic, as the reference does.
+/// `LIGHT` (7) and any byte outside the table map to plastic, as the reference
+/// does. (An *untracked object* is a different case: it has no material byte to
+/// look up at all, and falls back to [`DEFAULT_COLLISION_MATERIAL`] — wood.)
 ///
 /// This is a deliberate reduction of the reference's full material-**pair**
 /// matrix to the primary object's own material, which covers the common
 /// like-on-like case (wood on wood, stone on stone) and keeps the table small;
 /// the cross-material entries are a known simplification.
-const fn collision_sound_str(material: u8) -> &'static str {
+///
+/// A const table of parsed [`Uuid`]s rather than strings: a collision edge must
+/// not pay for `Uuid::parse_str` (and cannot fail it).
+const fn collision_sound(material: u8) -> Uuid {
     match material {
-        0 => "9538f37c-456e-4047-81be-6435045608d4", // stone
-        1 => "9e5c1297-6eed-40c0-825a-d9bcd86e3193", // metal
-        2 => "6a45ba0b-5775-4ea8-8513-26008a17f873", // glass
-        3 => "063c97d3-033a-4e9b-98d8-05c8074922cb", // wood
-        4 => "dce5fdd4-afe4-4ea1-822f-dd52cac46b08", // flesh
-        6 => "153c8bf7-fb89-4d89-b263-47e58b1b4774", // rubber
-        _ => "0e24a717-b97e-4b77-9c94-b59a5a88b2da", // plastic / light / unknown
+        0 => uuid::uuid!("9538f37c-456e-4047-81be-6435045608d4"), // stone
+        1 => uuid::uuid!("9e5c1297-6eed-40c0-825a-d9bcd86e3193"), // metal
+        2 => uuid::uuid!("6a45ba0b-5775-4ea8-8513-26008a17f873"), // glass
+        3 => uuid::uuid!("063c97d3-033a-4e9b-98d8-05c8074922cb"), // wood
+        4 => uuid::uuid!("dce5fdd4-afe4-4ea1-822f-dd52cac46b08"), // flesh
+        6 => uuid::uuid!("153c8bf7-fb89-4d89-b263-47e58b1b4774"), // rubber
+        _ => uuid::uuid!("0e24a717-b97e-4b77-9c94-b59a5a88b2da"), // plastic / light / unknown
     }
 }
 
@@ -742,26 +767,31 @@ pub(crate) fn ingest_collisions(
         else {
             continue;
         };
-        // Mute: skip if either object is on the mute list.
-        let muted_pair = [object1, object2].iter().any(|object| {
-            state
-                .full_key(&object.scoped_id)
-                .is_some_and(|key| mutes.is_muted(key.uuid()))
-        });
-        if muted_pair {
+        // Mute: skip if either object is on the mute list — through the same
+        // `muted` predicate the trigger and attached-sound paths use, so a mute
+        // entry that *allows* object sounds does not silence that object's
+        // collisions either.
+        if collision_muted(
+            &mutes,
+            [
+                state.owner_and_key_by_scoped(&object1.scoped_id),
+                state.owner_and_key_by_scoped(&object2.scoped_id),
+            ],
+        ) {
             continue;
         }
         // Parcel-local clamp at the contact point.
         if !scene_audible(&parcel, &state, point) {
             continue;
         }
-        // Primary object's material default sound (unknown → wood, as the
-        // reference maps an unrecognised mcode).
-        let material = state.material_by_scoped(&object1.scoped_id).unwrap_or(3);
-        let Ok(uuid) = Uuid::parse_str(collision_sound_str(material)) else {
-            continue;
-        };
-        let sound = AssetKey::from(uuid);
+        // Primary object's material default sound. An object we do not track has
+        // no material byte to read, so it falls back to wood — the material a
+        // prim is created with; an *unrecognised* byte maps to plastic inside
+        // `collision_sound`, as the reference does.
+        let material = state
+            .material_by_scoped(&object1.scoped_id)
+            .unwrap_or(DEFAULT_COLLISION_MATERIAL);
+        let sound = AssetKey::from(collision_sound(material));
         cache.request(sound);
         let _previous = sounds.collision_cooldowns.insert(key, now);
         sounds.pending_oneshots.push(PendingOneShot {
@@ -833,7 +863,7 @@ fn collision_sounds_enabled(settings: Option<&ViewerSettings>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pretty_assertions::assert_eq;
+    use pretty_assertions::{assert_eq, assert_ne};
     use sl_audio::MixerConfig;
 
     /// The error a test bubbles a missing fixture entry out through.
@@ -890,6 +920,67 @@ mod tests {
         assert!(!muted(&mutes, owner, object), "object-sounds exception");
     }
 
+    /// A collision is muted by the *same* predicate a trigger or attached sound
+    /// is: either side's owner-or-object mute silences it, and a mute entry that
+    /// **allows** object sounds silences neither. (Before the fix the collision
+    /// path used a bare `is_muted`, which ignored that exception and silenced an
+    /// object whose sounds the user had chosen to keep hearing.) An untracked
+    /// side contributes nothing.
+    #[test]
+    fn collision_mute_honours_the_object_sounds_exception() {
+        /// A mute of `id` carrying `flags`.
+        fn entry(id: Uuid, flags: MuteFlags) -> sl_client_bevy::MuteEntry {
+            sl_client_bevy::MuteEntry {
+                id,
+                name: String::new(),
+                mute_type: sl_client_bevy::MuteType::Object,
+                flags,
+            }
+        }
+
+        let owner = AgentKey::from(Uuid::from_u128(1));
+        let object = ObjectKey::from(Uuid::from_u128(2));
+        let other_owner = AgentKey::from(Uuid::from_u128(3));
+        let other_object = ObjectKey::from(Uuid::from_u128(4));
+        let side = Some((owner, object));
+        let other_side = Some((other_owner, other_object));
+
+        let mut mutes = MuteModel::default();
+        assert!(
+            !collision_muted(&mutes, [side, other_side]),
+            "nothing muted"
+        );
+        assert!(!collision_muted(&mutes, [None, None]), "untracked pair");
+
+        // A blanket mute of the *second* object still silences the pair.
+        mutes.note_mute(entry(other_object.uuid(), MuteFlags::default()));
+        assert!(
+            collision_muted(&mutes, [side, other_side]),
+            "either side's mute silences the collision"
+        );
+        assert!(
+            !collision_muted(&mutes, [side, None]),
+            "an untracked side is not muted by the other's entry"
+        );
+
+        // The same entry with the object-sounds exception lets it be heard again.
+        mutes.note_mute(entry(
+            other_object.uuid(),
+            MuteFlags(MuteFlags::ALLOW_OBJECT_SOUNDS),
+        ));
+        assert!(
+            !collision_muted(&mutes, [side, other_side]),
+            "the object-sounds exception un-mutes the collision too"
+        );
+
+        // The mute may equally name the owner rather than the object.
+        mutes.note_mute(entry(owner.uuid(), MuteFlags::default()));
+        assert!(
+            collision_muted(&mutes, [side, other_side]),
+            "an owner mute silences that owner's collisions"
+        );
+    }
+
     /// `realize_oneshots` drops a one-shot older than the cutoff (its moment has
     /// passed) and keeps a fresh one still waiting on its clip. Without a device
     /// the mixer plays nothing, so this exercises the drop / keep partition.
@@ -921,18 +1012,32 @@ mod tests {
         );
     }
 
-    /// Every material byte maps to a parseable default collision-sound UUID, with
-    /// LIGHT (7) and unknown codes sharing plastic's sound (as the reference does).
+    /// Every material byte maps to a non-nil default collision-sound UUID, the
+    /// six named materials are all distinct, and LIGHT (7) / unknown codes share
+    /// plastic's sound (as the reference does). An untracked object — no material
+    /// byte at all — falls back to wood, not to the unknown-byte plastic.
     #[test]
     fn collision_sound_table() {
-        for material in 0u8..=8 {
-            assert!(
-                Uuid::parse_str(collision_sound_str(material)).is_ok(),
-                "material {material} has a parseable collision sound"
-            );
+        let mut seen = HashSet::new();
+        for material in [0u8, 1, 2, 3, 4, 5, 6] {
+            let sound = collision_sound(material);
+            assert!(!sound.is_nil(), "material {material} has a collision sound");
+            assert!(seen.insert(sound), "material {material} has its own sound");
         }
-        assert_eq!(collision_sound_str(7), collision_sound_str(5));
-        assert_eq!(collision_sound_str(99), collision_sound_str(5));
+        assert_eq!(collision_sound(7), collision_sound(5), "LIGHT is plastic");
+        assert_eq!(
+            collision_sound(99),
+            collision_sound(5),
+            "unknown is plastic"
+        );
+        // The two "we do not know" cases are deliberately different: an
+        // unrecognised *byte* is the reference's plastic, an untracked *object*
+        // (no byte at all) is wood, the material a prim is created with.
+        assert_ne!(
+            collision_sound(DEFAULT_COLLISION_MATERIAL),
+            collision_sound(99),
+            "an untracked object is wood, not the unknown-byte plastic"
+        );
     }
 
     /// The parcel-local (`SOUND_LOCAL`) audibility rule: own parcel is always
@@ -940,14 +1045,31 @@ mod tests {
     /// source parcel is not heard from outside; anything else is audible.
     #[test]
     fn parcel_local_audibility_rule() {
-        // In the agent's own parcel: always heard, regardless of flags.
-        assert!(audible_from_flags(true, true, true));
-        // Outside, agent parcel is sound-local: nothing external is heard.
-        assert!(!audible_from_flags(false, true, false));
-        // Outside, source parcel is sound-local: not heard.
-        assert!(!audible_from_flags(false, false, true));
-        // Outside, neither is sound-local: heard.
-        assert!(audible_from_flags(false, false, false));
+        // The whole three-boolean truth table
+        // (in_agent_parcel, agent_parcel_sound_local, source_sound_local).
+        let table = [
+            // In the agent's own parcel: always heard, whatever the flags say.
+            ((true, false, false), true),
+            ((true, false, true), true),
+            ((true, true, false), true),
+            ((true, true, true), true),
+            // Outside, neither is sound-local: heard.
+            ((false, false, false), true),
+            // Outside, the source parcel is sound-local: not heard.
+            ((false, false, true), false),
+            // Outside, the agent's parcel is sound-local: nothing external is
+            // heard, whatever the source parcel says.
+            ((false, true, false), false),
+            ((false, true, true), false),
+        ];
+        for ((own, agent_local, source_local), expected) in table {
+            assert_eq!(
+                audible_from_flags(own, agent_local, source_local),
+                expected,
+                "in_agent_parcel={own} agent_sound_local={agent_local} \
+                 source_sound_local={source_local}"
+            );
+        }
     }
 
     /// A different sound on the same object replaces the entry, and the old entry

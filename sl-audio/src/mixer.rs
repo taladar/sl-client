@@ -363,12 +363,23 @@ impl Mixer {
 
     /// Open the output device and start audio processing.
     ///
+    /// A [`DeviceSelection::Named`] device that the host does not enumerate is
+    /// an **error**, not a quiet fall back to the default. cpal takes "no device
+    /// id" to mean "the system default", so resolving a missing name to `None`
+    /// would open the default and report success — leaving the caller (and
+    /// through it the user) believing the named device is the one playing. Ask
+    /// for [`DeviceSelection::Default`] to get the default.
+    ///
     /// # Errors
-    /// Returns [`AudioError::Stream`] if the device could not be opened.
+    /// Returns [`AudioError::NoDevice`] if a named device is not among
+    /// [`Mixer::output_devices`], or [`AudioError::Stream`] if the device is
+    /// there but could not be opened.
     pub fn start(&mut self, device: &DeviceSelection) -> Result<(), AudioError> {
         let device_id = match device {
             DeviceSelection::Default => None,
-            DeviceSelection::Named(name) => Self::find_output_device(name),
+            DeviceSelection::Named(name) => Some(
+                Self::find_output_device(name).ok_or_else(|| AudioError::NoDevice(name.clone()))?,
+            ),
         };
         let cpal_config = CpalConfig {
             output: CpalOutputConfig {
@@ -954,6 +965,26 @@ mod tests {
         for bus in Bus::ALL {
             assert!(mixer.bus_node_id(bus).is_some(), "bus {bus:?} present");
         }
+    }
+
+    /// A named device the host does not have is refused rather than quietly
+    /// opening the system default: cpal reads "no device id" as "the default",
+    /// so mapping a missing name to `None` would report success on a device the
+    /// caller never asked for, and every layer above would go on saying the
+    /// named one was playing. The name below cannot be a real device, and the
+    /// check happens before any stream is opened, so this touches no hardware.
+    #[test]
+    fn a_named_device_that_is_not_there_is_an_error() {
+        let Ok(mut mixer) = Mixer::new(&MixerConfig::default()) else {
+            unreachable!("graph builds without a device")
+        };
+        let name = "sl-audio test: no such output device \u{1f50a}";
+        let started = mixer.start(&DeviceSelection::Named(name.to_owned()));
+        assert!(
+            matches!(started, Err(AudioError::NoDevice(ref got)) if got == name),
+            "an absent named device is NoDevice, got {started:?}"
+        );
+        assert!(!mixer.is_started(), "and nothing was opened in its place");
     }
 
     #[test]

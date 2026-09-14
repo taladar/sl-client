@@ -88,6 +88,14 @@ const SECTION_COLOR: Color = Color::srgb(0.75, 0.80, 0.88);
 /// The muted tone for a filtered-empty tab's label (and the search glyphs).
 const MUTED_COLOR: Color = Color::srgb(0.55, 0.60, 0.68);
 
+/// A note's colour — the warm accent a filter hit uses, because a note is shown
+/// exactly when something wants the reader's eye.
+const NOTE_COLOR: Color = Color::srgb(0.98, 0.82, 0.40);
+
+/// A note's maximum width, in logical pixels: prose wraps rather than stretching
+/// the tab's content column to the width of a sentence.
+const NOTE_MAX_WIDTH: f32 = 420.0;
+
 /// A filter-matched row label's highlight — the same warm accent
 /// [`crate::menu`] paints its menu-search hits with.
 const FILTER_MATCH_COLOR: Color = Color::srgb(0.98, 0.82, 0.40);
@@ -593,6 +601,38 @@ pub(crate) fn spawn_pref_section(commands: &mut Commands, parent: Entity, key: &
         Name::new(format!("preferences:section:{key}")),
         ChildOf(parent),
     ));
+}
+
+/// Spawn a **note** under the row above it: a translated line of prose a tab
+/// shows when it has something to say about the state of a control — a device
+/// the preference names but that is not actually in use, say. Returns the text
+/// entity, so the tab can drive its `Node.display` (a note is usually hidden
+/// until it applies).
+///
+/// Deliberately *not* a [`PrefSearchRow`]: like a section heading, a note
+/// annotates the rows around it rather than being a row of its own, so the
+/// search filter leaves it alone.
+pub(crate) fn spawn_pref_note(
+    commands: &mut Commands,
+    parent: Entity,
+    key: &'static str,
+    shown: bool,
+) -> Entity {
+    commands
+        .spawn((
+            Node {
+                display: if shown { Display::Flex } else { Display::None },
+                max_width: Val::Px(NOTE_MAX_WIDTH),
+                ..default()
+            },
+            Text::default(),
+            Translated::new(key),
+            UiFont::Sans.at(FONT),
+            TextColor(NOTE_COLOR),
+            Name::new(format!("preferences:note:{key}")),
+            ChildOf(parent),
+        ))
+        .id()
 }
 
 // ---------------------------------------------------------------------------

@@ -29,6 +29,16 @@
 //!   are re-created, the buses keep their levels); a name that fails to open
 //!   falls back to the system default explicitly, since the mixer's own
 //!   automatic fallback only covers a *running* device disappearing.
+//!
+//!   The fallback does not rewrite the setting — an unplugged headset is
+//!   expected back, and silently demoting the user's choice to "system
+//!   default" would lose it. Instead the discrepancy is published as
+//!   [`OutputDeviceStatus`] (what was asked for, and whether it is actually
+//!   playing), which the preferences audio tab surfaces rather than showing the
+//!   preference as though it were the truth, and the named device is retried
+//!   every five seconds — only once it is enumerable again, so a
+//!   device that comes back is picked up without a restart and one that does
+//!   not costs a host enumeration rather than a failed stream open.
 
 use bevy::prelude::*;
 
@@ -94,7 +104,8 @@ impl Plugin for AudioPlugin {
                 warn!("audio mixer could not be created ({e}); running without audio");
             }
         }
-        app.add_systems(Last, (apply_output_device, drive_audio).chain());
+        app.init_resource::<OutputDeviceStatus>()
+            .add_systems(Last, (apply_output_device, drive_audio).chain());
     }
 }
 
@@ -188,6 +199,39 @@ fn drive_audio(
     mixer.update();
 }
 
+/// How often a named output device that failed to open is looked for again
+/// (seconds). Enumeration opens the audio host, so this is not a per-frame
+/// thing; it only runs at all while a device is known to be unavailable.
+const DEVICE_RETRY_SECONDS: f32 = 5.0;
+
+/// What the audio output is **actually** on, as against what
+/// [`SETTING_OUTPUT_DEVICE`] asks for. The setting is the user's preference and
+/// is never rewritten behind their back — an unplugged device is expected back —
+/// so this resource carries the discrepancy instead, and the preferences audio
+/// tab reads it rather than presenting the preference as the truth.
+#[derive(Resource, Debug, Default, Clone, PartialEq, Eq)]
+pub struct OutputDeviceStatus {
+    /// The device name the preference asks for (empty: the system default).
+    pub requested: String,
+    /// Whether [`requested`](Self::requested) names a device that could not be
+    /// opened, so the mixer is running on the system default instead. It is
+    /// retried every few seconds and clears when the device comes back (or the
+    /// user picks another).
+    pub unavailable: bool,
+}
+
+/// The output-device applier's own state, kept across frames in a `Local`.
+#[derive(Debug, Default)]
+struct DeviceApply {
+    /// The setting value last looked at (`None` before the first look).
+    applied: Option<String>,
+    /// Whether [`applied`](Self::applied) named a device that failed to open, so
+    /// the mixer fell back to the system default.
+    unavailable: bool,
+    /// When the next reappearance check is due, while `unavailable`.
+    next_retry: f32,
+}
+
 /// The device change to apply, if any: `stored` is the setting's current
 /// value ("" = system default), `last` the last value this session applied
 /// (`None` before the first look). Unchanged values — including the very
@@ -206,15 +250,31 @@ fn device_switch(stored: &str, last: Option<&str>) -> Option<DeviceSelection> {
     })
 }
 
+/// The retry to make for a device that previously failed to open: the named
+/// device, once it is back among the enumerated `devices`. `None` while it is
+/// still absent — reopening a device that is not there would only fail again
+/// and tear the graph down for nothing.
+fn device_retry(stored: &str, devices: &[String]) -> Option<DeviceSelection> {
+    (!stored.is_empty() && devices.iter().any(|name| name == stored))
+        .then(|| DeviceSelection::Named(stored.to_owned()))
+}
+
 /// Apply [`SETTING_OUTPUT_DEVICE`] to the mixer: on a change (or a persisted
 /// non-default device at startup), rebuild the graph on the selected device,
 /// falling back to the system default when the named device cannot be opened.
-/// The applied value is always recorded, so a broken name is not retried
-/// every frame.
+///
+/// A fallback is **not** the end of it. The setting keeps the user's choice
+/// (their headset is expected back), [`OutputDeviceStatus`] records that the
+/// choice is not what is playing, and the device is retried every
+/// [`DEVICE_RETRY_SECONDS`] — but only once it reappears in the enumeration, so
+/// the common case costs one host enumeration per five seconds and no failed
+/// stream opens at all.
 fn apply_output_device(
+    time: Res<Time>,
     settings: Option<Res<ViewerSettings>>,
     mixer: Option<NonSendMut<Mixer>>,
-    mut last: Local<Option<String>>,
+    mut state: Local<DeviceApply>,
+    mut status: ResMut<OutputDeviceStatus>,
 ) {
     let (Some(settings), Some(mut mixer)) = (settings, mixer) else {
         return;
@@ -224,18 +284,56 @@ fn apply_output_device(
         .get_str(SETTING_OUTPUT_DEVICE)
         .unwrap_or("")
         .to_owned();
-    if let Some(selection) = device_switch(&stored, last.as_deref())
-        && let Err(e) = mixer.rebuild_and_restart(&selection)
-    {
-        warn!(
-            "audio output device {stored:?} could not be started ({e}); \
-             falling back to the system default"
-        );
-        if let Err(e) = mixer.rebuild_and_restart(&DeviceSelection::Default) {
-            warn!("audio could not restart on the default device ({e}); running without audio");
+    let now = time.elapsed_secs();
+
+    // A setting change applies at once; failing that, a device that fell back to
+    // the system default is retried once it is enumerable again.
+    let selection = match device_switch(&stored, state.applied.as_deref()) {
+        Some(selection) => Some(selection),
+        None if state.unavailable && now >= state.next_retry => {
+            state.next_retry = now + DEVICE_RETRY_SECONDS;
+            device_retry(&stored, &Mixer::output_devices())
+        }
+        None => None,
+    };
+
+    if let Some(selection) = selection {
+        match mixer.rebuild_and_restart(&selection) {
+            Ok(()) => {
+                if state.unavailable {
+                    info!("audio output device {stored:?} is back; playing on it again");
+                }
+                state.unavailable = false;
+            }
+            Err(e) => {
+                let named = selection != DeviceSelection::Default;
+                warn!(
+                    "audio output device {stored:?} could not be started ({e}); \
+                     falling back to the system default"
+                );
+                // Only a *named* device can be waited for; a default that will
+                // not open is not something a retry can fix.
+                state.unavailable = named;
+                state.next_retry = now + DEVICE_RETRY_SECONDS;
+                if let Err(e) = mixer.rebuild_and_restart(&DeviceSelection::Default) {
+                    warn!(
+                        "audio could not restart on the default device ({e}); running without audio"
+                    );
+                }
+            }
         }
     }
-    *last = Some(stored);
+    state.applied = Some(stored.clone());
+
+    // Publish the truth for the preferences combo. Guarded, so an unchanged
+    // status does not dirty the resource every frame.
+    let truth = OutputDeviceStatus {
+        requested: stored,
+        unavailable: state.unavailable,
+    };
+    if *status != truth {
+        *status = truth;
+    }
 }
 
 #[cfg(test)]
@@ -246,8 +344,8 @@ mod tests {
     use sl_settings::{Scope, SettingValue, SettingsStore};
 
     use super::{
-        DEFAULT_EAR_LOCATION, SETTING_EAR_LOCATION, SETTING_OUTPUT_DEVICE, device_switch, ear_mode,
-        resolve_listener,
+        DEFAULT_EAR_LOCATION, SETTING_EAR_LOCATION, SETTING_OUTPUT_DEVICE, device_retry,
+        device_switch, ear_mode, resolve_listener,
     };
     use crate::settings::ViewerSettings;
 
@@ -337,5 +435,22 @@ mod tests {
             device_switch("", Some("Speakers")),
             Some(DeviceSelection::Default)
         );
+    }
+
+    /// A device that failed to open is retried only once it is enumerable
+    /// again: re-opening one that is still absent would fail and tear the graph
+    /// down for nothing.
+    #[test]
+    fn device_retry_waits_for_the_device_to_reappear() {
+        let absent = [String::from("Speakers")];
+        let present = [String::from("Speakers"), String::from("Headset")];
+        assert_eq!(device_retry("Headset", &absent), None, "still gone");
+        assert_eq!(
+            device_retry("Headset", &present),
+            Some(DeviceSelection::Named("Headset".to_owned())),
+            "back: re-open it"
+        );
+        // The system default is not a name that can be waited for.
+        assert_eq!(device_retry("", &present), None);
     }
 }

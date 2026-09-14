@@ -30,6 +30,14 @@
 //! pseudolocale garbles them, which is acceptable). Voice rows (devices,
 //! push-to-talk, visualizers) arrive with the voice task, not here.
 //!
+//! A chosen device that **cannot be opened** is not dropped from the list and
+//! is not written out of the setting: the mixer falls back to the system
+//! default, [`OutputDeviceStatus`] records that it did, and this tab keeps
+//! offering the chosen device while saying in the note under the combo that it
+//! is not the one playing. Showing the preference alone would claim a device is
+//! in use that is not; showing the fallback alone would look as though the
+//! user's choice had been forgotten.
+//!
 //! Reference (Firestorm, read-only): `panel_preferences_sound.xml`,
 //! `llfloaterpreference.cpp`.
 
@@ -38,9 +46,10 @@ use bevy::ui_widgets::{SliderRange, SliderStep};
 use sl_audio::{Bus, Mixer};
 use sl_settings::SettingValue;
 
+use crate::audio::OutputDeviceStatus;
 use crate::preferences::{
     PreferencesUi, spawn_pref_checkbox, spawn_pref_combo, spawn_pref_combo_with_anchor,
-    spawn_pref_section, spawn_pref_slider,
+    spawn_pref_note, spawn_pref_section, spawn_pref_slider,
 };
 use crate::settings_binding::{ComboBindingValues, SettingBinding};
 use crate::ui::UiPanelShown;
@@ -62,6 +71,12 @@ const DEVICE_POLL_SECONDS: f32 = 2.0;
 /// `refresh_output_device_options` finds it.
 #[derive(Component, Debug, Clone, Copy)]
 struct OutputDeviceCombo;
+
+/// Marks the note under the output-device combo — shown exactly while
+/// [`OutputDeviceStatus::unavailable`] says the chosen device is not the one
+/// playing.
+#[derive(Component, Debug, Clone, Copy)]
+struct OutputDeviceNote;
 
 /// The Fluent label key of a bus's volume-slider row.
 const fn volume_row_key(bus: Bus) -> &'static str {
@@ -92,14 +107,29 @@ const fn mute_row_key(bus: Bus) -> &'static str {
 
 /// The output-device combo's options: the system default first, then one
 /// option per enumerated device, each writing its name as the setting value.
-fn device_options(devices: Vec<String>) -> Vec<(String, SettingValue)> {
+///
+/// `requested` is the device the setting currently asks for. When it is a named
+/// device the enumeration does not offer — the case
+/// [`OutputDeviceStatus::unavailable`] reports — it is appended anyway, so the
+/// combo keeps showing the user's own choice instead of silently reading as the
+/// system default. That the choice is not what is *playing* is said in words by
+/// the row underneath ([`OutputDeviceNote`]), not by dropping it from the list.
+fn device_options(devices: Vec<String>, requested: &str) -> Vec<(String, SettingValue)> {
     let mut options = vec![(
         String::from("preferences-audio-device-default"),
         SettingValue::String(String::new()),
     )];
+    let mut offered = false;
     for name in devices {
+        offered |= name == requested;
         let value = SettingValue::String(name.clone());
         options.push((name, value));
+    }
+    if !offered && !requested.is_empty() {
+        options.push((
+            requested.to_owned(),
+            SettingValue::String(requested.to_owned()),
+        ));
     }
     options
 }
@@ -164,7 +194,10 @@ pub(crate) fn build_audio_tab(commands: &mut Commands, panel: Entity) {
     );
 
     spawn_pref_section(commands, panel, "preferences-section-audio-device");
-    let options = device_options(Mixer::output_devices());
+    // The build hook has no resource access, so the requested device is not
+    // known here; `refresh_output_device_options` runs on the frame the floater
+    // opens (its poll timer starts due) and supplies it.
+    let options = device_options(Mixer::output_devices(), "");
     let option_refs: Vec<(&str, SettingValue)> = options
         .iter()
         .map(|(key, value)| (key.as_str(), value.clone()))
@@ -177,17 +210,27 @@ pub(crate) fn build_audio_tab(commands: &mut Commands, panel: Entity) {
         &option_refs,
     );
     commands.entity(anchor).insert(OutputDeviceCombo);
+    let note = spawn_pref_note(
+        commands,
+        panel,
+        "preferences-audio-device-unavailable",
+        false,
+    );
+    commands.entity(note).insert(OutputDeviceNote);
 }
 
 /// Re-enumerate the output devices while the preferences floater is open and
 /// push any change into the device combo: the option labels through
 /// [`SetComboOptions`] (an equal list is a no-op there), the paired
-/// [`ComboBindingValues`] in the same pass. Closed, the poll timer resets so
-/// the next open re-enumerates immediately.
+/// [`ComboBindingValues`] in the same pass. The requested device is offered even
+/// when the enumeration has lost it (see [`device_options`]), and the note under
+/// the combo says so. Closed, the poll timer resets so the next open
+/// re-enumerates immediately.
 fn refresh_output_device_options(
     time: Res<Time>,
     mut next_poll: Local<Option<f32>>,
     ui: Option<Res<PreferencesUi>>,
+    status: Res<OutputDeviceStatus>,
     panels: Query<&UiPanelShown>,
     mut combos: Query<(Entity, &mut ComboBindingValues), With<OutputDeviceCombo>>,
     mut writer: MessageWriter<SetComboOptions>,
@@ -198,11 +241,15 @@ fn refresh_output_device_options(
         return;
     }
     let now = time.elapsed_secs();
-    if next_poll.is_some_and(|due| now < due) {
+    // A status change is news the moment it happens — the device the user is
+    // looking at just stopped (or started) being the one playing — so it does
+    // not wait for the poll.
+    if next_poll.is_some_and(|due| now < due) && !status.is_changed() {
         return;
     }
     *next_poll = Some(now + DEVICE_POLL_SECONDS);
-    let options = device_options(Mixer::output_devices());
+
+    let options = device_options(Mixer::output_devices(), &status.requested);
     for (combo, mut values) in &mut combos {
         let new_values: Vec<SettingValue> =
             options.iter().map(|(_, value)| value.clone()).collect();
@@ -218,6 +265,27 @@ fn refresh_output_device_options(
     }
 }
 
+/// Show the note under the output-device combo exactly while the chosen device
+/// is not the one playing. Not gated on the floater being open: it is two
+/// comparisons, and driving it unconditionally means the note is already right
+/// on the frame the tab appears.
+fn drive_output_device_note(
+    status: Res<OutputDeviceStatus>,
+    mut notes: Query<&mut Node, With<OutputDeviceNote>>,
+) {
+    let display = if status.unavailable {
+        Display::Flex
+    } else {
+        Display::None
+    };
+    for mut node in &mut notes {
+        // Guarded write, so an unchanged note does not dirty the layout.
+        if node.display != display {
+            node.display = display;
+        }
+    }
+}
+
 /// The audio tab's runtime side (the tab *content* is built by the shell
 /// through `crate::preferences::PREF_TABS`): the live output-device
 /// re-enumeration.
@@ -226,7 +294,12 @@ pub struct PreferencesAudioPlugin;
 
 impl Plugin for PreferencesAudioPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, refresh_output_device_options);
+        // Owned by `crate::audio`'s plugin; initialised here too so this tab's
+        // systems are schedulable without the whole audio stack (a test app).
+        app.init_resource::<OutputDeviceStatus>().add_systems(
+            Update,
+            (refresh_output_device_options, drive_output_device_note),
+        );
     }
 }
 
@@ -237,7 +310,10 @@ mod tests {
     use sl_audio::Bus;
     use sl_settings::SettingValue;
 
-    use super::{OutputDeviceCombo, device_options, mute_row_key, volume_row_key};
+    use super::{
+        OutputDeviceCombo, OutputDeviceNote, OutputDeviceStatus, device_options, mute_row_key,
+        volume_row_key,
+    };
     use crate::preferences::PreferencesUi;
     use crate::settings_binding::ComboBindingValues;
     use crate::ui::UiPanelShown;
@@ -259,7 +335,10 @@ mod tests {
 
     #[test]
     fn device_options_lead_with_system_default() {
-        let options = device_options(vec!["Speakers".to_owned(), "Headset".to_owned()]);
+        let options = device_options(
+            vec!["Speakers".to_owned(), "Headset".to_owned()],
+            "Speakers",
+        );
         let expected = vec![
             (
                 "preferences-audio-device-default".to_owned(),
@@ -274,7 +353,77 @@ mod tests {
                 SettingValue::String("Headset".to_owned()),
             ),
         ];
-        assert_eq!(options, expected);
+        assert_eq!(options, expected, "an enumerated choice is not duplicated");
+    }
+
+    /// A chosen device the host no longer enumerates is still offered, so the
+    /// combo shows the user's own choice rather than silently reading as the
+    /// system default. (The note under the combo is what says it is not the
+    /// device actually playing.)
+    #[test]
+    fn an_unavailable_device_is_still_offered() {
+        let options = device_options(vec!["Speakers".to_owned()], "Headset");
+        assert_eq!(
+            options.last(),
+            Some(&(
+                "Headset".to_owned(),
+                SettingValue::String("Headset".to_owned())
+            )),
+            "the unplugged device keeps its option"
+        );
+        // The system default asks for no extra option.
+        assert_eq!(device_options(vec!["Speakers".to_owned()], "").len(), 2);
+    }
+
+    /// The note under the device combo is shown exactly while the status says
+    /// the chosen device is not the one playing, and hidden again when it is.
+    #[test]
+    fn the_unavailable_note_follows_the_status() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<OutputDeviceStatus>()
+            .add_systems(Update, super::drive_output_device_note);
+        let note = app
+            .world_mut()
+            .spawn((
+                OutputDeviceNote,
+                Node {
+                    display: Display::None,
+                    ..default()
+                },
+            ))
+            .id();
+
+        app.update();
+        let display = |app: &App| {
+            app.world()
+                .entity(note)
+                .get::<Node>()
+                .map(|node| node.display)
+        };
+        assert_eq!(display(&app), Some(Display::None), "available: no note");
+
+        app.world_mut().insert_resource(OutputDeviceStatus {
+            requested: "Headset".to_owned(),
+            unavailable: true,
+        });
+        app.update();
+        assert_eq!(
+            display(&app),
+            Some(Display::Flex),
+            "unavailable: the note is shown"
+        );
+
+        app.world_mut().insert_resource(OutputDeviceStatus {
+            requested: "Headset".to_owned(),
+            unavailable: false,
+        });
+        app.update();
+        assert_eq!(
+            display(&app),
+            Some(Display::None),
+            "the device came back: the note goes away again"
+        );
     }
 
     /// The device poll runs only while the preferences floater is open, and
@@ -285,6 +434,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<SetComboOptions>()
+            .init_resource::<OutputDeviceStatus>()
             .add_systems(Update, super::refresh_output_device_options);
         let root = app.world_mut().spawn(UiPanelShown(false)).id();
         let strip = app.world_mut().spawn_empty().id();
