@@ -41,6 +41,7 @@ use cef::{
 use crate::{
     AudioSink, BackendConfig, CursorKind, FrameView, KeyInput, MediaBackend, MediaError,
     MediaSurface, Modifiers, MouseButton, SharedCookie, SurfaceConfig, SurfaceStatus,
+    ValidatedMediaUrl,
 };
 
 /// Whether the global CEF runtime was initialised in this process. CEF can
@@ -560,9 +561,9 @@ impl CefMediaSurface {
 }
 
 impl MediaSurface for CefMediaSurface {
-    fn navigate(&self, url: &str) {
+    fn navigate(&self, url: &ValidatedMediaUrl) {
         if let Some(frame) = self.browser().and_then(|browser| browser.main_frame()) {
-            frame.load_url(Some(&CefString::from(url)));
+            frame.load_url(Some(&CefString::from(url.as_str())));
         }
     }
 
@@ -901,7 +902,7 @@ impl MediaBackend for CefMediaBackend {
         let shared = StdRc::new(RefCell::new(SurfaceShared::new(
             width,
             height,
-            &config.initial_url,
+            config.initial_url.as_str(),
         )));
 
         let audio = Arc::new(Mutex::new(CefAudioState::default()));

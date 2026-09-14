@@ -1567,7 +1567,13 @@ fn build_web_tab(
     // below the URL line (`LLPanelProfileWeb`), with a load-status string —
     // navigation driven by code, no visible URL bar
     // (`viewer-profile-web-tab-browser`).
-    if let Some(page) = crate::system_browser::normalize_web_url(&url) {
+    // Another avatar's profile URL is their text, not the viewer's: it passes
+    // the media scheme allowlist like any other grid-supplied URL.
+    if let Some(page) = crate::system_browser::normalize_web_url(&url).and_then(|page| {
+        crate::browser_widget::ValidatedMediaUrl::parse(&page)
+            .inspect_err(|error| warn!("profile web page not opened: {error}"))
+            .ok()
+    }) {
         ui.web_view = Some(crate::browser_widget::spawn_browser_view(
             commands,
             panel,

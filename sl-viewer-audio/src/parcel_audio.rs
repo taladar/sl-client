@@ -47,7 +47,7 @@ use bevy::ui_widgets::{
 };
 use sl_audio::{Bus, Mixer};
 use sl_client_bevy::SlAgentParcel;
-use sl_gst::{AudioStreamPlayer, AudioStreamState};
+use sl_gst::{AudioStreamPlayer, AudioStreamState, ValidatedMediaUrl};
 
 use crate::media_audio::MixerStream;
 use crate::media_diagnostics::MediaDiagnostics;
@@ -108,8 +108,14 @@ const THUMB_FILL: Color = Color::srgb(0.62, 0.72, 0.86);
 pub(crate) struct ParcelAudio {
     /// The GStreamer stream player.
     player: AudioStreamPlayer,
-    /// The current parcel's music URL, if any.
-    parcel_url: Option<String>,
+    /// The current parcel's music URL, once it passed the media scheme
+    /// allowlist — the stream the player is (or would be) playing. A parcel
+    /// whose URL the allowlist refuses reads as no stream at all.
+    parcel_url: Option<ValidatedMediaUrl>,
+    /// The parcel's music URL as the grid sent it, the change detector for the
+    /// above: validation (and its log line) then runs once per parcel switch
+    /// rather than once per frame.
+    parcel_url_raw: Option<url::Url>,
     /// The user stopped this URL's stream; autoplay stays off until the
     /// parcel URL changes.
     user_stopped: bool,
@@ -400,10 +406,17 @@ fn drive_parcel_audio(
         .as_ref()
         .and_then(|parcel| parcel.current.as_ref())
         .and_then(|parcel| parcel.music_url.as_ref())
-        .map(url::Url::to_string);
-    if parcel_url != audio.parcel_url {
+        .cloned();
+    if parcel_url != audio.parcel_url_raw {
         debug!("parcel music stream now {parcel_url:?}");
-        audio.parcel_url = parcel_url;
+        // The music URL is whatever the land owner typed: a `file://` one
+        // would have `uridecodebin` open a local file on this machine.
+        audio.parcel_url = parcel_url.as_ref().and_then(|url| {
+            ValidatedMediaUrl::from_url(url)
+                .inspect_err(|error| warn!("parcel music URL not played: {error}"))
+                .ok()
+        });
+        audio.parcel_url_raw = parcel_url;
         audio.user_stopped = false;
         match audio.parcel_url.clone() {
             Some(url) if enabled => audio.player.play(&url),
@@ -593,8 +606,8 @@ fn sync_parcel_audio_ui(
                     status.title.clone().unwrap_or_else(|| {
                         audio
                             .parcel_url
-                            .as_deref()
-                            .and_then(|url| url::Url::parse(url).ok())
+                            .as_ref()
+                            .and_then(ValidatedMediaUrl::url)
                             .and_then(|url| url.host_str().map(String::from))
                             .unwrap_or_default()
                     })

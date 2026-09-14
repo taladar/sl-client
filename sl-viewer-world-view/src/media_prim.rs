@@ -49,7 +49,7 @@ use crate::world_api::world_scoped::{WorldPurge, WorldScoped, WorldScopedAppExt 
 use crate::world_api::{
     FLAGS_OBJECT_YOU_OWNER, MediaFocus, MediaTarget, MediaWorldClick, ViewerCamera,
 };
-use sl_cef::{KeyInput, MediaKind, SurfaceConfig, classify_url};
+use sl_cef::{KeyInput, MediaKind, SurfaceConfig, ValidatedMediaUrl, classify_url};
 
 /// The hard cap on simultaneously live in-world media surfaces (the
 /// reference's `PluginInstancesTotal`).
@@ -132,7 +132,7 @@ pub struct ActiveMedia {
     /// Consecutive white-list bounce-backs (a loop closes the surface).
     bounces: u8,
     /// The last URL a white-list check accepted (bounce-back destination).
-    last_good_url: Option<String>,
+    last_good_url: Option<ValidatedMediaUrl>,
 }
 
 /// All live in-world media surfaces by target.
@@ -351,14 +351,15 @@ fn ingest_media_events(
                     if entry.current_url != previous
                         && let Some(active) = state.active.get(&target)
                         && let Some(url) = &entry.current_url
+                        && let Some(url) = validated_media_url(url)
                     {
-                        let wanted = match classify_url(url) {
+                        let wanted = match classify_url(&url) {
                             MediaKind::Web => MediaEngineKind::Web,
                             MediaKind::Video | MediaKind::Audio => MediaEngineKind::Video,
                         };
                         if wanted == active.kind {
                             if let Some(slot) = surfaces.get(active.surface) {
-                                slot.surface.navigate(url.as_str());
+                                slot.surface.navigate(&url);
                             }
                         } else {
                             close_media_surface(
@@ -632,13 +633,17 @@ fn start_media_surface(
     let Some(url) = url else {
         return false;
     };
+    // Whoever owns the object wrote this URL. Anything the scheme allowlist
+    // refuses never reaches an engine, so no surface starts for it.
+    let Some(url) = validated_media_url(url) else {
+        return false;
+    };
     // The mime_types.xml dispatch: direct video / audio URLs go to the
     // GStreamer engine, everything else to the browser.
-    let kind = match classify_url(url) {
+    let kind = match classify_url(&url) {
         MediaKind::Web => MediaEngineKind::Web,
         MediaKind::Video | MediaKind::Audio => MediaEngineKind::Video,
     };
-    let url = url.to_string();
     let width = u32::try_from(entry.width_pixels.clamp(0, 4096)).unwrap_or(0);
     let height = u32::try_from(entry.height_pixels.clamp(0, 4096)).unwrap_or(0);
     let config = SurfaceConfig {
@@ -1152,6 +1157,19 @@ fn release_media_focus_on_escape(
     focus.pressed = None;
 }
 
+/// Check a grid-supplied media URL against the scheme allowlist, dropping (and
+/// reporting) one it refuses.
+///
+/// Object and parcel media URLs are written by whoever owns the object or the
+/// land, so this is where that data stops being arbitrary: a `file://` URL is
+/// one GStreamer's `uridecodebin` would open and CEF would render, on the
+/// machine of whoever walks past the prim.
+fn validated_media_url(url: &url::Url) -> Option<ValidatedMediaUrl> {
+    ValidatedMediaUrl::from_url(url)
+        .inspect_err(|error| warn!("media URL not opened: {error}"))
+        .ok()
+}
+
 /// Enforce each entry's navigation white-list on the live surfaces: a page
 /// that navigated somewhere the white-list rejects is bounced back to the
 /// last accepted URL (then the home URL); a bounce loop closes the surface —
@@ -1177,9 +1195,14 @@ fn enforce_media_whitelists(
         let Ok(parsed) = url::Url::parse(current) else {
             continue;
         };
-        if entry.check_candidate_url(&parsed) {
+        // Two checks, both on a URL the *page* chose: the entry's own
+        // white-list, and the scheme allowlist — a page that redirects itself
+        // to `file://` is bounced exactly like one that leaves its white-list.
+        let accepted =
+            validated_media_url(&parsed).filter(|_scheme_ok| entry.check_candidate_url(&parsed));
+        if let Some(accepted) = accepted {
             active.bounces = 0;
-            active.last_good_url = Some(current.clone());
+            active.last_good_url = Some(accepted);
             continue;
         }
         active.bounces = active.bounces.saturating_add(1);
@@ -1190,7 +1213,7 @@ fn enforce_media_whitelists(
         let back_to = active
             .last_good_url
             .clone()
-            .or_else(|| entry.home_url.as_ref().map(url::Url::to_string));
+            .or_else(|| entry.home_url.as_ref().and_then(validated_media_url));
         if let Some(back_to) = back_to {
             warn!("media white-list bounced {current} back to {back_to}");
             slot.surface.navigate(&back_to);
@@ -1213,8 +1236,32 @@ mod tests {
 
     use super::{
         MediaData, ObjectMediaData, WorldPurge, WorldScoped as _, media_permission_allows,
-        media_pixel_from_uv,
+        media_pixel_from_uv, validated_media_url,
     };
+
+    /// The URL on a prim face is whatever its owner typed. Only the network
+    /// schemes reach an engine: a `file://` one would have GStreamer's
+    /// `uridecodebin` open a local file and CEF render it, on the machine of
+    /// whoever walks past the prim.
+    #[test]
+    fn a_media_url_the_allowlist_refuses_opens_nothing() -> Result<(), String> {
+        for text in [
+            "file:///etc/passwd",
+            "data:text/html,<script>fetch('http://evil.example')</script>",
+            "javascript:alert(1)",
+        ] {
+            let url = url::Url::parse(text).map_err(|error| format!("bad test url: {error}"))?;
+            if let Some(passed) = validated_media_url(&url) {
+                return Err(format!("{text} reached an engine as {passed}"));
+            }
+        }
+        let played = url::Url::parse("https://media.example/live/master.m3u8")
+            .map_err(|error| format!("bad test url: {error}"))?;
+        if validated_media_url(&played).is_none() {
+            return Err(String::from("an ordinary https media URL was refused"));
+        }
+        Ok(())
+    }
 
     #[test]
     fn permissions_gate_anyone_and_owner() {

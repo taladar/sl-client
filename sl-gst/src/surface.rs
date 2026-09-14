@@ -23,7 +23,7 @@ use gstreamer::prelude::*;
 use gstreamer_video::VideoFrameExt as _;
 use sl_media::{
     AudioSink, FrameView, KeyInput, MediaError, MediaSurface, Modifiers, MouseButton,
-    PlaybackState, PlaybackStatus, SurfaceConfig, SurfaceStatus,
+    PlaybackState, PlaybackStatus, SurfaceConfig, SurfaceStatus, ValidatedMediaUrl,
 };
 use tracing::{debug, warn};
 
@@ -54,6 +54,10 @@ struct FrameStore {
 struct Shared {
     /// The status snapshot handed to [`MediaSurface::status`].
     status: SurfaceStatus,
+    /// The URI the pipeline currently plays, kept in its validated form so a
+    /// reconnect ([`MediaSurface::reload`] on a live stream) does not have to
+    /// re-derive it from the plain-text [`SurfaceStatus::url`].
+    current_url: ValidatedMediaUrl,
     /// The newest decoded frame.
     frame: FrameStore,
     /// Whether the user wants the media playing (survives buffering holds).
@@ -120,11 +124,12 @@ impl SurfaceInner {
 
         let shared = Arc::new(Mutex::new(Shared {
             status: SurfaceStatus {
-                url: config.initial_url.clone(),
+                url: config.initial_url.to_string(),
                 loading: true,
                 playback: Some(PlaybackStatus::default()),
                 ..SurfaceStatus::default()
             },
+            current_url: config.initial_url.clone(),
             frame: FrameStore::default(),
             desired_playing: true,
             loop_media: config.loop_media,
@@ -176,7 +181,7 @@ impl SurfaceInner {
             .map_err(|error| creation(format!("video sink ghost pad: {error}")))?;
 
         let playbin = gstreamer::ElementFactory::make("playbin3")
-            .property("uri", &config.initial_url)
+            .property("uri", config.initial_url.as_str())
             .property("video-sink", sink_bin.upcast_ref::<gstreamer::Element>())
             .build()
             .map_err(|error| creation(format!("playbin3: {error}")))?;
@@ -500,11 +505,12 @@ impl GstMediaSurface {
 }
 
 impl MediaSurface for GstMediaSurface {
-    fn navigate(&self, url: &str) {
+    fn navigate(&self, url: &ValidatedMediaUrl) {
         // A new URL: rebuild playback state and reconnect the pipeline.
         {
             let mut shared = lock_shared(&self.inner.shared);
-            shared.status.url = String::from(url);
+            shared.status.url = url.to_string();
+            shared.current_url = url.clone();
             shared.status.title.clear();
             shared.status.load_error = None;
             shared.status.network_diagnosable = false;
@@ -517,14 +523,14 @@ impl MediaSurface for GstMediaSurface {
             shared.touch();
         }
         let _stopped = self.inner.playbin.set_state(gstreamer::State::Null);
-        self.inner.playbin.set_property("uri", url);
+        self.inner.playbin.set_property("uri", url.as_str());
         let _started = self.inner.playbin.set_state(gstreamer::State::Playing);
     }
 
     fn reload(&self) {
         let (seekable, url) = {
             let mut shared = lock_shared(&self.inner.shared);
-            (shared.playback().seekable, shared.status.url.clone())
+            (shared.playback().seekable, shared.current_url.clone())
         };
         if seekable {
             self.inner.seek_seconds(0.0);
@@ -691,7 +697,7 @@ mod tests {
 
     use gstreamer::prelude::*;
     use pretty_assertions::assert_eq;
-    use sl_media::{MediaSurface as _, PlaybackState, SurfaceConfig};
+    use sl_media::{MediaSurface as _, PlaybackState, SurfaceConfig, ValidatedMediaUrl};
 
     use super::{FrameStore, Shared, SurfaceInner, store_sample};
     use crate::lock_shared;
@@ -707,6 +713,7 @@ mod tests {
     fn empty_shared() -> Arc<Mutex<Shared>> {
         Arc::new(Mutex::new(Shared {
             status: sl_media::SurfaceStatus::default(),
+            current_url: ValidatedMediaUrl::blank(),
             frame: FrameStore::default(),
             desired_playing: true,
             loop_media: false,
@@ -768,6 +775,13 @@ mod tests {
 
     /// A surface pointed at a nonexistent file reports a loud error status
     /// through the pump (the bus error path), not a silent black square.
+    ///
+    /// The `file://` URL is built through
+    /// [`ValidatedMediaUrl::viewer_authored`] because the scheme allowlist
+    /// keeps grid-supplied URLs off the local filesystem; a test authoring its
+    /// own URI is exactly the exemption that constructor names. It keeps this
+    /// test off the network — the error path under test is the bus error, not
+    /// a DNS or TCP failure.
     #[test]
     #[expect(
         clippy::print_stderr,
@@ -778,8 +792,10 @@ mod tests {
             eprintln!("skipping: no usable GStreamer");
             return Ok(());
         }
+        let initial_url = ValidatedMediaUrl::viewer_authored("file:///nonexistent/sl-gst-test.mp4")
+            .map_err(|error| format!("test URL: {error}"))?;
         let inner = match SurfaceInner::create(&SurfaceConfig {
-            initial_url: String::from("file:///nonexistent/sl-gst-test.mp4"),
+            initial_url,
             ..SurfaceConfig::default()
         }) {
             Ok(inner) => inner,

@@ -35,7 +35,7 @@ use bevy::ui_widgets::{
     Activate, Button, Slider, SliderDragState, SliderRange, SliderStep, SliderThumb, SliderValue,
     ValueChange,
 };
-use sl_cef::PlaybackState;
+use sl_cef::{PlaybackState, ValidatedMediaUrl};
 use sl_client_bevy::{Command, SlCommand};
 
 use crate::camera::FocusTarget;
@@ -836,10 +836,18 @@ fn on_media_url_key(
         warn!("media white-list rejects {url}");
         return;
     }
+    // The typed URL goes to the prim's surface *and* to the grid, where every
+    // other agent's viewer will pick it up: it passes the same scheme
+    // allowlist as a URL that arrives from the grid.
+    let Ok(validated) = ValidatedMediaUrl::from_url(&parsed)
+        .inspect_err(|error| warn!("media URL not navigated: {error}"))
+    else {
+        return;
+    };
     if let Some(active) = prim_state.active.get(&target)
         && let Some(slot) = surfaces.get(active.surface)
     {
-        slot.surface.navigate(&url);
+        slot.surface.navigate(&validated);
     }
     if let Ok(face) = u8::try_from(target.face.get()) {
         commands.write(SlCommand(Command::NavigateObjectMedia {
@@ -900,8 +908,16 @@ fn handle_media_control_actions(
                 }
             }
             "home" => {
-                if let Some(home) = data.entry(target).and_then(|entry| entry.home_url.as_ref()) {
-                    slot.surface.navigate(home.as_str());
+                if let Some(home) = data
+                    .entry(target)
+                    .and_then(|entry| entry.home_url.as_ref())
+                    .and_then(|home| {
+                        ValidatedMediaUrl::from_url(home)
+                            .inspect_err(|error| warn!("media home URL not opened: {error}"))
+                            .ok()
+                    })
+                {
+                    slot.surface.navigate(&home);
                 }
             }
             "reload-or-stop" => {

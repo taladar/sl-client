@@ -33,6 +33,9 @@ use bevy::ui::RelativeCursorPosition;
 use crate::media_engine::{MediaEngine, MediaEngineSystems, MediaSurfaceId, MediaSurfaces};
 use crate::media_keys::{current_modifiers, is_printable_text, vk_for_key_code};
 use sl_cef::{KeyInput, MouseButton as MediaMouseButton, SurfaceConfig};
+// Re-exported: it is part of this widget's public API ([`BrowserViewSpec`]),
+// so a caller spawning a view need not also depend on the engine crate.
+pub use sl_cef::ValidatedMediaUrl;
 
 /// Pixels of page scroll per scroll-wheel line (Chromium's usual notch).
 const WHEEL_PIXELS_PER_LINE: f32 = 40.0;
@@ -44,8 +47,9 @@ const MIN_VIEW_PIXELS: f32 = 8.0;
 /// here create its engine surface once the node has a laid-out size.
 #[derive(Component, Debug)]
 pub struct BrowserView {
-    /// The URL the surface loads on creation.
-    pub initial_url: String,
+    /// The URL the surface loads on creation (scheme-checked: see
+    /// [`ValidatedMediaUrl`]).
+    pub initial_url: ValidatedMediaUrl,
     /// Whether the surface runs in an isolated request context (in-world /
     /// untrusted content) or the shared one (trusted UI panels, so logins
     /// persist).
@@ -57,8 +61,8 @@ pub struct BrowserView {
 /// What [`spawn_browser_view`] needs to know.
 #[derive(Debug, Clone)]
 pub struct BrowserViewSpec {
-    /// The URL to load.
-    pub initial_url: String,
+    /// The URL to load (scheme-checked: see [`ValidatedMediaUrl`]).
+    pub initial_url: ValidatedMediaUrl,
     /// Isolated (untrusted) or shared (trusted UI) request context.
     pub isolated: bool,
     /// The tab order slot of the view.
@@ -524,6 +528,14 @@ pub fn spawn_browser_specimen(
          font-family:sans-serif'><h2>{}</h2><p>offline specimen page</p></body>",
         sample.replace(' ', "%20")
     );
+    // The one `data:` URL in the viewer, and the reason
+    // `ValidatedMediaUrl::viewer_authored` exists: the page is composed right
+    // here from a translated label, never from grid data. An unparsable one
+    // (impossible for this literal) falls back to the empty page.
+    let url = ValidatedMediaUrl::viewer_authored(&url).unwrap_or_else(|error| {
+        warn!("specimen page URL rejected ({error}); showing the empty page");
+        ValidatedMediaUrl::blank()
+    });
     spawn_browser_view(
         commands,
         frame,
@@ -539,7 +551,7 @@ pub fn spawn_browser_specimen(
 
 #[cfg(test)]
 mod tests {
-    use super::{BrowserViewSpec, spawn_browser_view};
+    use super::{BrowserViewSpec, ValidatedMediaUrl, spawn_browser_view};
     use bevy::camera::NormalizedRenderTarget;
     use bevy::input_focus::InputFocus;
     use bevy::picking::backend::HitData;
@@ -578,7 +590,7 @@ mod tests {
                 &mut commands,
                 root,
                 &BrowserViewSpec {
-                    initial_url: "about:blank".to_owned(),
+                    initial_url: ValidatedMediaUrl::blank(),
                     isolated: true,
                     tab_index: 0,
                     fixed_height: Some(64.0),

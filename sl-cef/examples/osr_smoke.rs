@@ -11,7 +11,7 @@
 //! ```
 
 use sl_cef::chromium::CefMediaBackend;
-use sl_cef::{BackendConfig, MediaBackend, SurfaceConfig};
+use sl_cef::{BackendConfig, MediaBackend, SurfaceConfig, ValidatedMediaUrl};
 
 /// Initialise, load `https://example.com/`, dump one frame, shut down.
 fn main() {
@@ -35,7 +35,8 @@ fn main() {
         .create_surface(&SurfaceConfig {
             width: 800,
             height: 600,
-            initial_url: String::from("https://example.com/"),
+            initial_url: ValidatedMediaUrl::parse("https://example.com/")
+                .unwrap_or_else(|error| panic!("test URL rejected: {error}")),
             isolated: true,
             max_fps: 30,
             muted: true,

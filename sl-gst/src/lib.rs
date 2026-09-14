@@ -48,7 +48,7 @@ mod messages;
 pub mod stream;
 mod surface;
 
-pub use sl_media::AudioSink;
+pub use sl_media::{AudioSink, MediaUrlError, ValidatedMediaUrl};
 pub use stream::{AudioStreamPlayer, AudioStreamState, AudioStreamStatus};
 
 /// Initialises the process-global GStreamer runtime (idempotent).

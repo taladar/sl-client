@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 313 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 29 |
-| done | 1132 |
+| bugs | 30 |
+| done | 1133 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1679** |
+| **total** | **1681** |
 
 ## ideas (100)
 
@@ -1163,7 +1163,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (29)
+## bugs (30)
 
 ### viewer
 
@@ -1179,15 +1179,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   fallback lies to the UI
 - [`viewer-audit-camera-reset-resnap`](bugs/viewer-audit-camera-reset-resnap.md)
   — Escape out of flycam interpolates between two unrelated poses
+- [`viewer-audit-cef-browser-settings-hardening`](bugs/viewer-audit-cef-browser-settings-hardening.md)
+  — An in-world media page runs on CEF's default browser settings
 - [`viewer-audit-env-overrides-preferences`](bugs/viewer-audit-env-overrides-preferences.md)
   — Environment variables silently override live graphics preferences
-- [`viewer-audit-media-url-scheme-allowlist`](bugs/viewer-audit-media-url-scheme-allowlist.md)
-  — Parcel media URLs reach CEF and GStreamer with no scheme allowlist
 - [`viewer-audit-parcel-audio-autoplay`](bugs/viewer-audit-parcel-audio-autoplay.md)
   — A transient empty parcel resets the user's stop decision and re-autoplays
 - [`viewer-audit-sit-camera-gating`](bugs/viewer-audit-sit-camera-gating.md) —
   The scripted sit camera arms on any SitResult and never clears forced
   mouselook
+- [`viewer-audit-system-browser-scheme-allowlist`](bugs/viewer-audit-system-browser-scheme-allowlist.md)
+  — Any scheme a chat link or SLURL names is handed to xdg-open
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
   — Mesh-head brow spikes forward from face-bone shape deformation
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
@@ -1234,7 +1236,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1132)
+## done (1133)
 
 ### protocol
 
@@ -1535,6 +1537,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   no cycle guard
 - [`viewer-audit-map-tile-transient-error`](done/viewer-audit-map-tile-transient-error.md)
   — A transient map-tile fetch error is cached as permanently missing
+- [`viewer-audit-media-url-scheme-allowlist`](done/viewer-audit-media-url-scheme-allowlist.md)
+  — Parcel media URLs reach CEF and GStreamer with no scheme allowlist
 - [`viewer-audit-name-tag-viewport-gate`](done/viewer-audit-name-tag-viewport-gate.md)
   — The name-tag viewport-changed gate is exactly inverted
 - [`viewer-audit-notification-store-overwrite`](done/viewer-audit-notification-store-overwrite.md)

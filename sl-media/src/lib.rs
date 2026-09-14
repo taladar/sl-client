@@ -15,6 +15,10 @@
 //!   the time-based playback controls ([`MediaSurface::play`] /
 //!   [`pause`](MediaSurface::pause) / [`seek`](MediaSurface::seek)) a video
 //!   surface honours and a browser surface ignores.
+//! - [`ValidatedMediaUrl`] — a URL that passed the **scheme allowlist**, and
+//!   the only thing a surface can be pointed at. Parcel and prim media URLs
+//!   come from any land or object owner, so the scheme is checked once, at the
+//!   boundary, and the type carries that evidence from there on.
 //! - [`classify_url`] — the URL → [`MediaKind`] dispatch that decides which
 //!   engine a media URL goes to (the reference viewer's `mime_types.xml`
 //!   dispatch, by URL scheme / extension).
@@ -84,6 +88,162 @@ pub enum MediaError {
     Cookie(String),
 }
 
+/// Why a URL was refused a media surface.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum MediaUrlError {
+    /// The text is not a URL at all.
+    #[error("not a URL: {0}")]
+    Malformed(#[from] url::ParseError),
+    /// The URL parses, but its scheme is not one a media surface may open.
+    #[error(
+        "URL scheme `{scheme}` is not one a media surface may open (allowed: {allowed}) — {url}"
+    )]
+    SchemeNotAllowed {
+        /// The rejected scheme, lower-cased.
+        scheme: String,
+        /// The rejected URL, for the log line that reports the refusal.
+        url: String,
+        /// The allowed schemes, comma-separated, so the message is
+        /// self-contained.
+        allowed: String,
+    },
+}
+
+/// A URL a media surface may be pointed at: one whose **scheme** passed
+/// [`MEDIA_URL_SCHEMES`].
+///
+/// Media URLs are attacker-supplied data — any land owner sets a parcel's
+/// media and music URL, any object owner sets a prim face's. Without a filter
+/// they reach CEF (`file://`, `data:`, `javascript:`) and GStreamer's
+/// `uridecodebin` (`file://`, which it opens happily), letting that owner make
+/// another avatar's viewer open and render a local file on a prim face.
+///
+/// The check therefore happens **once**, where remote data enters, and the
+/// type carries the evidence from there: [`SurfaceConfig::initial_url`],
+/// [`MediaSurface::navigate`] and [`classify_url`] take this type and nothing
+/// else, so no path into an engine can skip the filter by accident. The two
+/// deliberate exceptions are named for what they are —
+/// [`blank`](Self::blank) and [`viewer_authored`](Self::viewer_authored) —
+/// and neither may be handed remote data.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidatedMediaUrl(MediaUrlSource);
+
+/// Where a [`ValidatedMediaUrl`] came from.
+///
+/// [`Blank`](Self::Blank) is a variant of its own rather than a parsed
+/// `about:blank` so that [`ValidatedMediaUrl::blank`] is infallible (a
+/// `Result` there would push an unhandleable error into every
+/// [`SurfaceConfig::default`] caller).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum MediaUrlSource {
+    /// The engine's own empty page, `about:blank` — never remote data.
+    Blank,
+    /// A URL that passed the allowlist, or one the viewer itself authored.
+    Url(url::Url),
+}
+
+/// The engine's empty page.
+const BLANK_URL: &str = "about:blank";
+
+impl ValidatedMediaUrl {
+    /// The engine's empty page (`about:blank`): a surface with nothing loaded.
+    ///
+    /// Not reachable through [`parse`](Self::parse) — `about:` is exactly the
+    /// kind of scheme the allowlist keeps remote data away from, so the empty
+    /// page is a constructor of its own.
+    #[must_use]
+    pub const fn blank() -> Self {
+        Self(MediaUrlSource::Blank)
+    }
+
+    /// Validate an already-parsed URL.
+    ///
+    /// # Errors
+    /// [`MediaUrlError::SchemeNotAllowed`] when the scheme is not in
+    /// [`MEDIA_URL_SCHEMES`].
+    pub fn from_url(url: &url::Url) -> Result<Self, MediaUrlError> {
+        let scheme = url.scheme().to_ascii_lowercase();
+        if MEDIA_URL_SCHEMES.contains(&scheme.as_str()) {
+            Ok(Self(MediaUrlSource::Url(url.clone())))
+        } else {
+            Err(MediaUrlError::SchemeNotAllowed {
+                scheme,
+                url: url.to_string(),
+                allowed: MEDIA_URL_SCHEMES.join(", "),
+            })
+        }
+    }
+
+    /// Parse and validate a URL supplied as text (a grid field, a typed
+    /// address, a page's popup request).
+    ///
+    /// # Errors
+    /// [`MediaUrlError::Malformed`] when the text is not a URL,
+    /// [`MediaUrlError::SchemeNotAllowed`] when its scheme is not in
+    /// [`MEDIA_URL_SCHEMES`].
+    pub fn parse(text: &str) -> Result<Self, MediaUrlError> {
+        Self::from_url(&url::Url::parse(text)?)
+    }
+
+    /// A URL the **viewer itself** composed, exempt from the allowlist — the
+    /// offline `data:` specimen page of the widget gallery is the one case.
+    ///
+    /// Never call this with anything derived from grid data, a page, or user
+    /// input: it is the one door past the filter, and it is named so that a
+    /// reviewer sees a claim about provenance being made.
+    ///
+    /// # Errors
+    /// [`MediaUrlError::Malformed`] when the text is not a URL. The scheme is
+    /// deliberately not checked — that is what this constructor is for.
+    pub fn viewer_authored(text: &str) -> Result<Self, MediaUrlError> {
+        Ok(Self(MediaUrlSource::Url(url::Url::parse(text)?)))
+    }
+
+    /// The URL as text, the form the engines take.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        match &self.0 {
+            MediaUrlSource::Blank => BLANK_URL,
+            MediaUrlSource::Url(url) => url.as_str(),
+        }
+    }
+
+    /// The URL's scheme, lower-case.
+    #[must_use]
+    pub fn scheme(&self) -> &str {
+        match &self.0 {
+            MediaUrlSource::Blank => "about",
+            MediaUrlSource::Url(url) => url.scheme(),
+        }
+    }
+
+    /// The parsed URL, for callers needing more than the text (a host name,
+    /// say). [`None`] for the empty page, which has no host, path or query
+    /// worth reading.
+    #[must_use]
+    pub const fn url(&self) -> Option<&url::Url> {
+        match &self.0 {
+            MediaUrlSource::Blank => None,
+            MediaUrlSource::Url(url) => Some(url),
+        }
+    }
+
+    /// The URL's path, for the extension-based [`classify_url`] dispatch.
+    #[must_use]
+    pub fn path(&self) -> &str {
+        match &self.0 {
+            MediaUrlSource::Blank => "blank",
+            MediaUrlSource::Url(url) => url.path(),
+        }
+    }
+}
+
+impl core::fmt::Display for ValidatedMediaUrl {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// Configuration for initialising a [`MediaBackend`].
 #[derive(Debug, Clone)]
 pub struct BackendConfig {
@@ -109,8 +269,8 @@ pub struct SurfaceConfig {
     pub width: u32,
     /// Initial surface height in pixels (clamped to at least 1).
     pub height: u32,
-    /// The URL to load on creation.
-    pub initial_url: String,
+    /// The URL to load on creation (see [`ValidatedMediaUrl`]).
+    pub initial_url: ValidatedMediaUrl,
     /// Whether the surface gets its own isolated in-memory request context
     /// (cookies, storage). In-world media surfaces must be isolated; trusted
     /// UI browser panels may share the global context. Engines without a
@@ -130,7 +290,7 @@ impl Default for SurfaceConfig {
         Self {
             width: 1024,
             height: 768,
-            initial_url: String::from("about:blank"),
+            initial_url: ValidatedMediaUrl::blank(),
             isolated: true,
             max_fps: 30,
             muted: false,
@@ -304,8 +464,9 @@ pub struct SurfaceStatus {
 /// [`set_volume`](Self::set_volume)) are the reverse — the default
 /// implementations do nothing so each engine only implements its half.
 pub trait MediaSurface {
-    /// Navigates the surface to `url`.
-    fn navigate(&self, url: &str);
+    /// Navigates the surface to `url` (see [`ValidatedMediaUrl`] — a surface
+    /// is never handed an unfiltered scheme).
+    fn navigate(&self, url: &ValidatedMediaUrl);
     /// Reloads the current page (bypassing the cache). On a playback surface:
     /// restarts the media from the beginning.
     fn reload(&self);
@@ -503,6 +664,21 @@ const AUDIO_EXTENSIONS: &[&str] = &[
 /// URL schemes that are always streaming media, whatever the path looks like.
 const STREAM_SCHEMES: &[&str] = &["rtsp", "rtsps", "rtmp", "rtmps", "mms"];
 
+/// Every scheme a media surface may be pointed at: the web transports plus the
+/// streaming ones [`classify_url`] dispatches to the playback engine.
+///
+/// Deliberately a short list of *network* transports. `file://` and `data:`
+/// are the ones this keeps out — GStreamer's `uridecodebin` opens a `file://`
+/// URI happily and CEF renders both, so without the filter a land or object
+/// owner could make another avatar's viewer open a local file on a prim face.
+/// `javascript:`, `chrome://` and `about:` are refused for the same reason:
+/// nothing on the grid has any business naming them.
+///
+/// The streaming half is spelled out rather than concatenated (slice
+/// concatenation is not `const`); the `stream_schemes_are_all_allowed` test
+/// pins the two lists together.
+pub const MEDIA_URL_SCHEMES: &[&str] = &["http", "https", "rtsp", "rtsps", "rtmp", "rtmps", "mms"];
+
 /// Which engine `url` should be handed to.
 ///
 /// The reference viewer resolves the *served* MIME type with an HTTP probe
@@ -513,7 +689,7 @@ const STREAM_SCHEMES: &[&str] = &["rtsp", "rtsps", "rtmp", "rtmps", "mms"];
 /// under an extension-less URL therefore lands in the browser; revisit with
 /// a content-type probe if that turns out to matter in practice.
 #[must_use]
-pub fn classify_url(url: &url::Url) -> MediaKind {
+pub fn classify_url(url: &ValidatedMediaUrl) -> MediaKind {
     let scheme = url.scheme().to_ascii_lowercase();
     if STREAM_SCHEMES.contains(&scheme.as_str()) {
         return MediaKind::Video;
@@ -535,12 +711,24 @@ pub fn classify_url(url: &url::Url) -> MediaKind {
 mod tests {
     use pretty_assertions::assert_eq;
 
-    use super::{MediaKind, classify_url};
+    use super::{
+        MEDIA_URL_SCHEMES, MediaKind, MediaUrlError, STREAM_SCHEMES, ValidatedMediaUrl,
+        classify_url,
+    };
 
-    /// The [`MediaKind`] for a literal URL.
+    /// The [`MediaKind`] for a literal URL the allowlist accepts.
     fn kind(text: &str) -> Result<MediaKind, String> {
-        let url = url::Url::parse(text).map_err(|error| format!("bad test url {text}: {error}"))?;
+        let url = ValidatedMediaUrl::parse(text)
+            .map_err(|error| format!("test url {text} rejected: {error}"))?;
         Ok(classify_url(&url))
+    }
+
+    /// Assert the allowlist refuses `text`, reporting what happened instead.
+    fn rejected(text: &str) -> Result<(), String> {
+        match ValidatedMediaUrl::parse(text) {
+            Err(_refused) => Ok(()),
+            Ok(accepted) => Err(format!("{text} was accepted as {accepted}")),
+        }
     }
 
     #[test]
@@ -580,5 +768,81 @@ mod tests {
         // A dot in a directory, not the file name, is not an extension.
         assert_eq!(kind("https://a.example/v1.2/index")?, MediaKind::Web);
         Ok(())
+    }
+
+    /// The schemes a land or object owner must not be able to name. Before the
+    /// allowlist each of these reached CEF (which renders `file://`, `data:`
+    /// and `javascript:`) or GStreamer's `uridecodebin` (which opens
+    /// `file://`) as an ordinary "web" URL.
+    #[test]
+    fn disallowed_schemes_are_rejected() -> Result<(), String> {
+        for text in [
+            "file:///etc/passwd",
+            "file://localhost/home/user/.ssh/id_ed25519",
+            "data:text/html,<script>alert(1)</script>",
+            "javascript:alert(document.cookie)",
+            "about:blank",
+            "about:config",
+            "chrome://settings",
+            "chrome-devtools://devtools/bundled/inspector.html",
+            "blob:https://a.example/2b7d",
+            "ftp://a.example/movie.mp4",
+        ] {
+            match ValidatedMediaUrl::parse(text) {
+                Err(MediaUrlError::SchemeNotAllowed { .. }) => {}
+                Err(other) => return Err(format!("{text} rejected for the wrong reason: {other}")),
+                Ok(accepted) => return Err(format!("{text} was accepted as {accepted}")),
+            }
+        }
+        Ok(())
+    }
+
+    /// Case does not smuggle a scheme past the allowlist: the URL parser
+    /// lower-cases the scheme, and the check lower-cases again rather than
+    /// trusting that.
+    #[test]
+    fn scheme_matching_is_case_folded() -> Result<(), String> {
+        rejected("FILE:///etc/passwd")?;
+        rejected("JavaScript:alert(1)")?;
+        assert_eq!(kind("HTTPS://a.example/page.html")?, MediaKind::Web);
+        Ok(())
+    }
+
+    /// Text that is not a URL at all is refused as malformed, not silently
+    /// turned into a relative load.
+    #[test]
+    fn non_urls_are_rejected() -> Result<(), String> {
+        for text in ["not a url", "", "//a.example/clip.mp4"] {
+            match ValidatedMediaUrl::parse(text) {
+                Err(MediaUrlError::Malformed(_error)) => {}
+                Err(other) => {
+                    return Err(format!("{text:?} rejected for the wrong reason: {other}"));
+                }
+                Ok(accepted) => return Err(format!("{text:?} was accepted as {accepted}")),
+            }
+        }
+        Ok(())
+    }
+
+    /// Every streaming scheme the classifier dispatches to the video engine is
+    /// one the allowlist admits — otherwise that dispatch arm is dead code.
+    #[test]
+    fn stream_schemes_are_all_allowed() -> Result<(), String> {
+        for scheme in STREAM_SCHEMES {
+            if !MEDIA_URL_SCHEMES.contains(scheme) {
+                return Err(format!("streaming scheme {scheme} is not in the allowlist"));
+            }
+        }
+        Ok(())
+    }
+
+    /// The empty page is reachable only through its own constructor, and it
+    /// classifies as a web page (the browser engine owns it).
+    #[test]
+    fn blank_is_its_own_door() -> Result<(), String> {
+        let blank = ValidatedMediaUrl::blank();
+        assert_eq!(blank.as_str(), "about:blank");
+        assert_eq!(classify_url(&blank), MediaKind::Web);
+        rejected(blank.as_str())
     }
 }

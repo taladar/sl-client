@@ -17,7 +17,7 @@
 use std::sync::Arc;
 
 use gstreamer::prelude::*;
-use sl_media::AudioSink;
+use sl_media::{AudioSink, ValidatedMediaUrl};
 use tracing::{debug, warn};
 
 use crate::audio_sink::{self, SharedAudioSink};
@@ -117,14 +117,18 @@ impl AudioStreamPlayer {
     }
 
     /// Starts playing `url`, replacing any current stream.
-    pub fn play(&mut self, url: &str) {
+    ///
+    /// The URL is a [`ValidatedMediaUrl`] because a parcel's music URL is set
+    /// by its land owner: `playbin3` hands an unfiltered URI straight to
+    /// `uridecodebin`, which opens `file://` as happily as `http://`.
+    pub fn play(&mut self, url: &ValidatedMediaUrl) {
         self.stop();
         if let Err(error) = crate::ensure_initialized() {
             self.status.state = AudioStreamState::Error;
             self.status.error = Some(error.to_string());
             return;
         }
-        self.status.url = Some(String::from(url));
+        self.status.url = Some(url.to_string());
         self.status.title = None;
         self.status.error = None;
         self.status.network_diagnosable = false;
@@ -139,7 +143,7 @@ impl AudioStreamPlayer {
             (self.muted, self.volume)
         };
         let playbin = match gstreamer::ElementFactory::make("playbin3")
-            .property("uri", url)
+            .property("uri", url.as_str())
             .property("mute", playbin_mute)
             .property("volume", playbin_volume)
             .build()
