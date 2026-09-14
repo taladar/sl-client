@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 313 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 27 |
-| done | 1136 |
+| bugs | 26 |
+| done | 1137 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1681** |
@@ -1163,7 +1163,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (27)
+## bugs (26)
 
 ### viewer
 
@@ -1178,9 +1178,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-particles-dt-and-cloud-leak`](bugs/viewer-audit-particles-dt-and-cloud-leak.md)
   — Particle integration uses an unclamped dt, and a switched-off emitter leaks
   its cloud
-- [`viewer-audit-sit-camera-gating`](bugs/viewer-audit-sit-camera-gating.md) —
-  The scripted sit camera arms on any SitResult and never clears forced
-  mouselook
 - [`viewer-audit-system-ordering-claims`](bugs/viewer-audit-system-ordering-claims.md)
   — Update tuples claim a pipeline order the scheduler does not enforce
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
@@ -1229,7 +1226,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1136)
+## done (1137)
 
 ### protocol
 
@@ -1572,6 +1569,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The directory 'there is more' sentinel row is rendered as a result
 - [`viewer-audit-settings-write-race`](done/viewer-audit-settings-write-race.md)
   — Settings are written non-atomically from unordered detached tasks
+- [`viewer-audit-sit-camera-gating`](done/viewer-audit-sit-camera-gating.md) —
+  The scripted sit camera arms on any SitResult and never clears forced
+  mouselook
 - [`viewer-audit-stale-globaltransform-readers`](done/viewer-audit-stale-globaltransform-readers.md)
   — Depth-reconstructing passes and the interest camera read a frame-old camera
   pose
