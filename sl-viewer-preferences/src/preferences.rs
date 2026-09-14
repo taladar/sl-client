@@ -46,7 +46,7 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui::{Checked, InteractionDisabled};
-use bevy::ui_widgets::{Activate, Button, SliderRange, SliderStep, SliderThumb, SliderValue};
+use bevy::ui_widgets::{Activate, Button, SliderRange, SliderStep};
 use bevy_flair::style::components::ClassList;
 use sl_settings::{Scope, SettingValue, SettingsStore};
 
@@ -57,12 +57,13 @@ use crate::floater::{
 use crate::i18n::Translated;
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{ComboBindingValues, SettingBinding, bound_checkbox, bound_slider};
-use crate::ui::{LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_color_picker::spawn_color_swatch;
 use crate::ui_combo::{ComboSpec, spawn_combo};
 use crate::ui_element::ElementCx;
 use crate::ui_font::UiFont;
 use crate::ui_search::{SearchFieldSpec, spawn_search_field};
+use crate::ui_slider::{SliderStyle, spawn_slider};
 use crate::ui_tab::{
     DEFAULT_ELLIPSIS, TAB_LABEL_COLOR, TabButton, TabPanel, TabPlacement, TabSpec, TabStrip,
     fill_tab_container, spawn_tab_container,
@@ -119,14 +120,16 @@ const BUTTON_CLASS: &str = "sk-button";
 /// A checkbox box's side length, in logical pixels.
 pub(crate) const CHECK_SIZE: f32 = 18.0;
 
-/// A slider track's width, in logical pixels.
-const TRACK_WIDTH: f32 = 180.0;
-
-/// A slider thumb's width, in logical pixels.
-const THUMB_WIDTH: f32 = 14.0;
-
-/// A slider track's (and thumb's) height, in logical pixels.
-const TRACK_HEIGHT: f32 = 16.0;
+/// How this panel's sliders are drawn.
+const SLIDER: SliderStyle = SliderStyle {
+    track_width: 180.0,
+    track_height: 16.0,
+    border: 2.0,
+    border_color: CONTROL_BORDER,
+    track_fill: TRACK_FILL,
+    thumb_width: 14.0,
+    thumb_fill: THUMB_FILL,
+};
 
 /// The leading tab strip's fixed width, in logical pixels — near the
 /// reference's 114 px tab column, with room for the divider. Resizable by its
@@ -323,10 +326,6 @@ pub(crate) struct PrefRowLabel;
 #[derive(Component, Debug, Clone, Copy)]
 pub(crate) struct PrefCheckboxBox;
 
-/// Marks a preference slider's thumb node, so it slides to the bound value.
-#[derive(Component, Debug, Clone, Copy)]
-struct PrefSliderThumb;
-
 /// The bare row node every preference row starts from.
 fn pref_row_node() -> Node {
     Node {
@@ -404,38 +403,14 @@ pub(crate) fn spawn_pref_slider(
         ))
         .id();
     let label = spawn_row_label(commands, row, label_key);
-    commands
-        .spawn((
-            bound_slider(binding, range, step),
-            Node {
-                width: Val::Px(TRACK_WIDTH),
-                height: Val::Px(TRACK_HEIGHT),
-                border: UiRect::all(Val::Px(2.0)),
-                flex_shrink: 0.0,
-                ..default()
-            },
-            BorderColor::all(CONTROL_BORDER),
-            BackgroundColor(TRACK_FILL),
-            TabIndex(0),
-            ChildOf(row),
-        ))
-        .with_children(|track| {
-            track.spawn((
-                SliderThumb,
-                Node {
-                    position_type: PositionType::Absolute,
-                    width: Val::Px(THUMB_WIDTH),
-                    height: Val::Px(TRACK_HEIGHT),
-                    ..default()
-                },
-                LogicalInset(LogicalRect {
-                    inline_start: Val::Px(0.0),
-                    ..LogicalRect::ZERO
-                }),
-                BackgroundColor(THUMB_FILL),
-                PrefSliderThumb,
-            ));
-        });
+    spawn_slider(
+        commands,
+        row,
+        SLIDER,
+        0,
+        0.0,
+        bound_slider(binding, range, step),
+    );
     commands.entity(row).insert(PrefSearchRow { label });
     row
 }
@@ -627,7 +602,6 @@ impl Plugin for PreferencesPlugin {
                     mirror_preferences_filter,
                     apply_preferences_filter.after(mirror_preferences_filter),
                     drive_pref_checkbox_visual,
-                    drive_pref_slider_visual,
                 ),
             );
     }
@@ -1163,28 +1137,6 @@ fn drive_pref_checkbox_visual(mut boxes: PrefCheckboxPaint) {
     }
 }
 
-/// Slide each preference slider's thumb to its [`SliderValue`] within its
-/// range.
-fn drive_pref_slider_visual(
-    sliders: Query<(&SliderValue, &SliderRange, &Children), With<SettingBinding>>,
-    mut thumbs: Query<&mut LogicalInset, With<PrefSliderThumb>>,
-) {
-    for (value, range, slider_children) in &sliders {
-        let span = range.span();
-        let fraction = if span > f32::EPSILON {
-            ((value.0 - range.start()) / span).clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
-        let offset = fraction * (TRACK_WIDTH - THUMB_WIDTH);
-        for child in slider_children {
-            if let Ok(mut inset) = thumbs.get_mut(*child) {
-                inset.0.inline_start = Val::Px(offset);
-            }
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------
 // The first tab: UI & world display.
 // ---------------------------------------------------------------------------
@@ -1379,32 +1331,9 @@ pub fn spawn_preferences_specimen(
             TextColor(LABEL_COLOR),
             ChildOf(slider_row),
         ));
-        commands
-            .spawn((
-                Node {
-                    width: Val::Px(TRACK_WIDTH),
-                    height: Val::Px(TRACK_HEIGHT),
-                    border: UiRect::all(Val::Px(2.0)),
-                    flex_shrink: 0.0,
-                    ..default()
-                },
-                BorderColor::all(CONTROL_BORDER),
-                BackgroundColor(TRACK_FILL),
-                ChildOf(slider_row),
-            ))
-            .with_child((
-                Node {
-                    position_type: PositionType::Absolute,
-                    width: Val::Px(THUMB_WIDTH),
-                    height: Val::Px(TRACK_HEIGHT),
-                    ..default()
-                },
-                LogicalInset(LogicalRect {
-                    inline_start: Val::Px(TRACK_WIDTH * 0.6),
-                    ..LogicalRect::ZERO
-                }),
-                BackgroundColor(THUMB_FILL),
-            ));
+        // Static: no `Slider`, so nothing drives it — the thumb is drawn at
+        // the fraction the specimen wants and stays there.
+        spawn_slider(commands, slider_row, SLIDER, 0, 0.6, ());
     }
     if let Some(panel) = tabs.panels.get(1).copied() {
         // The alerts tab stand-in: a headline toggle row over a static

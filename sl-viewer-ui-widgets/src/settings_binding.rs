@@ -65,17 +65,17 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui::Checked;
 use bevy::ui_widgets::{
-    Activate, Button, Checkbox, Slider, SliderRange, SliderStep, SliderThumb, SliderValue,
-    ValueChange,
+    Activate, Button, Checkbox, Slider, SliderRange, SliderStep, SliderValue, ValueChange,
 };
 use sl_settings::{Scope, SettingKind, SettingValue};
 use tracing::warn;
 
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue};
 use crate::ui_combo::{ComboChanged, ComboSelection};
+use crate::ui_slider::{SliderStyle, SliderWidgetPlugin, slider_thumb, slider_track};
 use sl_viewer_settings::ViewerSettings;
 use sl_viewer_ui_core::ui::{
-    LogicalInset, LogicalMargin, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row,
+    LogicalMargin, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row,
 };
 use sl_viewer_ui_core::ui_font::UiFont;
 
@@ -168,6 +168,9 @@ pub struct SettingsBindingPlugin;
 
 impl Plugin for SettingsBindingPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<SliderWidgetPlugin>() {
+            app.add_plugins(SliderWidgetPlugin);
+        }
         // `ComboWidgetPlugin` / `ColorPickerPlugin` also register these
         // messages; doing it here too (idempotent) keeps the binding layer safe
         // to add standalone (tests).
@@ -197,7 +200,6 @@ impl Plugin for SettingsBindingPlugin {
                     write_bound_swatch_picks,
                     sync_bound_color_swatches.after(write_bound_swatch_picks),
                     drive_demo_checkbox_visual.after(sync_bound_checkboxes),
-                    drive_demo_slider_visual.after(sync_bound_sliders),
                     update_settings_binding_demo_labels,
                 ),
             );
@@ -666,12 +668,16 @@ const DEMO_LEVEL_MIN: f32 = 0.0;
 /// The upper bound of the demo slider; see [`DEMO_LEVEL_MIN`].
 const DEMO_LEVEL_MAX: f32 = 100.0;
 
-/// The demo slider track's width, in logical pixels.
-const DEMO_TRACK_WIDTH: f32 = 220.0;
-/// The demo slider thumb's width, in logical pixels.
-const DEMO_THUMB_WIDTH: f32 = 14.0;
-/// The demo slider track and thumb height, in logical pixels.
-const DEMO_TRACK_HEIGHT: f32 = 16.0;
+/// How the demo slider is drawn.
+const DEMO_SLIDER: SliderStyle = SliderStyle {
+    track_width: 220.0,
+    track_height: 16.0,
+    border: 2.0,
+    border_color: DEMO_CONTROL_BORDER,
+    track_fill: DEMO_TRACK_FILL,
+    thumb_width: 14.0,
+    thumb_fill: DEMO_THUMB_FILL,
+};
 
 /// The demo checkbox box's side length, in logical pixels.
 const DEMO_CHECK_SIZE: f32 = 18.0;
@@ -726,10 +732,6 @@ struct SettingsBindingDemoRoot;
 /// A marker on the demo checkbox's box node, so its fill tracks `Checked`.
 #[derive(Component, Debug, Clone, Copy)]
 struct DemoCheckboxBox;
-
-/// A marker on the demo slider's thumb node, so it slides to the bound value.
-#[derive(Component, Debug, Clone, Copy)]
-struct DemoSliderThumb;
 
 /// Which of the demo's live labels a `Text` node is.
 #[derive(Component, Debug, Clone, Copy)]
@@ -846,33 +848,9 @@ fn spawn_demo_slider_row(panel: &mut RelatedSpawnerCommands<'_, ChildOf>) {
                         SliderRange::new(DEMO_LEVEL_MIN, DEMO_LEVEL_MAX),
                         SliderStep(1.0),
                     ),
-                    Node {
-                        width: Val::Px(DEMO_TRACK_WIDTH),
-                        height: Val::Px(DEMO_TRACK_HEIGHT),
-                        border: UiRect::all(Val::Px(2.0)),
-                        ..default()
-                    },
-                    BorderColor::all(DEMO_CONTROL_BORDER),
-                    BackgroundColor(DEMO_TRACK_FILL),
-                    TabIndex(0),
+                    slider_track(DEMO_SLIDER, 0),
                 ))
-                .with_children(|track| {
-                    track.spawn((
-                        SliderThumb,
-                        Node {
-                            position_type: PositionType::Absolute,
-                            width: Val::Px(DEMO_THUMB_WIDTH),
-                            height: Val::Px(DEMO_TRACK_HEIGHT),
-                            ..default()
-                        },
-                        LogicalInset(LogicalRect {
-                            inline_start: Val::Px(0.0),
-                            ..LogicalRect::ZERO
-                        }),
-                        BackgroundColor(DEMO_THUMB_FILL),
-                        DemoSliderThumb,
-                    ));
-                });
+                .with_child(slider_thumb(DEMO_SLIDER, 0.0));
             slider_row.spawn((
                 Text::default(),
                 UiFont::Sans.at(DEMO_FONT_SIZE),
@@ -957,27 +935,6 @@ fn drive_demo_checkbox_visual(
         });
         if fill.0 != target.0 {
             *fill = target;
-        }
-    }
-}
-
-/// Slide each demo thumb to its slider's [`SliderValue`] within the range.
-fn drive_demo_slider_visual(
-    sliders: Query<(&SliderValue, &SliderRange, &Children), With<Slider>>,
-    mut thumbs: Query<&mut LogicalInset, With<DemoSliderThumb>>,
-) {
-    for (value, range, children) in &sliders {
-        let span = range.span();
-        let fraction = if span > f32::EPSILON {
-            ((value.0 - range.start()) / span).clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
-        let offset = fraction * (DEMO_TRACK_WIDTH - DEMO_THUMB_WIDTH);
-        for child in children {
-            if let Ok(mut inset) = thumbs.get_mut(*child) {
-                inset.0.inline_start = Val::Px(offset);
-            }
         }
     }
 }

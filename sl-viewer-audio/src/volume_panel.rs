@@ -18,9 +18,7 @@
 
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
-use bevy::ui_widgets::{
-    Activate, Button, Slider, SliderRange, SliderStep, SliderThumb, SliderValue,
-};
+use bevy::ui_widgets::{Activate, Button, SliderRange, SliderStep};
 use bevy::window::PrimaryWindow;
 
 use sl_audio::{AudioMixer as _, Bus, BusLevel, Mixer};
@@ -30,8 +28,9 @@ use crate::i18n::Translated;
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{SettingBinding, bound_slider};
 use crate::ui::BottomArea;
-use crate::ui::{LogicalInset, LogicalRect, UiPanelShown, column, row};
+use crate::ui::{UiPanelShown, column, row};
 use crate::ui_font::UiFont;
+use crate::ui_slider::{SliderStyle, SliderWidgetPlugin, spawn_slider};
 
 /// The persisted-settings section the bus levels live under (`[audio.bus]`),
 /// kept distinct from the parcel-stream player's own `[audio]` keys.
@@ -52,12 +51,16 @@ const AUDIO_SECTION: &[&str] = &["audio"];
 /// bus gain).
 pub const SETTING_MUTE_WHEN_MINIMIZED: &str = "MuteWhenMinimized";
 
-/// Slider track width in logical pixels.
-const TRACK_WIDTH: f32 = 90.0;
-/// Slider thumb width in logical pixels.
-const THUMB_WIDTH: f32 = 10.0;
-/// Slider track / thumb height in logical pixels.
-const TRACK_HEIGHT: f32 = 12.0;
+/// How the volume sliders are drawn.
+const SLIDER: SliderStyle = SliderStyle {
+    track_width: 90.0,
+    track_height: 12.0,
+    border: 1.0,
+    border_color: BUTTON_BORDER,
+    track_fill: TRACK_FILL,
+    thumb_width: 10.0,
+    thumb_fill: THUMB_FILL,
+};
 /// The pulldown / bar background.
 const PANEL_BACKGROUND: Color = Color::srgba(0.08, 0.09, 0.12, 0.96);
 /// The bar background.
@@ -147,10 +150,6 @@ struct VolumeMuteGlyph(Bus);
 #[derive(Component)]
 struct VolumePanelToggleButton;
 
-/// A slider thumb positioned from its parent slider's value each frame.
-#[derive(Component)]
-struct VolumeThumb;
-
 /// Fired when a mute button is pressed.
 #[derive(Message)]
 struct ToggleMute(Bus);
@@ -166,6 +165,9 @@ pub struct VolumePanelPlugin;
 
 impl Plugin for VolumePanelPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<SliderWidgetPlugin>() {
+            app.add_plugins(SliderWidgetPlugin);
+        }
         app.add_message::<ToggleMute>()
             .add_message::<ToggleVolumePanel>()
             .add_systems(Startup, register_volume_settings)
@@ -184,7 +186,6 @@ impl Plugin for VolumePanelPlugin {
                     apply_mute_toggles,
                     apply_panel_toggle,
                     sync_mute_glyphs,
-                    drive_volume_thumbs,
                     apply_volume_settings_to_mixer,
                 )
                     .chain(),
@@ -348,44 +349,21 @@ fn spawn_volume_row(commands: &mut Commands, parent: Entity, bus: Bus, tab_base:
 
 /// Spawn a settings-bound slider (track + thumb) for `bus` on `parent`.
 fn spawn_bound_slider(commands: &mut Commands, parent: Entity, bus: Bus, tab_index: i32) {
-    let slider = commands
-        .spawn((
+    spawn_slider(
+        commands,
+        parent,
+        SLIDER,
+        tab_index,
+        0.0,
+        (
             bound_slider(
                 SettingBinding::global(volume_key(bus)),
                 SliderRange::new(0.0, 1.0),
                 SliderStep(0.05),
             ),
-            Node {
-                width: Val::Px(TRACK_WIDTH),
-                height: Val::Px(TRACK_HEIGHT),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(BUTTON_BORDER),
-            BackgroundColor(TRACK_FILL),
-            TabIndex(tab_index),
-            Pickable::default(),
             Name::new(format!("volume-slider:{}", bus.key())),
-            ChildOf(parent),
-        ))
-        .id();
-    commands.spawn((
-        SliderThumb,
-        Node {
-            position_type: PositionType::Absolute,
-            width: Val::Px(THUMB_WIDTH),
-            height: Val::Px(TRACK_HEIGHT),
-            ..default()
-        },
-        LogicalInset(LogicalRect {
-            inline_start: Val::Px(0.0),
-            ..LogicalRect::ZERO
-        }),
-        BackgroundColor(THUMB_FILL),
-        VolumeThumb,
-        Pickable::IGNORE,
-        ChildOf(slider),
-    ));
+        ),
+    );
 }
 
 /// Spawn a mute toggle button (a speaker glyph) for `bus` on `parent`.
@@ -508,29 +486,6 @@ fn sync_mute_glyphs(
         let want_color = if muted { LABEL_DIM } else { LABEL_COLOR };
         if color.0 != want_color {
             color.0 = want_color;
-        }
-    }
-}
-
-/// Position each volume thumb from its parent slider's value.
-fn drive_volume_thumbs(
-    sliders: Query<(&SliderValue, &SliderRange, &Children), With<Slider>>,
-    mut thumbs: Query<&mut LogicalInset, With<VolumeThumb>>,
-) {
-    for (value, range, children) in &sliders {
-        let span = range.span();
-        let fraction = if span > f32::EPSILON {
-            ((value.0 - range.start()) / span).clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
-        let offset = fraction * (TRACK_WIDTH - THUMB_WIDTH);
-        for child in children {
-            if let Ok(mut inset) = thumbs.get_mut(*child)
-                && inset.0.inline_start != Val::Px(offset)
-            {
-                inset.0.inline_start = Val::Px(offset);
-            }
         }
     }
 }

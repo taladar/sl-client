@@ -139,8 +139,20 @@ const SETTING_RANGE: &str = "RadarNearMeRange";
 /// Header / cell font size, logical px.
 const FONT_SIZE: f32 = 13.0;
 
-/// Table row height, logical px.
+/// Table row height at the live cell font ([`FONT_SIZE`]), logical px.
 const ROW_HEIGHT: f32 = 22.0;
+
+/// The row height that goes with a cell font of `font_size`, logical px —
+/// [`ROW_HEIGHT`] at [`FONT_SIZE`], and in proportion to it elsewhere.
+///
+/// A row is a box with **one line of text** in it, so its height is a function
+/// of the font rather than a constant: a line of 22 px text lays out 27 px tall,
+/// and a 22 px row cuts its descenders off. The live table's font is a constant
+/// today, so this changes nothing there; the specimen sweeps the font size and
+/// needs the row that goes with each one.
+const fn row_height(font_size: f32) -> f32 {
+    font_size * (ROW_HEIGHT / FONT_SIZE)
+}
 
 /// The default cell / label colour.
 const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
@@ -1656,7 +1668,11 @@ pub fn spawn_radar_specimen(
         let row_node = commands
             .spawn((
                 Node {
-                    height: Val::Px(ROW_HEIGHT),
+                    // The row that goes with *this cell's* font, not the live
+                    // one: the specimen sweeps font sizes, and a row fixed at
+                    // the 13 px font's height cuts the descenders off a 22 px
+                    // line.
+                    height: Val::Px(row_height(cx.font_size)),
                     align_items: AlignItems::Center,
                     padding: UiRect::horizontal(Val::Px(4.0)),
                     ..row(Val::Px(10.0))

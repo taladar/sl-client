@@ -43,7 +43,7 @@ use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
-use bevy::ui_widgets::{Slider, SliderRange, SliderStep, SliderThumb, SliderValue, ValueChange};
+use bevy::ui_widgets::{Slider, SliderRange, SliderStep, SliderValue, ValueChange};
 use sl_client_bevy::{
     AssetType, Command, InventoryType, ItemInfo, JointOverrides, ParamEffect, ParamGroup, ParamSex,
     ResolvedParams, SkeletalDeformations, SlCommand, SlEvent, SlSessionEvent, TextureKey,
@@ -60,10 +60,11 @@ use crate::inventory::OpenWearableEditor;
 use crate::inventory_actions::{wearable_param_group, wearable_type_of};
 use crate::inventory_properties::to_wire_item;
 use crate::textures::{TextureDecoded, TextureManager};
-use crate::ui::{LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_font::UiFont;
 use crate::ui_radio::{RadioLayout, RadioSelection, RadioSpec, spawn_radio_group};
+use crate::ui_slider::{SliderStyle, SliderWidgetPlugin, spawn_slider};
 use crate::ui_texture_picker::{TextureSwatchValue, spawn_texture_swatch};
 use crate::world_api::DecodedTextures;
 use crate::world_api::TexturePicked;
@@ -84,14 +85,16 @@ const LIST_HEIGHT: f32 = 380.0;
 /// Logical pixels scrolled per wheel notch (`MouseScrollUnit::Line`).
 const LINE_SCROLL_PIXELS: f32 = 40.0;
 
-/// A slider track's width, in logical pixels.
-const TRACK_WIDTH: f32 = 150.0;
-
-/// A slider track's height.
-const TRACK_HEIGHT: f32 = 12.0;
-
-/// A slider thumb's width.
-const THUMB_WIDTH: f32 = 9.0;
+/// How a wearable parameter's slider is drawn.
+const SLIDER: SliderStyle = SliderStyle {
+    track_width: 150.0,
+    track_height: 12.0,
+    border: 1.0,
+    border_color: CONTROL_BORDER,
+    track_fill: TRACK_FILL,
+    thumb_width: 9.0,
+    thumb_fill: THUMB_FILL,
+};
 
 /// The label colour.
 const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
@@ -229,6 +232,9 @@ pub struct EditWearablePlugin;
 impl Plugin for EditWearablePlugin {
     /// Register the open message, state and systems; spawn the hidden floater.
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<SliderWidgetPlugin>() {
+            app.add_plugins(SliderWidgetPlugin);
+        }
         app.init_resource::<WearEditState>()
             .add_message::<OpenWearableEditor>()
             .add_systems(
@@ -690,8 +696,13 @@ fn spawn_param_slider(
         ))
         .id();
     let range = SliderRange::new(min, max);
-    commands
-        .spawn((
+    let track = spawn_slider(
+        commands,
+        row_entity,
+        SLIDER,
+        *tab,
+        0.0,
+        (
             Slider::default(),
             SliderValue(value.clamp(min, max)),
             range,
@@ -701,33 +712,10 @@ fn spawn_param_slider(
                 is_bake,
                 label: readout,
             },
-            Node {
-                width: Val::Px(TRACK_WIDTH),
-                height: Val::Px(TRACK_HEIGHT),
-                border: UiRect::all(Val::Px(1.0)),
-                ..Default::default()
-            },
-            BorderColor::all(CONTROL_BORDER),
-            BackgroundColor(TRACK_FILL),
-            TabIndex(*tab),
             Name::new(format!("wearable-slider:{id}")),
-            ChildOf(row_entity),
-        ))
-        .observe(on_wear_slider_change)
-        .with_child((
-            SliderThumb,
-            Node {
-                position_type: PositionType::Absolute,
-                width: Val::Px(THUMB_WIDTH),
-                height: Val::Px(TRACK_HEIGHT),
-                ..Default::default()
-            },
-            LogicalInset(LogicalRect {
-                inline_start: Val::Px(0.0),
-                ..LogicalRect::ZERO
-            }),
-            BackgroundColor(THUMB_FILL),
-        ));
+        ),
+    );
+    commands.entity(track).observe(on_wear_slider_change);
     *tab = tab.saturating_add(1);
 }
 
@@ -950,26 +938,13 @@ fn drive_wearable_preview(
     edit.bake_dirty = false;
 }
 
-/// Keep each slider's thumb position and value readout in sync with its
-/// [`SliderValue`].
+/// Keep each slider's value **readout** in sync with its [`SliderValue`]. The
+/// thumb is `sl_viewer_ui_widgets::ui_slider`'s to place.
 fn sync_wearable_sliders(
-    sliders: Query<(&WearParamSlider, &SliderValue, &SliderRange, &Children)>,
-    mut insets: Query<&mut LogicalInset, With<SliderThumb>>,
+    sliders: Query<(&WearParamSlider, &SliderValue)>,
     mut texts: Query<&mut Text>,
 ) {
-    for (info, value, range, children) in &sliders {
-        let span = range.span();
-        let fraction = if span > f32::EPSILON {
-            ((value.0 - range.start()) / span).clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
-        let offset = fraction * (TRACK_WIDTH - THUMB_WIDTH);
-        for child in children.iter() {
-            if let Ok(mut inset) = insets.get_mut(child) {
-                inset.0.inline_start = Val::Px(offset);
-            }
-        }
+    for (info, value) in &sliders {
         if let Ok(mut text) = texts.get_mut(info.label) {
             let want = format!("{:.2}", value.0);
             if text.0 != want {

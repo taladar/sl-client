@@ -15,13 +15,14 @@
 
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
-use bevy::ui_widgets::{Slider, SliderRange, SliderStep, SliderThumb, SliderValue};
+use bevy::ui_widgets::{Slider, SliderRange, SliderStep, SliderValue};
 use sl_client_bevy::TextureKey;
 use sl_viewer_pickers::ui_texture_picker::spawn_texture_swatch;
 use sl_viewer_ui_core::i18n::Translated;
-use sl_viewer_ui_core::ui::{LogicalInset, LogicalRect, column, row};
+use sl_viewer_ui_core::ui::{column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
 use sl_viewer_ui_widgets::ui_color_picker::spawn_color_swatch;
+use sl_viewer_ui_widgets::ui_slider::{SliderStyle, SliderWidgetPlugin, spawn_slider};
 use sl_viewer_ui_widgets::ui_trackball::{TrackballAim, TrackballPlugin, spawn_trackball};
 
 use crate::knobs::{AimKnobs, ColorKnob, SkyKnob, TextureKnob, label_key};
@@ -39,11 +40,17 @@ use crate::style::{
 /// mean.
 pub const TRACK_WIDTH: f32 = 140.0;
 
-/// A slider track's height, logical px.
-const TRACK_HEIGHT: f32 = 12.0;
-
-/// A slider thumb's width, logical px.
-const THUMB_WIDTH: f32 = 9.0;
+/// How every environment slider is drawn. Its width is [`TRACK_WIDTH`], which
+/// a column is sized from as well.
+pub(crate) const SLIDER: SliderStyle = SliderStyle {
+    track_width: TRACK_WIDTH,
+    track_height: 12.0,
+    border: 1.0,
+    border_color: CONTROL_BORDER,
+    track_fill: TRACK_FILL,
+    thumb_width: 9.0,
+    thumb_fill: THUMB_FILL,
+};
 
 /// A value readout's width, logical px — right of the label, on its line.
 const READOUT_WIDTH: f32 = 44.0;
@@ -108,7 +115,7 @@ pub fn spawn_labelled_block(
 
 /// A labelled slider over `range`, named `{element}-{slug}:slider`. Returns the
 /// track, which the caller tags with the knob it drives and an observer.
-pub fn spawn_slider(
+pub fn spawn_slider_row(
     commands: &mut Commands,
     parent: Entity,
     element: &str,
@@ -136,40 +143,21 @@ pub fn spawn_slider(
             ChildOf(caption),
         ))
         .id();
-    let track = commands
-        .spawn((
+    let track = spawn_slider(
+        commands,
+        block,
+        SLIDER,
+        *tab,
+        0.0,
+        (
             Slider::default(),
             SliderValue(min),
             SliderRange::new(min, max),
             SliderStep((max - min) / 100.0),
             SliderRow { readout, decimals },
-            Node {
-                width: Val::Px(TRACK_WIDTH),
-                height: Val::Px(TRACK_HEIGHT),
-                border: UiRect::all(Val::Px(1.0)),
-                ..Default::default()
-            },
-            BorderColor::all(CONTROL_BORDER),
-            BackgroundColor(TRACK_FILL),
-            TabIndex(*tab),
             Name::new(format!("{element}-{slug}:slider")),
-            ChildOf(block),
-        ))
-        .with_child((
-            SliderThumb,
-            Node {
-                position_type: PositionType::Absolute,
-                width: Val::Px(THUMB_WIDTH),
-                height: Val::Px(TRACK_HEIGHT),
-                ..Default::default()
-            },
-            LogicalInset(LogicalRect {
-                inline_start: Val::Px(0.0),
-                ..LogicalRect::ZERO
-            }),
-            BackgroundColor(THUMB_FILL),
-        ))
-        .id();
+        ),
+    );
     *tab = tab.saturating_add(1);
     track
 }
@@ -242,7 +230,7 @@ pub struct AimSlider {
 /// Tag a freshly spawned sky slider as one half of a body's aim, if its knob is
 /// one — which is what puts it in step with the trackball above it.
 ///
-/// Called by every window's slider spawner rather than by [`spawn_slider`]
+/// Called by every window's slider spawner rather than by [`spawn_slider_row`]
 /// itself, because that one takes a slug and a range and deliberately knows
 /// nothing about knobs.
 pub fn tag_aim_slider(commands: &mut Commands, slider: Entity, scope: &'static str, knob: SkyKnob) {
@@ -440,6 +428,9 @@ impl Plugin for RowsPlugin {
         if !app.is_plugin_added::<TrackballPlugin>() {
             app.add_plugins(TrackballPlugin);
         }
+        if !app.is_plugin_added::<SliderWidgetPlugin>() {
+            app.add_plugins(SliderWidgetPlugin);
+        }
         app.add_systems(
             Update,
             // Ordered: a slider drag has to reach the trackball and the
@@ -457,37 +448,14 @@ impl Plugin for RowsPlugin {
     }
 }
 
-/// Keep every environment slider's thumb and readout in step with its value —
-/// the one job that is the same in every window that draws one.
-pub fn sync_slider_rows(
-    sliders: Query<(&SliderRow, &SliderValue, &SliderRange, &Children)>,
-    mut insets: Query<&mut LogicalInset, With<SliderThumb>>,
-    mut texts: Query<&mut Text>,
-) {
-    for (row_info, value, range, children) in &sliders {
-        place_thumb(value, range, children, &mut insets);
+/// Keep every environment slider's **readout** in step with its value.
+///
+/// It used to place the thumb as well; that half is
+/// [`sl_viewer_ui_widgets::ui_slider`]'s now, and belongs there because every
+/// slider in the viewer needed it and each one had written it out again.
+pub fn sync_slider_rows(sliders: Query<(&SliderRow, &SliderValue)>, mut texts: Query<&mut Text>) {
+    for (row_info, value) in &sliders {
         write_readout(row_info.readout, value.0, row_info.decimals, &mut texts);
-    }
-}
-
-/// Move a slider's thumb to where its value sits in its range.
-fn place_thumb(
-    value: &SliderValue,
-    range: &SliderRange,
-    children: &Children,
-    insets: &mut Query<&mut LogicalInset, With<SliderThumb>>,
-) {
-    let span = range.span();
-    let fraction = if span > f32::EPSILON {
-        ((value.0 - range.start()) / span).clamp(0.0, 1.0)
-    } else {
-        0.0
-    };
-    let offset = fraction * (TRACK_WIDTH - THUMB_WIDTH);
-    for child in children.iter() {
-        if let Ok(mut inset) = insets.get_mut(child) {
-            inset.0.inline_start = Val::Px(offset);
-        }
     }
 }
 

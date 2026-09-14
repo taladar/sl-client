@@ -39,9 +39,7 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui::Checked;
 use bevy::ui::InteractionDisabled;
-use bevy::ui_widgets::{
-    Activate, Button, Slider, SliderRange, SliderStep, SliderThumb, SliderValue,
-};
+use bevy::ui_widgets::{Activate, Button, SliderRange, SliderStep};
 use bevy::window::PrimaryWindow;
 use serde::{Deserialize, Serialize};
 use sl_settings::{Scope, SettingKind};
@@ -56,10 +54,11 @@ use crate::settings::ViewerSettings;
 use crate::settings_binding::{SettingBinding, bound_checkbox, bound_slider};
 use crate::sky_presets::FixedSky;
 use crate::ui::BottomArea;
-use crate::ui::{LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_element::ElementCx;
 use crate::ui_font::UiFont;
+use crate::ui_slider::{SliderStyle, spawn_slider};
 use sl_viewer_ui_widgets::floater_persist::FloaterOpenExempt;
 
 /// The stable floater id (its geometry-persistence key and lookup handle).
@@ -78,12 +77,16 @@ const SECTION_FONT: f32 = 14.0;
 /// The gap between rows in the content column.
 const ROW_GAP: f32 = 8.0;
 
-/// A setting slider's track width, in logical pixels.
-const TRACK_WIDTH: f32 = 130.0;
-/// A setting slider's thumb width, in logical pixels.
-const THUMB_WIDTH: f32 = 12.0;
-/// A setting slider's track / thumb height, in logical pixels.
-const TRACK_HEIGHT: f32 = 14.0;
+/// How this panel's setting sliders are drawn.
+const SLIDER: SliderStyle = SliderStyle {
+    track_width: 130.0,
+    track_height: 14.0,
+    border: 2.0,
+    border_color: CONTROL_BORDER,
+    track_fill: TRACK_FILL,
+    thumb_width: 12.0,
+    thumb_fill: THUMB_FILL,
+};
 /// A checkbox box's side length, in logical pixels.
 const CHECK_SIZE: f32 = 16.0;
 /// The width of a setting row's trailing value readout, in logical pixels.
@@ -576,10 +579,6 @@ const fn combo_indices(fixed: Option<FixedEnvironment>, local_in_force: bool) ->
 #[derive(Component, Debug, Clone, Copy)]
 struct QuickPrefsFloaterRoot;
 
-/// A marker on a setting slider's thumb, so [`drive_quick_pref_thumbs`] slides it.
-#[derive(Component, Debug, Clone, Copy)]
-struct QuickPrefSliderThumb;
-
 /// A marker on a setting checkbox's box, so [`drive_quick_pref_checkboxes`]
 /// colours it.
 #[derive(Component, Debug, Clone, Copy)]
@@ -616,7 +615,6 @@ impl Plugin for QuickPreferencesPlugin {
                 apply_env_combos,
                 sync_env_combos.after(apply_env_combos),
                 update_quick_pref_values,
-                drive_quick_pref_thumbs,
                 drive_quick_pref_checkboxes,
             ),
         );
@@ -993,42 +991,18 @@ fn spawn_slider_row(commands: &mut Commands, parent: Entity, entry: &QuickPrefEn
             ChildOf(row_entity),
         ))
         .id();
-    commands
-        .spawn((
-            bound_slider(
-                entry_binding(entry),
-                SliderRange::new(entry.min, entry.max),
-                SliderStep(entry.increment),
-            ),
-            Node {
-                width: Val::Px(TRACK_WIDTH),
-                height: Val::Px(TRACK_HEIGHT),
-                border: UiRect::all(Val::Px(2.0)),
-                flex_shrink: 0.0,
-                ..default()
-            },
-            BorderColor::all(CONTROL_BORDER),
-            BackgroundColor(TRACK_FILL),
-            TabIndex(0),
-            ChildOf(group),
-        ))
-        .with_children(|track| {
-            track.spawn((
-                SliderThumb,
-                Node {
-                    position_type: PositionType::Absolute,
-                    width: Val::Px(THUMB_WIDTH),
-                    height: Val::Px(TRACK_HEIGHT),
-                    ..default()
-                },
-                LogicalInset(LogicalRect {
-                    inline_start: Val::Px(0.0),
-                    ..LogicalRect::ZERO
-                }),
-                BackgroundColor(THUMB_FILL),
-                QuickPrefSliderThumb,
-            ));
-        });
+    spawn_slider(
+        commands,
+        group,
+        SLIDER,
+        0,
+        0.0,
+        bound_slider(
+            entry_binding(entry),
+            SliderRange::new(entry.min, entry.max),
+            SliderStep(entry.increment),
+        ),
+    );
     // A right-aligning slot with a minimum width (not a fixed one) so the readout
     // column lines up but a long value / large UI scale grows it rather than
     // clipping or wrapping the text. The value Text itself is content-sized (a
@@ -1355,27 +1329,6 @@ const fn u32_to_f32(value: u32) -> f32 {
     value as f32
 }
 
-/// Slide each setting slider's thumb to its value within the range.
-fn drive_quick_pref_thumbs(
-    sliders: Query<(&SliderValue, &SliderRange, &Children), With<Slider>>,
-    mut thumbs: Query<&mut LogicalInset, With<QuickPrefSliderThumb>>,
-) {
-    for (value, range, children) in &sliders {
-        let span = range.span();
-        let fraction = if span > f32::EPSILON {
-            ((value.0 - range.start()) / span).clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
-        let offset = fraction * (TRACK_WIDTH - THUMB_WIDTH);
-        for child in children {
-            if let Ok(mut inset) = thumbs.get_mut(*child) {
-                inset.0.inline_start = Val::Px(offset);
-            }
-        }
-    }
-}
-
 /// Colour each setting checkbox's box from its `Checked` state.
 fn drive_quick_pref_checkboxes(
     mut boxes: Query<(&mut BackgroundColor, Has<Checked>), With<QuickPrefCheckboxBox>>,
@@ -1501,32 +1454,9 @@ fn spawn_specimen_slider_row(
             ChildOf(row_entity),
         ))
         .id();
-    commands
-        .spawn((
-            Node {
-                width: Val::Px(TRACK_WIDTH),
-                height: Val::Px(TRACK_HEIGHT),
-                border: UiRect::all(Val::Px(2.0)),
-                flex_shrink: 0.0,
-                ..default()
-            },
-            BorderColor::all(CONTROL_BORDER),
-            BackgroundColor(TRACK_FILL),
-            ChildOf(group),
-        ))
-        .with_child((
-            Node {
-                position_type: PositionType::Absolute,
-                width: Val::Px(THUMB_WIDTH),
-                height: Val::Px(TRACK_HEIGHT),
-                ..default()
-            },
-            LogicalInset(LogicalRect {
-                inline_start: Val::Px(fraction * (TRACK_WIDTH - THUMB_WIDTH)),
-                ..LogicalRect::ZERO
-            }),
-            BackgroundColor(THUMB_FILL),
-        ));
+    // Static: no `Slider`, so the thumb is drawn at the specimen's fraction and
+    // stays there.
+    spawn_slider(commands, group, SLIDER, 0, fraction, ());
     commands.spawn((
         Text::new(cx.text(value)),
         cx.font(UiFont::Sans),

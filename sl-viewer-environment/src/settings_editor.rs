@@ -109,7 +109,7 @@ use sl_viewer_world_scene::environment::EnvironmentState;
 
 use crate::knobs::{ColorKnob, SkyKnob, TextureKnob, WaterKnob};
 use crate::rows::{
-    AimTrackball, spawn_action_button, spawn_color_row, spawn_slider, spawn_texture_row,
+    AimTrackball, spawn_action_button, spawn_color_row, spawn_slider_row, spawn_texture_row,
     spawn_trackball_row, tag_aim_slider,
 };
 use crate::rows::{ButtonPaint, paint_action_button};
@@ -637,7 +637,7 @@ fn build_editor_content(editor: EditorKind, handle: FloaterHandle, commands: &mu
             let Some(parent) = slider_column(slider_columns, index, page.water.len()) else {
                 continue;
             };
-            let track = spawn_slider(
+            let track = spawn_slider_row(
                 commands,
                 parent,
                 element,
@@ -724,7 +724,7 @@ fn spawn_sky_knob(
     knob: SkyKnob,
     tab: &mut i32,
 ) {
-    let track = spawn_slider(
+    let track = spawn_slider_row(
         commands,
         parent,
         editor.element(),

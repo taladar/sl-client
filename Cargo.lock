@@ -598,9 +598,9 @@ dependencies = [
 
 [[package]]
 name = "aws-lc-rs"
-version = "1.17.3"
+version = "1.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00bdb5da18dac48ca2cc7cd4a98e533e8635a58e2361d13a1a4ee3888e0d72f1"
+checksum = "b281d307588d634de920874890732659e2e7672f72b5e10e81badc1a8a83621e"
 dependencies = [
  "aws-lc-sys",
  "zeroize",
@@ -608,9 +608,9 @@ dependencies = [
 
 [[package]]
 name = "aws-lc-sys"
-version = "0.43.0"
+version = "0.45.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43103168cc76fe62678a375e722fc9cb3a0146159ac5828bc4f0dfd755c2224c"
+checksum = "9bff6c3b54fad79a2e60b8102caf565819711497c1f5f092f49508e2f5c31b27"
 dependencies = [
  "cc",
  "cmake",
@@ -649,7 +649,7 @@ checksum = "3a8241f3ebb85c056b509d4327ad0358fbbba6ffb340bf388f26350aeda225b1"
 [[package]]
 name = "bevy"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_internal",
  "tracing",
@@ -658,7 +658,7 @@ dependencies = [
 [[package]]
 name = "bevy_a11y"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "accesskit",
  "bevy_app",
@@ -670,7 +670,7 @@ dependencies = [
 [[package]]
 name = "bevy_android"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "android-activity",
 ]
@@ -678,7 +678,7 @@ dependencies = [
 [[package]]
 name = "bevy_animation"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_animation_macros",
  "bevy_app",
@@ -710,7 +710,7 @@ dependencies = [
 [[package]]
 name = "bevy_animation_macros"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_macro_utils",
  "quote",
@@ -720,7 +720,7 @@ dependencies = [
 [[package]]
 name = "bevy_anti_alias"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -741,7 +741,7 @@ dependencies = [
 [[package]]
 name = "bevy_app"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_derive",
  "bevy_ecs",
@@ -763,7 +763,7 @@ dependencies = [
 [[package]]
 name = "bevy_asset"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "async-broadcast",
  "async-channel",
@@ -805,7 +805,7 @@ dependencies = [
 [[package]]
 name = "bevy_asset_macros"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_macro_utils",
  "proc-macro2",
@@ -816,7 +816,7 @@ dependencies = [
 [[package]]
 name = "bevy_audio"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -831,7 +831,7 @@ dependencies = [
 [[package]]
 name = "bevy_camera"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -856,7 +856,7 @@ dependencies = [
 [[package]]
 name = "bevy_clipboard"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_app",
  "bevy_ecs",
@@ -870,7 +870,7 @@ dependencies = [
 [[package]]
 name = "bevy_color"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_math",
  "bevy_reflect",
@@ -885,7 +885,7 @@ dependencies = [
 [[package]]
 name = "bevy_core_pipeline"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -913,7 +913,7 @@ dependencies = [
 [[package]]
 name = "bevy_derive"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_macro_utils",
  "quote",
@@ -923,7 +923,7 @@ dependencies = [
 [[package]]
 name = "bevy_dev_tools"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -954,7 +954,7 @@ dependencies = [
 [[package]]
 name = "bevy_diagnostic"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "atomic-waker",
  "bevy_app",
@@ -971,7 +971,7 @@ dependencies = [
 [[package]]
 name = "bevy_ecs"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "arrayvec",
  "bevy_ecs_macros",
@@ -999,7 +999,7 @@ dependencies = [
 [[package]]
 name = "bevy_ecs_macro_logic"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_macro_utils",
  "proc-macro2",
@@ -1010,7 +1010,7 @@ dependencies = [
 [[package]]
 name = "bevy_ecs_macros"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_ecs_macro_logic",
  "bevy_macro_utils",
@@ -1022,7 +1022,7 @@ dependencies = [
 [[package]]
 name = "bevy_encase_derive"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_macro_utils",
  "encase_derive_impl",
@@ -1031,7 +1031,7 @@ dependencies = [
 [[package]]
 name = "bevy_feathers"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "accesskit",
  "bevy_a11y",
@@ -1196,7 +1196,7 @@ dependencies = [
 [[package]]
 name = "bevy_gilrs"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_app",
  "bevy_ecs",
@@ -1211,7 +1211,7 @@ dependencies = [
 [[package]]
 name = "bevy_gizmos"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -1233,7 +1233,7 @@ dependencies = [
 [[package]]
 name = "bevy_gizmos_macros"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_macro_utils",
  "quote",
@@ -1243,7 +1243,7 @@ dependencies = [
 [[package]]
 name = "bevy_gizmos_render"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -1271,7 +1271,7 @@ dependencies = [
 [[package]]
 name = "bevy_gltf"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "async-lock",
  "base64",
@@ -1306,7 +1306,7 @@ dependencies = [
 [[package]]
 name = "bevy_image"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -1334,7 +1334,7 @@ dependencies = [
 [[package]]
 name = "bevy_input"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_app",
  "bevy_ecs",
@@ -1350,7 +1350,7 @@ dependencies = [
 [[package]]
 name = "bevy_input_focus"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_app",
  "bevy_ecs",
@@ -1366,7 +1366,7 @@ dependencies = [
 [[package]]
 name = "bevy_internal"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_a11y",
  "bevy_android",
@@ -1424,7 +1424,7 @@ dependencies = [
 [[package]]
 name = "bevy_light"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -1449,7 +1449,7 @@ dependencies = [
 [[package]]
 name = "bevy_log"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "android_log-sys",
  "bevy_app",
@@ -1470,7 +1470,7 @@ dependencies = [
 [[package]]
 name = "bevy_macro_utils"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1481,7 +1481,7 @@ dependencies = [
 [[package]]
 name = "bevy_material"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_asset",
  "bevy_derive",
@@ -1503,7 +1503,7 @@ dependencies = [
 [[package]]
 name = "bevy_material_macros"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_macro_utils",
  "quote",
@@ -1513,7 +1513,7 @@ dependencies = [
 [[package]]
 name = "bevy_math"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "approx",
  "arrayvec",
@@ -1532,7 +1532,7 @@ dependencies = [
 [[package]]
 name = "bevy_mesh"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -1565,7 +1565,7 @@ checksum = "bff34eb29ff4b8a8688bc7299f14fb6b597461ca80fec03ed7d22939ab33e48f"
 [[package]]
 name = "bevy_pbr"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "arrayvec",
  "bevy_app",
@@ -1607,7 +1607,7 @@ dependencies = [
 [[package]]
 name = "bevy_picking"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -1630,7 +1630,7 @@ dependencies = [
 [[package]]
 name = "bevy_platform"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "critical-section",
  "foldhash 0.2.0",
@@ -1651,7 +1651,7 @@ dependencies = [
 [[package]]
 name = "bevy_post_process"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -1675,12 +1675,12 @@ dependencies = [
 [[package]]
 name = "bevy_ptr"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 
 [[package]]
 name = "bevy_reflect"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "assert_type_match",
  "bevy_platform",
@@ -1708,7 +1708,7 @@ dependencies = [
 [[package]]
 name = "bevy_reflect_derive"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_macro_utils",
  "indexmap",
@@ -1721,7 +1721,7 @@ dependencies = [
 [[package]]
 name = "bevy_render"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "async-channel",
  "bevy_app",
@@ -1776,7 +1776,7 @@ dependencies = [
 [[package]]
 name = "bevy_render_macros"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_macro_utils",
  "proc-macro2",
@@ -1787,7 +1787,7 @@ dependencies = [
 [[package]]
 name = "bevy_scene"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -1807,7 +1807,7 @@ dependencies = [
 [[package]]
 name = "bevy_scene_macros"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_ecs_macro_logic",
  "bevy_macro_utils",
@@ -1819,7 +1819,7 @@ dependencies = [
 [[package]]
 name = "bevy_shader"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_asset",
  "bevy_platform",
@@ -1837,7 +1837,7 @@ dependencies = [
 [[package]]
 name = "bevy_sprite"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -1862,7 +1862,7 @@ dependencies = [
 [[package]]
 name = "bevy_sprite_render"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -1894,7 +1894,7 @@ dependencies = [
 [[package]]
 name = "bevy_state"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_app",
  "bevy_ecs",
@@ -1909,7 +1909,7 @@ dependencies = [
 [[package]]
 name = "bevy_state_macros"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_macro_utils",
  "quote",
@@ -1919,7 +1919,7 @@ dependencies = [
 [[package]]
 name = "bevy_tasks"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "async-channel",
  "async-executor",
@@ -1937,7 +1937,7 @@ dependencies = [
 [[package]]
 name = "bevy_text"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -1965,7 +1965,7 @@ dependencies = [
 [[package]]
 name = "bevy_time"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_app",
  "bevy_ecs",
@@ -1979,7 +1979,7 @@ dependencies = [
 [[package]]
 name = "bevy_transform"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_app",
  "bevy_ecs",
@@ -1995,7 +1995,7 @@ dependencies = [
 [[package]]
 name = "bevy_ui"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "accesskit",
  "bevy_a11y",
@@ -2032,7 +2032,7 @@ dependencies = [
 [[package]]
 name = "bevy_ui_render"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -2064,7 +2064,7 @@ dependencies = [
 [[package]]
 name = "bevy_ui_widgets"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "accesskit",
  "bevy_a11y",
@@ -2087,7 +2087,7 @@ dependencies = [
 [[package]]
 name = "bevy_utils"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "async-channel",
  "bevy_platform",
@@ -2099,7 +2099,7 @@ dependencies = [
 [[package]]
 name = "bevy_window"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -2117,7 +2117,7 @@ dependencies = [
 [[package]]
 name = "bevy_winit"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "accesskit",
  "accesskit_winit",
@@ -2149,7 +2149,7 @@ dependencies = [
 [[package]]
 name = "bevy_world_serialization"
 version = "0.19.0"
-source = "git+https://github.com/taladar/bevy.git?rev=db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f#db5fbf114b41cca7fdf1aa26ba8bacf04d06e62f"
+source = "git+https://github.com/taladar/bevy.git?rev=7d929a808e349bab905f02ef725d83205a9aa62a#7d929a808e349bab905f02ef725d83205a9aa62a"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -7918,9 +7918,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.42"
+version = "0.23.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c54fcab019b409d04215d3a17cb438fd7fbf192ee61461f20f4fe18704bc138"
+checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
 dependencies = [
  "aws-lc-rs",
  "log",
@@ -7983,9 +7983,9 @@ checksum = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f"
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.13"
+version = "0.103.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e"
+checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
 dependencies = [
  "aws-lc-rs",
  "ring",
@@ -10201,7 +10201,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.4",
  "windows-sys 0.61.2",

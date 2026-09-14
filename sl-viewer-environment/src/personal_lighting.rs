@@ -66,7 +66,7 @@ use sl_viewer_world_scene::sky::day_position;
 
 use crate::knobs::{AimKnobs, ColorKnob, SkyKnob, TextureKnob, WaterKnob};
 use crate::rows::{
-    AimTrackball, spawn_action_button, spawn_color_row, spawn_slider, spawn_texture_row,
+    AimTrackball, spawn_action_button, spawn_color_row, spawn_slider_row, spawn_texture_row,
     spawn_trackball_row, tag_aim_slider,
 };
 use crate::style::{DIM_LABEL_COLOR, HEADING_SIZE};
@@ -354,7 +354,7 @@ fn spawn_column(commands: &mut Commands, parent: Entity, heading_key: &'static s
 
 /// One sky-knob slider row.
 fn spawn_sky_slider(commands: &mut Commands, parent: Entity, knob: SkyKnob, tab: &mut i32) {
-    let track = spawn_slider(
+    let track = spawn_slider_row(
         commands,
         parent,
         ELEMENT,
@@ -378,7 +378,7 @@ fn spawn_aim_trackball(commands: &mut Commands, parent: Entity, knobs: AimKnobs,
 
 /// One water-knob slider row.
 fn spawn_water_slider(commands: &mut Commands, parent: Entity, knob: WaterKnob, tab: &mut i32) {
-    let track = spawn_slider(
+    let track = spawn_slider_row(
         commands,
         parent,
         ELEMENT,

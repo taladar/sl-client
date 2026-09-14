@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 41 |
 | in-progress | 22 |
 | bugs | 31 |
-| done | 1131 |
+| done | 1133 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1680** |
+| **total** | **1682** |
 
 ## ideas (100)
 
@@ -1204,6 +1204,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-crossing-movement-locks-up`](bugs/viewer-crossing-movement-locks-up.md)
   — Movement locks up after a region crossing (stand-up anim, esp. onto lower
   terrain)
+- [`viewer-grid-row-height-from-unwrapped-text`](bugs/viewer-grid-row-height-from-unwrapped-text.md)
+  — Upstream bug — a grid row takes its height from a wrap that never happens
 - [`viewer-hair-dome-stays-grey`](bugs/viewer-hair-dome-stays-grey.md) — The
   default hair dome intermittently stays grey for a whole session
 - [`viewer-hover-tooltip-202ms-frame-spike`](bugs/viewer-hover-tooltip-202ms-frame-spike.md)
@@ -1230,16 +1232,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   resolved / too many rigged-pending objects
 - [`viewer-sunlit-face-clips-two-channels`](bugs/viewer-sunlit-face-clips-two-channels.md)
   — A sunlit opaque face pins red and green rather than showing its texture
-- [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
-  — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
-  wrongly
 - [`viewer-tree-species-all-rendered-as-trees`](bugs/viewer-tree-species-all-rendered-as-trees.md)
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1131)
+## done (1133)
 
 ### protocol
 
@@ -2811,6 +2810,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   baseline format for UI and render facts
 - [`viewer-testkit-click-focus-resource-sensitive`](done/viewer-testkit-click-focus-resource-sensitive.md)
   — A click stops focusing its field when the harness gains any resource
+- [`viewer-text-node-padding-measure`](done/viewer-text-node-padding-measure.md)
+  — Upstream bug — a text node was measured at its border box, and a hanging
+  space counted as content
 - [`viewer-texture-picker-inventory-tree`](done/viewer-texture-picker-inventory-tree.md)
   — Texture picker — inventory folder tree navigation (blocked by
   `viewer-ui-texture-picker` (done))
@@ -2878,6 +2880,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-radio-widget`](done/viewer-ui-radio-widget.md) — Reusable
   radio-button widget (grouping container) (blocked by
   `viewer-ui-widget-scaffold` (done))
+- [`viewer-ui-rows-shorter-than-their-text`](done/viewer-ui-rows-shorter-than-their-text.md)
+  — Rows shorter than their text, and ten slider thumbs hanging out of their
+  tracks
 - [`viewer-ui-search-field`](done/viewer-ui-search-field.md) — Reusable
   search-field widget (single-line field + clear button) (blocked by
   `viewer-ui-text-input-widget` (done))

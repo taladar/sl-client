@@ -16,8 +16,9 @@
 //! it. `viewer-text-node-padding-measure` is the proof: a text node laid out
 //! one line shorter than the text it drew, diagnosed through a login to OpenSim,
 //! a temporary debug key, and six rounds of a human reporting numbers back. It
-//! is a pure function of a font, a string and an available width, and
-//! `a_text_node_may_not_carry_its_own_padding` now catches it in a
+//! is a pure function of a font, a string and an available width — and once it
+//! was one, it turned out to be two bugs wearing one description, both fixed in
+//! the Bevy fork and both now held down by this crate's own `measure_tests` in a
 //! fifth of a second.
 //!
 //! So the **matrix lives here**, not in the gallery (`gallery`). The
@@ -36,11 +37,12 @@
 //! That is not so in 0.19. Every piece is `pub`:
 //! [`propagate_ui_target_cameras`], [`ui_layout_system`], [`UiSurface`],
 //! [`ComputedCameraValues`] / [`RenderTargetInfo`], and the `bevy_transform`
-//! systems. No fork, no `[patch.crates-io]`, no upstream PR — this module is
-//! ordinary downstream code. (Bevy's own harness omits `measure_text_system`,
-//! because none of its fixtures carry text. Ours cannot omit it: text
-//! *measurement* is the thing most worth testing, and the padding bug lives
-//! precisely there.)
+//! systems. Nothing had to be *reached for* — this module is ordinary downstream
+//! code. (Bevy's own harness omits `measure_text_system`, because none of its
+//! fixtures carry text. Ours cannot omit it: text *measurement* is the thing
+//! most worth testing, and the padding bug lived precisely there. Fixing that
+//! bug did take the fork, but only to change what the measure computes — not to
+//! reach it.)
 //!
 //! # What it is not
 //!
@@ -49,7 +51,7 @@
 //! answers "is every box the right size and in the right place", which is where
 //! the bugs have actually been.
 //!
-//! [`viewer-text-node-padding-measure`]: ../../../roadmap/bugs/viewer-text-node-padding-measure.md
+//! [`viewer-text-node-padding-measure`]: ../../../roadmap/done/viewer-text-node-padding-measure.md
 
 pub mod baseline;
 pub mod interact;
@@ -116,41 +118,32 @@ pub fn border_box(computed: &ComputedNode, transform: &UiGlobalTransform) -> Rec
 /// **logical** pixels.
 ///
 /// This is **not** a rounding allowance, and it is worth being exact about why,
-/// because "it's just rounding" is the comfortable answer and it is wrong.
+/// because "it's just rounding" is the comfortable answer and it has been wrong
+/// twice now for two different reasons.
 ///
-/// Rounding is real but sub-pixel: `bevy_ui` rounds a node's `size` to whole
-/// physical pixels (hence `unrounded_size` beside it) while `content_size` comes
-/// back from `taffy` unrounded. That accounts for less than 1 px.
+/// Rounding is real but sub-pixel, twice over: `bevy_ui` rounds a node's `size`
+/// to whole physical pixels (hence `unrounded_size` beside it) while
+/// `content_size` comes back from `taffy` unrounded, and the text measure `ceil`s
+/// its own result. **2** logical px is the worst those can do together at scale
+/// factor 1, and less above it.
 ///
-/// What this actually absorbs is the **upstream measure error** of
-/// `viewer-text-node-padding-measure`, which the matrix characterised while this
-/// constant was being argued over. Two properties, both measured, both useful to
-/// the upstream report:
+/// It was 6 to absorb the upstream measure error of
+/// `viewer-text-node-padding-measure` — a hanging space counted as content, worth
+/// about a quarter em on every wrapping label. That is fixed, and
+/// `measure_tests::a_wrapped_text_node_is_never_wider_than_its_box` holds it
+/// fixed with **no** allowance at all, across a sweep of widths.
 ///
-/// - **It does not accumulate with nesting.** A three-deep tree reports the *same*
-///   overshoot at every level — text 551/546, its box 599/594, the panel 635/630,
-///   all 5 px — rather than 5/10/15. So it is one error introduced at the text
-///   measure and propagated outward unchanged by each ancestor's `content_size`,
-///   not a per-level rounding loss.
-/// - **It scales with the font, not with the display.** Across the matrix it is
-///   ≈ 0.23 × the font size — 5 logical px at 22 px text, 3.5 at 15 px — and
-///   near-constant against both `scale_factor` and `UiScale` once converted to
-///   logical. Roughly a quarter em: a per-line advance the measure does not
-///   account for.
-///
-/// Hence 6 logical px: enough to clear ~0.23 em at the matrix's largest font
-/// (22 px → 5 px) with a little headroom. **Sweeping a materially larger UI font
-/// would need this raised** — or, better, the upstream bug fixed.
+/// Bringing it down from 6 to 2 made the element and floater sweeps report a set
+/// of small **real** overflows the old allowance had been covering — rows shorter
+/// than one line of their own text at 22 px, and nodes placed a few pixels
+/// outside their parent at fractional `UiScale`. Those were fixed rather than
+/// tolerated (`viewer-ui-rows-shorter-than-their-text`), which is what the
+/// tightening was for.
 ///
 /// It is a ceiling on how fine a finding can be, not a licence. The failure this
 /// harness exists to catch overshoots by a whole **line** — 18 px at the demo
-/// panel's font size — and anything structural is line-scale or larger. Nothing
-/// real hides under a quarter em.
-///
-/// It should come back down to ~1 when the upstream measure is fixed; the canary
-/// for that is `a_text_node_may_not_carry_its_own_padding` (in the viewer), which starts
-/// failing the day Bevy corrects it.
-const OVERFLOW_EPSILON: f32 = 6.0;
+/// panel's font size — and anything structural is line-scale or larger.
+const OVERFLOW_EPSILON: f32 = 2.0;
 
 /// How far a box may move or resize between two settles of the same tree before
 /// it counts as unstable, in **logical** pixels.
@@ -1730,6 +1723,291 @@ mod stability_tests {
         assert!(
             reported.contains("flipper"),
             "the violation names the wrong node: {reported}",
+        );
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod measure_tests {
+    //! Teeth for the **text measure**, which everything else here stands on: a
+    //! box that is the wrong size makes every check above it answer a question
+    //! about a layout the viewer never performs.
+    //!
+    //! Two of these are `viewer-text-node-padding-measure`, in the shape it
+    //! turned out to have once it was measured rather than described — a wrap
+    //! width taken from the border box, and a hanging space counted as content.
+    //! Both are fixed in the Bevy fork; these are what stops them coming back.
+    //! The third is the part that is **not** fixed
+    //! (`viewer-grid-row-height-from-unwrapped-text`), and is written the other
+    //! way round: it asserts the bug is still there, so it fails the day taffy
+    //! corrects it.
+
+    use super::{LayoutTest, TestError, overflow_violations, settle, spawn_under_root};
+    use bevy::prelude::*;
+    use pretty_assertions::assert_eq;
+    use sl_viewer_ui_core::ui_font::UiFont;
+
+    /// Prose long enough to wrap several times at every width used below, and
+    /// ordinary enough that the wrap points are plain spaces — which is the
+    /// point of the hanging-whitespace half.
+    const PROSE: &str = "A much longer label, of the length a translated string reaches when \
+                         the original was written in English and measured once, which is \
+                         exactly the case a fixed pixel rect gets wrong.";
+
+    /// [`PROSE`] in a column, with `text_padding` of its own on the text node's
+    /// inline axis: the app, the text entity and the column entity.
+    ///
+    /// Under the scaffold root, never as a root of its own: a bare root is a
+    /// grid item of `bevy_ui`'s implicit viewport node, which has a layout bug
+    /// of its own (see the last test here) and would answer a different
+    /// question.
+    fn fixture(text_padding: f32) -> (App, Entity, Entity) {
+        let mut app = LayoutTest::new().build();
+        let text = app
+            .world_mut()
+            .spawn((
+                Text::new(PROSE),
+                UiFont::Sans.at(15.0),
+                Node {
+                    padding: UiRect::horizontal(Val::Px(text_padding)),
+                    ..default()
+                },
+                Name::new("text"),
+            ))
+            .id();
+        let column = spawn_under_root(
+            &mut app,
+            (
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    ..default()
+                },
+                Name::new("column"),
+            ),
+        );
+        app.world_mut().entity_mut(column).add_child(text);
+        (app, text, column)
+    }
+
+    /// Set the column's width, settle, and give back the text node's `size` and
+    /// `content_size`.
+    ///
+    /// Re-laying out one app rather than building one per width: the fixture is
+    /// cheap but the font stack behind it is not, and the sweep below walks 150
+    /// widths.
+    fn measure_at(
+        app: &mut App,
+        text: Entity,
+        column: Entity,
+        column_width: f32,
+    ) -> Result<(Vec2, Vec2), TestError> {
+        let mut node = app
+            .world_mut()
+            .entity_mut(column)
+            .into_mut::<Node>()
+            .ok_or("the column is not a node")?;
+        node.width = Val::Px(column_width);
+        settle(app);
+        let computed = app
+            .world()
+            .entity(text)
+            .get::<ComputedNode>()
+            .ok_or("the text node has no layout")?;
+        Ok((computed.size, computed.content_size))
+    }
+
+    /// One layout: [`fixture`] plus a single [`measure_at`].
+    fn measured(column_width: f32, text_padding: f32) -> Result<(Vec2, Vec2), TestError> {
+        let (mut app, text, column) = fixture(text_padding);
+        measure_at(&mut app, text, column, column_width)
+    }
+
+    /// A `Text` node carrying **its own** padding is wrapped at its **content
+    /// box**, not at its border box.
+    ///
+    /// The bug this replaced: `TextMeasure::measure` preferred taffy's
+    /// `known_width` — a *border box* width — over the `available_width` taffy
+    /// had already subtracted the node's padding and border from. The text was
+    /// measured at a width the renderer never wraps at, so the node came out
+    /// short by however many lines the extra width saved, and the last ones
+    /// hung out of the bottom of it.
+    ///
+    /// Written as three layouts rather than a pixel count, so it says what it
+    /// means at any font: the padded node must match the *narrow* reference (the
+    /// wrap it actually gets) and not the *wide* one (the wrap its border box
+    /// would give) — and the two references must differ, or the comparison is
+    /// vacuous.
+    #[test]
+    fn a_text_node_wraps_at_its_content_box() -> Result<(), TestError> {
+        // 150 px of padding a side inside a 600 px column: a 300 px content box.
+        let (padded, _) = measured(600.0, 150.0)?;
+        let (narrow, _) = measured(300.0, 0.0)?;
+        let (wide, _) = measured(600.0, 0.0)?;
+        assert!(
+            narrow.y > wide.y,
+            "the two references wrap to the same height ({} vs {}), so this test could not tell \
+             the two widths apart — lengthen `PROSE` or widen the gap",
+            narrow.y,
+            wide.y,
+        );
+        // Bit-exact, not a tolerance: the two go through the same layout at the
+        // same width, so they are the same number or the wrap was not the same.
+        assert_eq!(
+            padded.y.to_bits(),
+            narrow.y.to_bits(),
+            "a `Text` node with 150 px of padding a side in a 600 px column is {} px tall; it \
+             must match the same text wrapped at 300 px ({}), not at 600 ({})",
+            padded.y,
+            narrow.y,
+            wide.y,
+        );
+        Ok(())
+    }
+
+    /// A wrapping text node is **never wider than the box it was measured
+    /// into** — at any width, including the ones where the wrap lands badly.
+    ///
+    /// The space a soft wrap breaks at *hangs* past the wrap width, in parley as
+    /// in CSS. Sizing the node from `Layout::full_width`, which counts that
+    /// space, gave every wrapping label a content width up to one space advance
+    /// — about a quarter em — wider than the box it had just been fitted to, and
+    /// every ancestor inherited the error. It is invisible in English at most
+    /// widths, which is why this sweeps widths rather than checking one: at 15 px
+    /// text it showed at a 388 px box and not at a 384 px one.
+    #[test]
+    fn a_wrapped_text_node_is_never_wider_than_its_box() -> Result<(), TestError> {
+        let (mut app, text, column) = fixture(0.0);
+        let mut worst: Option<(f32, f32, f32)> = None;
+        let mut width = 300.0_f32;
+        while width <= 600.0 {
+            let (size, content) = measure_at(&mut app, text, column, width)?;
+            if content.x > size.x && worst.is_none_or(|(_, s, c)| content.x - size.x > c - s) {
+                worst = Some((width, size.x, content.x));
+            }
+            width += 2.0;
+        }
+        assert_eq!(
+            worst, None,
+            "a wrapped text node measured wider than the box it was wrapped into: (column width, \
+             box, content). That is hanging whitespace being counted as content — see \
+             `viewer-text-node-padding-measure`",
+        );
+        Ok(())
+    }
+
+    /// A **shrink-to-fit run that ends in a space stays one line**.
+    ///
+    /// The other half of the hanging-space question, and the reason the fix is
+    /// *count the hanging space where it fits the bounds* rather than the
+    /// simpler *never count it*. A run sized to its own ink and then laid out
+    /// again at exactly that width breaks at the space it can no longer hold,
+    /// and takes a second line it draws nothing on.
+    ///
+    /// This is the real shape of `linkified-text`, whose every plain segment
+    /// between two links ends in one: it went two lines tall in **every** cell of
+    /// the matrix the first time this was fixed the simple way, which is how the
+    /// simple way was caught.
+    #[test]
+    fn a_shrink_to_fit_run_ending_in_a_space_stays_one_line() -> Result<(), TestError> {
+        let mut app = LayoutTest::new().build();
+        let run = app
+            .world_mut()
+            .spawn((
+                Text::new("See "),
+                UiFont::Sans.at(15.0),
+                // What a linkified segment carries: a bound, not a width, so the
+                // run shrinks to its own content inside the wrapping row.
+                Node {
+                    max_width: Val::Percent(100.0),
+                    ..default()
+                },
+                Name::new("run"),
+            ))
+            .id();
+        let row = spawn_under_root(
+            &mut app,
+            (
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    flex_wrap: FlexWrap::Wrap,
+                    align_items: AlignItems::Center,
+                    width: Val::Percent(100.0),
+                    ..default()
+                },
+                Name::new("wrapping-row"),
+            ),
+        );
+        app.world_mut().entity_mut(row).add_child(run);
+        settle(&mut app);
+        let computed = app
+            .world()
+            .entity(run)
+            .get::<ComputedNode>()
+            .ok_or("the run has no layout")?;
+        assert_eq!(
+            computed.content_size.y.to_bits(),
+            computed.size.y.to_bits(),
+            "a run ending in a space took a line it does not draw: its box is {} tall and its \
+             content {} — see `viewer-text-node-padding-measure`",
+            computed.size.y,
+            computed.content_size.y,
+        );
+        Ok(())
+    }
+
+    /// **Inverted**, and deliberately: `viewer-grid-row-height-from-unwrapped-text`
+    /// is still open upstream, and this asserts it is still there.
+    ///
+    /// A `Display::Grid` with an auto row sizes that row from a layout performed
+    /// at the item's *max-content* width and never re-measures once the item's
+    /// real width is known, so a column clamped by its own `max_width` keeps the
+    /// height its text had as one unbroken line. Every root node hits it too:
+    /// `bevy_ui` parents each one to an implicit viewport node that is itself a
+    /// grid.
+    ///
+    /// When this starts failing, taffy has fixed it: delete this test, move the
+    /// roadmap item to `done/`, and drop the caveat on `OVERFLOW_EPSILON`.
+    #[test]
+    fn a_grid_row_takes_its_height_from_a_wrap_that_never_happens() -> Result<(), TestError> {
+        let mut app = LayoutTest::new().build();
+        let text = app
+            .world_mut()
+            .spawn((Text::new(PROSE), UiFont::Sans.at(15.0), Name::new("text")))
+            .id();
+        let column = app
+            .world_mut()
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    max_width: Val::Px(560.0),
+                    ..default()
+                },
+                Name::new("clamped-column"),
+            ))
+            .id();
+        let grid = spawn_under_root(
+            &mut app,
+            (
+                Node {
+                    display: Display::Grid,
+                    align_items: AlignItems::Start,
+                    justify_items: JustifyItems::Start,
+                    width: Val::Px(1600.0),
+                    height: Val::Px(1200.0),
+                    ..default()
+                },
+                Name::new("grid"),
+            ),
+        );
+        app.world_mut().entity_mut(column).add_child(text);
+        app.world_mut().entity_mut(grid).add_child(column);
+        settle(&mut app);
+        let violations = overflow_violations(&mut app);
+        assert!(
+            violations.iter().any(|v| v.contains("clamped-column")),
+            "the clamped column no longer overflows its grid row, so taffy has fixed \
+             `viewer-grid-row-height-from-unwrapped-text`: {violations:#?}",
         );
         Ok(())
     }
