@@ -60,7 +60,7 @@ use bevy::ecs::observer::ObservedBy;
 use bevy::ecs::system::SystemState;
 use bevy::input_focus::tab_navigation::{NavAction, TabIndex, TabNavigation};
 use bevy::input_focus::{FocusCause, InputFocus};
-use bevy::platform::collections::HashSet;
+use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
 use bevy::text::{EditableText, FontCx, LayoutCx, RemSize, ScaleCx, TextPipeline};
 use bevy::transform::systems::{
@@ -151,6 +151,15 @@ pub fn border_box(computed: &ComputedNode, transform: &UiGlobalTransform) -> Rec
 /// for that is `a_text_node_may_not_carry_its_own_padding` (in the viewer), which starts
 /// failing the day Bevy corrects it.
 const OVERFLOW_EPSILON: f32 = 6.0;
+
+/// How far a box may move or resize between two settles of the same tree before
+/// it counts as unstable, in **logical** pixels.
+///
+/// Sub-pixel, because there is nothing here for a tolerance to absorb: the same
+/// tree laid out twice takes the same path through taffy and parley, so it either
+/// reproduces its boxes exactly or something wrote between the two passes. The
+/// allowance is for float arithmetic, not for disagreement.
+const STABILITY_EPSILON: f32 = 0.5;
 
 /// A headless `bevy_ui` layout app, configured and then [`build`](Self::build).
 ///
@@ -1055,6 +1064,158 @@ pub fn radial_overlap_violations(app: &mut App) -> Vec<String> {
     violations
 }
 
+/// **Universal.** A settled layout must stay settled: laying the *same* tree out
+/// again has to reproduce the same boxes.
+///
+/// Every other check here asks whether one settled layout is right. This one asks
+/// whether there **is** one — whether the tree has a resting state at all, or
+/// merely two it alternates between. A layout that flips frame after frame
+/// satisfies every box-shaped invariant on whichever frame it is looked at, and
+/// on screen it is a row that will not stop moving.
+///
+/// The shape to catch is a **feedback loop**: a pass that measures the layout and
+/// then writes something the next layout measures differently. The viewer has two
+/// such passes by construction — the `…` reveal
+/// ([`sl_viewer_ui_core::ui_ellipsis`]) and the widget layout systems
+/// ([`LayoutTest::with_widget_layout`]) — and both are *meant* to converge within
+/// the two frames [`settle`] runs. This is the check that they did:
+/// `viewer-inventory-permission-suffix-layout` was an inventory row where the
+/// reveal did not, because more than one part of the row could shrink, so showing
+/// the marker took only part of its width out of the clip it was measuring
+/// against and the answer changed every frame.
+///
+/// Compared **frame to frame**, twice, rather than across a pair of updates:
+/// a layout that flips every frame is back where it started after two, so
+/// sampling a settled tree two updates apart is blind to precisely the
+/// oscillation this looks for — which is how the first draft of this check
+/// passed a fixture built to flicker.
+///
+/// The tolerance is a sub-pixel `STABILITY_EPSILON` and not the `OVERFLOW_EPSILON` the
+/// box-shaped checks use: those compare a text measurement against a laid-out
+/// box, two numbers that disagree in the last pixel by construction, while this
+/// compares one layout against another of the same tree, where any difference at
+/// all is the loop this exists to find.
+///
+/// **This check advances the app** — it is the one here that does. It therefore
+/// runs last in [`layout_violations`], and a caller that wants to look at the
+/// tree afterwards is looking at a tree two frames on (which, if this check
+/// passes, is the same tree).
+pub fn stability_violations(app: &mut App) -> Vec<String> {
+    let mut violations = Vec::new();
+    let mut reported: HashSet<Entity> = HashSet::new();
+    let mut previous = laid_out_boxes(app);
+    // **Frame by frame, not two at a time.** A layout that flips every frame is
+    // back where it started after two, so comparing a settled tree against
+    // itself two updates later is blind to exactly the oscillation this exists
+    // to find. Two single-frame comparisons see a period of one and a period of
+    // two alike.
+    //
+    // A settled tree may be compared frame to frame at all because that is what
+    // settled *means*: the after-layout passes are write-guarded, so once they
+    // agree with the boxes they read, they write nothing and the next frame
+    // reproduces the last. (`settle` takes two frames for a different reason —
+    // reaching that state from a tree that was only just spawned.)
+    for _frame in 0..2 {
+        app.update();
+        let current = laid_out_boxes(app);
+        compare_settles(app, &previous, &current, &mut reported, &mut violations);
+        previous = current;
+    }
+    violations
+}
+
+/// Report every node that moved, resized, appeared or vanished between two
+/// consecutive frames of an untouched tree — each node at most once, however
+/// many of the comparisons it fails.
+///
+/// The snapshots carry boxes and nothing else, and a node's name is looked up
+/// only for a node that is actually being reported: this runs over every node of
+/// every element in every cell of the matrix, where formatting a name per node
+/// per frame is pure cost on the overwhelmingly common path where there is
+/// nothing to say.
+fn compare_settles(
+    app: &App,
+    before: &HashMap<Entity, Rect>,
+    after: &HashMap<Entity, Rect>,
+    reported: &mut HashSet<Entity>,
+    violations: &mut Vec<String>,
+) {
+    for (entity, first) in before {
+        let Some(second) = after.get(entity) else {
+            if reported.insert(*entity) {
+                violations.push(format!(
+                    "{}: drawn at {first:?}, and not drawn at all on the very next frame — \
+                     nothing touched the tree in between",
+                    name_of(app, *entity),
+                ));
+            }
+            continue;
+        };
+        // Compared in logical pixels, like every other check here, and
+        // per-component in plain `f32` rather than with `glam`'s operators, for
+        // the reason `border_box` gives: the workspace's
+        // `arithmetic_side_effects` lint fires on the overloads and not on
+        // floating-point arithmetic.
+        let scale = app
+            .world()
+            .get::<ComputedNode>(*entity)
+            .map_or(1.0, |computed| computed.inverse_scale_factor);
+        let (first_size, second_size) = (first.size(), second.size());
+        let drift = [
+            (first.min.x - second.min.x).abs(),
+            (first.min.y - second.min.y).abs(),
+            (first_size.x - second_size.x).abs(),
+            (first_size.y - second_size.y).abs(),
+        ]
+        .into_iter()
+        .fold(0.0_f32, f32::max)
+            * scale;
+        if drift > STABILITY_EPSILON && reported.insert(*entity) {
+            violations.push(format!(
+                "{}: settled at {first:?} and then at {second:?} — the layout has no resting \
+                 state, it alternates between two",
+                name_of(app, *entity),
+            ));
+        }
+    }
+    // The other direction as well, because the flip that motivated this check is
+    // a node *appearing*: an `…` marker toggling `Display` is hidden — and so
+    // unlaid-out — on one of the two frames, and would slip through a comparison
+    // that only walked the frame it was drawn on.
+    for (entity, second) in after {
+        if !before.contains_key(entity) && reported.insert(*entity) {
+            violations.push(format!(
+                "{}: not drawn, and drawn at {second:?} on the very next frame — nothing touched \
+                 the tree in between",
+                name_of(app, *entity),
+            ));
+        }
+    }
+}
+
+/// How a node is named in a stability violation — the same rule as
+/// [`describe`], read straight from the world.
+fn name_of(app: &App, entity: Entity) -> String {
+    describe(app.world().get::<Name>(entity), entity)
+}
+
+/// Every laid-out node's border box, by entity.
+///
+/// A `Display::None` subtree lays out at zero on both axes, which would compare
+/// equal however it moved; skipping it keeps the comparison to nodes that are
+/// actually drawn, and makes a node that appears or disappears between two
+/// frames visible as a key that is in one snapshot and not the other.
+fn laid_out_boxes(app: &mut App) -> HashMap<Entity, Rect> {
+    let mut query = app
+        .world_mut()
+        .query::<(Entity, &ComputedNode, &UiGlobalTransform)>();
+    query
+        .iter(app.world())
+        .filter(|(_entity, computed, _transform)| !computed.size.cmple(Vec2::ZERO).all())
+        .map(|(entity, computed, transform)| (entity, border_box(computed, transform)))
+        .collect()
+}
+
 /// The absolute angular difference between two angles, wrapped into `0..=PI`.
 fn angular_difference(left: f32, right: f32) -> f32 {
     let raw = (left - right).rem_euclid(core::f32::consts::TAU);
@@ -1138,6 +1299,10 @@ pub fn layout_violations(app: &mut App, test: LayoutTest) -> Vec<String> {
     violations.extend(alignment_violations(app, test.direction()));
     violations.extend(radial_violations(app));
     violations.extend(radial_overlap_violations(app));
+    // Last, because it is the one check that advances the app: everything above
+    // reads the layout the caller settled, and this one asks whether settling it
+    // again changes it.
+    violations.extend(stability_violations(app));
     violations
 }
 
@@ -1491,4 +1656,81 @@ fn record_actions(mut actions: MessageReader<UiAction>, mut recorded: ResMut<Rec
 /// one to fail in.
 pub fn drain_actions(app: &mut App) -> Vec<UiAction> {
     core::mem::take(&mut app.world_mut().resource_mut::<RecordedActions>().0)
+}
+
+#[cfg(test)]
+mod stability_tests {
+    //! Teeth for [`stability_violations`]: a check that never fires is
+    //! indistinguishable from a UI that never flickers, and the whole of this
+    //! one is the difference.
+
+    use super::{LayoutTest, TestError, settle, spawn_under_root, stability_violations};
+    use bevy::prelude::*;
+    use pretty_assertions::assert_eq;
+
+    /// A settled tree that nothing writes to reports nothing.
+    #[test]
+    fn a_tree_at_rest_is_not_a_violation() {
+        let mut app = LayoutTest::new().build();
+        app.add_systems(
+            Startup,
+            (|mut commands: Commands, root: Res<crate::UiRoot>| {
+                commands.spawn((
+                    Node {
+                        width: Val::Px(120.0),
+                        height: Val::Px(40.0),
+                        ..default()
+                    },
+                    Name::new("at-rest"),
+                    ChildOf(root.0),
+                ));
+            })
+            .after(crate::UiScaffoldSystems::SpawnRoot),
+        );
+        settle(&mut app);
+        assert_eq!(stability_violations(&mut app), Vec::<String>::new());
+    }
+
+    /// A node whose width is rewritten from its own laid-out width — the shape
+    /// of every feedback loop in this UI, reduced to four lines — is caught,
+    /// and the message names it.
+    #[test]
+    fn a_node_that_flips_between_two_widths_is_caught() -> Result<(), TestError> {
+        let mut app = LayoutTest::new().build();
+        let flipper = spawn_under_root(
+            &mut app,
+            (
+                Node {
+                    width: Val::Px(120.0),
+                    height: Val::Px(40.0),
+                    ..default()
+                },
+                Name::new("flipper"),
+            ),
+        );
+        // The loop: wide one frame, narrow the next, forever — a layout whose
+        // output decides the next layout's input.
+        app.add_systems(
+            Update,
+            move |mut nodes: Query<&mut Node>, computed: Query<&ComputedNode>| {
+                let Ok(measured) = computed.get(flipper) else {
+                    return;
+                };
+                let wanted = if measured.size.x > 100.0 { 60.0 } else { 120.0 };
+                if let Ok(mut node) = nodes.get_mut(flipper) {
+                    node.width = Val::Px(wanted);
+                }
+            },
+        );
+        settle(&mut app);
+        let violations = stability_violations(&mut app);
+        let reported = violations
+            .first()
+            .ok_or("the flipping node was not caught")?;
+        assert!(
+            reported.contains("flipper"),
+            "the violation names the wrong node: {reported}",
+        );
+        Ok(())
+    }
 }

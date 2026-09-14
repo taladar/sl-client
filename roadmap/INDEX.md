@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 313 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 32 |
-| done | 1129 |
+| bugs | 30 |
+| done | 1132 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1679** |
+| **total** | **1680** |
 
 ## ideas (100)
 
@@ -1163,7 +1163,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (32)
+## bugs (30)
 
 ### viewer
 
@@ -1176,9 +1176,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   data
 - [`viewer-audit-camera-reset-resnap`](bugs/viewer-audit-camera-reset-resnap.md)
   — Escape out of flycam interpolates between two unrelated poses
-- [`viewer-audit-collider-settle-treadmill`](bugs/viewer-audit-collider-settle-treadmill.md)
-  — A mesh with no physics block rebuilds its collider and the BVH every frame
-  forever
 - [`viewer-audit-env-overrides-preferences`](bugs/viewer-audit-env-overrides-preferences.md)
   — Environment variables silently override live graphics preferences
 - [`viewer-audit-media-url-scheme-allowlist`](bugs/viewer-audit-media-url-scheme-allowlist.md)
@@ -1208,8 +1205,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   default hair dome intermittently stays grey for a whole session
 - [`viewer-hover-tooltip-202ms-frame-spike`](bugs/viewer-hover-tooltip-202ms-frame-spike.md)
   — update_hover_tooltip spikes to 202 ms on a single frame
-- [`viewer-inventory-permission-suffix-layout`](bugs/viewer-inventory-permission-suffix-layout.md)
-  — An inventory row drifts left, and its permission suffix oscillates
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)
@@ -1241,7 +1236,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1129)
+## done (1132)
 
 ### protocol
 
@@ -1523,6 +1518,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-audio-mute-and-device`](done/viewer-audit-audio-mute-and-device.md)
   — Collision sounds ignore the object-sound mute exception, and a device
   fallback lies to the UI
+- [`viewer-audit-collider-settle-treadmill`](done/viewer-audit-collider-settle-treadmill.md)
+  — A mesh with no physics block rebuilds its collider and the BVH every frame
+  forever
 - [`viewer-audit-command-result-diagnostics`](done/viewer-audit-command-result-diagnostics.md)
   — The bevy command dispatcher discards 300 protocol send results with no log
 - [`viewer-audit-diagnostic-stream-unread`](done/viewer-audit-diagnostic-stream-unread.md)
@@ -1948,6 +1946,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-inventory-outfit-tab`](done/viewer-inventory-outfit-tab.md) — Worn /
   current-outfit tab + recent items (blocked by `viewer-inventory-folder-tree`
   (done))
+- [`viewer-inventory-permission-suffix-layout`](done/viewer-inventory-permission-suffix-layout.md)
+  — An inventory row drifts left, and its permission suffix oscillates
 - [`viewer-inventory-replace-outfit`](done/viewer-inventory-replace-outfit.md) —
   Replace Current Outfit (whole-outfit swap)
 - [`viewer-inventory-restore-item`](done/viewer-inventory-restore-item.md) —
@@ -2496,6 +2496,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   updates
 - [`viewer-physics-static-prim-colliders`](done/viewer-physics-static-prim-colliders.md)
   — Colliders for all prims — a shared avian spatial index
+- [`viewer-pie-label-width-alternates`](done/viewer-pie-label-width-alternates.md)
+  — A pie label's width alternates by a pixel, every frame, forever
 - [`viewer-pillows-inside-out-geometry`](done/viewer-pillows-inside-out-geometry.md)
   — Pillows on the aditi test region render wrong — possibly inside out
 - [`viewer-plugin-groups`](done/viewer-plugin-groups.md) — One plugin-group

@@ -23,7 +23,7 @@
 //! mirroring the Phase 6 texture work that moved off the equivalent raw texture
 //! path.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -156,6 +156,36 @@ pub struct MeshManager {
     /// The in-flight background physics-block fetch per mesh id, polled by
     /// [`poll_meshes`]; presence means "already being fetched".
     physics_inflight: HashMap<MeshKey, Task<Option<Arc<MeshPhysics>>>>,
+    /// Physics-block requests made before the region's mesh capability was known,
+    /// held here instead of dropped — the geometry side's
+    /// [`pending`](Self::pending), for physics. Drained by
+    /// [`retry_pending`](Self::retry_pending) once the cap is set.
+    ///
+    /// Parking these is what lets a physics request have an honest
+    /// [`MeshPhysicsAvailability`]: a dropped request is indistinguishable from an
+    /// in-flight one, and a collider builder that cannot tell them apart has to
+    /// re-ask every frame — which is the whole of
+    /// `viewer-audit-collider-settle-treadmill`.
+    physics_parked: HashSet<MeshKey>,
+}
+
+/// Where a mesh's uploaded **physics** shape stands, as a collider builder needs to
+/// know it. [`MeshManager::physics`] answers `None` for the last two alike, which is
+/// enough to pick a shape but not enough to decide whether asking again can ever
+/// change the answer — and a builder that asks again every frame rebuilds its
+/// collider, and the raycast BVH behind it, forever.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MeshPhysicsAvailability {
+    /// The physics blocks are decoded and in hand.
+    Ready,
+    /// The fetch answered, and the answer is that there is nothing to have: the
+    /// mesh carries no physics block, its fetch failed terminally, or it is the nil
+    /// id. **Terminal** — a caller standing on the visual geometry instead has the
+    /// final shape and must stop retrying.
+    Absent,
+    /// The fetch is still running, or is parked waiting for the mesh capability. The
+    /// answer may still change, so a stand-in shape is worth replacing later.
+    Pending,
 }
 
 impl FromWorld for MeshManager {
@@ -181,6 +211,7 @@ impl FromWorld for MeshManager {
             retry: HashMap::new(),
             physics: HashMap::new(),
             physics_inflight: HashMap::new(),
+            physics_parked: HashSet::new(),
         }
     }
 }
@@ -452,18 +483,22 @@ impl MeshManager {
     /// mesh object's collider from its uploaded physics shape (the convex-hull
     /// decomposition / physics triangle mesh) rather than its far heavier visual
     /// geometry. Idempotent: a no-op once the physics is cached, already in flight,
-    /// or the id is nil. Parked (retried on the next call) while the mesh capability
-    /// is not yet known — a physics fetch needs the same `GetMesh2` / `GetMesh` cap
-    /// the geometry fetch does, and the collider index re-requests each frame until
-    /// the shape is in hand.
+    /// or the id is nil. A request made before the mesh capability is known is held
+    /// (`physics_parked`) — a physics fetch needs the same `GetMesh2` / `GetMesh`
+    /// cap the geometry fetch does — and issued for real by `retry_pending` once
+    /// the cap arrives.
     pub fn request_physics(&mut self, id: MeshKey) {
         if id.uuid().is_nil()
             || self.physics.contains_key(&id)
             || self.physics_inflight.contains_key(&id)
-            || !self.fetcher.has_cap_url()
         {
             return;
         }
+        if !self.fetcher.has_cap_url() {
+            let _parked = self.physics_parked.insert(id);
+            return;
+        }
+        let _unparked = self.physics_parked.remove(&id);
         let store = self.store.clone();
         let task = IoTaskPool::get().spawn(async move {
             // A mesh with no physics blocks resolves `Ok` with `physics()` still
@@ -484,9 +519,37 @@ impl MeshManager {
     /// The decoded physics shape blocks for `id`, once fetched via
     /// [`request_physics`](Self::request_physics): `Some` when the mesh carried a
     /// physics block, `None` while the fetch is still in flight, the id was never
-    /// requested, or the mesh carried no physics block.
+    /// requested, or the mesh carried no physics block. Use
+    /// [`physics_availability`](Self::physics_availability) to tell those last two
+    /// apart.
     pub fn physics(&self, id: MeshKey) -> Option<&Arc<MeshPhysics>> {
         self.physics.get(&id).and_then(Option::as_ref)
+    }
+
+    /// Whether `id`'s physics shape is in hand, terminally absent, or still coming —
+    /// the distinction [`physics`](Self::physics) cannot make, and the one a collider
+    /// builder needs so that a stand-in shape built from the *visual* geometry can
+    /// be marked final rather than retried (and rebuilt) every frame.
+    ///
+    /// Meaningful after [`request_physics`](Self::request_physics) has been called
+    /// for `id`; an id that was never requested reads as
+    /// [`Pending`](MeshPhysicsAvailability::Pending), the answer that keeps a caller
+    /// asking rather than settling on a guess.
+    #[must_use]
+    pub fn physics_availability(&self, id: MeshKey) -> MeshPhysicsAvailability {
+        if let Some(entry) = self.physics.get(&id) {
+            return if entry.is_some() {
+                MeshPhysicsAvailability::Ready
+            } else {
+                MeshPhysicsAvailability::Absent
+            };
+        }
+        // The nil id is never fetched at all, so nothing will ever resolve it; that
+        // is an answer, not a wait.
+        if id.uuid().is_nil() {
+            return MeshPhysicsAvailability::Absent;
+        }
+        MeshPhysicsAvailability::Pending
     }
 
     /// Whether a level-of-detail change for `id` is still in flight — chiefly the
@@ -520,7 +583,7 @@ impl MeshManager {
     /// `pending`), now that it is. A no-op while the cap is unset
     /// or nothing is pending. Call this whenever the cap is (re)set.
     pub(crate) fn retry_pending(&mut self) {
-        if self.pending.is_empty() || !self.fetcher.has_cap_url() {
+        if !self.fetcher.has_cap_url() {
             return;
         }
         // Drain first, then re-issue: `request` removes each id from `pending` and
@@ -528,6 +591,13 @@ impl MeshManager {
         let pending: Vec<(MeshKey, Priority)> = self.pending.drain().collect();
         for (id, priority) in pending {
             self.request_with(id, priority, RetryDisposition::Keep);
+        }
+        // The same for the physics blocks a collider builder asked for before the
+        // cap was up. Nothing else re-asks now that a parked request reads as
+        // `Pending` rather than as a fetch to repeat every frame.
+        let parked: Vec<MeshKey> = self.physics_parked.drain().collect();
+        for id in parked {
+            self.request_physics(id);
         }
     }
 
@@ -546,13 +616,17 @@ impl MeshManager {
         self.store.gate_stats()
     }
 
-    /// How many fetches are parked outside the store's own accounting — held for
-    /// the mesh capability, or waiting out a post-failure retry backoff — so the
-    /// pipeline overlay can show work the weak-referenced store cannot see (a failed
-    /// or not-yet-issued fetch), rather than reporting "nothing left to load".
+    /// How many fetches are parked outside the store's own accounting — geometry or
+    /// physics blocks held for the mesh capability, or waiting out a post-failure
+    /// retry backoff — so the pipeline overlay can show work the weak-referenced
+    /// store cannot see (a failed or not-yet-issued fetch), rather than reporting
+    /// "nothing left to load".
     #[must_use]
     pub fn deferred_count(&self) -> usize {
-        self.pending.len().saturating_add(self.retry.len())
+        self.pending
+            .len()
+            .saturating_add(self.retry.len())
+            .saturating_add(self.physics_parked.len())
     }
 }
 
@@ -748,5 +822,97 @@ pub fn poll_meshes(
     for (id, result) in physics_finished {
         let _removed = manager.physics_inflight.remove(&id);
         let _previous = manager.physics.insert(id, result);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use bevy::prelude::World;
+    use bevy::tasks::{IoTaskPool, TaskPool};
+    use pretty_assertions::assert_eq;
+    use sl_client_bevy::{MeshKey, MeshPhysics, Uuid};
+
+    use super::{MeshManager, MeshPhysicsAvailability};
+
+    /// A physics fetch that answered "this mesh has no physics block" must read as
+    /// **absent**, not as the same `None` a fetch still in flight gives: the collider
+    /// builders tell those apart to decide whether re-asking can ever change the
+    /// shape, and one that cannot rebuilds its collider — and the raycast BVH behind
+    /// it — every frame for the life of the prim
+    /// (`viewer-audit-collider-settle-treadmill`).
+    #[test]
+    fn physics_availability_tells_an_absent_block_from_a_pending_fetch() {
+        let mut manager = <MeshManager as bevy::prelude::FromWorld>::from_world(&mut World::new());
+        let id = MeshKey::from(Uuid::from_u128(0x9E5));
+
+        assert_eq!(
+            manager.physics_availability(id),
+            MeshPhysicsAvailability::Pending,
+            "nothing has answered for this id yet, so the answer may still change"
+        );
+
+        let _absent = manager.physics.insert(id, None);
+        assert_eq!(
+            manager.physics_availability(id),
+            MeshPhysicsAvailability::Absent,
+            "a resolved fetch that found no physics block is an answer, not a wait"
+        );
+
+        let _ready = manager
+            .physics
+            .insert(id, Some(Arc::new(MeshPhysics::default())));
+        assert_eq!(
+            manager.physics_availability(id),
+            MeshPhysicsAvailability::Ready,
+            "a decoded physics shape is in hand"
+        );
+
+        assert_eq!(
+            manager.physics_availability(MeshKey::from(Uuid::nil())),
+            MeshPhysicsAvailability::Absent,
+            "the nil id is never fetched at all, so waiting on it is waiting forever"
+        );
+    }
+
+    /// A physics request made before the region's mesh capability is known used to
+    /// be dropped on the floor, which only worked because the collider builder
+    /// re-asked every frame. Now that it does not, the request has to be parked and
+    /// re-issued — and it must read as **pending** meanwhile, so the stand-in
+    /// collider built from the visual geometry is still replaced when the real shape
+    /// arrives.
+    #[test]
+    fn a_physics_request_made_before_the_cap_is_parked_and_reissued() {
+        let _pool = IoTaskPool::get_or_init(TaskPool::new);
+        let mut manager = <MeshManager as bevy::prelude::FromWorld>::from_world(&mut World::new());
+        let id = MeshKey::from(Uuid::from_u128(0x9E6));
+
+        manager.request_physics(id);
+        assert!(
+            manager.physics_inflight.is_empty(),
+            "no fetch can be issued while the mesh capability is unknown"
+        );
+        assert!(
+            manager.physics_parked.contains(&id),
+            "so the request is held rather than dropped"
+        );
+        assert_eq!(
+            manager.physics_availability(id),
+            MeshPhysicsAvailability::Pending,
+            "a parked request is still coming — settling on it would be wrong"
+        );
+
+        manager.set_cap_url(Some("http://mesh.invalid/cap".to_owned()));
+        manager.retry_pending();
+
+        assert!(
+            manager.physics_parked.is_empty(),
+            "the parked request is drained once the cap is up"
+        );
+        assert!(
+            manager.physics_inflight.contains_key(&id),
+            "and issued for real"
+        );
     }
 }
