@@ -96,6 +96,31 @@ const VIEWPORT_HEIGHT: f32 = 420.0;
 /// toolbar to sit without being clipped.
 const INVENTORY_MIN_WIDTH: f32 = 260.0;
 
+/// The list viewport width, in logical pixels, below which a row's permission
+/// decoration is drawn as initials rather than words ([`SuffixStyle`]).
+///
+/// **Where the number comes from.** At [`ROW_FONT_SIZE`] the widest decoration
+/// — `(no copy) (no modify) (no transfer)`, every owner permission withheld —
+/// shapes to about 231 logical px, and the fixed parts before the name (one
+/// level of indent, the arrow and icon columns, the gaps between them and the
+/// `…` marker) take another 83. A panel is therefore this wide before the words
+/// leave the name the ~100 px that makes an item recognisable — which is well
+/// past the window's own default width, so the common case is the initials and
+/// the words are what a *widened* panel buys back.
+///
+/// Measured, not asserted: `the_threshold_is_where_the_words_stop_leaving_a_name`
+/// shapes the real strings in the layout harness and fails if this drifts from
+/// the boundary it names, so a changed row font moves the threshold loudly
+/// rather than quietly.
+const SUFFIX_ABBREVIATION_WIDTH: f32 = 420.0;
+
+/// How much wider than [`SUFFIX_ABBREVIATION_WIDTH`] the panel must be dragged
+/// before the words come back, in logical pixels.
+///
+/// A band rather than a single width, so a drag that rests on the threshold and
+/// jitters by a pixel does not respell every row back and forth.
+const SUFFIX_ABBREVIATION_HYSTERESIS: f32 = 8.0;
+
 /// The shortest the floater's content area may be resized to, in logical pixels —
 /// enough for the tabs, toolbar and search plus a few list rows.
 const INVENTORY_MIN_HEIGHT: f32 = 200.0;
@@ -191,6 +216,7 @@ impl Plugin for InventoryPlugin {
             .init_resource::<InventorySelection>()
             .init_resource::<InlineRename>()
             .init_resource::<PendingReveal>()
+            .init_resource::<SuffixStyle>()
             .add_message::<InventoryUiAction>()
             .add_systems(
                 Startup,
@@ -224,6 +250,7 @@ impl Plugin for InventoryPlugin {
                 Update,
                 (
                     populate_new_rows,
+                    choose_suffix_style,
                     bind_rows,
                     paint_selection,
                     start_inline_rename,
@@ -886,7 +913,7 @@ impl InventoryModel {
             name,
             icon: folder_icon(folder_type, !matches!(arrow, RowArrow::Collapsed)),
             arrow,
-            suffix: String::new(),
+            decorations: RowDecorations::default(),
             bold: false,
             italic: false,
         }
@@ -1323,7 +1350,7 @@ fn item_row(key: InventoryKey, name: &str, icon: &'static str, depth: usize) -> 
         name: name.to_owned(),
         icon,
         arrow: RowArrow::Leaf,
-        suffix: String::new(),
+        decorations: RowDecorations::default(),
         bold: false,
         italic: false,
     }
@@ -1339,7 +1366,7 @@ fn decorated_item_row(item: &ItemInfo, depth: usize, worn: &HashSet<InventoryKey
         name: item.name.clone(),
         icon: item_glyph(item.inv_type, item.flags),
         arrow: RowArrow::Leaf,
-        suffix: item_suffix(item, is_worn),
+        decorations: item_decorations(item, is_worn),
         bold: is_worn,
         // The reference draws an unworn link italic (worn wins over link).
         italic: !is_worn && is_link_asset(item.asset_type),
@@ -1360,30 +1387,85 @@ const ASSET_TYPE_LINK: i32 = 24;
 /// The `AT_LINK_FOLDER` asset-type wire code: an inventory link to a folder.
 const ASSET_TYPE_LINK_FOLDER: i32 = 25;
 
-/// The trailing suffix the reference viewer draws after an item's label
+/// The trailing decorations the reference viewer draws after an item's label
 /// (`LLItemBridge::getLabelSuffix`): a link is marked `(link)` (its
 /// permissions are the target's, not its own); otherwise each withheld owner
-/// permission is spelled out; and a worn item is marked `(worn)`.
-pub(crate) fn item_suffix(item: &ItemInfo, worn: bool) -> String {
-    let mut parts: Vec<&str> = Vec::new();
-    if is_link_asset(item.asset_type) {
-        parts.push("(link)");
-    } else {
-        let owner = item.permissions.owner;
-        if !owner.contains(Permissions::COPY) {
-            parts.push("(no copy)");
+/// permission is named; and a worn item is marked `(worn)`.
+///
+/// Held as the **facts** rather than the finished string, because how wide the
+/// row is decides how they are spelled — see [`SuffixStyle`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct RowDecorations {
+    /// An inventory link, drawn `(link)`. Its permissions are the target's, so
+    /// [`Self::withheld`] is not drawn for one.
+    link: bool,
+    /// The owner permissions the item **withholds** — the ones the decoration
+    /// names, since the reference spells out what you may *not* do.
+    withheld: Permissions,
+    /// A currently worn item, drawn `(worn)`.
+    worn: bool,
+}
+
+/// How wide a row's decoration is spelled.
+///
+/// The permissions a decoration can name are a **closed set of three** — copy,
+/// modify, transfer — and each starts with a different letter, so `(no c)`,
+/// `(no m)` and `(no t)` tell the same three apart that `(no copy)`,
+/// `(no modify)` and `(no transfer)` do, in a third of the width. A panel too
+/// narrow to hold the words therefore does not have to choose between showing
+/// the decoration and showing the name: it spells the decoration short and
+/// gives the name back the difference.
+///
+/// Chosen for the whole panel at once by [`choose_suffix_style`], from the
+/// width the list viewport was given — never from the row's own content, which
+/// is what would make it a feedback loop (see [`spawn_row_parts`]).
+#[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum SuffixStyle {
+    /// The words, as the reference viewer draws them.
+    #[default]
+    Spelled,
+    /// The initials, for a panel narrower than [`SUFFIX_ABBREVIATION_WIDTH`].
+    Abbreviated,
+}
+
+impl RowDecorations {
+    /// The decoration text, spelled for `style` — empty when there is nothing
+    /// to draw.
+    fn text(self, style: SuffixStyle) -> String {
+        let mut parts: Vec<&str> = Vec::new();
+        if self.link {
+            parts.push("(link)");
+        } else {
+            for (permission, spelled, abbreviated) in [
+                (Permissions::COPY, "(no copy)", "(no c)"),
+                (Permissions::MODIFY, "(no modify)", "(no m)"),
+                (Permissions::TRANSFER, "(no transfer)", "(no t)"),
+            ] {
+                if self.withheld.contains(permission) {
+                    parts.push(match style {
+                        SuffixStyle::Spelled => spelled,
+                        SuffixStyle::Abbreviated => abbreviated,
+                    });
+                }
+            }
         }
-        if !owner.contains(Permissions::MODIFY) {
-            parts.push("(no modify)");
+        if self.worn {
+            parts.push("(worn)");
         }
-        if !owner.contains(Permissions::TRANSFER) {
-            parts.push("(no transfer)");
-        }
+        parts.join(" ")
     }
-    if worn {
-        parts.push("(worn)");
+}
+
+/// What an item's row draws after its label: the link marker, the owner
+/// permissions it withholds, and whether it is worn.
+fn item_decorations(item: &ItemInfo, worn: bool) -> RowDecorations {
+    let owner = item.permissions.owner;
+    RowDecorations {
+        link: is_link_asset(item.asset_type),
+        withheld: (Permissions::COPY | Permissions::MODIFY | Permissions::TRANSFER)
+            .difference(owner),
+        worn,
     }
-    parts.join(" ")
 }
 
 // ---------------------------------------------------------------------------
@@ -1658,10 +1740,11 @@ pub(crate) struct DisplayRow {
     icon: &'static str,
     /// The expand-arrow state.
     arrow: RowArrow,
-    /// The trailing decoration text — the permission / link / worn suffixes
-    /// the reference viewer draws after the label ("(no copy) (worn)", …).
-    /// Empty for an undecorated row.
-    suffix: String,
+    /// What the row draws after its label — the link marker, the withheld
+    /// owner permissions, the worn marker. Kept as the facts rather than the
+    /// text, because how wide the panel is decides how they are spelled
+    /// ([`SuffixStyle`]).
+    decorations: RowDecorations,
     /// Whether the label is drawn **bold** — a currently worn item, so the
     /// outfit stands out in the tree (the reference's worn emphasis,
     /// `LLItemBridge::getLabelStyle`).
@@ -2829,101 +2912,17 @@ fn populate_new_rows(
         if child_of.parent() != ui.viewport {
             continue;
         }
-        // Amended, not inserted: `top` and `display` are the virtual list's.
-        amend_row_node(&mut commands, row_entity, |node| {
-            node.position_type = PositionType::Absolute;
-            node.left = Val::Px(0.0);
-            node.right = Val::Px(0.0);
-            node.height = Val::Px(ROW_HEIGHT);
-            node.align_items = AlignItems::Center;
-            node.column_gap = Val::Px(4.0);
-        });
+        amend_tree_row_node(&mut commands, row_entity);
         commands.entity(row_entity).insert((
             Pickable::default(),
             // Transparent until the drag-and-drop hover paints it as the drop
             // target ([`crate::inventory_drag`]).
             BackgroundColor(Color::NONE),
         ));
-        let indent = commands.spawn((Node::default(), ChildOf(row_entity))).id();
-        let arrow = commands
-            .spawn((
-                Text::new(""),
-                UiFont::Mono.at(ROW_FONT_SIZE),
-                TextColor(CHROME_COLOR),
-                Node {
-                    min_width: Val::Px(ARROW_COL_WIDTH),
-                    ..default()
-                },
-                ChildOf(row_entity),
-            ))
-            .id();
-        let icon = commands
-            .spawn((
-                Text::new(""),
-                UiFont::Sans.at(ROW_FONT_SIZE),
-                TextColor(LABEL_COLOR),
-                Node {
-                    min_width: Val::Px(ICON_COL_WIDTH),
-                    ..default()
-                },
-                ChildOf(row_entity),
-            ))
-            .id();
-        // The label sits in a shrink-and-clip container (see `label_clip_node`)
-        // with a no-wrap `Text` child, so a name wider than the row draws on a
-        // single line with its tail hidden rather than wrapping into the rows
-        // above and below.
-        let label_clip = commands
-            .spawn((label_clip_node(), Pickable::IGNORE, ChildOf(row_entity)))
-            .id();
-        let label = commands
-            .spawn((
-                Text::new(""),
-                TextLayout::no_wrap(),
-                UiFont::Sans.at(ROW_FONT_SIZE),
-                TextColor(LABEL_COLOR),
-                // The text keeps its full width; the clip container is what
-                // shrinks, so an over-long name overflows the clip and reveals
-                // the marker below.
-                Node {
-                    flex_shrink: 0.0,
-                    ..default()
-                },
-                Pickable::IGNORE,
-                ChildOf(label_clip),
-            ))
-            .id();
-        // The trailing `…` marker, between the clipped label and the decoration,
-        // hidden until `ui_ellipsis::apply_reveal_ellipsis` reveals it on
-        // overflow — the shared marker the table cells and tab labels use, so it
-        // carries `LocaleEllipsisMarker` and `i18n` sets its localised glyph.
-        let ellipsis = spawn_ellipsis_marker(
-            &mut commands,
-            row_entity,
-            ROW_FONT_SIZE,
-            LABEL_COLOR,
-            FALLBACK_ELLIPSIS,
-        );
-        commands
-            .entity(label_clip)
-            .insert(RevealEllipsis { marker: ellipsis });
-        let suffix = commands
-            .spawn((
-                Text::new(""),
-                UiFont::Sans.at(ROW_FONT_SIZE),
-                TextColor(SUFFIX_COLOR),
-                ChildOf(row_entity),
-            ))
-            .id();
+        let parts = spawn_row_parts(&mut commands, row_entity);
         commands
             .entity(row_entity)
-            .insert(RowParts {
-                indent,
-                arrow,
-                icon,
-                label,
-                suffix,
-            })
+            .insert(parts)
             .observe(on_row_press)
             .observe(crate::inventory_actions::on_row_context)
             .observe(crate::inventory_drag::on_row_drag_start)
@@ -2931,10 +2930,214 @@ fn populate_new_rows(
     }
 }
 
+/// Give a pooled row container the tree row's own geometry: a full-width band
+/// of one row's height, laying its parts out in a line with a 4 px gap.
+///
+/// Amended, not inserted: `top` and `display` are the virtual list's, and it
+/// spawns the container before this ever sees it.
+fn amend_tree_row_node(commands: &mut Commands, row_entity: Entity) {
+    amend_row_node(commands, row_entity, |node| {
+        node.position_type = PositionType::Absolute;
+        node.left = Val::Px(0.0);
+        node.right = Val::Px(0.0);
+        node.height = Val::Px(ROW_HEIGHT);
+        node.align_items = AlignItems::Center;
+        node.column_gap = Val::Px(4.0);
+    });
+}
+
+/// Spawn the parts a tree row keeps for its lifetime — indent, arrow, icon,
+/// clipped label with its `…` marker, and the trailing decoration — as children
+/// of `row_entity`, and hand back the [`RowParts`] naming them.
+///
+/// Split out of [`populate_new_rows`] so the row's **live** structure is
+/// reachable from a headless layout test: the registry sample
+/// ([`spawn_inventory_row_sample`]) deliberately differs from it (content-sized
+/// columns, a minimum rather than fixed height) to survive the element sweep's
+/// font and pseudolocale axes, so sweeping the sample says nothing about how a
+/// real row behaves as the panel narrows.
+///
+/// # What may and may not shrink
+///
+/// A row is a flex line whose spare width, once it runs out, is taken back from
+/// whatever will give it up. Exactly one part is allowed to: the **label's clip
+/// container**, which shrinks to nothing and hides the tail of the name behind
+/// the `…`. Everything else declares `flex_shrink: 0.0`, and both halves of
+/// `viewer-inventory-permission-suffix-layout` were a part that did not:
+///
+/// - the **indent** is the row's depth. Letting it collapse slid the whole row —
+///   arrow, icon and name — leftwards out from under its own indentation as the
+///   panel narrowed, which is the tree losing the only thing that shows its
+///   shape;
+/// - the **suffix** is the permission decoration. Sharing the shrink with the
+///   clip made the `…` marker's reveal oscillate: `ui_ellipsis` measures the
+///   name against "the clip's width plus whatever the marker occupies", which is
+///   only the width the clip would have without the marker while the clip is the
+///   sole giver. With the suffix shrinking too, showing the marker took part of
+///   its width from the suffix, the clip lost less than the marker's width, the
+///   name read as fitting, the marker hid, the suffix grew back — and the row
+///   flipped between the two states forever. It also drew on two lines inside a
+///   fixed-height row, since shrinking a wrapping `Text` wraps it.
+fn spawn_row_parts(commands: &mut Commands, row_entity: Entity) -> RowParts {
+    // The depth indent: a fixed width that must not be given back under
+    // pressure, or the row drifts left as the panel narrows.
+    let indent = commands
+        .spawn((
+            Node {
+                flex_shrink: 0.0,
+                ..default()
+            },
+            ChildOf(row_entity),
+        ))
+        .id();
+    let arrow = commands
+        .spawn((
+            Text::new(""),
+            UiFont::Mono.at(ROW_FONT_SIZE),
+            TextColor(CHROME_COLOR),
+            Node {
+                min_width: Val::Px(ARROW_COL_WIDTH),
+                ..default()
+            },
+            ChildOf(row_entity),
+        ))
+        .id();
+    let icon = commands
+        .spawn((
+            Text::new(""),
+            UiFont::Sans.at(ROW_FONT_SIZE),
+            TextColor(LABEL_COLOR),
+            Node {
+                min_width: Val::Px(ICON_COL_WIDTH),
+                ..default()
+            },
+            ChildOf(row_entity),
+        ))
+        .id();
+    // The label sits in a shrink-and-clip container (see `label_clip_node`)
+    // with a no-wrap `Text` child, so a name wider than the row draws on a
+    // single line with its tail hidden rather than wrapping into the rows
+    // above and below.
+    let label_clip = commands
+        .spawn((label_clip_node(), Pickable::IGNORE, ChildOf(row_entity)))
+        .id();
+    let label = commands
+        .spawn((
+            Text::new(""),
+            TextLayout::no_wrap(),
+            UiFont::Sans.at(ROW_FONT_SIZE),
+            TextColor(LABEL_COLOR),
+            // The text keeps its full width; the clip container is what
+            // shrinks, so an over-long name overflows the clip and reveals
+            // the marker below.
+            Node {
+                flex_shrink: 0.0,
+                ..default()
+            },
+            Pickable::IGNORE,
+            ChildOf(label_clip),
+        ))
+        .id();
+    // The trailing `…` marker, between the clipped label and the decoration,
+    // hidden until `ui_ellipsis::apply_reveal_ellipsis` reveals it on
+    // overflow — the shared marker the table cells and tab labels use, so it
+    // carries `LocaleEllipsisMarker` and `i18n` sets its localised glyph.
+    let ellipsis = spawn_ellipsis_marker(
+        commands,
+        row_entity,
+        ROW_FONT_SIZE,
+        LABEL_COLOR,
+        FALLBACK_ELLIPSIS,
+    );
+    commands
+        .entity(label_clip)
+        .insert(RevealEllipsis { marker: ellipsis });
+    // The decoration keeps its whole width and stays on one line: it is the
+    // other part that must not shrink, or the marker's reveal oscillates and
+    // the decoration wraps inside a fixed-height row (see the function docs).
+    let suffix = commands
+        .spawn((
+            Text::new(""),
+            TextLayout::no_wrap(),
+            UiFont::Sans.at(ROW_FONT_SIZE),
+            TextColor(SUFFIX_COLOR),
+            Node {
+                flex_shrink: 0.0,
+                ..default()
+            },
+            ChildOf(row_entity),
+        ))
+        .id();
+    RowParts {
+        indent,
+        arrow,
+        icon,
+        label,
+        suffix,
+    }
+}
+
+/// Pick the whole panel's [`SuffixStyle`] from the width the list viewport was
+/// laid out at: the words while they fit alongside a readable name, the
+/// initials once the panel is narrower than that.
+///
+/// **Read from the viewport, not from the row.** The viewport's width is the
+/// floater's, which the user sets by dragging its edge; no row can change it,
+/// because a row is absolutely positioned inside it. That is what makes this a
+/// decision and not a feedback loop — a rule that measured the decoration
+/// against the room left over would respell it, change the room, and flip
+/// between the two spellings forever, which is the shape of the bug that
+/// [`spawn_row_parts`] documents.
+///
+/// The switch has a hysteresis band rather than a single width, so a drag that
+/// rests on the threshold and jitters by a pixel does not respell every row
+/// back and forth.
+fn choose_suffix_style(
+    ui: Option<Res<InventoryUi>>,
+    nodes: Query<&ComputedNode>,
+    mut style: ResMut<SuffixStyle>,
+) {
+    let Some(ui) = ui else {
+        return;
+    };
+    let Ok(computed) = nodes.get(ui.viewport) else {
+        return;
+    };
+    // Logical pixels: the threshold is a width in the units the panel is
+    // described in, not in the display's.
+    let width = computed.size.x * computed.inverse_scale_factor;
+    let wanted = suffix_style_for(width, *style);
+    if *style != wanted {
+        *style = wanted;
+    }
+}
+
+/// How a panel `width` logical pixels wide spells its decorations, given how it
+/// is spelling them now.
+///
+/// The `current` argument is the hysteresis and nothing more: the switch down to
+/// the initials and the switch back up to the words are
+/// [`SUFFIX_ABBREVIATION_HYSTERESIS`] apart, so a drag resting on the threshold
+/// does not respell every row on every jittered pixel. It is memory of the
+/// user's drag, not of the layout's own output, which is what keeps this a
+/// hysteresis rather than the feedback loop [`spawn_row_parts`] documents.
+const fn suffix_style_for(width: f32, current: SuffixStyle) -> SuffixStyle {
+    match current {
+        SuffixStyle::Spelled if width < SUFFIX_ABBREVIATION_WIDTH => SuffixStyle::Abbreviated,
+        SuffixStyle::Abbreviated
+            if width >= SUFFIX_ABBREVIATION_WIDTH + SUFFIX_ABBREVIATION_HYSTERESIS =>
+        {
+            SuffixStyle::Spelled
+        }
+        settled => settled,
+    }
+}
+
 /// Bind each row's parts to the [`DisplayRow`] it now points at — on the frame
 /// the view is rebuilt (all rows) or a row's index changed (that row).
 fn bind_rows(
     view: Res<InventoryView>,
+    style: Res<SuffixStyle>,
     ui: Option<Res<InventoryUi>>,
     rows: Query<(Ref<VirtualRow>, &ChildOf, &RowParts)>,
     mut nodes: Query<&mut Node>,
@@ -2944,7 +3147,9 @@ fn bind_rows(
     let Some(ui) = ui else {
         return;
     };
-    let rebuild_all = view.is_changed();
+    // A narrowed panel respells every decoration, so a changed style rebinds the
+    // whole pool exactly as a rebuilt view does.
+    let rebuild_all = view.is_changed() || style.is_changed();
     for (row, child_of, parts) in &rows {
         if child_of.parent() != ui.viewport {
             continue;
@@ -2997,7 +3202,7 @@ fn bind_rows(
             }
         }
         if let Ok((mut text, _color)) = texts.get_mut(parts.suffix) {
-            set_text(&mut text, &display.suffix);
+            set_text(&mut text, &display.decorations.text(*style));
         }
     }
 }
@@ -3731,7 +3936,7 @@ pub struct AddEmbeddedItem {
 mod tests {
     use super::{
         DisplayRow, InventoryModel, InventoryTab, InventoryType, ItemInfo, RowArrow, RowKey,
-        depth_indent, folder_icon, item_glyph, item_icon, item_suffix,
+        SuffixStyle, depth_indent, folder_icon, item_decorations, item_glyph, item_icon,
     };
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{
@@ -4440,22 +4645,69 @@ mod tests {
         // All permissions withheld: every suffix, in reference order.
         let locked = item(1, 2, "Locked", InventoryType::Object);
         assert_eq!(
-            item_suffix(&locked, false),
+            item_decorations(&locked, false).text(SuffixStyle::Spelled),
             "(no copy) (no modify) (no transfer)"
         );
         assert_eq!(
-            item_suffix(&locked, true),
+            item_decorations(&locked, true).text(SuffixStyle::Spelled),
             "(no copy) (no modify) (no transfer) (worn)"
         );
         // Full permissions: nothing but the worn marker.
         let mut open = item(2, 2, "Open", InventoryType::Object);
         open.permissions.owner = Permissions::COPY | Permissions::MODIFY | Permissions::TRANSFER;
-        assert_eq!(item_suffix(&open, false), "");
-        assert_eq!(item_suffix(&open, true), "(worn)");
+        assert_eq!(
+            item_decorations(&open, false).text(SuffixStyle::Spelled),
+            ""
+        );
+        assert_eq!(
+            item_decorations(&open, true).text(SuffixStyle::Spelled),
+            "(worn)"
+        );
         // A link shows `(link)` in place of the permission suffixes.
         let mut link = item(3, 2, "Linked", InventoryType::Wearable);
         link.asset_type = sl_client_bevy::AssetType::Other(24);
-        assert_eq!(item_suffix(&link, false), "(link)");
+        assert_eq!(
+            item_decorations(&link, false).text(SuffixStyle::Spelled),
+            "(link)"
+        );
+    }
+
+    /// **The three permissions are a closed set**, so the abbreviated spelling
+    /// is as unambiguous as the words: each initial names exactly one of them,
+    /// and no two decorations collide.
+    #[test]
+    fn the_abbreviated_decoration_still_names_each_permission() {
+        let locked = item(1, 2, "Locked", InventoryType::Object);
+        assert_eq!(
+            item_decorations(&locked, false).text(SuffixStyle::Abbreviated),
+            "(no c) (no m) (no t)"
+        );
+        // Worn and link are already short, and read the same either way.
+        assert_eq!(
+            item_decorations(&locked, true).text(SuffixStyle::Abbreviated),
+            "(no c) (no m) (no t) (worn)"
+        );
+        let mut link = item(3, 2, "Linked", InventoryType::Wearable);
+        link.asset_type = sl_client_bevy::AssetType::Other(24);
+        assert_eq!(
+            item_decorations(&link, false).text(SuffixStyle::Abbreviated),
+            "(link)"
+        );
+        // Every single-permission case is distinct, which is the whole claim:
+        // one withheld permission abbreviates to one unambiguous initial.
+        let mut spellings = Vec::new();
+        for withheld in [
+            Permissions::COPY,
+            Permissions::MODIFY,
+            Permissions::TRANSFER,
+        ] {
+            let mut one = item(4, 2, "One", InventoryType::Object);
+            one.permissions.owner =
+                (Permissions::COPY | Permissions::MODIFY | Permissions::TRANSFER)
+                    .difference(withheld);
+            spellings.push(item_decorations(&one, false).text(SuffixStyle::Abbreviated));
+        }
+        assert_eq!(spellings, vec!["(no c)", "(no m)", "(no t)"]);
     }
 
     /// A worn item's tree row carries the bold emphasis and the `(worn)`
@@ -4476,13 +4728,20 @@ mod tests {
         let shirt = rows.iter().find(|row| row.name == "Blue shirt");
         assert_eq!(shirt.map(|row| row.bold), Some(true));
         assert_eq!(
-            shirt.map(|row| row.suffix.as_str()),
+            shirt
+                .map(|row| row.decorations.text(SuffixStyle::Spelled))
+                .as_deref(),
             Some("(no copy) (no modify) (no transfer) (worn)")
         );
         // Folders stay undecorated.
         let folder = rows.iter().find(|row| row.name == "Clothing");
         assert_eq!(folder.map(|row| row.bold), Some(false));
-        assert_eq!(folder.map(|row| row.suffix.as_str()), Some(""));
+        assert_eq!(
+            folder
+                .map(|row| row.decorations.text(SuffixStyle::Spelled))
+                .as_deref(),
+            Some("")
+        );
     }
 
     /// `folder_by_type` resolves the agent's Trash from a merged skeleton and
@@ -4869,6 +5128,291 @@ mod tests {
             model.subtree_folders(fkey(1)).len(),
             deeper_than_the_bound,
             "the breadth-first collector has no depth to bound — only repeats",
+        );
+    }
+}
+
+#[cfg(test)]
+mod row_layout_tests {
+    //! How a **live** tree row behaves as the panel around it narrows.
+    //!
+    //! The registry sample ([`super::spawn_inventory_row_sample`]) is swept by
+    //! the element matrix, but it is deliberately not the live row — it sizes
+    //! its columns to content and takes a minimum height rather than a fixed
+    //! one, so it survives the sweep's large-font and pseudolocale axes. That
+    //! is why both halves of `viewer-inventory-permission-suffix-layout` — a
+    //! row drifting left out of its own indentation, and a decoration flipping
+    //! between two states — went unseen: nothing measured the parts
+    //! [`super::spawn_row_parts`] actually spawns.
+    //!
+    //! These build that row directly, at the widths a user drags the inventory
+    //! floater through.
+
+    use super::{
+        Permissions, ROW_HEIGHT, RevealEllipsis, RowArrow, RowDecorations, RowParts,
+        SUFFIX_ABBREVIATION_HYSTERESIS, SUFFIX_ABBREVIATION_WIDTH, SuffixStyle, depth_indent,
+        item_icon,
+    };
+    use crate::ui::{UiRoot, UiScaffoldSystems};
+    use crate::virtual_list::amend_row_node;
+    use bevy::prelude::*;
+    use pretty_assertions::assert_eq;
+    use sl_client_bevy::InventoryType;
+    use sl_viewer_testkit::{LayoutTest, TestError, border_box, settle, stability_violations};
+
+    /// A name far too long for any of the widths swept below, so the label is
+    /// always the part under pressure.
+    const LONG_NAME: &str = "A ludicrously long inventory item name";
+
+    /// The widths the inventory floater is dragged through, in logical pixels —
+    /// from the panel's own width down to its minimum resizable width and a
+    /// little past it.
+    const WIDTHS: [f32; 6] = [340.0, 300.0, 280.0, 260.0, 240.0, 200.0];
+
+    /// The room a name needs to be recognisable, in logical pixels — about
+    /// thirteen characters at [`ROW_FONT_SIZE`]. What
+    /// [`SUFFIX_ABBREVIATION_WIDTH`] is the boundary of.
+    const MIN_LABEL_WIDTH: f32 = 100.0;
+
+    /// How far above that boundary the threshold may sit, in logical pixels,
+    /// before it is spelling rows short that had room for the words.
+    const THRESHOLD_SLACK: f32 = 24.0;
+
+    /// The **widest** decoration a row can carry: every owner permission
+    /// withheld, which is the case the report was made against and the one the
+    /// threshold is chosen for.
+    fn locked() -> RowDecorations {
+        RowDecorations {
+            link: false,
+            withheld: Permissions::COPY | Permissions::MODIFY | Permissions::TRANSFER,
+            worn: false,
+        }
+    }
+
+    /// The room the label is left in a `width` px panel whose decorations are
+    /// spelled `style`, in logical pixels — the width of the clip the name is
+    /// drawn inside, which is what the `…` cuts it down to.
+    ///
+    /// Depth 1: an item inside a folder, the ordinary case.
+    fn label_room(width: f32, style: SuffixStyle) -> Result<f32, TestError> {
+        let mut app = row_app(width, 1, LONG_NAME, &locked().text(style));
+        let mut clips = app
+            .world_mut()
+            .query_filtered::<&ComputedNode, With<RevealEllipsis>>();
+        let clip = clips
+            .iter(app.world())
+            .next()
+            .ok_or("the fixture spawned no label clip")?;
+        Ok(clip.size.x * clip.inverse_scale_factor)
+    }
+
+    /// Build a one-row app: a panel `width` logical px wide holding a single
+    /// live tree row, at `depth`, bound to `name` and `suffix`.
+    ///
+    /// The row is spawned exactly as `populate_new_rows` spawns it (the same
+    /// node amendment, the same parts) and bound the way `bind_rows` binds it,
+    /// so what is measured here is what the window draws.
+    fn row_app(width: f32, depth: usize, name: &str, suffix: &str) -> App {
+        let mut app = LayoutTest::new().with_viewport(800, 600).build();
+        let (name, suffix) = (name.to_owned(), suffix.to_owned());
+        app.add_systems(
+            Startup,
+            (move |mut commands: Commands, root: Res<UiRoot>| {
+                let panel = commands
+                    .spawn((
+                        Node {
+                            width: Val::Px(width),
+                            height: Val::Px(ROW_HEIGHT * 3.0),
+                            ..default()
+                        },
+                        Name::new("panel"),
+                        ChildOf(root.0),
+                    ))
+                    .id();
+                let row = commands.spawn((Name::new("row"), ChildOf(panel))).id();
+                super::amend_tree_row_node(&mut commands, row);
+                let parts = super::spawn_row_parts(&mut commands, row);
+                // What `bind_rows` writes into the parts, for one row.
+                amend_row_node(&mut commands, parts.indent, move |node| {
+                    node.width = Val::Px(depth_indent(depth));
+                });
+                commands
+                    .entity(parts.arrow)
+                    .insert(Text::new(RowArrow::Leaf.glyph().to_owned()));
+                commands
+                    .entity(parts.icon)
+                    .insert(Text::new(item_icon(InventoryType::Wearable).to_owned()));
+                commands.entity(parts.label).insert(Text::new(name.clone()));
+                commands
+                    .entity(parts.suffix)
+                    .insert(Text::new(suffix.clone()));
+                commands.entity(row).insert(parts);
+            })
+            .after(UiScaffoldSystems::SpawnRoot),
+        );
+        settle(&mut app);
+        app
+    }
+
+    /// The row's parts, read back out of the settled app.
+    fn parts_of(app: &mut App) -> Result<RowParts, TestError> {
+        let mut query = app.world_mut().query::<&RowParts>();
+        let parts = query
+            .iter(app.world())
+            .next()
+            .ok_or("the fixture spawned no row parts")?;
+        Ok(RowParts { ..*parts })
+    }
+
+    /// One node's border box, in physical pixels.
+    fn box_of(app: &App, entity: Entity) -> Result<Rect, TestError> {
+        let node = app
+            .world()
+            .get::<ComputedNode>(entity)
+            .ok_or("the node was never laid out")?;
+        let transform = app
+            .world()
+            .get::<UiGlobalTransform>(entity)
+            .ok_or("the node has no transform")?;
+        Ok(border_box(node, transform))
+    }
+
+    /// **The indent is the tree's shape**, and it must survive the squeeze: a
+    /// row at depth 3 keeps its 48 px of indentation at every width, rather
+    /// than handing it back and sliding the whole row — arrow, icon and name —
+    /// leftwards as the panel narrows.
+    #[test]
+    fn a_narrowing_panel_never_eats_a_row_s_indent() -> Result<(), TestError> {
+        let depth = 3;
+        for width in WIDTHS {
+            let mut app = row_app(
+                width,
+                depth,
+                LONG_NAME,
+                &locked().text(SuffixStyle::Spelled),
+            );
+            let parts = parts_of(&mut app)?;
+            let indent = box_of(&app, parts.indent)?;
+            assert!(
+                (indent.width() - depth_indent(depth)).abs() < 0.5,
+                "at {width} px the indent laid out {} px wide, not the {} px depth 3 asks for — \
+                 the row has drifted left out of its own indentation",
+                indent.width(),
+                depth_indent(depth),
+            );
+        }
+        Ok(())
+    }
+
+    /// The decoration is not the part that gives way: it keeps its whole width
+    /// and its single line at every width, so the name (which has an `…` to be
+    /// cut off with) is what shortens.
+    #[test]
+    fn the_permission_decoration_is_never_squeezed() -> Result<(), TestError> {
+        for width in WIDTHS {
+            let mut app = row_app(width, 1, LONG_NAME, &locked().text(SuffixStyle::Spelled));
+            let parts = parts_of(&mut app)?;
+            let suffix = app
+                .world()
+                .get::<ComputedNode>(parts.suffix)
+                .ok_or("the decoration was never laid out")?;
+            assert!(
+                suffix.content_size.x <= suffix.size.x + 0.5,
+                "at {width} px the decoration was laid out {} px wide for {} px of text — \
+                 squeezed, so it wraps inside a fixed-height row",
+                suffix.size.x,
+                suffix.content_size.x,
+            );
+            assert!(
+                suffix.size.y <= ROW_HEIGHT,
+                "at {width} px the decoration is {} px tall, more than the {ROW_HEIGHT} px row — \
+                 it has wrapped onto a second line",
+                suffix.size.y,
+            );
+        }
+        Ok(())
+    }
+
+    /// **A settled row stays settled**, at every width the floater is dragged
+    /// through — the harness's own stability check
+    /// ([`sl_viewer_testkit::stability_violations`]), asked about the one tree
+    /// the element sweep cannot see.
+    ///
+    /// The `…` marker's reveal is a feedback loop whenever more than one part of
+    /// the row can shrink: revealing the marker takes width from the decoration
+    /// as well as from the label's clip, so the clip loses less than the
+    /// marker's width, the name reads as fitting again, and the marker hides.
+    #[test]
+    fn a_row_s_layout_does_not_flip_between_two_states() {
+        for width in WIDTHS {
+            let mut app = row_app(width, 2, LONG_NAME, &locked().text(SuffixStyle::Spelled));
+            let violations = stability_violations(&mut app);
+            assert!(violations.is_empty(), "at {width} px: {violations:#?}");
+        }
+    }
+
+    /// **The threshold is where the words stop leaving a name.** Both sides of
+    /// it are pinned against text the harness actually shapes, so the constant
+    /// cannot drift away from the font it was measured against: at the
+    /// threshold the spelled decoration still leaves the name its minimum, and
+    /// it only just does — a threshold set far above the boundary would spell
+    /// rows short that had room for the words.
+    #[test]
+    fn the_threshold_is_where_the_words_stop_leaving_a_name() -> Result<(), TestError> {
+        let spelled = label_room(SUFFIX_ABBREVIATION_WIDTH, SuffixStyle::Spelled)?;
+        assert!(
+            spelled >= MIN_LABEL_WIDTH,
+            "at the {SUFFIX_ABBREVIATION_WIDTH} px threshold the words leave the name {spelled}              px, less than the {MIN_LABEL_WIDTH} px that makes an item recognisable — the              threshold is too low",
+        );
+        assert!(
+            spelled <= MIN_LABEL_WIDTH + THRESHOLD_SLACK,
+            "at the {SUFFIX_ABBREVIATION_WIDTH} px threshold the words leave the name {spelled}              px, well past the {MIN_LABEL_WIDTH} px it needs — the threshold is too high, and              rows are being spelled short while the words would have fitted",
+        );
+        Ok(())
+    }
+
+    /// **What the initials buy.** Just under the threshold — where the words no
+    /// longer leave a readable name — spelling the decoration short hands the
+    /// name back most of a panel's worth of room.
+    #[test]
+    fn the_initials_hand_the_name_back_its_room() -> Result<(), TestError> {
+        let width = SUFFIX_ABBREVIATION_WIDTH - 1.0;
+        let spelled = label_room(width, SuffixStyle::Spelled)?;
+        let abbreviated = label_room(width, SuffixStyle::Abbreviated)?;
+        assert!(
+            abbreviated >= spelled + 80.0,
+            "at {width} px the initials left the name {abbreviated} px against the words'              {spelled} px — the abbreviation is not buying the room it exists to buy",
+        );
+        Ok(())
+    }
+
+    /// The panel-wide choice: initials below the threshold, words above it, and
+    /// a band in between that a jittering drag cannot flip back and forth.
+    #[test]
+    fn the_panel_switches_spelling_at_the_threshold_and_stays_switched() {
+        use super::{SuffixStyle::Abbreviated, SuffixStyle::Spelled, suffix_style_for};
+
+        // Dragging narrower: the words give way at the threshold.
+        assert_eq!(
+            suffix_style_for(SUFFIX_ABBREVIATION_WIDTH, Spelled),
+            Spelled
+        );
+        assert_eq!(
+            suffix_style_for(SUFFIX_ABBREVIATION_WIDTH - 1.0, Spelled),
+            Abbreviated
+        );
+        // Dragging wider again: not at the same width, but a band past it, so a
+        // panel resting on the threshold does not respell on a jittered pixel.
+        assert_eq!(
+            suffix_style_for(SUFFIX_ABBREVIATION_WIDTH, Abbreviated),
+            Abbreviated
+        );
+        assert_eq!(
+            suffix_style_for(
+                SUFFIX_ABBREVIATION_WIDTH + SUFFIX_ABBREVIATION_HYSTERESIS,
+                Abbreviated
+            ),
+            Spelled
         );
     }
 }

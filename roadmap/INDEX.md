@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 313 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 35 |
-| done | 1125 |
+| bugs | 34 |
+| done | 1127 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1678** |
+| **total** | **1679** |
 
 ## ideas (100)
 
@@ -1163,7 +1163,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (35)
+## bugs (34)
 
 ### viewer
 
@@ -1213,8 +1213,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   default hair dome intermittently stays grey for a whole session
 - [`viewer-hover-tooltip-202ms-frame-spike`](bugs/viewer-hover-tooltip-202ms-frame-spike.md)
   — update_hover_tooltip spikes to 202 ms on a single frame
-- [`viewer-inventory-permission-suffix-layout`](bugs/viewer-inventory-permission-suffix-layout.md)
-  — An inventory row drifts left, and its permission suffix oscillates
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)
@@ -1248,7 +1246,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1125)
+## done (1127)
 
 ### protocol
 
@@ -1950,6 +1948,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-inventory-outfit-tab`](done/viewer-inventory-outfit-tab.md) — Worn /
   current-outfit tab + recent items (blocked by `viewer-inventory-folder-tree`
   (done))
+- [`viewer-inventory-permission-suffix-layout`](done/viewer-inventory-permission-suffix-layout.md)
+  — An inventory row drifts left, and its permission suffix oscillates
 - [`viewer-inventory-replace-outfit`](done/viewer-inventory-replace-outfit.md) —
   Replace Current Outfit (whole-outfit swap)
 - [`viewer-inventory-restore-item`](done/viewer-inventory-restore-item.md) —
@@ -2494,6 +2494,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   updates
 - [`viewer-physics-static-prim-colliders`](done/viewer-physics-static-prim-colliders.md)
   — Colliders for all prims — a shared avian spatial index
+- [`viewer-pie-label-width-alternates`](done/viewer-pie-label-width-alternates.md)
+  — A pie label's width alternates by a pixel, every frame, forever
 - [`viewer-pillows-inside-out-geometry`](done/viewer-pillows-inside-out-geometry.md)
   — Pillows on the aditi test region render wrong — possibly inside out
 - [`viewer-plugin-groups`](done/viewer-plugin-groups.md) — One plugin-group

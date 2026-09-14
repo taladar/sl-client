@@ -32,6 +32,9 @@ sl-viewer-world-api = { workspace = true }
 # can be driven without a decoder.
 bytes = { workspace = true }
 pretty_assertions = { workspace = true }
+# The headless layout harness: a live inventory row is measured at the widths
+# the floater is dragged through.
+sl-viewer-testkit = { workspace = true }
 
 [lints]
 workspace = true

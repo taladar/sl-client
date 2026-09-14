@@ -1357,6 +1357,31 @@ pub fn register_pie_layout(app: &mut App) {
     );
 }
 
+/// Half a label's box, in logical pixels — the extent the polar placement works
+/// in.
+///
+/// Read from `unrounded_size` rather than `size`, and that is load-bearing
+/// rather than fussy. `size` is the box **rounded to whole physical pixels**,
+/// and which way it rounds depends on where the node was put: a node whose left
+/// edge falls on a fraction can round a pixel wider than the same node placed on
+/// a whole one. Placing the label from that number closes a loop — the placement
+/// moves the label, the move re-rounds its width, the new width moves it back —
+/// and the pie's east label sat in it, alternating between 153 and 154 physical
+/// pixels wide for as long as the menu was open. `unrounded_size` is what the
+/// text measured to, which is the same answer wherever the label is placed, so
+/// the placement has a fixed point to reach.
+///
+/// Built per-component in plain `f32` rather than with `glam`'s operators, per
+/// the convention the viewer follows: the workspace's `arithmetic_side_effects`
+/// lint fires on the overloads and not on floating-point arithmetic.
+fn half_extent(computed: &ComputedNode) -> Vec2 {
+    let scale = computed.inverse_scale_factor;
+    Vec2::new(
+        computed.unrounded_size.x * scale / 2.0,
+        computed.unrounded_size.y * scale / 2.0,
+    )
+}
+
 /// **Place the labels by polar coordinate, and grow the ring to hold them.**
 ///
 /// This is the layout, and it runs every frame after `bevy_ui` has *measured* the
@@ -1415,8 +1440,7 @@ pub fn fit_pie_layout(
             let Ok((label, _node, computed)) = labels.get(child) else {
                 continue;
             };
-            let scale = computed.inverse_scale_factor;
-            let half = Vec2::new(computed.size.x * scale / 2.0, computed.size.y * scale / 2.0);
+            let half = half_extent(computed);
             let direction = label.at.screen_direction();
             // The support of the box along the tangent (perpendicular to the
             // radial direction): `|perp·(hx,0)| + |perp·(0,hy)|`.
@@ -1434,8 +1458,7 @@ pub fn fit_pie_layout(
             let Ok((label, _node, computed)) = labels.get(child) else {
                 continue;
             };
-            let scale = computed.inverse_scale_factor;
-            let half = Vec2::new(computed.size.x * scale / 2.0, computed.size.y * scale / 2.0);
+            let half = half_extent(computed);
             let direction = label.at.screen_direction();
             // The radial reach: how far the box extends from its own centre in the
             // outward direction, `|dx|·hx + |dy|·hy`.
@@ -1464,8 +1487,7 @@ pub fn fit_pie_layout(
             let Ok((label, mut node, computed)) = labels.get_mut(child) else {
                 continue;
             };
-            let scale = computed.inverse_scale_factor;
-            let half = Vec2::new(computed.size.x * scale / 2.0, computed.size.y * scale / 2.0);
+            let half = half_extent(computed);
             let direction = label.at.screen_direction();
             let label_centre = Vec2::new(
                 centre + direction.x * label_radius,

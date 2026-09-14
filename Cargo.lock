@@ -9248,6 +9248,7 @@ dependencies = [
  "sl-settings",
  "sl-viewer-kit",
  "sl-viewer-settings",
+ "sl-viewer-testkit",
  "sl-viewer-ui-core",
  "sl-viewer-ui-widgets",
  "sl-viewer-world-api",
