@@ -449,6 +449,13 @@ pub struct AttachmentPointDef {
     /// Whether this is a screen-space HUD point (the `hud="true"` attribute)
     /// rather than a world-space body point.
     pub is_hud: bool,
+    /// Whether an object worn here stays drawn while the wearer is in mouselook
+    /// (the `visible_in_first_person` attribute). The head points — Skull, the
+    /// ears, eyes, nose, mouth, chin, jaw, tongue — are not, so a worn hat or
+    /// mesh head does not fill a first-person view from the inside. An absent
+    /// attribute reads `false`, as it does in the reference
+    /// (`LLAvatarAppearance::LLAvatarXmlInfo::LLAvatarAttachmentInfo`).
+    pub visible_in_first_person: bool,
 }
 
 /// The parsed attachment-point table from `avatar_lad.xml`: the
@@ -561,6 +568,7 @@ fn parse_attachment_point(
         position: vec3_attr(node, "attachment_point", "position")?,
         rotation: vec3_attr(node, "attachment_point", "rotation")?,
         is_hud: node.attribute("hud") == Some("true"),
+        visible_in_first_person: node.attribute("visible_in_first_person") == Some("true"),
     })
 }
 
@@ -743,6 +751,12 @@ mod tests {
         assert!(!chest.is_hud);
         assert_eq!(chest.location.as_deref(), Some("ATTACH_CHEST"));
         assert!(close(chest.position, [0.15, 0.0, -0.1]));
+
+        // The first-person flag: the chest stays drawn in mouselook, the skull
+        // does not.
+        assert!(chest.visible_in_first_person);
+        let skull = points.get(AttachmentPoint::Skull).ok_or("skull present")?;
+        assert!(!skull.visible_in_first_person);
 
         // Only the HUD point lands in the HUD set, and it agrees with the wire
         // enum's own HUD classification.

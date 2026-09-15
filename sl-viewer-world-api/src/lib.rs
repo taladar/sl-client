@@ -2884,6 +2884,28 @@ pub enum CameraMode {
     Flycam,
 }
 
+/// Whether the own avatar's body stays drawn while the camera is in
+/// [`CameraMode::Mouselook`] — the reference's `FirstPersonAvatarVisible`, kept
+/// current from the settings store by the camera & movement preferences tab.
+///
+/// Either way the **head** is not drawn from inside it: with the body shown, the
+/// head, hair, eyelashes and eyeballs leave the view (still casting their
+/// shadow) and so does whatever is worn on a head attachment point; with it
+/// hidden, nothing of the avatar is drawn at all.
+///
+/// Defaults to shown, which is this project's default for the setting (the
+/// reference hides the body), so a run with no settings store keeps a body in
+/// mouselook.
+#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FirstPersonAvatarVisible(pub bool);
+
+impl Default for FirstPersonAvatarVisible {
+    /// Shown — see the type's documentation.
+    fn default() -> Self {
+        Self(true)
+    }
+}
+
 /// The marker on the one main viewer camera entity — the camera every world
 /// system means by "the camera", as opposed to the reflection-probe, mirror and
 /// minimap cameras that also carry `Camera3d`. Mode-agnostic: the same entity is
@@ -6224,6 +6246,31 @@ impl ObjectState {
             let tracked = self.objects.get(&current)?;
             if let Some(point) = tracked.attachment_point {
                 return (!is_hud_point(point)).then_some(tracked.parent);
+            }
+            if tracked.is_root {
+                return None;
+            }
+            current = tracked.parent;
+        }
+        None
+    }
+
+    /// The raw attachment-point id tracked object `scoped` is worn on — its own,
+    /// or its attachment root's for a linked child prim — or `None` when it is
+    /// not part of an attachment. HUD points included, unlike
+    /// [`wearer_of`](Self::wearer_of): the caller decides what a point means.
+    ///
+    /// A worn rigged mesh draws from submeshes parented to its wearer's body
+    /// rather than to the point's node, so what the point says about it (the
+    /// first-person view hides a mesh head worn on the Skull) has to be looked
+    /// up through the object, not the hierarchy.
+    #[must_use]
+    pub fn attachment_point_of(&self, scoped: ScopedObjectId) -> Option<u8> {
+        let mut current = scoped;
+        for _ in 0..MAX_PARENT_WALK {
+            let tracked = self.objects.get(&current)?;
+            if let Some(point) = tracked.attachment_point {
+                return Some(point);
             }
             if tracked.is_root {
                 return None;

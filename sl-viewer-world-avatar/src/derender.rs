@@ -100,10 +100,14 @@ use sl_settings::SettingValue;
 use tracing::{debug, info, warn};
 
 use crate::avatars::derender_agent;
+use crate::first_person::OwnAvatarView;
 use crate::settings::ViewerSettings;
 use crate::world_api::AvatarState;
 use crate::world_api::ObjectState;
-use crate::world_api::{DerenderEntry, DerenderKind, DerenderList, FriendsModel, HiddenBy};
+use crate::world_api::{
+    CameraMode, DerenderEntry, DerenderKind, DerenderList, FirstPersonAvatarVisible, FriendsModel,
+    HiddenBy,
+};
 
 /// The per-account file the permanent blacklist is stored in (a sibling of the
 /// account `settings.toml`). Our account directory is already per-grid and
@@ -607,16 +611,29 @@ pub(crate) fn clear_friends_only_on_teleport(
 /// survive the draw, not to stop tracking the crowd. The reference does the same
 /// by different means (it kills the object and its radar reads the coarse
 /// positions directly).
+///
+/// It is also where the **own** avatar disappears in mouselook when the
+/// `FirstPersonAvatarVisible` setting hides the body
+/// ([`OwnAvatarView::Hidden`]). That used to be a second system writing the same
+/// anchor's `Visibility` every frame, unordered against this one, so which of
+/// the two won was down to the scheduler: one writer per component is what
+/// makes the result the rules' and not the executor's.
 pub(crate) fn hide_suppressed_avatars(
     list: Res<DerenderList>,
     avatars: Res<AvatarState>,
+    identity: Option<Res<SlIdentity>>,
+    mode: Option<Res<CameraMode>>,
+    body_visible: Option<Res<FirstPersonAvatarVisible>>,
     mut visibilities: Query<&mut Visibility>,
 ) {
+    let own = identity.as_deref().and_then(|identity| identity.agent_id);
+    let own_hidden =
+        OwnAvatarView::current(mode.as_deref(), body_visible.as_deref()) == OwnAvatarView::Hidden;
     for (agent, anchor) in avatars.known_agents() {
         let Ok(mut visibility) = visibilities.get_mut(anchor) else {
             continue;
         };
-        let wanted = if list.hides_in_world(agent.uuid()) {
+        let wanted = if list.hides_in_world(agent.uuid()) || (own_hidden && Some(agent) == own) {
             Visibility::Hidden
         } else {
             Visibility::Inherited

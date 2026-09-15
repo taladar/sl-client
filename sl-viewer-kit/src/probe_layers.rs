@@ -23,9 +23,11 @@
 //! | environment (sky/water/terrain/clouds/discs/stars) | `0` + [`PROBE_ENV_LAYER`] | main, default probe, local probes |
 //! | static world geometry (prims/meshes/sculpts/trees/grass) | `0` + [`PROBE_GEOM_LAYER`] | main, local probes |
 //! | dynamic content (avatars, particles) | `0` + [`PROBE_DYNAMIC_LAYER`] | main, local probes *(when the setting includes it)* |
+//! | the own avatar's head in mouselook | [`SUN_SHADOW_ONLY_LAYER`] + [`PROBE_DYNAMIC_LAYER`] | the sun's shadow, local probes |
 //!
 //! The shadow-casting sun stays on layer `0` (so the main view is untouched and
-//! world geometry still casts real shadows there); a **shadow-free mirror sun**
+//! world geometry still casts real shadows there), plus
+//! [`SUN_SHADOW_ONLY_LAYER`], which no camera renders; a **shadow-free mirror sun**
 //! (`sky`) sits on the three probe layers so probe captures are still
 //! lit by the sun without any cascade being built for their cameras. The default
 //! probe camera renders [`PROBE_ENV_LAYER`] only — the reference's environment-
@@ -67,6 +69,18 @@ pub const PROBE_DYNAMIC_LAYER: usize = 6;
 /// layer alone into the screen-space mask the water shader samples.
 pub const WATER_EXCLUSION_LAYER: usize = 7;
 
+/// Render layer for geometry that **casts a sun shadow but is not drawn** in the
+/// main view: the shadow-casting `SceneSun` is on it, the main camera is not.
+///
+/// It exists for the own avatar's head in mouselook. The reference skips the
+/// head, hair, eyelashes and eyeballs when it draws the view from inside them,
+/// but draws them in its shadow pass (`LLVOAvatar::renderSkinned` gates on
+/// `LLAgent::needsRenderHead() || LLPipeline::sShadowRender`), so the avatar's
+/// shadow keeps its head. A `Visibility::Hidden` part would lose the shadow too:
+/// the directional caster cull (`shadow_visibility`) drops anything not
+/// inherited-visible.
+pub const SUN_SHADOW_ONLY_LAYER: usize = 8;
+
 /// Render layers for static world geometry: the main layer plus
 /// [`PROBE_GEOM_LAYER`].
 #[must_use]
@@ -86,6 +100,32 @@ pub fn environment_render_layers() -> RenderLayers {
 #[must_use]
 pub fn dynamic_render_layers() -> RenderLayers {
     RenderLayers::layer(MAIN_LAYER).with(PROBE_DYNAMIC_LAYER)
+}
+
+/// Render layers for dynamic content that must **not** appear in the main view
+/// but still casts a sun shadow and still shows in a probe that captures
+/// dynamic content: [`PROBE_DYNAMIC_LAYER`] plus [`SUN_SHADOW_ONLY_LAYER`], and
+/// no [`MAIN_LAYER`].
+#[must_use]
+pub fn dynamic_shadow_only_render_layers() -> RenderLayers {
+    RenderLayers::layer(PROBE_DYNAMIC_LAYER).with(SUN_SHADOW_ONLY_LAYER)
+}
+
+/// Render layers for dynamic content that must appear in **neither** the main
+/// view nor the sun's shadow, only in a probe that captures dynamic content:
+/// [`PROBE_DYNAMIC_LAYER`] alone.
+#[must_use]
+pub const fn dynamic_probe_only_render_layers() -> RenderLayers {
+    RenderLayers::layer(PROBE_DYNAMIC_LAYER)
+}
+
+/// Render layers for the **shadow-casting sun**: [`MAIN_LAYER`], so it lights
+/// and shadows the main view exactly as a light with no layers of its own does,
+/// plus [`SUN_SHADOW_ONLY_LAYER`], so what sits on that layer alone still casts
+/// its shadow.
+#[must_use]
+pub fn scene_sun_render_layers() -> RenderLayers {
+    RenderLayers::layer(MAIN_LAYER).with(SUN_SHADOW_ONLY_LAYER)
 }
 
 /// Render layers for the **shadow-free mirror sun**: all three probe layers, and

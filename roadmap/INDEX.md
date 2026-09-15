@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 313 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 19 |
-| done | 1148 |
+| bugs | 18 |
+| done | 1149 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1685** |
@@ -1163,7 +1163,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (19)
+## bugs (18)
 
 ### viewer
 
@@ -1189,8 +1189,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   oracle at scale)
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
   Some worn mesh hair does not render (visible in Firestorm)
-- [`viewer-mouselook-own-head-visible-from-inside`](bugs/viewer-mouselook-own-head-visible-from-inside.md)
-  — Mouselook — parts of the own avatar's head render from the inside
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
@@ -1210,7 +1208,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1148)
+## done (1149)
 
 ### protocol
 
@@ -2041,6 +2039,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-minimap-parcel-overlay`](done/viewer-minimap-parcel-overlay.md) —
   Parcel fills & property lines on the minimap (blocked by `viewer-minimap`
   (done), `viewer-parcel-overlay-decode` (done))
+- [`viewer-mouselook-own-head-visible-from-inside`](done/viewer-mouselook-own-head-visible-from-inside.md)
+  — Mouselook — parts of the own avatar's head render from the inside
 - [`viewer-movement-camera-input-tests`](done/viewer-movement-camera-input-tests.md)
   — Movement keys and camera modes, headless (blocked by
   `viewer-world-test-harness` (done))

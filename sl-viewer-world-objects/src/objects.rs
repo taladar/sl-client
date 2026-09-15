@@ -5245,6 +5245,57 @@ mod tests {
         Ok(())
     }
 
+    /// The attachment point a worn prim is on is its own when it is the
+    /// attachment root, and its root's when it is a linked child — which is
+    /// how a mesh head's submeshes, parented to the wearer's body rather than
+    /// to the point, find out they are on the Skull. An unworn linkset has no
+    /// point anywhere in it.
+    #[test]
+    fn a_linked_child_is_worn_on_its_roots_attachment_point() {
+        use bevy::prelude::World;
+        use sl_client_bevy::ObjectKey;
+
+        use crate::world_api::ObjectState;
+
+        let mut world = World::new();
+        let mut objects = ObjectState::default();
+        let mut track = |local: u32, point: Option<u8>, parent: Option<u32>| {
+            let mut object = bare_object(pcode::PRIMITIVE);
+            object.full_id = ObjectKey::from(Uuid::from_u128(u128::from(local)));
+            object.local_id = RegionLocalObjectId(local);
+            let scoped = object.scoped_id();
+            let entity = world.spawn_empty().id();
+            let geometry = world.spawn_empty().id();
+            let mut tracked = tracked_stub(&object, entity, geometry);
+            tracked.attachment_point = point;
+            if let Some(parent) = parent {
+                let mut root = object.clone();
+                root.local_id = RegionLocalObjectId(parent);
+                tracked.parent = root.scoped_id();
+                tracked.is_root = false;
+            }
+            objects.objects.insert(scoped, tracked);
+            scoped
+        };
+        // A worn root (on the Skull, parented to an avatar that is not
+        // tracked here) with a linked child; an unworn root with a child.
+        let worn_root = track(1, Some(2), None);
+        let worn_child = track(2, None, Some(1));
+        let loose_root = track(3, None, None);
+        let loose_child = track(4, None, Some(3));
+        let untracked = {
+            let mut object = bare_object(pcode::PRIMITIVE);
+            object.local_id = RegionLocalObjectId(99);
+            object.scoped_id()
+        };
+
+        assert_eq!(objects.attachment_point_of(worn_root), Some(2));
+        assert_eq!(objects.attachment_point_of(worn_child), Some(2));
+        assert_eq!(objects.attachment_point_of(loose_root), None);
+        assert_eq!(objects.attachment_point_of(loose_child), None);
+        assert_eq!(objects.attachment_point_of(untracked), None);
+    }
+
     /// The RLV admission test's one exclusion, read off the tracked objects
     /// this module fills: a *temporary* attachment (one whose `AttachItemID` is
     /// its own id) speaking while `RLVaEnableTemporaryAttachments` is off.

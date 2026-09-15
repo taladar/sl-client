@@ -47,9 +47,11 @@ const PREVIEW_TEXTURE_SIZE: u32 = 128;
 const SPHERE_RADIUS: f32 = 1.0;
 
 /// The first render layer a studio uses; successive studios take the next layers
-/// up. Chosen well clear of the world (0), HUD (1) and edit-gizmo (3) layers so a
-/// studio's sphere and light are invisible to every other camera and vice versa.
-const MATERIAL_PREVIEW_LAYER_BASE: usize = 8;
+/// up. Above every fixed layer — world (0), HUD (1), capture preview (2), edit
+/// gizmos (3), the probe and water-exclusion layers (4–7) and the sun's
+/// shadow-only layer (8) — so a studio's sphere and light are invisible to every
+/// other camera and vice versa.
+const MATERIAL_PREVIEW_LAYER_BASE: usize = 9;
 
 /// The studio camera's distance from the sphere centre, framing a unit sphere at
 /// [`STUDIO_FOV`] with a little margin.

@@ -6218,3 +6218,195 @@ mod drag_drop_tests {
             .id()
     }
 }
+
+#[cfg(test)]
+mod first_person_tests {
+    use bevy::camera::visibility::RenderLayers;
+    use bevy::prelude::*;
+    use pretty_assertions::assert_eq;
+
+    use sl_client_bevy::{AgentKey, ScopedObjectId, Uuid, Vector};
+
+    use super::{entity_of, seed_attachment, seed_avatar, settle, world_app_with_hud};
+    use crate::avatars::AvatarBodyPart;
+    use crate::world_api::{AvatarState, CameraMode, FirstPersonAvatarVisible};
+    use sl_viewer_kit::probe_layers::dynamic_render_layers;
+    use sl_viewer_world_avatar::first_person::FirstPersonLayers;
+
+    /// A boxed error so tests can use `?`.
+    type TestError = Box<dyn core::error::Error>;
+
+    /// The own agent.
+    const OWN: u128 = 0xF1;
+
+    /// The own avatar's region-local id, which the attachments name as parent.
+    const WEARER: u32 = 2;
+
+    /// Skull — `visible_in_first_person="false"`.
+    const SKULL: u8 = 2;
+
+    /// Chest — `visible_in_first_person="true"`.
+    const CHEST: u8 = 1;
+
+    /// The own avatar with its real rigged body, a prim on the Skull and one on
+    /// the Chest. Returns the app and the two attachments' ids.
+    fn worn_world() -> Result<(App, ScopedObjectId, ScopedObjectId), TestError> {
+        let mut app = world_app_with_hud()?;
+        let own = AgentKey::from(Uuid::from_u128(OWN));
+        app.world_mut()
+            .resource_mut::<sl_client_bevy::SlIdentity>()
+            .agent_id = Some(own);
+        seed_avatar(
+            &mut app,
+            own,
+            WEARER,
+            Vector {
+                x: 120.0,
+                y: 120.0,
+                z: 30.0,
+            },
+        );
+        settle(&mut app, 3);
+        let origin = Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        let skull = seed_attachment(&mut app, WEARER, 3, SKULL, origin.clone());
+        let chest = seed_attachment(&mut app, WEARER, 4, CHEST, origin);
+        settle(&mut app, 5);
+        if !app.world().resource::<AvatarState>().is_rigged(own) {
+            return Err("the own avatar never got its rigged body".into());
+        }
+        Ok((app, skull, chest))
+    }
+
+    /// Enter or leave mouselook.
+    fn set_mode(app: &mut App, mode: CameraMode) {
+        *app.world_mut().resource_mut::<CameraMode>() = mode;
+    }
+
+    /// Every own base part's override and propagated layers.
+    fn own_parts(app: &mut App) -> Vec<(Option<FirstPersonLayers>, Option<RenderLayers>)> {
+        let own = AgentKey::from(Uuid::from_u128(OWN));
+        let mut query = app.world_mut().query::<(
+            &AvatarBodyPart,
+            Option<&FirstPersonLayers>,
+            Option<&RenderLayers>,
+        )>();
+        query
+            .iter(app.world())
+            .filter(|(part, _layers, _render)| part.agent() == own)
+            .map(|(_part, layers, render)| (layers.copied(), render.cloned()))
+            .collect()
+    }
+
+    /// Whether the entity of `scoped` is drawn, as far as visibility goes.
+    fn is_drawn(app: &mut App, scoped: ScopedObjectId) -> Result<bool, TestError> {
+        let entity = entity_of(app, scoped).ok_or("an attachment never spawned")?;
+        Ok(app
+            .world()
+            .get::<InheritedVisibility>(entity)
+            .ok_or("an attachment has no inherited visibility")?
+            .get())
+    }
+
+    /// **Mouselook with the body shown loses the head, and gives it back.**
+    ///
+    /// The base head, hair and eyelashes leave the main view but stay on the
+    /// sun's shadow layer; the two eyeballs leave the shadow too; the body
+    /// below the neck is untouched. A prim worn on the Skull stops being drawn
+    /// while one on the Chest stays. Third person undoes all of it — no
+    /// override left behind, every part back on the body root's layers.
+    #[test]
+    fn mouselook_hides_the_own_head_and_what_is_worn_on_it() -> Result<(), TestError> {
+        let (mut app, skull, chest) = worn_world()?;
+        assert!(
+            is_drawn(&mut app, skull)?,
+            "a Skull prim shows in third person"
+        );
+
+        set_mode(&mut app, CameraMode::Mouselook);
+        settle(&mut app, 3);
+
+        let parts = own_parts(&mut app);
+        let count = |wanted: Option<FirstPersonLayers>| {
+            parts
+                .iter()
+                .filter(|(layers, _render)| *layers == wanted)
+                .count()
+        };
+        assert_eq!(
+            count(Some(FirstPersonLayers::ShadowOnly)),
+            3,
+            "head, hair and eyelashes keep only their shadow: {parts:?}"
+        );
+        assert_eq!(
+            count(Some(FirstPersonLayers::ProbeOnly)),
+            2,
+            "both eyeballs leave the view and the shadow: {parts:?}"
+        );
+        for (layers, render) in &parts {
+            let expected =
+                layers.map_or_else(dynamic_render_layers, FirstPersonLayers::render_layers);
+            assert_eq!(render.as_ref(), Some(&expected), "{layers:?}");
+        }
+        assert!(
+            !is_drawn(&mut app, skull)?,
+            "a Skull prim is not drawn in mouselook"
+        );
+        assert!(is_drawn(&mut app, chest)?, "a Chest prim still is");
+
+        set_mode(&mut app, CameraMode::ThirdPerson);
+        settle(&mut app, 3);
+        for (layers, render) in own_parts(&mut app) {
+            assert_eq!(layers, None, "no override survives leaving mouselook");
+            assert_eq!(render, Some(dynamic_render_layers()));
+        }
+        assert!(is_drawn(&mut app, skull)?, "the Skull prim is back");
+        Ok(())
+    }
+
+    /// **Mouselook with the body hidden hides all of it, and it stays hidden.**
+    ///
+    /// The derender pass used to un-hide the anchor every frame while the
+    /// preferences pass hid it, unordered, so the result depended on which ran
+    /// last. Held over several frames here, so a second writer would show up
+    /// as a frame that flips back.
+    #[test]
+    fn mouselook_with_the_body_hidden_keeps_the_whole_avatar_hidden() -> Result<(), TestError> {
+        let (mut app, _skull, chest) = worn_world()?;
+        // The anchor's one visibility writer; the running viewer adds it with
+        // the session plugins rather than the world group the fixture uses.
+        app.add_plugins(crate::derender::DerenderPlugin);
+        // What the preferences tab publishes when its checkbox is off.
+        app.world_mut()
+            .insert_resource(FirstPersonAvatarVisible(false));
+        set_mode(&mut app, CameraMode::Mouselook);
+
+        let own = AgentKey::from(Uuid::from_u128(OWN));
+        let anchor = app
+            .world()
+            .resource::<AvatarState>()
+            .body_root_of(own)
+            .ok_or("the own avatar has no body root")?;
+        for frame in 0..6 {
+            settle(&mut app, 1);
+            assert_eq!(
+                app.world().get::<Visibility>(anchor),
+                Some(&Visibility::Hidden),
+                "frame {frame}: the anchor must stay hidden"
+            );
+        }
+        assert!(!is_drawn(&mut app, chest)?, "nothing worn is drawn either");
+
+        set_mode(&mut app, CameraMode::ThirdPerson);
+        settle(&mut app, 2);
+        assert_eq!(
+            app.world().get::<Visibility>(anchor),
+            Some(&Visibility::Inherited),
+            "third person shows the avatar again"
+        );
+        Ok(())
+    }
+}

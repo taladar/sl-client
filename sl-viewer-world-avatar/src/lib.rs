@@ -61,6 +61,7 @@ pub mod bake_inputs;
 pub mod bake_publish;
 pub mod body_physics;
 pub mod derender;
+pub mod first_person;
 pub mod gpu_avatar_spike;
 pub mod gpu_avatars;
 pub mod ground;

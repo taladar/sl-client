@@ -201,6 +201,10 @@ pub struct AttachmentPointInfo {
     /// The point's local rotation from the joint, as Second Life Euler XYZ angles
     /// in degrees.
     pub rotation_euler_deg: [f32; 3],
+    /// Whether an object worn here stays drawn while its wearer is in
+    /// mouselook — `avatar_lad.xml`'s `visible_in_first_person`, off for the
+    /// head points.
+    pub visible_in_first_person: bool,
 }
 
 /// One HUD (screen-space) attachment point from `avatar_lad.xml` (P35.1): its
@@ -447,6 +451,7 @@ impl AvatarAssetLibrary {
                             joint_index,
                             position: def.position,
                             rotation_euler_deg: def.rotation,
+                            visible_in_first_person: def.visible_in_first_person,
                         },
                     )
                 })
