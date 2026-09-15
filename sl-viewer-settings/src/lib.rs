@@ -168,7 +168,7 @@ impl ViewerSettings {
     /// user edit here, at the binding's declared scope.
     pub fn set(&mut self, scope: Scope, name: &str, value: SettingValue) {
         if let Err(error) = self.store.set(scope, name, value) {
-            warn!("settings: could not set {name}: {error}");
+            warn!("settings: could not set {name} in the {scope:?} scope: {error}");
         }
     }
 
