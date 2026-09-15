@@ -1108,8 +1108,10 @@ impl TextureKnob {
         }
     }
 
-    /// The texture in force, falling back to the built-in default the field
-    /// means when it holds nothing.
+    /// The texture in force. A field that holds nothing reads as the built-in
+    /// default it means — except the sun, moon and cloud images, for which
+    /// nothing means *none* (no disc, no clouds, as in the reference) and so reads
+    /// as the nil id, an empty swatch over a sky that has nothing there either.
     #[must_use]
     pub fn read(self, sky: &SkySettings, water: &WaterSettings) -> TextureKey {
         let stored = match self {
@@ -1122,25 +1124,32 @@ impl TextureKnob {
             Self::WaterNormalMap => water.normal_map,
             Self::WaterTransparentTexture => water.transparent_texture,
         };
-        stored.unwrap_or_else(|| TextureKey::from(self.default_texture()))
+        stored.unwrap_or_else(|| match self {
+            Self::CloudImage | Self::SunImage | Self::MoonImage => {
+                TextureKey::from(sl_client_bevy::Uuid::nil())
+            }
+            Self::BloomImage
+            | Self::HaloImage
+            | Self::RainbowImage
+            | Self::WaterNormalMap
+            | Self::WaterTransparentTexture => TextureKey::from(self.default_texture()),
+        })
     }
 
-    /// Write a picked texture back into the settings.
-    pub const fn write(
-        self,
-        sky: &mut SkySettings,
-        water: &mut WaterSettings,
-        texture: TextureKey,
-    ) {
+    /// Write a picked texture back into the settings. The nil id (the picker's
+    /// **None**) is stored as nothing, which is what the wire's nil id decodes to
+    /// — so a cleared field and a received empty one are the same value.
+    pub fn write(self, sky: &mut SkySettings, water: &mut WaterSettings, texture: TextureKey) {
+        let texture = (!texture.uuid().is_nil()).then_some(texture);
         match self {
-            Self::CloudImage => sky.cloud_texture = Some(texture),
-            Self::SunImage => sky.sun_texture = Some(texture),
-            Self::MoonImage => sky.moon_texture = Some(texture),
-            Self::BloomImage => sky.bloom_texture = Some(texture),
-            Self::HaloImage => sky.halo_texture = Some(texture),
-            Self::RainbowImage => sky.rainbow_texture = Some(texture),
-            Self::WaterNormalMap => water.normal_map = Some(texture),
-            Self::WaterTransparentTexture => water.transparent_texture = Some(texture),
+            Self::CloudImage => sky.cloud_texture = texture,
+            Self::SunImage => sky.sun_texture = texture,
+            Self::MoonImage => sky.moon_texture = texture,
+            Self::BloomImage => sky.bloom_texture = texture,
+            Self::HaloImage => sky.halo_texture = texture,
+            Self::RainbowImage => sky.rainbow_texture = texture,
+            Self::WaterNormalMap => water.normal_map = texture,
+            Self::WaterTransparentTexture => water.transparent_texture = texture,
         }
     }
 }
@@ -1179,7 +1188,8 @@ mod tests {
     use super::{AimKnobs, ColorKnob, SkyKnob, TextureKnob, TrackballAim, WaterKnob};
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_bevy::{
-        DEFAULT_CLOUD_TEXTURE, DEFAULT_WATER_NORMAL_TEXTURE, SkySettings, TextureKey, WaterSettings,
+        DEFAULT_BLOOM_TEXTURE, DEFAULT_CLOUD_TEXTURE, DEFAULT_WATER_NORMAL_TEXTURE, SkySettings,
+        TextureKey, WaterSettings,
     };
 
     /// Every sky knob, for the round-trip sweeps.
@@ -1511,24 +1521,57 @@ mod tests {
         assert_eq!(sky.sunlight_color.alpha().to_bits(), alpha.to_bits());
     }
 
-    /// A settings frame that names no texture means "the viewer's own default",
-    /// and that is what the swatch has to open on — a null id would paint an
-    /// empty swatch over a sky that plainly has clouds.
+    /// A settings frame that names no texture means "the viewer's own default"
+    /// for most fields, and that is what the swatch has to open on. The sun, moon
+    /// and cloud images are the exception: nothing there means *none* — the sky
+    /// draws no disc and no clouds — so the swatch is empty, as the reference's
+    /// is for a nil id.
     #[test]
-    fn an_unset_texture_shows_the_built_in_default() {
+    fn an_unset_texture_shows_what_the_sky_draws() {
         let mut sky = SkySettings::legacy_windlight_default("probe");
         let mut water = WaterSettings::legacy_default("probe");
         sky.cloud_texture = None;
+        sky.bloom_texture = None;
         water.normal_map = None;
 
         assert_eq!(
             TextureKnob::CloudImage.read(&sky, &water),
-            TextureKey::from(DEFAULT_CLOUD_TEXTURE)
+            TextureKey::from(sl_client_bevy::Uuid::nil())
+        );
+        assert_eq!(
+            TextureKnob::BloomImage.read(&sky, &water),
+            TextureKey::from(DEFAULT_BLOOM_TEXTURE)
         );
         assert_eq!(
             TextureKnob::WaterNormalMap.read(&sky, &water),
             TextureKey::from(DEFAULT_WATER_NORMAL_TEXTURE)
         );
+    }
+
+    /// The default sky names the built-in cloud noise, so its swatch shows it —
+    /// the default sky has clouds.
+    #[test]
+    fn the_default_sky_shows_its_cloud_noise() {
+        let sky = SkySettings::legacy_windlight_default("probe");
+        let water = WaterSettings::legacy_default("probe");
+        assert_eq!(
+            TextureKnob::CloudImage.read(&sky, &water),
+            TextureKey::from(DEFAULT_CLOUD_TEXTURE)
+        );
+    }
+
+    /// The picker's **None** clears a field rather than storing a nil id, so a
+    /// cleared field is the same value a received empty one decodes to.
+    #[test]
+    fn picking_none_clears_the_field() {
+        let mut sky = SkySettings::legacy_windlight_default("probe");
+        let mut water = WaterSettings::legacy_default("probe");
+        TextureKnob::CloudImage.write(
+            &mut sky,
+            &mut water,
+            TextureKey::from(sl_client_bevy::Uuid::nil()),
+        );
+        assert_eq!(sky.cloud_texture, None);
     }
 
     /// Each texture knob writes its own field.

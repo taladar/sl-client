@@ -796,11 +796,18 @@ pub struct SkySettings {
     pub sky_bottom_radius: f32,
     /// The planet radius.
     pub planet_radius: f32,
-    /// The sun disc texture (`None` for the viewer default).
+    /// The sun disc texture. `None` (the wire's nil id) means **no disc**, not a
+    /// default one: the reference draws the sun disc "if and only if we have a
+    /// texture defined" (`LLDrawPoolWLSky::renderHeavenlyBodies`), and its own
+    /// default sky names none (`GetDefaultSunTextureId` is null). The sun's glow
+    /// is the sky shader's and does not depend on this.
     pub sun_texture: Option<TextureKey>,
-    /// The moon disc texture (`None` for the viewer default).
+    /// The moon disc texture. `None` means **no moon disc**, as for
+    /// [`sun_texture`](Self::sun_texture).
     pub moon_texture: Option<TextureKey>,
-    /// The cloud texture (`None` for the viewer default).
+    /// The cloud-noise texture. `None` means **no clouds**: the reference binds
+    /// no noise for a nil id (`LLVOSky::setCloudNoiseTextures`) and skips the
+    /// cloud pass without one (`LLDrawPoolWLSky::renderSkyClouds`).
     pub cloud_texture: Option<TextureKey>,
     /// The bloom texture (`None` for the viewer default).
     pub bloom_texture: Option<TextureKey>,
@@ -998,16 +1005,19 @@ pub const DEFAULT_SKY_FRAME: &str = "Default";
 /// [`DayCycle`]).
 pub const DEFAULT_WATER_FRAME: &str = "Default Water";
 
-/// The built-in sun-disc texture (`DEFAULT_SUN_ID`, `llsettingssky.cpp`) — what
-/// a renderer samples when [`SkySettings::sun_texture`] is `None`.
+/// The built-in sun-disc texture (`DEFAULT_SUN_ID`, `llsettingssky.cpp`) — the
+/// disc a sky editor's **Default** choice picks (`GetBlankSunTextureId`). Not a
+/// fallback: a sky whose [`SkySettings::sun_texture`] is `None` draws no disc.
 pub const DEFAULT_SUN_TEXTURE: Uuid = Uuid::from_u128(0x32bf_bcea_24b1_fb9d_1ef9_48a2_8a63_730f);
 
 /// The built-in moon-disc texture (`DEFAULT_MOON_ID`, `llsettingssky.cpp`) —
-/// what a renderer samples when [`SkySettings::moon_texture`] is `None`.
+/// the moon the default sky names. Not a fallback: a sky whose
+/// [`SkySettings::moon_texture`] is `None` draws no moon disc.
 pub const DEFAULT_MOON_TEXTURE: Uuid = Uuid::from_u128(0xd07f_6eed_b96a_47cd_b51d_400a_d4a1_c428);
 
 /// The built-in cloud-noise texture (`DEFAULT_CLOUD_ID`, `llsettingssky.cpp`) —
-/// what a renderer samples when [`SkySettings::cloud_texture`] is `None`.
+/// the noise the default sky names. Not a fallback: a sky whose
+/// [`SkySettings::cloud_texture`] is `None` has no clouds.
 pub const DEFAULT_CLOUD_TEXTURE: Uuid = Uuid::from_u128(0x1dc1_368f_e8fe_f02d_a08d_9d9f_11c1_af6b);
 
 /// The built-in rainbow texture (`IMG_RAINBOW`, `llsettingssky.cpp`) — what a
@@ -1819,10 +1829,14 @@ impl SkySettings {
             sky_top_radius: 6420.0,
             sky_bottom_radius: 6360.0,
             planet_radius: 6360.0,
-            // `None` selects the viewer's built-in sun/moon/cloud/etc. textures.
+            // The reference's `defaults()`: no sun disc (`GetDefaultSunTextureId`
+            // is null), and the built-in moon and cloud noise. These three are
+            // not interchangeable with `None` — a nil sun, moon or cloud id draws
+            // nothing — so a legacy sky built from this default keeps its clouds.
             sun_texture: None,
-            moon_texture: None,
-            cloud_texture: None,
+            moon_texture: Some(TextureKey::from(DEFAULT_MOON_TEXTURE)),
+            cloud_texture: Some(TextureKey::from(DEFAULT_CLOUD_TEXTURE)),
+            // `None` here renders the viewer's built-in textures.
             bloom_texture: None,
             halo_texture: None,
             rainbow_texture: None,

@@ -119,7 +119,21 @@ struct VertexOutput {
     @location(0) local_position: vec3<f32>,
     // The baked cloud texcoord, interpolated across the dome.
     @location(1) uv: vec2<f32>,
+    // The reference's `altitude_blend_factor`, computed per vertex and
+    // interpolated (see `vertex`).
+    @location(2) altitude_blend_factor: f32,
 };
+
+// The reference's `altitude_blend_factor` for one dome vertex (`cloudsV.glsl`):
+// a ramp over the vertex's height relative to the camera, cut to zero for a
+// vertex below it (SL-11589, "clouds drooping below horizon").
+fn altitude_blend_factor(local_position: vec3<f32>) -> f32 {
+    let rel_y = local_position.y + 50.0;
+    if (rel_y < 0.0) {
+        return 0.0;
+    }
+    return clamp((rel_y + 512.0) / cloud.max_y, 0.0, 1.0);
+}
 
 @vertex
 fn vertex(vertex: Vertex) -> VertexOutput {
@@ -137,6 +151,12 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.clip_position.z = 0.0;
     out.local_position = vertex.position;
     out.uv = vertex.uv;
+    // Per vertex, as the reference computes it, and not per fragment: its cut to
+    // zero below the camera then becomes a fade across the one row of triangles
+    // that straddles the horizon. Evaluated per fragment it is a hard edge instead,
+    // with clouds at a third of their opacity right down to the waterline
+    // (`viewer-clouds-horizon-waterline-contact`).
+    out.altitude_blend_factor = altitude_blend_factor(vertex.position);
     return out;
 }
 
@@ -182,14 +202,12 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let uv3v = uv1v * 16.0;
 
     // --- cloudsV.glsl: altitude projection to the cloud layer. ---
+    // The altitude fade itself is the interpolated per-vertex value.
     var rel_pos = in.local_position + vec3<f32>(0.0, 50.0, 0.0);
-    var altitude_blend_factor = clamp((rel_pos.y + 512.0) / cloud.max_y, 0.0, 1.0);
     if (rel_pos.y > 0.0) {
         rel_pos = rel_pos * (cloud.max_y / rel_pos.y);
     }
     if (rel_pos.y < 0.0) {
-        // SL-11589: clouds do not droop below the horizon.
-        altitude_blend_factor = 0.0;
         rel_pos = rel_pos * (-32000.0 / rel_pos.y);
     }
 
@@ -280,7 +298,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     alpha1 = min(max(alpha1 + cloud_density, 0.0) * 10.0 * cloud.cloud_pos_density1.z, 1.0);
     alpha1 = 1.0 - alpha1 * alpha1;
     alpha1 = 1.0 - alpha1 * alpha1;
-    alpha1 = alpha1 * altitude_blend_factor;
+    alpha1 = alpha1 * in.altitude_blend_factor;
     alpha1 = clamp(alpha1, 0.0, 1.0);
 
     // Self-shadow opacity: (1 - alpha2) is the incoming sunlight fraction.

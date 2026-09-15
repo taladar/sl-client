@@ -1491,7 +1491,8 @@ face falls back to
 `sl_proto::DEFAULT_PRIM_TEXTURE`; the pixels come from
 `sl_test_assets::builtin`). No viewer ships these — Firestorm marks the
 sky ones `// dataserver` — so without them an arrival is eight fetches
-that each burn a full retry budget, and the sky draws no sun at all.
+that each burn a full retry budget, and a sky that names them draws no
+disc and no clouds.
 They are stand-ins rather than Linden's own pixels, shaped to be
 recognisable in the role: a disc reads as a sun, and the halo's bright
 band sits at the 22° radius the shader samples it at.

@@ -298,11 +298,18 @@ const CLOUD_DOME_OFFSET: f32 = 0.96;
 /// dome, mirroring the reference `LLVOWLSky` sky-dome tessellation
 /// (`getNumStacks`, `WLSkyDetail`). The stacks are distributed by
 /// [`calc_cloud_phi`] over the reference's `[0, π/8]` zenith cap.
-const CLOUD_DOME_STACKS: usize = 32;
+///
+/// The count is not cosmetic. The reference evaluates the clouds' altitude fade
+/// per *vertex* and interpolates it, so the band over which clouds fade out at
+/// the horizon is one stack high — and `clouds.wgsl` does the same. `96` is the
+/// feature table's value for every graphics class but the top one (`128`);
+/// `settings.xml`'s bare default of `64` is overwritten by the table on first
+/// run, so it is not what a reference viewer actually draws with.
+const CLOUD_DOME_STACKS: usize = 96;
 
 /// The number of slices (segments around the dome) in the cloud dome, matching the
 /// reference `getNumSlices` = `2 × getNumStacks`.
-const CLOUD_DOME_SLICES: usize = 64;
+const CLOUD_DOME_SLICES: usize = 192;
 
 /// The reference cloud-scroll accumulation divisor (`LLEnvironment::
 /// updateCloudScroll`): the scroll delta grows by `dt * cloud_scroll_rate / 100`
@@ -412,8 +419,8 @@ pub(crate) struct DiscState {
     sun_material: Handle<SunDiscMaterial>,
     /// The moon-disc material.
     moon_material: Handle<SunDiscMaterial>,
-    /// The texture id currently requested for the sun disc (the active sky
-    /// frame's, or the built-in [`sl_client_bevy::DEFAULT_SUN_TEXTURE`]).
+    /// The texture id currently requested for the sun disc — the active sky
+    /// frame's; `None` while the frame names none, which draws no disc.
     sun_key: Option<TextureKey>,
     /// The texture id currently requested for the moon disc.
     moon_key: Option<TextureKey>,
@@ -429,8 +436,8 @@ pub(crate) struct CloudDome;
 pub(crate) struct CloudState {
     /// The single cloud-dome material, updated each frame by [`drive_clouds`].
     material: Handle<CloudMaterial>,
-    /// The texture id currently requested for the cloud noise (the active sky
-    /// frame's, or the built-in [`sl_client_bevy::DEFAULT_CLOUD_TEXTURE`]).
+    /// The texture id currently requested for the cloud noise — the active sky
+    /// frame's; `None` while the frame names none, which hides the clouds.
     cloud_key: Option<TextureKey>,
     /// The current scroll rate, in offset units per second (the sky frame's
     /// `cloud_scroll_rate` over the reference divisor) — the value uploaded as
@@ -1008,11 +1015,14 @@ pub(crate) fn drive_sun_moon_discs(
     } = resolve_sky(&sky);
 
     // Aim each disc when its body is up, and show only the bodies above the
-    // horizon (`getIsSunUp` / `getIsMoonUp`). `set_if_neq` throughout: with a
-    // parked camera and a fixed sky nothing here changes, and an unconditional
-    // write would re-extract both discs every frame.
+    // horizon (`getIsSunUp` / `getIsMoonUp`) whose frame names a texture — see
+    // `disc_drawn`. `set_if_neq` throughout: with a parked camera and a fixed sky
+    // nothing here changes, and an unconditional write would re-extract both
+    // discs every frame.
+    let sun_drawn = disc_drawn(sun_up, sky.sun_texture);
+    let moon_drawn = disc_drawn(moon_up, sky.moon_texture);
     if let Ok((mut transform, mut vis)) = sun.single_mut() {
-        if sun_up {
+        if sun_drawn {
             transform.set_if_neq(disc_transform(
                 camera_pos,
                 sun_dir,
@@ -1020,10 +1030,10 @@ pub(crate) fn drive_sun_moon_discs(
                 SUN_DISK_RADIUS,
             ));
         }
-        vis.set_if_neq(visible_if(sun_up));
+        vis.set_if_neq(visible_if(sun_drawn));
     }
     if let Ok((mut transform, mut vis)) = moon.single_mut() {
-        if moon_up {
+        if moon_drawn {
             transform.set_if_neq(disc_transform(
                 camera_pos,
                 moon_dir,
@@ -1031,7 +1041,7 @@ pub(crate) fn drive_sun_moon_discs(
                 MOON_DISK_RADIUS,
             ));
         }
-        vis.set_if_neq(visible_if(moon_up));
+        vis.set_if_neq(visible_if(moon_drawn));
     }
 
     // The sun disc is untinted (the reference `sunDiscF` ignores its bound diffuse
@@ -1093,24 +1103,36 @@ pub(crate) fn drive_sun_moon_discs(
         material.params = params;
     }
 
-    // Fetch the disc textures boosted (the sky frame's own, or the reference
-    // built-ins) so they resolve ahead of ordinary faces. Only on a key change:
-    // the boost request is persistent in the store, and re-requesting per frame
-    // marks `TextureManager` and `DiscState` changed with identical values.
-    let sun_key = sky
-        .sun_texture
-        .unwrap_or_else(|| TextureKey::from(sl_client_bevy::DEFAULT_SUN_TEXTURE));
-    let moon_key = sky
-        .moon_texture
-        .unwrap_or_else(|| TextureKey::from(sl_client_bevy::DEFAULT_MOON_TEXTURE));
-    if state.sun_key != Some(sun_key) {
-        textures.request_boosted(sun_key, SKY_BOOST_PRIORITY);
-        state.sun_key = Some(sun_key);
+    // Fetch the frame's disc textures boosted so they resolve ahead of ordinary
+    // faces — and nothing for a body whose frame names none, which has no disc
+    // to put it on. Only on a key change: the boost request is persistent in the
+    // store, and re-requesting per frame marks `TextureManager` and `DiscState`
+    // changed with identical values.
+    if state.sun_key != sky.sun_texture {
+        if let Some(key) = sky.sun_texture {
+            textures.request_boosted(key, SKY_BOOST_PRIORITY);
+        }
+        state.sun_key = sky.sun_texture;
     }
-    if state.moon_key != Some(moon_key) {
-        textures.request_boosted(moon_key, SKY_BOOST_PRIORITY);
-        state.moon_key = Some(moon_key);
+    if state.moon_key != sky.moon_texture {
+        if let Some(key) = sky.moon_texture {
+            textures.request_boosted(key, SKY_BOOST_PRIORITY);
+        }
+        state.moon_key = sky.moon_texture;
     }
+}
+
+/// Whether a sun or moon disc is drawn: its body is above the horizon **and**
+/// the sky frame names a texture for it.
+///
+/// The second half is the reference's, and it is not a fallback to a built-in
+/// disc: `LLDrawPoolWLSky::renderHeavenlyBodies` renders the sun disc "if and
+/// only if we have a texture defined", and a nil id binds none
+/// (`LLVOSky::setSunTextures`). The default sky itself names no sun texture
+/// (`GetDefaultSunTextureId` is null), and neither does OpenSim's — so on either
+/// the sun is its glow alone.
+const fn disc_drawn(up: bool, texture: Option<TextureKey>) -> bool {
+    up && texture.is_some()
 }
 
 /// Swap a decoded disc texture into the sun / moon material when its id resolves.
@@ -1235,6 +1257,7 @@ pub(crate) fn drive_clouds(
     mut state: ResMut<CloudState>,
     mut materials: ResMut<Assets<CloudMaterial>>,
     mut textures: ResMut<TextureManager>,
+    mut dome: Query<&mut Visibility, With<CloudDome>>,
 ) {
     let altitude = camera.single().map_or(0.0, |camera| camera.translation().y);
     let position = day_position(&environment);
@@ -1300,15 +1323,23 @@ pub(crate) fn drive_clouds(
         material.params = params;
     }
 
-    // Fetch the sky's cloud-noise texture boosted (the sky frame's own, or the
-    // reference built-in) so it resolves ahead of ordinary faces. Only on a key
-    // change — the boost request is persistent in the store.
-    let cloud_key = sky
-        .cloud_texture
-        .unwrap_or_else(|| TextureKey::from(sl_client_bevy::DEFAULT_CLOUD_TEXTURE));
-    if state.cloud_key != Some(cloud_key) {
-        textures.request_boosted(cloud_key, SKY_BOOST_PRIORITY);
-        state.cloud_key = Some(cloud_key);
+    // A frame that names no cloud noise has no clouds — the reference binds no
+    // noise for a nil id and skips the cloud pass without one
+    // (`LLVOSky::setCloudNoiseTextures`, `LLDrawPoolWLSky::renderSkyClouds`). It
+    // is not a fallback to the built-in noise, which the default sky names
+    // explicitly instead. `set_if_neq`: a fixed sky must not re-extract the dome.
+    if let Ok(mut visibility) = dome.single_mut() {
+        visibility.set_if_neq(visible_if(sky.cloud_texture.is_some()));
+    }
+
+    // Fetch the sky's cloud-noise texture boosted so it resolves ahead of
+    // ordinary faces. Only on a key change — the boost request is persistent in
+    // the store.
+    if state.cloud_key != sky.cloud_texture {
+        if let Some(key) = sky.cloud_texture {
+            textures.request_boosted(key, SKY_BOOST_PRIORITY);
+        }
+        state.cloud_key = sky.cloud_texture;
     }
 
     // Opt-in cloud-param diagnostic (`SL_VIEWER_LOG_CLOUDS`): dump the EEP cloud
@@ -1320,12 +1351,11 @@ pub(crate) fn drive_clouds(
         let pd1 = sky.cloud_pos_density1;
         let pd2 = sky.cloud_pos_density2;
         info!(
-            "cloud params: texture={:?} region_specified={} scale={:.4} \
+            "cloud params: texture={:?} scale={:.4} \
              pos_density1=({:.4},{:.4},{:.4}) pos_density2=({:.4},{:.4},{:.4}) \
              variance={:.4} scroll_rate=[{:.4},{:.4}] shadow={:.4} \
              color=({:.3},{:.3},{:.3})",
-            cloud_key,
-            sky.cloud_texture.is_some(),
+            sky.cloud_texture,
             sky.cloud_scale,
             pd1.position_x(),
             pd1.position_y(),
@@ -2154,12 +2184,28 @@ mod tests {
     )]
 
     use super::{
-        AMBIENT_BRIGHTNESS_SCALE, CLOUD_DOME_RADIUS, DAY_POSITION_STEPS, SHADOW_MAP_SIZE,
-        build_cloud_dome_mesh, quantised_day_position, sky_ambient_light, snap_shadow_direction,
+        AMBIENT_BRIGHTNESS_SCALE, CLOUD_DOME_RADIUS, CLOUD_DOME_SLICES, DAY_POSITION_STEPS,
+        SHADOW_MAP_SIZE, build_cloud_dome_mesh, disc_drawn, quantised_day_position,
+        sky_ambient_light, snap_shadow_direction,
     };
     use bevy::camera::primitives::MeshAabb as _;
     use bevy::math::Vec3;
+    use bevy::mesh::{Mesh, VertexAttributeValues};
     use pretty_assertions::{assert_eq, assert_ne};
+    use sl_client_bevy::TextureKey;
+
+    /// A sun or moon disc is drawn only above the horizon *and* only when the
+    /// frame names a texture. A nil id is "no disc", as in the reference, and not
+    /// the built-in disc: OpenSim's default sky names no sun texture, and drew a
+    /// disc here that Firestorm does not.
+    #[test]
+    fn a_disc_needs_its_body_up_and_a_texture() {
+        let texture = Some(TextureKey::from(sl_client_bevy::DEFAULT_MOON_TEXTURE));
+        assert!(disc_drawn(true, texture));
+        assert!(!disc_drawn(true, None));
+        assert!(!disc_drawn(false, texture));
+        assert!(!disc_drawn(false, None));
+    }
 
     /// The cloud dome's **mesh centre** — the one point Bevy's [`Transparent3d`]
     /// distance sort looks at — sits essentially *at* the camera the dome is
@@ -2184,6 +2230,39 @@ mod tests {
             centre < CLOUD_DOME_RADIUS / 100.0,
             "the cloud dome's mesh centre is {centre} m from the camera, \
              more than 1% of its {CLOUD_DOME_RADIUS} m radius",
+        );
+    }
+
+    /// The clouds fade out at the horizon across the one ring of triangles whose
+    /// rows straddle the camera — `clouds.wgsl` interpolates the reference's
+    /// per-vertex altitude fade across it — so that ring has to be thin, or
+    /// clouds smear a visible distance down onto the water. At the reference's
+    /// `WLSkyDetail` it spans about half a degree of elevation.
+    #[test]
+    fn the_horizon_fade_band_is_under_a_degree() {
+        let mesh = build_cloud_dome_mesh();
+        let positions = mesh
+            .attribute(Mesh::ATTRIBUTE_POSITION)
+            .and_then(VertexAttributeValues::as_float3)
+            .expect("the cloud dome mesh has float positions");
+        // One vertex per stack: the first slice of every row (theta = 0).
+        let stride = CLOUD_DOME_SLICES + 1;
+        let rows: Vec<&[f32; 3]> = positions.iter().step_by(stride).collect();
+        // `clouds.wgsl`'s cut: a vertex fades to zero once `y + 50` is negative.
+        let band = rows
+            .windows(2)
+            .find_map(|pair| match pair {
+                [above, below] if above[1] + 50.0 >= 0.0 && below[1] + 50.0 < 0.0 => {
+                    Some((**above, **below))
+                }
+                _ => None,
+            })
+            .expect("one ring of the dome straddles the fade cut");
+        let elevation = |p: [f32; 3]| p[1].atan2(p[0].hypot(p[2])).to_degrees();
+        let span = elevation(band.0) - elevation(band.1);
+        assert!(
+            span > 0.0 && span < 1.0,
+            "the horizon fade band spans {span}° of elevation"
         );
     }
 

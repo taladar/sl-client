@@ -909,8 +909,9 @@ fn texture_id(texture: Option<TextureKey>) -> RlvSkyValue {
     RlvSkyValue::Texture(texture.map_or_else(Uuid::nil, |key| key.0.0))
 }
 
-/// A texture id a script wrote, as the sky stores it: the null id means "the
-/// viewer's own default", which is `None` here.
+/// A texture id a script wrote, as the sky stores it: the null id is `None`
+/// here — for the sun, moon and cloud images that is *none* (no disc, no
+/// clouds), as it is on the wire.
 #[must_use]
 fn texture_key(id: Uuid) -> Option<TextureKey> {
     (!id.is_nil()).then_some(TextureKey(Key(id)))
@@ -1692,11 +1693,11 @@ mod tests {
         }
     }
 
-    /// A texture written as the null id names no texture, and reads back as the
-    /// null id rather than as nothing — the reference's own answer for a sky
-    /// that carries the viewer's default.
+    /// A texture written as the null id names no texture — for the sun, no disc
+    /// — and reads back as the null id rather than as nothing, the reference's
+    /// own answer for a sky that names none.
     #[test]
-    fn the_null_texture_is_the_viewer_default() {
+    fn the_null_texture_names_no_texture() {
         let mut slot = slot();
         assert!(slot.set_sky_value(RlvSkyField::SunTexture, RlvSkyValue::Texture(Uuid::nil())));
         assert_eq!(

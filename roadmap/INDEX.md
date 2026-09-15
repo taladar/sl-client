@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 314 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 18 |
-| done | 1149 |
+| bugs | 19 |
+| done | 1150 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1686** |
+| **total** | **1688** |
 
 ## ideas (100)
 
@@ -1165,14 +1165,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (18)
+## bugs (19)
 
 ### viewer
 
 - [`viewer-audit-cef-browser-settings-hardening`](bugs/viewer-audit-cef-browser-settings-hardening.md)
   — An in-world media page runs on CEF's default browser settings
-- [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
-  — Check clouds vs the waterline at the horizon against Firestorm
+- [`viewer-cloud-noise-scale-divergence`](bugs/viewer-cloud-noise-scale-divergence.md)
+  — Clouds come out fewer and larger than Firestorm's on the same noise
 - [`viewer-combo-stops-opening`](bugs/viewer-combo-stops-opening.md) — A combo
   can stop dropping down (seen on the contact-sets chooser)
 - [`viewer-crossing-movement-locks-up`](bugs/viewer-crossing-movement-locks-up.md)
@@ -1204,13 +1204,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rigged-attachments-wearer-not-resolved`](bugs/viewer-rigged-attachments-wearer-not-resolved.md)
   — Worn rigged attachments (e.g. own shoes) don't render — wearer never
   resolved / too many rigged-pending objects
+- [`viewer-sky-sunset-preset-glow-divergence`](bugs/viewer-sky-sunset-preset-glow-divergence.md)
+  — The legacy sunset sky is far brighter, with a much larger glow, than
 - [`viewer-sunlit-face-clips-two-channels`](bugs/viewer-sunlit-face-clips-two-channels.md)
   — A sunlit opaque face pins red and green rather than showing its texture
 - [`viewer-tree-species-all-rendered-as-trees`](bugs/viewer-tree-species-all-rendered-as-trees.md)
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)
 
-## done (1149)
+## done (1150)
 
 ### protocol
 
@@ -1716,6 +1718,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Reusable clickable avatar-name / group-name widgets
 - [`viewer-clipped-links-still-pickable`](done/viewer-clipped-links-still-pickable.md)
   — Scrolled-out chat links still hover and click, above the floater
+- [`viewer-clouds-horizon-waterline-contact`](done/viewer-clouds-horizon-waterline-contact.md)
+  — Check clouds vs the waterline at the horizon against Firestorm
 - [`viewer-clouds-sun-occlusion-horizon-contact`](done/viewer-clouds-sun-occlusion-horizon-contact.md)
   — Clouds wrong in front of the sun, and touch the water at the horizon
 - [`viewer-command-despawned-entity-warnings`](done/viewer-command-despawned-entity-warnings.md)
