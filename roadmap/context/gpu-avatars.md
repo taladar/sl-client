@@ -249,6 +249,8 @@ PoseCache   : [PoseCacheEntry; MAX_CACHE]      pass A output / pass B input
               flags), indexed track-major: cache_base + t
 LocalPose   : [avatar_slot][N_J] × { rot: vec4, pos: vec4 }
               pass B output / pass C input (pos.w flags: has_rot, has_pos)
+  + held    : same shape again, behind it (from `held_offset`): each joint's
+              last keyframe channels, pass B read+write, kept across frames
 JointWorld  : [avatar_slot][N_J] × mat4x4      pass C output (Bevy world
               space, root affine already composed) / pass D + pick input
 SkinInstance: [ { avatar_slot, mesh_skin_id, palette_offset } ]  pass D input,
@@ -317,7 +319,8 @@ let track = tracks[clip.track_offset + t];
 pose_cache[job.cache_base + t] = SampledTrack(rot, pos, flags);
 ```
 
-**Pass B — per-joint priority/ease blend + idle + corrections.** Dispatch:
+**Pass B — per-joint priority/ease blend + hold + idle + corrections.**
+Dispatch:
 one thread per `(avatar, joint)` — `avatars × N_J` threads (100 avatars =
 20 k threads; trivial).
 
@@ -339,6 +342,11 @@ for (var s = 0u; s < MAX_ACTIVE; s++) {
 // fold highest-first with the running weight budget
 // (new_sum = min(1, w + sum); nlerp(sum/new_sum, incoming, accumulated)).
 var local = blend(contribs);
+// hold (AnimationPose::hold): a channel the blend produced overwrites the
+// joint's held row; a channel it did not is taken from it. The reference
+// never resets a joint when its motion ends (LLJointStateBlender leaves an
+// untouched joint "unchanged from last frame"), so neither does this.
+local = hold(local, held[held_offset + avatar_slot * N_J + joint]);
 // idle adjusters (breathe/sway): pure f(idle_now, idle_seed, joint) —
 // port of procedural::apply_idle_adjustments, composed like today.
 local = apply_idle(local, joint, frame[avatar]);
@@ -350,6 +358,18 @@ local_pose[avatar * N_J + joint] = local;
 
 Sorting 4-of-16 contributions per thread is a fixed small insertion sort —
 no shared memory needed.
+
+The held rows share the `LocalPose` binding (pass B is already at the
+8-storage-buffer floor) and are the only pose state that outlives a frame.
+Three consequences: a buffer growth copies the held block to its new offset;
+a slot whose occupancy stamp changed (a new occupant, or the same avatar
+re-rigged after a free) has its held rows zeroed before pass B reads them;
+and the CPU mirror — the driver's held `AnimationPose` and the readback's
+`mirror_held` — must see every frame of every slot to stay in step. Held
+values are absolute keyframe channels, so a shape edit after a motion
+stopped does not move a held joint by the shape's delta the way the
+reference's telescoping `LLPolySkeletalDistortion::apply` does; the next
+motion to key the joint overwrites it either way.
 
 **Pass C — hierarchical FK (the SL recurrence) + root compose.** The SL
 recurrence is order-dependent (parent before child). Two strategies:
@@ -382,8 +402,8 @@ over an absolute position key *per joint*; the rest buffer carries
 `has_override` per joint so the GPU reproduces that exactly.
 
 T-pose debug freeze: `frame.flags.t_pose` makes pass B output "no channels"
-so pass C yields the shaped rest — preserving the `SL_VIEWER_TPOSE` A/B
-harness.
+(and neither read nor write the held rows) so pass C yields the shaped rest —
+preserving the `SL_VIEWER_TPOSE` A/B harness.
 
 **Pass D — skin palettes.** Dispatch: one thread per palette entry, i.e.
 `Σ_instances K_instance` (≈ 100 avatars × ~10 skins × ~80 joints = 80 k).

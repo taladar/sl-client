@@ -36,7 +36,7 @@ struct Params {
     chest_joint: u32,
     torso_joint: u32,
     flags: u32,
-    pad0: u32,
+    held_offset: u32,
     pad1: u32,
     pad2: u32,
 }
@@ -210,7 +210,10 @@ const TAU: f32 = 6.283185307179586;
 /// The sparse CPU corrections, sorted by (avatar, joint) (pass B).
 @group(0) @binding(19) var<storage, read> corrections: array<Correction>;
 /// The slot-indexed local pose as pass B **writes** it (the same buffer
-/// binding 3 reads in pass C, bound read-write under pass B's layout).
+/// binding 3 reads in pass C, bound read-write under pass B's layout). Behind
+/// the local-pose rows, from `params.held_offset`, sits the same-shaped
+/// **held** block: each (slot, joint)'s last keyframe channels, which pass B
+/// both reads and writes (pass C never looks past the local-pose rows).
 @group(0) @binding(20) var<storage, read_write> local_pose_out: array<LocalPose>;
 /// The per-slot posed **world-space** AABB (Phase 5 frustum culling): two
 /// `vec4` per slot — `bounds_out[2*slot]` the min `xyz`, `bounds_out[2*slot+1]`
@@ -618,13 +621,16 @@ fn body_noise_rotation(time: f32) -> vec4<f32> {
     return quat_mul(qx, qy);
 }
 
-/// Pass B — per-joint priority/ease blend + idle + corrections (§2.2): one
-/// thread per (avatar, joint). Gathers ≤ MAX_ACTIVE contributions (skipping
-/// empty slots, no-track joints, zero weights and channel-less cache rows —
-/// `resolve_pose`'s gather semantics), sorts by (priority desc, recency
-/// desc), caps at 4 and folds with the running weight budget — the exact
-/// `blend_joint` port — then composes the procedural idle deltas and applies
-/// this joint's sparse CPU correction, writing the avatar's `LocalPose` row.
+/// Pass B — per-joint priority/ease blend + hold + idle + corrections (§2.2):
+/// one thread per (avatar, joint). Gathers ≤ MAX_ACTIVE contributions
+/// (skipping empty slots, no-track joints, zero weights and channel-less
+/// cache rows — `resolve_pose`'s gather semantics), sorts by (priority desc,
+/// recency desc), caps at 4 and folds with the running weight budget — the
+/// exact `blend_joint` port — then folds in the joint's held channels,
+/// composes the procedural idle deltas and applies this joint's sparse CPU
+/// correction, writing the avatar's `LocalPose` row. Re-running it within a
+/// frame (one dispatch per 3D camera) is idempotent: the held row it reads
+/// back is the one the first run wrote from the same contributions.
 @compute @workgroup_size(64)
 fn blend(@builtin(global_invocation_id) gid: vec3<u32>) {
     let avatar = gid.y;
@@ -730,6 +736,32 @@ fn blend(@builtin(global_invocation_id) gid: vec3<u32>) {
                 sum_position = new_sum;
             }
         }
+    }
+
+    // The held channels (`AnimationPose::hold`): a joint no active motion
+    // drives keeps the last value one gave it, as the reference's joints do —
+    // nothing resets a joint to rest when its motion ends. A channel the blend
+    // produced becomes the held value; one it did not keeps the held value.
+    // Keyframe values only: the idle deltas and corrections below compose on
+    // top and are never held. The T-pose freeze neither reads nor writes.
+    if ((params.flags & PARAMS_FLAG_TPOSE) == 0u) {
+        let held_index = params.held_offset + slot * params.joint_count + joint;
+        var held = local_pose_out[held_index];
+        if ((out.flags & POSE_FLAG_ROT) != 0u) {
+            held.rot = out.rot;
+            held.flags |= POSE_FLAG_ROT;
+        } else if ((held.flags & POSE_FLAG_ROT) != 0u) {
+            out.rot = held.rot;
+            out.flags |= POSE_FLAG_ROT;
+        }
+        if ((out.flags & POSE_FLAG_POS) != 0u) {
+            held.pos = out.pos;
+            held.flags |= POSE_FLAG_POS;
+        } else if ((held.flags & POSE_FLAG_POS) != 0u) {
+            out.pos = held.pos;
+            out.flags |= POSE_FLAG_POS;
+        }
+        local_pose_out[held_index] = held;
     }
 
     // The procedural idle adjusters (`procedural::apply_idle_adjustments`):

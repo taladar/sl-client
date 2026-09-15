@@ -774,6 +774,7 @@ fn the_gpu_palette_matches_the_cpu_reference() -> Result<(), TestError> {
                     pad1: 0,
                     pad2: 0,
                 }],
+                frame_occupancy: vec![1],
                 local_pose: rows_for_startup.clone(),
                 rest: Arc::new(rest_for_startup.clone()),
                 rest_generation: 1,
@@ -1439,6 +1440,7 @@ fn golden_mirror_blend_matches_blend_joint() -> Result<(), TestError> {
         JOINT_NONE,
         JOINT_NONE,
         &[],
+        None,
     );
 
     // The CPU reference: resolve_pose's gather (skip weight <= 0) into
@@ -1546,6 +1548,7 @@ fn golden_mirror_idle_matches_procedural() -> Result<(), TestError> {
         2,
         1,
         &[],
+        None,
     );
 
     // The CPU reference: the blended keyframe pose + apply_idle_adjustments.
@@ -1613,12 +1616,253 @@ fn golden_mirror_corrections_replace_channels() -> Result<(), TestError> {
         JOINT_NONE,
         JOINT_NONE,
         &[(3, correction)],
+        None,
     );
     let corrected = rows.get(3).ok_or("corrected row")?;
     assert_eq!(corrected.flags, POSE_FLAG_ROT);
     assert!(corrected.rot.abs_diff_eq(correction.rot, 0.0));
     let untouched = rows.first().ok_or("row 0")?;
     assert_eq!(untouched.flags, 0);
+    Ok(())
+}
+
+/// One clip of a multi-frame held-pose fixture: the motion, its arena id, and
+/// its `(start, stopped_at, order)` play state.
+type HeldSetup<'a> = (&'a Motion, u32, f32, Option<f32>, u64);
+
+/// Stage one frame of `setups` at `now` the way the scheduler does: one sample
+/// job per clip at its elapsed phase, one playback row per clip. Returns the
+/// playback block, the jobs and the pose-cache length.
+fn stage_held_frame(
+    arena: &ClipArena,
+    setups: &[HeldSetup<'_>],
+    now: f32,
+) -> Result<(Vec<GpuPlayState>, Vec<GpuSampleJob>, u32), TestError> {
+    let mut plays = vec![GpuPlayState::default(); MAX_ACTIVE_CLIPS];
+    let mut jobs: Vec<GpuSampleJob> = Vec::new();
+    let mut cache_len = 0_u32;
+    for (index, &(_motion, clip_id, start, stopped_at, order)) in setups.iter().enumerate() {
+        let cache_base = cache_len;
+        jobs.push(GpuSampleJob {
+            clip_id,
+            cache_base,
+            phase: now - start,
+            pad0: 0,
+        });
+        cache_len = cache_len
+            .checked_add(arena.track_count(clip_id))
+            .ok_or("cache len")?;
+        *plays.get_mut(index).ok_or("slot")? = GpuPlayState {
+            clip_id,
+            cache_base,
+            start,
+            stopped_at: stopped_at.unwrap_or(PLAY_STOPPED_NONE),
+            order: u32::try_from(order)?,
+            pad0: 0,
+            pad1: 0,
+            pad2: 0,
+        };
+    }
+    Ok((plays, jobs, cache_len))
+}
+
+/// **Held-pose golden**: across a sequence of frames in which motions stop,
+/// the pass-B mirror's held rows reproduce the CPU driver's
+/// [`AnimationPose::hold`] over `sample_motion` + [`blend_joint`] bit-for-bit,
+/// per channel — so the CPU mini pose and the GPU pose keep agreeing about a
+/// joint no motion drives any more.
+///
+/// Frame A: a pelvis clip (rotation + position) and a torso clip (rotation
+/// only) both play. Frame B: the pelvis clip has eased out, the torso clip
+/// plays on at a different key. Frame C: both have eased out. The pelvis must
+/// hold frame A's channels through B and C, the torso frame B's rotation
+/// through C, and no joint may gain a channel no motion ever gave it.
+#[test]
+fn golden_mirror_held_matches_pose_hold() -> Result<(), TestError> {
+    let pelvis_clip = blend_clip(
+        JointPriority::HIGH,
+        [0.0, 0.258_819_04, 0.0, 0.965_925_8],
+        0.0,
+        0.5,
+    );
+    let torso_clip = Motion {
+        base_priority: JointPriority::MEDIUM,
+        duration: 10.0,
+        emote_name: String::new(),
+        loop_in_point: 0.0,
+        loop_out_point: 10.0,
+        loops: true,
+        ease_in_duration: 0.0,
+        ease_out_duration: 0.5,
+        hand_pose: HandPose::RELAXED,
+        joints: vec![JointMotion {
+            name: "mTorso".to_owned(),
+            priority: JointPriority::USE_MOTION,
+            rotation_keys: vec![
+                RotationKey {
+                    time: 0.0,
+                    rotation: [0.0, 0.0, 0.0, 1.0],
+                },
+                RotationKey {
+                    time: 10.0,
+                    rotation: [0.382_683_43, 0.0, 0.0, 0.923_879_5],
+                },
+            ],
+            position_keys: Vec::new(),
+        }],
+        constraints: Vec::new(),
+    };
+    let mut arena = ClipArena::default();
+    let pelvis_id = arena
+        .ensure_clip(
+            AssetKey::from(Uuid::from_u128(500)),
+            &pelvis_clip,
+            4,
+            golden_joint_index,
+        )
+        .ok_or("pelvis clip upload")?;
+    let torso_id = arena
+        .ensure_clip(
+            AssetKey::from(Uuid::from_u128(501)),
+            &torso_clip,
+            4,
+            golden_joint_index,
+        )
+        .ok_or("torso clip upload")?;
+
+    // (now, setups): the pelvis clip stops at 10 s, the torso clip at 25 s.
+    let frames: [(f32, Vec<HeldSetup<'_>>); 3] = [
+        (
+            2.0,
+            vec![
+                (&pelvis_clip, pelvis_id, 0.0, None, 1),
+                (&torso_clip, torso_id, 0.0, None, 2),
+            ],
+        ),
+        (
+            17.5,
+            vec![
+                (&pelvis_clip, pelvis_id, 0.0, Some(10.0), 1),
+                (&torso_clip, torso_id, 0.0, None, 2),
+            ],
+        ),
+        (
+            40.0,
+            vec![
+                (&pelvis_clip, pelvis_id, 0.0, Some(10.0), 1),
+                (&torso_clip, torso_id, 0.0, Some(25.0), 2),
+            ],
+        ),
+    ];
+
+    let mut mirror_held = vec![GpuLocalPose::default(); 4];
+    let mut cpu_held = AnimationPose::new();
+    let mut snapshots: Vec<Vec<GpuLocalPose>> = Vec::new();
+    for (now, setups) in &frames {
+        let (plays, jobs, cache_len) = stage_held_frame(&arena, setups, *now)?;
+        let rows = mirror_local_pose(
+            arena.slices(),
+            &plays,
+            &jobs,
+            cache_len,
+            4,
+            *now,
+            None,
+            JOINT_NONE,
+            JOINT_NONE,
+            &[],
+            Some(mirror_held.as_mut_slice()),
+        );
+
+        // The CPU driver: resolve this frame's blend, then hold it.
+        let mut contributions: std::collections::HashMap<usize, Vec<JointContribution>> =
+            std::collections::HashMap::new();
+        for &(motion, _clip_id, start, stopped_at, order) in setups {
+            let elapsed = now - start;
+            let weight = motion.pose_weight(elapsed, stopped_at);
+            if weight <= 0.0 {
+                continue;
+            }
+            for sampled in sample_motion(motion, elapsed) {
+                let Some(index) = golden_joint_index(sampled.name) else {
+                    continue;
+                };
+                contributions
+                    .entry(index)
+                    .or_default()
+                    .push(JointContribution {
+                        priority: sampled.priority,
+                        order,
+                        weight,
+                        rotation: sampled.rotation.map(|rotation| rotation.to_array()),
+                        position: sampled.position.map(|position| position.to_array()),
+                    });
+            }
+        }
+        let mut pose = AnimationPose::new();
+        for (index, mut joint) in contributions {
+            let blended = blend_joint(&mut joint);
+            if let Some(rotation) = blended.rotation {
+                pose.set_rotation(index, Quat::from_array(rotation));
+            }
+            if let Some(position) = blended.position {
+                pose.set_position(index, Vec3::from_array(position));
+            }
+        }
+        cpu_held.hold(&pose);
+
+        for (joint, row) in rows.iter().enumerate() {
+            match cpu_held.rotation(joint) {
+                Some(rotation) => {
+                    assert_eq!(
+                        row.flags & POSE_FLAG_ROT,
+                        POSE_FLAG_ROT,
+                        "joint {joint} rot"
+                    );
+                    for (got, want) in row.rot.to_array().iter().zip(rotation.to_array().iter()) {
+                        assert_bit_equal(*got, *want, &format!("t={now} joint {joint} rot"));
+                    }
+                }
+                None => assert_eq!(row.flags & POSE_FLAG_ROT, 0, "joint {joint} gained rot"),
+            }
+            match cpu_held.position(joint) {
+                Some(position) => {
+                    assert_eq!(
+                        row.flags & POSE_FLAG_POS,
+                        POSE_FLAG_POS,
+                        "joint {joint} pos"
+                    );
+                    for (got, want) in row.pos.to_array().iter().zip(position.to_array().iter()) {
+                        assert_bit_equal(*got, *want, &format!("t={now} joint {joint} pos"));
+                    }
+                }
+                None => assert_eq!(row.flags & POSE_FLAG_POS, 0, "joint {joint} gained pos"),
+            }
+        }
+        snapshots.push(rows);
+    }
+
+    // Teeth: the fixture really exercises holding across a stop.
+    let [frame_a, frame_b, frame_c] = snapshots.as_slice() else {
+        return Err("three frames".into());
+    };
+    let pelvis_a = frame_a.first().ok_or("pelvis a")?;
+    assert_eq!(pelvis_a.flags, POSE_FLAG_ROT | POSE_FLAG_POS);
+    assert_eq!(frame_b.first(), Some(pelvis_a), "the stopped pelvis holds");
+    assert_eq!(frame_c.first(), Some(pelvis_a), "and keeps holding");
+    let torso_a = frame_a.get(1).ok_or("torso a")?;
+    let torso_b = frame_b.get(1).ok_or("torso b")?;
+    assert!(torso_a != torso_b, "the torso moved between A and B");
+    assert_eq!(
+        torso_b.flags, POSE_FLAG_ROT,
+        "a rotation-only clip holds no position"
+    );
+    assert_eq!(frame_c.get(1), Some(torso_b), "the stopped torso holds B");
+    assert_eq!(
+        frame_c.get(2).map(|row| row.flags),
+        Some(0),
+        "never animated"
+    );
     Ok(())
 }
 
@@ -1819,7 +2063,8 @@ fn packing_correction_matches_wgsl() -> Result<(), TestError> {
 }
 
 /// The widened `GpuComputeParams` packs to the WGSL `Params` uniform layout:
-/// size 64, `now` at 32, `chest_joint` at 40, `flags` at 48.
+/// size 64, `now` at 32, `chest_joint` at 40, `flags` at 48, `held_offset` at
+/// 52.
 #[test]
 fn packing_compute_params_phase2_matches_wgsl() -> Result<(), TestError> {
     let params = GpuComputeParams {
@@ -1836,7 +2081,7 @@ fn packing_compute_params_phase2_matches_wgsl() -> Result<(), TestError> {
         chest_joint: 11,
         torso_joint: 12,
         flags: 13,
-        pad0: 0,
+        held_offset: 14,
         pad1: 0,
         pad2: 0,
     };
@@ -1848,6 +2093,7 @@ fn packing_compute_params_phase2_matches_wgsl() -> Result<(), TestError> {
     assert!((f32_at(&bytes, 32) - 9.0).abs() < f32::EPSILON, "now at 32");
     assert_eq!(u32_at(&bytes, 40), 11, "chest_joint at 40");
     assert_eq!(u32_at(&bytes, 48), 13, "flags at 48");
+    assert_eq!(u32_at(&bytes, 52), 14, "held_offset at 52");
     Ok(())
 }
 
@@ -1969,6 +2215,7 @@ fn the_gpu_sampled_blended_palette_matches_the_cpu_mirror() -> Result<(), TestEr
         chest_u32,
         torso_u32,
         &[(hip_u32, correction_value)],
+        None,
     );
     // Teeth: the fixture actually exercises blend + idle + correction.
     assert!(
@@ -2108,6 +2355,7 @@ fn the_gpu_sampled_blended_palette_matches_the_cpu_mirror() -> Result<(), TestEr
                     pad1: 0,
                     pad2: 0,
                 }],
+                frame_occupancy: vec![1],
                 // Phase 2: the local pose is GPU-computed by passes A+B.
                 local_pose: Vec::new(),
                 rest: Arc::new(rest_for_startup.clone()),
@@ -2190,6 +2438,380 @@ fn the_gpu_sampled_blended_palette_matches_the_cpu_mirror() -> Result<(), TestEr
         worst <= 1.0e-4,
         "the GPU sample+blend+FK palette diverges from the CPU mirror (worst component \
          diff {worst:e}) — passes A/B do not reproduce sample_motion/blend_joint"
+    );
+    Ok(())
+}
+
+/// Whether a completed readback's CPU-expected half is exactly `expected` —
+/// which of the staged frames a readback (they complete asynchronously, a few
+/// frames late) was taken from.
+fn readback_expected_is(bytes: &[u8], expected: &[Mat4]) -> bool {
+    let count = expected.len();
+    expected.iter().enumerate().all(|(entry, want)| {
+        count
+            .checked_add(entry)
+            .and_then(|index| super::render::mat_at(bytes, index))
+            .is_some_and(|got| {
+                got.iter()
+                    .zip(want.to_cols_array())
+                    .all(|(got, want)| got.to_bits() == want.to_bits())
+            })
+    })
+}
+
+/// **The held-pose GPU gate**: the real pass B keeps a joint's last keyframe
+/// channels after its motion stops, across frames, exactly as the CPU mirror's
+/// held rows do.
+///
+/// Phase 1 plays the golden clip (pelvis rotation + position, torso rotation)
+/// until a readback shows the GPU palette equal to the mirror — proof pass B
+/// has run over the clip and written its held rows. Phase 2 then stages the
+/// same avatar with **no playback at all** and a torso correction (which makes
+/// phase 2's expected palette tell its readbacks apart from phase 1's), and
+/// asserts a phase-2 readback matches the mirror carrying phase 1's held rows
+/// — a pelvis still posed by a clip that is no longer playing. The teeth: that
+/// expectation differs from the one without holding, where the pelvis would be
+/// back at rest.
+///
+/// Skips (loudly) when no frame comes back: a machine with no GPU adapter
+/// cannot answer, mirroring the readback test tier.
+#[test]
+fn the_gpu_holds_a_stopped_motions_pose() -> Result<(), TestError> {
+    let skeleton = fixture_skeleton()?;
+    let deform = fixture_deform()?;
+    let volumes = fixture_volumes()?;
+    let overrides = JointOverrides::default();
+    let pelvis = skeleton.find("mPelvis").ok_or("mPelvis missing")?;
+    let torso = skeleton.find("mTorso").ok_or("mTorso missing")?;
+    let joint_count = u32::try_from(skeleton.len()).map_err(|_error| "joint count")?;
+    let joint_rows = skeleton.len();
+    let root = fixture_root();
+    let now = 5.0_f32;
+
+    let clip = golden_motion(true);
+    let mut arena = ClipArena::default();
+    let clip_id = arena
+        .ensure_clip(
+            AssetKey::from(Uuid::from_u128(600)),
+            &clip,
+            joint_count,
+            |name: &str| skeleton.find(name),
+        )
+        .ok_or("clip upload")?;
+    let (plays, jobs, cache_len) =
+        stage_held_frame(&arena, &[(&clip, clip_id, 1.0, None, 1)], now)?;
+    let torso_u32 = u32::try_from(torso).map_err(|_error| "torso index")?;
+    let correction = GpuLocalPose {
+        rot: Vec4::new(0.0, 0.0, 0.382_683_43, 0.923_879_5),
+        pos: Vec3::ZERO,
+        flags: POSE_FLAG_ROT,
+    };
+    let joint_map: Vec<u32> = vec![
+        u32::try_from(pelvis).map_err(|_error| "pelvis index")?,
+        torso_u32,
+    ];
+    let ibps = vec![
+        Mat4::from_translation(Vec3::new(0.0, -1.0, 0.3)),
+        Mat4::from_rotation_z(0.5),
+    ];
+    let rest = compose_rest_joints(&skeleton, &deform, &volumes, &overrides);
+    let palette = |rows: &[GpuLocalPose]| -> Vec<Mat4> {
+        let world = reference_fk(&rest, rows, root);
+        joint_map
+            .iter()
+            .zip(ibps.iter())
+            .map(|(&canonical, ibp)| {
+                usize::try_from(canonical)
+                    .ok()
+                    .and_then(|index| world.get(index))
+                    .copied()
+                    .unwrap_or(Mat4::IDENTITY)
+                    .mul_mat4(ibp)
+            })
+            .collect()
+    };
+
+    // The mirror expectations: phase 1 over the clip (writing the held rows),
+    // phase 2 over nothing but the correction, carrying them.
+    let mut held = vec![GpuLocalPose::default(); joint_rows];
+    let empty_plays = vec![GpuPlayState::default(); MAX_ACTIVE_CLIPS];
+    let phase_one_rows = mirror_local_pose(
+        arena.slices(),
+        &plays,
+        &jobs,
+        cache_len,
+        joint_count,
+        now,
+        None,
+        JOINT_NONE,
+        JOINT_NONE,
+        &[],
+        Some(held.as_mut_slice()),
+    );
+    let phase_two_rows = mirror_local_pose(
+        arena.slices(),
+        &empty_plays,
+        &[],
+        0,
+        joint_count,
+        now,
+        None,
+        JOINT_NONE,
+        JOINT_NONE,
+        &[(torso_u32, correction)],
+        Some(held.as_mut_slice()),
+    );
+    let unheld_rows = mirror_local_pose(
+        arena.slices(),
+        &empty_plays,
+        &[],
+        0,
+        joint_count,
+        now,
+        None,
+        JOINT_NONE,
+        JOINT_NONE,
+        &[(torso_u32, correction)],
+        None,
+    );
+    let expected_one = palette(&phase_one_rows);
+    let expected_two = palette(&phase_two_rows);
+    let expected_unheld = palette(&unheld_rows);
+    assert!(
+        phase_two_rows
+            .get(pelvis)
+            .is_some_and(|row| row.flags == POSE_FLAG_ROT | POSE_FLAG_POS),
+        "the pelvis must be held in phase 2"
+    );
+    assert!(
+        expected_two != expected_unheld,
+        "holding must change the palette"
+    );
+    assert!(
+        expected_two != expected_one,
+        "phase 2 must be told apart from phase 1"
+    );
+
+    let (clip_headers, clip_tracks, track_of_joint, key_times, key_values, clip_generation) =
+        arena.staged();
+    let staging_for = |plays: Vec<GpuPlayState>,
+                       playback_generation: u64,
+                       jobs: Vec<GpuSampleJob>,
+                       cache_len: u32,
+                       corrections: Vec<GpuCorrection>,
+                       expected: Vec<Mat4>,
+                       target: Entity| GpuAvatarStaging {
+        joint_count,
+        slot_capacity: 1,
+        frames: vec![GpuAvatarFrame {
+            root,
+            slot: 0,
+            pad0: 0,
+            pad1: 0,
+            pad2: 0,
+        }],
+        frame_occupancy: vec![1],
+        local_pose: Vec::new(),
+        rest: Arc::new(rest.clone()),
+        rest_generation: 1,
+        joint_map: Arc::new(joint_map.clone()),
+        ibps: Arc::new(ibps.clone()),
+        pool_generation: 1,
+        instances: vec![StagedSkinInstance {
+            target,
+            avatar_slot: 0,
+            joint_count: 2,
+            joint_map_offset: 0,
+            ibp_offset: 0,
+        }],
+        readback: Some(StagedReadback {
+            target,
+            label: "held-pose headless fixture".to_owned(),
+            joint_count: 2,
+            expected,
+        }),
+        blend: true,
+        clip_headers: Arc::clone(&clip_headers),
+        clip_tracks: Arc::clone(&clip_tracks),
+        track_of_joint: Arc::clone(&track_of_joint),
+        key_times: Arc::clone(&key_times),
+        key_values: Arc::clone(&key_values),
+        clip_generation,
+        jobs,
+        cache_len,
+        playback: Arc::new(plays),
+        playback_generation,
+        corrections,
+        now,
+        idle_now: now,
+        chest_joint: JOINT_NONE,
+        torso_joint: JOINT_NONE,
+        param_flags: 0,
+    };
+
+    let mut app = App::new();
+    app.add_plugins(
+        DefaultPlugins
+            .set(WindowPlugin {
+                primary_window: None,
+                exit_condition: bevy::window::ExitCondition::DontExit,
+                ..default()
+            })
+            .disable::<WinitPlugin>()
+            .disable::<LogPlugin>(),
+    )
+    .add_plugins(ScheduleRunnerPlugin::run_loop(core::time::Duration::ZERO))
+    .add_plugins(SlFaceMaterialPlugin)
+    .add_plugins(GpuAvatarsPlugin {
+        mode: GpuAvatarsMode {
+            active: true,
+            readback: true,
+            live: false,
+        },
+    });
+    app.add_systems(
+        Update,
+        |mut meshes: Query<&mut Transform, With<SkinnedMesh>>| {
+            for mut transform in &mut meshes {
+                transform.set_changed();
+            }
+        },
+    );
+    let pixels: Cell = Cell::default();
+    let pixels_in_observer = Arc::clone(&pixels);
+    let quad_cell: Arc<Mutex<Option<Entity>>> = Arc::default();
+    let quad_in_startup = Arc::clone(&quad_cell);
+    app.add_systems(
+        Startup,
+        move |mut commands: Commands,
+              mut meshes: ResMut<Assets<Mesh>>,
+              mut materials: ResMut<Assets<FaceMaterial>>,
+              mut images: ResMut<Assets<Image>>,
+              mut bindposes: ResMut<Assets<SkinnedMeshInverseBindposes>>| {
+            let mut target =
+                Image::new_target_texture(FRAME, FRAME, TextureFormat::Rgba8UnormSrgb, None);
+            target.texture_descriptor.usage |= TextureUsages::COPY_SRC;
+            let target = images.add(target);
+            commands.spawn((
+                Camera3d::default(),
+                RenderTarget::Image(target.clone().into()),
+                bevy::camera::Hdr,
+                Msaa::Off,
+                Transform::from_xyz(0.0, 0.0, 6.0).looking_at(Vec3::ZERO, Vec3::Y),
+            ));
+            let pixels_cell = Arc::clone(&pixels_in_observer);
+            commands.spawn(Readback::texture(target)).observe(
+                move |readback: On<ReadbackComplete>| {
+                    if let Ok(mut slot) = pixels_cell.lock() {
+                        *slot = Some(readback.data.clone());
+                    }
+                },
+            );
+            let joints = vec![
+                commands.spawn(Transform::from_xyz(0.0, 0.0, 0.0)).id(),
+                commands.spawn(Transform::from_xyz(0.0, 1.0, 0.0)).id(),
+            ];
+            let inverse_bindposes = bindposes.add(SkinnedMeshInverseBindposes::from(vec![
+                Mat4::from_translation(Vec3::new(0.0, -1.0, 0.3)),
+                Mat4::from_rotation_z(0.5),
+            ]));
+            let quad = commands
+                .spawn((
+                    Mesh3d(meshes.add(skinned_quad())),
+                    MeshMaterial3d(materials.add(inert_face_material(StandardMaterial {
+                        base_color: Color::srgb(0.0, 1.0, 0.0),
+                        unlit: true,
+                        ..default()
+                    }))),
+                    Transform::IDENTITY,
+                    SkinnedMesh {
+                        inverse_bindposes,
+                        joints,
+                    },
+                    NoFrustumCulling,
+                ))
+                .id();
+            if let Ok(mut slot) = quad_in_startup.lock() {
+                *slot = Some(quad);
+            }
+        },
+    );
+
+    app.finish();
+    app.cleanup();
+    // Startup spawns the quad; stage phase 1 against it.
+    app.update();
+    let quad = quad_cell
+        .lock()
+        .ok()
+        .and_then(|slot| *slot)
+        .ok_or("the startup system did not spawn the quad")?;
+    app.insert_resource(staging_for(
+        plays,
+        1,
+        jobs,
+        cache_len,
+        Vec::new(),
+        expected_one.clone(),
+        quad,
+    ));
+
+    let mut phase_two = false;
+    let mut verdict: Option<f32> = None;
+    for _frame in 0..FRAMES_TO_RUN.saturating_mul(2) {
+        app.update();
+        let bytes = app
+            .world()
+            .get_resource::<GpuAvatarReadbackData>()
+            .map(|data| data.bytes.clone())
+            .unwrap_or_default();
+        if !phase_two {
+            let converged = readback_expected_is(&bytes, &expected_one)
+                && palette_worst_diff(&bytes, 2).is_some_and(|worst| worst <= 1.0e-4);
+            if converged {
+                app.insert_resource(staging_for(
+                    empty_plays.clone(),
+                    2,
+                    Vec::new(),
+                    0,
+                    vec![GpuCorrection {
+                        avatar: 0,
+                        joint: torso_u32,
+                        flags: correction.flags,
+                        pad0: 0,
+                        rot: correction.rot,
+                        pos: correction.pos,
+                        pad1: 0,
+                    }],
+                    expected_two.clone(),
+                    quad,
+                ));
+                phase_two = true;
+            }
+        } else if readback_expected_is(&bytes, &expected_two) {
+            verdict = palette_worst_diff(&bytes, 2);
+            break;
+        }
+    }
+
+    if pixels
+        .lock()
+        .ok()
+        .and_then(|mut slot| slot.take())
+        .is_none()
+    {
+        warn!("skipping: no frame came back, so this machine has no usable GPU adapter");
+        return Ok(());
+    }
+    assert!(
+        phase_two,
+        "the GPU palette never matched the mirror while the clip played — pass B did not run"
+    );
+    let worst = verdict.ok_or("no readback of the stopped frame ever completed")?;
+    assert!(
+        worst <= 1.0e-4,
+        "after its clip stopped the GPU pose diverges from the held mirror (worst component \
+         diff {worst:e}) — pass B does not hold the stopped motion's channels"
     );
     Ok(())
 }

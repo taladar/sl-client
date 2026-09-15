@@ -47,3 +47,14 @@ plus Reset Skeleton on animesh objects (menu_object.xml; our object
 RESET_PIE `reset-skeleton` slice in `object_menu.rs`). Extend the scope
 beyond the own avatar to: other-avatar reset, animesh-object reset,
 and **Reset Mesh LOD** (no coverage anywhere today).
+
+## Addendum (2026-09-15): held joints make Reset Skeleton load-bearing
+
+Since [[viewer-avatar-face-bone-shape-brow-spike]] a joint keeps the last value
+any animation gave it, as in the reference, so a Bento pose left behind by a
+stopped animation (a curled hand, an open jaw) stays until another animation
+keys the joint. The reference's only other way out is `resetSkeleton`, which
+rebuilds every joint's rest transform. A reset here must therefore also clear
+the avatar's held pose: `AnimationPlayback::held` on the CPU and the slot's
+held rows on the GPU (freeing and re-taking the slot, or a fresh occupancy
+stamp, zeroes them).

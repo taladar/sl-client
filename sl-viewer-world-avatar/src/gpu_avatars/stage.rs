@@ -255,6 +255,20 @@ pub(crate) struct GpuAvatarRegistry {
     playback_generation: u64,
     /// Whether the too-many-joints warning already fired (once per run).
     warned_joint_overflow: bool,
+    /// Each allocated pose slot's **occupancy** stamp: a number no earlier
+    /// allocation of any slot carried, so the render side can tell a slot
+    /// that changed hands — or was freed and re-taken by the same avatar —
+    /// from one still held by its occupant, and clear the dense slot's held
+    /// rows before pass B reads them. Never `0`, which the render side reads
+    /// as "never cleared".
+    occupancy: HashMap<PoseSlotKey, u64>,
+    /// The last occupancy stamp handed out.
+    next_occupancy: u64,
+    /// The debug readback's CPU mirror of each slot's held rows (see
+    /// [`mirror_local_pose`]), advanced for every staged slot while the
+    /// readback is on so the mirror holds exactly what pass B holds, whichever
+    /// instance the readback picks. Empty otherwise.
+    mirror_held: HashMap<PoseSlotKey, Vec<GpuLocalPose>>,
 }
 
 impl GpuAvatarRegistry {
@@ -274,16 +288,28 @@ impl GpuAvatarRegistry {
         let _prev = self.slots.insert(key, slot);
     }
 
-    /// Allocate a dense avatar slot (reusing a freed one when available).
-    /// `None` only on `u32` overflow, which a real scene never reaches.
-    fn alloc_slot(&mut self) -> Option<u32> {
-        if self.free.is_empty() {
-            let slot = self.slot_capacity;
-            self.slot_capacity = self.slot_capacity.checked_add(1)?;
-            self.rest_dirty = true;
+    /// The dense slot `key` holds, allocating one (reusing a freed one when
+    /// available) and stamping a fresh [occupancy](Self::occupancy) when it
+    /// holds none. `None` only on `u32` overflow, which a real scene never
+    /// reaches.
+    fn slot_for(&mut self, key: PoseSlotKey) -> Option<u32> {
+        if let Some(slot) = self.slots.get(&key).copied() {
             return Some(slot);
         }
-        self.free.pop()
+        let stamp = self.next_occupancy.checked_add(1)?;
+        let slot = match self.free.pop() {
+            Some(slot) => slot,
+            None => {
+                let slot = self.slot_capacity;
+                self.slot_capacity = self.slot_capacity.checked_add(1)?;
+                self.rest_dirty = true;
+                slot
+            }
+        };
+        let _prev = self.slots.insert(key, slot);
+        self.next_occupancy = stamp;
+        let _prev = self.occupancy.insert(key, stamp);
+        Some(slot)
     }
 
     /// Intern a resolved canonical joint map + inverse bindposes into the
@@ -364,6 +390,12 @@ pub(crate) struct GpuAvatarStaging {
     pub(crate) slot_capacity: u32,
     /// One row per posed avatar this frame (compact).
     pub(crate) frames: Vec<GpuAvatarFrame>,
+    /// Each frame row's slot [occupancy](GpuAvatarRegistry::occupancy)
+    /// stamp, parallel to [`Self::frames`]: when it differs from the stamp the
+    /// render side last cleared that dense slot for, the slot's held rows are
+    /// zeroed before pass B runs, so a new occupant never inherits the last
+    /// one's pose.
+    pub(crate) frame_occupancy: Vec<u64>,
     /// The slot-indexed local-pose rows (`slot_capacity * joint_count`).
     pub(crate) local_pose: Vec<GpuLocalPose>,
     /// The slot-indexed composed rest rows, re-uploaded on generation bump.
@@ -559,6 +591,8 @@ pub(crate) fn stage_gpu_avatars(
     for (slot_key, slot) in gone {
         let _slot = registry.slots.remove(&slot_key);
         let _rows = registry.rest_rows.remove(&slot_key);
+        let _occupancy = registry.occupancy.remove(&slot_key);
+        let _held = registry.mirror_held.remove(&slot_key);
         registry.free.push(slot);
         registry.rest_dirty = true;
     }
@@ -581,15 +615,8 @@ pub(crate) fn stage_gpu_avatars(
         let Some(deform) = state.deformations(agent) else {
             continue;
         };
-        let slot = match registry.slots.get(&slot_key).copied() {
-            Some(slot) => slot,
-            None => {
-                let Some(slot) = registry.alloc_slot() else {
-                    continue;
-                };
-                let _prev = registry.slots.insert(slot_key, slot);
-                slot
-            }
+        let Some(slot) = registry.slot_for(slot_key) else {
+            continue;
         };
         let stale = registry
             .rest_rows
@@ -614,15 +641,8 @@ pub(crate) fn stage_gpu_avatars(
             continue;
         }
         let generation = blend_inputs.control.overrides_generation(object);
-        let slot = match registry.slots.get(&slot_key).copied() {
-            Some(slot) => slot,
-            None => {
-                let Some(slot) = registry.alloc_slot() else {
-                    continue;
-                };
-                let _prev = registry.slots.insert(slot_key, slot);
-                slot
-            }
+        let Some(slot) = registry.slot_for(slot_key) else {
+            continue;
         };
         let stale = registry
             .rest_rows
@@ -661,15 +681,8 @@ pub(crate) fn stage_gpu_avatars(
             if feed.get(slot_key).is_none() {
                 continue;
             }
-            let slot = match registry.slots.get(&slot_key).copied() {
-                Some(slot) => slot,
-                None => {
-                    let Some(slot) = registry.alloc_slot() else {
-                        continue;
-                    };
-                    let _prev = registry.slots.insert(slot_key, slot);
-                    slot
-                }
+            let Some(slot) = registry.slot_for(slot_key) else {
+                continue;
             };
             let stale = registry
                 .rest_rows
@@ -728,8 +741,12 @@ pub(crate) fn stage_gpu_avatars(
     // The live path computes the local pose GPU-side (passes A+B); the buffer
     // is only filled by the hand-staged headless FK tests.
     let local_pose: Vec<GpuLocalPose> = Vec::new();
+    let mut frame_occupancy: Vec<u64> = Vec::with_capacity(active.len());
     for (slot_key, slot) in &active {
         let Some(entry) = feed.get(*slot_key) else {
+            continue;
+        };
+        let Some(occupancy) = registry.occupancy.get(slot_key).copied() else {
             continue;
         };
         frames.push(GpuAvatarFrame {
@@ -740,6 +757,7 @@ pub(crate) fn stage_gpu_avatars(
             pad2: 0,
         });
         frame_of_slot.push(*slot_key);
+        frame_occupancy.push(occupancy);
     }
 
     // The §2.1 CPU frame prep: upload newly decoded clips into the arena,
@@ -965,28 +983,36 @@ pub(crate) fn stage_gpu_avatars(
     // convergence idiom — the mesh body, not an early system part) and stage
     // its CPU-expected palette alongside.
     let param_flags = if t_pose { PARAMS_FLAG_TPOSE } else { 0 };
+    // The mirror of passes A+B runs for **every** staged slot while the
+    // readback is on, not just the one instance it reads back: pass B holds
+    // each joint's last keyframe value, so the mirror can only agree with it
+    // if it has seen every frame of every slot it might be asked about.
+    let mut mirrored: HashMap<PoseSlotKey, Vec<GpuLocalPose>> = HashMap::new();
+    if mode.readback {
+        let frame = RealReadbackFrame {
+            jobs: &jobs,
+            cache_len,
+            joint_count: joint_count_u32,
+            now,
+            idle: (!t_pose).then_some(idle_now),
+            chest_joint,
+            torso_joint,
+        };
+        for (frame_index, slot_key) in frame_of_slot.iter().enumerate() {
+            let rows = mirror_slot_local_pose(&mut registry, &feed, &frame, frame_index, *slot_key);
+            if let Some(rows) = rows {
+                let _prev = mirrored.insert(*slot_key, rows);
+            }
+        }
+    } else {
+        registry.mirror_held.clear();
+    }
     let registry = &*registry;
     let readback = if mode.readback {
         instances
             .iter()
             .max_by_key(|instance| instance.joint_count)
-            .and_then(|instance| {
-                real_readback_expected(
-                    instance,
-                    registry,
-                    &feed,
-                    &RealReadbackFrame {
-                        frame_of_slot: &frame_of_slot,
-                        jobs: &jobs,
-                        cache_len,
-                        joint_count: joint_count_u32,
-                        now,
-                        idle: (!t_pose).then_some(idle_now),
-                        chest_joint,
-                        torso_joint,
-                    },
-                )
-            })
+            .and_then(|instance| real_readback_expected(instance, registry, &feed, &mirrored))
     } else {
         None
     };
@@ -997,6 +1023,7 @@ pub(crate) fn stage_gpu_avatars(
         joint_count: joint_count_u32,
         slot_capacity: registry.slot_capacity,
         frames,
+        frame_occupancy,
         local_pose,
         rest: Arc::clone(&registry.assembled_rest),
         rest_generation: registry.rest_generation,
@@ -1025,12 +1052,10 @@ pub(crate) fn stage_gpu_avatars(
     };
 }
 
-/// The staged frame context [`real_readback_expected`] mirrors the GPU passes
-/// over: the frame-row order, this frame's sample jobs, and the pass-B frame
-/// params — everything needed to re-run passes A+B on the CPU for one avatar.
+/// The staged frame context [`mirror_slot_local_pose`] mirrors the GPU passes
+/// over: this frame's sample jobs and the pass-B frame params — everything
+/// needed to re-run passes A+B on the CPU for one avatar.
 struct RealReadbackFrame<'a> {
-    /// The staged frame rows' pose slots, in frame-index order.
-    frame_of_slot: &'a [PoseSlotKey],
     /// This frame's deduplicated sample jobs.
     jobs: &'a [GpuSampleJob],
     /// The pose-cache length the jobs cover.
@@ -1047,35 +1072,35 @@ struct RealReadbackFrame<'a> {
     torso_joint: u32,
 }
 
-/// The real placement's readback expectation (Phase 2): the joint globals are
-/// frozen there and the local pose is GPU-computed, so the CPU-path truth is
-/// the full mirror pipeline — [`mirror_local_pose`] (the golden-tested Rust
-/// mirror of passes A+B: sample, priority/ease blend, idle, corrections) over
-/// the very clip/playback/job data the pipeline uploaded this frame, then
-/// [`reference_fk`] (the pass-C mirror) under the staged root, times the
-/// pooled inverse bindposes. A mismatch therefore isolates a GPU-side fault
-/// (upload, layout, shader), not a pose-source difference.
-fn real_readback_expected(
-    instance: &StagedSkinInstance,
-    registry: &GpuAvatarRegistry,
+/// Mirror passes A+B for the slot at `frame_index` of this frame's staged rows
+/// ([`mirror_local_pose`], the golden-tested Rust mirror: sample,
+/// priority/ease blend, hold, idle, corrections) over the very clip / playback
+/// / job data the pipeline uploaded this frame, advancing the slot's mirrored
+/// held rows as pass B advances its own (the T-pose freeze, staged as no idle
+/// clock, holds nothing — as pass B does). `None` when the slot has no feed
+/// entry.
+fn mirror_slot_local_pose(
+    registry: &mut GpuAvatarRegistry,
     feed: &GpuAvatarPoseFeed,
     frame: &RealReadbackFrame<'_>,
-) -> Option<StagedReadback> {
-    let record = registry.real_skins.get(&instance.target)?;
-    let entry = feed.get(record.slot)?;
-    let (_generation, rest_rows) = registry.rest_rows.get(&record.slot)?;
-    let frame_index = frame
-        .frame_of_slot
-        .iter()
-        .position(|slot_key| *slot_key == record.slot)?;
+    frame_index: usize,
+    slot_key: PoseSlotKey,
+) -> Option<Vec<GpuLocalPose>> {
+    let entry = feed.get(slot_key)?;
     let play_start = frame_index.checked_mul(MAX_ACTIVE_CLIPS)?;
-    let plays = registry
+    let plays: Vec<GpuPlayState> = registry
         .playback_rows
         .get(play_start..play_start.checked_add(MAX_ACTIVE_CLIPS)?)
-        .unwrap_or(&[]);
+        .unwrap_or(&[])
+        .to_vec();
+    let joint_rows = usize::try_from(frame.joint_count).ok()?;
+    let mut held = registry
+        .mirror_held
+        .remove(&slot_key)
+        .unwrap_or_else(|| vec![GpuLocalPose::default(); joint_rows]);
     let rows = mirror_local_pose(
         registry.clips.slices(),
-        plays,
+        &plays,
         frame.jobs,
         frame.cache_len,
         frame.joint_count,
@@ -1084,8 +1109,30 @@ fn real_readback_expected(
         frame.chest_joint,
         frame.torso_joint,
         &entry.corrections,
+        frame.idle.is_some().then_some(held.as_mut_slice()),
     );
-    let world = reference_fk(rest_rows, &rows, entry.root);
+    let _prev = registry.mirror_held.insert(slot_key, held);
+    Some(rows)
+}
+
+/// The real placement's readback expectation (Phase 2): the joint globals are
+/// frozen there and the local pose is GPU-computed, so the CPU-path truth is
+/// the full mirror pipeline — the slot's `mirrored` local pose (see
+/// [`mirror_slot_local_pose`]), then [`reference_fk`] (the pass-C mirror)
+/// under the staged root, times the pooled inverse bindposes. A mismatch
+/// therefore isolates a GPU-side fault (upload, layout, shader), not a
+/// pose-source difference.
+fn real_readback_expected(
+    instance: &StagedSkinInstance,
+    registry: &GpuAvatarRegistry,
+    feed: &GpuAvatarPoseFeed,
+    mirrored: &HashMap<PoseSlotKey, Vec<GpuLocalPose>>,
+) -> Option<StagedReadback> {
+    let record = registry.real_skins.get(&instance.target)?;
+    let entry = feed.get(record.slot)?;
+    let (_generation, rest_rows) = registry.rest_rows.get(&record.slot)?;
+    let rows = mirrored.get(&record.slot)?;
+    let world = reference_fk(rest_rows, rows, entry.root);
     let count = usize::try_from(instance.joint_count).ok()?;
     let map_start = usize::try_from(instance.joint_map_offset).ok()?;
     let ibp_start = usize::try_from(instance.ibp_offset).ok()?;

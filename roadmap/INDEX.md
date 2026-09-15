@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 314 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 19 |
-| done | 1148 |
+| bugs | 18 |
+| done | 1149 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1686** |
@@ -1165,14 +1165,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (19)
+## bugs (18)
 
 ### viewer
 
 - [`viewer-audit-cef-browser-settings-hardening`](bugs/viewer-audit-cef-browser-settings-hardening.md)
   — An in-world media page runs on CEF's default browser settings
-- [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
-  — Mesh-head brow spikes forward from face-bone shape deformation
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
   — Check clouds vs the waterline at the horizon against Firestorm
 - [`viewer-combo-stops-opening`](bugs/viewer-combo-stops-opening.md) — A combo
@@ -1212,7 +1210,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)
 
-## done (1148)
+## done (1149)
 
 ### protocol
 
@@ -1613,6 +1611,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-avatar-dead-reckoning-translation-rubberband`](done/viewer-avatar-dead-reckoning-translation-rubberband.md)
   — Ease the avatar's rendered translation toward truth (dead-reckoning
   rubberband)
+- [`viewer-avatar-face-bone-shape-brow-spike`](done/viewer-avatar-face-bone-shape-brow-spike.md)
+  — Mesh-head brow spikes forward from face-bone shape deformation
 - [`viewer-avatar-mesh-accurate-pick`](done/viewer-avatar-mesh-accurate-pick.md)
   — Mesh-accurate avatar picking (replace the bounding-box approximation)
   (blocked by `viewer-avatar-context-menu` (done))

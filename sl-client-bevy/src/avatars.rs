@@ -359,6 +359,31 @@ impl AnimationPose {
     pub fn positions(&self) -> impl Iterator<Item = (usize, Vec3)> + '_ {
         self.positions.iter().map(|(&index, &pos)| (index, pos))
     }
+
+    /// Fold a newer pose into this one as a **held** pose: every channel
+    /// `newer` animates replaces this pose's value for that joint, and every
+    /// channel it does not animate keeps whatever this pose last held.
+    ///
+    /// This is how the reference viewer's joints behave once no motion drives
+    /// them. `LLJointStateBlender::blendJointStates` writes the blended value
+    /// into the joint itself and, for a joint no active motion touches, does
+    /// nothing at all ("leave it unchanged from last frame"); nothing resets a
+    /// joint to its rest transform short of Reset Skeleton. So a joint keeps
+    /// the last value any animation gave it — a Bento hand stays curled after
+    /// the hand pose stops, and a mesh head's expression animation, which
+    /// keys every face bone's position, keeps overriding the shape's face-bone
+    /// offsets between blinks instead of letting them spring back.
+    ///
+    /// Channels are held independently: a joint whose last motion keyed only
+    /// its rotation holds that rotation and keeps its rest position.
+    pub fn hold(&mut self, newer: &Self) {
+        for (index, rotation) in newer.rotations() {
+            let _prev = self.rotations.insert(index, rotation);
+        }
+        for (index, position) in newer.positions() {
+            let _prev = self.positions.insert(index, position);
+        }
+    }
 }
 
 /// The reference viewer's `computeBodySize` quantities for one avatar shape
@@ -2282,5 +2307,33 @@ mod tests {
         let chain = bevy.deformed_world_chain(&deform, &volumes, &overrides, &pose, &[usize::MAX]);
         assert!(chain.is_empty());
         Ok(())
+    }
+
+    /// A held pose takes every channel the newer pose animates and keeps every
+    /// channel it does not — per channel, so a rotation-only update leaves a
+    /// held position alone.
+    #[test]
+    fn a_held_pose_keeps_what_the_newer_pose_does_not_animate() {
+        use bevy::math::Quat;
+        let mut held = AnimationPose::new();
+        held.set_rotation(0, Quat::from_rotation_z(0.5));
+        held.set_position(0, Vec3::new(0.0, 0.0, 0.1));
+        held.set_rotation(1, Quat::from_rotation_x(0.25));
+
+        let mut newer = AnimationPose::new();
+        newer.set_rotation(0, Quat::from_rotation_y(-0.75));
+        newer.set_position(2, Vec3::new(0.02, 0.0, 0.0));
+        held.hold(&newer);
+
+        assert_eq!(held.rotation(0), Some(Quat::from_rotation_y(-0.75)));
+        assert_eq!(held.position(0), Some(Vec3::new(0.0, 0.0, 0.1)));
+        assert_eq!(held.rotation(1), Some(Quat::from_rotation_x(0.25)));
+        assert_eq!(held.position(2), Some(Vec3::new(0.02, 0.0, 0.0)));
+        assert_eq!(held.rotation(2), None);
+
+        // An empty newer pose (every motion stopped) changes nothing.
+        let before = held.clone();
+        held.hold(&AnimationPose::new());
+        assert_eq!(held, before);
     }
 }

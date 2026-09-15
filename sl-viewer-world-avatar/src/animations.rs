@@ -679,10 +679,18 @@ pub struct AnimationPlayback {
     /// The next activation-recency stamp to hand out (monotonic across all
     /// avatars; only the relative order within an avatar is ever compared).
     next_order: u64,
-    /// Each posed avatar's resolved per-joint pose this frame (only avatars with a
-    /// drivable animation appear). An avatar absent here keeps its plain deformed
-    /// rest pose, produced by ordinary transform propagation.
+    /// Each posed avatar's per-joint keyframe pose this frame: its **held** pose
+    /// ([`held`](Self::held)) with this frame's blend folded in. Only avatars
+    /// some animation has ever posed appear; an avatar absent here keeps its
+    /// plain deformed rest pose.
     poses: HashMap<AgentKey, AnimationPose>,
+    /// Each rigged avatar's held keyframe pose: the last value any animation
+    /// gave each joint channel, kept after the animation stops
+    /// ([`AnimationPose::hold`] — the reference's joints are never reset to
+    /// rest when a motion ends). Forgotten when the avatar stops being rigged,
+    /// which is also when the GPU pipeline frees the avatar's slot and with it
+    /// the GPU-side held rows, so the two restart together.
+    held: HashMap<AgentKey, AnimationPose>,
 }
 
 impl AnimationPlayback {
@@ -1070,9 +1078,10 @@ fn merge_playing(
 /// [`pose_weight`](Motion::pose_weight), and resolving concurrent contributions
 /// per joint by priority ([`blend_joint`], P18.4). `joint_index` maps a motion's
 /// joint *name* to the skeleton index the pose is keyed by. Returns `None` when
-/// no playing motion is decoded / contributes (the skeleton then keeps its rest
-/// pose). Shared by the avatar driver and the animesh control-avatar driver (P29,
-/// which resolves names against the same standard skeleton).
+/// no playing motion is decoded / contributes (the joints then keep whatever the
+/// caller's held pose gives them). Shared by the avatar driver and the animesh
+/// control-avatar driver (P29, which resolves names against the same standard
+/// skeleton).
 pub(crate) fn resolve_pose(
     anims: &HashMap<Uuid, PlayState>,
     now: f32,
@@ -1222,11 +1231,11 @@ fn mini_pose_subset(
 /// [`pose_weight`](Motion::pose_weight), and blends the per-joint contributions by
 /// priority ([`blend_joint`]) — a higher-priority motion dominating a joint while a
 /// lower-priority one shows through the weight it leaves unfilled. A motion that
-/// has fully eased out is dropped. The resolved [`AnimationPose`]s are stored on
-/// the [`AnimationPlayback`] resource; an avatar with no drivable animation is
-/// simply omitted, so ordinary transform propagation leaves it at its deformed
-/// rest pose. Procedural built-ins (walk / stand / …) have no cached motion, so an
-/// idle avatar signalling only those keeps its rest pose.
+/// has fully eased out is dropped. Each frame's blend is folded into the avatar's
+/// **held** pose ([`AnimationPose::hold`]), so a joint keeps the last value an
+/// animation gave it after that animation stops, as the reference's joints do;
+/// the held poses are stored on the [`AnimationPlayback`] resource. An avatar no
+/// animation has ever posed is omitted and keeps its deformed rest pose.
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources; the GPU hooks are \
@@ -1306,9 +1315,16 @@ pub(crate) fn drive_avatar_skeletons(
     // solves and corrections see the same animated channels the full solve
     // would, at a fraction of the sampling cost.
     let gpu_real = gpu.real_active();
+    // A held pose outlives its animations but not its avatar: an avatar that is
+    // no longer rigged starts from rest when it is rigged again, as a fresh GPU
+    // slot does.
+    playback.held.retain(|agent, _held| state.is_rigged(*agent));
     let mut agents: HashSet<AgentKey> = playback.playing.keys().copied().collect();
     agents.extend(playback.client_locomotion.keys().copied());
     agents.extend(playback.client_typing.keys().copied());
+    // An avatar whose animations have all stopped is still posed by what they
+    // left behind.
+    agents.extend(playback.held.keys().copied());
     let mut poses: HashMap<AgentKey, AnimationPose> = HashMap::new();
     for agent in agents {
         // Only a rigged avatar (with a spawned body) can be posed.
@@ -1334,12 +1350,25 @@ pub(crate) fn drive_avatar_skeletons(
                 _within => Some(index),
             }
         });
+        // Fold this frame's blend into the avatar's held pose, and pose the
+        // avatar with the result: a joint no playing motion drives keeps the
+        // last value one gave it (the GPU's pass B holds the same rows). Under
+        // the mini-pose subset only the subset's joints are ever held here, so
+        // a joint that joins the subset later (a socket worn after its joint's
+        // animation stopped) starts holding with its next animation, while the
+        // GPU — which blends every joint — already holds it.
+        let held = playback.held.entry(agent).or_default();
         if let Some(pose) = resolved {
-            let _prev = poses.insert(agent, pose);
+            held.hold(&pose);
+        }
+        if !held.is_empty() {
+            let _prev = poses.insert(agent, held.clone());
         }
     }
     // Edge-triggered logging (not every frame): an avatar starting / stopping being
     // posed is the live signal that a keyframe motion decoded and drove the skeleton.
+    // A held pose outlives its motions, so an avatar is released only when it stops
+    // being rigged.
     for &agent in poses.keys() {
         if !playback.poses.contains_key(&agent) {
             debug!("animation: posing avatar {agent} skeleton");
@@ -1347,7 +1376,7 @@ pub(crate) fn drive_avatar_skeletons(
     }
     for &agent in playback.poses.keys() {
         if !poses.contains_key(&agent) {
-            debug!("animation: released avatar {agent} skeleton back to rest");
+            debug!("animation: released avatar {agent} skeleton (no longer rigged)");
         }
     }
     playback.poses = poses;
