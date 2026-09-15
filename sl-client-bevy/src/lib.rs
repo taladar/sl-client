@@ -1881,9 +1881,14 @@ fn apply_command(
         } => {
             // Second Life: re-parent via AIS3 (`PATCH /category/<id>`); OpenSim
             // (no cap) keeps the UDP `MoveInventoryFolder`.
-            let suffix = ais_category_url(*folder_id);
-            let body = build_ais_move_body(*parent_id);
-            if !route_ais3(caps, &suffix, Ais3Verb::Patch, Some(body)) {
+            // The cache moves first either way: the AIS3 reply names the moved
+            // folder but not the parent it left, and a refused move is not sent.
+            if has_ais3(caps) {
+                session.move_inventory_folders_local(&[(*folder_id, *parent_id)])?;
+                let suffix = ais_category_url(*folder_id);
+                let body = build_ais_move_body(*parent_id);
+                route_ais3(caps, &suffix, Ais3Verb::Patch, Some(body));
+            } else {
                 session.move_inventory_folder(*folder_id, *parent_id, now)?;
             }
         }
@@ -1891,6 +1896,9 @@ fn apply_command(
             // Second Life: delete each folder via AIS3 (`DELETE /category/<id>`);
             // OpenSim (no cap) keeps the UDP batch `RemoveInventoryFolder`.
             if has_ais3(caps) {
+                // Drop them from the cache optimistically (the AIS3 DELETE does
+                // not), as the UDP path does.
+                session.remove_inventory_folders_local(folder_ids);
                 for folder_id in folder_ids {
                     route_ais3(caps, &ais_category_url(*folder_id), Ais3Verb::Delete, None);
                 }
@@ -1958,14 +1966,17 @@ fn apply_command(
             // `{ parent_id }`) — but only a *pure* move: the AIS3 move body
             // carries no name, so a move that also renames stays on UDP rather
             // than silently dropping the rename. OpenSim (no cap) keeps UDP.
-            let routed = new_name.is_empty()
-                && route_ais3(
+            if new_name.is_empty() && has_ais3(caps) {
+                // The cache moves first, as the UDP path's does: a Delete (a move
+                // to the Trash) re-reads the folder the item left straight away.
+                session.move_inventory_items_local(&[(*item_id, *folder_id, String::new())]);
+                route_ais3(
                     caps,
                     &ais_item_url(*item_id),
                     Ais3Verb::Patch,
                     Some(build_ais_move_body(*folder_id)),
                 );
-            if !routed {
+            } else {
                 session.move_inventory_item(*item_id, *folder_id, new_name, now)?;
             }
         }
@@ -2004,8 +2015,17 @@ fn apply_command(
         Command::PurgeInventoryDescendents(folder_id) => {
             // Second Life: empty via AIS3 (`DELETE /category/<id>/children`);
             // OpenSim (no cap) keeps the UDP `PurgeInventoryDescendents`.
-            let suffix = ais_category_children_url(*folder_id);
-            if !route_ais3(caps, &suffix, Ais3Verb::Delete, None) {
+            // The cache empties first either way, as the UDP path's does, so the
+            // folder page re-read straight after shows it empty.
+            if has_ais3(caps) {
+                session.purge_inventory_descendents_local(*folder_id);
+                route_ais3(
+                    caps,
+                    &ais_category_children_url(*folder_id),
+                    Ais3Verb::Delete,
+                    None,
+                );
+            } else {
                 session.purge_inventory_descendents(*folder_id, now)?;
             }
         }

@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 314 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 12 |
-| done | 1161 |
+| bugs | 11 |
+| done | 1162 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1693** |
@@ -1167,7 +1167,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (12)
+## bugs (11)
 
 ### viewer
 
@@ -1179,8 +1179,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Flashes along a thin line near the horizon
 - [`viewer-hover-tooltip-202ms-frame-spike`](bugs/viewer-hover-tooltip-202ms-frame-spike.md)
   — update_hover_tooltip spikes to 202 ms on a single frame
-- [`viewer-inventory-link-drop-to-world-rezzes-nothing`](bugs/viewer-inventory-link-drop-to-world-rezzes-nothing.md)
-  — Dragging an inventory link onto the ground rezzes nothing
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
   Some worn mesh hair does not render (visible in Firestorm)
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
@@ -1197,7 +1195,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)
 
-## done (1161)
+## done (1162)
 
 ### protocol
 
@@ -1934,6 +1932,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-inventory-give-via-profile`](done/viewer-inventory-give-via-profile.md)
   — Give inventory by dropping onto a profile (blocked by
   `viewer-social-profiles` (done))
+- [`viewer-inventory-link-drop-to-world-rezzes-nothing`](done/viewer-inventory-link-drop-to-world-rezzes-nothing.md)
+  — Dragging an inventory link onto the ground rezzes nothing
 - [`viewer-inventory-long-names-wrap-overlap`](done/viewer-inventory-long-names-wrap-overlap.md)
   — Inventory rows with long names wrap to multiple lines and overlap
 - [`viewer-inventory-materials-not-shown`](done/viewer-inventory-materials-not-shown.md)

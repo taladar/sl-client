@@ -10916,6 +10916,50 @@ impl Session {
         stamp: bool,
         now: Instant,
     ) -> Result<(), Error> {
+        self.check_folder_moves(moves)?;
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let wire: Vec<(Uuid, Uuid)> = moves
+            .iter()
+            .map(|(folder_id, parent_id)| (folder_id.uuid(), parent_id.uuid()))
+            .collect();
+        circuit.send_move_inventory_folders(&wire, stamp, now)?;
+        for &(folder_id, parent_id) in moves {
+            self.inventory.reparent_folder(folder_id, parent_id);
+        }
+        Ok(())
+    }
+
+    /// Re-parents folders in the local inventory cache **without** any wire
+    /// message — the local half of a move whose server side is an AIS3
+    /// `PATCH /category/<id>` (Second Life). Checked exactly as
+    /// [`Self::move_inventory_folders`] checks, so a move that one would refuse
+    /// is refused here too, and the caller must not send it.
+    ///
+    /// Without it a Second Life move changed nothing locally until something
+    /// re-fetched both folders: the AIS3 reply names the moved folder but not
+    /// the parent it left, so the old parent kept listing it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidInventoryOperation`] if a target parent is not in
+    /// the held model, or a move would form a cycle; nothing is changed then.
+    pub fn move_inventory_folders_local(
+        &mut self,
+        moves: &[(InventoryFolderKey, InventoryFolderKey)],
+    ) -> Result<(), Error> {
+        self.check_folder_moves(moves)?;
+        for &(folder_id, parent_id) in moves {
+            self.inventory.reparent_folder(folder_id, parent_id);
+        }
+        Ok(())
+    }
+
+    /// The pre-send check of a batch of folder moves: every target parent is
+    /// held, and no move makes a folder its own ancestor.
+    fn check_folder_moves(
+        &self,
+        moves: &[(InventoryFolderKey, InventoryFolderKey)],
+    ) -> Result<(), Error> {
         for &(folder_id, parent_id) in moves {
             if !self.inventory.contains_folder(parent_id) {
                 return Err(Error::InvalidInventoryOperation(
@@ -10927,15 +10971,6 @@ impl Session {
                     "moving a folder into itself or a descendant would form a cycle",
                 ));
             }
-        }
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        let wire: Vec<(Uuid, Uuid)> = moves
-            .iter()
-            .map(|(folder_id, parent_id)| (folder_id.uuid(), parent_id.uuid()))
-            .collect();
-        circuit.send_move_inventory_folders(&wire, stamp, now)?;
-        for &(folder_id, parent_id) in moves {
-            self.inventory.reparent_folder(folder_id, parent_id);
         }
         Ok(())
     }
@@ -10955,10 +10990,19 @@ impl Session {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         let wire: Vec<Uuid> = folder_ids.iter().map(InventoryFolderKey::uuid).collect();
         circuit.send_remove_inventory_folders(&wire, now)?;
+        self.remove_inventory_folders_local(folder_ids);
+        Ok(())
+    }
+
+    /// Drop folders and their cached descendents from the local inventory cache
+    /// **without** any wire message — the local half of a deletion whose server
+    /// side is an AIS3 `DELETE /category/<id>` (Second Life), mirroring
+    /// [`Self::remove_inventory_folders`]. The AIS3 reply lists what it removed
+    /// but carries no folder payload, so nothing else takes them out.
+    pub fn remove_inventory_folders_local(&mut self, folder_ids: &[InventoryFolderKey]) {
         for folder_id in folder_ids {
             self.inventory.remove_folder(*folder_id);
         }
-        Ok(())
     }
 
     /// Creates a new inventory item via `CreateInventoryItem`, returning the
@@ -11225,10 +11269,26 @@ impl Session {
             })
             .collect();
         circuit.send_move_inventory_items(&wire, stamp, now)?;
+        self.move_inventory_items_local(moves);
+        Ok(())
+    }
+
+    /// Move items in the local inventory cache **without** any wire message —
+    /// the local half of a move whose server side is an AIS3
+    /// `PATCH /item/<id>` (Second Life), mirroring
+    /// [`Self::move_inventory_items`].
+    ///
+    /// Without it a Second Life Delete (a move to the Trash) left the item
+    /// listed where it was: the folder page the caller re-reads straight after
+    /// is built from this cache, and the reply, arriving later, re-files the
+    /// item but prompts no re-read of the folder it left.
+    pub fn move_inventory_items_local(
+        &mut self,
+        moves: &[(InventoryKey, InventoryFolderKey, String)],
+    ) {
         for (item_id, folder_id, new_name) in moves {
             self.inventory.move_item(*item_id, *folder_id, new_name);
         }
-        Ok(())
     }
 
     /// Copies the item `old_item_id` (owned by `old_agent_id`) into
@@ -11326,8 +11386,17 @@ impl Session {
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_purge_inventory_descendents(folder_id.uuid(), now)?;
-        self.inventory.purge_descendents(folder_id);
+        self.purge_inventory_descendents_local(folder_id);
         Ok(())
+    }
+
+    /// Drop a folder's cached descendents **without** any wire message — the
+    /// local half of an emptying whose server side is an AIS3
+    /// `DELETE /category/<id>/children` (Second Life), mirroring
+    /// [`Self::purge_inventory_descendents`]. Without it an emptied Trash on
+    /// Second Life kept listing everything it had held.
+    pub fn purge_inventory_descendents_local(&mut self, folder_id: InventoryFolderKey) {
+        self.inventory.purge_descendents(folder_id);
     }
 
     /// Deletes a mixed set of folders and items in one `RemoveInventoryObjects`,

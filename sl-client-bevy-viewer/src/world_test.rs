@@ -6081,7 +6081,10 @@ mod drag_drop_tests {
         app.world_mut()
             .write_message(SlEvent(SessionEvent::InventoryFolderPage {
                 folder: InventoryFolderKey::from(Uuid::from_u128(ROOT)),
-                folders: Vec::new().into(),
+                // A session's page lists every sub-folder it holds, the
+                // skeleton's included — and a complete page that left the
+                // shelf out would say it was removed.
+                folders: vec![folder(SHELF, Some(ROOT), SHELF_LABEL, FolderType::None)].into(),
                 items: vec![
                     object_item(BOX_ITEM, ROOT, BOX_LABEL, Permissions::ALL),
                     object_item(

@@ -724,6 +724,52 @@ impl InventoryModel {
         self.items.insert(folder, owned);
     }
 
+    /// Forget every sub-folder of `folder` that a **complete** page of it no
+    /// longer lists, with everything beneath it — its own sub-folders and every
+    /// item filed in any of them.
+    ///
+    /// [`merge_folders`](Self::merge_folders) only ever adds and re-parents, so
+    /// without this a folder the grid removed stayed in the mirror for the
+    /// session: Empty Trash left the Trash's sub-folders drawn, and an item
+    /// purged inside one still answered [`find_item`](Self::find_item), so a
+    /// link to it resolved to an object the grid no longer has.
+    ///
+    /// Only a complete page may prune — a partial one does not list the
+    /// children past its cursor. The page is the session's own listing, and the
+    /// session holds every folder this mirror was ever told about (the Library
+    /// skeleton included), so a child missing from it is gone rather than
+    /// merely unfetched.
+    pub fn prune_unlisted_children(&mut self, folder: InventoryFolderKey, listed: &[FolderInfo]) {
+        let listed: HashSet<InventoryFolderKey> =
+            listed.iter().map(|info| info.folder_id).collect();
+        let gone: Vec<InventoryFolderKey> = self
+            .children_of(folder)
+            .iter()
+            .copied()
+            .filter(|child| !listed.contains(child))
+            .collect();
+        if gone.is_empty() {
+            return;
+        }
+        if let Some(children) = self.child_folders.get_mut(&folder) {
+            children.retain(|child| listed.contains(child));
+        }
+        for child in gone {
+            for removed in self.subtree_folders(child) {
+                self.folders.remove(&removed);
+                self.child_folders.remove(&removed);
+                self.items.remove(&removed);
+                self.library_folders.remove(&removed);
+                self.requested.remove(&removed);
+                self.expanded.remove(&removed);
+                self.roots.retain(|root| *root != removed);
+                if self.cof == Some(removed) {
+                    self.cof = None;
+                }
+            }
+        }
+    }
+
     /// Record an item as recently received, newest first, deduped and bounded.
     fn push_recent(
         &mut self,
@@ -2406,7 +2452,7 @@ fn ingest_inventory(
                 folder,
                 folders,
                 items,
-                ..
+                prev,
             } => {
                 model.requested.insert(*folder);
                 // A page carries the folder's sub-folders too; merging them fills
@@ -2414,6 +2460,14 @@ fn ingest_inventory(
                 // not fully carry) as it is browsed.
                 let library = model.library_folders.contains(folder);
                 model.merge_folders(folders, library);
+                // A complete page is the whole child list, so a sub-folder it
+                // no longer names was removed (an emptied Trash, a purge). The
+                // event does not say where a page began, so this leans on
+                // `query_folder_page` being the viewer's only query, and it
+                // always starts at the first entry: no cursor means all of it.
+                if prev.is_none() {
+                    model.prune_unlisted_children(*folder, folders);
+                }
                 model.set_items(*folder, items);
             }
             SlSessionEvent::InventoryDescendents { folder_id, .. } => {
@@ -4025,6 +4079,51 @@ mod tests {
         // An item the model has never loaded is simply not ours to rebind.
         let stranger = sl_client_bevy::InventoryKey::from(sl_client_bevy::Uuid::from_u128(0xFFFF));
         assert_eq!(model.rebind_asset(stranger, saved), None);
+    }
+
+    /// **A complete page forgets the sub-folders it no longer lists**, with
+    /// their whole subtree and the items in it — what an emptied Trash looks
+    /// like to the mirror. Before, the purged folders stayed drawn and their
+    /// items stayed findable (so a link to one resolved to nothing real).
+    #[test]
+    fn a_complete_page_prunes_removed_sub_folders() {
+        let mut model = sample_model();
+        let key =
+            |id| sl_client_bevy::InventoryFolderKey::from(sl_client_bevy::Uuid::from_u128(id));
+        // A nested folder with an item under the doomed `Objects` folder.
+        model.merge_folders(&[folder(4, Some(3), "Boxes", FolderType::None)], false);
+        model.set_items(key(4), &[item(11, 4, "A box", InventoryType::Object)]);
+        let boxed = sl_client_bevy::InventoryKey::from(sl_client_bevy::Uuid::from_u128(11));
+        let shirt = sl_client_bevy::InventoryKey::from(sl_client_bevy::Uuid::from_u128(10));
+        assert!(model.find_item(boxed).is_some());
+
+        // The root's page now lists only `Clothing`.
+        model.prune_unlisted_children(
+            key(1),
+            &[folder(2, Some(1), "Clothing", FolderType::Clothing)],
+        );
+
+        assert_eq!(model.children_of(key(1)), &[key(2)]);
+        assert!(
+            model.folder_info(key(3)).is_none(),
+            "the removed folder is forgotten"
+        );
+        assert!(model.folder_info(key(4)).is_none(), "and so is its subtree");
+        assert!(
+            model.find_item(boxed).is_none(),
+            "an item filed beneath it is gone"
+        );
+        assert!(
+            model.find_item(shirt).is_some(),
+            "a listed folder keeps its items"
+        );
+
+        // A page that still lists everything removes nothing.
+        model.prune_unlisted_children(
+            key(1),
+            &[folder(2, Some(1), "Clothing", FolderType::Clothing)],
+        );
+        assert!(model.folder_info(key(2)).is_some());
     }
 
     /// The names of a row list, for concise assertions.

@@ -215,6 +215,18 @@ forms:
   item's real id, so `link_inventory_item` returns an `InventoryCallbackId` to
   correlate the confirming `Event::InventoryItemCreated`.
 
+On Second Life the runtimes route a move, a folder or item removal and an
+emptying (`MoveInventoryItem`, `MoveInventoryFolder`, `RemoveInventoryFolders`,
+`RemoveInventoryItems`, `PurgeInventoryDescendents`) over AIS3 and keep the UDP
+message for OpenSim. **Both paths change the held cache when the command is
+sent**: the UDP methods do it themselves, and the AIS3 branch calls their
+wire-free halves (`move_inventory_items_local`,
+`move_inventory_folders_local`, `remove_inventory_folders_local`,
+`remove_inventory_items_local`, `purge_inventory_descendents_local`). An AIS3
+reply names what it moved but never the folder it left, and carries no payload
+for what it removed, so a cache left for the reply to fix kept a deleted item
+listed where it was.
+
 When the simulator creates an item, it allocates the real id and confirms via
 `Event::InventoryItemCreated`. Changes the server makes (including ones it made
 on your behalf) arrive as `Event::InventoryBulkUpdate`.

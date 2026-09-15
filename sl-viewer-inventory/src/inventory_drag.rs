@@ -30,6 +30,19 @@
 //!    the world point under the pointer ([`Command::RezObjectFromInventory`]),
 //!    the reference's drag-rez.
 //!
+//! # Links
+//!
+//! Over the list a link is moved as **itself** — that is what reorganising
+//! links means. Everywhere past the list (steps 2 and 4, and the contents /
+//! notecard drops) a link acts for **what it points at**: a link to an object
+//! rezzes or wears that object, a folder link gives that folder, and so on
+//! (`resolve_drop_source`). This deliberately goes further than the
+//! reference, whose tree drags a link as `DAD_LINK`, a type with no in-world
+//! drop handler at all; sending the link's own id instead, as this path used
+//! to, names an item the grid cannot rez and is silently ignored. A link whose
+//! target is not in the mirror is refused with a [`LocalChatNotice`] rather
+//! than dropped without a word.
+//!
 //! # While dragging over the list
 //!
 //! The pointer near the viewport's top / bottom edge **auto-scrolls** the
@@ -43,9 +56,9 @@ use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use sl_client_bevy::{
-    AgentKey, Command, InventoryFolderKey, InventoryType, ItemInfo, ObjectKey, Permissions,
-    RestoreItem, RezObjectParams, ScopedObjectId, SlCommand, SlIdentity, TransactionId, Uuid,
-    Vector,
+    ASSET_CODE_LINK, ASSET_CODE_LINK_FOLDER, AgentKey, AssetType, Command, InventoryFolderKey,
+    InventoryKey, InventoryType, ItemInfo, ObjectKey, Permissions, RestoreItem, RezObjectParams,
+    ScopedObjectId, SlCommand, SlIdentity, TransactionId, Uuid, Vector,
 };
 
 use crate::coords::bevy_to_sl_vec;
@@ -58,6 +71,7 @@ use crate::ui::UiRoot;
 use crate::ui_font::UiFont;
 use crate::virtual_list::{VirtualList, VirtualRow};
 use crate::world_api::AvatarPickTarget;
+use crate::world_api::LocalChatNotice;
 use crate::world_api::ViewerCamera;
 use crate::world_api::pointer_over_blocking_ui;
 use crate::world_api::{DragPickActive, DragPickHit, DragWorldPick, WorldPhase};
@@ -127,6 +141,14 @@ struct ActiveDrag {
     /// the drag began inside it), each with whether it sits in the read-only
     /// Library (a Library drop becomes a copy).
     sources: Vec<(MenuTarget, bool)>,
+    /// The same rows as they act **outside** the list, links resolved to their
+    /// targets ([`resolve_drop_source`]) — resolved once here rather than per
+    /// frame, since the hover outline reads it every frame and a link costs a
+    /// scan of the mirror.
+    resolved: Vec<(MenuTarget, bool)>,
+    /// The names of the dragged links whose targets resolved to nothing, for
+    /// the refusal a drop outside the list posts.
+    broken_links: Vec<String>,
     /// The ghost entity following the pointer.
     ghost: Entity,
     /// The destination folder currently hovered, if any.
@@ -294,6 +316,92 @@ pub(crate) fn rez_object_command(item: &ItemInfo, ray_start: Vector, ray_end: Ve
     }
 }
 
+/// What a dragged row acts as once the drop lands **outside** the inventory list,
+/// with whether that row sits in the Library: a link resolves to its target (an
+/// item link to the item, a folder link to the folder), anything else to itself.
+///
+/// The Library flag is the *target*'s — it is the target that gets rezzed,
+/// given or copied, so it is the target's provenance that decides whether that
+/// is allowed.
+///
+/// # Errors
+///
+/// The link's name, when its target is not in the mirror (deleted, or in a
+/// folder not fetched yet), or is itself a link: the reference's
+/// `getLinkedItem()` refuses a link to a link too, and there is no item there
+/// to act on.
+pub(crate) fn resolve_drop_source(
+    source: &MenuTarget,
+    from_library: bool,
+    model: &InventoryModel,
+) -> Result<(MenuTarget, bool), String> {
+    let MenuTarget::Item(item) = source else {
+        return Ok((source.clone(), from_library));
+    };
+    match item.asset_type {
+        AssetType::Other(ASSET_CODE_LINK) => model
+            .find_item(InventoryKey::from(item.asset_id))
+            .filter(|target| !is_link(target))
+            .map(|target| {
+                (
+                    MenuTarget::Item(target.clone()),
+                    model.is_library(target.folder_id),
+                )
+            })
+            .ok_or_else(|| item.name.clone()),
+        AssetType::Other(ASSET_CODE_LINK_FOLDER) => model
+            .folder_info(InventoryFolderKey::from(item.asset_id))
+            .map(|folder| {
+                (
+                    MenuTarget::Folder(folder.clone()),
+                    model.is_library(folder.folder_id),
+                )
+            })
+            .ok_or_else(|| item.name.clone()),
+        _other => Ok((source.clone(), from_library)),
+    }
+}
+
+/// Whether an item is an inventory link, to an item or to a folder.
+const fn is_link(item: &ItemInfo) -> bool {
+    matches!(
+        item.asset_type,
+        AssetType::Other(ASSET_CODE_LINK | ASSET_CODE_LINK_FOLDER)
+    )
+}
+
+/// The drag's sources as they act outside the list ([`resolve_drop_source`]),
+/// and the names of the links among them that resolve to nothing.
+fn resolve_drop_sources(
+    sources: &[(MenuTarget, bool)],
+    model: &InventoryModel,
+) -> (Vec<(MenuTarget, bool)>, Vec<String>) {
+    let mut resolved = Vec::with_capacity(sources.len());
+    let mut broken = Vec::new();
+    for (source, from_library) in sources {
+        match resolve_drop_source(source, *from_library, model) {
+            Ok(target) => resolved.push(target),
+            Err(name) => broken.push(name),
+        }
+    }
+    (resolved, broken)
+}
+
+/// The notice for a dropped link that points at nothing the viewer holds.
+pub(crate) fn broken_link_notice(name: &str) -> String {
+    format!(
+        "Inventory: the link \u{201c}{name}\u{201d} points at an item that is not loaded or no \
+         longer exists, so there is nothing to drop."
+    )
+}
+
+/// Post one [`broken_link_notice`] per link a drop had to refuse.
+fn report_broken_links(broken: &[String], notices: &mut MessageWriter<LocalChatNotice>) {
+    for name in broken {
+        notices.write(LocalChatNotice::new(broken_link_notice(name)));
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Observers: drag start / end on the pooled rows.
 // ---------------------------------------------------------------------------
@@ -398,8 +506,11 @@ pub(crate) fn on_row_drag_start(
             Pickable::IGNORE,
         ))
         .id();
+    let (resolved, broken_links) = resolve_drop_sources(&sources, &model);
     state.active = Some(ActiveDrag {
         sources,
+        resolved,
+        broken_links,
         ghost,
         hover_folder: None,
         hover_since: time.elapsed_secs_f64(),
@@ -621,6 +732,7 @@ pub(crate) fn on_row_drag_end(
         MessageWriter<crate::world_api::ContentsMutated>,
         Commands,
         MessageWriter<crate::inventory::AddEmbeddedItem>,
+        MessageWriter<LocalChatNotice>,
     ),
 ) {
     let (view, model, identity, mut worn) = session;
@@ -629,8 +741,14 @@ pub(crate) fn on_row_drag_end(
     let (agent_targets, pick_targets, contents_targets, notecard_targets) = targets;
     let (camera, world_pick) = world;
     let (keyboard, scene, objects) = resolve;
-    let (mut actions, mut commands, mut contents_mutations, mut commands_bevy, mut add_embedded) =
-        outputs;
+    let (
+        mut actions,
+        mut commands,
+        mut contents_mutations,
+        mut commands_bevy,
+        mut add_embedded,
+        mut notices,
+    ) = outputs;
     let Some(ui) = ui else {
         return;
     };
@@ -682,6 +800,12 @@ pub(crate) fn on_row_drag_end(
         return;
     }
 
+    // Past the list a link acts for its target (see the module docs). The
+    // refusals for links that resolve to nothing are posted only by the
+    // branches below that act, so a drop swallowed by other UI, or one with
+    // nothing under it in the world, stays silent as it always has.
+    let (sources, broken) = (&active.resolved, &active.broken_links);
+
     // 2. An avatar-keyed UI node under the pointer: a people row, a name tag,
     //    or the profile floater (whose root carries the target — the hovered
     //    node is one of its children, so walk up).
@@ -690,7 +814,8 @@ pub(crate) fn on_row_drag_end(
         .flat_map(|hits| hits.keys())
         .find_map(|hovered| agent_target_at(*hovered, &agent_targets, &pick_targets, &child_of));
     if let Some(agent) = ui_agent {
-        drop_onto_agent(&active, agent, &identity, &model, &mut worn, &mut commands);
+        report_broken_links(broken, &mut notices);
+        drop_onto_agent(sources, agent, &identity, &model, &mut worn, &mut commands);
         return;
     }
 
@@ -703,8 +828,9 @@ pub(crate) fn on_row_drag_end(
         .flat_map(|hits| hits.keys())
         .find_map(|hovered| contents_target_at(*hovered, &contents_targets, &child_of));
     if let Some((scoped, object)) = contents_object {
+        report_broken_links(broken, &mut notices);
         let mut added = Vec::new();
-        for (source, _from_library) in &active.sources {
+        for (source, _from_library) in sources {
             if let MenuTarget::Item(item) = source
                 && let Some(command) = crate::world_api::contents_drop_command(item, scoped, object)
             {
@@ -738,7 +864,8 @@ pub(crate) fn on_row_drag_end(
         .flat_map(|hits| hits.keys())
         .find_map(|hovered| notecard_target_at(*hovered, &notecard_targets, &child_of));
     if let Some(editor) = over_editable_notecard {
-        for (source, _from_library) in &active.sources {
+        report_broken_links(broken, &mut notices);
+        for (source, _from_library) in sources {
             if let MenuTarget::Item(item) = source {
                 add_embedded.write(crate::inventory::AddEmbeddedItem {
                     item: item.clone(),
@@ -764,8 +891,9 @@ pub(crate) fn on_row_drag_end(
     let Some(world_hit) = world_pick.hit else {
         return;
     };
+    report_broken_links(broken, &mut notices);
     if let DragPickHit::Avatar(agent) = world_hit {
-        drop_onto_agent(&active, agent, &identity, &model, &mut worn, &mut commands);
+        drop_onto_agent(sources, agent, &identity, &model, &mut worn, &mut commands);
         return;
     }
     let (face_entity, world_point) = match world_hit {
@@ -791,7 +919,7 @@ pub(crate) fn on_row_drag_end(
             })
             .and_then(|scoped| objects.full_key(&scoped).map(|full| (scoped, full)));
         let mut added = Vec::new();
-        for (source, from_library) in &active.sources {
+        for (source, from_library) in sources {
             let MenuTarget::Item(item) = source else {
                 continue;
             };
@@ -1009,16 +1137,17 @@ fn notecard_target_at(
 }
 
 /// Issue the commands for a drop onto an avatar: wear it on **yourself**
-/// (object → attach, wearable → wear), give it to anyone else.
+/// (object → attach, wearable → wear), give it to anyone else. `sources` are
+/// the drag's rows as they act outside the list, links already resolved.
 fn drop_onto_agent(
-    active: &ActiveDrag,
+    sources: &[(MenuTarget, bool)],
     agent: AgentKey,
     identity: &SlIdentity,
     model: &InventoryModel,
     worn: &mut WornAttachments,
     commands: &mut MessageWriter<SlCommand>,
 ) {
-    for (source, from_library) in &active.sources {
+    for (source, from_library) in sources {
         if identity.agent_id == Some(agent) {
             if let MenuTarget::Item(item) = source
                 && !from_library
@@ -1075,6 +1204,9 @@ impl Plugin for InventoryDragPlugin {
     /// order themselves against.
     fn build(&self, app: &mut App) {
         app.init_resource::<InventoryDragState>()
+            // The broken-link refusal a drop posts; idempotent with the chat
+            // overlay's own registration, which renders it.
+            .add_message::<LocalChatNotice>()
             // Idempotent with the world tier's own init: whichever half of the
             // conversation is present alone still finds its side of it.
             .init_resource::<DragPickActive>()
@@ -1147,7 +1279,8 @@ fn drive_drag_object_hover(
         // always do; an object item only with Ctrl held (else it rezzes).
         let ctrl =
             keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight);
-        let drops_into_contents = active.sources.iter().any(|(source, _library)| {
+        // Outside the list a link drops as its target, so that is what decides.
+        let drops_into_contents = active.resolved.iter().any(|(source, _library)| {
             matches!(source, MenuTarget::Item(item)
                 if !matches!(item.inv_type, InventoryType::Object | InventoryType::Attachment)
                     || ctrl)
@@ -1221,17 +1354,19 @@ fn resolve_hover_entity(
 #[cfg(test)]
 mod tests {
     use super::{
-        AgentDropTarget, FolderDrop, agent_target_at, classify_folder_drop, give_command,
-        rez_object_command, row_index_at,
+        AgentDropTarget, FolderDrop, agent_target_at, broken_link_notice, classify_folder_drop,
+        give_command, resolve_drop_source, resolve_drop_sources, rez_object_command, row_index_at,
     };
+    use crate::inventory::InventoryModel;
     use crate::inventory_actions::MenuTarget;
     use crate::world_api::AvatarPickTarget;
     use bevy::ecs::system::SystemState;
     use bevy::prelude::{ChildOf, Query, World};
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{
-        AgentKey, AssetType, Command, FolderInfo, FolderState, FolderType, InventoryFolderKey,
-        InventoryKey, InventoryType, ItemInfo, Permissions, Permissions5, Uuid, Vector,
+        ASSET_CODE_LINK, ASSET_CODE_LINK_FOLDER, AgentKey, AssetType, Command, FolderInfo,
+        FolderState, FolderType, InventoryFolderKey, InventoryKey, InventoryType, ItemInfo,
+        Permissions, Permissions5, Uuid, Vector,
     };
 
     /// A minimal item with the given owner permission mask.
@@ -1419,5 +1554,165 @@ mod tests {
             agent_target_at(bare, &agent_targets, &pick_targets, &child_of),
             None
         );
+    }
+
+    /// A loaded folder of the agent's tree (or the Library's).
+    fn folder(id: u128, parent: Option<u128>, name: &str) -> FolderInfo {
+        FolderInfo {
+            folder_id: InventoryFolderKey::from(Uuid::from_u128(id)),
+            parent_id: parent.map(|parent| InventoryFolderKey::from(Uuid::from_u128(parent))),
+            name: name.to_owned(),
+            folder_type: FolderType::None,
+            version: 1,
+            state: FolderState::Loaded { version: 1 },
+        }
+    }
+
+    /// A link row named `name`, of the given link asset code, pointing at
+    /// `target` (an item id or a folder id), filed in folder `0xF1`.
+    fn link(id: u128, name: &str, code: i32, target: u128) -> ItemInfo {
+        let mut link = item(Permissions::COPY.bits());
+        link.item_id = InventoryKey::from(Uuid::from_u128(id));
+        link.folder_id = InventoryFolderKey::from(Uuid::from_u128(0xF1));
+        link.name = name.to_owned();
+        link.asset_id = Uuid::from_u128(target);
+        link.asset_type = AssetType::Other(code);
+        // A link carries its target's inventory type, which is exactly why the
+        // old object gate let it through to a rez naming the link.
+        link.inv_type = InventoryType::Object;
+        link
+    }
+
+    /// An agent tree holding the object `Box` (`0x10`, in `0xF0`) and a
+    /// `Links` folder (`0xF1`), plus a Library folder (`0xB0`) holding the
+    /// object `Crate` (`0x20`).
+    fn model_with_links(links: &[ItemInfo]) -> InventoryModel {
+        let mut model = InventoryModel::default();
+        model.merge_folders(
+            &[
+                folder(0xE0, None, "My Inventory"),
+                folder(0xF0, Some(0xE0), "Objects"),
+                folder(0xF1, Some(0xE0), "Links"),
+            ],
+            false,
+        );
+        model.merge_folders(&[folder(0xB0, None, "Library")], true);
+        model.set_items(
+            InventoryFolderKey::from(Uuid::from_u128(0xF0)),
+            &[item(Permissions::COPY.bits())],
+        );
+        let mut library_item = item(Permissions::COPY.bits());
+        library_item.item_id = InventoryKey::from(Uuid::from_u128(0x20));
+        library_item.folder_id = InventoryFolderKey::from(Uuid::from_u128(0xB0));
+        library_item.name = "Crate".to_owned();
+        model.set_items(
+            InventoryFolderKey::from(Uuid::from_u128(0xB0)),
+            &[library_item],
+        );
+        model.set_items(InventoryFolderKey::from(Uuid::from_u128(0xF1)), links);
+        model
+    }
+
+    /// **A link dropped outside the list acts for its target**: an item link
+    /// becomes the item it points at — so a rez names the object, not the link
+    /// the grid silently ignored — and a folder link becomes that folder.
+    #[test]
+    fn a_link_resolves_to_what_it_points_at() {
+        let item_link = link(0x30, "Box link", ASSET_CODE_LINK, 0x10);
+        let folder_link = link(0x31, "Objects link", ASSET_CODE_LINK_FOLDER, 0xF0);
+        let model = model_with_links(&[item_link.clone(), folder_link.clone()]);
+
+        let box_id = InventoryKey::from(Uuid::from_u128(0x10));
+        let resolved = resolve_drop_source(&MenuTarget::Item(item_link), false, &model);
+        assert!(
+            matches!(&resolved, Ok((MenuTarget::Item(target), false)) if target.item_id == box_id),
+            "an item link must resolve to its item, got {resolved:?}"
+        );
+        let Ok((MenuTarget::Item(target), _from_library)) = resolved else {
+            return;
+        };
+        let object_code = i8::try_from(AssetType::Object.to_code()).ok();
+        let rezzed = rez_object_command(&target, vec3(0.0, 0.0, 0.0), vec3(1.0, 1.0, 1.0));
+        assert!(
+            matches!(
+                &rezzed,
+                Command::RezObjectFromInventory { params }
+                    if params.item.item_id == box_id
+                        && Some(params.item.asset_type) == object_code
+            ),
+            "the rez must name the object, not the link: {rezzed:?}"
+        );
+
+        let objects = InventoryFolderKey::from(Uuid::from_u128(0xF0));
+        let resolved = resolve_drop_source(&MenuTarget::Item(folder_link), false, &model);
+        assert!(
+            matches!(&resolved, Ok((MenuTarget::Folder(target), false))
+                if target.folder_id == objects),
+            "a folder link must resolve to its folder, got {resolved:?}"
+        );
+    }
+
+    /// Anything that is not a link — an item or a folder — acts as itself, and
+    /// keeps the Library flag it was dragged with.
+    #[test]
+    fn a_non_link_resolves_to_itself() {
+        let model = model_with_links(&[]);
+        let plain = item(Permissions::COPY.bits());
+        let resolved = resolve_drop_source(&MenuTarget::Item(plain.clone()), true, &model);
+        assert!(
+            matches!(&resolved, Ok((MenuTarget::Item(same), true)) if *same == plain),
+            "an item must resolve to itself, got {resolved:?}"
+        );
+        let resolved = resolve_drop_source(
+            &MenuTarget::Folder(folder(0xF0, Some(0xE0), "Objects")),
+            false,
+            &model,
+        );
+        assert!(matches!(resolved, Ok((MenuTarget::Folder(_), false))));
+    }
+
+    /// The Library flag a resolved link carries is its **target**'s: a link in
+    /// the own tree to a Library object is not ours to rez.
+    #[test]
+    fn a_resolved_link_takes_its_targets_library_flag() {
+        let library_link = link(0x32, "Crate link", ASSET_CODE_LINK, 0x20);
+        let model = model_with_links(std::slice::from_ref(&library_link));
+        let resolved = resolve_drop_source(&MenuTarget::Item(library_link), false, &model);
+        assert!(
+            matches!(resolved, Ok((MenuTarget::Item(_), true))),
+            "got {resolved:?}"
+        );
+    }
+
+    /// **A link that points at nothing is refused, by name** — a missing target,
+    /// a missing folder, and a link to a link (which the reference's
+    /// `getLinkedItem()` refuses too) — and the resolved list keeps the rest.
+    #[test]
+    fn a_broken_link_is_refused_by_name() {
+        let good = link(0x30, "Box link", ASSET_CODE_LINK, 0x10);
+        let dangling = link(0x33, "Gone link", ASSET_CODE_LINK, 0xDEAD);
+        let dangling_folder = link(0x34, "Gone folder link", ASSET_CODE_LINK_FOLDER, 0xDEAD);
+        let chained = link(0x35, "Link to link", ASSET_CODE_LINK, 0x30);
+        let model = model_with_links(&[
+            good.clone(),
+            dangling.clone(),
+            dangling_folder.clone(),
+            chained.clone(),
+        ]);
+        let sources = [good, dangling, dangling_folder, chained]
+            .into_iter()
+            .map(|link| (MenuTarget::Item(link), false))
+            .collect::<Vec<_>>();
+        let (resolved, broken) = resolve_drop_sources(&sources, &model);
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(
+            broken,
+            vec![
+                "Gone link".to_owned(),
+                "Gone folder link".to_owned(),
+                "Link to link".to_owned(),
+            ]
+        );
+        assert!(broken_link_notice("Gone link").contains("\u{201c}Gone link\u{201d}"));
     }
 }

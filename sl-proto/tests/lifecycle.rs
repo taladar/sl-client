@@ -10860,6 +10860,95 @@ mod test {
         Ok(())
     }
 
+    /// The `_local` inventory mutations — the cache half of a Second Life AIS3
+    /// move, folder delete and emptying — change the cache exactly as their UDP
+    /// twins do, and **send nothing**. The AIS3 branch used to leave the cache
+    /// untouched, so on Second Life a Delete, an Empty Trash and a folder delete
+    /// all stayed listed: the folder page read straight afterwards is built from
+    /// this cache.
+    #[test]
+    fn b4_local_inventory_mutations_change_the_cache_and_send_nothing() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let root = 0xB0;
+        feed_descendents(
+            &mut session,
+            now,
+            root,
+            5,
+            vec![
+                desc_folder(0xB1, root, 14, "Trash"),
+                desc_folder(0xB2, root, -1, "Stuff"),
+                desc_folder(0xB3, root, -1, "Boxes"),
+            ],
+            vec![
+                desc_item(0xC1, root, 7, 7, 0, 0, "Note"),
+                desc_item(0xC2, root, 6, 6, 0, 0, "Cube"),
+            ],
+            9,
+        )?;
+        let folder = |id| InventoryFolderKey::from(uuid::Uuid::from_u128(id));
+        let names = |session: &Session, id| {
+            let (folders, items, _next) = session.inventory_folder_page(folder(id), None, 16);
+            (
+                folders.into_iter().map(|f| f.name).collect::<Vec<_>>(),
+                items.into_iter().map(|i| i.name).collect::<Vec<_>>(),
+            )
+        };
+
+        // A Delete is a move to the Trash, of an item and of a folder.
+        session.move_inventory_items_local(&[(
+            InventoryKey::from(uuid::Uuid::from_u128(0xC1)),
+            folder(0xB1),
+            String::new(),
+        )]);
+        session.move_inventory_folders_local(&[(folder(0xB2), folder(0xB1))])?;
+        assert_eq!(
+            names(&session, root),
+            (
+                vec!["Trash".to_owned(), "Boxes".to_owned()],
+                vec!["Cube".to_owned()]
+            )
+        );
+        assert_eq!(
+            names(&session, 0xB1),
+            (vec!["Stuff".to_owned()], vec!["Note".to_owned()])
+        );
+
+        // A move the UDP path refuses (the Trash into its own child) is refused
+        // here too, and changes nothing.
+        assert!(matches!(
+            session.move_inventory_folders_local(&[(folder(0xB1), folder(0xB2))]),
+            Err(sl_proto::Error::InvalidInventoryOperation(_))
+        ));
+        assert_eq!(
+            session
+                .inventory_folder(folder(0xB1))
+                .and_then(|f| f.parent_id),
+            Some(folder(root))
+        );
+
+        // Empty Trash drops everything beneath it.
+        session.purge_inventory_descendents_local(folder(0xB1));
+        assert_eq!(names(&session, 0xB1), (Vec::new(), Vec::new()));
+        assert!(session.inventory_folder(folder(0xB2)).is_none());
+
+        // A folder delete takes the folder out of its parent.
+        session.remove_inventory_folders_local(&[folder(0xB3)]);
+        assert_eq!(
+            names(&session, root),
+            (vec!["Trash".to_owned()], vec!["Cube".to_owned()])
+        );
+
+        assert!(
+            drain(&mut session)?.is_empty(),
+            "a local mutation sends nothing"
+        );
+        Ok(())
+    }
+
     /// The clobber-free helpers change exactly one attribute, reading the rest
     /// from the cache: `rename_inventory_folder` keeps the type/parent,
     /// `rename_inventory_item` keeps the asset/folder/permissions, and

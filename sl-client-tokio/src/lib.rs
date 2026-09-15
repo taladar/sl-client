@@ -1102,15 +1102,22 @@ impl Client {
                         }
                         Some(Command::MoveInventoryFolder { folder_id, parent_id }) => {
                             // Second Life routes through AIS3 (`PATCH /category/<id>`); OpenSim keeps UDP.
-                            let suffix = ais_category_url(folder_id);
-                            let body = build_ais_move_body(parent_id);
-                            if !route_ais3(&caps, &http, &caps_tx, &suffix, Ais3Verb::Patch, Some(body)) {
+                            // The cache moves first either way: the AIS3 reply names the moved folder
+                            // but not the parent it left, and a refused move is not sent.
+                            if has_ais3(&caps) {
+                                self.session.move_inventory_folders_local(&[(folder_id, parent_id)])?;
+                                let suffix = ais_category_url(folder_id);
+                                let body = build_ais_move_body(parent_id);
+                                route_ais3(&caps, &http, &caps_tx, &suffix, Ais3Verb::Patch, Some(body));
+                            } else {
                                 self.session.move_inventory_folder(folder_id, parent_id, Instant::now())?;
                             }
                         }
                         Some(Command::RemoveInventoryFolders(folder_ids)) => {
                             // Second Life deletes each folder via AIS3 (`DELETE /category/<id>`); OpenSim keeps the UDP batch.
                             if has_ais3(&caps) {
+                                // Drop them from the cache optimistically (the AIS3 DELETE does not).
+                                self.session.remove_inventory_folders_local(&folder_ids);
                                 for folder_id in &folder_ids {
                                     route_ais3(&caps, &http, &caps_tx, &ais_category_url(*folder_id), Ais3Verb::Delete, None);
                                 }
@@ -1150,9 +1157,11 @@ impl Client {
                             // Second Life re-parents via AIS3 (`PATCH /item/<id>`), but only a pure
                             // move: the AIS3 move body carries no name, so a move that also renames
                             // stays on UDP rather than dropping the rename. OpenSim keeps UDP.
-                            let routed = new_name.is_empty()
-                                && route_ais3(&caps, &http, &caps_tx, &ais_item_url(item_id), Ais3Verb::Patch, Some(build_ais_move_body(folder_id)));
-                            if !routed {
+                            if new_name.is_empty() && has_ais3(&caps) {
+                                // The cache moves first, as the UDP path's does.
+                                self.session.move_inventory_items_local(&[(item_id, folder_id, String::new())]);
+                                route_ais3(&caps, &http, &caps_tx, &ais_item_url(item_id), Ais3Verb::Patch, Some(build_ais_move_body(folder_id)));
+                            } else {
                                 self.session.move_inventory_item(item_id, folder_id, &new_name, Instant::now())?;
                             }
                         }
@@ -1177,8 +1186,11 @@ impl Client {
                         }
                         Some(Command::PurgeInventoryDescendents(folder_id)) => {
                             // Second Life empties via AIS3 (`DELETE /category/<id>/children`); OpenSim keeps UDP.
-                            let suffix = ais_category_children_url(folder_id);
-                            if !route_ais3(&caps, &http, &caps_tx, &suffix, Ais3Verb::Delete, None) {
+                            // The cache empties first either way, as the UDP path's does.
+                            if has_ais3(&caps) {
+                                self.session.purge_inventory_descendents_local(folder_id);
+                                route_ais3(&caps, &http, &caps_tx, &ais_category_children_url(folder_id), Ais3Verb::Delete, None);
+                            } else {
                                 self.session.purge_inventory_descendents(folder_id, Instant::now())?;
                             }
                         }
