@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 314 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 22 |
-| done | 1145 |
+| bugs | 21 |
+| done | 1146 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1686** |
@@ -1165,7 +1165,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (22)
+## bugs (21)
 
 ### viewer
 
@@ -1173,8 +1173,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Animesh intermittently fails to render (timing race, not deterministic)
 - [`viewer-audit-cef-browser-settings-hardening`](bugs/viewer-audit-cef-browser-settings-hardening.md)
   — An in-world media page runs on CEF's default browser settings
-- [`viewer-audit-parcel-audio-autoplay`](bugs/viewer-audit-parcel-audio-autoplay.md)
-  — A transient empty parcel resets the user's stop decision and re-autoplays
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
   — Mesh-head brow spikes forward from face-bone shape deformation
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
@@ -1216,7 +1214,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)
 
-## done (1145)
+## done (1146)
 
 ### protocol
 
@@ -1538,6 +1536,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-parcel-access-list-accumulate`](done/viewer-audit-parcel-access-list-accumulate.md)
   — Editing a multi-packet parcel ban list unbans everyone not in the last
   packet
+- [`viewer-audit-parcel-audio-autoplay`](done/viewer-audit-parcel-audio-autoplay.md)
+  — A transient empty parcel resets the user's stop decision and re-autoplays
 - [`viewer-audit-parcel-borders-retessellation`](done/viewer-audit-parcel-borders-retessellation.md)
   — A region with parcels but no terrain re-tessellates its overlay every frame
 - [`viewer-audit-particles-dt-and-cloud-leak`](done/viewer-audit-particles-dt-and-cloud-leak.md)
