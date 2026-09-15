@@ -31,8 +31,8 @@ use cef::{
     ImplDisplayHandler, ImplFrame, ImplLifeSpanHandler, ImplLoadHandler, ImplRenderHandler,
     KeyEvent, KeyEventType, LifeSpanHandler, LoadHandler, LogSeverity, MouseButtonType, MouseEvent,
     PaintElementType, PopupFeatures, Rect, RenderHandler, RequestContext, RequestContextSettings,
-    ScreenInfo, Settings, WindowInfo, WindowOpenDisposition, WrapApp, WrapAudioHandler, WrapClient,
-    WrapDisplayHandler, WrapLifeSpanHandler, WrapLoadHandler, WrapRenderHandler,
+    ScreenInfo, Settings, State, WindowInfo, WindowOpenDisposition, WrapApp, WrapAudioHandler,
+    WrapClient, WrapDisplayHandler, WrapLifeSpanHandler, WrapLoadHandler, WrapRenderHandler,
     browser_host_create_browser_sync, cookie_manager_get_global_manager,
     request_context_create_context, wrap_app, wrap_audio_handler, wrap_client,
     wrap_display_handler, wrap_life_span_handler, wrap_load_handler, wrap_render_handler,
@@ -40,7 +40,7 @@ use cef::{
 
 use crate::{
     AudioSink, BackendConfig, CursorKind, FrameView, KeyInput, MediaBackend, MediaError,
-    MediaSurface, Modifiers, MouseButton, SharedCookie, SurfaceConfig, SurfaceStatus,
+    MediaSurface, Modifiers, MouseButton, SharedCookie, SurfaceConfig, SurfaceStatus, SurfaceTrust,
     ValidatedMediaUrl,
 };
 
@@ -524,6 +524,63 @@ fn path_string(path: &Path) -> CefString {
     CefString::from(path.to_string_lossy().as_ref())
 }
 
+/// The per-surface capability set for `trust`, painting at `max_fps`.
+///
+/// A trusted panel (the search tab, a profile page, the web floater) and an
+/// in-world prim face are the same kind of offscreen browser, so they used to
+/// be created with the same settings — which meant whatever Chromium's
+/// defaults happen to be, for a page whose URL any object owner writes.
+/// [`crate::ValidatedMediaUrl`] already decides *what* an in-world page may
+/// name; this decides what it may *do* once loaded.
+///
+/// The model is the reference viewer's `media_plugin_cef`, which likewise
+/// leaves JavaScript, images, remote fonts and WebGL on for media (in-world
+/// pages routinely need all four) and spends its hardening on the capabilities
+/// that reach *out of* the page:
+///
+/// - **`javascript_close_windows`** — a page may not close the surface the
+///   viewer owns. The embedder decides when a media face or panel goes away.
+/// - **`javascript_access_clipboard`** / **`javascript_dom_paste`** — the
+///   user's clipboard is viewer state; a parcel's page must not read what is
+///   in it or push into it. This is the sharpest of the set: a clipboard read
+///   leaks whatever the user last copied — a password, a chat line — to the
+///   object owner's server on the next fetch.
+/// - **`local_storage`** / **`databases_deprecated`** — an in-world page gets
+///   a fresh in-memory request context per surface anyway (see
+///   [`SurfaceTrust::is_isolated`]), so storage buys it nothing but a place to
+///   accumulate state the user cannot see or clear.
+///
+/// Everything a trusted panel needs — a persisted login in `local_storage`, a
+/// copy button in the search results — stays on for [`SurfaceTrust::Viewer`],
+/// and those surfaces are stated explicitly rather than left at
+/// `State::DEFAULT` so the contrast is in the source rather than in Chromium's
+/// build flags.
+fn browser_settings(trust: SurfaceTrust, max_fps: u8) -> BrowserSettings {
+    let trusted_only = if trust.is_isolated() {
+        State::DISABLED
+    } else {
+        State::ENABLED
+    };
+    BrowserSettings {
+        windowless_frame_rate: i32::from(max_fps.clamp(1, 60)),
+        background_color: 0xFFFF_FFFF,
+        // On for both: an in-world page that cannot script, load images or
+        // use WebGL is not media any more, and the reference viewer keeps all
+        // of these for media too.
+        javascript: State::ENABLED,
+        image_loading: State::ENABLED,
+        remote_fonts: State::ENABLED,
+        webgl: State::ENABLED,
+        // Trusted panels only.
+        javascript_close_windows: trusted_only,
+        javascript_access_clipboard: trusted_only,
+        javascript_dom_paste: trusted_only,
+        local_storage: trusted_only,
+        databases_deprecated: trusted_only,
+        ..BrowserSettings::default()
+    }
+}
+
 /// One offscreen CEF browser surface (see [`MediaSurface`]).
 pub struct CefMediaSurface {
     /// State shared with the CEF handler callbacks.
@@ -917,12 +974,8 @@ impl MediaBackend for CefMediaBackend {
             windowless_rendering_enabled: 1,
             ..WindowInfo::default()
         };
-        let browser_settings = BrowserSettings {
-            windowless_frame_rate: i32::from(config.max_fps.clamp(1, 60)),
-            background_color: 0xFFFF_FFFF,
-            ..BrowserSettings::default()
-        };
-        let mut request_context: Option<RequestContext> = if config.isolated {
+        let browser_settings = browser_settings(config.trust, config.max_fps);
+        let mut request_context: Option<RequestContext> = if config.trust.is_isolated() {
             request_context_create_context(Some(&RequestContextSettings::default()), None)
         } else {
             None
@@ -1048,5 +1101,72 @@ impl MediaBackend for CefMediaBackend {
 impl Drop for CefMediaBackend {
     fn drop(&mut self) {
         self.shutdown();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use cef::State;
+    use pretty_assertions::assert_eq;
+
+    use super::browser_settings;
+    use crate::SurfaceTrust;
+
+    /// An in-world page reaches nothing outside itself: it cannot close the
+    /// surface, touch the clipboard, or keep storage between navigations.
+    #[test]
+    fn in_world_surfaces_lose_the_reaching_out_capabilities() {
+        let settings = browser_settings(SurfaceTrust::InWorld, 15);
+        assert_eq!(settings.javascript_close_windows, State::DISABLED);
+        assert_eq!(settings.javascript_access_clipboard, State::DISABLED);
+        assert_eq!(settings.javascript_dom_paste, State::DISABLED);
+        assert_eq!(settings.local_storage, State::DISABLED);
+        assert_eq!(settings.databases_deprecated, State::DISABLED);
+    }
+
+    /// …but it is still a usable media page: script, images, fonts and WebGL
+    /// stay on, as they do in the reference viewer's media plugin.
+    #[test]
+    fn in_world_surfaces_keep_what_media_needs() {
+        let settings = browser_settings(SurfaceTrust::InWorld, 15);
+        assert_eq!(settings.javascript, State::ENABLED);
+        assert_eq!(settings.image_loading, State::ENABLED);
+        assert_eq!(settings.remote_fonts, State::ENABLED);
+        assert_eq!(settings.webgl, State::ENABLED);
+    }
+
+    /// A trusted panel keeps every capability — a persisted login needs
+    /// `local_storage`, a copy button needs the clipboard.
+    #[test]
+    fn viewer_surfaces_keep_every_capability() {
+        let settings = browser_settings(SurfaceTrust::Viewer, 30);
+        assert_eq!(settings.javascript_close_windows, State::ENABLED);
+        assert_eq!(settings.javascript_access_clipboard, State::ENABLED);
+        assert_eq!(settings.javascript_dom_paste, State::ENABLED);
+        assert_eq!(settings.local_storage, State::ENABLED);
+        assert_eq!(settings.databases_deprecated, State::ENABLED);
+    }
+
+    /// Trust decides capabilities and nothing else: the paint rate and the
+    /// opaque white background are the same either way, and the rate is
+    /// clamped into CEF's 1–60 range.
+    #[test]
+    fn trust_does_not_disturb_the_paint_settings() {
+        for trust in [SurfaceTrust::Viewer, SurfaceTrust::InWorld] {
+            let settings = browser_settings(trust, 15);
+            assert_eq!(settings.windowless_frame_rate, 15);
+            assert_eq!(settings.background_color, 0xFFFF_FFFF);
+            assert_eq!(browser_settings(trust, 0).windowless_frame_rate, 1);
+            assert_eq!(browser_settings(trust, 240).windowless_frame_rate, 60);
+        }
+    }
+
+    /// The trust value the config carries is the isolation decision too — an
+    /// in-world surface gets its own request context, a viewer panel shares
+    /// the one the grid's web-session cookie lives in.
+    #[test]
+    fn only_in_world_surfaces_are_isolated() {
+        assert!(SurfaceTrust::InWorld.is_isolated());
+        assert!(!SurfaceTrust::Viewer.is_isolated());
     }
 }

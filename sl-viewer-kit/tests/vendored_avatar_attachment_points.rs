@@ -82,4 +82,29 @@ mod test {
         }
         Ok(())
     }
+
+    /// The body points an object worn on stays drawn in mouselook, pinned to the
+    /// vendored `avatar_lad.xml`: every point but the head ones. The own-avatar
+    /// first-person view hides what is worn on the rest, so a re-copied
+    /// `character/` directory that lost the attribute would put a worn hat or
+    /// mesh head back in front of the camera — the parser reads a missing flag
+    /// as `false`, which would hide everything instead.
+    #[test]
+    fn only_the_head_points_are_hidden_in_first_person() -> Result<(), TestError> {
+        let library = AvatarAssetLibrary::load(&character_dir())?;
+        let hidden: BTreeSet<u8> = library
+            .attachment_points()
+            .into_iter()
+            .filter(|(_point_id, info)| !info.visible_in_first_person)
+            .map(|(point_id, _info)| point_id)
+            .collect();
+        // Skull, Mouth, Chin, Left / Right Ear, Left / Right Eyeball, Nose, and
+        // the Bento face points Jaw, Alt Left / Right Ear, Alt Left / Right Eye
+        // and Tongue.
+        let expected: BTreeSet<u8> = [2, 11, 12, 13, 14, 15, 16, 17, 47, 48, 49, 50, 51, 52]
+            .into_iter()
+            .collect();
+        assert_eq!(hidden, expected);
+        Ok(())
+    }
 }

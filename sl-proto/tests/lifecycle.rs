@@ -13649,18 +13649,35 @@ mod test {
                     count: 3,
                     online_status: false,
                 },
+                // A simulator's placeholder row: nobody's objects.
+                ParcelObjectOwnersReplyDataBlock {
+                    owner_id: uuid::Uuid::nil(),
+                    is_group_owned: false,
+                    count: 0,
+                    online_status: false,
+                },
             ],
         });
         session.handle_datagram(sim_addr(), &server_message(&reply, 9, true)?, now)?;
 
-        let owners = drain_events(&mut session)
+        let (circuit, part, owners) = drain_events(&mut session)
             .into_iter()
             .find_map(|e| match e {
-                Event::ParcelObjectOwners { owners } => Some(owners),
+                Event::ParcelObjectOwners {
+                    circuit,
+                    part,
+                    owners,
+                } => Some((circuit, part, owners)),
                 _ => None,
             })
             .ok_or("expected a ParcelObjectOwners event")?;
-        assert_eq!(owners.len(), 2);
+        // The reply names no parcel: the circuit it came in on is what says
+        // which question it answers, and a packet never claims to be the whole
+        // tally.
+        assert_eq!(Some(circuit), session.root_circuit_id());
+        assert_eq!(part, sl_proto::ParcelObjectOwnersPart::Packet);
+        assert_eq!(owners.len(), 2, "the nil placeholder row is not an owner");
+        assert!(owners.iter().all(|owner| owner.most_recent.is_none()));
         let first = owners.first().ok_or("expected a first owner")?;
         assert_eq!(
             first.owner,
@@ -13673,6 +13690,122 @@ mod test {
             second.owner,
             sl_proto::OwnerKey::Group(sl_proto::GroupKey::from(uuid::Uuid::from_u128(0x22)))
         );
+        Ok(())
+    }
+
+    /// **The event-queue form**, which is how a region with a queue answers
+    /// (`ParcelObjectOwnersReply` is `UDPDeprecated`). It is the whole tally in
+    /// one document, carries each owner's most recent rez time in a positional
+    /// `DataExtended` array — a big-endian binary, as a `U32` travels in LLSD —
+    /// and rides the root circuit.
+    #[test]
+    fn parcel_object_owners_caps_event_surfaces_the_whole_tally() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let row = |owner: u128, group: bool, count: i32| {
+            Llsd::Map(
+                [
+                    (
+                        "OwnerID".to_owned(),
+                        Llsd::Uuid(uuid::Uuid::from_u128(owner)),
+                    ),
+                    ("IsGroupOwned".to_owned(), Llsd::Boolean(group)),
+                    ("Count".to_owned(), Llsd::Integer(count)),
+                    ("OnlineStatus".to_owned(), Llsd::Boolean(false)),
+                ]
+                .into_iter()
+                .collect(),
+            )
+        };
+        let stamp = |bytes: [u8; 4]| {
+            Llsd::Map(
+                [("TimeStamp".to_owned(), Llsd::Binary(bytes.to_vec()))]
+                    .into_iter()
+                    .collect(),
+            )
+        };
+        let body = Llsd::Map(
+            [
+                (
+                    "Data".to_owned(),
+                    Llsd::Array(vec![
+                        row(0x21, false, 12),
+                        row(0, false, 0),
+                        row(0x22, true, 3),
+                    ]),
+                ),
+                (
+                    "DataExtended".to_owned(),
+                    Llsd::Array(vec![
+                        // 1_700_000_000, big-endian.
+                        stamp([0x65, 0x53, 0xF1, 0x00]),
+                        stamp([0; 4]),
+                        // An unknown time is a zero, not a date in 1970.
+                        stamp([0; 4]),
+                    ]),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        session.handle_caps_event("ParcelObjectOwnersReply", &body, now)?;
+
+        let (circuit, part, owners) = drain_events(&mut session)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::ParcelObjectOwners {
+                    circuit,
+                    part,
+                    owners,
+                } => Some((circuit, part, owners)),
+                _ => None,
+            })
+            .ok_or("expected a ParcelObjectOwners event")?;
+        assert_eq!(Some(circuit), session.root_circuit_id());
+        assert_eq!(part, sl_proto::ParcelObjectOwnersPart::Complete);
+        let summary: Vec<(sl_proto::OwnerKey, i32, Option<u32>)> = owners
+            .iter()
+            .map(|owner| (owner.owner, owner.count, owner.most_recent))
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                (
+                    sl_proto::OwnerKey::Agent(sl_proto::AgentKey::from(uuid::Uuid::from_u128(
+                        0x21
+                    ))),
+                    12,
+                    Some(1_700_000_000),
+                ),
+                // The nil row is dropped, and the extended entries stay paired
+                // with the rows they sat beside.
+                (
+                    sl_proto::OwnerKey::Group(sl_proto::GroupKey::from(uuid::Uuid::from_u128(
+                        0x22
+                    ))),
+                    3,
+                    None,
+                ),
+            ]
+        );
+
+        // A tally of nobody has no `Data` array at all, and is still an answer.
+        session.handle_caps_event(
+            "ParcelObjectOwnersReply",
+            &Llsd::Map(std::collections::HashMap::new()),
+            now,
+        )?;
+        let empty = drain_events(&mut session)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::ParcelObjectOwners { owners, .. } => Some(owners),
+                _ => None,
+            })
+            .ok_or("an empty tally was not surfaced as a tally")?;
+        assert!(empty.is_empty());
         Ok(())
     }
 

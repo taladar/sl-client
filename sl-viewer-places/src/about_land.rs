@@ -66,9 +66,9 @@ use sl_client_bevy::{
     AgentKey, Asset, AssetKey, AssetType, CircuitId, Command, EstateCovenant, LandArea,
     LindenAmount, Maturity, OwnerKey, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
     ParcelCategory, ParcelFlags, ParcelInfo, ParcelMediaUpdateInfo, ParcelObjectOwner,
-    ParcelUpdate, ProductType, RegionCoordinates, RegionFlags, RegionLocalParcelId, ScopedParcelId,
-    SlAgentParcel, SlCommand, SlCurrentRegion, SlEvent, SlIdentity, SlParcel, SlRegionIdentity,
-    SlSessionEvent, TextureKey, Uuid,
+    ParcelObjectOwnersPart, ParcelUpdate, ProductType, RegionCoordinates, RegionFlags,
+    RegionLocalParcelId, ScopedParcelId, SlAgentParcel, SlCommand, SlCurrentRegion, SlEvent,
+    SlIdentity, SlParcel, SlRegionIdentity, SlSessionEvent, TextureKey, Uuid,
 };
 
 use crate::edit_fields::{FieldSeed, seed_one_field, set_combo};
@@ -156,7 +156,7 @@ const PICK_BAN: &str = "about-land-ban";
 /// `OpenGroupPicker::field`).
 const PICK_GROUP: &str = "about-land-group";
 
-/// The object-owners table: type, name, object count.
+/// The object-owners table: type, name, object count, most recent rez.
 const OWNERS_TABLE: TableSpec = TableSpec {
     element: "about-land-owners",
     selection: TableSelectionMode::None,
@@ -183,6 +183,14 @@ const OWNERS_TABLE: TableSpec = TableSpec {
             kind: TableColumnKind::Text,
             width: TableColumnWidth::Fixed { default: 60.0 },
             align: TableAlign::End,
+            sortable: false,
+        },
+        TableColumn {
+            header_key: "about-land-owners-most-recent",
+            token: "most-recent",
+            kind: TableColumnKind::Text,
+            width: TableColumnWidth::Fixed { default: 115.0 },
+            align: TableAlign::Start,
             sortable: false,
         },
     ],
@@ -311,8 +319,14 @@ struct AboutLandState {
     covenant_text: Option<String>,
     /// The covenant notecard asset id awaited.
     covenant_pending: Option<Uuid>,
-    /// The per-owner object tallies.
+    /// The per-owner object tallies — accumulated, since a tally answered by
+    /// packet may arrive in several.
     owners: Vec<ParcelObjectOwner>,
+    /// Where the tally request stands.
+    tally: TallyStatus,
+    /// The status line last written, as `(status, owners listed)` — so the
+    /// line is rewritten only when what it says changes.
+    shown_tally: Option<(TallyStatus, bool)>,
     /// The parcel's allow list.
     access_allow: Vec<ParcelAccessEntry>,
     /// The parcel's ban list.
@@ -370,21 +384,38 @@ impl LandSequence {
 /// window's request goes out, in seconds.
 const OWNER_TALLY_TIMEOUT_SECONDS: f64 = 8.0;
 
-/// The windows waiting for an object-owner tally, oldest first.
+/// The windows waiting for an object-owner tally, oldest first, and the one
+/// question outstanding on each circuit.
 ///
 /// `ParcelObjectOwnersReply` carries **nothing but the owners** — not the
-/// parcel, not a sequence id (see the wire template) — so a reply cannot say
-/// whose question it answers, and two windows asking at once would each take
-/// the other's tally as their own. Only one request is outstanding at a time;
-/// every reply while it is belongs to the window that asked, which is also how
-/// a tally split over several packets stays whole. Filed as
+/// parcel, not a sequence id (see the wire template) — so the only thing that
+/// says whose question a reply answers is the circuit it arrived on. One request
+/// is outstanding per circuit; every reply on that circuit while it is belongs
+/// to the window that asked. Two windows on parcels of one region therefore
+/// still take turns, which the Objects tab says rather than showing an empty
+/// table (`TallyStatus::Waiting`). Filed as
 /// `viewer-parcel-object-owners-uncorrelated`.
+///
+/// A turn ends when the reply says it is whole (the event-queue form, one
+/// document), when the window closes, or at the deadline. A packet reply cannot
+/// end it early: a simulator may split a long tally over several packets and
+/// mark none of them the last, and a lost one is resent seconds later — ending
+/// the turn on a quiet gap would hand that packet to the next window.
 #[derive(Resource, Debug, Default)]
 struct OwnerTallyQueue {
     /// The windows still to ask for, with the parcel each is about.
     waiting: std::collections::VecDeque<(Entity, ScopedParcelId)>,
-    /// The window whose request is outstanding, and when it gives up.
-    asking: Option<(Entity, f64)>,
+    /// The question outstanding on each circuit.
+    asking: std::collections::HashMap<CircuitId, AskingTally>,
+}
+
+/// The object-owner question outstanding on one circuit.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct AskingTally {
+    /// The window that asked, and so owns every reply on the circuit.
+    window: Entity,
+    /// When the turn ends even if the reply never said it was whole.
+    deadline: f64,
 }
 
 impl OwnerTallyQueue {
@@ -395,17 +426,56 @@ impl OwnerTallyQueue {
         self.waiting.push_back((window, parcel));
     }
 
-    /// Whether `window` owns the tally replies arriving now.
-    fn owns_reply(&self, window: Entity) -> bool {
+    /// Whether `window` owns the tally replies arriving on `circuit` now.
+    fn owns_reply(&self, window: Entity, circuit: CircuitId) -> bool {
         self.asking
-            .is_some_and(|(asking, _deadline)| asking == window)
+            .get(&circuit)
+            .is_some_and(|asking| asking.window == window)
+    }
+
+    /// End the turn on `circuit`: its reply said it was whole.
+    fn finish(&mut self, circuit: CircuitId) {
+        self.asking.remove(&circuit);
     }
 
     /// Forget `window` — it closed, or its subject changed.
     fn forget(&mut self, window: Entity) {
         self.waiting.retain(|(waiting, _parcel)| *waiting != window);
-        if self.owns_reply(window) {
-            self.asking = None;
+        self.asking
+            .retain(|_circuit, asking| asking.window != window);
+    }
+}
+
+/// Where one window's object-owner tally stands — what the Objects tab says
+/// beside the owners table, so a tally that has not arrived never reads as a
+/// parcel with no objects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum TallyStatus {
+    /// Nothing asked yet: the window's parcel has not resolved.
+    #[default]
+    NotAsked,
+    /// Queued behind another request on the same region, whose reply could not
+    /// be told apart from this one's.
+    Waiting,
+    /// Asked, and nothing back yet.
+    Searching,
+    /// The tally (or the first part of it) arrived.
+    Answered,
+    /// The turn ran out with no reply — the region refused or ignored it.
+    Unanswered,
+}
+
+impl TallyStatus {
+    /// The status line's Fluent key, or `None` for no line: nothing asked, or a
+    /// tally the table itself shows.
+    const fn message_key(self, owners_listed: bool) -> Option<&'static str> {
+        match self {
+            Self::NotAsked => None,
+            Self::Waiting => Some("about-land-owners-waiting"),
+            Self::Searching => Some("about-land-owners-searching"),
+            Self::Answered if owners_listed => None,
+            Self::Answered => Some("about-land-owners-empty"),
+            Self::Unanswered => Some("about-land-owners-unanswered"),
         }
     }
 }
@@ -424,6 +494,7 @@ impl AboutLandState {
         self.covenant_text = None;
         self.covenant_pending = None;
         self.owners = Vec::new();
+        self.tally = TallyStatus::NotAsked;
         self.clear_access_lists();
         self.draft = ParcelUpdate::default();
         self.seeded = None;
@@ -598,6 +669,9 @@ struct OwnerRowData {
     name: String,
     /// The object count.
     count: String,
+    /// When the owner's most recent object here was rezzed — empty where the
+    /// grid did not say (a reply by packet never does).
+    most_recent: String,
 }
 
 /// The object-owners table view (rebuilt when the tally or names change), for
@@ -723,6 +797,8 @@ struct ObjectHandles {
     owners_viewport: Option<Entity>,
     /// The object-owners table root.
     owners_table: Option<Entity>,
+    /// The tally status line beside the Refresh button.
+    owners_status: Option<Entity>,
 }
 
 /// The retained handles of the Options tab.
@@ -989,6 +1065,7 @@ impl Plugin for AboutLandPlugin {
                 (
                     ingest_about_land_events,
                     drive_owner_tallies,
+                    update_owner_tally_status,
                     refresh_on_names,
                     seed_edit_fields,
                     update_control_enable,
@@ -1241,6 +1318,7 @@ fn build_objects_tab(commands: &mut Commands, panel: Entity) -> ObjectHandles {
         3,
         false,
     );
+    handles.owners_status = Some(spawn_disabled_value(commands, header));
     let table = spawn_bounded_table(commands, panel, &OWNERS_TABLE);
     handles.owners_viewport = Some(table.viewport);
     handles.owners_table = Some(table.root);
@@ -1809,9 +1887,10 @@ fn request_tab_data(
 ) {
     state.clear_access_lists();
     // The object-owner tally is asked for through the queue: its reply names no
-    // parcel, so only one window may have one outstanding
+    // parcel, so only one window per region may have one outstanding
     // (`OwnerTallyQueue`).
     tallies.ask(window, scoped);
+    state.tally = TallyStatus::Waiting;
     commands.write(SlCommand(Command::RequestParcelDwell { local_id: scoped }));
     commands.write(SlCommand(Command::RequestParcelAccessList {
         local_id: scoped,
@@ -1864,6 +1943,7 @@ fn ingest_about_land_events(
     mut tallies: ResMut<OwnerTallyQueue>,
     identity: Res<SlIdentity>,
     agent_parcel: Res<SlAgentParcel>,
+    groups: Res<GroupsModel>,
     mut closes: MessageWriter<FloaterCommand>,
     mut commands: MessageWriter<SlCommand>,
 ) {
@@ -1934,12 +2014,23 @@ fn ingest_about_land_events(
                     dirty.general_values = true;
                 }
                 // The tally names no parcel, so it belongs to the window whose
-                // request is outstanding (`OwnerTallyQueue`).
-                SlSessionEvent::ParcelObjectOwners { owners } if tallies.owns_reply(window) => {
-                    state.owners.clone_from(owners);
-                    request_names_for_owners(&state, &mut commands);
+                // request is outstanding on the circuit it came in on
+                // (`OwnerTallyQueue`). Folded in, not swapped: a packet may be
+                // one slice of the tally, and the list was emptied when the
+                // request went out (`drive_owner_tallies`).
+                SlSessionEvent::ParcelObjectOwners {
+                    circuit,
+                    part,
+                    owners,
+                } if tallies.owns_reply(window, *circuit) => {
+                    merge_owner_reply(&mut state.owners, owners);
+                    state.tally = TallyStatus::Answered;
+                    request_names_for_owners(owners, &groups, &mut commands);
                     state.owners_revision = state.owners_revision.wrapping_add(1);
                     dirty.objects_values = true;
+                    if *part == ParcelObjectOwnersPart::Complete {
+                        tallies.finish(*circuit);
+                    }
                 }
                 SlSessionEvent::ParcelAccessList {
                     local_id,
@@ -2019,6 +2110,21 @@ fn ingest_about_land_events(
     }
 }
 
+/// Fold one reply's owner rows into a window's tally.
+///
+/// A tally answered by packet can arrive in several, so rows are added rather
+/// than the list replaced; an owner already listed takes the newer row in place
+/// — the reference's name-list keys rows by owner — so a packet delivered twice
+/// cannot count one owner's objects twice.
+fn merge_owner_reply(tally: &mut Vec<ParcelObjectOwner>, rows: &[ParcelObjectOwner]) {
+    for row in rows {
+        match tally.iter_mut().find(|held| held.owner == row.owner) {
+            Some(held) => *held = *row,
+            None => tally.push(*row),
+        }
+    }
+}
+
 /// Settle a point-opened window onto the parcel its click landed in: fold it
 /// into that parcel's existing window if there is one, and otherwise re-key it
 /// from its provisional [`point_key`] to the parcel's own.
@@ -2062,33 +2168,84 @@ fn bind_point_window(
     false
 }
 
-/// Send the outstanding object-owner tally request, one window at a time.
+/// Send the waiting object-owner tally requests, one outstanding per circuit.
 ///
 /// The reply names no parcel (`OwnerTallyQueue`), so a second request in flight
-/// would make it ambiguous; a window that goes unanswered releases its turn
-/// after [`OWNER_TALLY_TIMEOUT_SECONDS`].
+/// on one circuit would make it ambiguous; a turn nobody ended releases at
+/// [`OWNER_TALLY_TIMEOUT_SECONDS`], and a window that heard nothing by then says
+/// so ([`TallyStatus::Unanswered`]).
 fn drive_owner_tallies(
     mut tallies: ResMut<OwnerTallyQueue>,
-    windows: Query<(), With<AboutLandState>>,
+    mut windows: Query<&mut AboutLandState>,
     time: Res<Time>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     let now = time.elapsed_secs_f64();
-    if let Some((asking, deadline)) = tallies.asking {
-        if windows.contains(asking) && now < deadline {
-            return;
+    tallies.asking.retain(|_circuit, asking| {
+        let Ok(mut state) = windows.get_mut(asking.window) else {
+            return false;
+        };
+        if now < asking.deadline {
+            return true;
         }
-        tallies.asking = None;
-    }
-    while let Some((window, parcel)) = tallies.waiting.pop_front() {
-        if !windows.contains(window) {
+        if state.tally == TallyStatus::Searching {
+            state.tally = TallyStatus::Unanswered;
+        }
+        false
+    });
+    let queued = core::mem::take(&mut tallies.waiting);
+    for (window, parcel) in queued {
+        let Ok(mut state) = windows.get_mut(window) else {
+            continue;
+        };
+        if tallies.asking.contains_key(&parcel.circuit()) {
+            // This region is still answering somebody; wait for that turn.
+            tallies.waiting.push_back((window, parcel));
             continue;
         }
         commands.write(SlCommand(Command::RequestParcelObjectOwners {
             local_id: parcel,
         }));
-        tallies.asking = Some((window, now + OWNER_TALLY_TIMEOUT_SECONDS));
-        return;
+        let _previous = tallies.asking.insert(
+            parcel.circuit(),
+            AskingTally {
+                window,
+                deadline: now + OWNER_TALLY_TIMEOUT_SECONDS,
+            },
+        );
+        // A fresh tally starts from nothing: its replies are folded in.
+        state.owners.clear();
+        state.owners_revision = state.owners_revision.wrapping_add(1);
+        state.tally = TallyStatus::Searching;
+    }
+}
+
+/// Say where each window's object-owner tally stands, beside its Refresh
+/// button — rewritten only when what it says changes.
+fn update_owner_tally_status(
+    mut windows: Query<(&mut AboutLandState, &AboutLandUi)>,
+    mut commands: Commands,
+) {
+    for (mut state, ui) in &mut windows {
+        let shown = (state.tally, !state.owners.is_empty());
+        if state.shown_tally == Some(shown) {
+            continue;
+        }
+        let Some(node) = ui.object_handles.owners_status else {
+            continue;
+        };
+        state.shown_tally = Some(shown);
+        match state.tally.message_key(shown.1) {
+            Some(key) => {
+                commands.entity(node).insert(Translated::new(key));
+            }
+            None => {
+                commands
+                    .entity(node)
+                    .remove::<Translated>()
+                    .insert(Text::new(String::new()));
+            }
+        }
     }
 }
 
@@ -2126,9 +2283,12 @@ fn decode_covenant(asset: &Asset) -> String {
 }
 
 /// Request display names for every agent owner in the object-owner tally.
-fn request_names_for_owners(state: &AboutLandState, commands: &mut MessageWriter<SlCommand>) {
-    let agents: Vec<AgentKey> = state
-        .owners
+fn request_names_for_owners(
+    owners: &[ParcelObjectOwner],
+    groups: &GroupsModel,
+    commands: &mut MessageWriter<SlCommand>,
+) {
+    let agents: Vec<AgentKey> = owners
         .iter()
         .filter_map(|owner| match owner.owner {
             OwnerKey::Agent(agent) => Some(agent),
@@ -2137,6 +2297,13 @@ fn request_names_for_owners(state: &AboutLandState, commands: &mut MessageWriter
         .collect();
     if !agents.is_empty() {
         commands.write(SlCommand(Command::RequestAvatarNames(agents)));
+    }
+    // A group-owned row would otherwise show its bare id for good: nothing else
+    // asks for the name of a group the resident is not in.
+    for owner in owners {
+        if let OwnerKey::Group(group) = owner.owner {
+            groups.request_name(group, commands);
+        }
     }
 }
 
@@ -2717,6 +2884,10 @@ fn sync_owners_view(
                     kind: translator.get(kind_key),
                     name,
                     count: owner.count.to_string(),
+                    most_recent: owner
+                        .most_recent
+                        .map(|unix| format_unix_date(i64::from(unix)))
+                        .unwrap_or_default(),
                 }
             })
             .collect();
@@ -2886,6 +3057,7 @@ fn bind_owner_rows(
             set_cell(&mut texts, cells, 0, &data.kind);
             set_cell(&mut texts, cells, 1, &data.name);
             set_cell(&mut texts, cells, 2, &data.count);
+            set_cell(&mut texts, cells, 3, &data.most_recent);
         }
     }
 }
@@ -3067,7 +3239,10 @@ fn on_about_land_action(
     };
     match action {
         AboutLandAction::Apply => apply_draft(&mut state, ui, &fields, scoped, &mut sl_commands),
-        AboutLandAction::RefreshOwners => tallies.ask(window, scoped),
+        AboutLandAction::RefreshOwners => {
+            tallies.ask(window, scoped);
+            state.tally = TallyStatus::Waiting;
+        }
         AboutLandAction::PickSnapshot => {
             texture_pickers.write(OpenTexturePicker {
                 requester: press.entity,
@@ -4074,7 +4249,7 @@ fn set_check_visual(
 
 #[cfg(test)]
 mod tests {
-    use super::{AboutLandState, ParcelUpdate, merge_access_reply};
+    use super::{AboutLandState, ParcelUpdate, TallyStatus, merge_access_reply};
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_bevy::{ParcelAccessEntry, ParcelAccessFlags, Uuid};
 
@@ -4090,6 +4265,35 @@ mod tests {
     /// The ids of a list, in order.
     fn ids(list: &[ParcelAccessEntry]) -> Vec<Uuid> {
         list.iter().map(|entry| entry.id).collect()
+    }
+
+    /// **A tally that has not arrived never reads as "no objects".** The
+    /// empty-parcel line is for an answer with nobody in it, and only for that.
+    #[test]
+    fn only_an_answer_says_the_parcel_is_empty() {
+        for pending in [
+            TallyStatus::Waiting,
+            TallyStatus::Searching,
+            TallyStatus::Unanswered,
+        ] {
+            for listed in [false, true] {
+                assert_ne!(
+                    pending.message_key(listed),
+                    Some("about-land-owners-empty"),
+                    "{pending:?} called the parcel empty"
+                );
+                assert!(
+                    pending.message_key(listed).is_some(),
+                    "{pending:?} said nothing"
+                );
+            }
+        }
+        assert_eq!(
+            TallyStatus::Answered.message_key(false),
+            Some("about-land-owners-empty")
+        );
+        assert_eq!(TallyStatus::Answered.message_key(true), None);
+        assert_eq!(TallyStatus::NotAsked.message_key(false), None);
     }
 
     /// The regression this function exists for: one request is answered by
@@ -4229,18 +4433,20 @@ mod tests {
     mod instances {
         use super::super::{
             AboutLandAction, AboutLandDirty, AboutLandPlugin, AboutLandState, AboutLandSubject,
-            OpenAboutLand, OwnerTallyQueue, OwnersView, parcel_key,
+            AboutLandUi, OWNER_TALLY_TIMEOUT_SECONDS, OpenAboutLand, OwnerTallyQueue, OwnersView,
+            TallyStatus, parcel_key,
         };
         use crate::floater::{Floater, FloaterCommand, FloaterOp, FloaterPlugin};
+        use crate::i18n::Translated;
         use crate::ui::UiRoot;
         use crate::world_api::{AgentRegionPosition, AvatarState, GroupPicked, GroupsModel};
         use bevy::ecs::change_detection::Tick;
         use bevy::prelude::*;
         use pretty_assertions::{assert_eq, assert_ne};
         use sl_client_bevy::{
-            AgentKey, CircuitId, Command, GroupKey, OwnerKey, ParcelObjectOwner, RegionHandle,
-            RegionLocalParcelId, ScopedParcelId, SlAgentParcel, SlCommand, SlEvent, SlIdentity,
-            Uuid,
+            AgentKey, CircuitId, Command, GroupKey, OwnerKey, ParcelObjectOwner,
+            ParcelObjectOwnersPart, RegionHandle, RegionLocalParcelId, ScopedParcelId,
+            SlAgentParcel, SlCommand, SlEvent, SlIdentity, SlSessionEvent, Uuid,
         };
 
         /// A boxed error so tests use `?` rather than the disallowed
@@ -4343,6 +4549,7 @@ mod tests {
                     owner: OwnerKey::Agent(owner),
                     count: 3,
                     online_status: false,
+                    most_recent: None,
                 }];
                 state.owners_revision = state.owners_revision.wrapping_add(1);
             }
@@ -4459,37 +4666,156 @@ mod tests {
             Ok(())
         }
 
-        /// **Only one object-owner tally is outstanding.** The reply carries
-        /// nothing but the owners — no parcel, no sequence id — so a second
-        /// request in flight would let one window take the other's tally.
-        #[test]
-        fn owner_tallies_are_serialised() -> Result<(), TestError> {
-            let mut app = land_app();
-            let first = app.world_mut().spawn(AboutLandState::default()).id();
-            let second = app.world_mut().spawn(AboutLandState::default()).id();
-            {
-                let mut tallies = app.world_mut().resource_mut::<OwnerTallyQueue>();
-                tallies.ask(
-                    first,
-                    ScopedParcelId::new(circuit(), RegionLocalParcelId(7)),
-                );
-                tallies.ask(
-                    second,
-                    ScopedParcelId::new(circuit(), RegionLocalParcelId(9)),
-                );
-            }
-            app.update();
+        /// A bare window bound to `local_id`, the shape the ingest pass takes a
+        /// tally into — no content, so the status line is not in play.
+        fn tally_window(app: &mut App, local_id: i32) -> Entity {
+            app.world_mut()
+                .spawn((
+                    AboutLandState {
+                        target: Some(RegionLocalParcelId(local_id)),
+                        ..AboutLandState::default()
+                    },
+                    AboutLandDirty::default(),
+                ))
+                .id()
+        }
 
-            let asked = app
-                .world()
+        /// Queue `window`'s tally request for a parcel on `on`.
+        fn ask(app: &mut App, window: Entity, on: CircuitId, local_id: i32) {
+            app.world_mut().resource_mut::<OwnerTallyQueue>().ask(
+                window,
+                ScopedParcelId::new(on, RegionLocalParcelId(local_id)),
+            );
+        }
+
+        /// How many tally requests the last update sent.
+        fn tally_requests(app: &App) -> usize {
+            app.world()
                 .resource::<Messages<SlCommand>>()
                 .iter_current_update_messages()
                 .filter(|command| matches!(command.0, Command::RequestParcelObjectOwners { .. }))
-                .count();
-            assert_eq!(asked, 1, "both windows asked for a tally at once");
+                .count()
+        }
+
+        /// Deliver one tally reply on `on`, then run a frame.
+        fn reply(
+            app: &mut App,
+            on: CircuitId,
+            part: ParcelObjectOwnersPart,
+            owners: &[ParcelObjectOwner],
+        ) {
+            app.world_mut()
+                .write_message(SlEvent(SlSessionEvent::ParcelObjectOwners {
+                    circuit: on,
+                    part,
+                    owners: owners.to_vec(),
+                }));
+            app.update();
+        }
+
+        /// A resident owning `count` objects.
+        fn owner(n: u128, count: i32) -> ParcelObjectOwner {
+            ParcelObjectOwner {
+                owner: OwnerKey::Agent(AgentKey::from(Uuid::from_u128(n))),
+                count,
+                online_status: false,
+                most_recent: None,
+            }
+        }
+
+        /// One window's tally and where it stands.
+        fn tally_of(
+            app: &App,
+            window: Entity,
+        ) -> Result<(Vec<(OwnerKey, i32)>, TallyStatus), TestError> {
+            let state = app
+                .world()
+                .get::<AboutLandState>(window)
+                .ok_or("the window has no state")?;
+            Ok((
+                state
+                    .owners
+                    .iter()
+                    .map(|row| (row.owner, row.count))
+                    .collect(),
+                state.tally,
+            ))
+        }
+
+        /// Run the clock past a turn's deadline, then a frame.
+        fn outlast_the_turn(app: &mut App) {
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(core::time::Duration::from_secs_f64(
+                    OWNER_TALLY_TIMEOUT_SECONDS + 1.0,
+                ));
+            app.update();
+        }
+
+        /// **One object-owner tally is outstanding per region.** The reply
+        /// carries nothing but the owners — no parcel, no sequence id — so a
+        /// second request in flight on one circuit would let one window take
+        /// the other's tally. The one kept waiting says so, rather than showing
+        /// an empty table that reads as "no objects".
+        #[test]
+        fn one_tally_is_outstanding_per_region() -> Result<(), TestError> {
+            let mut app = land_app();
+            let first = tally_window(&mut app, 7);
+            let second = tally_window(&mut app, 9);
+            ask(&mut app, first, circuit(), 7);
+            ask(&mut app, second, circuit(), 9);
+            app.update();
+
+            assert_eq!(
+                tally_requests(&app),
+                1,
+                "both windows asked for a tally at once"
+            );
             let tallies = app.world().resource::<OwnerTallyQueue>();
-            assert!(tallies.owns_reply(first), "the reply is nobody's, or wrong");
-            assert!(!tallies.owns_reply(second));
+            assert!(
+                tallies.owns_reply(first, circuit()),
+                "the reply is nobody's, or wrong"
+            );
+            assert!(!tallies.owns_reply(second, circuit()));
+            assert_eq!(tally_of(&app, first)?.1, TallyStatus::Searching);
+            // `ask` alone does not say Waiting; the open path does, and the
+            // queue must not have promoted the second window past it.
+            assert_ne!(tally_of(&app, second)?.1, TallyStatus::Searching);
+            Ok(())
+        }
+
+        /// Windows on two regions ask at once: each circuit has its own question
+        /// outstanding, and a reply goes only to the window that asked on the
+        /// circuit it came in on.
+        #[test]
+        fn windows_on_two_regions_ask_at_once() -> Result<(), TestError> {
+            let neighbour = CircuitId::new(2);
+            let mut app = land_app();
+            let here = tally_window(&mut app, 7);
+            let there = tally_window(&mut app, 7);
+            ask(&mut app, here, circuit(), 7);
+            ask(&mut app, there, neighbour, 7);
+            app.update();
+            assert_eq!(
+                tally_requests(&app),
+                2,
+                "a busy region held up another region's tally"
+            );
+
+            reply(
+                &mut app,
+                neighbour,
+                ParcelObjectOwnersPart::Packet,
+                &[owner(0x0e, 4)],
+            );
+            assert!(
+                tally_of(&app, here)?.0.is_empty(),
+                "a neighbour's tally landed here"
+            );
+            assert_eq!(
+                tally_of(&app, there)?,
+                (vec![(owner(0x0e, 4).owner, 4)], TallyStatus::Answered)
+            );
             Ok(())
         }
 
@@ -4497,27 +4823,225 @@ mod tests {
         #[test]
         fn a_closed_window_releases_the_tally_turn() -> Result<(), TestError> {
             let mut app = land_app();
-            let first = app.world_mut().spawn(AboutLandState::default()).id();
-            let second = app.world_mut().spawn(AboutLandState::default()).id();
-            {
-                let mut tallies = app.world_mut().resource_mut::<OwnerTallyQueue>();
-                tallies.ask(
-                    first,
-                    ScopedParcelId::new(circuit(), RegionLocalParcelId(7)),
-                );
-                tallies.ask(
-                    second,
-                    ScopedParcelId::new(circuit(), RegionLocalParcelId(9)),
-                );
-            }
+            let first = tally_window(&mut app, 7);
+            let second = tally_window(&mut app, 9);
+            ask(&mut app, first, circuit(), 7);
+            ask(&mut app, second, circuit(), 9);
             app.update();
             app.world_mut().entity_mut(first).despawn();
             app.update();
 
             let tallies = app.world().resource::<OwnerTallyQueue>();
             assert!(
-                tallies.owns_reply(second),
+                tallies.owns_reply(second, circuit()),
                 "the second window never got its turn"
+            );
+            Ok(())
+        }
+
+        /// **A tally split over packets is kept whole.** A simulator answering
+        /// by packet may spread a long tally over several, and each one used to
+        /// replace the last — so a parcel with many owners showed only the
+        /// final packet's. A packet delivered twice must not count anyone twice.
+        #[test]
+        fn a_tally_split_over_packets_is_kept_whole() -> Result<(), TestError> {
+            let mut app = land_app();
+            let window = tally_window(&mut app, 7);
+            ask(&mut app, window, circuit(), 7);
+            app.update();
+
+            reply(
+                &mut app,
+                circuit(),
+                ParcelObjectOwnersPart::Packet,
+                &[owner(1, 3), owner(2, 1)],
+            );
+            reply(
+                &mut app,
+                circuit(),
+                ParcelObjectOwnersPart::Packet,
+                &[owner(3, 8)],
+            );
+            reply(
+                &mut app,
+                circuit(),
+                ParcelObjectOwnersPart::Packet,
+                &[owner(3, 8)],
+            );
+
+            let (rows, status) = tally_of(&app, window)?;
+            assert_eq!(
+                rows,
+                vec![
+                    (owner(1, 0).owner, 3),
+                    (owner(2, 0).owner, 1),
+                    (owner(3, 0).owner, 8),
+                ]
+            );
+            assert_eq!(status, TallyStatus::Answered);
+            Ok(())
+        }
+
+        /// A reply by packet does not end the turn: it cannot say it was the
+        /// last, and a straggler handed to the next window would be a
+        /// neighbour's owner in its table. The next window asks at the deadline.
+        #[test]
+        fn a_packet_reply_holds_the_turn_until_the_deadline() -> Result<(), TestError> {
+            let mut app = land_app();
+            let first = tally_window(&mut app, 7);
+            let second = tally_window(&mut app, 9);
+            ask(&mut app, first, circuit(), 7);
+            ask(&mut app, second, circuit(), 9);
+            app.update();
+
+            reply(
+                &mut app,
+                circuit(),
+                ParcelObjectOwnersPart::Packet,
+                &[owner(1, 3)],
+            );
+            app.update();
+            assert_eq!(tally_requests(&app), 0, "a packet ended the turn");
+            assert!(
+                app.world()
+                    .resource::<OwnerTallyQueue>()
+                    .owns_reply(first, circuit())
+            );
+
+            outlast_the_turn(&mut app);
+            assert_eq!(tally_requests(&app), 1);
+            assert!(
+                app.world()
+                    .resource::<OwnerTallyQueue>()
+                    .owns_reply(second, circuit())
+            );
+            assert_eq!(
+                tally_of(&app, first)?.1,
+                TallyStatus::Answered,
+                "an answered window that ran out its turn is still answered"
+            );
+            Ok(())
+        }
+
+        /// The event-queue form is the whole tally in one document, so it ends
+        /// the turn at once — the next window on the region asks in the same
+        /// frame instead of waiting out the deadline.
+        #[test]
+        fn a_whole_reply_ends_the_turn_at_once() -> Result<(), TestError> {
+            let mut app = land_app();
+            let first = tally_window(&mut app, 7);
+            let second = tally_window(&mut app, 9);
+            ask(&mut app, first, circuit(), 7);
+            ask(&mut app, second, circuit(), 9);
+            app.update();
+
+            reply(
+                &mut app,
+                circuit(),
+                ParcelObjectOwnersPart::Complete,
+                &[owner(1, 3)],
+            );
+            assert_eq!(
+                tally_requests(&app),
+                1,
+                "the whole reply did not release the turn"
+            );
+            assert!(
+                app.world()
+                    .resource::<OwnerTallyQueue>()
+                    .owns_reply(second, circuit())
+            );
+            assert_eq!(tally_of(&app, first)?.0, vec![(owner(1, 0).owner, 3)]);
+            assert_eq!(tally_of(&app, second)?.1, TallyStatus::Searching);
+            Ok(())
+        }
+
+        /// A turn that runs out with nothing heard says so: the region refused
+        /// or ignored the request, which is not the same as a parcel with no
+        /// objects.
+        #[test]
+        fn an_unanswered_tally_says_so() -> Result<(), TestError> {
+            let mut app = land_app();
+            let window = tally_window(&mut app, 7);
+            ask(&mut app, window, circuit(), 7);
+            app.update();
+            outlast_the_turn(&mut app);
+            assert_eq!(
+                tally_of(&app, window)?,
+                (Vec::new(), TallyStatus::Unanswered)
+            );
+            Ok(())
+        }
+
+        /// A refresh starts from nothing once its request goes out, so an owner
+        /// who has since cleared their objects off the parcel drops out of the
+        /// table rather than lingering from the last tally.
+        #[test]
+        fn a_refresh_starts_the_tally_from_nothing() -> Result<(), TestError> {
+            let mut app = land_app();
+            let window = tally_window(&mut app, 7);
+            ask(&mut app, window, circuit(), 7);
+            app.update();
+            reply(
+                &mut app,
+                circuit(),
+                ParcelObjectOwnersPart::Complete,
+                &[owner(1, 3)],
+            );
+
+            ask(&mut app, window, circuit(), 7);
+            app.update();
+            assert_eq!(tally_requests(&app), 1);
+            assert_eq!(
+                tally_of(&app, window)?,
+                (Vec::new(), TallyStatus::Searching)
+            );
+            reply(
+                &mut app,
+                circuit(),
+                ParcelObjectOwnersPart::Complete,
+                &[owner(2, 5)],
+            );
+            assert_eq!(tally_of(&app, window)?.0, vec![(owner(2, 0).owner, 5)]);
+            Ok(())
+        }
+
+        /// A real window's status line follows its tally: written when what it
+        /// says changes, and a line at all only while there is something the
+        /// table cannot say.
+        #[test]
+        fn the_status_line_follows_the_tally() -> Result<(), TestError> {
+            let mut app = land_app();
+            open(&mut app, 7);
+            let window = *windows(&mut app).first().ok_or("no window opened")?;
+            let node = app
+                .world()
+                .get::<AboutLandUi>(window)
+                .and_then(|ui| ui.object_handles.owners_status)
+                .ok_or("the Objects tab has no status line")?;
+
+            app.world_mut()
+                .get_mut::<AboutLandState>(window)
+                .ok_or("the window has no state")?
+                .tally = TallyStatus::Searching;
+            app.update();
+            assert!(
+                app.world().get::<Translated>(node).is_some(),
+                "a pending tally said nothing"
+            );
+
+            {
+                let mut state = app
+                    .world_mut()
+                    .get_mut::<AboutLandState>(window)
+                    .ok_or("the window has no state")?;
+                state.tally = TallyStatus::Answered;
+                state.owners = vec![owner(1, 3)];
+            }
+            app.update();
+            assert!(
+                app.world().get::<Translated>(node).is_none(),
+                "a tally the table shows kept a status line"
             );
             Ok(())
         }

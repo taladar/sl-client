@@ -722,13 +722,11 @@ mod tests {
     use bevy::asset::RenderAssetUsages;
     use bevy::camera::RenderTarget;
     use bevy::camera::visibility::NoFrustumCulling;
-    use bevy::log::LogPlugin;
     use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
     use bevy::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
     use bevy::prelude::*;
     use bevy::render::gpu_readback::{Readback, ReadbackComplete};
     use bevy::render::render_resource::{TextureFormat, TextureUsages};
-    use bevy::winit::WinitPlugin;
 
     use super::{GpuAvatarSpikePlugin, MAT4_BYTES, SpikeMode, SpikeReadbackData};
     use crate::face_material::{FaceMaterial, SlFaceMaterialPlugin, inert_face_material};
@@ -852,18 +850,9 @@ mod tests {
     fn spike_app(mode: Option<SpikeMode>) -> (App, Cell) {
         let mut app = App::new();
         app.add_plugins(
-            DefaultPlugins
-                .set(WindowPlugin {
-                    // Headless: no window, and the app must not exit for the
-                    // lack of one.
-                    primary_window: None,
-                    exit_condition: bevy::window::ExitCondition::DontExit,
-                    ..default()
-                })
-                // No event loop: the test drives `update` itself.
-                .disable::<WinitPlugin>()
-                // The test harness owns the tracing subscriber.
-                .disable::<LogPlugin>(),
+            // Headless, and compiling its pipelines synchronously so none
+            // outlives the test.
+            crate::headless_gpu::headless_gpu_plugins(),
         )
         .add_plugins(ScheduleRunnerPlugin::run_loop(core::time::Duration::ZERO))
         // The viewer's own face material — what a real avatar part is drawn

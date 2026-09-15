@@ -20,9 +20,9 @@ use super::{
     MeanCollision, MoneyBalance, MuteEntry, NavMeshStatus, NeighborInfo, Object,
     ObjectPlayingAnimation, ObjectProperties, ObjectPropertiesFamily, OpenRegionInfo,
     ParcelAccessEntry, ParcelAccessScope, ParcelDetails, ParcelInfo, ParcelMediaCommand,
-    ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo, PickInfo, PlacesResult,
-    PlayingAnimation, RegionIdentity, RegionLimits, RegionStats, RequiredVoiceVersion,
-    ScriptCompileError, ScriptControl, ScriptDialog, ScriptPermissionRequest,
+    ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelObjectOwnersPart, ParcelOverlayInfo, PickInfo,
+    PlacesResult, PlayingAnimation, RegionIdentity, RegionLimits, RegionStats,
+    RequiredVoiceVersion, ScriptCompileError, ScriptControl, ScriptDialog, ScriptPermissionRequest,
     ScriptPermissionState, ScriptTeleportRequest, ServerError, SetDisplayNameReply, SimulatorTime,
     SoundFlags, SoundPreload, TaskInventoryItem, TaskInventoryReply, TelehubInfo, TeleportFlags,
     TerrainPatch, Texture, TransferStatus, UserInfo, ViewerEffect, Wearable,
@@ -273,8 +273,17 @@ pub enum Event {
     /// A parcel's per-owner object tallies, from a `ParcelObjectOwnersReply` in
     /// response to
     /// [`Session::request_parcel_object_owners`](crate::Session::request_parcel_object_owners).
+    ///
+    /// The reply names **no parcel** — not its id, not a sequence number — so
+    /// the circuit it arrived on is the only thing that says which question it
+    /// answers. The event-queue form rides the root region's circuit.
     ParcelObjectOwners {
-        /// One row per owner with objects on the parcel.
+        /// The circuit the reply arrived on.
+        circuit: CircuitId,
+        /// Whether this is the whole tally or one packet of it.
+        part: ParcelObjectOwnersPart,
+        /// One row per owner with objects on the parcel (a simulator's nil-owner
+        /// placeholder rows are dropped, as the reference drops them).
         owners: Vec<ParcelObjectOwner>,
     },
     /// A parcel's basic listing, from a `ParcelInfoReply` in response to

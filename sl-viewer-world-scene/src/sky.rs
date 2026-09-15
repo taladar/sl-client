@@ -72,7 +72,9 @@ use sl_client_bevy::{
 
 use crate::coords::sl_to_bevy_object_rotation;
 use crate::environment::EnvironmentState;
-use crate::probe_layers::{environment_render_layers, mirror_sun_render_layers};
+use crate::probe_layers::{
+    environment_render_layers, mirror_sun_render_layers, scene_sun_render_layers,
+};
 use crate::textures::{TextureDecoded, TextureManager};
 use crate::transparency::SkyBackdrop;
 use crate::world_api::{DecodedTextures, SKY_BOOST_PRIORITY, ViewerCamera, WorldPhase};
@@ -629,6 +631,10 @@ pub(crate) fn setup_sky(
         // prims and terrain (`drive_sky` keeps the direction on the active body).
         shadow_cascades(),
         Transform::default().looking_to(Vec3::new(-0.4, -1.0, -0.3), Vec3::Y),
+        // The main layer, like any light without layers of its own, plus the
+        // shadow-only layer no camera draws — so the own avatar's head keeps its
+        // shadow in mouselook while the view from inside it does not show it.
+        scene_sun_render_layers(),
         SceneSun,
     ));
     // The shadow-free mirror sun: lights reflection-probe captures without

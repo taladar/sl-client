@@ -448,6 +448,70 @@ mod test {
         Ok(())
     }
 
+    /// **A parcel's object-owner tally comes back whole, from the scene.**
+    ///
+    /// Over the event queue, as a region with one answers it: the event says it
+    /// is the entire tally (so a viewer asking about several parcels can end
+    /// its turn on it rather than waiting out a deadline) and names the circuit
+    /// it came in on, the only thing that ties a reply naming no parcel to its
+    /// question. A parcel with nothing on it is still answered.
+    #[tokio::test]
+    async fn a_parcel_object_owner_tally_comes_back_whole() -> Result<(), TestError> {
+        let mut running = start().await?;
+        let circuit = running.circuit;
+        running
+            .commands
+            .send(Command::RequestParcelObjectOwners {
+                local_id: sl_client_tokio::ScopedParcelId::new(
+                    circuit,
+                    sl_fake_grid::scenario::STOCK_PARCEL_LOCAL_ID,
+                ),
+            })
+            .await?;
+        let (answered_on, part, owners) = running
+            .wait_for(|event| match event {
+                Event::ParcelObjectOwners {
+                    circuit,
+                    part,
+                    owners,
+                } => Some((*circuit, *part, owners.clone())),
+                _ => None,
+            })
+            .await?;
+        assert_eq!(answered_on, circuit);
+        assert_eq!(part, sl_client_tokio::ParcelObjectOwnersPart::Complete);
+        // The stock scene's one object: a single-prim box, owned by the
+        // fixture creator who owns its task inventory too.
+        let tally: Vec<(sl_client_tokio::OwnerKey, i32)> =
+            owners.iter().map(|row| (row.owner, row.count)).collect();
+        assert_eq!(
+            tally,
+            vec![(sl_fake_grid::scenario::stock_script_item().owner, 1)]
+        );
+
+        // A parcel that is not there has nothing on it, and says so.
+        running
+            .commands
+            .send(Command::RequestParcelObjectOwners {
+                local_id: sl_client_tokio::ScopedParcelId::new(
+                    circuit,
+                    sl_client_tokio::RegionLocalParcelId(99),
+                ),
+            })
+            .await?;
+        let empty = running
+            .wait_for(|event| match event {
+                Event::ParcelObjectOwners { owners, .. } => Some(owners.is_empty()),
+                _ => None,
+            })
+            .await?;
+        assert!(
+            empty,
+            "an empty parcel was answered with somebody's objects"
+        );
+        Ok(())
+    }
+
     /// **A top-objects report has rows in it, and the return the report's own
     /// actions send finds them.**
     ///

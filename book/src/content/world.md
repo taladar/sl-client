@@ -172,7 +172,12 @@ Beyond reading a parcel, a client with land rights can **manage** it over UDP:
   one (`Command::DivideParcel`),
 - list **who owns objects** on the parcel
   (`Command::RequestParcelObjectOwners` → `Event::ParcelObjectOwners`, one row
-  per owner with a count and online flag),
+  per owner with a count, an online flag and — over the event queue only — the
+  owner's most recent rez time). The reply names no parcel, so the event
+  carries the circuit it arrived on and whether it is the whole tally (the
+  event-queue form, one document) or one packet of a tally a simulator may
+  split; a consumer asking about several parcels keeps one question outstanding
+  per circuit,
   and **return** or **disable** those objects
   (`Command::ReturnParcelObjects` / `Command::DisableParcelObjects`, scoped by
   owner/group/other or an explicit id list),
@@ -362,7 +367,10 @@ None of these has a reply; the client just acts on them.
 >   `sl-proto/src/session/circuit.rs`; the simulator side decodes each into a
 >   `ServerEvent` and answers `RequestParcelObjectOwners` / `RequestParcelInfo`
 >   with `SimSession::send_parcel_object_owners_reply` /
->   `send_parcel_info_reply`.
+>   `send_parcel_info_reply`. `ParcelObjectOwnersReply` is `UDPDeprecated`: a
+>   region with an event queue answers it there instead
+>   (`SimSession::enqueue_parcel_object_owners_reply`, decoded by the client's
+>   `handle_caps_event`).
 > - `RequestRemoteParcelId` posts the `RemoteParcelRequest` capability
 >   (`sl-wire/src/remote_parcel.rs`), decoded into `Event::RemoteParcelId`.
 > - The world map's three queries are `Command::RequestMapBlocks` /

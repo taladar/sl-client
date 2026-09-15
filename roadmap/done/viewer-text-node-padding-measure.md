@@ -91,11 +91,13 @@ layout was broken at** (parley records that as `layout_max_advance`), and drop
 it where it does not. The half of the pair that catches the simpler answer is
 `measure_tests::a_shrink_to_fit_run_ending_in_a_space_stays_one_line`.
 
-## 3. A grid row sized from a wrap that never happens — still open
+## 3. A grid row sized from a wrap that never happens — split out
 
-Split out to [[viewer-grid-row-height-from-unwrapped-text]]: an auto grid row
-takes its height from a layout at the item's max-content width and never
-re-measures. Every root node is a grid item (`bevy_ui` parents each to an
+Split out to [[viewer-grid-row-height-from-unwrapped-text]], and since fixed
+there. It turned out not to be grid track sizing at all but two `taffy` flexbox
+and cache bugs; the description below is the one it was filed under: an auto
+grid row takes its height from a layout at the item's max-content width and
+never re-measures. Every root node is a grid item (`bevy_ui` parents each to an
 implicit viewport node that is a grid), so the original headless canary — a
 bounded panel spawned as its own root — was firing on *this*, not on the
 padding. That is why the canary went on passing while the padding half was, on

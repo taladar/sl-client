@@ -1513,6 +1513,7 @@ mod test {
                 ))),
                 count: 9,
                 online_status: true,
+                most_recent: None,
             }],
             now,
         )?;
@@ -1546,7 +1547,7 @@ mod test {
         let owners = client_events
             .iter()
             .find_map(|e| match e {
-                Event::ParcelObjectOwners { owners } => Some(owners),
+                Event::ParcelObjectOwners { owners, .. } => Some(owners),
                 _ => None,
             })
             .ok_or("expected a ParcelObjectOwners client event")?;

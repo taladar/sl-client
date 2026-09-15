@@ -1137,6 +1137,27 @@ pub struct ParcelObjectOwner {
     /// Whether the owner is currently online (the grid only fills this for the
     /// estate owner / managers, otherwise `false`).
     pub online_status: bool,
+    /// When this owner's most recent object on the parcel was rezzed, as Unix
+    /// seconds — `None` when the reply did not say. Only the event-queue form
+    /// carries it (its `DataExtended` block; the UDP template has none), and a
+    /// zero there is the same "not said".
+    pub most_recent: Option<u32>,
+}
+
+/// How much of a parcel's object-owner tally one
+/// [`Event::ParcelObjectOwners`](crate::Event::ParcelObjectOwners) carries.
+///
+/// The two forms of the reply differ in exactly the way a consumer collecting a
+/// tally needs to know: the event-queue form is one LLSD document, so it *is*
+/// the tally, while a simulator answering by packet may split a long tally over
+/// several `ParcelObjectOwnersReply` packets and marks none of them as the last.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ParcelObjectOwnersPart {
+    /// The whole tally, from the event queue: nothing more follows for this
+    /// question.
+    Complete,
+    /// One packet of a tally that may continue in further packets.
+    Packet,
 }
 
 /// Which top-objects report a `LandStatReply` carries (`ReportType`): a parcel's

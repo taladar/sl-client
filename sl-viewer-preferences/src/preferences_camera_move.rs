@@ -13,8 +13,9 @@
 //! the store each frame (`refresh_camera_tuning` /
 //! `refresh_movement_tuning`), the field of view is applied straight onto
 //! the world camera's projection (`apply_camera_fov`), and the mouselook
-//! avatar visibility onto the own avatar's body-root anchor
-//! (`apply_first_person_avatar_visibility`). The defaults reproduce the
+//! avatar visibility is published as [`FirstPersonAvatarVisible`]
+//! (`refresh_first_person_avatar_visible`) for the avatar layer to apply. The
+//! defaults reproduce the
 //! previously hardcoded constants, so out of the box nothing changes — except
 //! tap-tap-hold-to-run, a new gesture shipped enabled like the reference.
 //!
@@ -48,9 +49,7 @@ use crate::preferences::{
 };
 use crate::settings::ViewerSettings;
 use crate::settings_binding::SettingBinding;
-use crate::world_api::AvatarState;
-use crate::world_api::{CameraMode, ViewerCamera};
-use sl_client_bevy::SlIdentity;
+use crate::world_api::{FirstPersonAvatarVisible, ViewerCamera};
 use sl_viewer_world_scene::viewer_camera::{
     DEFAULT_FIELD_OF_VIEW, MAX_FIELD_OF_VIEW, MIN_FIELD_OF_VIEW, clamp_field_of_view,
 };
@@ -486,63 +485,48 @@ fn apply_camera_fov(
     }
 }
 
-/// Hide the own avatar's body-root anchor while in mouselook with
-/// [`SETTING_FIRST_PERSON_AVATAR`] off, and restore it otherwise. The anchor
-/// subtree carries the body parts, skeleton and world attachments; HUD
-/// attachments hang off the screen-space [`crate::hud`] subtree and name tags
-/// are top-level entities, so neither is affected. Poll-and-restore, so
-/// leaving mouselook (or flipping the setting live) always un-hides.
-fn apply_first_person_avatar_visibility(
+/// Refresh [`FirstPersonAvatarVisible`] from [`SETTING_FIRST_PERSON_AVATAR`].
+///
+/// This tab only says what the user chose. What mouselook then draws of the own
+/// avatar — the body without its head, or nothing — is the avatar layer's
+/// (`sl_viewer_world_avatar::first_person`), which also owns the one writer of
+/// the avatar anchor's visibility; this used to hide the anchor itself, racing
+/// the derender pass that un-hides it every frame.
+fn refresh_first_person_avatar_visible(
     settings: Option<Res<ViewerSettings>>,
-    mode: Option<Res<CameraMode>>,
-    identity: Option<Res<SlIdentity>>,
-    avatars: Option<Res<AvatarState>>,
-    mut visibilities: Query<&mut Visibility>,
+    mut visible: ResMut<FirstPersonAvatarVisible>,
 ) {
-    let (Some(settings), Some(mode), Some(identity), Some(avatars)) =
-        (settings, mode, identity, avatars)
-    else {
+    let Some(settings) = settings else {
         return;
     };
-    let show_in_mouselook = settings
-        .store()
-        .get_bool(SETTING_FIRST_PERSON_AVATAR)
-        .unwrap_or(true);
-    let want = if *mode == CameraMode::Mouselook && !show_in_mouselook {
-        Visibility::Hidden
-    } else {
-        Visibility::Inherited
-    };
-    let Some(anchor) = identity
-        .agent_id
-        .and_then(|agent| avatars.body_root_of(agent))
-    else {
-        return;
-    };
-    let Ok(mut visibility) = visibilities.get_mut(anchor) else {
-        return;
-    };
-    if *visibility != want {
-        *visibility = want;
+    let default = FirstPersonAvatarVisible::default();
+    let next = FirstPersonAvatarVisible(
+        settings
+            .store()
+            .get_bool(SETTING_FIRST_PERSON_AVATAR)
+            .unwrap_or(default.0),
+    );
+    if *visible != next {
+        *visible = next;
     }
 }
 
 /// Owns the camera & movement tab's runtime side: the per-frame tuning
-/// refreshes and the two direct appliers (field of view, mouselook avatar
-/// visibility). The tab *content* is built by the preferences shell through
+/// refreshes (camera, movement, mouselook avatar visibility) and the field of
+/// view applier. The tab *content* is built by the preferences shell through
 /// `crate::preferences::PREF_TABS`.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PreferencesCameraMovePlugin;
 
 impl Plugin for PreferencesCameraMovePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
+        app.init_resource::<FirstPersonAvatarVisible>().add_systems(
             Update,
             (
                 refresh_camera_tuning,
                 refresh_movement_tuning,
                 apply_camera_fov,
-                apply_first_person_avatar_visibility,
+                refresh_first_person_avatar_visible,
             ),
         );
     }
@@ -557,8 +541,9 @@ mod tests {
     use super::{
         FOV_MAX, FOV_MIN, SETTING_AUTOMATIC_FLY, SETTING_AVATAR_TURN_RATE, SETTING_CAMERA_ANGLE,
         SETTING_CAMERA_MAX_DISTANCE, SETTING_CAMERA_OFFSET_SCALE, SETTING_CAMERA_SMOOTHING,
-        SETTING_DISABLE_WHEEL_ZOOM, SETTING_INVERT_MOUSE, SETTING_MOUSE_SENSITIVITY,
-        SETTING_TAP_TAP_HOLD_RUN, apply_camera_fov, refresh_camera_tuning, refresh_movement_tuning,
+        SETTING_DISABLE_WHEEL_ZOOM, SETTING_FIRST_PERSON_AVATAR, SETTING_INVERT_MOUSE,
+        SETTING_MOUSE_SENSITIVITY, SETTING_TAP_TAP_HOLD_RUN, apply_camera_fov,
+        refresh_camera_tuning, refresh_first_person_avatar_visible, refresh_movement_tuning,
         register_settings,
     };
     use crate::camera::CameraTuning;
@@ -587,6 +572,38 @@ mod tests {
                 ),
             );
         app
+    }
+
+    /// The mouselook body toggle reaches the resource the avatar layer reads,
+    /// both ways, and a fresh store shows the body — this project's default,
+    /// where the reference's is hidden.
+    #[test]
+    fn the_first_person_avatar_setting_reaches_the_avatar_layer() {
+        use crate::world_api::FirstPersonAvatarVisible;
+
+        let mut app = test_app();
+        app.init_resource::<FirstPersonAvatarVisible>()
+            .add_systems(Update, refresh_first_person_avatar_visible);
+        app.world_mut()
+            .insert_resource(FirstPersonAvatarVisible(false));
+        app.update();
+        assert_eq!(
+            *app.world().resource::<FirstPersonAvatarVisible>(),
+            FirstPersonAvatarVisible(true),
+            "an untouched store shows the body"
+        );
+
+        app.world_mut().resource_mut::<ViewerSettings>().set(
+            Scope::Global,
+            SETTING_FIRST_PERSON_AVATAR,
+            SettingValue::Bool(false),
+        );
+        app.update();
+        assert_eq!(
+            *app.world().resource::<FirstPersonAvatarVisible>(),
+            FirstPersonAvatarVisible(false),
+            "turning the setting off hides the body"
+        );
     }
 
     /// On a freshly registered (untouched) store the refreshed tunings are

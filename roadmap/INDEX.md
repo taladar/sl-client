@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 314 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 17 |
-| done | 1155 |
+| bugs | 13 |
+| done | 1160 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1692** |
+| **total** | **1693** |
 
 ## ideas (101)
 
@@ -1167,36 +1167,28 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (17)
+## bugs (13)
 
 ### viewer
 
-- [`viewer-audit-cef-browser-settings-hardening`](bugs/viewer-audit-cef-browser-settings-hardening.md)
-  — An in-world media page runs on CEF's default browser settings
 - [`viewer-cloud-noise-scale-divergence`](bugs/viewer-cloud-noise-scale-divergence.md)
   — Clouds come out fewer and larger than Firestorm's on the same noise
 - [`viewer-combo-stops-opening`](bugs/viewer-combo-stops-opening.md) — A combo
   can stop dropping down (seen on the contact-sets chooser)
-- [`viewer-grid-row-height-from-unwrapped-text`](bugs/viewer-grid-row-height-from-unwrapped-text.md)
-  — Upstream bug — a grid row takes its height from a wrap that never happens
 - [`viewer-hair-dome-stays-grey`](bugs/viewer-hair-dome-stays-grey.md) — The
   default hair dome intermittently stays grey for a whole session
+- [`viewer-horizon-thin-line-flashes`](bugs/viewer-horizon-thin-line-flashes.md)
+  — Flashes along a thin line near the horizon
 - [`viewer-hover-tooltip-202ms-frame-spike`](bugs/viewer-hover-tooltip-202ms-frame-spike.md)
   — update_hover_tooltip spikes to 202 ms on a single frame
 - [`viewer-inventory-link-drop-to-world-rezzes-nothing`](bugs/viewer-inventory-link-drop-to-world-rezzes-nothing.md)
   — Dragging an inventory link onto the ground rezzes nothing
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
   Some worn mesh hair does not render (visible in Firestorm)
-- [`viewer-mouselook-own-head-visible-from-inside`](bugs/viewer-mouselook-own-head-visible-from-inside.md)
-  — Mouselook — parts of the own avatar's head render from the inside
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
   — Own avatar looks broken after a teleport
-- [`viewer-own-avatar-facing-drifts-idle`](bugs/viewer-own-avatar-facing-drifts-idle.md)
-  — Own avatar forward direction drifts every few seconds while idle
-- [`viewer-parcel-object-owners-uncorrelated`](bugs/viewer-parcel-object-owners-uncorrelated.md)
-  — An object-owner tally says nothing about which parcel it counted
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 - [`viewer-sky-sunset-preset-glow-divergence`](bugs/viewer-sky-sunset-preset-glow-divergence.md)
@@ -1207,7 +1199,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)
 
-## done (1155)
+## done (1160)
 
 ### protocol
 
@@ -1498,6 +1490,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   fallback lies to the UI
 - [`viewer-audit-camera-reset-resnap`](done/viewer-audit-camera-reset-resnap.md)
   — Escape out of flycam interpolates between two unrelated poses
+- [`viewer-audit-cef-browser-settings-hardening`](done/viewer-audit-cef-browser-settings-hardening.md)
+  — An in-world media page runs on CEF's default browser settings
 - [`viewer-audit-collider-settle-treadmill`](done/viewer-audit-collider-settle-treadmill.md)
   — A mesh with no physics block rebuilds its collider and the BVH every frame
   forever
@@ -1861,6 +1855,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — GPU-avatar (1b) session — 10.6 GB RSS + ~2 min 263%-CPU shutdown spin
 - [`viewer-grey-avatars-bakes-not-showing`](done/viewer-grey-avatars-bakes-not-showing.md)
   — Most other avatars render grey (baked skin/textures not showing) on aditi
+- [`viewer-grid-row-height-from-unwrapped-text`](done/viewer-grid-row-height-from-unwrapped-text.md)
+  — Upstream bug — a max-width column came out as tall as its text on one line
 - [`viewer-group-notice-body-links`](done/viewer-group-notice-body-links.md) —
   Group notice body — clickable URLs / SLURLs (blocked by
   `viewer-url-linkification` (done))
@@ -2048,6 +2044,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-minimap-parcel-overlay`](done/viewer-minimap-parcel-overlay.md) —
   Parcel fills & property lines on the minimap (blocked by `viewer-minimap`
   (done), `viewer-parcel-overlay-decode` (done))
+- [`viewer-mouselook-own-head-visible-from-inside`](done/viewer-mouselook-own-head-visible-from-inside.md)
+  — Mouselook — parts of the own avatar's head render from the inside
 - [`viewer-movement-camera-input-tests`](done/viewer-movement-camera-input-tests.md)
   — Movement keys and camera modes, headless (blocked by
   `viewer-world-test-harness` (done))
@@ -2195,6 +2193,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-outline-swallows-thin-hollow-prim`](done/viewer-outline-swallows-thin-hollow-prim.md)
   — The selection outline fills a thin-walled hollow prim white instead of
   outlining it
+- [`viewer-own-avatar-facing-drifts-idle`](done/viewer-own-avatar-facing-drifts-idle.md)
+  — Own avatar forward direction drifts every few seconds while idle
 - [`viewer-own-avatar-vanishes-near-ground`](done/viewer-own-avatar-vanishes-near-ground.md)
   — The own avatar briefly disappears near the ground while flying or falling
 - [`viewer-own-bake-not-refreshed-on-outfit-change`](done/viewer-own-bake-not-refreshed-on-outfit-change.md)
@@ -2386,6 +2386,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-parcel-overlay-decode` (done))
 - [`viewer-parcel-music-stream-internal-data-error`](done/viewer-parcel-music-stream-internal-data-error.md)
   — Parcel music stream fails to play ("Internal data stream error")
+- [`viewer-parcel-object-owners-uncorrelated`](done/viewer-parcel-object-owners-uncorrelated.md)
+  — An object-owner tally says nothing about which parcel it counted
 - [`viewer-parcel-options-access-media`](done/viewer-parcel-options-access-media.md)
   — About Land floater — access / ban / media / sound (blocked by
   `viewer-parcel-options-general` (done))

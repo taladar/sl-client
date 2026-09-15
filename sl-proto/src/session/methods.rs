@@ -20,10 +20,10 @@ use super::conversions::{
     land_stat_reply_from_caps_llsd, map_item, map_layer, map_region_info, money_balance,
     nav_mesh_status_from_llsd, neighbor_info, object_from_full_update, object_properties,
     offline_messages_from_llsd, open_region_info_from_llsd, pack_uuids, packages_of, parcel_info,
-    parcel_info_from_llsd, parse_lure_region_handle, parse_mute_list, parse_task_inventory,
-    parse_uuid_string, pick_info, region_identity, region_limits, required_voice_version_from_llsd,
-    script_dialog, script_permission_request, script_running_from_caps_llsd,
-    server_appearance_update_from_llsd, session_history_from_llsd,
+    parcel_info_from_llsd, parcel_object_owners_from_caps_llsd, parse_lure_region_handle,
+    parse_mute_list, parse_task_inventory, parse_uuid_string, pick_info, region_identity,
+    region_limits, required_voice_version_from_llsd, script_dialog, script_permission_request,
+    script_running_from_caps_llsd, server_appearance_update_from_llsd, session_history_from_llsd,
     set_display_name_reply_from_llsd, sim_console_response_from_llsd, skeleton_folder,
     teleport_finish_from_llsd, trimmed_string, voice_channel_info_from_llsd,
     windlight_refresh_from_llsd,
@@ -84,17 +84,18 @@ use crate::types::{
     NotecardRez, Object, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings,
     ObjectPlayingAnimation, ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry,
     ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelInfo,
-    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo,
-    ParcelReturnType, ParcelUpdate, PermissionField, PickKey, PickUpdate, PlacesResult, Postcard,
-    PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId, RegionDebugUpdate, RegionInfoUpdate,
-    RegionStats, RegionTerrainUpdate, Reliability, RestoreItem, RezAttachment, RezObjectParams,
-    RezScriptParams, SaleType, ScriptControl, ScriptControlAction, ScriptControlsInfo,
-    ScriptGrantInfo, ScriptLanguage, ScriptPermissionState, ScriptPermissionStatus,
-    ScriptPermissions, ScriptTeleportRequest, ServerError, SimStatId, SimWideDeleteFlags,
-    SimulatorTime, SoundFlags, SoundPreload, StartLocationSlot, SurfaceInfo, TaskInventoryKey,
-    TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture,
-    TextureEntry, Throttle, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo,
-    ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable, WearableType,
+    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelObjectOwnersPart,
+    ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField, PickKey, PickUpdate,
+    PlacesResult, Postcard, PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId,
+    RegionDebugUpdate, RegionInfoUpdate, RegionStats, RegionTerrainUpdate, Reliability,
+    RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType, ScriptControl,
+    ScriptControlAction, ScriptControlsInfo, ScriptGrantInfo, ScriptLanguage,
+    ScriptPermissionState, ScriptPermissionStatus, ScriptPermissions, ScriptTeleportRequest,
+    ServerError, SimStatId, SimWideDeleteFlags, SimulatorTime, SoundFlags, SoundPreload,
+    StartLocationSlot, SurfaceInfo, TaskInventoryKey, TaskInventoryReply, TelehubInfo,
+    TeleportFlags, TerrainLayerType, TerrainPatch, Texture, TextureEntry, Throttle, TransferStatus,
+    Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    Wearable, WearableType,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
@@ -515,6 +516,24 @@ impl Session {
                         request_flags,
                         total_object_count,
                         items,
+                    });
+                } else {
+                    self.caps_decode_failed(message);
+                }
+            }
+            // A parcel's object-owner tally. The message is `UDPDeprecated`: a
+            // simulator with an event queue answers a `ParcelObjectOwnersRequest`
+            // over it, as one document — and only this form carries the
+            // `DataExtended` half, which is where each owner's most recent rez
+            // time comes from.
+            "ParcelObjectOwnersReply" => {
+                if let Some(owners) = parcel_object_owners_from_caps_llsd(body) {
+                    // The event queue rides the root region's circuit.
+                    let circuit = self.root_circuit_id().unwrap_or_default();
+                    self.events.push_back(Event::ParcelObjectOwners {
+                        circuit,
+                        part: ParcelObjectOwnersPart::Complete,
+                        owners,
                     });
                 } else {
                     self.caps_decode_failed(message);
@@ -3255,10 +3274,19 @@ impl Session {
                 });
             }
             AnyMessage::ParcelObjectOwnersReply(reply) => {
+                // The reply names no parcel, so the circuit is what ties it to
+                // the question (`Event::ParcelObjectOwners`).
+                let circuit = self.circuit_id_for(from).unwrap_or_default();
                 self.events.push_back(Event::ParcelObjectOwners {
+                    circuit,
+                    part: ParcelObjectOwnersPart::Packet,
                     owners: reply
                         .data
                         .iter()
+                        // A nil owner is a placeholder row, not somebody's
+                        // objects; the reference skips it
+                        // (`LLPanelLandObjects::processParcelObjectOwnersReply`).
+                        .filter(|owner| !owner.owner_id.is_nil())
                         .map(|owner| ParcelObjectOwner {
                             owner: crate::types::owner_key_from_wire(
                                 owner.owner_id,
@@ -3266,6 +3294,8 @@ impl Session {
                             ),
                             count: owner.count,
                             online_status: owner.online_status,
+                            // The UDP template has no `DataExtended` block.
+                            most_recent: None,
                         })
                         .collect(),
                 });

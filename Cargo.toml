@@ -576,6 +576,27 @@ wgpu-hal = { git = "https://github.com/taladar/wgpu.git", rev = "72126feaceecfe8
 wgpu-naga-bridge = { git = "https://github.com/taladar/wgpu.git", rev = "72126feaceecfe82a2b0fa5e37ac7e787920e107" }
 wgpu-types = { git = "https://github.com/taladar/wgpu.git", rev = "72126feaceecfe82a2b0fa5e37ac7e787920e107" }
 
+# Fork of taffy 0.10.1 (github.com/taladar/taffy, branch
+# sl-client-flex-max-cross-available) — the version `bevy_ui` 0.19 pins —
+# carrying ONE commit vs the v0.10.1 tag, two fixes for one symptom: a column
+# flex container with an indefinite width and a `max_width` came out as tall as
+# its text laid out on a single line, while the text was finally laid out, and
+# wrapped, at the clamped width (roadmap `viewer-grid-row-height-from-unwrapped-text`).
+#
+# - flexbox `determine_available_space` now clamps an unknown dimension by the
+#   container's own min/max size, so a grid item (always measured with no known
+#   width) sizes its items into its `max_width` rather than the whole grid area.
+#   Every `bevy_ui` root node is such a grid item, of the implicit viewport node;
+# - the measure cache no longer answers a query whose known width merely equals
+#   an entry's *output* width from an entry computed with no known width, which
+#   is a different layout whenever that output was clamped. This is what upstream
+#   #911 does too; as there, a node is measured a few more times per layout.
+#
+# Upstream 0.14 carries the cache half but not the flexbox half. Pinned to a rev
+# for reproducibility; not for upstream submission. Drop when `bevy_ui` moves to
+# a taffy that carries both.
+taffy = { git = "https://github.com/taladar/taffy.git", rev = "694ada00a99af385e87cf070c511896d09aa96d5" }
+
 [profile.dev]
 # Light optimization for our own crates. Bevy's baseline advice leaves these at
 # opt-level 0 on the assumption the engine dominates frame time, but that does

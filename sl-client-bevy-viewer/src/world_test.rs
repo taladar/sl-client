@@ -4229,7 +4229,8 @@ mod movement_tests {
 
     use sl_client_bevy::{
         AgentKey, Arrival, Command, ControlFlags, ObjectKey, RegionCoordinates, RegionHandle,
-        Rotation, SlAgentParcel, SlEvent, SlIdentity, SlSessionEvent as SessionEvent, Uuid, Vector,
+        RegionLocalObjectId, Rotation, SlAgentParcel, SlEvent, SlIdentity,
+        SlSessionEvent as SessionEvent, Uuid, Vector, pcode,
     };
     use sl_viewer_testkit::interact;
 
@@ -4489,6 +4490,128 @@ mod movement_tests {
             last.z > 0.0 && last.s > 0.0,
             "…and it is re-stated to the simulator as a turn about the Second \
              Life up axis, got {last:?}"
+        );
+        Ok(())
+    }
+
+    /// The local id of the prim the seat tests sit the own avatar on.
+    const SEAT_LOCAL: u32 = 5;
+
+    /// The yaw (radians about the Second Life up axis) a body rotation states.
+    fn yaw_of(rotation: &Rotation) -> f32 {
+        let Rotation { x, y, z, s } = rotation;
+        (2.0 * (s * z + x * y)).atan2(1.0 - 2.0 * (y * y + z * z))
+    }
+
+    /// Stream the own avatar again, as the grid would on its next update: facing
+    /// `yaw`, riding the object with local id `parent` (`0` standing), and carrying
+    /// `update_flags`.
+    fn restream_own(app: &mut App, yaw: f32, parent: u32, update_flags: u32) {
+        let own = AgentKey::from(Uuid::from_u128(OWN));
+        let mut object = crate::objects::fixture_object(pcode::AVATAR);
+        object.local_id = RegionLocalObjectId(OWN_LOCAL);
+        object.full_id = ObjectKey::from(own.uuid());
+        object.motion.position = Vector {
+            x: 8.0,
+            y: 8.0,
+            z: GROUND_M,
+        };
+        let half = 0.5 * yaw;
+        object.motion.rotation = Rotation {
+            x: 0.0,
+            y: 0.0,
+            z: half.sin(),
+            s: half.cos(),
+        };
+        object.parent_id = RegionLocalObjectId(parent);
+        object.update_flags = update_flags;
+        super::seed_object(app, object);
+    }
+
+    /// **Standing up holds the facing the seat left the body at** — not the
+    /// heading it had before it sat, and not whatever the simulator's stand-up
+    /// update reports (viewer-own-avatar-facing-drifts-idle).
+    ///
+    /// The held heading is what the own body is drawn facing and what the camera
+    /// follows, and a seat turns the body without this viewer turning the heading.
+    /// So a heading kept across the sit would stand the avatar up swinging back to
+    /// the direction it walked in from, and one seeded from the stand-up report
+    /// stood it up facing somewhere else again (seen on aditi). The reference
+    /// takes the seated body's world facing on the way off the seat. Here the
+    /// avatar walks up facing east, sits on an unrotated seat that turns it north,
+    /// and the stand-up update reports south: the held heading is north, and north
+    /// is stated to the simulator.
+    #[test]
+    fn standing_up_holds_the_facing_the_seat_left_the_body_at() -> Result<(), TestError> {
+        let mut app = movement_app(false);
+        let own = AgentKey::from(Uuid::from_u128(OWN));
+        let mut seat = crate::objects::fixture_object(pcode::PRIMITIVE);
+        seat.local_id = RegionLocalObjectId(SEAT_LOCAL);
+        super::seed_object(&mut app, seat);
+        let north = core::f32::consts::FRAC_PI_2;
+        restream_own(&mut app, north, SEAT_LOCAL, 0);
+        settle(&mut app, 3);
+        assert!(
+            app.world().resource::<AvatarState>().is_seated(own),
+            "the fixture avatar is riding the seat"
+        );
+        let _sitting = drain_movement(&mut app);
+
+        restream_own(&mut app, -north, 0, 0);
+        settle(&mut app, 3);
+        assert!(
+            (heading(&app) - north).abs() < 1.0e-3,
+            "standing, the held heading is the facing the seat left the body at, got {}",
+            heading(&app)
+        );
+        let (_controls, rotations) = drain_movement(&mut app);
+        let last = rotations
+            .last()
+            .ok_or("the standing facing was not stated")?;
+        assert!(
+            (yaw_of(last) - north).abs() < 1.0e-3,
+            "…and it is stated to the simulator, so neither the keep-alive's pre-sit \
+             heading nor the stand-up report's facing is the one it keeps, got {last:?}"
+        );
+        Ok(())
+    }
+
+    /// **Only a server-steered report turns the held heading.** An ordinary
+    /// update reporting a different facing — the simulator parking a turned body
+    /// short of the heading it was sent — leaves the heading, and so the drawn
+    /// body and the camera, where the viewer turned them, and states nothing. The
+    /// same report flagged `FLAGS_SERVER_AUTOPILOT` is the simulator steering the
+    /// agent, and there the reference's `gAgent.rotate` adopts it: so does this.
+    #[test]
+    fn only_a_server_steered_report_turns_the_held_heading() -> Result<(), TestError> {
+        let mut app = movement_app(false);
+        let north = core::f32::consts::FRAC_PI_2;
+
+        restream_own(&mut app, north, 0, 0);
+        settle(&mut app, 3);
+        assert!(
+            heading(&app).abs() < 1.0e-3,
+            "an ordinary report does not turn the held heading, got {}",
+            heading(&app)
+        );
+        let (_controls, rotations) = drain_movement(&mut app);
+        assert_eq!(rotations, Vec::new(), "…and nothing is stated back");
+
+        restream_own(&mut app, north, 0, crate::world_api::FLAGS_SERVER_AUTOPILOT);
+        settle(&mut app, 3);
+        assert!(
+            (heading(&app) - north).abs() < 1.0e-3,
+            "a server-steered report does, got {}",
+            heading(&app)
+        );
+        let (_controls, rotations) = drain_movement(&mut app);
+        let last = rotations
+            .last()
+            .ok_or("the steered facing was not stated")?;
+        assert!(
+            (yaw_of(last) - north).abs() < 1.0e-3,
+            "…and it is stated back as the reference's next AgentUpdate would, got \
+             {last:?}"
         );
         Ok(())
     }
@@ -6411,5 +6534,197 @@ mod drag_drop_tests {
                 ChildOf(root),
             ))
             .id()
+    }
+}
+
+#[cfg(test)]
+mod first_person_tests {
+    use bevy::camera::visibility::RenderLayers;
+    use bevy::prelude::*;
+    use pretty_assertions::assert_eq;
+
+    use sl_client_bevy::{AgentKey, ScopedObjectId, Uuid, Vector};
+
+    use super::{entity_of, seed_attachment, seed_avatar, settle, world_app_with_hud};
+    use crate::avatars::AvatarBodyPart;
+    use crate::world_api::{AvatarState, CameraMode, FirstPersonAvatarVisible};
+    use sl_viewer_kit::probe_layers::dynamic_render_layers;
+    use sl_viewer_world_avatar::first_person::FirstPersonLayers;
+
+    /// A boxed error so tests can use `?`.
+    type TestError = Box<dyn core::error::Error>;
+
+    /// The own agent.
+    const OWN: u128 = 0xF1;
+
+    /// The own avatar's region-local id, which the attachments name as parent.
+    const WEARER: u32 = 2;
+
+    /// Skull — `visible_in_first_person="false"`.
+    const SKULL: u8 = 2;
+
+    /// Chest — `visible_in_first_person="true"`.
+    const CHEST: u8 = 1;
+
+    /// The own avatar with its real rigged body, a prim on the Skull and one on
+    /// the Chest. Returns the app and the two attachments' ids.
+    fn worn_world() -> Result<(App, ScopedObjectId, ScopedObjectId), TestError> {
+        let mut app = world_app_with_hud()?;
+        let own = AgentKey::from(Uuid::from_u128(OWN));
+        app.world_mut()
+            .resource_mut::<sl_client_bevy::SlIdentity>()
+            .agent_id = Some(own);
+        seed_avatar(
+            &mut app,
+            own,
+            WEARER,
+            Vector {
+                x: 120.0,
+                y: 120.0,
+                z: 30.0,
+            },
+        );
+        settle(&mut app, 3);
+        let origin = Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        let skull = seed_attachment(&mut app, WEARER, 3, SKULL, origin.clone());
+        let chest = seed_attachment(&mut app, WEARER, 4, CHEST, origin);
+        settle(&mut app, 5);
+        if !app.world().resource::<AvatarState>().is_rigged(own) {
+            return Err("the own avatar never got its rigged body".into());
+        }
+        Ok((app, skull, chest))
+    }
+
+    /// Enter or leave mouselook.
+    fn set_mode(app: &mut App, mode: CameraMode) {
+        *app.world_mut().resource_mut::<CameraMode>() = mode;
+    }
+
+    /// Every own base part's override and propagated layers.
+    fn own_parts(app: &mut App) -> Vec<(Option<FirstPersonLayers>, Option<RenderLayers>)> {
+        let own = AgentKey::from(Uuid::from_u128(OWN));
+        let mut query = app.world_mut().query::<(
+            &AvatarBodyPart,
+            Option<&FirstPersonLayers>,
+            Option<&RenderLayers>,
+        )>();
+        query
+            .iter(app.world())
+            .filter(|(part, _layers, _render)| part.agent() == own)
+            .map(|(_part, layers, render)| (layers.copied(), render.cloned()))
+            .collect()
+    }
+
+    /// Whether the entity of `scoped` is drawn, as far as visibility goes.
+    fn is_drawn(app: &mut App, scoped: ScopedObjectId) -> Result<bool, TestError> {
+        let entity = entity_of(app, scoped).ok_or("an attachment never spawned")?;
+        Ok(app
+            .world()
+            .get::<InheritedVisibility>(entity)
+            .ok_or("an attachment has no inherited visibility")?
+            .get())
+    }
+
+    /// **Mouselook with the body shown loses the head, and gives it back.**
+    ///
+    /// The base head, hair and eyelashes leave the main view but stay on the
+    /// sun's shadow layer; the two eyeballs leave the shadow too; the body
+    /// below the neck is untouched. A prim worn on the Skull stops being drawn
+    /// while one on the Chest stays. Third person undoes all of it — no
+    /// override left behind, every part back on the body root's layers.
+    #[test]
+    fn mouselook_hides_the_own_head_and_what_is_worn_on_it() -> Result<(), TestError> {
+        let (mut app, skull, chest) = worn_world()?;
+        assert!(
+            is_drawn(&mut app, skull)?,
+            "a Skull prim shows in third person"
+        );
+
+        set_mode(&mut app, CameraMode::Mouselook);
+        settle(&mut app, 3);
+
+        let parts = own_parts(&mut app);
+        let count = |wanted: Option<FirstPersonLayers>| {
+            parts
+                .iter()
+                .filter(|(layers, _render)| *layers == wanted)
+                .count()
+        };
+        assert_eq!(
+            count(Some(FirstPersonLayers::ShadowOnly)),
+            3,
+            "head, hair and eyelashes keep only their shadow: {parts:?}"
+        );
+        assert_eq!(
+            count(Some(FirstPersonLayers::ProbeOnly)),
+            2,
+            "both eyeballs leave the view and the shadow: {parts:?}"
+        );
+        for (layers, render) in &parts {
+            let expected =
+                layers.map_or_else(dynamic_render_layers, FirstPersonLayers::render_layers);
+            assert_eq!(render.as_ref(), Some(&expected), "{layers:?}");
+        }
+        assert!(
+            !is_drawn(&mut app, skull)?,
+            "a Skull prim is not drawn in mouselook"
+        );
+        assert!(is_drawn(&mut app, chest)?, "a Chest prim still is");
+
+        set_mode(&mut app, CameraMode::ThirdPerson);
+        settle(&mut app, 3);
+        for (layers, render) in own_parts(&mut app) {
+            assert_eq!(layers, None, "no override survives leaving mouselook");
+            assert_eq!(render, Some(dynamic_render_layers()));
+        }
+        assert!(is_drawn(&mut app, skull)?, "the Skull prim is back");
+        Ok(())
+    }
+
+    /// **Mouselook with the body hidden hides all of it, and it stays hidden.**
+    ///
+    /// The derender pass used to un-hide the anchor every frame while the
+    /// preferences pass hid it, unordered, so the result depended on which ran
+    /// last. Held over several frames here, so a second writer would show up
+    /// as a frame that flips back.
+    #[test]
+    fn mouselook_with_the_body_hidden_keeps_the_whole_avatar_hidden() -> Result<(), TestError> {
+        let (mut app, _skull, chest) = worn_world()?;
+        // The anchor's one visibility writer; the running viewer adds it with
+        // the session plugins rather than the world group the fixture uses.
+        app.add_plugins(crate::derender::DerenderPlugin);
+        // What the preferences tab publishes when its checkbox is off.
+        app.world_mut()
+            .insert_resource(FirstPersonAvatarVisible(false));
+        set_mode(&mut app, CameraMode::Mouselook);
+
+        let own = AgentKey::from(Uuid::from_u128(OWN));
+        let anchor = app
+            .world()
+            .resource::<AvatarState>()
+            .body_root_of(own)
+            .ok_or("the own avatar has no body root")?;
+        for frame in 0..6 {
+            settle(&mut app, 1);
+            assert_eq!(
+                app.world().get::<Visibility>(anchor),
+                Some(&Visibility::Hidden),
+                "frame {frame}: the anchor must stay hidden"
+            );
+        }
+        assert!(!is_drawn(&mut app, chest)?, "nothing worn is drawn either");
+
+        set_mode(&mut app, CameraMode::ThirdPerson);
+        settle(&mut app, 2);
+        assert_eq!(
+            app.world().get::<Visibility>(anchor),
+            Some(&Visibility::Inherited),
+            "third person shows the avatar again"
+        );
+        Ok(())
     }
 }

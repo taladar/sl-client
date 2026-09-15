@@ -180,9 +180,10 @@ use crate::session::{
     crossed_region_to_caps_llsd, display_name_update_to_llsd, enable_simulator_to_caps_llsd,
     establish_agent_communication_to_llsd, full_update_block, instant_message,
     land_stat_reply_to_caps_llsd, nav_mesh_status_to_llsd, open_region_info_to_llsd,
-    parcel_properties_to_llsd, parcel_properties_to_wire, region_handshake_message,
-    required_voice_version_to_llsd, set_display_name_reply_to_llsd, shape_from_object_shape_block,
-    sim_console_response_to_llsd, teleport_finish_to_llsd, unpack_uuids, windlight_refresh_to_llsd,
+    parcel_object_owners_to_caps_llsd, parcel_properties_to_llsd, parcel_properties_to_wire,
+    region_handshake_message, required_voice_version_to_llsd, set_display_name_reply_to_llsd,
+    shape_from_object_shape_block, sim_console_response_to_llsd, teleport_finish_to_llsd,
+    unpack_uuids, windlight_refresh_to_llsd,
 };
 use crate::sim_experiences::SimExperiences;
 use crate::sim_inventory::{SimInventoryError, SimInventoryTree};
@@ -9680,6 +9681,22 @@ impl SimSession {
         self.enqueue_caps_event(
             "LandStatReply",
             land_stat_reply_to_caps_llsd(report_type, request_flags, total_object_count, items),
+        );
+    }
+
+    /// Enqueues a CAPS `ParcelObjectOwnersReply`: a parcel's per-owner object
+    /// tallies, answering a `ParcelObjectOwnersRequest`.
+    ///
+    /// The event-queue form of
+    /// [`send_parcel_object_owners_reply`](Self::send_parcel_object_owners_reply),
+    /// and the one a simulator with a queue answers with (the message is
+    /// `UDPDeprecated`). It is one document however many owners there are, and
+    /// only it carries each owner's most recent rez time
+    /// ([`ParcelObjectOwner::most_recent`]).
+    pub fn enqueue_parcel_object_owners_reply(&mut self, owners: &[ParcelObjectOwner]) {
+        self.enqueue_caps_event(
+            "ParcelObjectOwnersReply",
+            parcel_object_owners_to_caps_llsd(owners),
         );
     }
 

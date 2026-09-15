@@ -1139,7 +1139,11 @@ pub(crate) fn position_camera(
     // The seat and its linkset ancestors, to compose a scripted sit camera's seat
     // pose from current-frame local transforms (see [`sit_camera_pose`]).
     seat_chain: SeatChainQuery,
-    motions: Query<&AvatarMotion>,
+    // The own avatar's reported motion and the heading the viewer holds for it:
+    // the follow tracks the held heading, the report is the fallback until it is
+    // seeded (see [`own_avatar_pose`]). One tuple, since this system is at Bevy's
+    // parameter limit.
+    facing: (Query<&AvatarMotion>, Res<crate::world_api::AvatarControls>),
     // The own avatar's mesh sub-hierarchy, so the collision ray can ignore the
     // agent's own body (see [`collide_camera`]).
     children: Query<&Children>,
@@ -1167,7 +1171,8 @@ pub(crate) fn position_camera(
     // The own avatar's live world position and stable (heading-derived) facing, if
     // it has arrived. Read from the current-frame anchor `Transform`, not the
     // frame-late `GlobalTransform`, so the follow does not trail by a frame.
-    let avatar_pose = own_avatar_pose(&identity, &avatars, &transforms, &motions);
+    let (motions, controls) = facing;
+    let avatar_pose = own_avatar_pose(&identity, &avatars, &transforms, &motions, &controls);
 
     // The own avatar's mesh entities (its anchor and the whole rigged-body
     // sub-hierarchy), so [`collide_camera`] does not treat the agent's own body as
@@ -1518,16 +1523,21 @@ fn collide_camera(
 /// The own avatar's Bevy world position (its body-root anchor) and **stable**
 /// facing. `None` until the avatar has spawned.
 ///
-/// The facing comes from the avatar's reported **heading** ([`AvatarMotion::yaw`]),
-/// not from a skeleton joint's rotation: the chest / upper-body joints sway with
-/// the idle animation, and following that swings the third-person camera
-/// left-and-right. The heading is the body yaw, which is what the reference camera
-/// tracks. The anchor's own rotation is the fallback when no motion is tracked.
+/// The facing is the **heading** the viewer holds for the avatar
+/// ([`AvatarControls::held_heading`](crate::world_api::AvatarControls::held_heading)),
+/// the same one its body is drawn facing, and until that is seeded the avatar's
+/// reported heading ([`AvatarMotion::yaw`]). Never a skeleton joint's rotation:
+/// the chest / upper-body joints sway with the idle animation, and following that
+/// swings the third-person camera left-and-right. Nor the reported heading once
+/// the held one is known: the simulator parks a turned body a couple of degrees
+/// short of it, and the reference camera follows its agent frame, not the echo.
+/// The anchor's own rotation is the fallback when no motion is tracked.
 fn own_avatar_pose(
     identity: &SlIdentity,
     avatars: &AvatarState,
     transforms: &AvatarTransformQuery,
     motions: &Query<&AvatarMotion>,
+    controls: &crate::world_api::AvatarControls,
 ) -> Option<(Vec3, Vec3)> {
     let agent = identity.agent_id?;
     let anchor = avatars.body_root_of(agent)?;
@@ -1547,7 +1557,7 @@ fn own_avatar_pose(
     let transform = transforms.get(anchor).ok()?;
     let facing = motions.get(anchor).map_or_else(
         |_error| transform.rotation.mul_vec3(Vec3::X),
-        |motion| facing_from_yaw(motion.yaw()),
+        |motion| facing_from_yaw(controls.held_heading().unwrap_or_else(|| motion.yaw())),
     );
     Some((transform.translation, facing))
 }
@@ -2250,6 +2260,7 @@ mod tests {
             .init_resource::<StaticRaycastIndex>()
             .init_resource::<DynamicColliders>()
             .init_resource::<CameraAim>()
+            .init_resource::<crate::world_api::AvatarControls>()
             .init_resource::<Writes>()
             .add_systems(Update, (position_camera, count_writes).chain());
         // A non-zero eye offset from the focus point, so the look direction is

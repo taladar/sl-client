@@ -460,6 +460,12 @@ about-land-autoreturn = Auto-return (minutes):
 about-land-object-owners = Object Owners:
 about-land-refresh = Refresh
 about-land-owners-empty = No objects on this parcel.
+# The object-owner tally's status, beside Refresh: another About Land window on
+# this region asked first, and its answer would be indistinguishable from this
+# one's.
+about-land-owners-waiting = Waiting for another request on this region…
+about-land-owners-searching = Searching…
+about-land-owners-unanswered = The region sent no object list.
 about-land-owner-agent = Resident
 about-land-owner-group = Group
 # One object-owner row's object count.
@@ -468,6 +474,7 @@ about-land-owner-count = { $count } objects
 about-land-owners-type = Type
 about-land-owners-name = Name
 about-land-owners-count = Count
+about-land-owners-most-recent = Most recent
 # The allow / ban list table column headers.
 about-land-access-name = Name
 about-land-access-expiry = Expires

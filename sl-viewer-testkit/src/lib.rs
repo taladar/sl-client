@@ -1738,10 +1738,9 @@ mod measure_tests {
     //! turned out to have once it was measured rather than described — a wrap
     //! width taken from the border box, and a hanging space counted as content.
     //! Both are fixed in the Bevy fork; these are what stops them coming back.
-    //! The third is the part that is **not** fixed
-    //! (`viewer-grid-row-height-from-unwrapped-text`), and is written the other
-    //! way round: it asserts the bug is still there, so it fails the day taffy
-    //! corrects it.
+    //! The last three are `viewer-grid-row-height-from-unwrapped-text`, a
+    //! column bounded by `max_width` that came out one line tall: two `taffy`
+    //! defects, fixed in the taffy fork.
 
     use super::{LayoutTest, TestError, overflow_violations, settle, spawn_under_root};
     use bevy::prelude::*;
@@ -1759,9 +1758,8 @@ mod measure_tests {
     /// inline axis: the app, the text entity and the column entity.
     ///
     /// Under the scaffold root, never as a root of its own: a bare root is a
-    /// grid item of `bevy_ui`'s implicit viewport node, which has a layout bug
-    /// of its own (see the last test here) and would answer a different
-    /// question.
+    /// grid item of `bevy_ui`'s implicit viewport node, and would test that
+    /// path as well as the text measure.
     fn fixture(text_padding: f32) -> (App, Entity, Entity) {
         let mut app = LayoutTest::new().build();
         let text = app
@@ -1956,20 +1954,14 @@ mod measure_tests {
         Ok(())
     }
 
-    /// **Inverted**, and deliberately: `viewer-grid-row-height-from-unwrapped-text`
-    /// is still open upstream, and this asserts it is still there.
+    /// A column bounded by `max_width: 560` holding [`PROSE`], which wraps at
+    /// that width, placed in `container` (or as a root of its own when that is
+    /// `None`), then settled.
     ///
-    /// A `Display::Grid` with an auto row sizes that row from a layout performed
-    /// at the item's *max-content* width and never re-measures once the item's
-    /// real width is known, so a column clamped by its own `max_width` keeps the
-    /// height its text had as one unbroken line. Every root node hits it too:
-    /// `bevy_ui` parents each one to an implicit viewport node that is itself a
-    /// grid.
-    ///
-    /// When this starts failing, taffy has fixed it: delete this test, move the
-    /// roadmap item to `done/`, and drop the caveat on `OVERFLOW_EPSILON`.
-    #[test]
-    fn a_grid_row_takes_its_height_from_a_wrap_that_never_happens() -> Result<(), TestError> {
+    /// The column is shrink-to-fit in every placement below, so its width is
+    /// never definite beforehand: it is **measured** with no known width and
+    /// clamped afterwards, which is the path the bug lived on.
+    fn clamped_column_in(container: Option<Node>) -> App {
         let mut app = LayoutTest::new().build();
         let text = app
             .world_mut()
@@ -1986,29 +1978,69 @@ mod measure_tests {
                 Name::new("clamped-column"),
             ))
             .id();
-        let grid = spawn_under_root(
-            &mut app,
-            (
-                Node {
-                    display: Display::Grid,
-                    align_items: AlignItems::Start,
-                    justify_items: JustifyItems::Start,
-                    width: Val::Px(1600.0),
-                    height: Val::Px(1200.0),
-                    ..default()
-                },
-                Name::new("grid"),
-            ),
-        );
         app.world_mut().entity_mut(column).add_child(text);
-        app.world_mut().entity_mut(grid).add_child(column);
+        if let Some(container) = container {
+            let container = spawn_under_root(&mut app, (container, Name::new("container")));
+            app.world_mut().entity_mut(container).add_child(column);
+        }
         settle(&mut app);
-        let violations = overflow_violations(&mut app);
+        app
+    }
+
+    /// Assert `app` lays out with no overflow, naming the column's `placement`.
+    fn assert_no_overflow(app: &mut App, placement: &str) {
+        let violations = overflow_violations(app);
         assert!(
-            violations.iter().any(|v| v.contains("clamped-column")),
-            "the clamped column no longer overflows its grid row, so taffy has fixed \
+            violations.is_empty(),
+            "a `max_width` column {placement} is shorter than the text it wraps; see \
              `viewer-grid-row-height-from-unwrapped-text`: {violations:#?}",
         );
-        Ok(())
+    }
+
+    /// A `max_width` column **as a grid item** is as tall as its wrapped text.
+    ///
+    /// A grid measures its items with no known width, and taffy's flexbox
+    /// offered such a column's children the whole grid area rather than the
+    /// 560 px the column can have. The text was measured as one line, the column
+    /// took that height, and the text, laid out at 560 px in the end, wrapped to
+    /// three lines and hung two of them out of the bottom.
+    #[test]
+    fn a_max_width_column_in_a_grid_is_as_tall_as_its_text() {
+        let mut app = clamped_column_in(Some(Node {
+            display: Display::Grid,
+            align_items: AlignItems::Start,
+            justify_items: JustifyItems::Start,
+            width: Val::Px(1600.0),
+            height: Val::Px(1200.0),
+            ..default()
+        }));
+        assert_no_overflow(&mut app, "in a grid");
+    }
+
+    /// The same column **as a flex row item**, which reached the same symptom by
+    /// another route: the row asks for the column's height at its clamped width,
+    /// and taffy's measure cache answered from a measure made with *no* known
+    /// width whose result merely came out clamped to that width, i.e. from a
+    /// layout of the text as one line.
+    #[test]
+    fn a_max_width_column_in_a_flex_row_is_as_tall_as_its_text() {
+        let mut app = clamped_column_in(Some(Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Start,
+            width: Val::Px(1600.0),
+            height: Val::Px(1200.0),
+            ..default()
+        }));
+        assert_no_overflow(&mut app, "in a flex row");
+    }
+
+    /// The same column **as a root of its own**: the shape the bug was first
+    /// seen in, a bounded panel spawned without a parent. `bevy_ui` parents every
+    /// root to an implicit viewport node that is a grid, so this is the grid case
+    /// reached without anyone writing a grid.
+    #[test]
+    fn a_max_width_column_as_a_root_is_as_tall_as_its_text() {
+        let mut app = clamped_column_in(None);
+        assert_no_overflow(&mut app, "as a root node");
     }
 }

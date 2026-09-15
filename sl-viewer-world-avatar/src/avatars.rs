@@ -132,6 +132,13 @@ impl Plugin for AvatarAppearancePlugin {
                 crate::bake_publish::drive_bake_publish,
             ),
         );
+        // What of the own avatar mouselook draws: after the avatars are folded
+        // in, so a body spawned this frame is layered before it is first drawn.
+        app.init_resource::<crate::world_api::FirstPersonAvatarVisible>()
+            .add_systems(
+                Update,
+                crate::first_person::apply_first_person_view.after(WorldPhase::AvatarsUpdated),
+            );
         if std::env::var("SL_VIEWER_LOG_AVATAR_INTEREST").as_deref() == Ok("1") {
             // R22b diagnostic census of unresolved coarse "blue sphere" avatars.
             app.add_systems(Update, log_avatar_interest_census);
@@ -224,6 +231,11 @@ impl AvatarBodyPart {
     /// The part's index into the shared `AvatarBody::parts` list.
     pub(crate) const fn part(&self) -> usize {
         self.part
+    }
+
+    /// Which baked region this part belongs to.
+    pub(crate) const fn region(&self) -> BodyRegion {
+        self.region
     }
 }
 
@@ -392,8 +404,15 @@ fn uv_grid_image() -> Image {
 /// joint — [`pose_attachment_nodes`](crate::animations::pose_attachment_nodes)
 /// re-propagates their subtrees from the posed joint so a worn rigid attachment
 /// (an earring, a piercing) tracks the head instead of freezing at the rest pose.
+///
+/// It also carries whether what hangs off it stays drawn in mouselook, so the
+/// first-person view (`crate::first_person`) can hide a worn hat without looking
+/// the point back up.
 #[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct AttachmentPointNode;
+pub(crate) struct AttachmentPointNode {
+    /// `avatar_lad.xml`'s `visible_in_first_person` for this point.
+    pub(crate) visible_in_first_person: bool,
+}
 
 /// The settings section the name-tag toggles live in.
 const NAME_TAG_SECTION: &[&str] = &["nametags"];
@@ -693,6 +712,8 @@ struct BodyAttachmentPoint {
     joint_index: usize,
     /// The point's fixed local offset from that joint (Second Life Z-up space).
     offset: Transform,
+    /// Whether an object worn here stays drawn in mouselook.
+    visible_in_first_person: bool,
 }
 
 /// One base part's shared render data.
@@ -822,6 +843,7 @@ pub fn setup_avatar_body(
                             rotation: sl_euler_deg_to_quat(info.rotation_euler_deg),
                             scale: Vec3::ONE,
                         },
+                        visible_in_first_person: info.visible_in_first_person,
                     },
                 )
             })
@@ -1541,7 +1563,9 @@ fn spawn_body(
                 .spawn((
                     initial,
                     Visibility::default(),
-                    AttachmentPointNode,
+                    AttachmentPointNode {
+                        visible_in_first_person: point.visible_in_first_person,
+                    },
                     ChildOf(root),
                 ))
                 .id();

@@ -341,6 +341,7 @@ allow-git = [
   "https://github.com/taladar/bevy_flair.git",
   "https://github.com/taladar/bevy.git",
   "https://github.com/taladar/wgpu.git",
+  "https://github.com/taladar/taffy.git",
 ]
 
 [sources.allow-org]

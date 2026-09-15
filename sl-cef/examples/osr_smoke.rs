@@ -11,7 +11,7 @@
 //! ```
 
 use sl_cef::chromium::CefMediaBackend;
-use sl_cef::{BackendConfig, MediaBackend, SurfaceConfig, ValidatedMediaUrl};
+use sl_cef::{BackendConfig, MediaBackend, SurfaceConfig, SurfaceTrust, ValidatedMediaUrl};
 
 /// Initialise, load `https://example.com/`, dump one frame, shut down.
 fn main() {
@@ -37,7 +37,7 @@ fn main() {
             height: 600,
             initial_url: ValidatedMediaUrl::parse("https://example.com/")
                 .unwrap_or_else(|error| panic!("test URL rejected: {error}")),
-            isolated: true,
+            trust: SurfaceTrust::InWorld,
             max_fps: 30,
             muted: true,
             loop_media: false,
