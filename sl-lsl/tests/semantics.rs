@@ -434,6 +434,34 @@ default { state_entry() { } }";
         );
     }
 
+    /// The grid compiles a repeated label, so it is a warning, never an error.
+    #[test]
+    fn duplicate_label_severity_is_warning() {
+        let script = parse("default { state_entry() { @again; @again; } }").script;
+        let severities: Vec<Severity> = analyze(&script, &library())
+            .into_iter()
+            .map(|d| d.severity)
+            .collect();
+        assert_eq!(severities, vec![Severity::Warning]);
+    }
+
+    /// `print` is grammar, not library: it resolves against a full table that
+    /// never lists it, takes a value of any type, and its operand is still
+    /// checked.
+    #[test]
+    fn print_is_not_a_library_call() {
+        assert_eq!(
+            kinds("default { state_entry() { print(1); print(\"x\"); print([]); } }"),
+            vec![]
+        );
+        assert_eq!(
+            kinds("default { state_entry() { print(nope); } }"),
+            vec![DiagnosticKind::UndefinedVariable {
+                name: "nope".to_owned()
+            }]
+        );
+    }
+
     #[test]
     fn undefined_label_jump() {
         assert_eq!(

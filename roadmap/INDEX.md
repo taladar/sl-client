@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 100 |
+| ideas | 101 |
 | ready | 314 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 22 |
-| done | 1145 |
+| bugs | 20 |
+| done | 1147 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1686** |
+| **total** | **1687** |
 
-## ideas (100)
+## ideas (101)
 
 ### protocol
 
@@ -77,6 +77,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Access-list export / import / copy for parcel & estate lists
 - [`viewer-local-mesh`](ideas/viewer-local-mesh.md) — Local mesh — live-reload
   mesh from disk
+- [`viewer-lsl-oracle-misses`](ideas/viewer-lsl-oracle-misses.md) — Grid compile
+  errors the LSL semantic pass does not report (20 oracle misses)
 - [`viewer-lsl-preprocessor`](ideas/viewer-lsl-preprocessor.md) — LSL
   preprocessor (FS-compatible)
 - [`viewer-manual-music-stream-url`](ideas/viewer-manual-music-stream-url.md) —
@@ -1165,7 +1167,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (22)
+## bugs (20)
 
 ### viewer
 
@@ -1190,9 +1192,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   default hair dome intermittently stays grey for a whole session
 - [`viewer-hover-tooltip-202ms-frame-spike`](bugs/viewer-hover-tooltip-202ms-frame-spike.md)
   — update_hover_tooltip spikes to 202 ms on a single frame
-- [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
-  — LSL semantic pass false-positives on legal scripts (found by the tailslide
-  oracle at scale)
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
   Some worn mesh hair does not render (visible in Firestorm)
 - [`viewer-mouselook-own-head-visible-from-inside`](bugs/viewer-mouselook-own-head-visible-from-inside.md)
@@ -1216,7 +1215,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)
 
-## done (1145)
+## done (1147)
 
 ### protocol
 
@@ -2007,6 +2006,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-lsl-parser-tree`](done/viewer-lsl-parser-tree.md) — LSL parser —
   error-tolerant recursive-descent AST (sl-lsl) (blocked by `viewer-lsl-lexer`
   (done))
+- [`viewer-lsl-semantic-false-positives`](done/viewer-lsl-semantic-false-positives.md)
+  — LSL semantic pass false-positives on legal scripts (found by the tailslide
+  oracle at scale)
 - [`viewer-lsl-semantic-pass`](done/viewer-lsl-semantic-pass.md) — LSL semantic
   pass — types, arity, undefined symbols, reachability (blocked by
   `viewer-lsl-parser-tree` (done), `protocol-lsl-syntax` (done))

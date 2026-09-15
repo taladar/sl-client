@@ -117,6 +117,20 @@ mod tests {
     }
 
     #[test]
+    fn l_prefixed_string_is_one_literal() {
+        // The legacy `L` prefix belongs to the string; a longer word ending in
+        // `L` does not.
+        assert_eq!(
+            kinds_text(r#"L"hi" xL"y""#),
+            vec![
+                (Token::StringLiteral, r#"L"hi""#),
+                (Token::Identifier, "xL"),
+                (Token::StringLiteral, r#""y""#),
+            ]
+        );
+    }
+
+    #[test]
     fn unterminated_string_runs_to_end() {
         assert_eq!(
             kinds_text("x = \"oops"),

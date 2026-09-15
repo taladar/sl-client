@@ -200,7 +200,9 @@ pub enum DiagnosticKind {
         /// The repeated name.
         name: String,
     },
-    /// Two jump labels with the same name in one function or event handler.
+    /// Two jump labels with the same name in one function or event handler. A
+    /// warning: the grid compiles it, and a `jump` then silently lands on
+    /// whichever of the two its compiler picks.
     DuplicateLabel {
         /// The repeated label name.
         name: String,
@@ -214,13 +216,15 @@ pub enum DiagnosticKind {
 
 impl DiagnosticKind {
     /// The severity this kind carries. Everything the grid's front-end would
-    /// reject is an [`Severity::Error`]; the two "legal but suspicious" kinds
-    /// ([`Self::MissingReturn`], [`Self::UnreachableState`]) are
-    /// [`Severity::Warning`].
+    /// reject is an [`Severity::Error`]; the "legal but suspicious" kinds
+    /// ([`Self::MissingReturn`], [`Self::UnreachableState`],
+    /// [`Self::DuplicateLabel`]) are [`Severity::Warning`].
     #[must_use]
     pub const fn severity(&self) -> Severity {
         match self {
-            Self::MissingReturn { .. } | Self::UnreachableState { .. } => Severity::Warning,
+            Self::MissingReturn { .. }
+            | Self::UnreachableState { .. }
+            | Self::DuplicateLabel { .. } => Severity::Warning,
             _ => Severity::Error,
         }
     }
@@ -766,6 +770,7 @@ impl<'a> Analyzer<'a> {
             }
             Expr::Cast { operand, .. } => self.analyze_expr(operand),
             Expr::Paren { inner, .. } => self.analyze_expr(inner),
+            Expr::Print { arg, .. } => self.analyze_expr(arg),
         }
     }
 
@@ -883,7 +888,10 @@ impl<'a> Analyzer<'a> {
             // operand-polymorphic in LSL (`%` is vector cross product too), so
             // it stays unknown rather than risk a wrong guess.
             Expr::Binary { op, .. } => binary_result_type(*op),
-            Expr::Error(_) => None,
+            // The grid's compiler types `print(x)` inconsistently (as a string
+            // in some positions, with nothing on the stack), so it stays
+            // unknown rather than feed a type check.
+            Expr::Print { .. } | Expr::Error(_) => None,
         }
     }
 

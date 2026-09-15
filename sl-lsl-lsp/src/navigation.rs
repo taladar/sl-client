@@ -476,7 +476,7 @@ impl<'a> Resolver<'a> {
                 self.walk_expr(target);
                 self.walk_expr(value);
             }
-            Expr::Paren { inner, .. } => self.walk_expr(inner),
+            Expr::Paren { inner, .. } | Expr::Print { arg: inner, .. } => self.walk_expr(inner),
         }
     }
 

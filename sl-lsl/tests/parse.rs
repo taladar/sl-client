@@ -290,7 +290,7 @@ state running
 
     #[test]
     fn parenthesised_comparison_inside_a_vector_component() -> Result<(), String> {
-        // Real LSL requires the parentheses; the component then holds a `>`.
+        // Parentheses put a `>` out of reach of the constructor in any component.
         let Expr::Vector { x, .. } = expr("<(a > b), 0, 0>")? else {
             return Err("expected a vector".to_owned());
         };
@@ -304,6 +304,194 @@ state running
                 ..
             }
         ));
+        Ok(())
+    }
+
+    /// The binary operator of `expr`, or an error naming what it was instead.
+    fn binary_op(expr: &Expr) -> Result<BinaryOp, String> {
+        match expr {
+            Expr::Binary { op, .. } => Ok(*op),
+            other => Err(format!("expected a binary expression, got {other:?}")),
+        }
+    }
+
+    #[test]
+    fn comparisons_in_a_non_last_component_need_no_parentheses() -> Result<(), String> {
+        // Nothing can close the constructor before its last `,`, so the grid's
+        // grammar reads every `<` and `>` there as an operator.
+        let Expr::Vector { x, y, .. } = expr("<a < b, a > b, 3>")? else {
+            return Err("expected a vector".to_owned());
+        };
+        assert_eq!(binary_op(&x)?, BinaryOp::Lt);
+        assert_eq!(binary_op(&y)?, BinaryOp::Gt);
+        let Expr::Rotation { z, .. } = expr("<1, 2, a >= b, 4>")? else {
+            return Err("expected a rotation".to_owned());
+        };
+        assert_eq!(binary_op(&z)?, BinaryOp::Ge);
+        Ok(())
+    }
+
+    #[test]
+    fn greater_before_an_operand_compares_in_the_last_component() -> Result<(), String> {
+        let Expr::Vector { z, .. } = expr("<1, 2, a > b>")? else {
+            return Err("expected a vector".to_owned());
+        };
+        assert_eq!(binary_op(&z)?, BinaryOp::Gt);
+        // `z` of a rotation is ambiguous until the `,`, and `s` is last too.
+        let Expr::Rotation { z, s, .. } = expr("<1, 2, a > b, a > 1.5>")? else {
+            return Err("expected a rotation".to_owned());
+        };
+        assert_eq!(binary_op(&z)?, BinaryOp::Gt);
+        assert_eq!(binary_op(&s)?, BinaryOp::Gt);
+        Ok(())
+    }
+
+    #[test]
+    fn greater_before_minus_or_less_closes_the_constructor() -> Result<(), String> {
+        // The constructor rule outranks `-` and `<` at the component's top
+        // level, so they apply to the finished vector.
+        for (src, op) in [
+            ("<1, 2, 3> - v", BinaryOp::Sub),
+            ("<1, 2, 3> < v", BinaryOp::Lt),
+        ] {
+            let Expr::Binary { op: found, lhs, .. } = expr(src)? else {
+                return Err(format!("expected a binary expression from {src}"));
+            };
+            assert_eq!(found, op);
+            assert!(matches!(*lhs, Expr::Vector { .. }), "{src}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn greater_under_a_looser_operator_takes_a_negated_operand() -> Result<(), String> {
+        // Below the component's top level the grid's grammar has already
+        // committed to a comparison, so `-c` is its operand: `a == (b > -c)`.
+        let Expr::Vector { z, .. } = expr("<1, 2, a == b > -c>")? else {
+            return Err("expected a vector".to_owned());
+        };
+        let Expr::Binary {
+            op: BinaryOp::Eq,
+            rhs,
+            ..
+        } = *z
+        else {
+            return Err("expected `==` at the top of the last component".to_owned());
+        };
+        let Expr::Binary {
+            op: BinaryOp::Gt,
+            rhs: operand,
+            ..
+        } = *rhs
+        else {
+            return Err("expected `>` under the `==`".to_owned());
+        };
+        assert!(matches!(
+            *operand,
+            Expr::Prefix {
+                op: PrefixOp::Neg,
+                ..
+            }
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn nested_vector_comparison_parses_like_the_grid() -> Result<(), String> {
+        // tailslide's `vconst.lsl`: the inner `<1, 1 > 1, 1>` has a comparison
+        // as its `y`, and the space-separated `> >` closes both constructors.
+        let Expr::Vector { z, .. } = expr("<1, 2, <1, 1, 1> * <1, 1 > 1, 1> >")? else {
+            return Err("expected a vector".to_owned());
+        };
+        let Expr::Binary {
+            op: BinaryOp::Mul,
+            lhs,
+            rhs,
+            ..
+        } = *z
+        else {
+            return Err("expected a product as the last component".to_owned());
+        };
+        assert!(matches!(*lhs, Expr::Vector { .. }));
+        let Expr::Vector { y, .. } = *rhs else {
+            return Err("expected a vector on the right of the product".to_owned());
+        };
+        assert_eq!(binary_op(&y)?, BinaryOp::Gt);
+        Ok(())
+    }
+
+    #[test]
+    fn print_is_a_keyword_expression() -> Result<(), String> {
+        let Stmt::Expr {
+            expr: Expr::Print { arg, .. },
+            ..
+        } = stmt("print(\"hi\");")?
+        else {
+            return Err("expected a print expression statement".to_owned());
+        };
+        assert!(matches!(*arg, Expr::Str { .. }));
+        let Stmt::For { init, incr, .. } = stmt("for (print(1); 0; print(2)) ;")? else {
+            return Err("expected a for loop".to_owned());
+        };
+        assert!(matches!(init.as_slice(), [Expr::Print { .. }]));
+        assert!(matches!(incr.as_slice(), [Expr::Print { .. }]));
+        // A keyword is not a value.
+        assert!(parse("default { timer() { llSay(0, (string)print); } }").has_errors());
+        Ok(())
+    }
+
+    #[test]
+    fn characters_that_start_no_token_are_skipped_like_the_grid() -> Result<(), String> {
+        let script = parse_ok("default { $ ' state_entry() { llOwnerSay(\"hi\"); ` } }");
+        let handler = script
+            .states
+            .first()
+            .and_then(|state| state.events.first())
+            .ok_or("expected the handler to survive the stray characters")?;
+        assert_eq!(handler.name.name, "state_entry");
+        Ok(())
+    }
+
+    #[test]
+    fn a_quote_with_no_closing_quote_is_a_skipped_character() -> Result<(), String> {
+        // The grid's scanner ignores the lone `"` rather than running a string
+        // to the end of the file, so the closing braces after it still count.
+        let script = parse_ok("default { timer() { llOwnerSay(\"hi\"); }\" }");
+        assert_eq!(script.states.len(), 1);
+        // Every later quote is stray too, even one an editor would read as the
+        // start of a closed string: `x\"; a = 1;` is `x \ ; a = 1;` there.
+        let script = parse_ok("default { timer() { a = \"x\\\"; a = 1; } }");
+        let statements = script
+            .states
+            .first()
+            .and_then(|state| state.events.first())
+            .map(|event| event.body.statements.len());
+        assert_eq!(statements, Some(2));
+        // An unterminated `L"` leaves the `L` as a plain identifier.
+        let Stmt::Expr {
+            expr: Expr::Variable(id),
+            ..
+        } = stmt("L\";")?
+        else {
+            return Err("expected the `L` to remain a variable".to_owned());
+        };
+        assert_eq!(id.name, "L");
+        Ok(())
+    }
+
+    #[test]
+    fn l_prefixed_string_spanning_a_line_is_one_literal() -> Result<(), String> {
+        let Stmt::Expr {
+            expr: Expr::Call { args, .. },
+            ..
+        } = stmt("llOwnerSay(L\"Hello\nworld\");")?
+        else {
+            return Err("expected a call".to_owned());
+        };
+        let [Expr::Str { raw, .. }] = args.as_slice() else {
+            return Err("expected one string argument".to_owned());
+        };
+        assert_eq!(raw, "L\"Hello\nworld\"");
         Ok(())
     }
 
