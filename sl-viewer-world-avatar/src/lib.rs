@@ -66,6 +66,8 @@ pub mod gpu_avatar_spike;
 pub mod gpu_avatars;
 pub mod ground;
 pub mod hand_pose;
+#[cfg(test)]
+mod headless_gpu;
 pub mod locomotion;
 pub mod locomotion_ik;
 pub mod look_at;

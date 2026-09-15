@@ -22,14 +22,12 @@ use bevy::app::ScheduleRunnerPlugin;
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::RenderTarget;
 use bevy::camera::visibility::NoFrustumCulling;
-use bevy::log::LogPlugin;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
 use bevy::prelude::*;
 use bevy::render::gpu_readback::{Readback, ReadbackComplete};
 use bevy::render::render_resource::encase;
 use bevy::render::render_resource::{TextureFormat, TextureUsages};
-use bevy::winit::WinitPlugin;
 use sl_client_bevy::{
     AnimationPose, BevySkeleton, JointOverrides, SkeletalDeformations, Skeleton, VisualParams,
     VolumeDeformations,
@@ -652,27 +650,18 @@ fn the_gpu_palette_matches_the_cpu_reference() -> Result<(), TestError> {
     let row_capacity = skeleton.len();
 
     let mut app = App::new();
-    app.add_plugins(
-        DefaultPlugins
-            .set(WindowPlugin {
-                primary_window: None,
-                exit_condition: bevy::window::ExitCondition::DontExit,
-                ..default()
-            })
-            .disable::<WinitPlugin>()
-            .disable::<LogPlugin>(),
-    )
-    .add_plugins(ScheduleRunnerPlugin::run_loop(core::time::Duration::ZERO))
-    .add_plugins(SlFaceMaterialPlugin)
-    .add_plugins(GpuAvatarsPlugin {
-        mode: GpuAvatarsMode {
-            active: true,
-            readback: true,
-            // The test stages fixture data by hand instead of reading the
-            // (absent) avatar state.
-            live: false,
-        },
-    });
+    app.add_plugins(crate::headless_gpu::headless_gpu_plugins())
+        .add_plugins(ScheduleRunnerPlugin::run_loop(core::time::Duration::ZERO))
+        .add_plugins(SlFaceMaterialPlugin)
+        .add_plugins(GpuAvatarsPlugin {
+            mode: GpuAvatarsMode {
+                active: true,
+                readback: true,
+                // The test stages fixture data by hand instead of reading the
+                // (absent) avatar state.
+                live: false,
+            },
+        });
 
     // Phase 5: turn the posed-bounds pass on for this fixture (the live app
     // gates its infra on `mode.live`, off here) so the test runs the exact
@@ -2259,25 +2248,16 @@ fn the_gpu_sampled_blended_palette_matches_the_cpu_mirror() -> Result<(), TestEr
         arena.staged();
 
     let mut app = App::new();
-    app.add_plugins(
-        DefaultPlugins
-            .set(WindowPlugin {
-                primary_window: None,
-                exit_condition: bevy::window::ExitCondition::DontExit,
-                ..default()
-            })
-            .disable::<WinitPlugin>()
-            .disable::<LogPlugin>(),
-    )
-    .add_plugins(ScheduleRunnerPlugin::run_loop(core::time::Duration::ZERO))
-    .add_plugins(SlFaceMaterialPlugin)
-    .add_plugins(GpuAvatarsPlugin {
-        mode: GpuAvatarsMode {
-            active: true,
-            readback: true,
-            live: false,
-        },
-    });
+    app.add_plugins(crate::headless_gpu::headless_gpu_plugins())
+        .add_plugins(ScheduleRunnerPlugin::run_loop(core::time::Duration::ZERO))
+        .add_plugins(SlFaceMaterialPlugin)
+        .add_plugins(GpuAvatarsPlugin {
+            mode: GpuAvatarsMode {
+                active: true,
+                readback: true,
+                live: false,
+            },
+        });
     app.add_systems(
         Update,
         |mut meshes: Query<&mut Transform, With<SkinnedMesh>>| {
@@ -2650,25 +2630,16 @@ fn the_gpu_holds_a_stopped_motions_pose() -> Result<(), TestError> {
     };
 
     let mut app = App::new();
-    app.add_plugins(
-        DefaultPlugins
-            .set(WindowPlugin {
-                primary_window: None,
-                exit_condition: bevy::window::ExitCondition::DontExit,
-                ..default()
-            })
-            .disable::<WinitPlugin>()
-            .disable::<LogPlugin>(),
-    )
-    .add_plugins(ScheduleRunnerPlugin::run_loop(core::time::Duration::ZERO))
-    .add_plugins(SlFaceMaterialPlugin)
-    .add_plugins(GpuAvatarsPlugin {
-        mode: GpuAvatarsMode {
-            active: true,
-            readback: true,
-            live: false,
-        },
-    });
+    app.add_plugins(crate::headless_gpu::headless_gpu_plugins())
+        .add_plugins(ScheduleRunnerPlugin::run_loop(core::time::Duration::ZERO))
+        .add_plugins(SlFaceMaterialPlugin)
+        .add_plugins(GpuAvatarsPlugin {
+            mode: GpuAvatarsMode {
+                active: true,
+                readback: true,
+                live: false,
+            },
+        });
     app.add_systems(
         Update,
         |mut meshes: Query<&mut Transform, With<SkinnedMesh>>| {
