@@ -1602,10 +1602,18 @@ fn calc_cloud_phi(t: f32) -> f32 {
 /// tessellation used for clouds (`buildStripsBuffer`). A grid of
 /// [`CLOUD_DOME_STACKS`]×[`CLOUD_DOME_SLICES`] vertices over the zenith cap
 /// ([`calc_cloud_phi`]), each carrying the reference **baked** planar cloud
-/// texcoord `((-z0 + 1) / 2, (-x0 + 1) / 2)` of its unit dome direction (Bevy Y-up:
-/// `x0`/`z0` horizontal, `y0 = cos φ` up). `clouds.wgsl` samples the cloud texture
-/// through this interpolated UV, so the projection matches the reference instead of
-/// being derived per fragment across a full sphere.
+/// texcoord `((-z0 + 1) / 2, (-x0 + 1) / 2)` of its unit dome direction.
+/// `clouds.wgsl` samples the cloud texture through this interpolated UV, so the
+/// projection matches the reference instead of being derived per fragment across
+/// a full sphere.
+///
+/// `x0`, `y0` and `z0` are in the reference's **dome frame**, which is not Bevy's.
+/// `renderDome` turns the dome 120° about `(1, 1, 1)` before drawing it, so its
+/// `x` is north, `y` up and `z` east; the vertices are then written out in Bevy's
+/// `(east, up, south)` as `(z0, y0, -x0)`. Building the texcoord from Bevy's axes
+/// instead turns the whole layer a quarter-turn about the zenith: the noise is laid
+/// out on other ground, and a west wind carries the clouds north
+/// (`viewer-cloud-noise-scale-divergence`).
 pub(crate) fn build_cloud_dome_mesh() -> Mesh {
     let stride = CLOUD_DOME_SLICES.saturating_add(1);
     let vert_count = CLOUD_DOME_STACKS.saturating_add(1).saturating_mul(stride);
@@ -1649,14 +1657,16 @@ pub(crate) fn build_cloud_dome_mesh() -> Mesh {
             )]
             let theta = std::f32::consts::TAU * (j as f32 / slices_f);
             let (sin_theta, cos_theta) = (theta.sin(), theta.cos());
-            // Unit dome direction (Bevy Y-up: y0 is up, x0/z0 horizontal).
+            // Unit dome direction in the reference's dome frame: x0 north, y0 up,
+            // z0 east.
             let x0 = sin_phi * cos_theta;
             let y0 = cos_phi;
             let z0 = sin_phi * sin_theta;
+            // Into Bevy's (east, up, south).
             positions.push([
-                x0 * CLOUD_DOME_RADIUS,
-                y0 * CLOUD_DOME_RADIUS - cam_height,
                 z0 * CLOUD_DOME_RADIUS,
+                y0 * CLOUD_DOME_RADIUS - cam_height,
+                -x0 * CLOUD_DOME_RADIUS,
             ]);
             // The reference baked planar texcoord (`buildStripsBuffer`):
             // `((-z0 + 1) / 2, (-x0 + 1) / 2)`, expressed as midpoints.
@@ -2237,6 +2247,39 @@ mod tests {
             "the cloud dome's mesh centre is {centre} m from the camera, \
              more than 1% of its {CLOUD_DOME_RADIUS} m radius",
         );
+    }
+
+    /// The cloud texture is laid on the sky the way the reference lays it: its `u`
+    /// runs against **east** and its `v` against **north**. The reference bakes
+    /// `((-z0 + 1) / 2, (-x0 + 1) / 2)` in a dome frame whose `z` is east and `x`
+    /// north, so a vertex due east of the zenith has the smallest `u` and one due
+    /// north the smallest `v` — and the layer's west-east scroll then carries the
+    /// clouds west-east. Reading the axes from Bevy's `(east, up, south)` instead
+    /// turned the whole layer a quarter-turn.
+    #[test]
+    fn the_cloud_texture_axes_follow_east_and_north() {
+        let mesh = build_cloud_dome_mesh();
+        let positions = mesh
+            .attribute(Mesh::ATTRIBUTE_POSITION)
+            .and_then(VertexAttributeValues::as_float3)
+            .expect("the cloud dome mesh has float positions");
+        let uvs = mesh
+            .attribute(Mesh::ATTRIBUTE_UV_0)
+            .and_then(|values| match values {
+                VertexAttributeValues::Float32x2(uvs) => Some(uvs),
+                _other => None,
+            })
+            .expect("the cloud dome mesh has float texcoords");
+        assert_eq!(positions.len(), uvs.len());
+        for (&[bevy_x, _, bevy_z], &[u, v]) in positions.iter().zip(uvs) {
+            // Bevy is (east, up, south).
+            let east = bevy_x / CLOUD_DOME_RADIUS;
+            let north = -bevy_z / CLOUD_DOME_RADIUS;
+            assert!(
+                (u - (1.0 - east) / 2.0).abs() < 1e-4 && (v - (1.0 - north) / 2.0).abs() < 1e-4,
+                "the vertex {east} east, {north} north carries the texcoord ({u}, {v})"
+            );
+        }
     }
 
     /// The clouds fade out at the horizon across the one ring of triangles whose

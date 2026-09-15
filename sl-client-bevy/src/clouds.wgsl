@@ -194,9 +194,12 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     uv0 = (uv0 - 0.5) / cloud.cloud_scale + 0.5;
 
     // The self-shadow layer is offset toward the (horizontal) light direction.
+    // The reference's `lightnorm` is in its dome frame (`toLightNorm`: x north,
+    // y up, z east), the frame the baked UV is laid out in; ours is Bevy's (x
+    // east, y up, z south), so its north is `-z` and its east `x`.
     var uv1v = uv0;
-    uv1v.x += cloud.lightnorm.x * 0.0125;
-    uv1v.y += cloud.lightnorm.z * 0.0125;
+    uv1v.x += -cloud.lightnorm.z * 0.0125;
+    uv1v.y += cloud.lightnorm.x * 0.0125;
 
     let uv2v = uv0 * 16.0;
     let uv3v = uv1v * 16.0;

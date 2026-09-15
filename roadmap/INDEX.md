@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 314 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 13 |
-| done | 1160 |
+| bugs | 12 |
+| done | 1161 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1693** |
@@ -1167,12 +1167,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (13)
+## bugs (12)
 
 ### viewer
 
-- [`viewer-cloud-noise-scale-divergence`](bugs/viewer-cloud-noise-scale-divergence.md)
-  — Clouds come out fewer and larger than Firestorm's on the same noise
 - [`viewer-combo-stops-opening`](bugs/viewer-combo-stops-opening.md) — A combo
   can stop dropping down (seen on the contact-sets chooser)
 - [`viewer-hair-dome-stays-grey`](bugs/viewer-hair-dome-stays-grey.md) — The
@@ -1199,7 +1197,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)
 
-## done (1160)
+## done (1161)
 
 ### protocol
 
@@ -1707,6 +1705,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Reusable clickable avatar-name / group-name widgets
 - [`viewer-clipped-links-still-pickable`](done/viewer-clipped-links-still-pickable.md)
   — Scrolled-out chat links still hover and click, above the floater
+- [`viewer-cloud-noise-scale-divergence`](done/viewer-cloud-noise-scale-divergence.md)
+  — Clouds come out fewer and larger than Firestorm's on the same noise
 - [`viewer-clouds-horizon-waterline-contact`](done/viewer-clouds-horizon-waterline-contact.md)
   — Check clouds vs the waterline at the horizon against Firestorm
 - [`viewer-clouds-sun-occlusion-horizon-contact`](done/viewer-clouds-sun-occlusion-horizon-contact.md)
