@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 41 |
 | in-progress | 22 |
 | bugs | 14 |
-| done | 1153 |
+| done | 1154 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1686** |
+| **total** | **1687** |
 
 ## ideas (100)
 
@@ -1178,6 +1178,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   terrain)
 - [`viewer-hair-dome-stays-grey`](bugs/viewer-hair-dome-stays-grey.md) — The
   default hair dome intermittently stays grey for a whole session
+- [`viewer-horizon-thin-line-flashes`](bugs/viewer-horizon-thin-line-flashes.md)
+  — Flashes along a thin line near the horizon
 - [`viewer-hover-tooltip-202ms-frame-spike`](bugs/viewer-hover-tooltip-202ms-frame-spike.md)
   — update_hover_tooltip spikes to 202 ms on a single frame
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
@@ -1189,8 +1191,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A nearby avatar stays a coarse sphere even as the camera closes in
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
   — Own avatar looks broken after a teleport
-- [`viewer-own-avatar-facing-drifts-idle`](bugs/viewer-own-avatar-facing-drifts-idle.md)
-  — Own avatar forward direction drifts every few seconds while idle
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 - [`viewer-rigged-attachments-wearer-not-resolved`](bugs/viewer-rigged-attachments-wearer-not-resolved.md)
@@ -1202,7 +1202,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)
 
-## done (1153)
+## done (1154)
 
 ### protocol
 
@@ -2188,6 +2188,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-outline-swallows-thin-hollow-prim`](done/viewer-outline-swallows-thin-hollow-prim.md)
   — The selection outline fills a thin-walled hollow prim white instead of
   outlining it
+- [`viewer-own-avatar-facing-drifts-idle`](done/viewer-own-avatar-facing-drifts-idle.md)
+  — Own avatar forward direction drifts every few seconds while idle
 - [`viewer-own-bake-not-refreshed-on-outfit-change`](done/viewer-own-bake-not-refreshed-on-outfit-change.md)
   — Own avatar bake not refreshed when worn layers change at runtime
 - [`viewer-p0-1`](done/viewer-p0-1-create-the-crate-skeletons.md) — Create the

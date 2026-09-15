@@ -90,7 +90,8 @@ use crate::world_api::AvatarState;
 use crate::world_api::TerrainState;
 use crate::world_api::world_scoped::{WorldPurge, WorldScoped, WorldScopedAppExt as _};
 use crate::world_api::{
-    AvatarInterp, AvatarMotion, MotionState, PhysicalObject, ViewerCamera, bevy_rotation_of,
+    AvatarControls, AvatarInterp, AvatarMotion, MotionState, PhysicalObject, ViewerCamera,
+    bevy_rotation_of,
 };
 
 /// Clamp a raw region time dilation into the `0.0..=1.0` speed factor the
@@ -684,8 +685,24 @@ fn eased_translation(rendered: Vec3, target: Vec3, region_crossed: bool, alpha: 
 /// margin cannot express this in `f32`: `1 - 1e-8` rounds to `1.0`.)
 const ROTATION_SETTLE_EPSILON: f32 = 1.0e-5;
 
-/// Ease the avatar anchor's rendered orientation toward its current authoritative /
-/// dead-reckoned facing and return the value to write (P31.7), or `None` for a
+/// The Bevy-world orientation an avatar anchor is eased towards: the viewer's own
+/// `held_heading` for the **own** avatar once it is known
+/// ([`AvatarControls::held_heading`](crate::world_api::AvatarControls::held_heading)),
+/// otherwise the authoritative / dead-reckoned facing of `motion`.
+///
+/// Every other avatar can only be drawn from what the simulator reports. The own
+/// one is drawn from the heading the viewer turned it to, as the reference draws
+/// its self avatar from the agent frame: the echo reaches that heading late and
+/// parks short of it, and an idle avatar must not turn for anything but a key.
+fn avatar_facing_target(motion: &MotionState, held_heading: Option<f32>) -> Quat {
+    held_heading.map_or_else(
+        || bevy_rotation_of(motion),
+        |yaw| sl_to_bevy_rotation().mul_quat(Quat::from_rotation_z(yaw)),
+    )
+}
+
+/// Ease the avatar anchor's rendered orientation toward `target` (its
+/// [`avatar_facing_target`]) and return the value to write (P31.7), or `None` for a
 /// placeholder sphere (which does not carry the object rotation), so only rigged
 /// bodies smooth-turn. `dt` is the real (undilated) frame time — the smoothing is a
 /// visual concern, independent of the physics clock.
@@ -695,11 +712,10 @@ const ROTATION_SETTLE_EPSILON: f32 = 1.0e-5;
 /// and marks the component changed **every call**, no matter what is written
 /// inside — which kept every idle avatar's anchor dirty per frame and defeated
 /// the pose gate. The caller writes through the `Mut` only on an actual change.
-fn smoothed_rotation(interp: &mut AvatarInterp, dt: f32) -> Option<Quat> {
+fn smoothed_rotation(interp: &mut AvatarInterp, target: Quat, dt: f32) -> Option<Quat> {
     if !interp.apply_rotation {
         return None;
     }
-    let target = bevy_rotation_of(&interp.motion);
     let alpha = rotation_smoothing_alpha(dt);
     let next = interp.rendered_rotation.slerp(target, alpha);
     interp.rendered_rotation = if next.abs_diff_eq(target, ROTATION_SETTLE_EPSILON) {
@@ -1232,8 +1248,15 @@ pub(crate) fn drive_avatar_motion(
         // drives its anchor, so the region-space dead-reckoner must leave it be.
         Without<crate::world_api::Seated>,
     >,
+    // Which anchor is the own avatar's, and the heading it is drawn facing
+    // ([`avatar_facing_target`]).
+    own: (Res<SlIdentity>, Res<AvatarState>, Res<AvatarControls>),
     mut commands: Commands,
 ) {
+    let (identity, avatar_state, controls) = own;
+    let own_anchor = identity
+        .agent_id
+        .and_then(|agent| avatar_state.body_root_of(agent));
     let now = time.elapsed_secs_f64();
     let dt_raw = time.delta_secs();
     let circuit_stale = liveness
@@ -1387,7 +1410,11 @@ pub(crate) fn drive_avatar_motion(
         if transform.translation != interp.rendered_translation {
             transform.translation = interp.rendered_translation;
         }
-        if let Some(rotation) = smoothed_rotation(&mut interp, dt_raw)
+        let held_heading = (own_anchor == Some(entity))
+            .then(|| controls.held_heading())
+            .flatten();
+        let target = avatar_facing_target(&interp.motion, held_heading);
+        if let Some(rotation) = smoothed_rotation(&mut interp, target, dt_raw)
             && transform.rotation != rotation
         {
             transform.rotation = rotation;
@@ -2558,11 +2585,12 @@ mod tests {
         ClampInput, MAX_INTERP_SECS, MotionState, OBJECT_SMOOTHING_TAU_SECS, PHASE_OUT_START_SECS,
         PhysicsInterp, REGION_MAX_HEIGHT_M, REGION_WIDTH_M, ROTATION_SMOOTHING_TAU_SECS,
         TRANSLATION_SNAP_DISTANCE_M, advance_motion, angular_step, append_triangles,
-        avatar_collision_floor, avatar_ground_floor, bevy_position_of, bevy_rotation_of,
-        category_gets_collider, clamp_dilation, clamp_prediction, dead_reckon, eased_translation,
-        extents_differ, ground_floor, mesh_physics_collider, neighbours_known, phase_out_factor,
-        place_smoothed, prim_geometry_collider, reaim_residual, rotation_smoothing_alpha,
-        shape_wants_geometry, smoothing_alpha, submesh_trimesh, to_parry_points,
+        avatar_collision_floor, avatar_facing_target, avatar_ground_floor, bevy_position_of,
+        bevy_rotation_of, category_gets_collider, clamp_dilation, clamp_prediction, dead_reckon,
+        eased_translation, extents_differ, ground_floor, mesh_physics_collider, neighbours_known,
+        phase_out_factor, place_smoothed, prim_geometry_collider, reaim_residual,
+        rotation_smoothing_alpha, shape_wants_geometry, smoothing_alpha, submesh_trimesh,
+        to_parry_points,
     };
     use crate::objects::ObjectCategory;
     use crate::physics::{ObjectPhysicsShapes, RegionTimeDilation};
@@ -3227,6 +3255,55 @@ mod tests {
     /// advances part-way each frame (never snapping) and converges to the target once
     /// it stops moving — the whole point of P31.7. Yaw about the up axis stands in for
     /// the turning avatar.
+    /// **The own avatar is drawn at the heading the viewer holds, not at the one
+    /// the simulator parked it at** (viewer-own-avatar-facing-drifts-idle).
+    ///
+    /// The numbers are an aditi turn: the viewer sent 157.27° and the simulator
+    /// settled the body at 154.38° with no further update. Drawn from the echo the
+    /// body stays 2.9° off the heading it was turned to; drawn from the held
+    /// heading it faces exactly that. With no held heading (the own avatar before
+    /// its first report, and every other avatar) the echo is the facing.
+    #[test]
+    fn the_own_avatar_faces_its_held_heading_not_the_parked_echo() {
+        let zero = Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        let parked = 154.38_f32.to_radians();
+        let half = 0.5 * parked;
+        let echo = MotionState::new(
+            &zero,
+            &zero,
+            &zero,
+            &Rotation {
+                x: 0.0,
+                y: 0.0,
+                z: half.sin(),
+                s: half.cos(),
+            },
+            &zero,
+            RegionHandle(0),
+        );
+        let held = 157.27_f32.to_radians();
+
+        let drawn = avatar_facing_target(&echo, Some(held));
+        let expected = crate::coords::sl_to_bevy_rotation().mul_quat(Quat::from_rotation_z(held));
+        assert!(
+            drawn.abs_diff_eq(expected, 1.0e-6),
+            "the own avatar faces its held heading: {drawn:?} vs {expected:?}"
+        );
+        let off_by = drawn.angle_between(bevy_rotation_of(&echo)).to_degrees();
+        assert!(
+            (off_by - 2.89).abs() < 0.05,
+            "…which is the parked offset away from the echo, got {off_by}°"
+        );
+        assert!(
+            avatar_facing_target(&echo, None).abs_diff_eq(bevy_rotation_of(&echo), 1.0e-6),
+            "with no held heading the echo is the facing"
+        );
+    }
+
     #[test]
     fn rotation_smoothing_converges_without_snapping() {
         let target = Quat::from_rotation_y(core::f32::consts::FRAC_PI_2);

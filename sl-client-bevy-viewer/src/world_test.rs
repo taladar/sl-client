@@ -4229,7 +4229,8 @@ mod movement_tests {
 
     use sl_client_bevy::{
         AgentKey, Arrival, Command, ControlFlags, ObjectKey, RegionCoordinates, RegionHandle,
-        Rotation, SlAgentParcel, SlEvent, SlIdentity, SlSessionEvent as SessionEvent, Uuid, Vector,
+        RegionLocalObjectId, Rotation, SlAgentParcel, SlEvent, SlIdentity,
+        SlSessionEvent as SessionEvent, Uuid, Vector, pcode,
     };
     use sl_viewer_testkit::interact;
 
@@ -4489,6 +4490,128 @@ mod movement_tests {
             last.z > 0.0 && last.s > 0.0,
             "…and it is re-stated to the simulator as a turn about the Second \
              Life up axis, got {last:?}"
+        );
+        Ok(())
+    }
+
+    /// The local id of the prim the seat tests sit the own avatar on.
+    const SEAT_LOCAL: u32 = 5;
+
+    /// The yaw (radians about the Second Life up axis) a body rotation states.
+    fn yaw_of(rotation: &Rotation) -> f32 {
+        let Rotation { x, y, z, s } = rotation;
+        (2.0 * (s * z + x * y)).atan2(1.0 - 2.0 * (y * y + z * z))
+    }
+
+    /// Stream the own avatar again, as the grid would on its next update: facing
+    /// `yaw`, riding the object with local id `parent` (`0` standing), and carrying
+    /// `update_flags`.
+    fn restream_own(app: &mut App, yaw: f32, parent: u32, update_flags: u32) {
+        let own = AgentKey::from(Uuid::from_u128(OWN));
+        let mut object = crate::objects::fixture_object(pcode::AVATAR);
+        object.local_id = RegionLocalObjectId(OWN_LOCAL);
+        object.full_id = ObjectKey::from(own.uuid());
+        object.motion.position = Vector {
+            x: 8.0,
+            y: 8.0,
+            z: GROUND_M,
+        };
+        let half = 0.5 * yaw;
+        object.motion.rotation = Rotation {
+            x: 0.0,
+            y: 0.0,
+            z: half.sin(),
+            s: half.cos(),
+        };
+        object.parent_id = RegionLocalObjectId(parent);
+        object.update_flags = update_flags;
+        super::seed_object(app, object);
+    }
+
+    /// **Standing up holds the facing the seat left the body at** — not the
+    /// heading it had before it sat, and not whatever the simulator's stand-up
+    /// update reports (viewer-own-avatar-facing-drifts-idle).
+    ///
+    /// The held heading is what the own body is drawn facing and what the camera
+    /// follows, and a seat turns the body without this viewer turning the heading.
+    /// So a heading kept across the sit would stand the avatar up swinging back to
+    /// the direction it walked in from, and one seeded from the stand-up report
+    /// stood it up facing somewhere else again (seen on aditi). The reference
+    /// takes the seated body's world facing on the way off the seat. Here the
+    /// avatar walks up facing east, sits on an unrotated seat that turns it north,
+    /// and the stand-up update reports south: the held heading is north, and north
+    /// is stated to the simulator.
+    #[test]
+    fn standing_up_holds_the_facing_the_seat_left_the_body_at() -> Result<(), TestError> {
+        let mut app = movement_app(false);
+        let own = AgentKey::from(Uuid::from_u128(OWN));
+        let mut seat = crate::objects::fixture_object(pcode::PRIMITIVE);
+        seat.local_id = RegionLocalObjectId(SEAT_LOCAL);
+        super::seed_object(&mut app, seat);
+        let north = core::f32::consts::FRAC_PI_2;
+        restream_own(&mut app, north, SEAT_LOCAL, 0);
+        settle(&mut app, 3);
+        assert!(
+            app.world().resource::<AvatarState>().is_seated(own),
+            "the fixture avatar is riding the seat"
+        );
+        let _sitting = drain_movement(&mut app);
+
+        restream_own(&mut app, -north, 0, 0);
+        settle(&mut app, 3);
+        assert!(
+            (heading(&app) - north).abs() < 1.0e-3,
+            "standing, the held heading is the facing the seat left the body at, got {}",
+            heading(&app)
+        );
+        let (_controls, rotations) = drain_movement(&mut app);
+        let last = rotations
+            .last()
+            .ok_or("the standing facing was not stated")?;
+        assert!(
+            (yaw_of(last) - north).abs() < 1.0e-3,
+            "…and it is stated to the simulator, so neither the keep-alive's pre-sit \
+             heading nor the stand-up report's facing is the one it keeps, got {last:?}"
+        );
+        Ok(())
+    }
+
+    /// **Only a server-steered report turns the held heading.** An ordinary
+    /// update reporting a different facing — the simulator parking a turned body
+    /// short of the heading it was sent — leaves the heading, and so the drawn
+    /// body and the camera, where the viewer turned them, and states nothing. The
+    /// same report flagged `FLAGS_SERVER_AUTOPILOT` is the simulator steering the
+    /// agent, and there the reference's `gAgent.rotate` adopts it: so does this.
+    #[test]
+    fn only_a_server_steered_report_turns_the_held_heading() -> Result<(), TestError> {
+        let mut app = movement_app(false);
+        let north = core::f32::consts::FRAC_PI_2;
+
+        restream_own(&mut app, north, 0, 0);
+        settle(&mut app, 3);
+        assert!(
+            heading(&app).abs() < 1.0e-3,
+            "an ordinary report does not turn the held heading, got {}",
+            heading(&app)
+        );
+        let (_controls, rotations) = drain_movement(&mut app);
+        assert_eq!(rotations, Vec::new(), "…and nothing is stated back");
+
+        restream_own(&mut app, north, 0, crate::world_api::FLAGS_SERVER_AUTOPILOT);
+        settle(&mut app, 3);
+        assert!(
+            (heading(&app) - north).abs() < 1.0e-3,
+            "a server-steered report does, got {}",
+            heading(&app)
+        );
+        let (_controls, rotations) = drain_movement(&mut app);
+        let last = rotations
+            .last()
+            .ok_or("the steered facing was not stated")?;
+        assert!(
+            (yaw_of(last) - north).abs() < 1.0e-3,
+            "…and it is stated back as the reference's next AgentUpdate would, got \
+             {last:?}"
         );
         Ok(())
     }

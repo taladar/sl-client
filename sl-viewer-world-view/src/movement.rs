@@ -80,7 +80,12 @@ impl Plugin for AvatarMovementPlugin {
             .init_resource::<AvatarNavSmoothing>()
             .add_systems(
                 Update,
-                drive_avatar_controls.in_set(WorldPhase::AvatarControlsDriven),
+                // Before the dead-reckoner: it draws the own avatar facing the
+                // heading this driver holds, so this frame's turn is this frame's
+                // body rather than last frame's.
+                drive_avatar_controls
+                    .in_set(WorldPhase::AvatarControlsDriven)
+                    .before(crate::physics::drive_avatar_motion),
             )
             // The arrival slam (`crate::arrival`) belongs to the same concern — which
             // way the own avatar faces — and feeds this driver's heading, so it is
@@ -253,7 +258,7 @@ pub(crate) fn drive_avatar_controls(
     spacenav: Res<SpacenavInput>,
     avatar_axes: Res<AvatarAxisSettings>,
     mut nav_smoothing: ResMut<AvatarNavSmoothing>,
-    motions: Query<&AvatarMotion>,
+    motions: Query<(Ref<AvatarMotion>, &Transform)>,
     presence: Option<Res<crate::world_api::PresenceState>>,
     mut controls: ResMut<AvatarControls>,
     mut writer: MessageWriter<SlCommand>,
@@ -299,18 +304,53 @@ pub(crate) fn drive_avatar_controls(
 
     // The own avatar's authoritative motion (facing, vertical speed, ground floor),
     // used to seed the walk heading and to auto-stop flying on landing.
-    let own_motion = identity
+    let own_anchor = identity
         .agent_id
         .and_then(|own| avatars.body_root_of(own))
         .and_then(|anchor| motions.get(anchor).ok());
+    let own_motion = own_anchor.as_ref().map(|(motion, _transform)| motion);
 
-    // Seed the walk heading from the own avatar's reported facing the first time it
-    // is available, so the first step keeps its orientation instead of snapping.
-    if !controls.seeded
+    // While the body rides a seat, the held heading is the way the seat turns it.
+    // The held heading is what the standing body is drawn facing
+    // (`AvatarControls::held_heading`), and a seat turns the body without this
+    // driver turning the heading — so a heading held across a sit is stale by
+    // however far the seat faced away from it. The reference takes the seated
+    // body's world facing into its agent frame on the way off the seat
+    // (`LLVOAvatar::getOffObject` → `gAgent.resetAxes`) and states it in its next
+    // `AgentUpdate`; here the heading follows the seated anchor's world facing
+    // (written from the seat by `place_seated_avatars`) for as long as it sits, so
+    // the frame it stands the heading already is that facing, and it is stated
+    // once — the simulator would otherwise keep the pre-sit one the keep-alive
+    // re-sends. Not the simulator's own report of the stand: that is not the
+    // seated facing, and seeding from it stood the avatar up facing somewhere else.
+    let body_seated = identity.agent_id.is_some_and(|own| avatars.is_seated(own));
+    if body_seated {
+        if let Some((_motion, transform)) = &own_anchor
+            && let Some(yaw) = seated_heading(transform.rotation)
+        {
+            controls.yaw = yaw;
+            controls.seeded = true;
+        }
+        controls.sent_initial_rotation = false;
+    } else if !controls.seeded
         && let Some(motion) = own_motion
     {
+        // Seed the walk heading from the own avatar's reported facing the first time
+        // it is available, so the first step keeps its orientation instead of
+        // snapping.
         controls.yaw = motion.yaw();
         controls.seeded = true;
+    }
+
+    // The one time a report turns the held heading: the simulator is steering the
+    // agent (`FLAGS_SERVER_AUTOPILOT` — a walk to a seat, a server autopilot), so
+    // the facing it reports is the one to hold. The reference's `gAgent.rotate` on
+    // the same flag. Taken as a forced heading so it is also stated back at once.
+    if let Some(motion) = own_motion
+        && motion.is_changed()
+        && motion.is_server_autopiloted()
+    {
+        controls.forced_heading = Some(motion.yaw());
     }
 
     // Ascend / descend from PageUp / PageDown or the SpaceNavigator's up axis (a
@@ -583,6 +623,20 @@ fn should_take_off(
         && ascend_held_frames > TAKE_OFF_HOLD_FRAMES
 }
 
+/// The Second Life heading (radians about the up axis) a seated anchor's Bevy
+/// world `rotation` faces: its forward (Second Life +X) axis projected onto the
+/// horizontal, as the reference flattens the seated at-axis before resetting its
+/// agent frame to it. `None` for a body pitched straight up or down, which faces
+/// no heading.
+#[must_use]
+fn seated_heading(rotation: Quat) -> Option<f32> {
+    let sl_rotation = crate::coords::sl_to_bevy_rotation()
+        .inverse()
+        .mul_quat(rotation);
+    let forward = sl_rotation.mul_vec3(Vec3::X);
+    (forward.x.hypot(forward.y) > 1.0e-3).then(|| forward.y.atan2(forward.x))
+}
+
 /// Wrap an angle (radians) into `(-π, π]`, keeping the tracked heading bounded over
 /// a long session.
 #[must_use]
@@ -843,6 +897,25 @@ mod tests {
 
     /// A zero heading is the identity rotation; a quarter turn about the up axis is a
     /// unit quaternion with the expected Z / W components.
+    /// A seated anchor's world rotation reads back as the heading it faces: an
+    /// avatar turned north about the Second Life up axis is facing north, and one
+    /// also rolled by a tilted seat still faces the heading its forward axis
+    /// points along on the horizontal.
+    #[test]
+    fn a_seated_anchor_faces_the_heading_its_forward_axis_points_along() {
+        let north = core::f32::consts::FRAC_PI_2;
+        let to_bevy = crate::coords::sl_to_bevy_rotation();
+        let upright = to_bevy.mul_quat(bevy::math::Quat::from_rotation_z(north));
+        let heading = super::seated_heading(upright).unwrap_or(f32::NAN);
+        assert!((heading - north).abs() < 1.0e-4, "upright: {heading}");
+        let rolled = to_bevy.mul_quat(
+            bevy::math::Quat::from_rotation_z(north)
+                .mul_quat(bevy::math::Quat::from_rotation_x(0.4)),
+        );
+        let heading = super::seated_heading(rolled).unwrap_or(f32::NAN);
+        assert!((heading - north).abs() < 1.0e-4, "rolled: {heading}");
+    }
+
     #[test]
     fn rotation_from_yaw_builds_a_z_axis_turn() {
         let Rotation { x, y, z, s } = rotation_from_yaw(0.0);

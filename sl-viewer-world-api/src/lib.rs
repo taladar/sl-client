@@ -3154,6 +3154,10 @@ pub struct AvatarMotion {
     /// `crate::ground` resolves the foot-IK ground from, exactly as the
     /// reference viewer's `getGround` / `mFootPlane` do.
     collision_plane: Option<[f32; 4]>,
+    /// Whether the update carried [`FLAGS_SERVER_AUTOPILOT`]: the simulator is
+    /// steering this agent, so its reported facing is authoritative even for the
+    /// own avatar, whose facing is otherwise the viewer's held heading.
+    server_autopilot: bool,
 }
 
 impl AvatarMotion {
@@ -3221,6 +3225,7 @@ impl AvatarMotion {
             height: object.scale.z,
             apply_rotation,
             collision_plane: object.motion.collision_plane,
+            server_autopilot: object.update_flags & FLAGS_SERVER_AUTOPILOT != 0,
         }
     }
 
@@ -3230,6 +3235,13 @@ impl AvatarMotion {
     #[must_use]
     pub const fn collision_plane(&self) -> Option<[f32; 4]> {
         self.collision_plane
+    }
+
+    /// Whether the simulator is steering this agent ([`FLAGS_SERVER_AUTOPILOT`]),
+    /// which makes the facing this update reports the one the own avatar adopts.
+    #[must_use]
+    pub const fn is_server_autopiloted(&self) -> bool {
+        self.server_autopilot
     }
 }
 
@@ -3692,6 +3704,14 @@ impl DerenderList {
 /// the object is simulated by the server's physics engine. This is the "physical
 /// object" flag the reference viewer reads (`LLViewerObject::flagUsePhysics`).
 pub const FLAGS_USE_PHYSICS: u32 = 1 << 0;
+
+/// The `FLAGS_SERVER_AUTOPILOT` bit of an object's update flags
+/// (`object_flags.h`): the update is for an agent the **simulator** is steering
+/// — a walk-to-seat, an `llMoveToTarget`-style server autopilot — so the facing it
+/// carries is the simulator's to decide, not the viewer's. The one case the
+/// reference lets an echoed rotation turn its own agent
+/// (`LLViewerObject::processUpdateMessage` → `gAgent.rotate`).
+pub const FLAGS_SERVER_AUTOPILOT: u32 = 1 << 24;
 
 /// The agent-relative `FLAGS_OBJECT_MODIFY` bit of `PrimFlags` (`object_flags.h`):
 /// this agent may modify the object. The simulator sets it per-agent, folding in
@@ -6983,6 +7003,23 @@ pub struct AvatarControls {
 }
 
 impl AvatarControls {
+    /// The heading (radians about the Second Life up axis) the **own** avatar is
+    /// drawn facing and the third-person camera follows, once it is known.
+    ///
+    /// The viewer's own heading, not the facing the simulator echoes back. That
+    /// is the reference's rule (`LLVOAvatar::updateOrientation` takes the self
+    /// avatar's forward direction from `gAgent`'s at-axis), and it matters
+    /// because the echo is not the heading: the simulator turns the body towards
+    /// a sent rotation over several updates and parks it short, 1.5–3° off on
+    /// aditi, so a body drawn from the echo sits visibly off the heading it was
+    /// turned to, and any small step the simulator chose to send would turn it
+    /// with no key pressed. `None` until the heading has been seeded from the
+    /// avatar's first report, when the echo is all there is.
+    #[must_use]
+    pub const fn held_heading(&self) -> Option<f32> {
+        if self.seeded { Some(self.yaw) } else { None }
+    }
+
     /// The [`ControlFlags`] set last advertised to the simulator (walk / run /
     /// fly / ascend / descend). The client-side locomotion fallback
     /// (the `locomotion` module) reads the same advertised intent that moves the
