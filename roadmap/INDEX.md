@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 314 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 20 |
-| done | 1147 |
+| bugs | 18 |
+| done | 1149 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1687** |
@@ -1167,16 +1167,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (20)
+## bugs (18)
 
 ### viewer
 
-- [`viewer-animesh-intermittent-render`](bugs/viewer-animesh-intermittent-render.md)
-  — Animesh intermittently fails to render (timing race, not deterministic)
 - [`viewer-audit-cef-browser-settings-hardening`](bugs/viewer-audit-cef-browser-settings-hardening.md)
   — An in-world media page runs on CEF's default browser settings
-- [`viewer-audit-parcel-audio-autoplay`](bugs/viewer-audit-parcel-audio-autoplay.md)
-  — A transient empty parcel resets the user's stop decision and re-autoplays
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
   — Mesh-head brow spikes forward from face-bone shape deformation
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
@@ -1215,7 +1211,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)
 
-## done (1147)
+## done (1149)
 
 ### protocol
 
@@ -1461,6 +1457,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Add Friend sends the offer silently — no message dialog, no feedback
 - [`viewer-ais3-inventory-mutations-and-cof-reconverge`](done/viewer-ais3-inventory-mutations-and-cof-reconverge.md)
   — Route inventory mutations through AIS3 on SL + reconverge the COF on wear
+- [`viewer-animesh-intermittent-render`](done/viewer-animesh-intermittent-render.md)
+  — Animesh intermittently fails to render (timing race, not deterministic)
 - [`viewer-appearance-editor-bodyparts`](done/viewer-appearance-editor-bodyparts.md)
   — Edit Shape / Skin / Hair / Eyes — body-part editors (blocked by
   `viewer-appearance-editor-shell` (done))
@@ -1537,6 +1535,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-parcel-access-list-accumulate`](done/viewer-audit-parcel-access-list-accumulate.md)
   — Editing a multi-packet parcel ban list unbans everyone not in the last
   packet
+- [`viewer-audit-parcel-audio-autoplay`](done/viewer-audit-parcel-audio-autoplay.md)
+  — A transient empty parcel resets the user's stop decision and re-autoplays
 - [`viewer-audit-parcel-borders-retessellation`](done/viewer-audit-parcel-borders-retessellation.md)
   — A region with parcels but no terrain re-tessellates its overlay every frame
 - [`viewer-audit-particles-dt-and-cloud-leak`](done/viewer-audit-particles-dt-and-cloud-leak.md)

@@ -1302,3 +1302,149 @@ pub(crate) fn log_avatar_bounds(
         bounds.bytes.len(),
     );
 }
+
+/// The env flag turning the per-animesh stage census on
+/// (`SL_VIEWER_LOG_ANIMESH=1`): for every animesh in the scene, one line per
+/// linkset mesh part naming the stage it has reached — waiting on its mesh
+/// decode, waiting on its skinned bind, or built — with what that stage waits
+/// on, and for a built part whether its submeshes are posed, bounded and
+/// visible.
+///
+/// The aggregate [`ENV_LOG_BOUNDS`] census cannot say which submeshes belong to
+/// *the* animesh that is missing, and the bind trace only speaks for a part
+/// that reached the bind; a part stuck before it, or bound but culled, is
+/// silent there. This names the stage for each one
+/// (roadmap `viewer-animesh-intermittent-render`).
+const ENV_LOG_ANIMESH: &str = "SL_VIEWER_LOG_ANIMESH";
+
+/// Log each animesh's stage census when [`ENV_LOG_ANIMESH`] is set, once per
+/// second at most and only for an animesh whose census **changed** — so a run
+/// that goes wrong ends with the stuck state as the last block logged for it,
+/// rather than burying it under a repeat every second. Inert otherwise (the env
+/// is read once into a `Local`).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a diagnostic joining the object, mesh, control-avatar and GPU-slot state it reports on"
+)]
+pub(crate) fn log_animesh_census(
+    state: Res<crate::world_api::ObjectState>,
+    mesh_manager: Res<crate::meshes::MeshManager>,
+    control: Res<ControlAvatarState>,
+    registry: Res<GpuAvatarRegistry>,
+    builds: Query<&crate::objects::ObjectBuilds>,
+    faces: Query<(
+        Option<&GpuSkinBinding>,
+        Option<&Aabb>,
+        &InheritedVisibility,
+        &bevy::camera::visibility::ViewVisibility,
+    )>,
+    time: Res<Time>,
+    mut enabled: Local<Option<bool>>,
+    mut next_log: Local<f32>,
+    mut last: Local<HashMap<sl_client_bevy::ObjectKey, String>>,
+) {
+    let on = *enabled.get_or_insert_with(|| std::env::var(ENV_LOG_ANIMESH).as_deref() == Ok("1"));
+    if !on {
+        return;
+    }
+    let now = time.elapsed_secs();
+    if now < *next_log {
+        return;
+    }
+    *next_log = now + 1.0;
+
+    // Every mesh part, grouped under the animesh root it resolves to. A part
+    // whose root has not arrived resolves to no animesh and so is not listed —
+    // the bind trace reports it as a worn attachment with no wearer instead.
+    let mut roots: HashMap<sl_client_bevy::ObjectKey, Vec<String>> = HashMap::new();
+    for (&scoped, tracked) in &state.objects {
+        let Some(sl_client_bevy::SculptOrMeshKey::Mesh(key)) =
+            tracked.extra.sculpt.map(|sculpt| sculpt.texture)
+        else {
+            continue;
+        };
+        let Some((root, _root_entity)) = crate::animesh::animesh_root(&state, scoped) else {
+            continue;
+        };
+        let stage = match builds
+            .get(tracked.entity)
+            .ok()
+            .and_then(crate::objects::ObjectBuilds::pending)
+        {
+            None => "built",
+            Some(crate::objects::PendingGeometry::Mesh(_)) => "waiting on mesh decode",
+            Some(crate::objects::PendingGeometry::RiggedMesh(_)) => "waiting on skinned bind",
+            Some(crate::objects::PendingGeometry::Sculpt(_)) => "waiting on sculpt map",
+        };
+        let decoded = mesh_manager
+            .decoded(key)
+            .map_or_else(|| "none".to_owned(), |mesh| format!("{:?}", mesh.lod));
+        let best = mesh_manager
+            .header(key)
+            .and_then(|header| header.best_lod(sl_client_bevy::MeshLod::FINEST))
+            .map_or_else(|| "?".to_owned(), |lod| format!("{lod:?}"));
+        let mut posed = 0_u32;
+        let mut real_bound = 0_u32;
+        let mut inherited = 0_u32;
+        let mut visible = 0_u32;
+        for &face in &tracked.face_entities {
+            let Ok((binding, aabb, inherited_visibility, view_visibility)) = faces.get(face) else {
+                continue;
+            };
+            if binding.is_some_and(|binding| binding.slot == PoseSlotKey::Animesh(root)) {
+                posed = posed.saturating_add(1);
+            }
+            if aabb.is_some_and(|aabb| {
+                aabb.half_extents.max_element() < BOUND_DEFAULT_HALF_EXTENT_METRES * 0.5
+            }) {
+                real_bound = real_bound.saturating_add(1);
+            }
+            if inherited_visibility.get() {
+                inherited = inherited.saturating_add(1);
+            }
+            if view_visibility.get() {
+                visible = visible.saturating_add(1);
+            }
+        }
+        roots.entry(root).or_default().push(format!(
+            "  part {scoped} mesh {key}: {stage}; decoded {decoded} (finest available \
+             {best}), skin {}, LOD change in flight {}; {} face(s): {posed} posed on this \
+             animesh, {real_bound} with a read-back bound, {inherited} not hidden, {visible} \
+             in view",
+            if mesh_manager.skin(key).is_some() {
+                "decoded"
+            } else {
+                "none"
+            },
+            mesh_manager.lod_change_inflight(key),
+            tracked.face_entities.len(),
+        ));
+    }
+
+    last.retain(|root, _census| roots.contains_key(root));
+    for (root, mut parts) in roots {
+        parts.sort();
+        let slot = registry
+            .slot_index(PoseSlotKey::Animesh(root))
+            .map_or_else(|| "unallocated".to_owned(), |slot| slot.to_string());
+        let census = format!(
+            "control avatar {}, pose slot {slot}\n{}",
+            if control.animated_objects().any(|object| object == root) {
+                "spawned"
+            } else {
+                "not spawned"
+            },
+            parts.join("\n"),
+        );
+        // The playing count is reported but not compared: an idle animesh's
+        // script cycles its motions, and a census that re-logged on every
+        // start and stop would bury the one block that matters.
+        if last.get(&root) != Some(&census) {
+            info!(
+                "animesh census {root}: {} animation(s) playing, {census}",
+                control.merged_active(root).len()
+            );
+            let _previous = last.insert(root, census);
+        }
+    }
+}
