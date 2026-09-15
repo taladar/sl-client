@@ -33,9 +33,10 @@ use bevy::ui::RelativeCursorPosition;
 use crate::media_engine::{MediaEngine, MediaEngineSystems, MediaSurfaceId, MediaSurfaces};
 use crate::media_keys::{current_modifiers, is_printable_text, vk_for_key_code};
 use sl_cef::{KeyInput, MouseButton as MediaMouseButton, SurfaceConfig};
-// Re-exported: it is part of this widget's public API ([`BrowserViewSpec`]),
-// so a caller spawning a view need not also depend on the engine crate.
-pub use sl_cef::ValidatedMediaUrl;
+// Re-exported: they are part of this widget's public API
+// ([`BrowserViewSpec`]), so a caller spawning a view need not also depend on
+// the engine crate.
+pub use sl_cef::{SurfaceTrust, ValidatedMediaUrl};
 
 /// Pixels of page scroll per scroll-wheel line (Chromium's usual notch).
 const WHEEL_PIXELS_PER_LINE: f32 = 40.0;
@@ -50,10 +51,10 @@ pub struct BrowserView {
     /// The URL the surface loads on creation (scheme-checked: see
     /// [`ValidatedMediaUrl`]).
     pub initial_url: ValidatedMediaUrl,
-    /// Whether the surface runs in an isolated request context (in-world /
-    /// untrusted content) or the shared one (trusted UI panels, so logins
-    /// persist).
-    pub isolated: bool,
+    /// Who wrote the page: decides both the request context (the shared one
+    /// for trusted UI panels, so logins persist) and the capabilities the
+    /// engine grants it.
+    pub trust: SurfaceTrust,
     /// The live engine surface, once created.
     pub surface: Option<MediaSurfaceId>,
 }
@@ -63,8 +64,9 @@ pub struct BrowserView {
 pub struct BrowserViewSpec {
     /// The URL to load (scheme-checked: see [`ValidatedMediaUrl`]).
     pub initial_url: ValidatedMediaUrl,
-    /// Isolated (untrusted) or shared (trusted UI) request context.
-    pub isolated: bool,
+    /// Who wrote the page: in-world (isolated, hardened) or the viewer
+    /// itself (shared request context, full capabilities).
+    pub trust: SurfaceTrust,
     /// The tab order slot of the view.
     pub tab_index: i32,
     /// `None`: the view stretches to fill its parent (`flex_grow`). `Some`: a
@@ -128,7 +130,7 @@ pub fn spawn_browser_view(
             node,
             BrowserView {
                 initial_url: spec.initial_url.clone(),
-                isolated: spec.isolated,
+                trust: spec.trust,
                 surface: None,
             },
             BackgroundColor(Color::srgb(0.08, 0.09, 0.11)),
@@ -395,7 +397,7 @@ fn create_browser_surfaces(
             width: pixel_dimension(size.x),
             height: pixel_dimension(size.y),
             initial_url: view.initial_url.clone(),
-            isolated: view.isolated,
+            trust: view.trust,
             max_fps: 30,
             muted: false,
             loop_media: false,
@@ -541,7 +543,7 @@ pub fn spawn_browser_specimen(
         frame,
         &BrowserViewSpec {
             initial_url: url,
-            isolated: true,
+            trust: SurfaceTrust::InWorld,
             tab_index: 1,
             fixed_height: None,
         },
@@ -551,7 +553,7 @@ pub fn spawn_browser_specimen(
 
 #[cfg(test)]
 mod tests {
-    use super::{BrowserViewSpec, ValidatedMediaUrl, spawn_browser_view};
+    use super::{BrowserViewSpec, SurfaceTrust, ValidatedMediaUrl, spawn_browser_view};
     use bevy::camera::NormalizedRenderTarget;
     use bevy::input_focus::InputFocus;
     use bevy::picking::backend::HitData;
@@ -591,7 +593,7 @@ mod tests {
                 root,
                 &BrowserViewSpec {
                     initial_url: ValidatedMediaUrl::blank(),
-                    isolated: true,
+                    trust: SurfaceTrust::InWorld,
                     tab_index: 0,
                     fixed_height: Some(64.0),
                 },

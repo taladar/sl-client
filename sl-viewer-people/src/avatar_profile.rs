@@ -1568,7 +1568,16 @@ fn build_web_tab(
     // navigation driven by code, no visible URL bar
     // (`viewer-profile-web-tab-browser`).
     // Another avatar's profile URL is their text, not the viewer's: it passes
-    // the media scheme allowlist like any other grid-supplied URL.
+    // the media scheme allowlist like any other grid-supplied URL, and it
+    // loads at in-world trust — isolated from the grid web session, and
+    // without the capabilities that reach back out of the page.
+    //
+    // The reference loads this one at *trusted* content's settings, but its
+    // `LLPanelProfileWeb` control is shared: the same browser also renders the
+    // grid's own web-profile page (`mURLWebProfile`), which needs the OpenID
+    // cookie, and the avatar's homepage (`mURLHome`) inherits the cookie the
+    // panel injected for it. Ours only ever loads the homepage field, so there
+    // is nothing here the grid session is for.
     if let Some(page) = crate::system_browser::normalize_web_url(&url).and_then(|page| {
         crate::browser_widget::ValidatedMediaUrl::parse(&page)
             .inspect_err(|error| warn!("profile web page not opened: {error}"))
@@ -1579,7 +1588,7 @@ fn build_web_tab(
             panel,
             &crate::browser_widget::BrowserViewSpec {
                 initial_url: page,
-                isolated: false,
+                trust: crate::browser_widget::SurfaceTrust::InWorld,
                 tab_index: 5,
                 fixed_height: Some(320.0),
             },

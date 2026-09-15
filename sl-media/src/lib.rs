@@ -262,6 +262,37 @@ pub struct BackendConfig {
     pub user_agent_product: Option<String>,
 }
 
+/// Who wrote the content a surface loads — the viewer itself, or whoever
+/// owns the object/parcel the media hangs off.
+///
+/// This is the surface's whole trust decision, and two things read it: the
+/// **request context** (an in-world page must never see the grid web-session
+/// cookie the trusted panels carry) and the **capability set** the engine
+/// grants the page (clipboard, storage, window control — see
+/// `sl_cef::chromium`). Both used to hang off one `isolated: bool`, which
+/// named the storage half and left the capability half at the engine's
+/// defaults.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SurfaceTrust {
+    /// Content the viewer chose: a search tab, a profile page, the web
+    /// floater, a viewer-authored page. These share the global request
+    /// context, so a grid login persists across them.
+    Viewer,
+    /// Content an object or parcel owner wrote: media-on-a-prim, parcel
+    /// media. Hostile by assumption — the default.
+    #[default]
+    InWorld,
+}
+
+impl SurfaceTrust {
+    /// Whether the surface needs its own request context (cookies, storage)
+    /// rather than the shared trusted-UI one.
+    #[must_use]
+    pub const fn is_isolated(self) -> bool {
+        matches!(self, Self::InWorld)
+    }
+}
+
 /// Configuration for creating one [`MediaSurface`].
 #[derive(Debug, Clone)]
 pub struct SurfaceConfig {
@@ -271,11 +302,10 @@ pub struct SurfaceConfig {
     pub height: u32,
     /// The URL to load on creation (see [`ValidatedMediaUrl`]).
     pub initial_url: ValidatedMediaUrl,
-    /// Whether the surface gets its own isolated in-memory request context
-    /// (cookies, storage). In-world media surfaces must be isolated; trusted
-    /// UI browser panels may share the global context. Engines without a
-    /// request-context notion (the video player) ignore this.
-    pub isolated: bool,
+    /// Who wrote the content: decides both the request context the surface
+    /// runs in and the capabilities the engine grants it. Engines without a
+    /// request-context or capability notion (the video player) ignore this.
+    pub trust: SurfaceTrust,
     /// Maximum paint rate in frames per second (1–60).
     pub max_fps: u8,
     /// Whether audio starts muted.
@@ -291,7 +321,7 @@ impl Default for SurfaceConfig {
             width: 1024,
             height: 768,
             initial_url: ValidatedMediaUrl::blank(),
-            isolated: true,
+            trust: SurfaceTrust::InWorld,
             max_fps: 30,
             muted: false,
             loop_media: false,
@@ -605,9 +635,9 @@ pub trait MediaBackend {
     /// are gone (bounded), and tears down the global runtime. Idempotent.
     fn shutdown(&mut self);
     /// Injects `cookie` into the engine's **shared** (trusted-UI) request
-    /// context, so browser surfaces created with `isolated: false` see it. The
-    /// isolated in-world contexts are never touched. Must be called on the
-    /// engine's pump thread.
+    /// context, so browser surfaces created with [`SurfaceTrust::Viewer`] see
+    /// it. The isolated in-world contexts are never touched. Must be called on
+    /// the engine's pump thread.
     ///
     /// The default is a no-op returning `Ok(())` for engines with no
     /// cookie/request-context notion (the video player).

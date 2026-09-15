@@ -16,7 +16,9 @@ use bevy::prelude::*;
 use bevy::text::{EditableText, FontCx, LayoutCx};
 use bevy::ui_widgets::{Activate, Button};
 
-use crate::browser_widget::{BrowserView, BrowserViewSpec, ValidatedMediaUrl, spawn_browser_view};
+use crate::browser_widget::{
+    BrowserView, BrowserViewSpec, SurfaceTrust, ValidatedMediaUrl, spawn_browser_view,
+};
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::Translated;
 use crate::media_engine::{MediaEngineSystems, MediaSurfaces};
@@ -171,7 +173,7 @@ fn spawn_web_floater(mut commands: Commands, root: Res<UiRoot>) {
         &BrowserViewSpec {
             initial_url: validated_web_url(DEFAULT_HOME_URL)
                 .unwrap_or_else(|_refused| ValidatedMediaUrl::blank()),
-            isolated: false,
+            trust: SurfaceTrust::Viewer,
             tab_index: 6,
             fixed_height: None,
         },

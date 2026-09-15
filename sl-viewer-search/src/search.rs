@@ -44,7 +44,9 @@ use sl_client_bevy::{
 };
 use sl_settings::SettingValue;
 
-use crate::browser_widget::{BrowserView, BrowserViewSpec, ValidatedMediaUrl, spawn_browser_view};
+use crate::browser_widget::{
+    BrowserView, BrowserViewSpec, SurfaceTrust, ValidatedMediaUrl, spawn_browser_view,
+};
 use crate::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater,
 };
@@ -1339,7 +1341,7 @@ fn build_search_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
         web_panel,
         &BrowserViewSpec {
             initial_url: search_site_url(SL_SEARCH_URL),
-            isolated: false,
+            trust: SurfaceTrust::Viewer,
             tab_index: 0,
             fixed_height: None,
         },

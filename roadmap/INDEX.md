@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 313 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 23 |
-| done | 1144 |
+| bugs | 22 |
+| done | 1145 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1685** |
@@ -1163,14 +1163,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (23)
+## bugs (22)
 
 ### viewer
 
 - [`viewer-animesh-intermittent-render`](bugs/viewer-animesh-intermittent-render.md)
   — Animesh intermittently fails to render (timing race, not deterministic)
-- [`viewer-audit-cef-browser-settings-hardening`](bugs/viewer-audit-cef-browser-settings-hardening.md)
-  — An in-world media page runs on CEF's default browser settings
 - [`viewer-audit-parcel-audio-autoplay`](bugs/viewer-audit-parcel-audio-autoplay.md)
   — A transient empty parcel resets the user's stop decision and re-autoplays
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
@@ -1218,7 +1216,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1144)
+## done (1145)
 
 ### protocol
 
@@ -1507,6 +1505,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   fallback lies to the UI
 - [`viewer-audit-camera-reset-resnap`](done/viewer-audit-camera-reset-resnap.md)
   — Escape out of flycam interpolates between two unrelated poses
+- [`viewer-audit-cef-browser-settings-hardening`](done/viewer-audit-cef-browser-settings-hardening.md)
+  — An in-world media page runs on CEF's default browser settings
 - [`viewer-audit-collider-settle-treadmill`](done/viewer-audit-collider-settle-treadmill.md)
   — A mesh with no physics block rebuilds its collider and the BVH every frame
   forever

@@ -23,9 +23,12 @@
 //! Design notes (see `roadmap/in-progress/viewer-media-prim-browser.md` in
 //! the workspace): input crosses the boundary as portable *Windows virtual-key
 //! code + text* (never native key blobs), frames cross as CPU BGRA buffers
-//! (zero-copy is deferred headroom), and each surface can run in an isolated
-//! request context so hostile in-world pages cannot read another surface's
-//! cookies.
+//! (zero-copy is deferred headroom), and each surface's [`SurfaceTrust`]
+//! decides both the request context it runs in — so hostile in-world pages
+//! cannot read another surface's cookies — and the capability set the engine
+//! grants it (see `chromium::browser_settings`): an in-world page keeps what
+//! media needs and loses the capabilities that reach back out of it, the
+//! clipboard first among them.
 //!
 //! The playback half of the boundary ([`MediaSurface::play`] /
 //! [`pause`](MediaSurface::pause) / [`seek`](MediaSurface::seek) /

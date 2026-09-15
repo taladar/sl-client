@@ -49,7 +49,7 @@ use crate::world_api::world_scoped::{WorldPurge, WorldScoped, WorldScopedAppExt 
 use crate::world_api::{
     FLAGS_OBJECT_YOU_OWNER, MediaFocus, MediaTarget, MediaWorldClick, ViewerCamera,
 };
-use sl_cef::{KeyInput, MediaKind, SurfaceConfig, ValidatedMediaUrl, classify_url};
+use sl_cef::{KeyInput, MediaKind, SurfaceConfig, SurfaceTrust, ValidatedMediaUrl, classify_url};
 
 /// The hard cap on simultaneously live in-world media surfaces (the
 /// reference's `PluginInstancesTotal`).
@@ -650,7 +650,7 @@ fn start_media_surface(
         width: if width == 0 { 1024 } else { width },
         height: if height == 0 { 768 } else { height },
         initial_url: url.clone(),
-        isolated: true,
+        trust: SurfaceTrust::InWorld,
         max_fps: 15,
         muted: false,
         loop_media: entry.auto_loop,
