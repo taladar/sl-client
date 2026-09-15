@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 313 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 22 |
-| done | 1145 |
+| bugs | 20 |
+| done | 1147 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1685** |
@@ -1163,7 +1163,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (22)
+## bugs (20)
 
 ### viewer
 
@@ -1180,8 +1180,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-crossing-movement-locks-up`](bugs/viewer-crossing-movement-locks-up.md)
   — Movement locks up after a region crossing (stand-up anim, esp. onto lower
   terrain)
-- [`viewer-grid-row-height-from-unwrapped-text`](bugs/viewer-grid-row-height-from-unwrapped-text.md)
-  — Upstream bug — a grid row takes its height from a wrap that never happens
 - [`viewer-hair-dome-stays-grey`](bugs/viewer-hair-dome-stays-grey.md) — The
   default hair dome intermittently stays grey for a whole session
 - [`viewer-hover-tooltip-202ms-frame-spike`](bugs/viewer-hover-tooltip-202ms-frame-spike.md)
@@ -1214,7 +1212,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1145)
+## done (1147)
 
 ### protocol
 
@@ -1859,6 +1857,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — GPU-avatar (1b) session — 10.6 GB RSS + ~2 min 263%-CPU shutdown spin
 - [`viewer-grey-avatars-bakes-not-showing`](done/viewer-grey-avatars-bakes-not-showing.md)
   — Most other avatars render grey (baked skin/textures not showing) on aditi
+- [`viewer-grid-row-height-from-unwrapped-text`](done/viewer-grid-row-height-from-unwrapped-text.md)
+  — Upstream bug — a max-width column came out as tall as its text on one line
 - [`viewer-group-notice-body-links`](done/viewer-group-notice-body-links.md) —
   Group notice body — clickable URLs / SLURLs (blocked by
   `viewer-url-linkification` (done))
