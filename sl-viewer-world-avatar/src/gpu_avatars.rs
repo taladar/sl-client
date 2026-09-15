@@ -247,6 +247,10 @@ impl Plugin for GpuAvatarsPlugin {
                         // the pre-cull reset value.
                         stage::log_avatar_bounds
                             .after(bevy::camera::visibility::VisibilitySystems::CheckVisibility),
+                        // The `SL_VIEWER_LOG_ANIMESH` per-animesh stage census
+                        // (inert unless the env is set), likewise after the cull.
+                        stage::log_animesh_census
+                            .after(bevy::camera::visibility::VisibilitySystems::CheckVisibility),
                     ),
                 );
         }

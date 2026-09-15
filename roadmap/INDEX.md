@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 314 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 21 |
-| done | 1146 |
+| bugs | 19 |
+| done | 1148 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1686** |
@@ -1165,12 +1165,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (21)
+## bugs (19)
 
 ### viewer
 
-- [`viewer-animesh-intermittent-render`](bugs/viewer-animesh-intermittent-render.md)
-  — Animesh intermittently fails to render (timing race, not deterministic)
 - [`viewer-audit-cef-browser-settings-hardening`](bugs/viewer-audit-cef-browser-settings-hardening.md)
   — An in-world media page runs on CEF's default browser settings
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
@@ -1214,7 +1212,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)
 
-## done (1146)
+## done (1148)
 
 ### protocol
 
@@ -1460,6 +1458,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Add Friend sends the offer silently — no message dialog, no feedback
 - [`viewer-ais3-inventory-mutations-and-cof-reconverge`](done/viewer-ais3-inventory-mutations-and-cof-reconverge.md)
   — Route inventory mutations through AIS3 on SL + reconverge the COF on wear
+- [`viewer-animesh-intermittent-render`](done/viewer-animesh-intermittent-render.md)
+  — Animesh intermittently fails to render (timing race, not deterministic)
 - [`viewer-appearance-editor-bodyparts`](done/viewer-appearance-editor-bodyparts.md)
   — Edit Shape / Skin / Hair / Eyes — body-part editors (blocked by
   `viewer-appearance-editor-shell` (done))
