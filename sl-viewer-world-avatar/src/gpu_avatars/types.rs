@@ -209,8 +209,12 @@ pub(crate) struct GpuComputeParams {
     pub(crate) torso_joint: u32,
     /// The [`PARAMS_FLAG_TPOSE`] bit.
     pub(crate) flags: u32,
-    /// std140 padding up to the 16-byte struct alignment.
-    pub(crate) pad0: u32,
+    /// The row where the **held** block starts in the local-pose buffer: pass
+    /// B keeps each (slot, joint)'s last keyframe channels at
+    /// `held_offset + slot * joint_count + joint`, behind the slot-indexed
+    /// local-pose rows pass C reads (see [`mirror_blend_joint`]). Sharing the
+    /// local-pose binding keeps pass B at the 8-storage-buffer floor.
+    pub(crate) held_offset: u32,
     /// std140 padding.
     pub(crate) pad1: u32,
     /// std140 padding.
@@ -1043,8 +1047,17 @@ pub(crate) fn mirror_pose_cache(
 /// from one avatar's playback slots, blend them by priority with the running
 /// weight budget (an exact port of [`sl_anim::blend_joint`] under
 /// `resolve_pose`'s gather semantics: zero-weight and channel-less
-/// contributions never enter the slot cap), fold the procedural idle
-/// adjusters, and apply this joint's correction if one is staged.
+/// contributions never enter the slot cap), fold in the joint's **held**
+/// channels, fold the procedural idle adjusters, and apply this joint's
+/// correction if one is staged.
+///
+/// `held` is the joint's held row (the CPU's
+/// [`AnimationPose::hold`](sl_client_bevy::AnimationPose::hold)): each channel
+/// the blend produced is written into it, and each channel the blend did not
+/// produce is taken from it, so a joint keeps the last value an animation gave
+/// it. It holds keyframe values only — the idle deltas and corrections are
+/// composed on top afterwards and never held. `None` is the T-pose freeze,
+/// which neither reads nor writes the held rows.
 #[expect(
     clippy::too_many_arguments,
     reason = "the mirror takes exactly the WGSL pass's bindings — the arena view, the \
@@ -1061,6 +1074,7 @@ pub(crate) fn mirror_blend_joint(
     chest_joint: u32,
     torso_joint: u32,
     corrections: &[(u32, GpuLocalPose)],
+    held: Option<&mut GpuLocalPose>,
 ) -> GpuLocalPose {
     /// One gathered contribution, ordered like the WGSL's fixed arrays.
     struct Contribution {
@@ -1158,6 +1172,24 @@ pub(crate) fn mirror_blend_joint(
             }
         }
     }
+    // The held channels: a channel the blend produced becomes the held value;
+    // a channel it did not keeps the held one.
+    if let Some(held) = held {
+        if out.flags & POSE_FLAG_ROT != 0 {
+            held.rot = out.rot;
+            held.flags |= POSE_FLAG_ROT;
+        } else if held.flags & POSE_FLAG_ROT != 0 {
+            out.rot = held.rot;
+            out.flags |= POSE_FLAG_ROT;
+        }
+        if out.flags & POSE_FLAG_POS != 0 {
+            held.pos = out.pos;
+            held.flags |= POSE_FLAG_POS;
+        } else if held.flags & POSE_FLAG_POS != 0 {
+            out.pos = held.pos;
+            out.flags |= POSE_FLAG_POS;
+        }
+    }
     // The procedural idle adjusters (P31.8), composed exactly like the CPU
     // `apply_idle_adjustments`: a small delta on top of whatever the blend
     // produced for the joint.
@@ -1204,6 +1236,10 @@ pub(crate) fn mirror_blend_joint(
 /// block from the staged playback slots, jobs and corrections — the CPU
 /// reference the real-placement readback verdict compares the GPU's
 /// `LocalPose` against (via [`reference_fk`] into palettes).
+///
+/// `held` is the avatar's `joint_count` held rows, updated in place (see
+/// [`mirror_blend_joint`]); `None` under the T-pose freeze. A row missing from
+/// a short slice holds nothing for that joint.
 #[expect(
     clippy::too_many_arguments,
     reason = "the mirror takes exactly the WGSL passes' bindings and frame params; \
@@ -1221,10 +1257,16 @@ pub(crate) fn mirror_local_pose(
     chest_joint: u32,
     torso_joint: u32,
     corrections: &[(u32, GpuLocalPose)],
+    mut held: Option<&mut [GpuLocalPose]>,
 ) -> Vec<GpuLocalPose> {
     let cache = mirror_pose_cache(slices, jobs, cache_len);
     (0..joint_count)
         .map(|joint| {
+            let held_row = held.as_deref_mut().and_then(|rows| {
+                usize::try_from(joint)
+                    .ok()
+                    .and_then(|index| rows.get_mut(index))
+            });
             mirror_blend_joint(
                 slices,
                 plays,
@@ -1235,6 +1277,7 @@ pub(crate) fn mirror_local_pose(
                 chest_joint,
                 torso_joint,
                 corrections,
+                held_row,
             )
         })
         .collect()

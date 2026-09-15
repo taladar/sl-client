@@ -230,6 +230,10 @@ fn engage_sit_camera(
                 rig.aim_along(transform.forward().as_vec3());
             }
             *mode = CameraMode::Mouselook;
+            // Named in the log like every other mode change
+            // (viewer-wasd-moves-flycam-in-world): this one is not the user's
+            // doing at all, so it is the most worth saying out loud.
+            info!("camera: → mouselook (the seat {seat:?} forces first person)");
         }
         sit_camera.mouselook_applied_for = Some(seat);
         sit_camera.forced_mouselook = true;
@@ -267,6 +271,7 @@ fn clear_sit_camera_on_stand(
                 if let Ok(mut rig) = cameras.single_mut() {
                     rig.resnap();
                 }
+                info!("camera: mouselook → third person (stood off a seat that forced it)");
             }
         }
     }

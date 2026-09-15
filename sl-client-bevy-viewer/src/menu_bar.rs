@@ -133,6 +133,11 @@ const BLACKLIST_OPEN: &str = "asset-blacklist-open";
 /// the check mark on the World ▸ Photo and Video ▸ Phototools entry.
 const PHOTOTOOLS_OPEN: &str = "phototools-open";
 
+/// The condition key that holds while the camera is in the flycam — drives the
+/// check mark on the Advanced ▸ Shortcuts ▸ Joystick Flycam entry, which is the
+/// one place the viewer *shows* which mode the movement keys are driving.
+const FLYCAM_ON: &str = "flycam-on";
+
 /// The condition key that holds while the Avatar Render Settings floater is
 /// open — drives the check mark on the World ▸ Avatar Render Settings entry.
 const AVATAR_RENDER_SETTINGS_OPEN: &str = "avatar-render-settings-open";
@@ -618,12 +623,49 @@ static HELP_MENU: MenuDef = MenuDef {
     )],
 };
 
+/// The Advanced ▸ **Shortcuts** submenu — where the reference keeps the
+/// keyboard-reachable camera and view commands that the Linden viewer files
+/// under a *View* menu. Firestorm has no View menu at all: `Mouselook`,
+/// `Joystick Flycam`, `Reset View`, `Reset Camera Angles`, `Look at Last
+/// Chatter` and the three `Zoom` steps all live here, alongside a
+/// shortcut-index copy of commands whose home is elsewhere in the bar (Search,
+/// Always Run, Fly, Snapshot to Disk, the window-closing group).
+///
+/// **Joystick Flycam** is the first entry to land, on the reference's own
+/// `alt|shift|F`, because it is what makes the flycam reachable and *visible*
+/// from the keyboard (viewer-wasd-moves-flycam-in-world): until it existed the
+/// only way into the flycam was the 6-DOF device's first button, so a stray
+/// press silently reassigned the whole movement cluster from the avatar to the
+/// camera with nothing on screen saying so. The check mark here is that
+/// statement, and the entry is the way back out.
+///
+/// The rest of the submenu is [[viewer-menu-advanced-shortcuts]]: the entries
+/// that duplicate a command already in the bar need the bar's
+/// one-action-one-entry invariant relaxed first (see
+/// `no_two_entries_in_the_bar_share_an_action`), which is a decision about the
+/// whole bar rather than about the flycam.
+static SHORTCUTS_MENU: MenuDef = MenuDef {
+    label: "Shortcuts",
+    items: &[MenuItemDef::Command(
+        MenuCommand::new("Joystick Flycam", "toggle-flycam")
+            .accel("Alt+Shift+F")
+            .checked_when(FLYCAM_ON),
+    )],
+};
+
 /// The Advanced menu — the reference viewer's power-user menu, after Help as
 /// in the reference's bar order. The debug-settings editor today; future
 /// developer / diagnostic commands join here.
+///
+/// The order follows the reference's own: the submenu block — [`SHORTCUTS_MENU`]
+/// is the last of them there — comes before the tail that ends in *Show Debug
+/// Settings*, so this viewer's Shortcuts sits above its debug-settings entry for
+/// the same reason.
 static ADVANCED_MENU: MenuDef = MenuDef {
     label: "Advanced",
     items: &[
+        MenuItemDef::Submenu(&SHORTCUTS_MENU),
+        MenuItemDef::Separator,
         MenuItemDef::Command(
             MenuCommand::new("Debug settings\u{2026}", "toggle-debug-settings")
                 .accel("Ctrl+Alt+Shift+S")
@@ -803,6 +845,9 @@ impl Plugin for TopMenuBarPlugin {
             // system that panics on its first frame, not one that quietly does
             // nothing.
             .add_message::<crate::bulk_import::StartWindlightBulkImport>()
+            // Likewise the flycam toggle, which the camera plugin registers and a
+            // menu-only fold does not mount.
+            .add_message::<crate::world_api::ToggleFlycam>()
             .add_systems(
                 Startup,
                 spawn_top_menu_bar.after(UiScaffoldSystems::SpawnRoot),
@@ -868,7 +913,8 @@ fn spawn_top_menu_bar(mut commands: Commands, root: Res<UiRoot>, asset_server: R
               the fan-in of every condition the bar's check marks and enable gates read: the \
               floaters, the environment, the selection and edit tool, the settings, the \
               presence modes, the RLV state that can take the environment menu away, the \
-              WindLight bulk importer's run state, the panel-shown query, and the bar itself"
+              WindLight bulk importer's run state, the camera mode, the panel-shown query, and \
+              the bar itself"
 )]
 fn update_top_menu_conditions(
     floaters: Query<(Entity, &crate::floater::Floater)>,
@@ -879,6 +925,7 @@ fn update_top_menu_conditions(
     presence: Option<Res<crate::world_api::PresenceState>>,
     rlv_session: Option<Res<crate::world_api::rlv::RlvSession>>,
     bulk_import: Option<Res<crate::bulk_import::BulkImportRun>>,
+    camera_mode: Option<Res<crate::world_api::CameraMode>>,
     panels: Query<&UiPanelShown>,
     mut bars: Query<&mut MenuConditions, With<TopMenuBar>>,
 ) {
@@ -950,6 +997,13 @@ fn update_top_menu_conditions(
     }
     if phototools_open {
         wanted.push(PHOTOTOOLS_OPEN);
+    }
+    // The Advanced ▸ Shortcuts ▸ Joystick Flycam check mark. `Option`, because
+    // a menu-only fixture mounts the bar without the camera plugin that owns the
+    // mode; a missing resource reads as "not in the flycam", which is what an
+    // app with no camera is.
+    if camera_mode.is_some_and(|mode| *mode == crate::world_api::CameraMode::Flycam) {
+        wanted.push(FLYCAM_ON);
     }
     if render_settings_open {
         wanted.push(AVATAR_RENDER_SETTINGS_OPEN);
@@ -1121,8 +1175,8 @@ const fn environment_condition(
     reason = "a Bevy system's parameters are its injected resources / queries: the action \
               stream, the by-id floater lookup, the environment state, the parcel, the two \
               open-request channels, the settings, the panel-shown query, the People sub-tab \
-              request, the presence modes and their notification channel, and the \
-              quit-request writer"
+              request, the presence modes and their notification channel, the flycam-toggle \
+              request, and the quit-request writer"
 )]
 fn handle_top_menu_actions(
     mut actions: MessageReader<UiAction>,
@@ -1138,6 +1192,7 @@ fn handle_top_menu_actions(
     mut notify: MessageWriter<crate::notifications::ShowNotification>,
     mut quit: MessageWriter<crate::session::QuitRequested>,
     mut bulk_import: MessageWriter<crate::bulk_import::StartWindlightBulkImport>,
+    mut flycam: MessageWriter<crate::world_api::ToggleFlycam>,
 ) {
     use crate::environment::FixedEnvironment;
     use crate::sky_presets::FixedSky;
@@ -1301,6 +1356,14 @@ fn handle_top_menu_actions(
                     &mut panels,
                     crate::phototools::PHOTOTOOLS_FLOATER_ID,
                 );
+            }
+            // Enter or leave the flycam. Asked for as a request rather than
+            // written on `CameraMode` here, because the switch is more than the
+            // mode: `switch_camera_mode` seeds the rig's aim entering and
+            // resnaps the smoothing leaving, so the pose is continuous one way
+            // and does not glide through the scene the other.
+            "toggle-flycam" => {
+                flycam.write(crate::world_api::ToggleFlycam);
             }
             "toggle-avatar-render-settings" => {
                 toggle_floater(
@@ -1689,6 +1752,7 @@ mod tests {
             ("RLVa".to_owned(), "toggle-rlv-behaviours"),
             ("RLVa".to_owned(), "toggle-rlv-strings"),
             ("Help".to_owned(), "toggle-about"),
+            ("Advanced > Shortcuts".to_owned(), "toggle-flycam"),
             ("Advanced".to_owned(), "toggle-debug-settings"),
             ("Advanced".to_owned(), "toggle-collect-diagnostics"),
         ];
@@ -1775,6 +1839,10 @@ mod tests {
                 crate::edit_link::LINK_ACTION,
                 crate::edit_link::UNLINK_ACTION,
                 "toggle-search",
+                // Advanced ▸ Shortcuts ▸ Joystick Flycam, on the reference's own
+                // `alt|shift|F` — the keyboard way into and out of the flycam
+                // (viewer-wasd-moves-flycam-in-world).
+                "toggle-flycam",
                 "toggle-debug-settings",
             ],
             "the entries that carry a shortcut, pinned: a drawn accelerator is a \

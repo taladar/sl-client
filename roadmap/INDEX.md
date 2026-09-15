@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 313 |
+| ready | 314 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 18 |
-| done | 1149 |
+| bugs | 14 |
+| done | 1153 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1685** |
+| **total** | **1686** |
 
 ## ideas (100)
 
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (313)
+## ready (314)
 
 ### protocol
 
@@ -622,6 +622,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-text-foundation` (done), `viewer-ui-text-input-widget` (done))
 - [`viewer-media-playback-policies`](ready/viewer-media-playback-policies.md) —
   Media playback policies — URL filter, perms, first-click, rolloff
+- [`viewer-menu-advanced-shortcuts`](ready/viewer-menu-advanced-shortcuts.md) —
+  Advanced ▸ Shortcuts — the rest of the reference's submenu
 - [`viewer-menu-bar-fill-implemented-entries`](ready/viewer-menu-bar-fill-implemented-entries.md)
   — Top menu bar — add entries for already-implemented features
 - [`viewer-mesh-cost-estimate`](ready/viewer-mesh-cost-estimate.md) — Streaming
@@ -1163,16 +1165,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (18)
+## bugs (14)
 
 ### viewer
 
-- [`viewer-animesh-intermittent-render`](bugs/viewer-animesh-intermittent-render.md)
-  — Animesh intermittently fails to render (timing race, not deterministic)
-- [`viewer-audit-parcel-audio-autoplay`](bugs/viewer-audit-parcel-audio-autoplay.md)
-  — A transient empty parcel resets the user's stop decision and re-autoplays
-- [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
-  — Mesh-head brow spikes forward from face-bone shape deformation
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
   — Check clouds vs the waterline at the horizon against Firestorm
 - [`viewer-combo-stops-opening`](bugs/viewer-combo-stops-opening.md) — A combo
@@ -1205,10 +1201,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-tree-species-all-rendered-as-trees`](bugs/viewer-tree-species-all-rendered-as-trees.md)
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)
-- [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
-  — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1149)
+## done (1153)
 
 ### protocol
 
@@ -1454,6 +1448,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Add Friend sends the offer silently — no message dialog, no feedback
 - [`viewer-ais3-inventory-mutations-and-cof-reconverge`](done/viewer-ais3-inventory-mutations-and-cof-reconverge.md)
   — Route inventory mutations through AIS3 on SL + reconverge the COF on wear
+- [`viewer-animesh-intermittent-render`](done/viewer-animesh-intermittent-render.md)
+  — Animesh intermittently fails to render (timing race, not deterministic)
 - [`viewer-appearance-editor-bodyparts`](done/viewer-appearance-editor-bodyparts.md)
   — Edit Shape / Skin / Hair / Eyes — body-part editors (blocked by
   `viewer-appearance-editor-shell` (done))
@@ -1532,6 +1528,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-parcel-access-list-accumulate`](done/viewer-audit-parcel-access-list-accumulate.md)
   — Editing a multi-packet parcel ban list unbans everyone not in the last
   packet
+- [`viewer-audit-parcel-audio-autoplay`](done/viewer-audit-parcel-audio-autoplay.md)
+  — A transient empty parcel resets the user's stop decision and re-autoplays
 - [`viewer-audit-parcel-borders-retessellation`](done/viewer-audit-parcel-borders-retessellation.md)
   — A region with parcels but no terrain re-tessellates its overlay every frame
 - [`viewer-audit-particles-dt-and-cloud-leak`](done/viewer-audit-particles-dt-and-cloud-leak.md)
@@ -1607,6 +1605,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-avatar-dead-reckoning-translation-rubberband`](done/viewer-avatar-dead-reckoning-translation-rubberband.md)
   — Ease the avatar's rendered translation toward truth (dead-reckoning
   rubberband)
+- [`viewer-avatar-face-bone-shape-brow-spike`](done/viewer-avatar-face-bone-shape-brow-spike.md)
+  — Mesh-head brow spikes forward from face-bone shape deformation
 - [`viewer-avatar-mesh-accurate-pick`](done/viewer-avatar-mesh-accurate-pick.md)
   — Mesh-accurate avatar picking (replace the bounding-box approximation)
   (blocked by `viewer-avatar-context-menu` (done))
@@ -2961,6 +2961,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-volume-panel`](done/viewer-volume-panel.md) — Volume panel (master +
   per-category sliders) (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-audio-backend` (done))
+- [`viewer-wasd-moves-flycam-in-world`](done/viewer-wasd-moves-flycam-in-world.md)
+  — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 - [`viewer-water-exclusion`](done/viewer-water-exclusion.md) — Water-exclusion
   surfaces (invisiprim successor)
 - [`viewer-water-refraction-smears-avatar-silhouette`](done/viewer-water-refraction-smears-avatar-silhouette.md)

@@ -2906,6 +2906,20 @@ impl Default for FirstPersonAvatarVisible {
     }
 }
 
+/// A request to enter [`CameraMode::Flycam`], or to leave it for third person —
+/// the same toggle the 6-DOF device's first button pulses, written by anything
+/// outside the world layer that offers the user a way in or out (the menu bar's
+/// **Joystick Flycam** entry and its `Alt+Shift+F` accelerator).
+///
+/// A message rather than a direct `CameraMode` write because entering and
+/// leaving are not just a mode assignment: the rig's aim is seeded from the
+/// current view on the way in and the smoothing is resnapped on the way out, so
+/// the pose is continuous entering and does not glide through the scene leaving.
+/// `sl_viewer_world_view::camera`'s `switch_camera_mode` owns that, and this is
+/// how it is asked.
+#[derive(Message, Debug, Clone, Copy)]
+pub struct ToggleFlycam;
+
 /// The marker on the one main viewer camera entity — the camera every world
 /// system means by "the camera", as opposed to the reflection-probe, mirror and
 /// minimap cameras that also carry `Camera3d`. Mode-agnostic: the same entity is

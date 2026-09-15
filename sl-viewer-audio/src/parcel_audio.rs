@@ -18,6 +18,17 @@
 //! setting stops the stream and suppresses all autoplay; the play button
 //! still works (an explicit user start).
 //!
+//! **An unresolved parcel is not a parcel without music.** The agent's parcel
+//! ([`SlAgentParcel::current`]) is `None` whenever the simulator has not
+//! pushed one yet — before login, across a region crossing, through a
+//! teleport — and that gap says nothing about the stream. Reading it as "a
+//! different parcel, with no URL" is what let a crossing stop the radio and
+//! then, on the way back in, forget that the user had pressed stop and start
+//! it again. So the policy is expressed over a three-state `ParcelStream`: an
+//! `Unknown` parcel changes nothing at all, only a `Resolved` one that really
+//! names no URL stops, and the stop decision is remembered as *the URL that
+//! was stopped* rather than as a flag a gap can clear.
+//!
 //! # The controls
 //!
 //! One right-aligned row in the bottom area's upper stack (the counterpart
@@ -107,27 +118,174 @@ const TRACK_FILL: Color = Color::srgb(0.16, 0.19, 0.25);
 /// The slider thumb's fill.
 const THUMB_FILL: Color = Color::srgb(0.62, 0.72, 0.86);
 
+/// What the grid currently says about the agent's parcel and its music stream.
+///
+/// The distinction the autoplay policy turns on: "I do not know which parcel
+/// the agent is on" and "the agent is on a parcel that has no music" are
+/// different facts, and only the second one should stop a stream or re-arm
+/// autoplay.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ParcelStream {
+    /// The agent's parcel has not resolved — before login, across a region
+    /// crossing, through a teleport, or in any gap before the simulator's
+    /// parcel push arrives. Carries no information about the stream.
+    Unknown,
+    /// The parcel resolved and named this music URL (`None`: it has none).
+    Resolved(Option<url::Url>),
+}
+
+impl ParcelStream {
+    /// Read the agent-parcel mirror. A missing resource (no session yet) and an
+    /// unresolved parcel are the same fact: [`Unknown`](Self::Unknown).
+    fn from_agent_parcel(parcel: Option<&SlAgentParcel>) -> Self {
+        parcel
+            .and_then(|parcel| parcel.current.as_ref())
+            .map_or(Self::Unknown, |parcel| {
+                Self::Resolved(parcel.music_url.clone())
+            })
+    }
+}
+
+/// What the decision below asks of the player.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum StreamAction {
+    /// Start (or restart) the player on this stream.
+    Play(ValidatedMediaUrl),
+    /// Stop the player.
+    Stop,
+    /// Leave the player exactly as it is.
+    Nothing,
+}
+
+/// The autoplay decision, with no player and no ECS in it: what the viewer
+/// knows about the parcel's stream, which stream the user stopped, and the
+/// enabled flag it last acted on. Every transition returns the
+/// [`StreamAction`] the player should be given, so the policy is testable
+/// directly rather than only through a running grid.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct AutoplayState {
+    /// The resolved parcel's music URL, once it passed the media scheme
+    /// allowlist — the stream the player is (or would be) playing. A parcel
+    /// whose URL the allowlist refuses reads as no stream at all.
+    parcel_url: Option<ValidatedMediaUrl>,
+    /// The resolved parcel's music URL as the grid sent it, the change detector
+    /// for the above: validation (and its log line) then runs once per parcel
+    /// switch rather than once per frame. Only ever written from a
+    /// [`ParcelStream::Resolved`], so an unresolved parcel leaves the last
+    /// known stream standing.
+    parcel_url_raw: Option<url::Url>,
+    /// The stream URL the user pressed **stop** on, if any: autoplay stays off
+    /// for exactly that URL. Holding the URL rather than a bare flag is what
+    /// makes the decision survive an unresolved-parcel gap — there is nothing
+    /// for the gap to clear, and the comparison still re-arms autoplay for a
+    /// genuinely different stream.
+    stopped_url: Option<url::Url>,
+    /// The enabled flag last seen (a change detector for the setting).
+    applied_enabled: Option<bool>,
+}
+
+impl AutoplayState {
+    /// Whether autoplay is armed for the currently known stream — i.e. the user
+    /// has not pressed stop on *this* URL.
+    fn autoplay_armed(&self) -> bool {
+        self.stopped_url != self.parcel_url_raw
+    }
+
+    /// The agent's parcel, as of this frame. An [`Unknown`](ParcelStream::Unknown)
+    /// parcel and a re-delivery of the URL already known both change nothing;
+    /// a genuinely different stream re-arms autoplay and starts (or, when the
+    /// new parcel has none or the setting is off, stops) the player.
+    fn observe_parcel(&mut self, observed: &ParcelStream, enabled: bool) -> StreamAction {
+        let ParcelStream::Resolved(parcel_url) = observed else {
+            return StreamAction::Nothing;
+        };
+        if *parcel_url == self.parcel_url_raw {
+            return StreamAction::Nothing;
+        }
+        debug!("parcel music stream now {parcel_url:?}");
+        // The music URL is whatever the land owner typed: a `file://` one
+        // would have `uridecodebin` open a local file on this machine.
+        self.parcel_url = parcel_url.as_ref().and_then(|url| {
+            ValidatedMediaUrl::from_url(url)
+                .inspect_err(|error| warn!("parcel music URL not played: {error}"))
+                .ok()
+        });
+        self.parcel_url_raw.clone_from(parcel_url);
+        match self.parcel_url.clone() {
+            Some(url) if enabled && self.autoplay_armed() => StreamAction::Play(url),
+            _stopped_or_none_or_disabled => StreamAction::Stop,
+        }
+    }
+
+    /// The `MusicStreamEnabled` setting, as of this frame: off stops the
+    /// stream, on re-starts it (unless the user stopped this URL themselves).
+    /// The first sight of the setting is not a flip — it is what the state was
+    /// initialised to, and must not start anything on its own.
+    fn observe_enabled(&mut self, enabled: bool, running: bool) -> StreamAction {
+        if self.applied_enabled == Some(enabled) {
+            return StreamAction::Nothing;
+        }
+        let first_sight = self.applied_enabled.is_none();
+        self.applied_enabled = Some(enabled);
+        if first_sight {
+            return StreamAction::Nothing;
+        }
+        if enabled {
+            match self.parcel_url.clone() {
+                Some(url) if !running && self.autoplay_armed() => StreamAction::Play(url),
+                _running_or_stopped_or_none => StreamAction::Nothing,
+            }
+        } else if running {
+            StreamAction::Stop
+        } else {
+            StreamAction::Nothing
+        }
+    }
+
+    /// The play / stop button. Stopping remembers *this* URL as the one the
+    /// user silenced; starting forgets it, so an explicit play works even with
+    /// the autoplay setting off.
+    fn toggle_play(&mut self, running: bool) -> StreamAction {
+        if running {
+            self.stopped_url = self.parcel_url_raw.clone();
+            return StreamAction::Stop;
+        }
+        match self.parcel_url.clone() {
+            Some(url) => {
+                self.stopped_url = None;
+                StreamAction::Play(url)
+            }
+            None => StreamAction::Nothing,
+        }
+    }
+}
+
 /// The parcel stream player and its autoplay bookkeeping.
 #[derive(Resource, Default)]
 pub(crate) struct ParcelAudio {
     /// The GStreamer stream player.
     player: AudioStreamPlayer,
-    /// The current parcel's music URL, once it passed the media scheme
-    /// allowlist — the stream the player is (or would be) playing. A parcel
-    /// whose URL the allowlist refuses reads as no stream at all.
-    parcel_url: Option<ValidatedMediaUrl>,
-    /// The parcel's music URL as the grid sent it, the change detector for the
-    /// above: validation (and its log line) then runs once per parcel switch
-    /// rather than once per frame.
-    parcel_url_raw: Option<url::Url>,
-    /// The user stopped this URL's stream; autoplay stays off until the
-    /// parcel URL changes.
-    user_stopped: bool,
-    /// The enabled flag last seen (a change detector for the setting).
-    applied_enabled: Option<bool>,
+    /// The autoplay policy's state — the decisions, without the player.
+    state: AutoplayState,
     /// The player's bridge into the mixer's **music** bus (2-D, stereo). Opened
     /// lazily once the mixer exists and the sink is attached to the player.
     audio: Option<MixerStream>,
+}
+
+impl ParcelAudio {
+    /// Hand a decision to the player.
+    fn apply(&mut self, action: StreamAction) {
+        match action {
+            StreamAction::Play(url) => self.player.play(&url),
+            StreamAction::Stop => self.player.stop(),
+            StreamAction::Nothing => {}
+        }
+    }
+
+    /// Whether the player is running (or trying to run).
+    const fn running(&self) -> bool {
+        stream_running(self.player.status().state)
+    }
 }
 
 /// The bar's entities.
@@ -379,47 +537,17 @@ fn drive_parcel_audio(
         .and_then(|settings| settings.store().get_bool(MUSIC_ENABLED_SETTING).ok())
         .unwrap_or(false);
 
-    // Parcel switch: a new music URL re-arms autoplay; losing the URL stops.
-    let parcel_url = parcel
-        .as_ref()
-        .and_then(|parcel| parcel.current.as_ref())
-        .and_then(|parcel| parcel.music_url.as_ref())
-        .cloned();
-    if parcel_url != audio.parcel_url_raw {
-        debug!("parcel music stream now {parcel_url:?}");
-        // The music URL is whatever the land owner typed: a `file://` one
-        // would have `uridecodebin` open a local file on this machine.
-        audio.parcel_url = parcel_url.as_ref().and_then(|url| {
-            ValidatedMediaUrl::from_url(url)
-                .inspect_err(|error| warn!("parcel music URL not played: {error}"))
-                .ok()
-        });
-        audio.parcel_url_raw = parcel_url;
-        audio.user_stopped = false;
-        match audio.parcel_url.clone() {
-            Some(url) if enabled => audio.player.play(&url),
-            _none_or_disabled => audio.player.stop(),
-        }
-    }
+    // Parcel switch: a new music URL re-arms autoplay; a parcel that resolves
+    // with no URL stops. An *unresolved* parcel does neither.
+    let observed = ParcelStream::from_agent_parcel(parcel.as_deref());
+    let action = audio.state.observe_parcel(&observed, enabled);
+    audio.apply(action);
 
     // Enabled flips: off stops the stream, on re-starts it (unless the user
     // stopped this URL themselves).
-    if audio.applied_enabled != Some(enabled) {
-        let first_sight = audio.applied_enabled.is_none();
-        audio.applied_enabled = Some(enabled);
-        if !first_sight {
-            if enabled {
-                if !audio.user_stopped
-                    && !stream_running(audio.player.status().state)
-                    && let Some(url) = audio.parcel_url.clone()
-                {
-                    audio.player.play(&url);
-                }
-            } else if stream_running(audio.player.status().state) {
-                audio.player.stop();
-            }
-        }
-    }
+    let running = audio.running();
+    let action = audio.state.observe_enabled(enabled, running);
+    audio.apply(action);
 }
 
 /// Route the cluster's button actions.
@@ -435,18 +563,14 @@ fn handle_parcel_audio_actions(
         // The play / mute buttons are disabled (greyed) while the parcel has no
         // stream; honour that here too, since `InteractionDisabled` is advisory
         // for these custom buttons.
-        if audio.parcel_url.is_none() {
+        if audio.state.parcel_url.is_none() {
             continue;
         }
         match action.action {
             "play-stop" => {
-                if stream_running(audio.player.status().state) {
-                    audio.player.stop();
-                    audio.user_stopped = true;
-                } else if let Some(url) = audio.parcel_url.clone() {
-                    audio.user_stopped = false;
-                    audio.player.play(&url);
-                }
+                let running = audio.running();
+                let decision = audio.state.toggle_play(running);
+                audio.apply(decision);
             }
             "mute-toggle" => {
                 // Mute is the music bus (the stream's single volume path); the
@@ -504,7 +628,7 @@ fn sync_parcel_audio_ui(
     mut commands: Commands,
 ) {
     let Some(ui) = ui else { return };
-    let active = audio.parcel_url.is_some();
+    let active = audio.state.parcel_url.is_some();
     // The mute glyph reflects the music bus (the stream's mute lives there now).
     let music_muted = settings
         .as_ref()
@@ -583,6 +707,7 @@ fn sync_parcel_audio_ui(
                 || {
                     status.title.clone().unwrap_or_else(|| {
                         audio
+                            .state
                             .parcel_url
                             .as_ref()
                             .and_then(ValidatedMediaUrl::url)
@@ -677,4 +802,191 @@ pub fn spawn_parcel_audio_specimen(
     // Static: no `Slider`, so the thumb stays at the half the specimen draws.
     spawn_slider(commands, cluster, SLIDER, 0, 0.5, ());
     cluster
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+    use sl_gst::ValidatedMediaUrl;
+
+    use super::{AutoplayState, ParcelStream, StreamAction};
+
+    /// Anything a helper below can fail with (a malformed test URL, a scheme
+    /// the media allowlist refuses).
+    type TestError = Box<dyn core::error::Error>;
+
+    /// A parcel that resolved and names this stream.
+    fn on(url: &str) -> Result<ParcelStream, TestError> {
+        Ok(ParcelStream::Resolved(Some(url::Url::parse(url)?)))
+    }
+
+    /// A parcel that resolved and has no stream.
+    const fn silent() -> ParcelStream {
+        ParcelStream::Resolved(None)
+    }
+
+    /// The action that starts this stream.
+    fn playing(url: &str) -> Result<StreamAction, TestError> {
+        Ok(StreamAction::Play(ValidatedMediaUrl::parse(url)?))
+    }
+
+    /// A state that has already settled on `url` playing, with autoplay on —
+    /// the position every parcel-change test starts from.
+    fn listening(url: &str) -> Result<AutoplayState, TestError> {
+        let mut state = AutoplayState::default();
+        assert_eq!(state.observe_enabled(true, false), StreamAction::Nothing);
+        assert_eq!(state.observe_parcel(&on(url)?, true), playing(url)?);
+        Ok(state)
+    }
+
+    /// The same parcel arriving again — every frame, in fact — must not restart
+    /// the stream it is already playing.
+    #[test]
+    fn a_same_url_redelivery_does_nothing() -> Result<(), TestError> {
+        let mut state = listening("http://radio.example/stream")?;
+        for _redelivery in 0..3 {
+            assert_eq!(
+                state.observe_parcel(&on("http://radio.example/stream")?, true),
+                StreamAction::Nothing
+            );
+        }
+        Ok(())
+    }
+
+    /// The bug: a region crossing (or any gap before the simulator's parcel
+    /// push) leaves the agent's parcel unresolved for a few frames. That must
+    /// neither stop the stream nor forget that the user pressed stop — the old
+    /// code read the gap as "a different parcel with no URL", so the stream
+    /// stopped and then autoplayed again on the way back in.
+    #[test]
+    fn an_unresolved_parcel_holds_the_stream_and_the_stop_decision() -> Result<(), TestError> {
+        let mut state = listening("http://radio.example/stream")?;
+        assert_eq!(state.toggle_play(true), StreamAction::Stop);
+
+        for _frame_of_the_crossing in 0..5 {
+            assert_eq!(
+                state.observe_parcel(&ParcelStream::Unknown, true),
+                StreamAction::Nothing
+            );
+        }
+        // The same parcel resolves again on the far side.
+        assert_eq!(
+            state.observe_parcel(&on("http://radio.example/stream")?, true),
+            StreamAction::Nothing,
+            "the user's stop must survive the gap"
+        );
+        Ok(())
+    }
+
+    /// The flip side of the fix: a genuinely different stream still re-arms
+    /// autoplay, even when the user stopped the previous one — including when
+    /// an unresolved gap sits between the two parcels.
+    #[test]
+    fn a_different_stream_rearms_autoplay_after_a_stop() -> Result<(), TestError> {
+        let mut state = listening("http://radio.example/stream")?;
+        assert_eq!(state.toggle_play(true), StreamAction::Stop);
+        assert_eq!(
+            state.observe_parcel(&ParcelStream::Unknown, true),
+            StreamAction::Nothing
+        );
+        assert_eq!(
+            state.observe_parcel(&on("http://other.example/stream")?, true),
+            playing("http://other.example/stream")?
+        );
+        Ok(())
+    }
+
+    /// A parcel that really has no music stops the stream — that is a resolved
+    /// fact, not a gap — but the stop decision is about a URL, so walking
+    /// through such a parcel and back does not re-autoplay what was stopped.
+    #[test]
+    fn a_parcel_without_music_stops_without_clearing_the_decision() -> Result<(), TestError> {
+        let mut state = listening("http://radio.example/stream")?;
+        assert_eq!(state.toggle_play(true), StreamAction::Stop);
+        assert_eq!(state.observe_parcel(&silent(), true), StreamAction::Stop);
+        assert_eq!(
+            state.observe_parcel(&on("http://radio.example/stream")?, true),
+            StreamAction::Stop,
+            "back on the stopped stream: still stopped, not restarted"
+        );
+        Ok(())
+    }
+
+    /// A parcel whose URL the media scheme allowlist refuses reads as no stream
+    /// at all — the land owner does not get to point `uridecodebin` at a local
+    /// file.
+    #[test]
+    fn a_refused_scheme_reads_as_no_stream() -> Result<(), TestError> {
+        let mut state = listening("http://radio.example/stream")?;
+        assert_eq!(
+            state.observe_parcel(&on("file:///etc/passwd")?, true),
+            StreamAction::Stop
+        );
+        assert_eq!(state.parcel_url, None);
+        Ok(())
+    }
+
+    /// With autoplay off nothing starts by itself, but the play button still
+    /// does — and having pressed it, the *next* parcel does not autoplay either.
+    #[test]
+    fn autoplay_off_never_starts_but_the_button_does() -> Result<(), TestError> {
+        let mut state = AutoplayState::default();
+        assert_eq!(state.observe_enabled(false, false), StreamAction::Nothing);
+        assert_eq!(
+            state.observe_parcel(&on("http://radio.example/stream")?, false),
+            StreamAction::Stop
+        );
+        assert_eq!(
+            state.toggle_play(false),
+            playing("http://radio.example/stream")?
+        );
+        assert_eq!(
+            state.observe_parcel(&on("http://other.example/stream")?, false),
+            StreamAction::Stop
+        );
+        Ok(())
+    }
+
+    /// The first sight of the setting is the state it was initialised to, not a
+    /// flip: seeing `true` at startup must not start a stream on its own.
+    #[test]
+    fn the_first_sight_of_the_setting_starts_nothing() {
+        let mut state = AutoplayState::default();
+        assert_eq!(state.observe_enabled(true, false), StreamAction::Nothing);
+        assert_eq!(state.observe_enabled(true, false), StreamAction::Nothing);
+    }
+
+    /// Turning the setting off stops a running stream; turning it back on
+    /// restarts the parcel's stream, unless the user stopped that one.
+    #[test]
+    fn the_setting_stops_and_restarts_but_honours_a_stop() -> Result<(), TestError> {
+        let mut state = listening("http://radio.example/stream")?;
+        assert_eq!(state.observe_enabled(false, true), StreamAction::Stop);
+        assert_eq!(
+            state.observe_enabled(true, false),
+            playing("http://radio.example/stream")?
+        );
+
+        assert_eq!(state.toggle_play(true), StreamAction::Stop);
+        assert_eq!(state.observe_enabled(false, false), StreamAction::Nothing);
+        assert_eq!(
+            state.observe_enabled(true, false),
+            StreamAction::Nothing,
+            "the user's stop outlives a setting round-trip"
+        );
+        Ok(())
+    }
+
+    /// Nothing at all is known yet (no session): an unresolved parcel is the
+    /// resting state, and it starts nothing.
+    #[test]
+    fn a_missing_agent_parcel_is_unknown() {
+        assert_eq!(ParcelStream::from_agent_parcel(None), ParcelStream::Unknown);
+        let mut state = AutoplayState::default();
+        assert_eq!(state.observe_enabled(true, false), StreamAction::Nothing);
+        assert_eq!(
+            state.observe_parcel(&ParcelStream::Unknown, true),
+            StreamAction::Nothing
+        );
+    }
 }

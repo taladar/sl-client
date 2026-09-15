@@ -266,6 +266,12 @@ impl CameraExit<'_, '_> {
         if let Ok(mut rig) = self.cameras.single_mut() {
             rig.resnap();
         }
+        // Logged like every other mode change (viewer-wasd-moves-flycam-in-world):
+        // the mode decides whether the movement keys drive the avatar or the
+        // camera, so a live log has to say when and why it changed.
+        info!(
+            "camera: flycam → third person (Stop flycam button); the movement keys walk the avatar"
+        );
     }
 }
 

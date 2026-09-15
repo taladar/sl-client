@@ -480,6 +480,14 @@ impl ObjectBuilds {
             && self.sculpt_rebuild.is_none()
     }
 
+    /// The pending asset build, read-only — for a diagnostic that must not take
+    /// the write access [`PendingBuilds`] holds (and so must not serialise
+    /// against every build system). `None` once the geometry is built.
+    #[must_use]
+    pub const fn pending(&self) -> Option<&PendingGeometry> {
+        self.pending.as_ref()
+    }
+
     /// The client-tessellated rebuild inputs this object holds, if any — what
     /// [`apply_prim_lod`] re-runs at a new level. `None` for a mesh, a tree (which
     /// has its own tier and driver), or anything not tessellated on the CPU.

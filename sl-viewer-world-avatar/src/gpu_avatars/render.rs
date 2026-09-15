@@ -18,8 +18,9 @@ use bevy::render::render_resource::binding_types::{
 };
 use bevy::render::render_resource::{
     BindGroup, BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries, Buffer,
-    BufferDescriptor, BufferUsages, CachedComputePipelineId, ComputePassDescriptor,
-    ComputePipelineDescriptor, PipelineCache, ShaderStages, StorageBuffer, UniformBuffer,
+    BufferDescriptor, BufferUsages, CachedComputePipelineId, CommandEncoderDescriptor,
+    ComputePassDescriptor, ComputePipelineDescriptor, PipelineCache, ShaderStages, StorageBuffer,
+    UniformBuffer,
 };
 use bevy::render::renderer::{RenderContext, RenderDevice, RenderQueue};
 use bevy::render::storage::{GpuShaderBuffer, ShaderBuffer};
@@ -269,7 +270,10 @@ pub(super) struct GpuAvatarBuffers {
     rest: StorageBuffer<Vec<GpuRestJoint>>,
     /// The staged generation [`Self::rest`] currently holds.
     rest_generation: Option<u64>,
-    /// The slot-indexed local pose rows, rewritten every frame.
+    /// The slot-indexed local pose rows, rewritten every frame. In **blend**
+    /// mode it is twice that size: behind the local-pose rows pass C reads
+    /// sits the same-shaped block of **held** rows pass B keeps across frames
+    /// (from row [`Self::local_pose_rows`], the `held_offset` param).
     local_pose: StorageBuffer<Vec<GpuLocalPose>>,
     /// The shared joint-map pool, rewritten on pool-generation bump.
     joint_map: StorageBuffer<Vec<u32>>,
@@ -310,8 +314,13 @@ pub(super) struct GpuAvatarBuffers {
     /// (pass A output / pass B input; transient within one frame).
     pose_cache: Option<(Buffer, u64)>,
     /// How many local-pose rows the buffer was last sized for in **blend**
-    /// mode (where contents are GPU-written and only the allocation matters).
+    /// mode (where contents are GPU-written and only the allocation matters) —
+    /// also where the held block starts.
     local_pose_rows: usize,
+    /// Per dense slot, the occupancy stamp its held rows were last cleared
+    /// for (`0` = never cleared). A frame row whose staged stamp differs gets
+    /// its slot's held rows zeroed before pass B reads them.
+    held_occupancy: Vec<u64>,
 }
 
 impl Default for GpuAvatarBuffers {
@@ -340,10 +349,13 @@ impl Default for GpuAvatarBuffers {
             corrections: StorageBuffer::default(),
             pose_cache: None,
             local_pose_rows: 0,
+            held_occupancy: Vec::new(),
         };
         buffers.frames.set_label(Some("gpu_avatar_frames"));
         buffers.rest.set_label(Some("gpu_avatar_rest"));
         buffers.local_pose.set_label(Some("gpu_avatar_local_pose"));
+        // The held block is carried across a growth by a GPU-side copy.
+        buffers.local_pose.add_usages(BufferUsages::COPY_SRC);
         buffers.joint_map.set_label(Some("gpu_avatar_joint_map"));
         buffers.ibps.set_label(Some("gpu_avatar_ibps"));
         buffers.instances.set_label(Some("gpu_avatar_instances"));
@@ -476,15 +488,8 @@ pub(super) fn prepare_gpu_avatars(
     if staging.blend {
         // Phase 2: the local pose is GPU-written by pass B — only the
         // allocation matters. (Re)size it on slot growth; never upload rows.
-        if buffers.local_pose_rows < rows_len {
-            buffers
-                .local_pose
-                .set(vec![GpuLocalPose::default(); rows_len]);
-            buffers
-                .local_pose
-                .write_buffer(&render_device, &render_queue);
-            buffers.local_pose_rows = rows_len;
-        }
+        grow_local_pose(&mut buffers, rows_len, &render_device, &render_queue);
+        clear_reoccupied_held_rows(&mut buffers, &staging, &render_queue);
     } else {
         // Phase 1 upload (ghost placement / hand-staged tests): the CPU rows.
         buffers.local_pose.set(staging.local_pose.clone());
@@ -499,6 +504,13 @@ pub(super) fn prepare_gpu_avatars(
         .write_buffer(&render_device, &render_queue);
     let job_count = u32::try_from(staging.jobs.len()).unwrap_or(0);
     let correction_count = u32::try_from(staging.corrections.len()).unwrap_or(0);
+    // Where pass B's held block starts (blend mode only; no pass B runs
+    // otherwise).
+    let held_offset = if staging.blend {
+        u32::try_from(buffers.local_pose_rows).unwrap_or(u32::MAX)
+    } else {
+        0
+    };
     buffers.params.set(GpuComputeParams {
         avatar_count,
         joint_count: staging.joint_count,
@@ -513,7 +525,7 @@ pub(super) fn prepare_gpu_avatars(
         chest_joint: staging.chest_joint,
         torso_joint: staging.torso_joint,
         flags: staging.param_flags,
-        pad0: 0,
+        held_offset,
         pad1: 0,
         pad2: 0,
     });
@@ -846,6 +858,100 @@ pub(super) fn prepare_gpu_avatars(
         readback,
         bounds,
     });
+}
+
+/// Size the blend-mode local-pose buffer for `rows_len` local-pose rows plus
+/// as many held rows behind them, growing only. The local-pose block is
+/// rewritten by pass B every frame, but the held block is state pass B carries
+/// between frames, so a growth copies the old held block to its new offset
+/// (the queued copy runs before this frame's compute).
+fn grow_local_pose(
+    buffers: &mut GpuAvatarBuffers,
+    rows_len: usize,
+    render_device: &RenderDevice,
+    render_queue: &RenderQueue,
+) {
+    if buffers.local_pose_rows >= rows_len {
+        return;
+    }
+    let old_rows = buffers.local_pose_rows;
+    let old_buffer = buffers.local_pose.buffer().cloned();
+    buffers
+        .local_pose
+        .set(vec![GpuLocalPose::default(); rows_len.saturating_mul(2)]);
+    buffers.local_pose.write_buffer(render_device, render_queue);
+    buffers.local_pose_rows = rows_len;
+    let (Some(old_buffer), Some(new_buffer)) = (old_buffer, buffers.local_pose.buffer()) else {
+        return;
+    };
+    let (Ok(old_rows), Ok(new_rows)) = (u64::try_from(old_rows), u64::try_from(rows_len)) else {
+        return;
+    };
+    if old_rows == 0 {
+        return;
+    }
+    let mut encoder = render_device.create_command_encoder(&CommandEncoderDescriptor {
+        label: Some("gpu_avatar_held_rows_growth"),
+    });
+    encoder.copy_buffer_to_buffer(
+        &old_buffer,
+        old_rows.saturating_mul(POSE_ENTRY_BYTES),
+        new_buffer,
+        new_rows.saturating_mul(POSE_ENTRY_BYTES),
+        Some(old_rows.saturating_mul(POSE_ENTRY_BYTES)),
+    );
+    render_queue.submit([encoder.finish()]);
+}
+
+/// Zero the held rows of every staged slot whose occupancy stamp is not the one
+/// its held rows were last cleared for — a slot newly taken, by another pose
+/// slot or by the same one again after it was freed — so pass B never holds a
+/// pose its occupant was not given. Compared against state rather than
+/// signalled once, so a frame this system skipped cannot lose the clear.
+fn clear_reoccupied_held_rows(
+    buffers: &mut GpuAvatarBuffers,
+    staging: &GpuAvatarStaging,
+    render_queue: &RenderQueue,
+) {
+    let Ok(joint_count) = usize::try_from(staging.joint_count) else {
+        return;
+    };
+    let Ok(row_bytes) = usize::try_from(POSE_ENTRY_BYTES) else {
+        return;
+    };
+    let held_offset = buffers.local_pose_rows;
+    for (frame, &occupancy) in staging.frames.iter().zip(&staging.frame_occupancy) {
+        let Ok(slot) = usize::try_from(frame.slot) else {
+            continue;
+        };
+        if buffers.held_occupancy.get(slot) == Some(&occupancy) {
+            continue;
+        }
+        let Some(start_row) = slot
+            .checked_mul(joint_count)
+            .and_then(|row| row.checked_add(held_offset))
+        else {
+            continue;
+        };
+        let (Some(offset), Some(len)) = (
+            start_row
+                .checked_mul(row_bytes)
+                .and_then(|bytes| u64::try_from(bytes).ok()),
+            joint_count.checked_mul(row_bytes),
+        ) else {
+            continue;
+        };
+        let Some(buffer) = buffers.local_pose.buffer() else {
+            return;
+        };
+        render_queue.write_buffer(buffer, offset, &vec![0_u8; len]);
+        if buffers.held_occupancy.len() <= slot {
+            buffers.held_occupancy.resize(slot.saturating_add(1), 0);
+        }
+        if let Some(stamp) = buffers.held_occupancy.get_mut(slot) {
+            *stamp = occupancy;
+        }
+    }
 }
 
 /// Encode passes A→D in one compute pass — first in the frame's `Core3d`
