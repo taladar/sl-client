@@ -18,6 +18,12 @@
 //! value for a setting this build does not declare is kept by inferring a
 //! [`SettingValue`] from its TOML shape, so a newer version's setting survives a
 //! round-trip through an older one.
+//!
+//! An inferred type is a guess, and a setting registered *after* the file was
+//! loaded proves it wrong — so
+//! [`SettingsStore`](crate::SettingsStore)'s `retype_untyped_overrides` re-reads
+//! such a value at the declared type once the declaration arrives. Inference
+//! here therefore only has to preserve the value, not pick the eventual type.
 
 use std::collections::BTreeMap;
 
@@ -307,7 +313,15 @@ fn infer(value: &Value) -> Option<SettingValue> {
         return Some(SettingValue::Bool(flag));
     }
     if let Some(number) = value.as_integer() {
-        return i32::try_from(number).ok().map(SettingValue::I32);
+        // An `i32` first, so the common case keeps the shape the inference has
+        // always produced; a value that only fits a `u32` (a large unsigned
+        // setting this build has not declared yet) is kept as one rather than
+        // dropped, since the declaration that arrives later can still read it
+        // (`SettingValue::retyped_as`).
+        return i32::try_from(number)
+            .ok()
+            .map(SettingValue::I32)
+            .or_else(|| u32::try_from(number).ok().map(SettingValue::U32));
     }
     if let Some(number) = value.as_float() {
         return f64_to_f32(number).map(SettingValue::F32);

@@ -243,8 +243,43 @@ impl SettingsStore {
             persist,
             editor_hidden,
         };
-        let _prev = self.decls.insert(name, decl);
+        let kind = decl.kind();
+        let _prev = self.decls.insert(name.clone(), decl);
+        self.retype_untyped_overrides(&name, kind);
         Ok(())
+    }
+
+    /// Re-read any override of `name` that was loaded before this declaration
+    /// arrived, now that the declared type is known.
+    ///
+    /// A scope file is loaded against the declarations the store holds at that
+    /// moment, and an entry whose setting is not declared yet has its type
+    /// *inferred* from the TOML shape — so a saved `RenderAvatarComplexityMode
+    /// = 2` lands as an [`I32`](SettingValue::I32) whatever the setting is
+    /// really declared as. Registration order is not something a feature can be
+    /// asked to get right (the viewer loads the global scope before the Bevy
+    /// app exists, and a plugin that registers from a `Startup` system is
+    /// necessarily later), so the reconciliation happens here instead: the
+    /// stored value is re-read at the declared type, and dropped if it cannot
+    /// be — the same outcome a declared load gives a value that no longer fits.
+    ///
+    /// Without this, every such setting silently reverted to its default on
+    /// every run, and a write-back of the loaded value (the preferences
+    /// Cancel-revert) was rejected for the type the file was never read at.
+    fn retype_untyped_overrides(&mut self, name: &str, kind: SettingKind) {
+        for scope in [Scope::Global, Scope::Account] {
+            let map = self.scope_map_mut(scope);
+            let Some(value) = map.get(name) else {
+                continue;
+            };
+            if value.kind() == kind {
+                continue;
+            }
+            let _prev = match value.retyped_as(kind) {
+                Some(retyped) => map.insert(name.to_owned(), retyped),
+                None => map.remove(name),
+            };
+        }
     }
 
     /// The declaration of a registered setting, or `None` if it is unknown.
@@ -458,10 +493,15 @@ impl SettingsStore {
     /// overrides.
     ///
     /// A missing file is not an error: the scope is left untouched and `false`
-    /// is returned. Register the settings before loading — an entry whose value
-    /// no longer fits a registered setting's declared type (a type changed
-    /// across versions) is dropped, while an entry for a not-yet-registered
-    /// setting is kept for forward compatibility.
+    /// is returned. An entry whose value no longer fits a registered setting's
+    /// declared type (a type changed across versions) is dropped, while an
+    /// entry for a not-yet-registered setting is kept for forward
+    /// compatibility.
+    ///
+    /// Loading before every setting is registered is allowed and lossless: an
+    /// entry read before its declaration arrived is re-read at the declared
+    /// type when it does (see `retype_untyped_overrides`), so a feature that
+    /// registers late does not cost the user their saved value.
     ///
     /// # Errors
     ///

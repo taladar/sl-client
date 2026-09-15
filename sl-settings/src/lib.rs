@@ -415,6 +415,97 @@ mod tests {
         Ok(())
     }
 
+    /// A setting registered *after* the file was loaded still gets its saved
+    /// value: the untyped read is re-read at the declared type when the
+    /// declaration arrives.
+    ///
+    /// This is the viewer's real shape — the global scope is loaded before the
+    /// Bevy app exists, and a plugin that registers from a `Startup` system
+    /// necessarily declares later — and it used to cost the user every such
+    /// value: `RenderAvatarComplexityMode` (a `u32`) was read as an `i32` no
+    /// `u32` write or read could match, so it silently reverted to its default
+    /// on every run.
+    #[test]
+    fn a_late_declaration_reclaims_its_loaded_value() -> Result<(), TestError> {
+        let dir = tempdir()?;
+        let path = dir.join("global.toml");
+        fs_err::write(
+            &path,
+            "Mode = 2\nBudget = 4000000000\nLimit = 1024\nTint = [1, 0, 0]\nBox = [0, 10, 20, 0]\n",
+        )?;
+
+        let mut store = SettingsStore::new();
+        assert!(store.load_scope(Scope::Global, &path)?);
+        // Nothing is declared yet, so every entry was read at its TOML shape.
+        assert_eq!(store.get("Mode"), Some(&SettingValue::I32(2)));
+
+        // The declarations arrive afterwards, at types the file never named.
+        store.register("Mode", SettingValue::U32(0), "an unsigned mode")?;
+        store.register("Budget", SettingValue::U32(0), "past i32::MAX")?;
+        store.register("Limit", SettingValue::F32(0.0), "an integer literal")?;
+        store.register("Tint", SettingValue::Color3([0.0; 3]), "an RGB")?;
+        store.register("Box", SettingValue::Color4([0.0; 4]), "an RGBA")?;
+
+        assert_eq!(store.get_u32("Mode")?, 2, "the saved mode, not the default");
+        assert_eq!(store.get_u32("Budget")?, 4_000_000_000);
+        approx(store.get_f32("Limit")?, 1024.0);
+        approx_slice(&store.get_color3("Tint")?, &[1.0, 0.0, 0.0]);
+        approx_slice(&store.get_color4("Box")?, &[0.0, 10.0, 20.0, 0.0]);
+
+        // And the reclaimed value is now writable at its declared type — the
+        // write-back that the preferences Cancel-revert performs.
+        store.set(Scope::Global, "Mode", SettingValue::U32(1))?;
+        assert_eq!(store.get_u32("Mode")?, 1);
+        Ok(())
+    }
+
+    /// A late declaration whose saved value cannot be read at the declared type
+    /// drops that override — the same outcome a declared load gives a value
+    /// that no longer fits — rather than leaving a wrongly-typed value behind.
+    #[test]
+    fn a_late_declaration_drops_an_unreadable_value() -> Result<(), TestError> {
+        let dir = tempdir()?;
+        let path = dir.join("global.toml");
+        fs_err::write(&path, "Mode = -1\nFlag = 3\n")?;
+
+        let mut store = SettingsStore::new();
+        assert!(store.load_scope(Scope::Global, &path)?);
+        store.register("Mode", SettingValue::U32(7), "no negative mode")?;
+        store.register("Flag", SettingValue::Bool(true), "not an integer")?;
+
+        assert_eq!(
+            store.get_u32("Mode")?,
+            7,
+            "the default, the override dropped"
+        );
+        assert!(store.get_bool("Flag")?);
+        assert!(!store.is_overridden("Mode"));
+        assert!(!store.is_overridden("Flag"));
+        Ok(())
+    }
+
+    /// The re-read reaches the account scope too, not just the global one.
+    #[test]
+    fn a_late_declaration_reclaims_the_account_scope() -> Result<(), TestError> {
+        let dir = tempdir()?;
+        let global = dir.join("global.toml");
+        let account = dir.join("account.toml");
+        fs_err::write(&global, "Mode = 1\n")?;
+        fs_err::write(&account, "Mode = 2\n")?;
+
+        let mut store = SettingsStore::new();
+        assert!(store.load_scope(Scope::Global, &global)?);
+        assert!(store.load_scope(Scope::Account, &account)?);
+        store.register("Mode", SettingValue::U32(0), "an unsigned mode")?;
+
+        assert_eq!(
+            store.get_override(Scope::Global, "Mode"),
+            Some(&SettingValue::U32(1))
+        );
+        assert_eq!(store.get_u32("Mode")?, 2, "the account override wins");
+        Ok(())
+    }
+
     /// The TOML on disk carries each setting's declared comment above a bare
     /// `name = value` line (no type tag).
     #[test]

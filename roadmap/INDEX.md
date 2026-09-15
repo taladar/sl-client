@@ -1206,8 +1206,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rigged-attachments-wearer-not-resolved`](bugs/viewer-rigged-attachments-wearer-not-resolved.md)
   — Worn rigged attachments (e.g. own shoes) don't render — wearer never
   resolved / too many rigged-pending objects
-- [`viewer-setting-write-rejected-wrong-type`](bugs/viewer-setting-write-rejected-wrong-type.md)
-  — A settings write is silently rejected for the wrong integer type
 - [`viewer-sunlit-face-clips-two-channels`](bugs/viewer-sunlit-face-clips-two-channels.md)
   — A sunlit opaque face pins red and green rather than showing its texture
 - [`viewer-tree-species-all-rendered-as-trees`](bugs/viewer-tree-species-all-rendered-as-trees.md)
@@ -2738,6 +2736,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-self-closing-widget-leaks-its-press`](done/viewer-self-closing-widget-leaks-its-press.md)
   — A widget that closes on a press hands that press to the world, which
   deselects
+- [`viewer-setting-write-rejected-wrong-type`](done/viewer-setting-write-rejected-wrong-type.md)
+  — A settings write is silently rejected for the wrong integer type
 - [`viewer-settings-account-scope-persist`](done/viewer-settings-account-scope-persist.md)
   — Load and save both global and per-account settings in the viewer (blocked by
   `viewer-ui-settings-store` (done))
