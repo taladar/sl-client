@@ -305,7 +305,7 @@ async fn request_object_owners(
         .await?;
     session
         .wait_for(REPLY_TIMEOUT, |event| match event {
-            Event::ParcelObjectOwners { owners } => Some(owners.clone()),
+            Event::ParcelObjectOwners { owners, .. } => Some(owners.clone()),
             _ => None,
         })
         .await

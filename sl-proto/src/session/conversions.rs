@@ -20,8 +20,8 @@ use crate::types::{
     LandStatScore, LandingType, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags,
     Maturity, MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags, MuteType, NavMeshBuildStatus,
     NavMeshStatus, NeighborInfo, Object, ObjectProperties, ObjectTransform, OpenRegionInfo,
-    ParcelCategory, ParcelInfo, ParcelRequestResult, ParcelStatus, PickInfo, PickKey,
-    PlayingAnimation, PrimShapeParams, ProductType, ProposalCandidateId, ProposalVoteId,
+    ParcelCategory, ParcelInfo, ParcelObjectOwner, ParcelRequestResult, ParcelStatus, PickInfo,
+    PickKey, PlayingAnimation, PrimShapeParams, ProductType, ProposalCandidateId, ProposalVoteId,
     RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionLimits,
     RegionTerrainComposition, RequiredVoiceVersion, RestoreItem, SaleType, Scale, ScriptDialog,
     ScriptPermissionRequest, ScriptPermissions, SetDisplayNameReply, SkySettings, TRACK_MAX,
@@ -4854,6 +4854,84 @@ fn land_stat_extended_from_llsd(entry: &Llsd) -> LandStatExtended {
         script_size_bytes: f32_member(entry, "Size"),
         timestamp: u32_member(entry, "TimeStamp"),
     }
+}
+
+/// Decodes a CAPS `ParcelObjectOwnersReply` event body: the event-queue form of
+/// a parcel's object-owner tally, one `Data` row per owner and a positional
+/// `DataExtended` array beside it.
+///
+/// A tally of nobody carries no `Data` array at all, and is still a tally — so
+/// only a body that is not a map is refused. A nil owner is a simulator's
+/// placeholder row and is dropped, as the reference drops it.
+pub(crate) fn parcel_object_owners_from_caps_llsd(body: &Llsd) -> Option<Vec<ParcelObjectOwner>> {
+    body.as_map()?;
+    let extended = body.get("DataExtended").and_then(Llsd::as_array);
+    let rows = body.get("Data").and_then(Llsd::as_array);
+    Some(rows.map_or_else(Vec::new, |rows| {
+        rows.iter()
+            .enumerate()
+            .filter_map(|(index, row)| {
+                let owner_id = uuid_member(row, "OwnerID");
+                if owner_id.is_nil() {
+                    return None;
+                }
+                let is_group = row
+                    .get("IsGroupOwned")
+                    .and_then(Llsd::as_bool)
+                    .unwrap_or(false);
+                Some(ParcelObjectOwner {
+                    owner: crate::types::owner_key_from_wire(owner_id, is_group),
+                    count: i32_member(row, "Count"),
+                    online_status: row
+                        .get("OnlineStatus")
+                        .and_then(Llsd::as_bool)
+                        .unwrap_or(false),
+                    most_recent: extended
+                        .and_then(|entries| entries.get(index))
+                        .map(|entry| u32_member(entry, "TimeStamp"))
+                        .filter(|stamp| *stamp != 0),
+                })
+            })
+            .collect()
+    }))
+}
+
+/// Serializes a parcel's object-owner tally as a CAPS `ParcelObjectOwnersReply`
+/// event body (the inverse of the client's own
+/// `parcel_object_owners_from_caps_llsd`).
+///
+/// Like [`land_stat_reply_to_caps_llsd`], the two arrays are positional, so
+/// `DataExtended` is written for every row whenever there are rows, a zero
+/// `TimeStamp` standing in for an owner whose most recent rez is not known.
+#[must_use]
+pub fn parcel_object_owners_to_caps_llsd(owners: &[ParcelObjectOwner]) -> Llsd {
+    if owners.is_empty() {
+        return llsd_map(Vec::new());
+    }
+    let rows: Vec<Llsd> = owners
+        .iter()
+        .map(|owner| {
+            llsd_map(vec![
+                ("Count", Llsd::Integer(owner.count)),
+                ("IsGroupOwned", Llsd::Boolean(owner.owner.is_group())),
+                ("OnlineStatus", Llsd::Boolean(owner.online_status)),
+                ("OwnerID", Llsd::Uuid(owner.owner.uuid())),
+            ])
+        })
+        .collect();
+    let extended: Vec<Llsd> = owners
+        .iter()
+        .map(|owner| {
+            llsd_map(vec![(
+                "TimeStamp",
+                u32_to_llsd(owner.most_recent.unwrap_or(0)),
+            )])
+        })
+        .collect();
+    llsd_map(vec![
+        ("Data", Llsd::Array(rows)),
+        ("DataExtended", Llsd::Array(extended)),
+    ])
 }
 
 /// Serializes a top-objects report as a CAPS `LandStatReply` event body (the

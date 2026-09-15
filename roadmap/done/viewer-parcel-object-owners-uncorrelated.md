@@ -2,10 +2,11 @@
 id: viewer-parcel-object-owners-uncorrelated
 title: An object-owner tally says nothing about which parcel it counted
 topic: viewer
-status: bugs
+status: done
 origin: found keying the About Land floater per parcel
   ([[viewer-keyed-floater-audit]], 2026-09-07)
 refs: [viewer-keyed-floater-audit, viewer-remote-parcel-id-uncorrelated,
+  viewer-parcel-join-split,
   viewer-parcel-options-general]
 ---
 
@@ -74,3 +75,51 @@ question across it and stamps it into the answer. This one is UDP, and a
 `ParcelObjectOwnersReply` has nowhere to put a question — so the queue and its
 one-at-a-time rule stay until there is a capability to ask instead, and the
 "make the wait visible" half above is the cheap part that can be done first.
+
+## What was done (2026-09-15)
+
+The protocol gap is still there — the reply names no parcel — but reading the
+path end to end turned up defects that were ours, and fixing them narrows the
+gap to what the protocol really leaves:
+
+- **The event-queue form was never decoded.** `ParcelObjectOwnersReply` is
+  `UDPDeprecated`, and the reference reads a `DataExtended` block the UDP
+  template does not have — only the LLSD form carries one. A region with a
+  queue (Second Life) answers there, and `handle_caps_event` had no arm for
+  it, so the Objects tab could never fill on SL. Decoded now, with each
+  owner's most recent rez time (`ParcelObjectOwner::most_recent`, a new
+  **Most recent** column); `SimSession::enqueue_parcel_object_owners_reply`
+  is the server side, and `sl-fake-grid` answers the request from its scene.
+- **A tally split over packets kept only the last packet.** The ingest
+  replaced the list on every reply while the queue's doc claimed it kept a
+  split tally whole. Rows are folded in now (by owner, so a repeated packet
+  counts nobody twice), and the list is emptied when the request goes out.
+- **The reply carries its circuit** (`Event::ParcelObjectOwners::circuit`),
+  so the queue keeps one question outstanding **per circuit**: windows on two
+  regions ask at once, and a neighbour's reply never lands in this window.
+- **The reply says whether it is whole** (`ParcelObjectOwnersPart`): the
+  event-queue form is one document and ends the turn at once; a packet cannot
+  say it is the last, so a UDP answer still holds the turn to the 8 s
+  deadline (a straggler resent after a loss would otherwise be handed to the
+  next window).
+- **The wait is visible**: a status line beside Refresh says *Waiting for
+  another request on this region…*, *Searching…*, *No objects on this
+  parcel.* (only for an answer with nobody in it) or *The region sent no
+  object list.*
+- Nil-owner placeholder rows are dropped (the reference skips them), and a
+  group owner's name is requested.
+
+What remains is the protocol's: two windows on parcels of **one** region
+still take turns, and on a grid answering by packet each turn is the full
+deadline.
+
+## Verified
+
+Unit tests pin each rule (per-circuit turns, split tallies, whole replies
+ending a turn, the unanswered and waiting lines, a refresh starting from
+nothing); the event-queue form round-trips through `SimSession` and the fake
+grid answers it end to end. Live on the local OpenSim (2026-09-15) the Objects
+tab fills, Refresh re-asks and the status line follows. The **two-window**
+case could not be tried live: the test region has one parcel, and splitting
+one needs [[viewer-parcel-join-split]]. The Second Life (event-queue) path is
+covered by tests only.

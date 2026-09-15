@@ -35,10 +35,11 @@ mod test {
         InterestsUpdate, InventoryCallbackId, InventoryFolderKey, InventoryKey, InventoryType,
         LandStatExtended, LandStatItem, LandStatReportType, LandStatScore, LindenAmount,
         LoginParams, LureId, Maturity, MoneyTransactionType, MuteFlags, MuteType, NewInventoryItem,
-        ObjectExtraParams, ObjectKey, PickKey, PickUpdate, PrimShapeParams, ProductType,
-        ProfileUpdate, QueryId, RegionHandle, RegionIdentity, RegionLocalObjectId,
-        RegionTerrainComposition, RezAttachment, ScopedObjectId, ServerEvent, Session, SimSession,
-        TextureKey, Wearable, WearableType, group_powers, parse_event_queue_response,
+        ObjectExtraParams, ObjectKey, OwnerKey, ParcelObjectOwner, ParcelObjectOwnersPart, PickKey,
+        PickUpdate, PrimShapeParams, ProductType, ProfileUpdate, QueryId, RegionHandle,
+        RegionIdentity, RegionLocalObjectId, RegionTerrainComposition, RezAttachment,
+        ScopedObjectId, ServerEvent, Session, SimSession, TextureKey, Wearable, WearableType,
+        group_powers, parse_event_queue_response,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_types::map::RegionCoordinates;
@@ -1317,6 +1318,55 @@ mod test {
         assert_eq!(request_flags, 4);
         assert_eq!(total, 7);
         assert_eq!(items, vec![sent], "every field survives the round trip");
+        Ok(())
+    }
+
+    /// A parcel's object-owner tally as a region with an event queue answers it:
+    /// one document, every field — the most recent rez time included, which the
+    /// packet form has no room for — surviving the round trip.
+    #[test]
+    fn parcel_object_owners_reach_client_via_caps() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        let sent = vec![
+            ParcelObjectOwner {
+                owner: OwnerKey::Agent(AgentKey::from(uuid::Uuid::from_u128(0x21))),
+                count: 12,
+                online_status: true,
+                most_recent: Some(1_700_000_000),
+            },
+            ParcelObjectOwner {
+                owner: OwnerKey::Group(GroupKey::from(uuid::Uuid::from_u128(0x22))),
+                count: 3,
+                online_status: false,
+                most_recent: None,
+            },
+        ];
+
+        sim.enqueue_parcel_object_owners_reply(&sent);
+        let events = deliver_caps(&mut client, &mut sim, now)?;
+
+        let (part, owners) = events
+            .into_iter()
+            .find_map(|event| match event {
+                Event::ParcelObjectOwners { part, owners, .. } => Some((part, owners)),
+                _ => None,
+            })
+            .ok_or("expected a ParcelObjectOwners client event")?;
+        assert_eq!(part, ParcelObjectOwnersPart::Complete);
+        assert_eq!(owners, sent, "every field survives the round trip");
+
+        // And a tally of nobody is still a tally.
+        sim.enqueue_parcel_object_owners_reply(&[]);
+        let events = deliver_caps(&mut client, &mut sim, now)?;
+        let owners = events
+            .into_iter()
+            .find_map(|event| match event {
+                Event::ParcelObjectOwners { owners, .. } => Some(owners),
+                _ => None,
+            })
+            .ok_or("an empty tally never reached the client")?;
+        assert!(owners.is_empty());
         Ok(())
     }
 

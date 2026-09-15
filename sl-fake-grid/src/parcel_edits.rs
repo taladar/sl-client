@@ -24,8 +24,8 @@
 use std::time::Instant;
 
 use sl_proto::{
-    LandStatExtended, LandStatItem, LandStatReportType, ParcelInfo, ParcelStatus, RegionIdentity,
-    RegionLocalParcelId, ServerEvent, SimSession,
+    LandStatExtended, LandStatItem, LandStatReportType, ParcelInfo, ParcelObjectOwner,
+    ParcelStatus, RegionIdentity, RegionLocalParcelId, ServerEvent, SimSession, pcode,
 };
 use sl_types::key::{AgentKey, OwnerKey};
 use sl_types::map::RegionCoordinates;
@@ -272,6 +272,15 @@ pub(crate) fn answer_parcel_edit(
             let total = u32::try_from(rows.len()).unwrap_or(u32::MAX);
             sim.enqueue_land_stat_reply(*report_type, *request_flags, total, &rows);
         }
+        // A parcel's object-owner tally, from the scene: one row per owner,
+        // counting the prims of every linkset whose root stands on the parcel
+        // (a simulator's `primsOverMe`, tallied by `PrimCount`). Over the event
+        // queue for the same reason as the report above — the message is
+        // `UDPDeprecated`, and only the queue's form is whole in one document,
+        // which is what lets a viewer end its turn on the reply.
+        ServerEvent::RequestParcelObjectOwners { local_id } => {
+            sim.enqueue_parcel_object_owners_reply(&parcel_object_owners(world, *local_id));
+        }
         ServerEvent::RequestRegionInfo => {
             if let Err(error) = sim.send_region_info(&region_limits(region), now) {
                 tracing::warn!("answering a region info request failed: {error}");
@@ -280,6 +289,47 @@ pub(crate) fn answer_parcel_edit(
         _other => return None,
     }
     Some(Vec::new())
+}
+
+/// The object-owner tally of one parcel: each owner's prim count over the
+/// linksets whose root stands on it, in the order the owners are first met.
+///
+/// Avatars are not objects anybody owns on a parcel, and an attachment's root
+/// is its wearer — neither is counted. A fake region keeps no rez times, so no
+/// row says when its owner last rezzed.
+fn parcel_object_owners(
+    world: &SceneFixtures,
+    parcel: RegionLocalParcelId,
+) -> Vec<ParcelObjectOwner> {
+    let objects = world.all_objects();
+    let mut tally: Vec<ParcelObjectOwner> = Vec::new();
+    for root in objects
+        .iter()
+        .filter(|object| object.parent_id.0 == 0 && object.pcode != pcode::AVATAR)
+    {
+        if world.parcel_at_position(&root.motion.position) != Some(parcel) {
+            continue;
+        }
+        let children = objects
+            .iter()
+            .filter(|child| child.parent_id == root.local_id && child.pcode != pcode::AVATAR)
+            .count();
+        let prims = i32::try_from(children.saturating_add(1)).unwrap_or(i32::MAX);
+        let owner = world.properties_of(root.local_id).map_or_else(
+            || OwnerKey::Agent(AgentKey::from(root.owner_id)),
+            |properties| properties.owner,
+        );
+        match tally.iter_mut().find(|row| row.owner == owner) {
+            Some(row) => row.count = row.count.saturating_add(prims),
+            None => tally.push(ParcelObjectOwner {
+                owner,
+                count: prims,
+                online_status: false,
+                most_recent: None,
+            }),
+        }
+    }
+    tally
 }
 
 /// Whether an object is in scope for a return or a disable addressed to

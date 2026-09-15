@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 313 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 20 |
-| done | 1147 |
+| bugs | 19 |
+| done | 1148 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1685** |
@@ -1163,7 +1163,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (20)
+## bugs (19)
 
 ### viewer
 
@@ -1197,8 +1197,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Own avatar looks broken after a teleport
 - [`viewer-own-avatar-facing-drifts-idle`](bugs/viewer-own-avatar-facing-drifts-idle.md)
   — Own avatar forward direction drifts every few seconds while idle
-- [`viewer-parcel-object-owners-uncorrelated`](bugs/viewer-parcel-object-owners-uncorrelated.md)
-  — An object-owner tally says nothing about which parcel it counted
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 - [`viewer-rigged-attachments-wearer-not-resolved`](bugs/viewer-rigged-attachments-wearer-not-resolved.md)
@@ -1212,7 +1210,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1147)
+## done (1148)
 
 ### protocol
 
@@ -2377,6 +2375,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-parcel-overlay-decode` (done))
 - [`viewer-parcel-music-stream-internal-data-error`](done/viewer-parcel-music-stream-internal-data-error.md)
   — Parcel music stream fails to play ("Internal data stream error")
+- [`viewer-parcel-object-owners-uncorrelated`](done/viewer-parcel-object-owners-uncorrelated.md)
+  — An object-owner tally says nothing about which parcel it counted
 - [`viewer-parcel-options-access-media`](done/viewer-parcel-options-access-media.md)
   — About Land floater — access / ban / media / sound (blocked by
   `viewer-parcel-options-general` (done))
