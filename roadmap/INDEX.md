@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 41 |
 | in-progress | 22 |
 | bugs | 17 |
-| done | 1152 |
+| done | 1153 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1689** |
+| **total** | **1690** |
 
 ## ideas (101)
 
@@ -1185,6 +1185,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   default hair dome intermittently stays grey for a whole session
 - [`viewer-hover-tooltip-202ms-frame-spike`](bugs/viewer-hover-tooltip-202ms-frame-spike.md)
   — update_hover_tooltip spikes to 202 ms on a single frame
+- [`viewer-inventory-link-drop-to-world-rezzes-nothing`](bugs/viewer-inventory-link-drop-to-world-rezzes-nothing.md)
+  — Dragging an inventory link onto the ground rezzes nothing
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
   Some worn mesh hair does not render (visible in Firestorm)
 - [`viewer-mouselook-own-head-visible-from-inside`](bugs/viewer-mouselook-own-head-visible-from-inside.md)
@@ -1199,16 +1201,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — An object-owner tally says nothing about which parcel it counted
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
-- [`viewer-rigged-attachments-wearer-not-resolved`](bugs/viewer-rigged-attachments-wearer-not-resolved.md)
-  — Worn rigged attachments (e.g. own shoes) don't render — wearer never
-  resolved / too many rigged-pending objects
 - [`viewer-sunlit-face-clips-two-channels`](bugs/viewer-sunlit-face-clips-two-channels.md)
   — A sunlit opaque face pins red and green rather than showing its texture
 - [`viewer-tree-species-all-rendered-as-trees`](bugs/viewer-tree-species-all-rendered-as-trees.md)
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)
 
-## done (1152)
+## done (1153)
 
 ### protocol
 
@@ -2679,6 +2678,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-render-test-harness`](done/viewer-render-test-harness.md) — 3D render
   test harness — render one object without a grid, assert automatically, catch
   regressions
+- [`viewer-rigged-attachments-wearer-not-resolved`](done/viewer-rigged-attachments-wearer-not-resolved.md)
+  — Worn rigged attachments (e.g. own shoes) don't render — wearer never
+  resolved / too many rigged-pending objects
 - [`viewer-rlv-blocked-behaviours`](done/viewer-rlv-blocked-behaviours.md) — RLV
   — blocked behaviours, and RestrainedLoveNoSetEnv as the one that uses them
 - [`viewer-rlv-command-intake`](done/viewer-rlv-command-intake.md) — RLV — the

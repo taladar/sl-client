@@ -88,6 +88,7 @@ use crate::probes::ReflectionProbePlugin;
 use crate::render_priority::drive_render_priority;
 use crate::rigged_attachments::{
     AttachmentAdoptSkipLog, RiggedBindSkipLog, adopt_pending_attachments, apply_rigged_attachments,
+    route_in_world_rigged_meshes,
 };
 use crate::sit_camera::SitCameraPlugin;
 use crate::spacenav::{DeviceRead, SpacenavPlugin};
@@ -661,6 +662,13 @@ impl Plugin for ViewerWorldPlugins {
                     apply_rigged_attachments
                         .after(apply_object_meshes)
                         .after(update_avatar_objects),
+                    // Before the bind, so a rigged mesh standing in the world is
+                    // handed to the static mesh path rather than traced as a
+                    // wearer that never resolves.
+                    route_in_world_rigged_meshes
+                        .after(apply_object_meshes)
+                        .after(update_objects)
+                        .before(apply_rigged_attachments),
                 ),
                 apply_avatar_names,
             ),

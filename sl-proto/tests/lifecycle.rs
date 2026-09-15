@@ -15750,54 +15750,121 @@ mod test {
         Ok(())
     }
 
+    /// A child `ObjectUpdate` (local id `child_id`) parented to `parent_id`.
+    fn child_of(child_id: u32, parent_id: u32) -> Result<AnyMessage, TestError> {
+        let AnyMessage::ObjectUpdate(mut child) =
+            object_update(child_id, u128::from(child_id), zero_vec())
+        else {
+            return Err("object_update should build an ObjectUpdate".into());
+        };
+        child
+            .object_data
+            .first_mut()
+            .ok_or("the child update must have a block")?
+            .parent_id = parent_id;
+        Ok(AnyMessage::ObjectUpdate(child))
+    }
+
+    /// Drains every queued datagram, counting the *fresh* `RequestMultipleObjects`
+    /// that name `local_id` — a reliable layer retransmission (`RESENT`) of an
+    /// earlier request is not a new ask.
+    fn fresh_requests_for(session: &mut Session, local_id: u32) -> Result<usize, TestError> {
+        let mut asks = 0_usize;
+        while let Some(transmit) = session.poll_transmit() {
+            let parsed = parse_datagram(&transmit.payload)?;
+            if !parsed.flags.contains(PacketFlags::RESENT)
+                && let AnyMessage::RequestMultipleObjects(request) = decode(&transmit)?
+                && request.object_data.iter().any(|block| block.id == local_id)
+            {
+                asks = asks.saturating_add(1);
+            }
+        }
+        Ok(asks)
+    }
+
+    /// Steps `session` one second at a time from `from` for `seconds`, keeping
+    /// the circuit alive and running its timers, and returns the second (counted
+    /// from `from`) of every fresh request for `local_id`.
+    fn seconds_asking_for(
+        session: &mut Session,
+        from: Instant,
+        seconds: u64,
+        local_id: u32,
+    ) -> Result<Vec<u64>, TestError> {
+        let mut asked_at = Vec::new();
+        let mut sequence = 1_000_u32;
+        for second in 1..=seconds {
+            let at = after(from, second.saturating_mul(1_000))?;
+            session.handle_datagram(
+                sim_addr(),
+                &server_message(&inert_keepalive(), sequence, false)?,
+                at,
+            )?;
+            session.handle_timeout(at);
+            sequence = sequence.wrapping_add(1);
+            if fresh_requests_for(session, local_id)? > 0 {
+                asked_at.push(second);
+            }
+        }
+        Ok(asked_at)
+    }
+
     /// The unknown-parent request is speculative: nothing tracks whether the
-    /// simulator answered it. Deduping it *forever* would strand every child of
-    /// that root for the session if the one request went unanswered, so the
-    /// dedupe is a cooldown — a later update naming the same missing parent
-    /// re-asks once the cooldown has passed.
+    /// simulator answered it. Asking once *ever* would strand every child of
+    /// that root for the session if the one request went unanswered, and asking
+    /// again only when a child next updates strands the children that never do
+    /// (a worn shoe stands still). So the timer loop re-asks on its own, backing
+    /// off from a minute to a ten-minute ceiling — and a repeat of the child's
+    /// own update in between asks nothing.
     #[test]
-    fn an_unanswered_unknown_parent_request_is_re_asked_later() -> Result<(), TestError> {
+    fn an_unanswered_unknown_parent_is_re_asked_on_a_backoff() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        settle_for_a_long_wait(&mut session, now)?;
+        let child = child_of(9002, 4300)?;
+
+        session.handle_datagram(sim_addr(), &server_message(&child, 20, true)?, now)?;
+        assert_eq!(fresh_requests_for(&mut session, 4300)?, 1);
+        session.handle_datagram(sim_addr(), &server_message(&child, 21, true)?, now)?;
+        assert_eq!(
+            fresh_requests_for(&mut session, 4300)?,
+            0,
+            "a repeat of the child's update does not ask again"
+        );
+
+        // No child update from here on: every ask is the timer's. 60 s, then
+        // 120, 240, 480, and the 600 s ceiling from there.
+        assert_eq!(
+            seconds_asking_for(&mut session, now, 2_100, 4300)?,
+            vec![60, 180, 420, 900, 1_500, 2_100],
+        );
+        Ok(())
+    }
+
+    /// A parent is only worth asking for while something is waiting on it: once
+    /// the last child naming it is killed, the timer forgets it rather than
+    /// asking a simulator for an object nothing will ever use.
+    #[test]
+    fn a_parent_nothing_names_any_more_is_not_re_asked() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
         settle_for_a_long_wait(&mut session, now)?;
 
-        let AnyMessage::ObjectUpdate(mut child) = object_update(9002, 0xC3, zero_vec()) else {
-            return Err("object_update should build an ObjectUpdate".into());
-        };
-        let block = child
-            .object_data
-            .first_mut()
-            .ok_or("the child update must have a block")?;
-        block.parent_id = 4300;
-        let child = AnyMessage::ObjectUpdate(child);
+        session.handle_datagram(
+            sim_addr(),
+            &server_message(&child_of(9003, 4400)?, 20, true)?,
+            now,
+        )?;
+        assert_eq!(fresh_requests_for(&mut session, 4400)?, 1);
+        let kill = AnyMessage::KillObject(KillObject {
+            object_data: vec![KillObjectObjectDataBlock { id: 9003 }],
+        });
+        session.handle_datagram(sim_addr(), &server_message(&kill, 21, true)?, now)?;
 
-        // Asks for the missing parent once, and does not ask again for a repeat
-        // of the same update moments later.
-        let asks_for_the_parent = |session: &mut Session| -> Result<bool, TestError> {
-            Ok(drain(session)?.iter().any(|message| match message {
-                AnyMessage::RequestMultipleObjects(request) => {
-                    request.object_data.iter().any(|block| block.id == 4300)
-                }
-                _ => false,
-            }))
-        };
-        session.handle_datagram(sim_addr(), &server_message(&child, 20, true)?, now)?;
-        assert!(asks_for_the_parent(&mut session)?);
-        session.handle_datagram(sim_addr(), &server_message(&child, 21, true)?, now)?;
-        assert!(
-            !asks_for_the_parent(&mut session)?,
-            "the request is deduped while the cooldown stands"
-        );
-
-        // Once the cooldown has passed the parent is asked for again, rather
-        // than the child being stranded on one unanswered request.
-        let later = after(now, 60_001)?;
-        advance_alive(&mut session, now, later, 800)?;
-        drain(&mut session)?;
-        session.handle_datagram(sim_addr(), &server_message(&child, 22, true)?, later)?;
-        assert!(
-            asks_for_the_parent(&mut session)?,
-            "an unanswered parent request is re-asked after the cooldown"
+        assert_eq!(
+            seconds_asking_for(&mut session, now, 700, 4400)?,
+            Vec::<u64>::new(),
+            "no child names the parent, so nothing re-asks for it"
         );
         Ok(())
     }

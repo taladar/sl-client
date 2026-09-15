@@ -2,11 +2,59 @@
 id: viewer-rigged-attachments-wearer-not-resolved
 title: Worn rigged attachments (e.g. own shoes) don't render — wearer never resolved / too many rigged-pending objects
 topic: viewer
-status: bugs
+status: done
 origin: chasing own-avatar missing shoes on aditi (2026-08-11)
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
+
+## Resolution (2026-09-15)
+
+The two open residuals below are closed; the shoes themselves were already
+fixed by the parent request (2026-08-11).
+
+- **Stranded parents are re-asked by the timer, not by the child.** The
+  cooldown that replaced the ask-once latch only re-asked when a child *updated
+  again* — which a still attachment never does. `Session::requested_parents`
+  now holds a `ParentRequest` (last ask + attempt count);
+  `reask_missing_parents` runs from `handle_timeout` (and feeds
+  `poll_timeout`), re-asking every parent a tracked child still names on a
+  doubling interval (60 s → 600 s ceiling, batched per circuit), warning once
+  at the third unanswered request with the orphan count, and forgetting a
+  parent nothing names any more. No give-up: every child naming it is evidence
+  it exists, and a neighbour's interest list may reach it later. Tests
+  `an_unanswered_unknown_parent_is_re_asked_on_a_backoff`,
+  `a_parent_nothing_names_any_more_is_not_re_asked`.
+  (The old code comment claimed the reference requests unknown parents in
+  `processUpdateCore`; it does not — it only `orphanize`s and waits.)
+- **In-world rigged meshes render static, like the reference.** The
+  "255 wearer-unresolved" flood was in-world rigged meshes parked forever on
+  the skinned bind. The reference skins only
+  `!is_animated && skinInfo && isAttachment()` (or a playing control avatar)
+  and draws every other skinned volume as ordinary geometry. New
+  `route_in_world_rigged_meshes` (before `apply_rigged_attachments`) walks
+  the linkset with `rig_placement`: animated / attachment / avatar ⇒ `Bound`,
+  ordinary root ⇒ `InWorld`, an untracked or unclassified link ⇒
+  `Unresolved` (decides nothing — a worn attachment with a lost root looks
+  the same). `InWorld` hands the build back to `apply_object_meshes` as a
+  static one (`PendingMesh::in_world_rig`); a static one whose linkset later
+  becomes `Bound` (Animated Mesh ticked, worn from the ground) is parked on
+  the bind again with its static faces despawned. Tests
+  `a_rigged_mesh_is_skinned_only_when_worn_or_animated`,
+  `an_in_world_rigged_mesh_round_trips_through_the_static_path`.
+
+Live-verified on aditi (2026-09-15): a rigged item rezzed on the ground
+renders as a static mesh (one `stands in the world` route in the trace), worn
+rigged items still render correctly, and the run logged no unresolved wearer
+and no stranded-parent warning. The in-world → bound transition is unit-tested
+only: our build floater has no Animated Mesh checkbox yet
+([[viewer-build-probe-animesh-controls]]).
+
+Not done: the optional `ObjectProperties` round-trip to attribute a stranded
+root's owner in the trace — the attachment point already identified the
+residual, and the new warning names the parent and its orphan count.
+
+## History
 
 Symptom: an own-avatar worn rigged attachment (repeatably: **shoes**) does not
 render at initial rez, while everything else rezzes in seconds. **Re-attaching**

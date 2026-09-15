@@ -27,6 +27,11 @@ maintenance pass walks them ([[viewer-inventory-cof-maintenance]]) — so
 this is view-filter and selection work on the existing tree plus a
 delete pass for broken links.
 
+Reported live on aditi (2026-09-15): right-clicking a link row offers no
+**Find Original** at all — the user looked for it. The companion bug that a
+link dragged onto the ground rezzes nothing is filed separately as
+[[viewer-inventory-link-drop-to-world-rezzes-nothing]].
+
 Reference (Firestorm, read-only):
 `indra/newview/skins/default/xui/en/menu_inventory.xml`,
 `menu_inventory_gear_default.xml`,

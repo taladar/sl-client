@@ -46,14 +46,14 @@ use super::{
     FolderState, FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION,
     INVENTORY_FETCH_MAX_ATTEMPTS, INVENTORY_SAVE_TIMEOUT, Inventory, InventoryOwner,
     LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT, MAX_XFER_DOWNLOAD_BYTES,
-    MessageCursor, OfferedUpload, PING_INTERVAL, PendingHandover, PendingInventorySave,
-    PendingInvite, RELIABLE_REPLY_GRACE, ReliableSeverity, SIT_TIMEOUT, ScriptGrant, ScriptHolder,
-    ServerHistoryFetch, ServerHistoryMessage, ServerHistoryState, Session, SessionMessage,
-    SessionState, SitState, TELEPORT_TIMEOUT, TEXTURE_DOWNLOAD_MAX_ATTEMPTS,
-    TEXTURE_DOWNLOAD_STALL_TIMEOUT, TYPING_TIMEOUT, TakenControls, TeleportPhase, TextureDownload,
-    TransferDownload, TransferProgress, TransferPurpose, VoiceChannelInfo, XFER_OFFER_TIMEOUT,
-    XFER_REFUSED_RESULT, XFER_STALL_TIMEOUT, XFER_TIMEOUT_RESULT, XferDownload, XferPurpose,
-    XferUpload, deadline, merge_deadline,
+    MessageCursor, OfferedUpload, PARENT_REQUEST_WARN_ATTEMPTS, PING_INTERVAL, ParentRequest,
+    PendingHandover, PendingInventorySave, PendingInvite, RELIABLE_REPLY_GRACE, ReliableSeverity,
+    SIT_TIMEOUT, ScriptGrant, ScriptHolder, ServerHistoryFetch, ServerHistoryMessage,
+    ServerHistoryState, Session, SessionMessage, SessionState, SitState, TELEPORT_TIMEOUT,
+    TEXTURE_DOWNLOAD_MAX_ATTEMPTS, TEXTURE_DOWNLOAD_STALL_TIMEOUT, TYPING_TIMEOUT, TakenControls,
+    TeleportPhase, TextureDownload, TransferDownload, TransferProgress, TransferPurpose,
+    VoiceChannelInfo, XFER_OFFER_TIMEOUT, XFER_REFUSED_RESULT, XFER_STALL_TIMEOUT,
+    XFER_TIMEOUT_RESULT, XferDownload, XferPurpose, XferUpload, deadline, merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
@@ -2625,24 +2625,94 @@ impl Session {
             }
         }
         // Ask the simulator to (re)send the unknown parent so the child's linkset /
-        // attachment chain can resolve (the reference viewer requests unknown
-        // parents in `LLViewerObjectList::processUpdateCore`). The request is a
-        // speculative one whose result is not tracked, so the dedupe is a
-        // cooldown rather than a latch: asking once *ever* would strand every
-        // child of that root for the session if the simulator ignored that one
-        // request, and asking on every referencing update would flood a region
-        // streaming many children of a missing root.
+        // attachment chain can resolve. The reference viewer only files such a
+        // child as an orphan (`LLViewerObjectList::orphanize`) and waits for the
+        // parent to turn up on its own; asking outright is what got a worn
+        // attachment whose root update was lost to render at all. Only the first
+        // request goes out here: a repeat of the same child must not flood a
+        // region streaming many children of one missing root, and the re-asks
+        // belong to the timer loop (`reask_missing_parents`), which also reaches
+        // the children that never update again.
         if parent_missing {
             let parent = ScopedObjectId::new(circuit_id, parent_local);
-            let due = self
-                .requested_parents
-                .get(&parent)
-                .is_none_or(|asked| now.saturating_duration_since(*asked) >= RELIABLE_REPLY_GRACE);
-            if due {
-                let _previous = self.requested_parents.insert(parent, now);
+            if let std::collections::btree_map::Entry::Vacant(entry) =
+                self.requested_parents.entry(parent)
+            {
+                let _request = entry.insert(ParentRequest::first(now));
                 self.request_object_ids(from, &[parent_local], now);
             }
         }
+    }
+
+    /// Re-asks for every parent object that is due again
+    /// ([`ParentRequest::next_ask`]) and that a tracked child still names, one
+    /// `RequestMultipleObjects` per circuit; forgets a parent no tracked object
+    /// names any more, since nothing is left waiting on it.
+    ///
+    /// Says so once, at [`PARENT_REQUEST_WARN_ATTEMPTS`], when a parent keeps
+    /// going unanswered: everything hanging off it stays invisible meanwhile,
+    /// and the count of its orphans is what tells a stray prim from a whole
+    /// outfit.
+    fn reask_missing_parents(&mut self, now: Instant) {
+        let due: Vec<ScopedObjectId> = self
+            .requested_parents
+            .iter()
+            .filter(|(_parent, request)| now >= request.next_ask())
+            .map(|(parent, _request)| *parent)
+            .collect();
+        if due.is_empty() {
+            return;
+        }
+        let mut asks: BTreeMap<CircuitId, Vec<RegionLocalObjectId>> = BTreeMap::new();
+        for parent in due {
+            let orphans = self.objects.get(&parent.circuit).map_or(0, |sim| {
+                sim.values()
+                    .filter(|object| object.parent_id == parent.id)
+                    .count()
+            });
+            if orphans == 0 {
+                let _forgotten = self.requested_parents.remove(&parent);
+                continue;
+            }
+            let Some(request) = self.requested_parents.get_mut(&parent) else {
+                continue;
+            };
+            request.asked = now;
+            request.attempts = request.attempts.saturating_add(1);
+            if request.attempts == PARENT_REQUEST_WARN_ATTEMPTS {
+                tracing::warn!(
+                    %parent,
+                    orphans,
+                    "parent object still not sent after {PARENT_REQUEST_WARN_ATTEMPTS} requests; \
+                     its children stay unresolved"
+                );
+            }
+            asks.entry(parent.circuit).or_default().push(parent.id);
+        }
+        for (circuit_id, local_ids) in asks {
+            if let Some(addr) = self.circuit_addr_of(circuit_id) {
+                self.request_object_ids(addr, &local_ids, now);
+            }
+        }
+    }
+
+    /// The earliest instant [`Self::reask_missing_parents`] has a parent to ask
+    /// for again, merged into [`Self::poll_timeout`].
+    fn next_parent_reask(&self) -> Option<Instant> {
+        self.requested_parents
+            .values()
+            .map(ParentRequest::next_ask)
+            .min()
+    }
+
+    /// The simulator address of the live circuit (root or child) whose instance
+    /// is `circuit_id`, if one is.
+    fn circuit_addr_of(&self, circuit_id: CircuitId) -> Option<SocketAddr> {
+        self.circuit
+            .iter()
+            .chain(self.children.values())
+            .find(|circuit| circuit.id == circuit_id)
+            .map(|circuit| circuit.sim_addr)
     }
 
     /// Records the agent's own avatar region-local id for circuit `circuit_id`
@@ -5397,6 +5467,11 @@ impl Session {
         // remove-on-success, so without this a stalled stream strands its
         // partial buffer — and its caller — for the session's life.
         self.expire_asset_transfers(now);
+
+        // Re-ask for linkset roots a tracked child still names but the simulator
+        // has not sent: without it a child that never updates again (a worn
+        // shoe) waits on one unanswered request for the session's life.
+        self.reask_missing_parents(now);
 
         if self
             .circuit
@@ -13794,6 +13869,8 @@ impl Session {
         // Likewise the asset-transfer stall deadlines: without them a download
         // that goes quiet is only noticed the next time some other timer fires.
         merge_deadline(&mut earliest, self.next_asset_transfer_deadline());
+        // And the parent re-asks, for a child that is otherwise quiet.
+        merge_deadline(&mut earliest, self.next_parent_reask());
         for child in self.children.values() {
             merge_deadline(&mut earliest, Some(child.timers.inactivity));
             merge_deadline(&mut earliest, child.timers.ack_flush);

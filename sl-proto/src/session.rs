@@ -889,6 +889,54 @@ const MAX_XFER_DOWNLOAD_BYTES: usize = 16 * 1024 * 1024;
 /// request still being retransmitted.
 const RELIABLE_REPLY_GRACE: Duration = Duration::from_secs(60);
 
+/// The longest a parent object a child still names waits between two requests
+/// for it ([`ParentRequest`]).
+///
+/// The interval starts at [`RELIABLE_REPLY_GRACE`] and doubles per unanswered
+/// request up to this, rather than giving up: every child that still names the
+/// parent is evidence it exists, and a simulator that does not send it now — a
+/// neighbour whose interest list has not reached it yet — may well send it
+/// later. At this interval a region stranding a dozen roots costs a dozen ids
+/// in one message every ten minutes.
+const PARENT_REQUEST_MAX_INTERVAL: Duration = Duration::from_secs(600);
+
+/// How many requests for one parent object go unanswered before the session
+/// says so ([`ParentRequest`]): by then the reliable layer has delivered the
+/// request several times over, so the simulator is declining to send the object
+/// and every child hanging off it is invisible until it does.
+const PARENT_REQUEST_WARN_ATTEMPTS: u32 = 3;
+
+/// One outstanding request for a parent object a tracked child names but the
+/// session has never been sent (`Session::requested_parents`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ParentRequest {
+    /// When the parent was last asked for.
+    asked: Instant,
+    /// How many times it has been asked for, the first request included.
+    attempts: u32,
+}
+
+impl ParentRequest {
+    /// The record of a first request, made at `now`.
+    const fn first(now: Instant) -> Self {
+        Self {
+            asked: now,
+            attempts: 1,
+        }
+    }
+
+    /// When the parent is due to be asked for again: [`RELIABLE_REPLY_GRACE`]
+    /// after the first request, doubling with each further one up to
+    /// [`PARENT_REQUEST_MAX_INTERVAL`].
+    fn next_ask(&self) -> Instant {
+        let doublings = self.attempts.saturating_sub(1).min(16);
+        let interval = RELIABLE_REPLY_GRACE
+            .saturating_mul(2_u32.saturating_pow(doublings))
+            .min(PARENT_REQUEST_MAX_INTERVAL);
+        deadline(self.asked, interval)
+    }
+}
+
 /// Computes `now + duration`, saturating at `now` on (impossible) overflow.
 fn deadline(now: Instant, duration: Duration) -> Instant {
     now.checked_add(duration).unwrap_or(now)
@@ -1948,12 +1996,17 @@ pub struct Session {
     /// object referenced a `parent_id` we had not tracked — an out-of-order or
     /// dropped root update. Without this a worn attachment (or any linkset child)
     /// whose root never arrives can never resolve its wearer / chain and so never
-    /// renders. The value is when that parent was last asked for: the request is
-    /// deduped for [`RELIABLE_REPLY_GRACE`] and then re-issued, so a speculative
-    /// fetch the simulator ignores does not strand the child forever. An entry
-    /// is cleared when the object finally arrives (so a later re-orphan
-    /// re-requests at once) and with the rest of a retiring circuit's state.
-    requested_parents: BTreeMap<ScopedObjectId, Instant>,
+    /// renders.
+    ///
+    /// Re-asked from the timer loop on a doubling interval
+    /// ([`ParentRequest::next_ask`]) for as long as a tracked child still names
+    /// the parent, so a speculative fetch the simulator ignored does not strand
+    /// the child — and, unlike re-asking when a child next updates, it also
+    /// reaches the children that never update again (a worn shoe stands
+    /// still). An entry is cleared when the object finally arrives (so a later
+    /// re-orphan re-requests at once), when no tracked object names it any more,
+    /// and with the rest of a retiring circuit's state.
+    requested_parents: BTreeMap<ScopedObjectId, ParentRequest>,
     /// The decoded terrain cache, keyed by the circuit instance the patches
     /// belong to (the root region *and* every neighbour streamed over a child
     /// circuit), then by `(layer code, patch x, patch y)` so each layer's
