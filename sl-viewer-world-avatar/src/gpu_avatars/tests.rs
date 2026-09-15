@@ -888,7 +888,7 @@ fn encode_bounds(entries: &[(u32, Vec3, Vec3)]) -> Vec<u8> {
 }
 
 /// Phase 5 culling: the `Aabb` [`apply_gpu_avatar_bounds`] derives from a
-/// read-back world bound must actually **cull** a skinned avatar/crowd submesh
+/// read-back bound must actually **cull** a skinned avatar/crowd submesh
 /// when the camera frustum excludes it — the live symptom was a flat
 /// `extract_skins` that never dropped when the crowd was off-screen, i.e. an
 /// effectively always-visible AABB. This drives the real apply system
@@ -903,18 +903,20 @@ fn applied_bounds_cull_an_offscreen_avatar() -> Result<(), TestError> {
 
     use super::GpuSkinBinding;
     use super::render::GpuAvatarBounds;
-    use super::stage::{GpuAvatarRegistry, apply_gpu_avatar_bounds};
+    use super::stage::{GpuAvatarPoseFeed, GpuAvatarRegistry, apply_gpu_avatar_bounds};
     use crate::world_api::PoseSlotKey;
 
+    // Both bounds are the same 2 m box about the root they were posed under;
+    // the published root places each.
     // Slot 0 — a "real avatar": the entity transform equals the GPU pose root,
-    // so its world bound sits right at the entity (10 m ahead of the origin).
+    // so its bound sits right at the entity (10 m ahead of the origin).
     // Slot 1 — a "crowd copy": the entity transform is a static grid cell 2 m
-    // aside, but the GPU bound is 10 m ahead and 3 m up (as if the shared
+    // aside, but the GPU root is 10 m ahead and 3 m up (as if the shared
     // base-root placed it there); the world→local round-trip must still put the
-    // cull box at the GPU bound, not at the grid cell.
+    // cull box at the GPU root, not at the grid cell.
     let bytes = encode_bounds(&[
-        (0, Vec3::new(-1.0, -1.0, -11.0), Vec3::new(1.0, 1.0, -9.0)),
-        (1, Vec3::new(-1.0, 2.0, -11.0), Vec3::new(1.0, 4.0, -9.0)),
+        (0, Vec3::splat(-1.0), Vec3::splat(1.0)),
+        (1, Vec3::splat(-1.0), Vec3::splat(1.0)),
     ]);
 
     let mut world = World::new();
@@ -923,6 +925,18 @@ fn applied_bounds_cull_an_offscreen_avatar() -> Result<(), TestError> {
     registry.set_slot_for_test(PoseSlotKey::Crowd(1), 1);
     world.insert_resource(registry);
     world.insert_resource(GpuAvatarBounds { bytes });
+    let mut feed = GpuAvatarPoseFeed::default();
+    feed.publish_real(
+        PoseSlotKey::Crowd(0),
+        Mat4::from_translation(Vec3::new(0.0, 0.0, -10.0)),
+        Vec::new(),
+    );
+    feed.publish_real(
+        PoseSlotKey::Crowd(1),
+        Mat4::from_translation(Vec3::new(0.0, 3.0, -10.0)),
+        Vec::new(),
+    );
+    world.insert_resource(feed);
 
     let real = world
         .spawn((
@@ -989,6 +1003,79 @@ fn applied_bounds_cull_an_offscreen_avatar() -> Result<(), TestError> {
              always-visible AABB is the live bug"
         );
     }
+    Ok(())
+}
+
+/// The cull box follows the avatar, not the frame its bound was posed in
+/// (`viewer-own-avatar-vanishes-near-ground`). The bounds readback lands about
+/// three frames late; a falling avatar covers 1.5 m a frame, so a box left
+/// where it was posed sits metres above the body, clears the top of a
+/// third-person view, and the whole avatar is culled while it is still on
+/// screen.
+///
+/// Both runs apply the same read-back bound to the same entity, at the same
+/// current root, under the same camera: the first as if the slot's root were
+/// still the one the bound was posed under (the old world-space placement),
+/// the second at the root published this frame. Only the second may be seen.
+#[test]
+fn the_cull_box_follows_a_falling_avatar() -> Result<(), TestError> {
+    use bevy::camera::primitives::Aabb;
+    use bevy::camera::{CameraProjection, PerspectiveProjection};
+
+    use super::GpuSkinBinding;
+    use super::render::GpuAvatarBounds;
+    use super::stage::{GpuAvatarPoseFeed, GpuAvatarRegistry, apply_gpu_avatar_bounds};
+    use crate::world_api::PoseSlotKey;
+
+    let slot = PoseSlotKey::Crowd(0);
+    // A standing-sized posed skeleton about its root.
+    let bytes = encode_bounds(&[(0, Vec3::new(-0.3, -1.0, -0.3), Vec3::new(0.3, 0.8, 0.3))]);
+    // Where the body root is now, and where it was three frames (4.5 m) ago.
+    let now = Vec3::new(0.0, 70.0, 0.0);
+    let posed_under = Vec3::new(0.0, 74.5, 0.0);
+    // A third-person camera 3.4 m behind the root, level with it.
+    let frustum = CameraProjection::compute_frustum(
+        &PerspectiveProjection::default(),
+        &GlobalTransform::from(Transform::from_xyz(0.0, 70.0, 3.4).looking_at(now, Vec3::Y)),
+    );
+
+    let mut seen = Vec::new();
+    for root in [posed_under, now] {
+        let mut world = World::new();
+        let mut registry = GpuAvatarRegistry::default();
+        registry.set_slot_for_test(slot, 0);
+        world.insert_resource(registry);
+        world.insert_resource(GpuAvatarBounds {
+            bytes: bytes.clone(),
+        });
+        let mut feed = GpuAvatarPoseFeed::default();
+        feed.publish_real(slot, Mat4::from_translation(root), Vec::new());
+        world.insert_resource(feed);
+        let global = GlobalTransform::from(Transform::from_translation(now));
+        let part = world
+            .spawn((
+                GpuSkinBinding {
+                    slot,
+                    canonical: Arc::from(Vec::<u32>::new()),
+                },
+                global,
+            ))
+            .id();
+        let mut schedule = Schedule::default();
+        schedule.add_systems(apply_gpu_avatar_bounds);
+        schedule.run(&mut world);
+        let aabb = world
+            .get::<Aabb>(part)
+            .copied()
+            .ok_or("apply_gpu_avatar_bounds left the entity with no Aabb")?;
+        seen.push(frustum.intersects_obb(&aabb, &global.affine(), true, false));
+    }
+    assert_eq!(
+        seen,
+        vec![false, true],
+        "placed on the root it was posed under, the box must miss the view (the bug this \
+         pins); placed on the current root, it must be seen"
+    );
     Ok(())
 }
 

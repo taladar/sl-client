@@ -85,7 +85,7 @@ pub(super) struct GpuAvatarPipelines {
     /// The debug readback pipeline, entry point `readback_palette`.
     readback_pipeline: CachedComputePipelineId,
     /// The posed-bounds layout (Phase 5 frustum culling): params + frames +
-    /// joint world + the world-space bounds destination, at the module's
+    /// joint world + the root-relative bounds destination, at the module's
     /// binding indices `{0, 1, 4, 21}` (3 storage buffers — well under the
     /// per-stage floor).
     bounds_layout: BindGroupLayoutDescriptor,
@@ -229,7 +229,7 @@ pub(super) fn init_gpu_avatar_pipelines(
                 // joint world (pass C output; read here, so the module's
                 // read_write declaration keeps this binding read-write).
                 (4, storage_buffer_sized(false, None)),
-                // world-space bounds destination
+                // root-relative bounds destination
                 (21, storage_buffer_sized(false, None)),
             ),
         ),
@@ -699,7 +699,7 @@ pub(super) fn prepare_gpu_avatars(
     );
 
     // The posed-bounds bind group (Phase 5): pass `bounds` reduces pass C's
-    // joint world positions into a per-slot world-space AABB written straight
+    // joint world positions into a per-slot root-relative AABB written straight
     // into the readback destination asset. Built only when that asset has
     // prepared; skipped otherwise (the avatars keep the CPU's generous default
     // AABB that frame — no cull until the first real bound lands).
@@ -1101,8 +1101,9 @@ fn gpu_avatar_readback_verdict(
 
 // ---------------------------------------------------------------------------
 // The posed-bounds readback channel (Phase 5 frustum culling): the `bounds`
-// pass writes a per-slot world-space AABB every frame; the CPU reads it back
-// and sets each avatar's `Aabb` so off-screen avatars frustum-cull.
+// pass writes a per-slot root-relative AABB every frame; the CPU reads it back,
+// places it on the current root and sets each avatar's `Aabb` so off-screen
+// avatars frustum-cull.
 // ---------------------------------------------------------------------------
 
 /// The fixed per-slot capacity of the bounds buffer (mirrors `pose.wgsl`'s
@@ -1115,7 +1116,7 @@ pub(super) const BOUND_SLOT_CAP: u32 = 4096;
 /// pad, max `xyz` + pad) in std430.
 const BOUND_ENTRY_BYTES: usize = 32;
 
-/// The destination the `bounds` pass writes each posed slot's world-space AABB
+/// The destination the `bounds` pass writes each posed slot's root-relative AABB
 /// into, so `Readback::buffer` can lift the whole slot-indexed block off the
 /// GPU — the per-frame frustum-cull input consumed by
 /// [`apply_gpu_avatar_bounds`](super::stage::apply_gpu_avatar_bounds).
@@ -1134,7 +1135,7 @@ impl ExtractResource for GpuAvatarBoundsTarget {
 }
 
 /// The raw bytes of the last completed bounds readback: [`BOUND_SLOT_CAP`]
-/// slot-indexed `(min, max)` world-space AABBs. Empty until the first
+/// slot-indexed `(min, max)` root-relative AABBs. Empty until the first
 /// completes (before which every avatar keeps the generous default AABB).
 #[derive(Resource, Default)]
 pub(crate) struct GpuAvatarBounds {
@@ -1174,8 +1175,9 @@ fn vec3_at(bytes: &[u8], offset: usize) -> Option<Vec3> {
     Some(Vec3::new(x, y, z))
 }
 
-/// The world-space `(min, max)` AABB of pose slot `slot` in a completed bounds
-/// readback, or `None` when the slot is past the buffer or was never written
+/// The `(min, max)` AABB of pose slot `slot` in a completed bounds readback —
+/// in Bevy world axes, relative to the translation of the root it was posed
+/// under — or `None` when the slot is past the buffer or was never written
 /// this run. An unwritten slot reads back all-zeros — a degenerate zero-extent
 /// box a real posed skeleton never produces (its joints always span), so a
 /// zero-extent read means "no bound yet" and the caller keeps the avatar

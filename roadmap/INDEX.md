@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 314 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 18 |
-| done | 1151 |
+| bugs | 17 |
+| done | 1152 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1689** |
@@ -1167,7 +1167,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (18)
+## bugs (17)
 
 ### viewer
 
@@ -1195,8 +1195,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Own avatar looks broken after a teleport
 - [`viewer-own-avatar-facing-drifts-idle`](bugs/viewer-own-avatar-facing-drifts-idle.md)
   — Own avatar forward direction drifts every few seconds while idle
-- [`viewer-own-avatar-vanishes-near-ground`](bugs/viewer-own-avatar-vanishes-near-ground.md)
-  — The own avatar briefly disappears near the ground while flying or falling
 - [`viewer-parcel-object-owners-uncorrelated`](bugs/viewer-parcel-object-owners-uncorrelated.md)
   — An object-owner tally says nothing about which parcel it counted
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
@@ -1210,7 +1208,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)
 
-## done (1151)
+## done (1152)
 
 ### protocol
 
@@ -2194,6 +2192,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-outline-swallows-thin-hollow-prim`](done/viewer-outline-swallows-thin-hollow-prim.md)
   — The selection outline fills a thin-walled hollow prim white instead of
   outlining it
+- [`viewer-own-avatar-vanishes-near-ground`](done/viewer-own-avatar-vanishes-near-ground.md)
+  — The own avatar briefly disappears near the ground while flying or falling
 - [`viewer-own-bake-not-refreshed-on-outfit-change`](done/viewer-own-bake-not-refreshed-on-outfit-change.md)
   — Own avatar bake not refreshed when worn layers change at runtime
 - [`viewer-own-motion-timed-stops`](done/viewer-own-motion-timed-stops.md) — The
