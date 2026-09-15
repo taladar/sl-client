@@ -199,6 +199,15 @@ Standing up is not a message at all: one `AgentUpdate` with the transient
 just the `SIT_ON_GROUND` control flag (`Session::sit_on_ground`) — a pure
 animation state with no object involved.
 
+A third transient flag ends a movement state. After a hard landing
+(`standup`), and around a jump (`pre_jump`, `land`, `medium_land`), a
+Second Life simulator waits for the viewer to report that the animation
+has finished playing — `FINISH_ANIM` (`Session::finish_animation`). Only
+the viewer can know when that is, because only it plays the motion. The
+Bevy viewer raises it when its own copy of the motion runs out, beside the
+`AgentAnimation` stop the reference sends for every self-terminating
+motion. OpenSim ends those states on its own timer and ignores the flag.
+
 On the server side `SimSession` mirrors the machine: `AgentRequestSit`
 decodes as `ServerEvent::SitRequested`, the driver answers with
 `send_avatar_sit_response` (a `SitTransform`), the completing `AgentSit`

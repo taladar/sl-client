@@ -471,6 +471,7 @@ const fn command_name(command: &Command) -> &'static str {
         Command::SetRotation { .. } => "set_rotation",
         Command::SetCamera(..) => "set_camera",
         Command::Stand => "stand",
+        Command::FinishAnimation => "finish_animation",
         Command::SitOnGround => "sit_on_ground",
         Command::Sit { .. } => "sit",
         Command::Autopilot { .. } => "autopilot",

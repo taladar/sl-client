@@ -1769,6 +1769,9 @@ fn apply_command(
         Command::Stand => {
             session.stand(now)?;
         }
+        Command::FinishAnimation => {
+            session.finish_animation(now)?;
+        }
         Command::SitOnGround => {
             session.sit_on_ground(now)?;
         }

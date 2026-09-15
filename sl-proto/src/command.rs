@@ -105,6 +105,10 @@ pub enum Command {
     SetCamera(Camera),
     /// Stand the agent up (from sitting).
     Stand,
+    /// Tell the simulator the agent's own landing / pre-jump animation has
+    /// finished playing, releasing the movement it holds until then (one
+    /// `AgentUpdate` carrying the transient `FINISH_ANIM` control bit).
+    FinishAnimation,
     /// Sit the agent on the ground where it stands.
     SitOnGround,
     /// Sit the agent on the object `target` at the region-local `offset`. The
@@ -2887,6 +2891,7 @@ impl Command {
             Self::SetRotation { .. } => "SetRotation",
             Self::SetCamera(..) => "SetCamera",
             Self::Stand => "Stand",
+            Self::FinishAnimation => "FinishAnimation",
             Self::SitOnGround => "SitOnGround",
             Self::Sit { .. } => "Sit",
             Self::Autopilot { .. } => "Autopilot",

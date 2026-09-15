@@ -5,7 +5,7 @@ topic: viewer
 status: blocked
 origin: main-menu survey (2026-07-23)
 blocked_by: [viewer-fs-bridge-protocol]
-refs: [viewer-p31-5, viewer-qol-toggles]
+refs: [viewer-p31-5, viewer-qol-toggles, viewer-own-motion-timed-stops]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -43,3 +43,14 @@ ported (`sl-client-bevy-viewer/src/notifications.rs:3702-3746`).
 Parity-audit extension: crouch-as-toggle mode (`FSCrouchToggle`, with
 `FSCrouchToggleStatus` holding the current state) — pressing the crouch
 key once toggles crouching instead of requiring hold.
+
+## Quickjump is a control bit, not a suppressed phase (2026-09-15)
+
+Found in [[viewer-own-motion-timed-stops]]: Firestorm's Quickjump
+(`FSIgnoreFinishAnimation`) does not touch the movement controller.
+`LLAgent::getControlFlags` ORs `AGENT_CONTROL_FINISH_ANIM` into every
+`AgentUpdate` while it is on, so the simulator never waits for a pre-jump or a
+landing to finish. The one-shot form now exists (`Session::finish_animation`,
+sent by `sl-viewer-world-avatar`'s `motion_stops` when the own avatar's motion
+runs out); Quickjump needs the persistent form — the bit held in the
+advertised controls — and does not need the bridge.

@@ -37,7 +37,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use bevy::ecs::system::SystemParam;
+use bevy::ecs::schedule::ScheduleConfigs;
+use bevy::ecs::system::{ScheduleSystem, SystemParam};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use sl_anim::{
@@ -106,6 +107,10 @@ impl Plugin for AvatarAnimationPlugin {
                 // client-driven set before the skeleton driver folds it into the
                 // frame's pose.
                 crate::typing::drive_own_typing.before(WorldPhase::AvatarSkeletonsDriven),
+                // Timed stops for the own avatar: tell the simulator when one of
+                // its animations has run out, and release the movement hold a
+                // landing or pre-jump keeps until then.
+                own_motion_stops_config(),
                 drive_avatar_skeletons
                     .in_set(WorldPhase::AvatarSkeletonsDriven)
                     .after(WorldPhase::AvatarAppearanceApplied),
@@ -161,6 +166,22 @@ impl Plugin for AvatarAnimationPlugin {
             ),
         );
     }
+}
+
+/// Where the own avatar's timed stops
+/// ([`request_own_motion_stops`](crate::motion_stops::request_own_motion_stops))
+/// sit in the frame: after the assets are polled, so a motion decoded this
+/// frame is checked this frame, and before the skeleton driver, whose pruning
+/// would otherwise drop a motion first seen past its end — a late decode, a
+/// long frame — before it was ever reported, so its stop and finish would
+/// never be sent. After the controls, so the ascend key it reads is this
+/// frame's.
+fn own_motion_stops_config() -> ScheduleConfigs<ScheduleSystem> {
+    crate::motion_stops::request_own_motion_stops
+        .after(poll_animations)
+        .after(WorldPhase::AvatarControlsDriven)
+        .before(WorldPhase::AvatarSkeletonsDriven)
+        .into_configs()
 }
 
 /// The avatar pose pass's own scheduling (P18.3).
@@ -318,6 +339,24 @@ impl AnimationManager {
     /// ([`drive_avatar_skeletons`]).
     pub(crate) fn motion(&self, id: AssetKey) -> Option<&Arc<Motion>> {
         self.motions.get(&id)
+    }
+
+    /// What is known about `id`'s playback length: decoded, still on its way,
+    /// or never going to arrive. The run-out check ([`take_run_out`]) needs the
+    /// last of these told apart from the second, which [`motion`](Self::motion)
+    /// alone cannot do.
+    pub(crate) fn timing(&self, id: AssetKey) -> MotionTiming {
+        if let Some(motion) = self.motions.get(&id) {
+            MotionTiming::Decoded {
+                duration: motion.duration,
+                loops: motion.loops,
+                ease_out: motion.ease_out_duration,
+            }
+        } else if self.unavailable.contains(&id) {
+            MotionTiming::Unavailable
+        } else {
+            MotionTiming::Pending
+        }
     }
 
     /// A point-in-time snapshot of the animation fetch/decode pipeline, for the
@@ -554,6 +593,11 @@ pub(crate) struct PlayState {
     /// See `reconcile_playing` for how the stamp reproduces Second Life's
     /// present-observer vs. late-arriver ordering.
     order: u64,
+    /// Whether this activation has already been reported as run out
+    /// ([`take_run_out`]), so the stop it sends goes out once rather than every
+    /// frame of the ease-out tail. A re-trigger (a changed sequence id) is a
+    /// fresh [`PlayState`] and is reported again.
+    stop_requested: bool,
 }
 
 impl PlayState {
@@ -577,6 +621,86 @@ impl PlayState {
     pub(crate) const fn order(&self) -> u64 {
         self.order
     }
+}
+
+/// What the run-out check ([`take_run_out`]) knows about one playing
+/// animation's asset.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum MotionTiming {
+    /// Decoded: how long it plays, whether it loops, and its ease-out.
+    Decoded {
+        /// The motion's length in seconds.
+        duration: f32,
+        /// Whether it loops (a looping motion never runs out).
+        loops: bool,
+        /// Its ease-out duration in seconds.
+        ease_out: f32,
+    },
+    /// Still being fetched or decoded, or parked until the asset capability is
+    /// known.
+    Pending,
+    /// No asset will arrive: a procedural built-in, or a fetch or decode that
+    /// failed.
+    Unavailable,
+}
+
+/// How a playing animation came to be reported by [`take_run_out`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RunOut {
+    /// It played to its send-stop point.
+    Played(Uuid),
+    /// Its asset will never arrive, so it can never play to that point.
+    Unplayable(Uuid),
+}
+
+/// Report every animation in one avatar's **simulator-signalled** set that has
+/// just run out, marking each so it is reported once per activation.
+///
+/// This is the timed stop of `LLMotionController::updateMotionsByType`: a
+/// non-looping motion of non-zero length gets a send-stop timestamp one
+/// ease-out before its end (`activateMotionInstance`), and the first frame past
+/// it calls `requestStopMotion`, which for the own avatar tells the simulator
+/// the motion is over — the simulator itself has no idea how long an animation
+/// is. An animation the simulator has already dropped (`stopped_at`) is
+/// easing out on the simulator's word and is not reported.
+///
+/// An animation whose asset is [`Unavailable`](MotionTiming::Unavailable) is
+/// reported as [`RunOut::Unplayable`] rather than never: the reference would
+/// wait for ever, and the caller decides whether that wait is one worth
+/// breaking. A [`Pending`](MotionTiming::Pending) one is simply not yet
+/// playing. The result is sorted, so what is sent does not follow hash order.
+pub(crate) fn take_run_out(
+    entry: &mut HashMap<Uuid, PlayState>,
+    now: f32,
+    timing: impl Fn(Uuid) -> MotionTiming,
+) -> Vec<RunOut> {
+    let mut run_out = Vec::new();
+    for (&id, state) in entry.iter_mut() {
+        if state.stop_requested || state.stopped_at.is_some() {
+            continue;
+        }
+        let report = match timing(id) {
+            MotionTiming::Decoded {
+                duration,
+                loops,
+                ease_out,
+            } => {
+                let send_stop_at = (duration - ease_out).max(0.0);
+                (!loops && duration != 0.0 && now - state.start > send_stop_at)
+                    .then_some(RunOut::Played(id))
+            }
+            MotionTiming::Unavailable => Some(RunOut::Unplayable(id)),
+            MotionTiming::Pending => None,
+        };
+        if let Some(report) = report {
+            state.stop_requested = true;
+            run_out.push(report);
+        }
+    }
+    run_out.sort_unstable_by_key(|report| match *report {
+        RunOut::Played(id) | RunOut::Unplayable(id) => id,
+    });
+    run_out
 }
 
 /// One animation an avatar is playing, as a reader **outside** the animation
@@ -697,6 +821,22 @@ impl AnimationPlayback {
         self.playing
             .get(&agent)
             .is_some_and(|anims| anims.values().any(|state| state.stopped_at.is_none()))
+    }
+
+    /// Report — once per activation — every animation in `agent`'s
+    /// simulator-signalled set that has run out; see [`take_run_out`]. Only
+    /// that set: the client-driven locomotion and typing sets are animations
+    /// the simulator was never told about, so it has nothing to be told when
+    /// they end.
+    pub(crate) fn take_run_out(
+        &mut self,
+        agent: AgentKey,
+        now: f32,
+        manager: &AnimationManager,
+    ) -> Vec<RunOut> {
+        self.playing.get_mut(&agent).map_or_else(Vec::new, |entry| {
+            take_run_out(entry, now, |id| manager.timing(AssetKey::from(id)))
+        })
     }
 
     /// Whether the simulator-signalled animation set of `agent` contains
@@ -1017,6 +1157,7 @@ pub(crate) fn reconcile_playing(
                 stopped_at: None,
                 order: *next_order,
                 anim_offset: 0.0,
+                stop_requested: false,
             },
         );
         *next_order = next_order.wrapping_add(1);
@@ -1990,10 +2131,19 @@ pub(crate) fn t_pose_enabled() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{PlayState, reconcile_playing};
+    use super::{
+        MotionTiming, PlayState, RunOut, drive_avatar_skeletons, own_motion_stops_config,
+        poll_animations, reconcile_playing, take_run_out,
+    };
+    use crate::motion_stops::request_own_motion_stops;
+    use crate::world_api::WorldPhase;
+    use bevy::ecs::schedule::{NodeId, ScheduleGraph, SystemKey};
+    use bevy::prelude::{IntoScheduleConfigs as _, IntoSystem, Schedule, System, World};
+    use core::any::TypeId;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::Uuid;
     use std::collections::HashMap;
+    use std::collections::HashSet;
 
     /// A boxed error so tests can use `?` instead of the disallowed
     /// `unwrap` / `expect` when pulling a tracked entry out of the map.
@@ -2027,6 +2177,198 @@ mod tests {
         reconcile_playing(&mut entry, &mut next_order, &[], 40.0);
         // Relative stop time is 40 - 10 = 30 s, not the absolute 40 s.
         assert_eq!(stop_of(&entry, walk())?, Some(30.0));
+        Ok(())
+    }
+
+    /// A non-looping motion of `duration` seconds with a `0.5` s ease-out.
+    fn once(duration: f32) -> MotionTiming {
+        MotionTiming::Decoded {
+            duration,
+            loops: false,
+            ease_out: 0.5,
+        }
+    }
+
+    /// A non-looping motion is reported on the first check past one ease-out
+    /// before its end — the reference's send-stop timestamp — and never again
+    /// for the same activation, however long its tail lingers.
+    #[test]
+    fn run_out_is_reported_once_an_ease_out_before_the_end() {
+        let mut entry: HashMap<Uuid, PlayState> = HashMap::new();
+        let mut next_order = 0u64;
+        reconcile_playing(&mut entry, &mut next_order, &[(stand(), 1)], 10.0);
+        // A 2 s motion's send-stop point is 1.5 s in.
+        assert_eq!(take_run_out(&mut entry, 11.5, |_id| once(2.0)), []);
+        assert_eq!(
+            take_run_out(&mut entry, 11.6, |_id| once(2.0)),
+            [RunOut::Played(stand())]
+        );
+        assert_eq!(take_run_out(&mut entry, 11.7, |_id| once(2.0)), []);
+        // The simulator still signalling it (its stop not yet processed) does
+        // not re-arm the report.
+        reconcile_playing(&mut entry, &mut next_order, &[(stand(), 1)], 11.8);
+        assert_eq!(take_run_out(&mut entry, 11.9, |_id| once(2.0)), []);
+    }
+
+    /// A motion first seen long after its end — its asset decoded late, or a
+    /// long frame — is reported at once, not skipped: a skipped report is a
+    /// movement hold the simulator never releases.
+    #[test]
+    fn a_late_check_still_reports_the_run_out() {
+        let mut entry: HashMap<Uuid, PlayState> = HashMap::new();
+        let mut next_order = 0u64;
+        reconcile_playing(&mut entry, &mut next_order, &[(stand(), 1)], 0.0);
+        assert_eq!(
+            take_run_out(&mut entry, 60.0, |_id| once(2.0)),
+            [RunOut::Played(stand())]
+        );
+    }
+
+    /// The simulator re-triggering the motion (a new sequence id) is a new
+    /// activation, reported again when it runs out.
+    #[test]
+    fn a_retrigger_is_reported_again() {
+        let mut entry: HashMap<Uuid, PlayState> = HashMap::new();
+        let mut next_order = 0u64;
+        reconcile_playing(&mut entry, &mut next_order, &[(stand(), 1)], 0.0);
+        assert_eq!(
+            take_run_out(&mut entry, 3.0, |_id| once(2.0)),
+            [RunOut::Played(stand())]
+        );
+        reconcile_playing(&mut entry, &mut next_order, &[(stand(), 2)], 4.0);
+        assert_eq!(take_run_out(&mut entry, 5.0, |_id| once(2.0)), []);
+        assert_eq!(
+            take_run_out(&mut entry, 6.0, |_id| once(2.0)),
+            [RunOut::Played(stand())]
+        );
+    }
+
+    /// Looping, zero-length, still-loading and simulator-dropped motions never
+    /// run out on the viewer's clock; one whose asset will never arrive is
+    /// reported as unplayable.
+    #[test]
+    fn only_timed_motions_run_out() {
+        let mut entry: HashMap<Uuid, PlayState> = HashMap::new();
+        let mut next_order = 0u64;
+        let looping = Uuid::from_u128(10);
+        let empty = Uuid::from_u128(11);
+        let loading = Uuid::from_u128(12);
+        let dropped = Uuid::from_u128(13);
+        let missing = Uuid::from_u128(14);
+        let all = [looping, empty, loading, dropped, missing].map(|id| (id, 1));
+        reconcile_playing(&mut entry, &mut next_order, &all, 0.0);
+        let without_dropped = [looping, empty, loading, missing].map(|id| (id, 1));
+        reconcile_playing(&mut entry, &mut next_order, &without_dropped, 0.1);
+        let timing = |id: Uuid| {
+            if id == looping {
+                MotionTiming::Decoded {
+                    duration: 1.0,
+                    loops: true,
+                    ease_out: 0.0,
+                }
+            } else if id == empty {
+                once(0.0)
+            } else if id == loading {
+                MotionTiming::Pending
+            } else if id == dropped {
+                once(1.0)
+            } else {
+                MotionTiming::Unavailable
+            }
+        };
+        assert_eq!(
+            take_run_out(&mut entry, 100.0, timing),
+            [RunOut::Unplayable(missing)]
+        );
+    }
+
+    /// The type Bevy knows `system` by once it is boxed into a schedule (a
+    /// system's name is only real with Bevy's `debug` feature).
+    fn system_type<M, S: IntoSystem<(), (), M>>(system: S) -> TypeId {
+        System::system_type(&IntoSystem::into_system(system))
+    }
+
+    /// Every system `node` stands for: itself, or everything beneath a set.
+    fn systems_under(graph: &ScheduleGraph, node: NodeId, into: &mut Vec<SystemKey>) {
+        match node {
+            NodeId::System(key) => into.push(key),
+            NodeId::Set(_) => {
+                for child in graph.hierarchy().graph().neighbors(node) {
+                    systems_under(graph, child, into);
+                }
+            }
+        }
+    }
+
+    /// The timed-stop check is ordered after the asset poll and before the
+    /// skeleton driver. The ordering **edges** are what is asserted, not the
+    /// order the systems happen to be stored in: an unordered pair stored in
+    /// the right sequence is still free to run in either.
+    #[test]
+    fn own_motion_stops_run_between_the_poll_and_the_pruning() -> Result<(), String> {
+        let mut world = World::new();
+        let mut schedule = Schedule::default();
+        schedule.add_systems((
+            poll_animations,
+            own_motion_stops_config(),
+            drive_avatar_skeletons.in_set(WorldPhase::AvatarSkeletonsDriven),
+        ));
+        schedule
+            .initialize(&mut world)
+            .map_err(|error| format!("the schedule builds: {error:?}"))?;
+        let keys: Vec<(TypeId, SystemKey)> = schedule
+            .systems()
+            .map_err(|error| format!("an initialized schedule lists systems: {error:?}"))?
+            .map(|(key, system)| (System::system_type(&**system), key))
+            .collect();
+        let key_of = |system_type: TypeId, name: &str| {
+            keys.iter()
+                .find(|&&(ty, _key)| ty == system_type)
+                .map(|&(_ty, key)| key)
+                .ok_or_else(|| format!("{name} is not in the schedule"))
+        };
+        let graph = schedule.graph();
+        let mut before: Vec<(SystemKey, SystemKey)> = Vec::new();
+        for (from, to) in graph.dependency().graph().all_edges() {
+            let (mut earlier, mut later) = (Vec::new(), Vec::new());
+            systems_under(graph, from, &mut earlier);
+            systems_under(graph, to, &mut later);
+            for &early in &earlier {
+                before.extend(later.iter().map(|&late| (early, late)));
+            }
+        }
+        let orders = |earlier: SystemKey, later: SystemKey| {
+            let mut seen = HashSet::new();
+            let mut pending = vec![earlier];
+            while let Some(key) = pending.pop() {
+                for &(_from, to) in before.iter().filter(|&&(from, _to)| from == key) {
+                    if to == later {
+                        return true;
+                    }
+                    if seen.insert(to) {
+                        pending.push(to);
+                    }
+                }
+            }
+            false
+        };
+        let poll = key_of(system_type(poll_animations), "poll_animations")?;
+        let stops = key_of(
+            system_type(request_own_motion_stops),
+            "request_own_motion_stops",
+        )?;
+        let drive = key_of(
+            system_type(drive_avatar_skeletons),
+            "drive_avatar_skeletons",
+        )?;
+        assert!(
+            orders(poll, stops),
+            "nothing orders the poll before the stop check"
+        );
+        assert!(
+            orders(stops, drive),
+            "nothing orders the stop check before the skeleton driver's pruning"
+        );
         Ok(())
     }
 

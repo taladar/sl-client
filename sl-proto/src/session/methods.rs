@@ -6223,6 +6223,24 @@ impl Session {
         self.send_agent_update_now(ControlFlags::STAND_UP, now)
     }
 
+    /// Tells the simulator the agent's own landing or pre-jump animation has run
+    /// out, sending one `AgentUpdate` with the transient `FINISH_ANIM` control
+    /// bit. Does not change the persistent controls.
+    ///
+    /// A Second Life simulator waits, after a hard landing (`standup`) and
+    /// around a jump (`pre_jump`, `land`, `medium_land`), for the viewer to
+    /// report that the animation finished playing — which only the viewer can
+    /// know, because only it plays the motion. The reference viewer's
+    /// `LLAgent::onAnimStop` raises the same bit. OpenSim ignores it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the message fails to encode.
+    pub fn finish_animation(&mut self, now: Instant) -> Result<(), Error> {
+        self.send_agent_update_now(ControlFlags::FINISH_ANIM, now)
+    }
+
     /// The object the agent is currently seated on, or [`None`] if it is not
     /// seated on an object (standing, ground-sitting, or a sit request still
     /// awaiting its `AvatarSitResponse`). Set once a [`sit_on`](Self::sit_on)

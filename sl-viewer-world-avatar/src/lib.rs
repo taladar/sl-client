@@ -68,6 +68,7 @@ pub mod hand_pose;
 pub mod locomotion;
 pub mod locomotion_ik;
 pub mod look_at;
+pub mod motion_stops;
 pub mod name_tag_content;
 pub mod reach;
 pub mod replay_bundle;

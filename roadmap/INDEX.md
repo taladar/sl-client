@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 41 |
 | in-progress | 22 |
 | bugs | 18 |
-| done | 1149 |
+| done | 1151 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1687** |
+| **total** | **1689** |
 
 ## ideas (101)
 
@@ -1179,9 +1179,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Check clouds vs the waterline at the horizon against Firestorm
 - [`viewer-combo-stops-opening`](bugs/viewer-combo-stops-opening.md) — A combo
   can stop dropping down (seen on the contact-sets chooser)
-- [`viewer-crossing-movement-locks-up`](bugs/viewer-crossing-movement-locks-up.md)
-  — Movement locks up after a region crossing (stand-up anim, esp. onto lower
-  terrain)
 - [`viewer-grid-row-height-from-unwrapped-text`](bugs/viewer-grid-row-height-from-unwrapped-text.md)
   — Upstream bug — a grid row takes its height from a wrap that never happens
 - [`viewer-hair-dome-stays-grey`](bugs/viewer-hair-dome-stays-grey.md) — The
@@ -1198,6 +1195,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Own avatar looks broken after a teleport
 - [`viewer-own-avatar-facing-drifts-idle`](bugs/viewer-own-avatar-facing-drifts-idle.md)
   — Own avatar forward direction drifts every few seconds while idle
+- [`viewer-own-avatar-vanishes-near-ground`](bugs/viewer-own-avatar-vanishes-near-ground.md)
+  — The own avatar briefly disappears near the ground while flying or falling
 - [`viewer-parcel-object-owners-uncorrelated`](bugs/viewer-parcel-object-owners-uncorrelated.md)
   — An object-owner tally says nothing about which parcel it counted
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
@@ -1211,7 +1210,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)
 
-## done (1149)
+## done (1151)
 
 ### protocol
 
@@ -1730,6 +1729,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-plugin-groups` (done))
 - [`viewer-create-shift-drag-duplicate`](done/viewer-create-shift-drag-duplicate.md)
   — Create tool — Shift-drag to duplicate an object into a new one
+- [`viewer-crossing-movement-locks-up`](done/viewer-crossing-movement-locks-up.md)
+  — Movement locks up after a region crossing (stand-up anim, esp. onto lower
+  terrain)
 - [`viewer-crossing-stale-minimap-self-dot`](done/viewer-crossing-stale-minimap-self-dot.md)
   — Stale own-avatar dot left in the old region on the minimap after a crossing
 - [`viewer-custom-face-material-shader`](done/viewer-custom-face-material-shader.md)
@@ -2194,6 +2196,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   outlining it
 - [`viewer-own-bake-not-refreshed-on-outfit-change`](done/viewer-own-bake-not-refreshed-on-outfit-change.md)
   — Own avatar bake not refreshed when worn layers change at runtime
+- [`viewer-own-motion-timed-stops`](done/viewer-own-motion-timed-stops.md) — The
+  own avatar's animations never told the simulator they had finished
 - [`viewer-p0-1`](done/viewer-p0-1-create-the-crate-skeletons.md) — Create the
   crate skeletons
 - [`viewer-p0-2`](done/viewer-p0-2-register-the-members.md) — Register the

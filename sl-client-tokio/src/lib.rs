@@ -997,6 +997,9 @@ impl Client {
                         Some(Command::Stand) => {
                             self.session.stand(Instant::now())?;
                         }
+                        Some(Command::FinishAnimation) => {
+                            self.session.finish_animation(Instant::now())?;
+                        }
                         Some(Command::SitOnGround) => {
                             self.session.sit_on_ground(Instant::now())?;
                         }

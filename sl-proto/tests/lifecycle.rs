@@ -1734,6 +1734,32 @@ mod test {
     }
 
     #[test]
+    fn finish_animation_is_a_one_shot_control() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        session.set_controls(ControlFlags::AT_POS, now)?;
+        drain(&mut session)?;
+
+        // finish_animation() adds FINISH_ANIM to the immediate update, keeping
+        // the held controls and persisting nothing.
+        session.finish_animation(now)?;
+        let sent = drain(&mut session)?;
+        let controls = ControlFlags::from_bits(agent_update_controls(&sent).ok_or("AgentUpdate")?);
+        assert!(controls.contains(ControlFlags::FINISH_ANIM));
+        assert!(controls.contains(ControlFlags::AT_POS));
+
+        // The next keep-alive no longer carries FINISH_ANIM: a bit left set would
+        // skip every later pre-jump and landing, not just the one that finished.
+        session.handle_timeout(after(now, 1100)?);
+        let keepalive = drain(&mut session)?;
+        let controls =
+            ControlFlags::from_bits(agent_update_controls(&keepalive).ok_or("AgentUpdate")?);
+        assert!(!controls.contains(ControlFlags::FINISH_ANIM));
+        assert!(controls.contains(ControlFlags::AT_POS));
+        Ok(())
+    }
+
+    #[test]
     fn autopilot_sends_generic_message() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
