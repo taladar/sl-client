@@ -215,12 +215,13 @@ const TAU: f32 = 6.283185307179586;
 /// **held** block: each (slot, joint)'s last keyframe channels, which pass B
 /// both reads and writes (pass C never looks past the local-pose rows).
 @group(0) @binding(20) var<storage, read_write> local_pose_out: array<LocalPose>;
-/// The per-slot posed **world-space** AABB (Phase 5 frustum culling): two
-/// `vec4` per slot — `bounds_out[2*slot]` the min `xyz`, `bounds_out[2*slot+1]`
-/// the max `xyz` (the `w` lanes are padding). Pass `bounds` reduces pass C's
-/// posed joint world positions into this; the CPU reads it back and sets each
-/// avatar's `Aabb` so off-screen avatars frustum-cull (the `bounds` layout
-/// only).
+/// The per-slot posed AABB (Phase 5 frustum culling), in Bevy world axes but
+/// **relative to the translation of the root it was posed under**: two `vec4`
+/// per slot — `bounds_out[2*slot]` the min `xyz`, `bounds_out[2*slot+1]` the
+/// max `xyz` (the `w` lanes are padding). Pass `bounds` reduces pass C's posed
+/// joint world positions into this; the CPU reads it back frames later, places
+/// it on the root it is posing *then*, and sets each avatar's `Aabb` so
+/// off-screen avatars frustum-cull (the `bounds` layout only).
 @group(0) @binding(21) var<storage, read_write> bounds_out: array<vec4<f32>>;
 
 // The fixed per-slot capacity of `bounds_out` (mirrors `render.rs`
@@ -329,12 +330,16 @@ fn fk(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
 }
 
-/// Pass — posed world-space bounds (Phase 5): one thread per posed avatar
-/// frame, reducing that slot's `joint_count` posed joint world **positions**
-/// (pass C's output, read here) into an axis-aligned min/max box in Bevy world
-/// space. The CPU reads it back, expands it by a flesh + motion margin, and
-/// sets the avatar's `Aabb`, so an off-screen avatar frustum-culls instead of
-/// carrying `NoFrustumCulling`. Runs after `fk` in the same compute pass
+/// Pass — posed bounds (Phase 5): one thread per posed avatar frame, reducing
+/// that slot's `joint_count` posed joint world **positions** (pass C's output,
+/// read here) into an axis-aligned min/max box in Bevy world axes, taken
+/// relative to the frame root's translation. The readback lands frames late,
+/// and a box left in world space trails a moving avatar by that whole latency
+/// — a falling one by metres, far enough for the box to leave the view while
+/// the avatar is still in it. Root-relative, the CPU re-places the box on the
+/// current root, expands it by a flesh + motion margin, and sets the avatar's
+/// `Aabb`, so an off-screen avatar frustum-culls instead of carrying
+/// `NoFrustumCulling`. Runs after `fk` in the same compute pass
 /// (storage writes are visible between dispatches). A joint span is a
 /// conservative under-bound of the skinned flesh — the CPU margin covers the
 /// difference.
@@ -356,8 +361,9 @@ fn bounds(@builtin(global_invocation_id) gid: vec3<u32>) {
         lo = min(lo, p);
         hi = max(hi, p);
     }
-    bounds_out[2u * frame.slot] = vec4<f32>(lo, 0.0);
-    bounds_out[2u * frame.slot + 1u] = vec4<f32>(hi, 0.0);
+    let origin = frame.root[3].xyz;
+    bounds_out[2u * frame.slot] = vec4<f32>(lo - origin, 0.0);
+    bounds_out[2u * frame.slot + 1u] = vec4<f32>(hi - origin, 0.0);
 }
 
 /// Pass D — skin palettes: one thread per (palette entry, instance), writing

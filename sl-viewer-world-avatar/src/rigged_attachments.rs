@@ -42,7 +42,10 @@ use crate::avatars::{AvatarBody, BomFace, bom_face_material, log_avatar_faces_en
 use crate::face_material::FaceMaterial;
 use crate::geometry_cache::GeometryCache;
 use crate::meshes::MeshManager;
-use crate::objects::{PendingBuilds, PendingGeometry, PrimFaceEntity, WornPickTarget};
+use crate::objects::{
+    ObjectCategory, PendingBuilds, PendingDecodedMeshes, PendingGeometry, PrimFaceEntity,
+    SceneObject, WornPickTarget,
+};
 use crate::textures::{PrimTextures, TextureAlpha, TextureManager, face_material};
 use crate::world_api::{
     AVATAR_BOOST_PRIORITY, AvatarPickTarget, AvatarState, DecodedTextures, HUD_RENDER_LAYER,
@@ -405,6 +408,124 @@ const fn pending_kind(pending: Option<&PendingGeometry>) -> &'static str {
     }
 }
 
+/// What a rigged mesh's linkset hangs off, which decides whether it is skinned
+/// at all ([`rig_placement`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RigPlacement {
+    /// Its chain ends at an ordinary in-world root: nothing is wearing it and
+    /// nothing animates it, so it is drawn as the static mesh it is.
+    InWorld,
+    /// It is worn (its chain passes an attachment or reaches an avatar) or part
+    /// of an animated object: it is skinned, by [`apply_rigged_attachments`].
+    Bound,
+    /// Its chain breaks at an object that has not arrived (or cannot be
+    /// classified yet). Nothing is decided on that: an attachment whose root
+    /// update was lost looks exactly like this until the root turns up.
+    Unresolved,
+}
+
+/// Where the rigged mesh `scoped` belongs, by walking its linkset up through
+/// `state` — the reference's `rigged = !is_animated && skinInfo &&
+/// isAttachment()` (`LLVolumeGeometryManager::rebuildGeom`), asked of the
+/// object layer's records. `is_avatar` answers whether an object entity is an
+/// avatar, or `None` when it cannot tell yet.
+///
+/// The walk stops at the first object that settles it: an **animated** one or
+/// an **attachment** binds the mesh, and so does reaching an **avatar** (an
+/// attachment root's parent) even when the attachment point has not been read.
+/// Only a root that is none of those — a linkset standing in the world — makes
+/// it [`InWorld`](RigPlacement::InWorld).
+pub(crate) fn rig_placement(
+    state: &ObjectState,
+    scoped: ScopedObjectId,
+    is_avatar: impl Fn(Entity) -> Option<bool>,
+) -> RigPlacement {
+    let mut current = scoped;
+    for _ in 0..crate::animesh::MAX_LINKSET_DEPTH {
+        let Some(tracked) = state.objects.get(&current) else {
+            return RigPlacement::Unresolved;
+        };
+        if tracked.animated || tracked.attachment_point.is_some() {
+            return RigPlacement::Bound;
+        }
+        match is_avatar(tracked.entity) {
+            None => return RigPlacement::Unresolved,
+            Some(true) => return RigPlacement::Bound,
+            Some(false) => {}
+        }
+        if tracked.is_root {
+            return RigPlacement::InWorld;
+        }
+        current = tracked.parent;
+    }
+    RigPlacement::Unresolved
+}
+
+/// Draw a rigged mesh nothing binds as the static mesh it is, and put it back
+/// on the skinned bind once something does.
+///
+/// A mesh with a skin block is a rigged mesh, but the reference only skins one
+/// that is worn or part of an animated object; a rigged mesh standing in the
+/// world — rezzed from inventory, a vendor display, a creator's build — renders
+/// as ordinary geometry there. This viewer instead parked every rigged mesh on
+/// [`apply_rigged_attachments`], which looks for a wearer such an object never
+/// has, so it never appeared, and its every retry logged as a wearer that would
+/// not resolve (the 255 "stuck attachments" of one content-heavy aditi region).
+///
+/// Each frame, for every rigged build still pending whose linkset
+/// `rig_placement` finds in the world, the build is handed back to
+/// [`apply_object_meshes`](crate::objects::apply_object_meshes) as a static one
+/// (a mesh still upgrading to its finest block waits for it, since a rigged key
+/// is never swapped to another level afterwards). And every rigged mesh built
+/// that way whose linkset is now bound — ticked animated in the build floater,
+/// or worn — is parked on the skinned bind again, its static faces despawned.
+/// An `Unresolved` chain changes nothing either
+/// way.
+pub fn route_in_world_rigged_meshes(
+    mut state: ResMut<ObjectState>,
+    mut builds: PendingBuilds,
+    scene: Query<&SceneObject>,
+    mesh_manager: Res<MeshManager>,
+    mut decoded: ResMut<PendingDecodedMeshes>,
+    mut commands: Commands,
+) {
+    let is_avatar = |entity: Entity| {
+        scene
+            .get(entity)
+            .ok()
+            .map(|object| object.category == ObjectCategory::Avatar)
+    };
+    let pending =
+        builds.scoped_pending_on(|pending| matches!(pending, PendingGeometry::RiggedMesh(_)));
+    for (scoped, entity) in pending {
+        let Some(PendingGeometry::RiggedMesh(build)) = builds.pending(entity) else {
+            continue;
+        };
+        if mesh_manager.lod_change_inflight(build.key())
+            || rig_placement(&state, scoped, is_avatar) != RigPlacement::InWorld
+        {
+            continue;
+        }
+        if let Some(key) = builds.build_rigged_in_world(entity) {
+            debug!("rigged mesh {key} on {scoped} stands in the world: building it static");
+            decoded.requeue(key);
+        }
+    }
+    for (scoped, entity) in builds.scoped_in_world_rigged() {
+        if rig_placement(&state, scoped, is_avatar) != RigPlacement::Bound
+            || !builds.rebind_in_world_rigged(entity)
+        {
+            continue;
+        }
+        debug!("rigged mesh on {scoped} is now worn or animated: skinning it");
+        if let Some(tracked) = state.objects.get_mut(&scoped) {
+            for face in tracked.face_entities.drain(..) {
+                commands.entity(face).try_despawn();
+            }
+        }
+    }
+}
+
 /// Bind every worn rigged mesh attachment whose skeleton instance is now
 /// available (P17.2): for each object holding a `PendingGeometry::RiggedMesh`,
 /// resolve the wearer avatar's skeleton-instance joint entities and spawn the
@@ -476,7 +597,7 @@ pub fn apply_rigged_attachments(
         let Some(PendingGeometry::RiggedMesh(build)) = builds.pending(entity) else {
             continue;
         };
-        let key = build.key;
+        let key = build.key();
         // A rigged mesh that started on the managed coarse-LOD path (an animesh, or
         // an attachment whose worn status resolved late) is being upgraded to the
         // finest block asynchronously (`upgrade_to_finest`). Building now would bind
@@ -642,7 +763,7 @@ pub fn apply_rigged_attachments(
                 unresolved
             );
         }
-        let texture_entry = build.texture_entry.clone();
+        let texture_entry = build.texture_entry().to_vec();
         // The wearer's agent id (when known) keys its baked textures (P17.3): a
         // bake-on-mesh face is textured from the wearer's own bake, not a fetch. An
         // animesh has no wearer bake (`bind_agent` is `None`), so its faces texture
@@ -1081,7 +1202,7 @@ mod tests {
         AvatarState, HudState, INITIAL_TREE_TIER, ObjectState, ShapeFingerprint, TrackedObject,
     };
 
-    use super::{AttachmentAdoptSkipLog, adopt_pending_attachments};
+    use super::{AttachmentAdoptSkipLog, RigPlacement, adopt_pending_attachments, rig_placement};
 
     /// A boxed test error, so a test can use `?`.
     type TestError = Box<dyn core::error::Error>;
@@ -1212,5 +1333,93 @@ mod tests {
             "an unseated attachment must stay pending for a later frame"
         );
         Ok(())
+    }
+
+    /// Where each shape of linkset puts a rigged mesh: skinned only when it is
+    /// worn or animated, static when its chain ends at an ordinary in-world
+    /// root, and undecided while a link in the chain has not arrived.
+    ///
+    /// The undecided case is the one that matters most. A worn attachment whose
+    /// root update was lost looks exactly like a linkset child with no root; if
+    /// that were taken for "in the world", a shoe would render as a static mesh
+    /// at the region origin the moment its root went missing.
+    #[test]
+    fn a_rigged_mesh_is_skinned_only_when_worn_or_animated() {
+        let circuit = CircuitId::new(1);
+        let scoped = |id: u32| ScopedObjectId::new(circuit, RegionLocalObjectId(id));
+        let mut world = World::new();
+        let mut entity = || world.spawn_empty().id();
+        let mut state = ObjectState::default();
+        let mut avatar_entities = Vec::new();
+        let mut unclassified = Vec::new();
+        let mut track =
+            |id: u32, parent: u32, attachment_point: Option<u8>, animated: bool, entity: Entity| {
+                let _replaced = state.objects.insert(
+                    scoped(id),
+                    TrackedObject {
+                        parent: scoped(parent),
+                        is_root: parent == id,
+                        attachment_point,
+                        animated,
+                        ..worn_object(entity, entity, 0)
+                    },
+                );
+            };
+        // An in-world linkset: root 1, rigged child 2.
+        track(1, 1, None, false, entity());
+        track(2, 1, None, false, entity());
+        // A child whose root (3) never arrived.
+        track(4, 3, None, false, entity());
+        // A worn linkset on avatar 10: root 11 on point 5, rigged child 12.
+        let avatar = entity();
+        avatar_entities.push(avatar);
+        track(10, 10, None, false, avatar);
+        track(11, 10, Some(5), false, entity());
+        track(12, 11, None, false, entity());
+        // An attachment root whose point has not been read, on that avatar.
+        track(13, 10, None, false, entity());
+        // An animated in-world linkset: root 20, rigged child 21.
+        track(20, 20, None, true, entity());
+        track(21, 20, None, false, entity());
+        // An in-world root whose entity cannot be classified yet.
+        let fresh = entity();
+        unclassified.push(fresh);
+        track(30, 30, None, false, fresh);
+        track(31, 30, None, false, entity());
+
+        let is_avatar = |entity: Entity| {
+            (!unclassified.contains(&entity)).then(|| avatar_entities.contains(&entity))
+        };
+        let placement = |id: u32| rig_placement(&state, scoped(id), is_avatar);
+        assert_eq!(placement(1), RigPlacement::InWorld, "an in-world root");
+        assert_eq!(placement(2), RigPlacement::InWorld, "a child of one");
+        assert_eq!(
+            placement(4),
+            RigPlacement::Unresolved,
+            "a child with no root"
+        );
+        assert_eq!(placement(11), RigPlacement::Bound, "a worn root");
+        assert_eq!(placement(12), RigPlacement::Bound, "a child of a worn root");
+        assert_eq!(
+            placement(13),
+            RigPlacement::Bound,
+            "a root on an avatar, point unread"
+        );
+        assert_eq!(placement(20), RigPlacement::Bound, "an animated root");
+        assert_eq!(
+            placement(21),
+            RigPlacement::Bound,
+            "a child of an animated root"
+        );
+        assert_eq!(
+            placement(31),
+            RigPlacement::Unresolved,
+            "a root not yet classified decides nothing"
+        );
+        assert_eq!(
+            placement(99),
+            RigPlacement::Unresolved,
+            "an untracked object"
+        );
     }
 }

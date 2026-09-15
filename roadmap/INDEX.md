@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 100 |
+| ideas | 101 |
 | ready | 314 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 19 |
-| done | 1150 |
+| bugs | 17 |
+| done | 1155 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1688** |
+| **total** | **1692** |
 
-## ideas (100)
+## ideas (101)
 
 ### protocol
 
@@ -77,6 +77,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Access-list export / import / copy for parcel & estate lists
 - [`viewer-local-mesh`](ideas/viewer-local-mesh.md) — Local mesh — live-reload
   mesh from disk
+- [`viewer-lsl-oracle-misses`](ideas/viewer-lsl-oracle-misses.md) — Grid compile
+  errors the LSL semantic pass does not report (20 oracle misses)
 - [`viewer-lsl-preprocessor`](ideas/viewer-lsl-preprocessor.md) — LSL
   preprocessor (FS-compatible)
 - [`viewer-manual-music-stream-url`](ideas/viewer-manual-music-stream-url.md) —
@@ -1165,7 +1167,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (19)
+## bugs (17)
 
 ### viewer
 
@@ -1175,18 +1177,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Clouds come out fewer and larger than Firestorm's on the same noise
 - [`viewer-combo-stops-opening`](bugs/viewer-combo-stops-opening.md) — A combo
   can stop dropping down (seen on the contact-sets chooser)
-- [`viewer-crossing-movement-locks-up`](bugs/viewer-crossing-movement-locks-up.md)
-  — Movement locks up after a region crossing (stand-up anim, esp. onto lower
-  terrain)
 - [`viewer-grid-row-height-from-unwrapped-text`](bugs/viewer-grid-row-height-from-unwrapped-text.md)
   — Upstream bug — a grid row takes its height from a wrap that never happens
 - [`viewer-hair-dome-stays-grey`](bugs/viewer-hair-dome-stays-grey.md) — The
   default hair dome intermittently stays grey for a whole session
 - [`viewer-hover-tooltip-202ms-frame-spike`](bugs/viewer-hover-tooltip-202ms-frame-spike.md)
   — update_hover_tooltip spikes to 202 ms on a single frame
-- [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
-  — LSL semantic pass false-positives on legal scripts (found by the tailslide
-  oracle at scale)
+- [`viewer-inventory-link-drop-to-world-rezzes-nothing`](bugs/viewer-inventory-link-drop-to-world-rezzes-nothing.md)
+  — Dragging an inventory link onto the ground rezzes nothing
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
   Some worn mesh hair does not render (visible in Firestorm)
 - [`viewer-mouselook-own-head-visible-from-inside`](bugs/viewer-mouselook-own-head-visible-from-inside.md)
@@ -1201,9 +1199,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — An object-owner tally says nothing about which parcel it counted
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
-- [`viewer-rigged-attachments-wearer-not-resolved`](bugs/viewer-rigged-attachments-wearer-not-resolved.md)
-  — Worn rigged attachments (e.g. own shoes) don't render — wearer never
-  resolved / too many rigged-pending objects
 - [`viewer-sky-sunset-preset-glow-divergence`](bugs/viewer-sky-sunset-preset-glow-divergence.md)
   — The legacy sunset sky is far brighter, with a much larger glow, than
 - [`viewer-sunlit-face-clips-two-channels`](bugs/viewer-sunlit-face-clips-two-channels.md)
@@ -1212,7 +1207,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)
 
-## done (1150)
+## done (1155)
 
 ### protocol
 
@@ -1735,6 +1730,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-plugin-groups` (done))
 - [`viewer-create-shift-drag-duplicate`](done/viewer-create-shift-drag-duplicate.md)
   — Create tool — Shift-drag to duplicate an object into a new one
+- [`viewer-crossing-movement-locks-up`](done/viewer-crossing-movement-locks-up.md)
+  — Movement locks up after a region crossing (stand-up anim, esp. onto lower
+  terrain)
 - [`viewer-crossing-stale-minimap-self-dot`](done/viewer-crossing-stale-minimap-self-dot.md)
   — Stale own-avatar dot left in the old region on the minimap after a crossing
 - [`viewer-custom-face-material-shader`](done/viewer-custom-face-material-shader.md)
@@ -2011,6 +2009,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-lsl-parser-tree`](done/viewer-lsl-parser-tree.md) — LSL parser —
   error-tolerant recursive-descent AST (sl-lsl) (blocked by `viewer-lsl-lexer`
   (done))
+- [`viewer-lsl-semantic-false-positives`](done/viewer-lsl-semantic-false-positives.md)
+  — LSL semantic pass false-positives on legal scripts (found by the tailslide
+  oracle at scale)
 - [`viewer-lsl-semantic-pass`](done/viewer-lsl-semantic-pass.md) — LSL semantic
   pass — types, arity, undefined symbols, reachability (blocked by
   `viewer-lsl-parser-tree` (done), `protocol-lsl-syntax` (done))
@@ -2194,8 +2195,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-outline-swallows-thin-hollow-prim`](done/viewer-outline-swallows-thin-hollow-prim.md)
   — The selection outline fills a thin-walled hollow prim white instead of
   outlining it
+- [`viewer-own-avatar-vanishes-near-ground`](done/viewer-own-avatar-vanishes-near-ground.md)
+  — The own avatar briefly disappears near the ground while flying or falling
 - [`viewer-own-bake-not-refreshed-on-outfit-change`](done/viewer-own-bake-not-refreshed-on-outfit-change.md)
   — Own avatar bake not refreshed when worn layers change at runtime
+- [`viewer-own-motion-timed-stops`](done/viewer-own-motion-timed-stops.md) — The
+  own avatar's animations never told the simulator they had finished
 - [`viewer-p0-1`](done/viewer-p0-1-create-the-crate-skeletons.md) — Create the
   crate skeletons
 - [`viewer-p0-2`](done/viewer-p0-2-register-the-members.md) — Register the
@@ -2677,6 +2682,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-render-test-harness`](done/viewer-render-test-harness.md) — 3D render
   test harness — render one object without a grid, assert automatically, catch
   regressions
+- [`viewer-rigged-attachments-wearer-not-resolved`](done/viewer-rigged-attachments-wearer-not-resolved.md)
+  — Worn rigged attachments (e.g. own shoes) don't render — wearer never
+  resolved / too many rigged-pending objects
 - [`viewer-rlv-blocked-behaviours`](done/viewer-rlv-blocked-behaviours.md) — RLV
   — blocked behaviours, and RestrainedLoveNoSetEnv as the one that uses them
 - [`viewer-rlv-command-intake`](done/viewer-rlv-command-intake.md) — RLV — the

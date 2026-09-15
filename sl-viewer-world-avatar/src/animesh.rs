@@ -75,7 +75,7 @@ pub fn joint_overrides_enabled() -> bool {
 
 /// A guard on the linkset-chain walk in [`animesh_root`], against a malformed
 /// parent cycle.
-const MAX_LINKSET_DEPTH: usize = 32;
+pub(crate) const MAX_LINKSET_DEPTH: usize = 32;
 
 /// The animesh linkset root that `scoped` belongs to (P29): walk its parent chain
 /// up to the object carrying the animated-object flag and return that root's full

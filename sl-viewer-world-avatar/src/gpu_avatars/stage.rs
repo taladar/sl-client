@@ -172,6 +172,12 @@ impl GpuAvatarPoseFeed {
         self.entries.get(&slot)
     }
 
+    /// The Bevy-world translation of `slot`'s latest published root — where
+    /// [`apply_gpu_avatar_bounds`] places the slot's root-relative bound.
+    pub(crate) fn root_translation(&self, slot: PoseSlotKey) -> Option<Vec3> {
+        self.get(slot).map(|entry| entry.root.w_axis.truncate())
+    }
+
     /// The root matrix and a clone of the sparse corrections of `slot` — the
     /// synthetic-crowd publisher ([`crate::gpu_avatars::crowd`]) reads the
     /// local avatar's freshly published entry to derive each copy's grid-offset
@@ -1177,10 +1183,12 @@ fn real_readback_expected(
 /// one just off-screen — so the bound is deliberately generous.
 const BOUND_FLESH_MARGIN_METRES: f32 = 0.75;
 
-/// Extra metres covering the 1–2 frame bounds-readback latency: a fast-moving
-/// avatar (or, for a crowd copy, a fast-moving *template* avatar) is a couple
-/// frames ahead of its last read-back world box, so the box is grown by roughly
-/// its per-latency travel and is never culled a frame early.
+/// Extra metres covering what the bounds-readback latency (about three frames)
+/// still leaves stale once the box is re-placed on the current root: the pose
+/// itself — a limb swinging out, the body turning — may have moved on from the
+/// read-back one. Translation is *not* in it: that latency is removed by
+/// placing the root-relative box on this frame's root, because at a fall's
+/// speed it is metres, which no margin covers.
 const BOUND_MOTION_MARGIN_METRES: f32 = 0.5;
 
 /// The half-extent (metres) of the generous default AABB an avatar carries
@@ -1198,13 +1206,19 @@ const fn generous_default_aabb() -> Aabb {
     }
 }
 
-/// Convert a read-back world-space AABB into the entity-local AABB the frustum
+/// A root-relative bound corner placed on the root at `root` (component f32
+/// arithmetic — the restriction lints forbid glam's `Vec3` operator overloads).
+fn place_bound(corner: Vec3, root: Vec3) -> Vec3 {
+    Vec3::new(corner.x + root.x, corner.y + root.y, corner.z + root.z)
+}
+
+/// Convert a placed world-space AABB into the entity-local AABB the frustum
 /// test wants, grown by `margin` metres on every side: expand the world box,
 /// transform its 8 corners through the inverse of the entity's
 /// `GlobalTransform`, and re-bound them. The cull re-applies that same
 /// transform, so this round-trips the world box **regardless** of what the
-/// transform is — a real avatar submesh's transform is its body root (equal to
-/// the GPU root the bound was posed under), a synthetic crowd copy's is its
+/// transform is — a real avatar submesh's transform is its body root (the root
+/// the box was placed on), a synthetic crowd copy's is its
 /// static grid cell (the base-root translation the copy actually renders at
 /// lives only in the GPU root); either way the re-application reproduces the
 /// world box. Axis-aligning the inverse-rotated box is over-inclusive, which is
@@ -1237,8 +1251,15 @@ fn world_aabb_to_local(min: Vec3, max: Vec3, margin: f32, global: &GlobalTransfo
 }
 
 /// Set each GPU-posed skinned submesh's `Aabb` from its pose slot's read-back
-/// world bound, so off-screen avatars frustum-cull now that the avatar parts no
+/// bound, so off-screen avatars frustum-cull now that the avatar parts no
 /// longer carry `NoFrustumCulling` (Phase 5).
+///
+/// The read-back box is relative to the root it was posed under, frames ago;
+/// it is placed on the root the slot published **this** frame, so the cull box
+/// moves with the avatar rather than trailing it by the readback latency.
+/// Left where it was posed, a falling avatar's box sat 4–5 m above it and the
+/// whole body was culled while it was still in view
+/// (`viewer-own-avatar-vanishes-near-ground`).
 ///
 /// One per-slot bound is applied to **all** that avatar's submeshes
 /// (conservative but correct — they share a skeleton). Until a slot's first
@@ -1250,6 +1271,7 @@ fn world_aabb_to_local(min: Vec3, max: Vec3, margin: f32, global: &GlobalTransfo
 pub(crate) fn apply_gpu_avatar_bounds(
     bounds: Res<GpuAvatarBounds>,
     registry: Res<GpuAvatarRegistry>,
+    feed: Res<GpuAvatarPoseFeed>,
     mut targets: Query<(Entity, &GpuSkinBinding, &GlobalTransform, Option<&mut Aabb>)>,
     mut commands: Commands,
 ) {
@@ -1257,7 +1279,9 @@ pub(crate) fn apply_gpu_avatar_bounds(
     for (entity, binding, global, existing) in &mut targets {
         let world = registry
             .slot_index(binding.slot)
-            .and_then(|slot| bounds_at(&bounds.bytes, slot));
+            .and_then(|slot| bounds_at(&bounds.bytes, slot))
+            .zip(feed.root_translation(binding.slot))
+            .map(|((min, max), root)| (place_bound(min, root), place_bound(max, root)));
         let aabb = match world {
             Some((min, max)) => world_aabb_to_local(min, max, margin, global),
             None => generous_default_aabb(),

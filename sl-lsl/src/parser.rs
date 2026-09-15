@@ -10,11 +10,11 @@
 //! and the list of errors.
 //!
 //! The parser holds the small set of LSL **keywords** (the types `integer` …
-//! `list`, the control words `if`/`while`/`state` …) and classifies the
-//! lexer's uniform [`Token::Identifier`] words against them. It does **not**
-//! hold the LSL *library*: a called name, an event name or a constant is left
-//! as a plain identifier for the semantic pass to resolve against the grid's
-//! symbol table.
+//! `list`, the control words `if`/`while`/`state` …, and the legacy `print`)
+//! and classifies the lexer's uniform [`Token::Identifier`] words against
+//! them. It does **not** hold the LSL *library*: a called name, an event name
+//! or a constant is left as a plain identifier for the semantic pass to
+//! resolve against the grid's symbol table.
 //!
 //! ## Precedence
 //!
@@ -25,14 +25,27 @@
 //! ## The `<` / `>` ambiguity
 //!
 //! `<a, b, c>` is a vector and `<` is also less-than, so the angle brackets
-//! collide with the relational and shift operators (the only ones spelled with
-//! `<` or `>`). A `<` is read as a vector/rotation constructor **only in
-//! operand position** (where a primary expression is expected); after an
-//! operand it is the relational operator. Inside a constructor's
-//! components the operators that consume a `<`/`>` — `<`, `<=`, `>`, `>=`,
-//! `<<`, `>>` — are suppressed so the closing `>` wins, exactly as real LSL
-//! requires those comparisons to be parenthesised (`<(a > b), 0, 0>`); a
-//! parenthesised sub-expression lifts the suppression again.
+//! collide with the relational operators. A `<` is read as a vector/rotation
+//! constructor **only in operand position** (where a primary expression is
+//! expected); after an operand it is the relational operator.
+//!
+//! The closing `>` is the harder half, and the rule here is the one the grid's
+//! LALR grammar actually produces (Linden Lab's `lscript` grammar, as
+//! reproduced by `tailslide`), not a simplification of it:
+//!
+//! - In every component but the **last**, nothing can close the constructor
+//!   (a `,` must follow), so `<`, `>`, `<=`, `>=`, `<<` and `>>` are all
+//!   ordinary operators: `<1, a > b, 3>` is a vector whose `y` is a comparison.
+//! - In the last component (`z` of a vector, `z` or `s` of a rotation — `z` is
+//!   both until a `,` or `>` decides) only a `>` is ambiguous. The grammar
+//!   takes it as the comparison when the token after it can start an
+//!   expression, and as the closing bracket otherwise. Two tokens that can
+//!   start an expression still close it at the component's top level, because
+//!   the constructor rule outranks them: `-` and `<` (`<1, 2, 3> - v`,
+//!   `<1, 2, 3> < v`). So `<1, 2, a > b>` is a vector whose `z` is `a > b`.
+//!
+//! A parenthesised sub-expression, a list element or a call argument is out of
+//! reach of the pending `>` and parses freely again.
 
 use core::ops::Range;
 
@@ -40,7 +53,7 @@ use crate::ast::{
     AssignOp, BinaryOp, Block, EventHandler, Expr, FunctionDef, GlobalItem, GlobalVar, Ident,
     Param, PostfixOp, PrefixOp, Script, StateDef, StateName, Stmt, TypeName, TypeRef,
 };
-use crate::lexer::{SpannedToken, lex};
+use crate::lexer::{SpannedToken, tokens};
 use crate::token::Token;
 
 /// A single recovered syntax error: a human-readable message and the byte span
@@ -97,6 +110,16 @@ enum InfixOp {
     Assign(AssignOp),
 }
 
+/// Whether a vector/rotation constructor's closing `>` can end the expression
+/// being parsed — see the module note on the `<` / `>` ambiguity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Angle {
+    /// No closing `>` is pending: every operator is an operator.
+    Free,
+    /// The last component of a constructor, where a `>` may close it.
+    Closing,
+}
+
 /// The recursive-descent parser state: the token stream, a cursor into it and
 /// the accumulated errors.
 struct Parser<'src> {
@@ -114,13 +137,10 @@ struct Parser<'src> {
 }
 
 impl<'src> Parser<'src> {
-    /// Build a parser over `source`, lexing it and dropping trivia (comments)
-    /// so the grammar never has to mention them.
+    /// Build a parser over `source`, lexing it into the token stream the grid's
+    /// compiler sees (see [`grammar_tokens`]).
     fn new(source: &'src str) -> Self {
-        let tokens = lex(source)
-            .into_iter()
-            .filter(|token| !token.is_trivia())
-            .collect();
+        let tokens = grammar_tokens(source);
         Self {
             source,
             tokens,
@@ -692,20 +712,20 @@ impl<'src> Parser<'src> {
 
     /// Parse a full expression (assignment level and below).
     fn parse_expr(&mut self) -> Expr {
-        self.parse_expr_bp(0, false)
+        self.parse_expr_bp(0, Angle::Free)
     }
 
     /// Precedence-climbing expression parse.
     ///
     /// `min_bp` is the minimum left binding power an infix operator must have to
-    /// be taken here. `in_angle` suppresses the `<`/`>`-spelled operators so a
-    /// vector/rotation constructor's closing `>` wins over a comparison.
-    fn parse_expr_bp(&mut self, min_bp: u8, in_angle: bool) -> Expr {
+    /// be taken here. `angle` says whether a constructor's closing `>` may end
+    /// the expression instead of being read as a comparison.
+    fn parse_expr_bp(&mut self, min_bp: u8, angle: Angle) -> Expr {
         if self.depth >= Self::MAX_DEPTH {
             return self.too_deep_expr();
         }
         self.depth = self.depth.saturating_add(1);
-        let expr = self.parse_expr_bp_inner(min_bp, in_angle);
+        let expr = self.parse_expr_bp_inner(min_bp, angle);
         self.depth = self.depth.saturating_sub(1);
         expr
     }
@@ -714,10 +734,10 @@ impl<'src> Parser<'src> {
     /// right-associative recursion (an operator's right operand) is why the
     /// guard lives here and not only in [`Parser::parse_prefix`]: a long
     /// `a = b = c = … = z` chain recurses through this method, not that one.
-    fn parse_expr_bp_inner(&mut self, min_bp: u8, in_angle: bool) -> Expr {
-        let mut lhs = self.parse_prefix(in_angle);
+    fn parse_expr_bp_inner(&mut self, min_bp: u8, angle: Angle) -> Expr {
+        let mut lhs = self.parse_prefix(angle);
         while let Some(tok) = self.peek_kind() {
-            if in_angle && is_angle_conflict(tok) {
+            if angle == Angle::Closing && tok == Token::Greater && self.greater_closes(min_bp) {
                 break;
             }
             let Some((lbp, rbp, op)) = infix_binding_power(tok) else {
@@ -727,7 +747,7 @@ impl<'src> Parser<'src> {
                 break;
             }
             self.bump(); // operator
-            let rhs = self.parse_expr_bp(rbp, in_angle);
+            let rhs = self.parse_expr_bp(rbp, angle);
             let span = lhs.span().start..rhs.span().end;
             lhs = match op {
                 InfixOp::Binary(op) => Expr::Binary {
@@ -754,12 +774,12 @@ impl<'src> Parser<'src> {
     /// overflow). Every expression-nesting form — parentheses, casts, unary
     /// chains, list/vector elements, call arguments — passes through here, so
     /// this one guard bounds the whole expression grammar.
-    fn parse_prefix(&mut self, in_angle: bool) -> Expr {
+    fn parse_prefix(&mut self, angle: Angle) -> Expr {
         if self.depth >= Self::MAX_DEPTH {
             return self.too_deep_expr();
         }
         self.depth = self.depth.saturating_add(1);
-        let expr = self.parse_prefix_inner(in_angle);
+        let expr = self.parse_prefix_inner(angle);
         self.depth = self.depth.saturating_sub(1);
         expr
     }
@@ -775,11 +795,11 @@ impl<'src> Parser<'src> {
     }
 
     /// The body of [`Parser::parse_prefix`], run inside the depth guard.
-    fn parse_prefix_inner(&mut self, in_angle: bool) -> Expr {
+    fn parse_prefix_inner(&mut self, angle: Angle) -> Expr {
         let start = self.cur_start();
         if let Some(op) = self.peek_kind().and_then(prefix_op) {
             self.bump();
-            let operand = self.parse_prefix(in_angle);
+            let operand = self.parse_prefix(angle);
             let span = start..operand.span().end;
             return Expr::Prefix {
                 op,
@@ -787,7 +807,7 @@ impl<'src> Parser<'src> {
                 span,
             };
         }
-        let primary = self.parse_primary(in_angle);
+        let primary = self.parse_primary(angle);
         self.parse_postfix(primary)
     }
 
@@ -815,7 +835,7 @@ impl<'src> Parser<'src> {
     /// Parse a primary expression: a literal, a name (variable / call /
     /// member), a parenthesised expression or cast, a vector/rotation
     /// constructor, or a list.
-    fn parse_primary(&mut self, in_angle: bool) -> Expr {
+    fn parse_primary(&mut self, angle: Angle) -> Expr {
         let start = self.cur_start();
         match self.peek_kind() {
             Some(Token::IntegerLiteral) => {
@@ -836,12 +856,14 @@ impl<'src> Parser<'src> {
                 self.bump();
                 Expr::Str { raw, span }
             }
-            Some(Token::LParen) => self.parse_paren_or_cast(in_angle),
+            Some(Token::LParen) => self.parse_paren_or_cast(angle),
             Some(Token::Less) => self.parse_vector_or_rotation(),
             Some(Token::LBracket) => self.parse_list(),
             Some(Token::Identifier) => {
                 let word = self.cur_text();
-                if is_reserved_word(word) {
+                if word == "print" {
+                    self.parse_print()
+                } else if is_reserved_word(word) {
                     self.error_here(format!("expected an expression, found keyword `{word}`"));
                     Expr::Error(start..start)
                 } else {
@@ -849,8 +871,9 @@ impl<'src> Parser<'src> {
                 }
             }
             other => {
-                let stop = other
-                    .is_none_or(|tok| is_expr_stop(tok) || (in_angle && is_angle_conflict(tok)));
+                let stop = other.is_none_or(|tok| {
+                    is_expr_stop(tok) || (angle == Angle::Closing && tok == Token::Greater)
+                });
                 if stop {
                     self.error_here("expected an expression".to_owned());
                     Expr::Error(start..start)
@@ -862,6 +885,40 @@ impl<'src> Parser<'src> {
                     Expr::Error(span)
                 }
             }
+        }
+    }
+
+    /// Whether the `>` at the cursor closes the constructor whose last component
+    /// is being parsed, rather than comparing. `min_bp` is zero only at that
+    /// component's top level, the one place the grammar's constructor rule is
+    /// in reach and outranks the `-` and `<` that could otherwise start the
+    /// comparison's right operand. Deeper in, the grid's grammar has already
+    /// committed to a comparison; closing there when nothing can follow as its
+    /// operand accepts what the grid would reject, never the reverse.
+    fn greater_closes(&self, min_bp: u8) -> bool {
+        match self.peek_kind_at(1) {
+            Some(Token::Minus | Token::Less) => min_bp == 0,
+            Some(Token::Identifier) => self
+                .tokens
+                .get(self.pos.saturating_add(1))
+                .and_then(|token| token.text(self.source))
+                .is_some_and(|word| word != "print" && is_reserved_word(word)),
+            Some(next) => !starts_expression(next),
+            None => true,
+        }
+    }
+
+    /// Parse LSL's `print(value)` keyword expression. The `print` keyword is at
+    /// the cursor.
+    fn parse_print(&mut self) -> Expr {
+        let start = self.cur_start();
+        self.bump(); // `print`
+        self.expect(Token::LParen, "`(` after `print`");
+        let arg = self.parse_expr_bp(0, Angle::Free);
+        let end = self.expect_close(Token::RParen, "`)` to close `print`");
+        Expr::Print {
+            arg: Box::new(arg),
+            span: start..end,
         }
     }
 
@@ -902,7 +959,7 @@ impl<'src> Parser<'src> {
         if !self.at(Token::RParen) && self.peek_kind().is_some() {
             loop {
                 let before = self.pos;
-                args.push(self.parse_expr_bp(0, false));
+                args.push(self.parse_expr_bp(0, Angle::Free));
                 if !self.eat(Token::Comma) {
                     break;
                 }
@@ -916,7 +973,7 @@ impl<'src> Parser<'src> {
 
     /// Parse a parenthesised expression, or a `(type)operand` cast if the
     /// parentheses wrap a bare type keyword.
-    fn parse_paren_or_cast(&mut self, in_angle: bool) -> Expr {
+    fn parse_paren_or_cast(&mut self, angle: Angle) -> Expr {
         let start = self.cur_start();
         self.bump(); // `(`
         if self.at(Token::Identifier)
@@ -926,7 +983,7 @@ impl<'src> Parser<'src> {
             let ty_span = self.cur_span();
             self.bump(); // type keyword
             self.bump(); // `)`
-            let operand = self.parse_prefix(in_angle);
+            let operand = self.parse_prefix(angle);
             let span = start..operand.span().end;
             return Expr::Cast {
                 ty: TypeRef {
@@ -937,7 +994,7 @@ impl<'src> Parser<'src> {
                 span,
             };
         }
-        let inner = self.parse_expr_bp(0, false);
+        let inner = self.parse_expr_bp(0, Angle::Free);
         let end = self.expect_close(Token::RParen, "`)` to close the group");
         Expr::Paren {
             inner: Box::new(inner),
@@ -950,13 +1007,13 @@ impl<'src> Parser<'src> {
     fn parse_vector_or_rotation(&mut self) -> Expr {
         let start = self.cur_start();
         self.bump(); // `<`
-        let x = self.parse_expr_bp(0, true);
+        let x = self.parse_expr_bp(0, Angle::Free);
         self.expect(Token::Comma, "`,` between vector components");
-        let y = self.parse_expr_bp(0, true);
+        let y = self.parse_expr_bp(0, Angle::Free);
         self.expect(Token::Comma, "`,` between vector components");
-        let z = self.parse_expr_bp(0, true);
+        let z = self.parse_expr_bp(0, Angle::Closing);
         if self.eat(Token::Comma) {
-            let s = self.parse_expr_bp(0, true);
+            let s = self.parse_expr_bp(0, Angle::Closing);
             let end = self.expect_close(Token::Greater, "`>` to close the rotation");
             Expr::Rotation {
                 x: Box::new(x),
@@ -984,7 +1041,7 @@ impl<'src> Parser<'src> {
         if !self.at(Token::RBracket) && self.peek_kind().is_some() {
             loop {
                 let before = self.pos;
-                elements.push(self.parse_expr_bp(0, false));
+                elements.push(self.parse_expr_bp(0, Angle::Free));
                 if !self.eat(Token::Comma) {
                     break;
                 }
@@ -1085,18 +1142,100 @@ const fn infix_binding_power(token: Token) -> Option<(u8, u8, InfixOp)> {
     Some(result)
 }
 
-/// Whether a token is spelled with `<` or `>` and therefore collides with the
-/// angle brackets of a vector/rotation constructor.
-const fn is_angle_conflict(token: Token) -> bool {
+/// Whether a token (other than an identifier, which depends on its text) can
+/// begin an expression: a literal, a bracket that opens one, or a prefix
+/// operator.
+const fn starts_expression(token: Token) -> bool {
     matches!(
         token,
-        Token::Less
-            | Token::LessEq
-            | Token::Greater
-            | Token::GreaterEq
-            | Token::ShiftLeft
-            | Token::ShiftRight
+        Token::IntegerLiteral
+            | Token::FloatLiteral
+            | Token::StringLiteral
+            | Token::LParen
+            | Token::LBracket
+            | Token::Less
+            | Token::Minus
+            | Token::Bang
+            | Token::Tilde
+            | Token::PlusPlus
+            | Token::MinusMinus
     )
+}
+
+/// Lex `source` into the token stream the grid's compiler parses, which is not
+/// quite the one an editor colours:
+///
+/// - **comments** are dropped, so the grammar never has to mention them;
+/// - a byte that begins no token ([`Token::Error`]) is dropped too, because
+///   the grid's scanner ignores such characters rather than rejecting them;
+/// - a `"` with no closing quote is a lone ignored character there, not a
+///   string running to the end of the file, so scanning resumes right after it
+///   (after the `L` identifier, for an unterminated `L"`).
+///
+/// Once one string runs to the end, **every later `"` is ignored too**: a
+/// quote the unterminated string swallowed was either inside a comment or
+/// escaped, and a string opened by an escaped one scans the same characters
+/// from the same unescaped state, so it cannot find a close the first did not.
+/// The remainder is therefore lexed once with its quotes blanked to spaces
+/// (one byte for one, so every span still indexes `source`), rather than
+/// re-lexed after each quote — which a script of `\"` would make quadratic on
+/// every keystroke.
+fn grammar_tokens(source: &str) -> Vec<SpannedToken> {
+    let mut out = Vec::new();
+    for token in tokens(source) {
+        if token.is_trivia() || token.token.is_error() {
+            continue;
+        }
+        if token.token == Token::StringLiteral {
+            let text = token.text(source).unwrap_or("");
+            if !string_is_terminated(text) {
+                let quote = if text.starts_with('L') {
+                    out.push(SpannedToken {
+                        token: Token::Identifier,
+                        span: token.span.start..token.span.start.saturating_add(1),
+                    });
+                    token.span.start.saturating_add(1)
+                } else {
+                    token.span.start
+                };
+                let resume = quote.saturating_add(1);
+                let rest = source.get(resume..).unwrap_or("").replace('"', " ");
+                out.extend(
+                    tokens(&rest)
+                        .filter(|later| !later.is_trivia() && !later.token.is_error())
+                        .map(|later| SpannedToken {
+                            token: later.token,
+                            span: later.span.start.saturating_add(resume)
+                                ..later.span.end.saturating_add(resume),
+                        }),
+                );
+                break;
+            }
+        }
+        out.push(token);
+    }
+    out
+}
+
+/// Whether a string literal's text (quotes included, optionally `L`-prefixed)
+/// ends in a closing quote that no backslash escapes — i.e. the lexer found
+/// its end rather than running it to the end of the input.
+fn string_is_terminated(text: &str) -> bool {
+    let body = text.strip_prefix('L').unwrap_or(text);
+    let Some(inner) = body.strip_prefix('"') else {
+        return false;
+    };
+    let mut escaped = false;
+    for (index, ch) in inner.char_indices() {
+        if escaped {
+            escaped = false;
+        } else if ch == '\\' {
+            escaped = true;
+        } else if ch == '"' {
+            return index.saturating_add(1) == inner.len();
+        }
+    }
+    false
 }
 
 /// Whether a token terminates an expression (a delimiter the primary parser
@@ -1124,5 +1263,6 @@ fn is_reserved_word(word: &str) -> bool {
                 | "for"
                 | "do"
                 | "while"
+                | "print"
         )
 }

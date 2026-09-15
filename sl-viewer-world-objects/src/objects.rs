@@ -299,10 +299,13 @@ pub enum PendingGeometry {
     /// A sculpted prim waiting on its sculpt map texture (built by
     /// [`apply_object_sculpts`]).
     Sculpt(PendingSculpt),
-    /// A worn **rigged** mesh attachment whose geometry and skin have decoded but
-    /// whose avatar skeleton instance is not yet available to bind to (P17.2).
-    /// Held until the avatar layer's `apply_rigged_attachments` can resolve the
-    /// avatar's joint entities, then built as a `SkinnedMesh`.
+    /// A **rigged** mesh whose geometry and skin have decoded but whose skeleton —
+    /// its wearer's, or its animated object's control avatar — is not yet
+    /// available to bind to (P17.2). Held until the avatar layer's
+    /// `apply_rigged_attachments` can resolve it, then built as a `SkinnedMesh`;
+    /// or handed back as a static [`Mesh`](Self::Mesh) build when the object
+    /// turns out to be bound to neither
+    /// ([`PendingBuilds::build_rigged_in_world`]).
     RiggedMesh(PendingRiggedMesh),
 }
 
@@ -324,19 +327,42 @@ pub struct PendingMesh {
     /// The object-level material-intern inputs, retained because this rebuild
     /// runs without the live [`Object`] at hand.
     intern: MaterialInternContext,
+    /// Whether this is a **rigged** mesh that the avatar layer found standing in
+    /// the world — neither worn nor part of an animated object — and so is built
+    /// as the static mesh its vertices describe, skin block and all.
+    ///
+    /// That is how the reference draws one: `LLVolumeGeometryManager` treats a
+    /// face as rigged only when `!is_animated && skinInfo && isAttachment()` (or
+    /// an animated object is playing), and renders every other face of a skinned
+    /// volume as ordinary geometry. Without the flag the rigged mesh defers to
+    /// the skinned bind, which needs a wearer this object will never have.
+    in_world_rig: bool,
 }
 
-/// A worn rigged mesh attachment's deferred skinned build (P17.2): the decoded
-/// mesh asset key and the object's texture-entry bytes, retained so its skinned
-/// submesh entities can be spawned (and textured) once the wearer avatar's
-/// skeleton instance is available to bind against.
+/// A rigged mesh's deferred skinned build (P17.2): the inputs of its mesh build,
+/// retained so its skinned submesh entities can be spawned (and textured) once
+/// the skeleton it binds to — its wearer's, or its animated object's control
+/// avatar — is available, or handed back to the static mesh path when the avatar
+/// layer finds it bound to neither ([`PendingBuilds::build_rigged_in_world`]).
 #[derive(Debug)]
 pub struct PendingRiggedMesh {
+    /// The mesh build inputs, with [`PendingMesh::in_world_rig`] unset.
+    mesh: PendingMesh,
+}
+
+impl PendingRiggedMesh {
     /// The mesh asset key to look the decoded geometry and skin up by.
-    pub key: MeshKey,
-    /// The object's raw texture-entry bytes, decoded per-submesh at build time to
-    /// texture each face.
-    pub texture_entry: Vec<u8>,
+    #[must_use]
+    pub const fn key(&self) -> MeshKey {
+        self.mesh.key
+    }
+
+    /// The object's raw texture-entry bytes, decoded per-submesh at build time
+    /// to texture each face.
+    #[must_use]
+    pub fn texture_entry(&self) -> &[u8] {
+        &self.mesh.texture_entry
+    }
 }
 
 /// A sculpted prim's geometry build inputs: the sculpt map texture key, the
@@ -621,6 +647,84 @@ impl PendingBuilds<'_, '_> {
             .filter(|(_entity, _scene, builds)| builds.pending.as_ref().is_some_and(&wanted))
             .map(|(entity, scene, _builds)| (scene.scoped_id, entity))
             .collect()
+    }
+
+    /// Hand `entity`'s pending **rigged** mesh build back to the static mesh
+    /// path, because the avatar layer found the object standing in the world
+    /// (`PendingMesh::in_world_rig`). Returns the mesh key, which the caller
+    /// re-queues on [`PendingDecodedMeshes`] so [`apply_object_meshes`] builds
+    /// it; `None` (and nothing changed) when the object has no rigged build
+    /// pending.
+    pub fn build_rigged_in_world(&mut self, entity: Entity) -> Option<MeshKey> {
+        let (_entity, _scene, mut builds) = self.builds.get_mut(entity).ok()?;
+        if !matches!(builds.pending, Some(PendingGeometry::RiggedMesh(_))) {
+            return None;
+        }
+        let Some(PendingGeometry::RiggedMesh(PendingRiggedMesh { mut mesh })) =
+            builds.pending.take()
+        else {
+            return None;
+        };
+        mesh.in_world_rig = true;
+        let key = mesh.key;
+        builds.pending = Some(PendingGeometry::Mesh(mesh));
+        Some(key)
+    }
+
+    /// Every object whose rigged mesh is built — or queued to be built — as
+    /// in-world static geometry (`PendingMesh::in_world_rig`), with the entity
+    /// carrying it: the set the avatar layer re-checks for one that has since
+    /// been worn, or become part of an animated object.
+    #[must_use]
+    pub fn scoped_in_world_rigged(&self) -> Vec<(ScopedObjectId, Entity)> {
+        self.builds
+            .iter()
+            .filter(|(_entity, _scene, builds)| match builds.pending.as_ref() {
+                Some(PendingGeometry::Mesh(pending)) => pending.in_world_rig,
+                Some(PendingGeometry::Sculpt(_) | PendingGeometry::RiggedMesh(_)) => false,
+                None => builds
+                    .mesh_rebuild
+                    .as_ref()
+                    .is_some_and(|rebuild| rebuild.in_world_rig),
+            })
+            .map(|(entity, scene, _builds)| (scene.scoped_id, entity))
+            .collect()
+    }
+
+    /// Undo [`build_rigged_in_world`](Self::build_rigged_in_world): park
+    /// `entity`'s in-world rigged mesh on the skinned bind again, because the
+    /// object is now worn or animated. Returns whether it did. The static faces
+    /// it already built are the caller's to despawn — the skinned build spawns
+    /// its own.
+    pub fn rebind_in_world_rigged(&mut self, entity: Entity) -> bool {
+        let Ok((_entity, _scene, mut builds)) = self.builds.get_mut(entity) else {
+            return false;
+        };
+        let queued = matches!(
+            builds.pending.as_ref(),
+            Some(PendingGeometry::Mesh(pending)) if pending.in_world_rig
+        );
+        let built = builds.pending.is_none()
+            && builds
+                .mesh_rebuild
+                .as_ref()
+                .is_some_and(|rebuild| rebuild.in_world_rig);
+        let mesh = if queued {
+            match builds.pending.take() {
+                Some(PendingGeometry::Mesh(mesh)) => Some(mesh),
+                _other => None,
+            }
+        } else if built {
+            builds.mesh_rebuild.take()
+        } else {
+            None
+        };
+        let Some(mut mesh) = mesh else {
+            return false;
+        };
+        mesh.in_world_rig = false;
+        builds.pending = Some(PendingGeometry::RiggedMesh(PendingRiggedMesh { mesh }));
+        true
     }
 
     /// Every object that has already built its static mesh from `key` and holds
@@ -1056,6 +1160,16 @@ impl PendingDecodedMeshes {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.queue.is_empty()
+    }
+
+    /// Queue `key` for [`apply_object_meshes`] again, as though it had just
+    /// decoded — for a build parked on an already-decoded mesh after its decode
+    /// was applied ([`PendingBuilds::build_rigged_in_world`]). A no-op when the
+    /// key is already queued.
+    pub fn requeue(&mut self, key: MeshKey) {
+        if self.queued.insert(key) {
+            self.queue.push_back(key);
+        }
     }
 }
 
@@ -1872,8 +1986,14 @@ fn build_object_geometry(
                     ObjectGeometryBuild {
                         builds: ObjectBuilds {
                             pending: Some(PendingGeometry::RiggedMesh(PendingRiggedMesh {
-                                key,
-                                texture_entry: object.texture_entry.clone(),
+                                mesh: PendingMesh {
+                                    key,
+                                    texture_entry: object.texture_entry.clone(),
+                                    scale: [object.scale.x, object.scale.y, object.scale.z],
+                                    priority,
+                                    intern: intern.clone(),
+                                    in_world_rig: false,
+                                },
                             })),
                             ..ObjectBuilds::default()
                         },
@@ -1912,6 +2032,7 @@ fn build_object_geometry(
                             scale: [object.scale.x, object.scale.y, object.scale.z],
                             priority,
                             intern: intern.clone(),
+                            in_world_rig: false,
                         }),
                         ..ObjectBuilds::default()
                     },
@@ -1925,6 +2046,7 @@ fn build_object_geometry(
                             scale: [object.scale.x, object.scale.y, object.scale.z],
                             priority,
                             intern: intern.clone(),
+                            in_world_rig: false,
                         })),
                         ..ObjectBuilds::default()
                     },
@@ -3871,9 +3993,7 @@ pub fn apply_object_meshes(
     mut material_cache: ResMut<MaterialCache>,
 ) {
     for &MeshDecoded(key) in decoded.read() {
-        if pending_keys.queued.insert(key) {
-            pending_keys.queue.push_back(key);
-        }
+        pending_keys.requeue(key);
     }
     let mut scans = 0_usize;
     while budget.remaining > 0 && scans < GEOMETRY_APPLY_SCAN_CAP {
@@ -3887,10 +4007,11 @@ pub fn apply_object_meshes(
             continue;
         };
         // A rigged mesh (a mesh carrying a skin block) is worn by an avatar — or is
-        // an animesh (Phase 29) — and is never built as a static child: it must be
-        // skinned to a skeleton. It defers to the avatar layer's
-        // `apply_rigged_attachments`, which
-        // finds its wearer by walking the parent chain to an avatar root.
+        // an animesh (Phase 29) — and so is not built as a static child: it must be
+        // skinned to a skeleton. It defers to the avatar layer, which finds its
+        // wearer by walking the parent chain to an avatar root — or, finding the
+        // chain ends at an ordinary in-world root, hands it back here as static
+        // geometry (`PendingMesh::in_world_rig`).
         let is_rigged = mesh_manager.skin(key).is_some();
         // The objects this key resolves for, snapshotted before any of them is
         // built: those waiting on its first build, and those already built from it
@@ -3929,7 +4050,10 @@ pub fn apply_object_meshes(
             let Some(PendingGeometry::Mesh(pending)) = builds.take_pending(entity) else {
                 continue;
             };
-            if is_rigged && !hud_rigged.contains(&scoped) {
+            // An in-world rigged mesh was handed back here by the avatar layer
+            // once it found no wearer and no animated object to bind to; it
+            // builds as static geometry, like any other mesh.
+            if is_rigged && !hud_rigged.contains(&scoped) && !pending.in_world_rig {
                 // Defer the skinned build to `apply_rigged_attachments`. This is
                 // gated on the mesh being rigged, NOT on `attachment_point`: an
                 // attachment's point can arrive in a later update than the mesh
@@ -3945,10 +4069,7 @@ pub fn apply_object_meshes(
                 mesh_manager.upgrade_to_finest(key);
                 builds.set_pending(
                     entity,
-                    PendingGeometry::RiggedMesh(PendingRiggedMesh {
-                        key,
-                        texture_entry: pending.texture_entry,
-                    }),
+                    PendingGeometry::RiggedMesh(PendingRiggedMesh { mesh: pending }),
                 );
                 continue;
             }
@@ -6098,6 +6219,128 @@ mod tests {
                 "and clear the mark, so the pick admits it only while it is hidden"
             );
         }
+        Ok(())
+    }
+
+    /// A rigged mesh standing in the world goes to the static mesh path and
+    /// back again, keeping its build inputs both ways.
+    ///
+    /// `build_rigged_in_world` turns the skinned bind's pending build into a
+    /// static one the mesh path will build (flagged, so it is not deferred
+    /// straight back), `scoped_in_world_rigged` lists it whether it is still
+    /// queued or already built, and `rebind_in_world_rigged` parks it on the
+    /// bind again with the flag cleared. A plain static mesh is none of this.
+    #[test]
+    fn an_in_world_rigged_mesh_round_trips_through_the_static_path()
+    -> Result<(), Box<dyn core::error::Error>> {
+        use super::{
+            ObjectBuilds, PendingBuilds, PendingGeometry, PendingMesh, PendingRiggedMesh,
+            SceneObject,
+        };
+        use crate::material_cache::MaterialInternContext;
+        use bevy::ecs::system::SystemState;
+        use bevy::prelude::World;
+        use sl_client_bevy::{CircuitId, Priority, ScopedObjectId};
+
+        let key = MeshKey::from(Uuid::from_u128(0x5c14));
+        let object = bare_object(pcode::PRIMITIVE);
+        let mesh = |in_world_rig: bool| PendingMesh {
+            key,
+            texture_entry: vec![7_u8; 4],
+            scale: [1.0, 2.0, 3.0],
+            priority: Priority::IDLE,
+            intern: MaterialInternContext::for_object(&object, false),
+            in_world_rig,
+        };
+        let scoped = ScopedObjectId::new(CircuitId::new(1), RegionLocalObjectId(10));
+        let plain_scoped = ScopedObjectId::new(CircuitId::new(1), RegionLocalObjectId(11));
+        let mut world = World::new();
+        let entity = world
+            .spawn((
+                SceneObject {
+                    scoped_id: scoped,
+                    category: ObjectCategory::Mesh,
+                },
+                ObjectBuilds {
+                    pending: Some(PendingGeometry::RiggedMesh(PendingRiggedMesh {
+                        mesh: mesh(false),
+                    })),
+                    ..ObjectBuilds::default()
+                },
+            ))
+            .id();
+        let plain = world
+            .spawn((
+                SceneObject {
+                    scoped_id: plain_scoped,
+                    category: ObjectCategory::Mesh,
+                },
+                ObjectBuilds {
+                    mesh_rebuild: Some(mesh(false)),
+                    ..ObjectBuilds::default()
+                },
+            ))
+            .id();
+
+        let mut params: SystemState<PendingBuilds> = SystemState::new(&mut world);
+        let mut builds = params.get_mut(&mut world)?;
+        assert!(builds.scoped_in_world_rigged().is_empty());
+        assert_eq!(builds.build_rigged_in_world(entity), Some(key));
+        assert_eq!(
+            builds.build_rigged_in_world(entity),
+            None,
+            "a build already handed back is not handed back twice"
+        );
+        match builds.pending(entity) {
+            Some(PendingGeometry::Mesh(pending)) => {
+                assert!(
+                    pending.in_world_rig,
+                    "the static build must not defer again"
+                );
+                assert_eq!(pending.texture_entry, vec![7_u8; 4]);
+                assert_eq!(
+                    pending.scale.map(f32::to_bits),
+                    [1.0_f32, 2.0, 3.0].map(f32::to_bits)
+                );
+            }
+            other => return Err(format!("expected a static mesh build, got {other:?}").into()),
+        }
+        assert_eq!(builds.scoped_in_world_rigged(), vec![(scoped, entity)]);
+
+        // Worn or animated while still queued: back on the bind, unflagged.
+        assert!(builds.rebind_in_world_rigged(entity));
+        match builds.pending(entity) {
+            Some(PendingGeometry::RiggedMesh(pending)) => {
+                assert_eq!(pending.key(), key);
+                assert!(!pending.mesh.in_world_rig);
+            }
+            other => return Err(format!("expected a skinned bind, got {other:?}").into()),
+        }
+        assert!(builds.scoped_in_world_rigged().is_empty());
+
+        // Built static (`apply_object_meshes` took the pending build and kept its
+        // inputs as the LOD rebuild record), then bound: the same.
+        let _handed_back = builds.build_rigged_in_world(entity);
+        let Some(PendingGeometry::Mesh(built)) = builds.take_pending(entity) else {
+            return Err("the handed-back build is a static one".into());
+        };
+        builds.set_mesh_rebuild(entity, built);
+        assert_eq!(builds.scoped_in_world_rigged(), vec![(scoped, entity)]);
+        assert!(builds.rebind_in_world_rigged(entity));
+        assert!(matches!(
+            builds.pending(entity),
+            Some(PendingGeometry::RiggedMesh(_))
+        ));
+        assert!(
+            builds
+                .get(entity)
+                .is_some_and(|record| record.mesh_rebuild.is_none()),
+            "the static rebuild record goes with the static build"
+        );
+
+        // An ordinary static mesh is not an in-world rigged one.
+        assert!(!builds.rebind_in_world_rigged(plain));
+        assert_eq!(builds.build_rigged_in_world(plain), None);
         Ok(())
     }
 }

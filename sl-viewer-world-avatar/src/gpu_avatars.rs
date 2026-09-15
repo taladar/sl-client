@@ -43,6 +43,7 @@
 //! joint set kept intact this phase).
 
 pub mod crowd;
+mod own_watch;
 pub(crate) mod render;
 pub(crate) mod stage;
 pub(crate) mod types;
@@ -234,8 +235,9 @@ impl Plugin for GpuAvatarsPlugin {
                         // reads every binding.
                         stage::sync_skin_pose_twins.before(stage::stage_gpu_avatars),
                         // Phase 5: set each avatar's `Aabb` from its read-back
-                        // world bound (so off-screen avatars frustum-cull), after
-                        // the stage refreshed the slot map and before Bevy's
+                        // bound placed on this frame's root (so off-screen avatars
+                        // frustum-cull), after the stage refreshed the slot map and
+                        // published the roots, and before Bevy's
                         // `CalculateBounds` would otherwise install the meaningless
                         // dummy-joint bind-pose AABB.
                         stage::apply_gpu_avatar_bounds
@@ -250,6 +252,11 @@ impl Plugin for GpuAvatarsPlugin {
                         // The `SL_VIEWER_LOG_ANIMESH` per-animesh stage census
                         // (inert unless the env is set), likewise after the cull.
                         stage::log_animesh_census
+                            .after(bevy::camera::visibility::VisibilitySystems::CheckVisibility),
+                        // The `SL_VIEWER_LOG_OWN_AVATAR_VISIBILITY` frame-by-frame
+                        // own-avatar draw watch (inert unless the env is set),
+                        // likewise after the cull.
+                        own_watch::watch_own_avatar_visibility
                             .after(bevy::camera::visibility::VisibilitySystems::CheckVisibility),
                     ),
                 );

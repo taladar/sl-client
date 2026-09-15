@@ -555,6 +555,16 @@ pub enum Expr {
         /// The byte range including the parentheses.
         span: Range<usize>,
     },
+    /// LSL's legacy `print(value)`. `print` is a keyword of the grammar, not a
+    /// library function — the grid's table never lists it, and it takes exactly
+    /// one argument of any (non-void) type — so it is its own node rather than
+    /// a [`Self::Call`] the semantic pass would resolve against the library.
+    Print {
+        /// The printed expression.
+        arg: Box<Self>,
+        /// The byte range from the keyword through the closing parenthesis.
+        span: Range<usize>,
+    },
     /// A placeholder for input that did not parse as an expression.
     Error(Range<usize>),
 }
@@ -579,7 +589,8 @@ impl Expr {
             | Self::Binary { span, .. }
             | Self::Assign { span, .. }
             | Self::Cast { span, .. }
-            | Self::Paren { span, .. } => span.start..span.end,
+            | Self::Paren { span, .. }
+            | Self::Print { span, .. } => span.start..span.end,
         }
     }
 }

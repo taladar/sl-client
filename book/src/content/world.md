@@ -44,6 +44,15 @@ Extended, less-frequently-changing data — creator, full permissions, name,
 description, sale info — comes separately as **object properties**, requested on
 demand.
 
+A child names its parent only by local id, and nothing guarantees the parent's
+update arrived first — or at all. The reference viewer files such a child as an
+**orphan** and waits for the parent to turn up. `Session` asks for it outright
+(`RequestMultipleObjects`) the first time a child names a parent it has never
+seen, then again from its timer loop on a doubling interval (a minute, up to
+ten) for as long as some tracked child still names it. The re-asks cannot wait
+for the child to update again: a worn shoe stands still, and its whole outfit
+linkset stays invisible until its root arrives.
+
 Object updates also carry a **time dilation** value: when a region is overloaded
 it runs physics slower than real time, and the dilation lets the client
 interpolate correctly.
@@ -78,6 +87,16 @@ user)". Two consequences that cost an afternoon to rediscover:
   missing fixture — worth knowing before filing it as a grid bug, which is
   exactly the mistake this note exists to prevent. The visible name tag comes
   from the object's name, not from the avatar name cache, so nothing is lost.
+
+A **rigged** mesh (one with a skin block) is not skinned just for having one.
+The reference skins a face only when its object is worn or part of an animated
+object (`!is_animated && skinInfo && isAttachment()`, or a playing control
+avatar); a rigged mesh standing in the world — rezzed from inventory, a vendor
+display — draws as the static mesh its vertices describe, at the object's
+scale. The viewer decides by walking the linkset up: an animated object, an
+attachment or an avatar binds it; an ordinary root leaves it static; a link that
+has not arrived decides nothing, because a worn attachment whose root was lost
+looks exactly like that.
 
 ### Editing objects
 
@@ -198,6 +217,15 @@ Standing up is not a message at all: one `AgentUpdate` with the transient
 `STAND_UP` control flag (`Session::stand`). Sitting on the ground is likewise
 just the `SIT_ON_GROUND` control flag (`Session::sit_on_ground`) — a pure
 animation state with no object involved.
+
+A third transient flag ends a movement state. After a hard landing
+(`standup`), and around a jump (`pre_jump`, `land`, `medium_land`), a
+Second Life simulator waits for the viewer to report that the animation
+has finished playing — `FINISH_ANIM` (`Session::finish_animation`). Only
+the viewer can know when that is, because only it plays the motion. The
+Bevy viewer raises it when its own copy of the motion runs out, beside the
+`AgentAnimation` stop the reference sends for every self-terminating
+motion. OpenSim ends those states on its own timer and ignores the flag.
 
 On the server side `SimSession` mirrors the machine: `AgentRequestSit`
 decodes as `ServerEvent::SitRequested`, the driver answers with

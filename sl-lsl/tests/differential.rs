@@ -59,7 +59,7 @@
     reason = "an integration-test oracle reports its skip reason and result counts to the operator"
 )]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -240,22 +240,46 @@ fn lint_line_number(line: &str) -> Option<u32> {
 
 // -- the sl-lsl side --------------------------------------------------------
 
-/// The 1-based source lines `sl-lsl` flags as **errors** for `src`: every
-/// recovered syntax error (the grid's front-end would reject these) plus every
-/// [`Severity::Error`] semantic diagnostic. Warnings are excluded — they are not
-/// part of the no-false-positive gate.
-fn sl_lsl_error_lines(src: &str, syntax: &LslSyntax) -> BTreeSet<u32> {
+/// The **errors** `sl-lsl` reports for `src`, keyed by 1-based source line:
+/// every recovered syntax error (the grid's front-end would reject these) plus
+/// every [`Severity::Error`] semantic diagnostic. Warnings are excluded — they
+/// are not part of the no-false-positive gate. The messages are kept so a
+/// false positive names the rule that fired, not only where.
+fn sl_lsl_error_lines(src: &str, syntax: &LslSyntax) -> BTreeMap<u32, Vec<String>> {
     let parsed = parse(src);
-    let mut lines = BTreeSet::new();
+    let mut lines: BTreeMap<u32, Vec<String>> = BTreeMap::new();
     for error in &parsed.errors {
-        let _new = lines.insert(offset_to_line(src, error.span.start));
+        lines
+            .entry(offset_to_line(src, error.span.start))
+            .or_default()
+            .push(error.message.clone());
     }
     for diagnostic in analyze(&parsed.script, syntax) {
         if diagnostic.severity == Severity::Error {
-            let _new = lines.insert(offset_to_line(src, diagnostic.span.start));
+            lines
+                .entry(offset_to_line(src, diagnostic.span.start))
+                .or_default()
+                .push(diagnostic.message);
         }
     }
     lines
+}
+
+/// Whether `sl-lsl` rejected a script because it hit the parser's recursion
+/// ceiling (`Parser::MAX_DEPTH`) — the one *accepted* divergence from
+/// tailslide, whose heap-stacked parser nests ~10 000 levels deep where a
+/// recursive-descent one on the native stack stops at 128 (tailslide's own
+/// `parserstackdepth2.lsl`). No 64 KiB script comes near either, so such a
+/// script is reported apart from the false positives rather than failing the
+/// run; every other error on it is recovery fallout from the cut-off.
+///
+/// Keyed on the parser's message text, so a reworded message makes these
+/// scripts fail loudly as false positives again rather than pass silently.
+fn hits_depth_ceiling(errors: &BTreeMap<u32, Vec<String>>) -> bool {
+    errors
+        .values()
+        .flatten()
+        .any(|message| message.ends_with("nests too deeply"))
 }
 
 /// Map a byte offset into `src` to its 1-based line number, so a `sl-lsl` byte
@@ -308,10 +332,9 @@ fn run_tailslide(bin: &Path, script: &Path) -> Result<LintReport, BoxError> {
 /// Defaults to the committed corpus (`tests/corpus/{valid,error}/`), the
 /// regression guard. `SL_LSL_DIFFTEST_CORPUS` overrides it with an arbitrary
 /// directory tree — point it at a larger real-world corpus (e.g. tailslide's own
-/// `tests/scripts/`) to exercise the no-false-positive bar at scale. Caveat: the
-/// recursive-descent parser does not yet guard its recursion depth, so a
-/// deeply-nested torture input (tailslide's `parserstackdepth*.lsl`) can
-/// overflow the native stack — a known parser bug, not a harness one.
+/// `tests/scripts/`) to exercise the no-false-positive bar at scale. A torture
+/// input nested past the parser's depth ceiling (tailslide's
+/// `parserstackdepth2.lsl`) is reported apart, see [`hits_depth_ceiling`].
 fn corpus_files() -> Vec<PathBuf> {
     let mut files = Vec::new();
     if let Some(dir) = std::env::var_os("SL_LSL_DIFFTEST_CORPUS") {
@@ -362,7 +385,7 @@ fn collect_lsl(dir: &Path, out: &mut Vec<PathBuf>) {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
+    use std::collections::BTreeMap;
     use std::path::PathBuf;
 
     use pretty_assertions::assert_eq;
@@ -370,8 +393,8 @@ mod tests {
     use sl_lsl::ast::TypeName;
 
     use super::{
-        BoxError, builtins_library, corpus_files, lint_line_number, offset_to_line, oracle,
-        parse_lint, run_tailslide, sl_lsl_error_lines,
+        BoxError, builtins_library, corpus_files, hits_depth_ceiling, lint_line_number,
+        offset_to_line, oracle, parse_lint, run_tailslide, sl_lsl_error_lines,
     };
 
     /// Diff `sl-lsl` against `tailslide` over the committed corpus, proving the
@@ -400,7 +423,8 @@ mod tests {
         let mut error_agreements: usize = 0;
         let mut skipped: usize = 0;
         let mut missed: Vec<PathBuf> = Vec::new();
-        let mut false_positives: Vec<(PathBuf, BTreeSet<u32>)> = Vec::new();
+        let mut false_positives: Vec<(PathBuf, BTreeMap<u32, Vec<String>>)> = Vec::new();
+        let mut depth_ceiling: Vec<PathBuf> = Vec::new();
 
         for path in &files {
             // An external corpus may hold non-UTF-8 files (e.g. compiled
@@ -416,6 +440,8 @@ mod tests {
             if oracle_report.error_count == 0 {
                 if our_errors.is_empty() {
                     clean_agreements = clean_agreements.saturating_add(1);
+                } else if hits_depth_ceiling(&our_errors) {
+                    depth_ceiling.push(path.clone());
                 } else {
                     false_positives.push((path.clone(), our_errors));
                 }
@@ -428,14 +454,21 @@ mod tests {
 
         eprintln!(
             "differential oracle: {} file(s) — clean-agree {}, error-agree {}, missed {}, \
-             false-positive {}, skipped {}",
+             false-positive {}, depth-ceiling {}, skipped {}",
             files.len(),
             clean_agreements,
             error_agreements,
             missed.len(),
             false_positives.len(),
+            depth_ceiling.len(),
             skipped
         );
+        for path in &depth_ceiling {
+            eprintln!(
+                "  depth ceiling (accepted divergence, tailslide nests deeper): {}",
+                path.display()
+            );
+        }
         for path in &missed {
             eprintln!(
                 "  missed (tailslide flags, sl-lsl silent): {}",
@@ -446,7 +479,7 @@ mod tests {
         if !false_positives.is_empty() {
             let detail = false_positives
                 .iter()
-                .map(|(path, lines)| format!("{} at lines {:?}", path.display(), lines))
+                .map(|(path, lines)| format!("{} at {:?}", path.display(), lines))
                 .collect::<Vec<_>>()
                 .join("; ");
             return Err(format!(
@@ -557,7 +590,7 @@ TOTAL:: Errors: 2  Warnings: 1";
         let broken = "default\n{\n    state_entry()\n    {\n        llSay(0 \"hi\")\n    }\n}\n";
         let lines = sl_lsl_error_lines(broken, &library);
         assert!(
-            lines.contains(&5),
+            lines.contains_key(&5),
             "expected an error on line 5, got {lines:?}"
         );
     }

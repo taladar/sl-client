@@ -2182,6 +2182,11 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |_args, _ctx| Ok(Command::Stand),
         },
         CommandSpec {
+            name: "finish_animation",
+            usage: "",
+            build: |_args, _ctx| Ok(Command::FinishAnimation),
+        },
+        CommandSpec {
             name: "sit_on_ground",
             usage: "",
             build: |_args, _ctx| Ok(Command::SitOnGround),

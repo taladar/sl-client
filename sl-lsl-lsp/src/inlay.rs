@@ -229,7 +229,9 @@ fn collect_calls_expr<'a>(expr: &'a Expr, out: &mut Vec<&'a Expr>) {
             collect_calls_expr(target, out);
             collect_calls_expr(value, out);
         }
-        Expr::Paren { inner, .. } => collect_calls_expr(inner, out),
+        Expr::Paren { inner, .. } | Expr::Print { arg: inner, .. } => {
+            collect_calls_expr(inner, out);
+        }
         Expr::Integer { .. }
         | Expr::Float { .. }
         | Expr::Str { .. }
