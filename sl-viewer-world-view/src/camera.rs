@@ -66,7 +66,7 @@ use crate::world_api::InputContext;
 use crate::world_api::rlv::RlvExtFacts;
 use crate::world_api::{
     AvatarMotion, CameraMode, CameraRig, MAX_DISTANCE, MAX_PITCH, MOUSELOOK_CROSS_DISTANCE,
-    ViewerCamera,
+    ToggleFlycam, ViewerCamera,
 };
 use sl_client_bevy::{SlIdentity, Vector};
 
@@ -440,6 +440,10 @@ impl Plugin for CameraPlugin {
             // idempotent, so where `SpacenavPlugin` *is* present it still owns them.
             .init_resource::<SpacenavInput>()
             .init_resource::<FlycamAxisSettings>()
+            // The out-of-world way into and out of flycam (the menu entry and its
+            // accelerator). Registered here, with the system that reads it, so a
+            // host that mounts the camera gets the request channel with it.
+            .add_message::<ToggleFlycam>()
             .add_systems(PreUpdate, sync_input_mode)
             .add_systems(
                 Update,
@@ -495,19 +499,32 @@ pub(crate) fn sync_input_mode(mode: Res<CameraMode>, mut input_mode: ResMut<Inpu
 }
 
 /// Handle the mode-toggle actions and the seamless zoom-through transitions, and
-/// auto-enter flycam on SpaceNavigator input.
+/// enter / leave flycam on the 6-DOF device's button or a [`ToggleFlycam`]
+/// request.
 ///
 /// Toggling seeds the rig so the new mode picks up where the old one left off — a
 /// dropped-into flycam keeps the current aim, and leaving mouselook restores an
 /// orbit just outside the head — which is what makes the transitions
 /// ([`position_camera`]'s smoothing does the visual glide) seamless.
+///
+/// **Every mode change here is logged with the input that caused it**
+/// (viewer-wasd-moves-flycam-in-world). Which mode the camera is in decides what
+/// the whole WASD cluster means — the avatar in third person and mouselook, the
+/// camera in flycam ([`crate::input_action`]) — so a mode entered by a stray
+/// press of a 6-DOF puck's button reads as "my movement keys started flying the
+/// camera", with nothing in the log to say otherwise. That is the report this
+/// logging answers.
 pub(crate) fn switch_camera_mode(
     actions: Res<ButtonInput<Action>>,
     spacenav: Res<SpacenavInput>,
+    mut requests: MessageReader<ToggleFlycam>,
     mut mode: ResMut<CameraMode>,
     mut focus: ResMut<FocusTarget>,
     mut cameras: Query<(&Transform, &mut CameraRig), With<ViewerCamera>>,
 ) {
+    // Drain the requests whatever happens, so one queued while there was no camera
+    // does not fire late, on a frame the user did not ask for.
+    let requested = requests.read().count() > 0;
     let Ok((transform, mut rig)) = cameras.single_mut() else {
         return;
     };
@@ -520,31 +537,46 @@ pub(crate) fn switch_camera_mode(
                 *mode = CameraMode::ThirdPerson;
                 rig.distance = rig.distance.max(MOUSELOOK_CROSS_DISTANCE);
                 *focus = FocusTarget::Avatar;
+                info!("camera: mouselook → third person (mouselook key)");
             }
             CameraMode::ThirdPerson | CameraMode::Flycam => {
                 rig.aim_along(transform.forward().as_vec3());
+                let previous = *mode;
                 *mode = CameraMode::Mouselook;
+                info!("camera: {previous:?} → mouselook (mouselook key)");
             }
         }
     }
 
     // Flycam toggle: into flycam keeps the current pose (the entity transform is
     // already the eye; seed the aim from the forward); out of it returns to
-    // third-person. The `ToggleFlycam` action and the SpaceNavigator's **first
-    // button** both toggle it — matching the reference, where the joystick's flycam
-    // button enters and leaves flycam.
-    if actions.just_pressed(Action::ToggleFlycam) || spacenav.toggle_flycam {
-        toggle_flycam(&mut mode, &mut focus, &mut rig, transform);
+    // third-person. The `ToggleFlycam` action, a [`ToggleFlycam`] request (the
+    // menu entry and its accelerator) and the SpaceNavigator's **first button** all
+    // toggle it — matching the reference, where the joystick's flycam button and
+    // View ▸ Joystick Flycam are the same switch from either side.
+    let cause = if actions.just_pressed(Action::ToggleFlycam) {
+        Some("flycam key")
+    } else if requested {
+        Some("Joystick Flycam menu entry")
+    } else if spacenav.toggle_flycam {
+        Some("6-DOF device button")
+    } else {
+        None
+    };
+    if let Some(cause) = cause {
+        toggle_flycam(&mut mode, &mut focus, &mut rig, transform, cause);
     }
 }
 
 /// Enter or leave flycam, seeding the aim from the current forward so the pose is
-/// continuous across the switch.
+/// continuous across the switch. `cause` names the input that asked, for the log
+/// line the switch leaves behind.
 fn toggle_flycam(
     mode: &mut CameraMode,
     focus: &mut FocusTarget,
     rig: &mut CameraRig,
     transform: &Transform,
+    cause: &str,
 ) {
     match *mode {
         CameraMode::Flycam => {
@@ -555,10 +587,13 @@ fn toggle_flycam(
             // unrelated, so an interpolation between them just flies through the
             // scene).
             rig.resnap();
+            info!("camera: flycam → third person ({cause}); the movement keys walk the avatar");
         }
         CameraMode::Mouselook | CameraMode::ThirdPerson => {
             rig.aim_along(transform.forward().as_vec3());
+            let previous = *mode;
             *mode = CameraMode::Flycam;
+            info!("camera: {previous:?} → flycam ({cause}); the movement keys now fly the camera");
         }
     }
 }
@@ -596,7 +631,13 @@ pub(crate) fn reset_camera_view(
             rig.resnap();
         }
     }
-    info!("camera: reset to third-person rear view");
+    if was_flycam {
+        info!(
+            "camera: flycam → third person (Escape reset); the movement keys walk the avatar again"
+        );
+    } else {
+        info!("camera: reset to third-person rear view (Escape)");
+    }
 }
 
 /// Swap the mouse cursor to signal the third-person camera gesture the modifiers
@@ -720,6 +761,11 @@ pub(crate) fn orbit_third_person(
                     let forward = vsub(rig.smoothed_focus, rig.smoothed_eye);
                     rig.aim_along(forward);
                     *mode = CameraMode::Mouselook;
+                    // Logged like the keyed transitions
+                    // (viewer-wasd-moves-flycam-in-world): a zoom that carries on
+                    // past the minimum distance changes what the movement keys
+                    // mean, and a scroll wheel is an easy thing to do by accident.
+                    info!("camera: third person → mouselook (zoomed through the minimum distance)");
                 } else {
                     rig.distance = next.clamp(MOUSELOOK_CROSS_DISTANCE, tuning.max_distance);
                 }
@@ -1855,7 +1901,8 @@ mod tests {
     #[test]
     fn mode_toggles_switch_the_camera_mode() {
         use super::{
-            Action, CameraMode, FocusTarget, SpacenavInput, ViewerCamera, switch_camera_mode,
+            Action, CameraMode, FocusTarget, SpacenavInput, ToggleFlycam, ViewerCamera,
+            switch_camera_mode,
         };
         use bevy::prelude::*;
         use pretty_assertions::assert_eq;
@@ -1867,6 +1914,7 @@ mod tests {
                 .init_resource::<FocusTarget>()
                 .init_resource::<ButtonInput<Action>>()
                 .init_resource::<SpacenavInput>()
+                .add_message::<ToggleFlycam>()
                 .add_systems(Update, switch_camera_mode);
             app.world_mut()
                 .spawn((ViewerCamera, CameraRig::default(), Transform::default()));
@@ -1900,6 +1948,76 @@ mod tests {
             CameraMode::Flycam,
             Action::ToggleFlycam,
             CameraMode::ThirdPerson,
+        );
+    }
+
+    /// **A [`ToggleFlycam`] request is the same switch, from either side** — and
+    /// it seeds and resnaps the rig exactly as the other two sources do.
+    ///
+    /// This is the menu entry's channel (World ▸ Photo and Video ▸ Joystick
+    /// Flycam and its `Alt+Shift+F`). Before it, the only way into the flycam in
+    /// an ordinary session was the 6-DOF device's first button — so a stray press
+    /// of a puck on the desk reassigned the whole movement cluster from the avatar
+    /// to the camera, and the keyboard offered no way back
+    /// (viewer-wasd-moves-flycam-in-world). The point of the test is the **round
+    /// trip**: in on one request, out on the next.
+    #[test]
+    fn a_toggle_flycam_request_enters_and_leaves_the_flycam() {
+        use super::{
+            Action, CameraMode, FocusTarget, SpacenavInput, ToggleFlycam, ViewerCamera,
+            switch_camera_mode,
+        };
+        use bevy::prelude::*;
+        use pretty_assertions::assert_eq;
+
+        let mut app = App::new();
+        app.init_resource::<CameraMode>()
+            .init_resource::<FocusTarget>()
+            .init_resource::<ButtonInput<Action>>()
+            .init_resource::<SpacenavInput>()
+            .add_message::<ToggleFlycam>()
+            .add_systems(Update, switch_camera_mode);
+        // A rig already seeded, so `resnap` on the way out is observable.
+        app.world_mut().spawn((
+            ViewerCamera,
+            CameraRig {
+                seeded: true,
+                ..CameraRig::default()
+            },
+            Transform::default(),
+        ));
+        // Nothing asked yet: a frame on its own must not change the mode.
+        app.update();
+        assert_eq!(
+            *app.world().resource::<CameraMode>(),
+            CameraMode::ThirdPerson,
+            "an idle frame leaves the camera in third person"
+        );
+
+        app.world_mut().write_message(ToggleFlycam);
+        app.update();
+        assert_eq!(
+            *app.world().resource::<CameraMode>(),
+            CameraMode::Flycam,
+            "the request enters the flycam"
+        );
+
+        app.world_mut().write_message(ToggleFlycam);
+        app.update();
+        assert_eq!(
+            *app.world().resource::<CameraMode>(),
+            CameraMode::ThirdPerson,
+            "the next request leaves it again — the entry is its own off switch"
+        );
+        assert!(
+            matches!(*app.world().resource::<FocusTarget>(), FocusTarget::Avatar),
+            "…refocused on the avatar"
+        );
+        let mut rigs = app.world_mut().query::<&CameraRig>();
+        assert_eq!(
+            rigs.iter(app.world()).next().map(|rig| rig.seeded),
+            Some(false),
+            "…and un-seeded, so the return warps rather than flying through the scene"
         );
     }
 

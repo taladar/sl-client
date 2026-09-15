@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 313 |
+| ready | 314 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 23 |
-| done | 1144 |
+| bugs | 22 |
+| done | 1145 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1685** |
+| **total** | **1686** |
 
 ## ideas (100)
 
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (313)
+## ready (314)
 
 ### protocol
 
@@ -622,6 +622,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-text-foundation` (done), `viewer-ui-text-input-widget` (done))
 - [`viewer-media-playback-policies`](ready/viewer-media-playback-policies.md) —
   Media playback policies — URL filter, perms, first-click, rolloff
+- [`viewer-menu-advanced-shortcuts`](ready/viewer-menu-advanced-shortcuts.md) —
+  Advanced ▸ Shortcuts — the rest of the reference's submenu
 - [`viewer-menu-bar-fill-implemented-entries`](ready/viewer-menu-bar-fill-implemented-entries.md)
   — Top menu bar — add entries for already-implemented features
 - [`viewer-mesh-cost-estimate`](ready/viewer-mesh-cost-estimate.md) — Streaming
@@ -1163,7 +1165,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (23)
+## bugs (22)
 
 ### viewer
 
@@ -1215,10 +1217,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-tree-species-all-rendered-as-trees`](bugs/viewer-tree-species-all-rendered-as-trees.md)
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)
-- [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
-  — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (1144)
+## done (1145)
 
 ### protocol
 
@@ -2961,6 +2961,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-volume-panel`](done/viewer-volume-panel.md) — Volume panel (master +
   per-category sliders) (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-audio-backend` (done))
+- [`viewer-wasd-moves-flycam-in-world`](done/viewer-wasd-moves-flycam-in-world.md)
+  — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 - [`viewer-water-exclusion`](done/viewer-water-exclusion.md) — Water-exclusion
   surfaces (invisiprim successor)
 - [`viewer-water-refraction-smears-avatar-silhouette`](done/viewer-water-refraction-smears-avatar-silhouette.md)

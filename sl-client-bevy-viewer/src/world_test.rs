@@ -3153,6 +3153,7 @@ mod camera_tests {
     use bevy::input::keyboard::Key;
     use bevy::prelude::*;
     use bevy::window::CursorGrabMode;
+    use pretty_assertions::assert_eq;
 
     use sl_viewer_testkit::interact;
 
@@ -3646,6 +3647,200 @@ mod camera_tests {
         assert!(
             aimed.forward().as_vec3().dot(idle.right().as_vec3()) > 0.0,
             "…toward the side the mouse went"
+        );
+        Ok(())
+    }
+
+    /// **Outside the flycam the movement keys never touch the camera**
+    /// (viewer-wasd-moves-flycam-in-world): the whole `WASD` cluster, held in
+    /// third person, leaves the camera's transform exactly where it was — and
+    /// does not switch the mode on its way past either.
+    ///
+    /// Reported from a live session as "`WASD` seems to drive the flycam during
+    /// normal play", suspected to be a leftover of the early debug fly-camera
+    /// reading the raw keys. It is not: nothing reads `KeyCode::KeyW` for a
+    /// camera, and `drive_flycam` is gated on the mode twice over (a
+    /// `resource_equals` run condition and its own first line). What is real is
+    /// that the *mode* can change under the user — the 6-DOF device's first
+    /// button was, until the menu entry, the only way in — and in the flycam the
+    /// very same keys legitimately fly the camera.
+    ///
+    /// So the control is the point: the same fixture, the same keystroke, one
+    /// mode apart. Without it a passing "the camera did not move" proves only
+    /// that the key never arrived.
+    #[test]
+    fn the_movement_keys_do_not_touch_the_camera_outside_the_flycam() -> Result<(), TestError> {
+        let mut app = world_app_with_input();
+        let camera = install_camera_rig(
+            &mut app,
+            Vec3::new(0.0, 20.0, 0.0),
+            Vec3::new(0.0, 20.0, -1.0),
+        )
+        .ok_or("no camera stood up")?;
+        settle(&mut app, 2);
+        let pose =
+            |app: &App| -> Option<Transform> { app.world().get::<Transform>(camera).copied() };
+        assert_eq!(
+            *app.world().resource::<CameraMode>(),
+            CameraMode::ThirdPerson,
+            "the viewer starts in third person — a fixture that starts in the flycam \
+             would prove nothing below"
+        );
+
+        // The whole cluster, held together, for long enough that the flycam's
+        // 10 m/s would have carried the camera metres.
+        let cluster = [
+            (KeyCode::KeyW, Key::Character("w".into())),
+            (KeyCode::KeyA, Key::Character("a".into())),
+            (KeyCode::KeyS, Key::Character("s".into())),
+            (KeyCode::KeyD, Key::Character("d".into())),
+        ];
+        let before = pose(&app).ok_or("the camera has no transform")?;
+        for (key_code, logical) in &cluster {
+            interact::key_down(&mut app, *key_code, logical.clone(), None);
+        }
+        settle(&mut app, 12);
+        for (key_code, logical) in &cluster {
+            interact::key_up(&mut app, *key_code, logical.clone());
+        }
+        settle(&mut app, 1);
+        let after = pose(&app).ok_or("the camera has no transform")?;
+        // Component-wise plain `f32`, per the workspace convention.
+        let travel = Vec3::new(
+            after.translation.x - before.translation.x,
+            after.translation.y - before.translation.y,
+            after.translation.z - before.translation.z,
+        );
+        assert!(
+            travel.length() < 1.0e-3,
+            "in third person the movement keys must leave the camera alone, moved {:?} m",
+            travel.length()
+        );
+        assert!(
+            after.rotation.angle_between(before.rotation) < 1.0e-3,
+            "…and must not aim it either"
+        );
+        assert_eq!(
+            *app.world().resource::<CameraMode>(),
+            CameraMode::ThirdPerson,
+            "…and no movement key is a mode switch"
+        );
+
+        // The control: one mode over, the identical keystroke does fly it. This is
+        // what says the key reached the action map at all.
+        *app.world_mut().resource_mut::<CameraMode>() = CameraMode::Flycam;
+        settle(&mut app, 2);
+        let before = pose(&app).ok_or("the camera has no transform")?;
+        interact::key_down(&mut app, KeyCode::KeyW, Key::Character("w".into()), None);
+        settle(&mut app, 12);
+        interact::key_up(&mut app, KeyCode::KeyW, Key::Character("w".into()));
+        let flown = pose(&app).ok_or("the camera has no transform")?;
+        let travel = Vec3::new(
+            flown.translation.x - before.translation.x,
+            flown.translation.y - before.translation.y,
+            flown.translation.z - before.translation.z,
+        );
+        assert!(
+            travel.length() > 0.5,
+            "the same key in the flycam must fly the camera, moved {:?} m — if this \
+             fails the negative above is vacuous",
+            travel.length()
+        );
+        Ok(())
+    }
+
+    /// **A moving avatar's camera stays on its orbit**, which is the other half
+    /// of the same report (viewer-wasd-moves-flycam-in-world): the camera was
+    /// said to drive the flycam "or in addition to" walking the avatar.
+    ///
+    /// With an avatar to follow, the camera *does* move — it is a rear-view
+    /// follow, and the pair moves together. What a held movement key must never
+    /// add is a translation of its own: the eye stays at the rig's distance from
+    /// the focus the whole way, where a flycam driven by the same key would have
+    /// walked straight out of the orbit.
+    ///
+    /// The avatar is moved the way the simulator moves it — a fresh object
+    /// update at the new position — because the fixture has no simulator to
+    /// dead-reckon against; `W` is held across it so the question being asked is
+    /// "does the key add anything to the follow", which is the report.
+    #[test]
+    fn a_held_movement_key_keeps_the_camera_on_its_orbit() -> Result<(), TestError> {
+        let mut app = world_app_with_input();
+        let own = sl_client_bevy::AgentKey::from(sl_client_bevy::Uuid::from_u128(0xC));
+        app.world_mut()
+            .resource_mut::<sl_client_bevy::SlIdentity>()
+            .agent_id = Some(own);
+        super::seed_avatar(
+            &mut app,
+            own,
+            2,
+            sl_client_bevy::Vector {
+                x: 128.0,
+                y: 128.0,
+                z: 30.0,
+            },
+        );
+        install_camera_rig(
+            &mut app,
+            Vec3::new(128.0, 31.0, -128.0),
+            Vec3::new(128.0, 31.0, -120.0),
+        )
+        .ok_or("no camera stood up")?;
+        // The follow settles: the smoothing's ~0.1 s half-life at 16 ms a frame.
+        settle(&mut app, 40);
+
+        // How far the eye sits from what it orbits, against the distance it is
+        // supposed to sit at.
+        let orbit_error = |app: &mut App| -> Option<f32> {
+            let rig = rig(app)?;
+            let offset = Vec3::new(
+                rig.smoothed_eye.x - rig.smoothed_focus.x,
+                rig.smoothed_eye.y - rig.smoothed_focus.y,
+                rig.smoothed_eye.z - rig.smoothed_focus.z,
+            );
+            Some((offset.length() - rig.distance).abs())
+        };
+        let settled = orbit_error(&mut app).ok_or("the camera has no rig")?;
+        assert!(
+            settled < 0.05,
+            "the fixture must start on its orbit, off by {settled} m"
+        );
+
+        let focus_before = rig(&mut app).ok_or("the camera has no rig")?.smoothed_focus;
+        interact::key_down(&mut app, KeyCode::KeyW, Key::Character("w".into()), None);
+        settle(&mut app, 10);
+        // The simulator's half of a walk: the avatar is five metres further north.
+        super::seed_avatar(
+            &mut app,
+            own,
+            2,
+            sl_client_bevy::Vector {
+                x: 133.0,
+                y: 128.0,
+                z: 30.0,
+            },
+        );
+        settle(&mut app, 30);
+        let walking = orbit_error(&mut app).ok_or("the camera has no rig")?;
+        let focus_after = rig(&mut app).ok_or("the camera has no rig")?.smoothed_focus;
+        interact::key_up(&mut app, KeyCode::KeyW, Key::Character("w".into()));
+        assert!(
+            walking < 0.05,
+            "a held forward key must keep the camera on its orbit around the avatar, \
+             off by {walking} m — a camera being flown by the same key leaves it"
+        );
+        // …and the thing being orbited actually moved, which is what says the
+        // burst exercised the follow at all rather than a parked camera.
+        let walked = Vec3::new(
+            focus_after.x - focus_before.x,
+            focus_after.y - focus_before.y,
+            focus_after.z - focus_before.z,
+        );
+        assert!(
+            walked.length() > 1.0,
+            "the avatar must actually have moved, focus travelled {:?} m — otherwise \
+             the orbit check above is vacuous",
+            walked.length()
         );
         Ok(())
     }
