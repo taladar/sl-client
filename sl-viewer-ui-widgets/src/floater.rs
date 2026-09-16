@@ -116,8 +116,8 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
 use sl_viewer_ui_core::ui::{
-    LogicalBorder, LogicalInset, LogicalPadding, LogicalRect, UiDirection, UiPanelShown, UiRoot,
-    UiScaffoldSystems, column, row,
+    BOTTOM_BAR_Z, LogicalBorder, LogicalInset, LogicalPadding, LogicalRect, UiDirection,
+    UiPanelShown, UiRoot, UiScaffoldSystems, column, row,
 };
 use sl_viewer_ui_core::ui_element::ElementCx;
 use sl_viewer_ui_core::ui_font::UiFont;
@@ -278,7 +278,9 @@ impl Plugin for FloaterPlugin {
             .add_systems(
                 PostUpdate,
                 (
-                    raise_floaters_on_open.before(bevy::ui::UiSystems::Stack),
+                    (raise_floaters_on_open, renumber_floater_z)
+                        .chain()
+                        .before(bevy::ui::UiSystems::Stack),
                     close_owned_floaters,
                 ),
             );
@@ -540,12 +542,33 @@ pub struct FloaterParts {
     dock_glyph: Option<Entity>,
 }
 
+/// The highest paint order a free floater may take: just under the bars.
+///
+/// A floater's `GlobalZIndex` shares one number line with everything drawn
+/// *over* the windows at a fixed plane — the top and bottom bars
+/// ([`BOTTOM_BAR_Z`]), the toast channel and the combo popovers (9 500), the
+/// menus (10 000). A window that climbed past one of those planes would paint
+/// over it and win its clicks: a combo's list would open *behind* the window
+/// holding the combo, and pressing the combo again would silently close the
+/// list nobody could see ([[viewer-combo-stops-opening]]).
+const FLOATER_Z_CEILING: i32 = BOTTOM_BAR_Z - 1;
+
+/// The high-water mark past which [`renumber_floater_z`] packs the free
+/// floaters' paint orders back down to `1..=N`.
+///
+/// Every press anywhere in a window raises it, so the mark climbs by one or two
+/// per click for the whole session; well below [`FLOATER_Z_CEILING`], so the
+/// ceiling is only ever a backstop against a single frame's worth of raises.
+const FLOATER_Z_RENUMBER_AT: i32 = 4_096;
+
 /// The z-order high-water mark: the next `GlobalZIndex` a bring-to-front assigns.
 ///
-/// Monotonic, so raising a floater never has to renumber the others — it simply
-/// takes a value above every one seen so far, which is the reference's
-/// front-of-list ordering expressed as a paint order. `i32` is far more headroom
-/// than any session of clicks could exhaust.
+/// Monotonic between renumberings, so raising a floater never has to touch the
+/// others — it simply takes a value above every one seen so far, which is the
+/// reference's front-of-list ordering expressed as a paint order. It is **not**
+/// allowed to climb for ever, though: the planes drawn over the windows are
+/// fixed numbers, so once the mark passes `FLOATER_Z_RENUMBER_AT` the stack is
+/// packed back down, order preserved (`renumber_floater_z`).
 #[derive(Resource, Debug, Clone, Copy)]
 pub struct FloaterZTop(i32);
 
@@ -558,12 +581,13 @@ impl Default for FloaterZTop {
 }
 
 impl FloaterZTop {
-    /// The next z value, advancing the mark. Saturates rather than wrapping, so a
-    /// pathological run of raises degrades to "all on top together" instead of
-    /// diving behind everything.
-    const fn next(&mut self) -> i32 {
-        let z = self.0;
-        self.0 = self.0.saturating_add(1);
+    /// The next z value, advancing the mark. Stops at [`FLOATER_Z_CEILING`]
+    /// rather than passing it, so a pathological run of raises inside one frame
+    /// degrades to "all on top together" instead of climbing over the bars,
+    /// toasts, combo lists and menus.
+    fn next(&mut self) -> i32 {
+        let z = self.0.min(FLOATER_Z_CEILING);
+        self.0 = self.0.saturating_add(1).min(FLOATER_Z_CEILING);
         z
     }
 }
@@ -2036,9 +2060,51 @@ fn close_owned_floaters(
     }
 }
 
+/// Pack the free floaters' paint orders back down to `1..=N`, in their current
+/// order, once the high-water mark has passed [`FLOATER_Z_RENUMBER_AT`].
+///
+/// Only the *order* of the windows means anything, so renumbering is invisible —
+/// and it is what keeps every window under the planes drawn over them (see
+/// [`FLOATER_Z_CEILING`]). A floater still at 0 has never been raised and stays
+/// there; a docked one carries its host's plane, not a place in this stack, and
+/// is left alone. Runs after the last raise of the frame and before the UI stack
+/// pass reads the z-order, so no frame is ever drawn from a climbing number.
+fn renumber_floater_z(
+    mut z_top: ResMut<FloaterZTop>,
+    mut floaters: Query<(Entity, &Floater, &mut GlobalZIndex)>,
+) {
+    if z_top.0 <= FLOATER_Z_RENUMBER_AT {
+        return;
+    }
+    let mut stacked: Vec<(i32, Entity)> = floaters
+        .iter()
+        .filter(|(_entity, floater, z)| floater.docked_in.is_none() && z.0 > 0)
+        .map(|(entity, _floater, z)| (z.0, entity))
+        .collect();
+    // Ties can only be windows that shared the ceiling; the entity breaks them
+    // deterministically, which is as much order as they ever had.
+    stacked.sort_unstable();
+    tracing::debug!(
+        mark = z_top.0,
+        windows = stacked.len(),
+        "renumbering the floater z-order"
+    );
+    let mut packed = FloaterZTop::default();
+    for (_old, entity) in stacked {
+        let z = packed.next();
+        if let Ok((_entity, _floater, mut index)) = floaters.get_mut(entity)
+            && index.0 != z
+        {
+            index.0 = z;
+        }
+    }
+    *z_top = packed;
+}
+
 /// Assign `entity` the next z value, raising it above every other floater.
 fn raise(entity: Entity, z_indices: &mut Query<&mut GlobalZIndex>, z_top: &mut FloaterZTop) {
     let z = z_top.next();
+    tracing::debug!(floater = ?entity, z, "raising a floater");
     if let Ok(mut index) = z_indices.get_mut(entity)
         && index.0 != z
     {
@@ -2573,15 +2639,15 @@ pub fn register_floater_layout(app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::{
-        ActiveFloater, CASCADE_STEP, DefaultDockHost, DeferredFloaterContent, Floater, FloaterCaps,
-        FloaterCloseGuard, FloaterCloseRequested, FloaterCommand, FloaterHandle, FloaterKey,
-        FloaterOp, FloaterOwner, FloaterParts, FloaterSpec, FloaterSystems, FloaterZTop,
-        KeyedFloaterOpen, KeyedFloaters, MIN_VISIBLE, RESIZE_FLOOR, apply_floater_commands,
-        apply_floater_content, apply_floater_glyphs, apply_floater_inset,
-        build_deferred_floater_content, clamp_floaters_on_screen, clamp_position,
-        close_owned_floaters, drag_position, floater_panel, highlight_active_floater,
-        picker_identity, raise_floaters_on_open, resize_size, snap_rect_of, spawn_floater,
-        toggle_floater,
+        ActiveFloater, BOTTOM_BAR_Z, CASCADE_STEP, DefaultDockHost, DeferredFloaterContent,
+        FLOATER_Z_CEILING, FLOATER_Z_RENUMBER_AT, Floater, FloaterCaps, FloaterCloseGuard,
+        FloaterCloseRequested, FloaterCommand, FloaterHandle, FloaterKey, FloaterOp, FloaterOwner,
+        FloaterParts, FloaterSpec, FloaterSystems, FloaterZTop, KeyedFloaterOpen, KeyedFloaters,
+        MIN_VISIBLE, RESIZE_FLOOR, apply_floater_commands, apply_floater_content,
+        apply_floater_glyphs, apply_floater_inset, build_deferred_floater_content,
+        clamp_floaters_on_screen, clamp_position, close_owned_floaters, drag_position,
+        floater_panel, highlight_active_floater, picker_identity, raise_floaters_on_open,
+        renumber_floater_z, resize_size, snap_rect_of, spawn_floater, toggle_floater,
     };
     use bevy::picking::backend::HitData;
     use bevy::picking::pointer::PointerId;
@@ -2624,7 +2690,13 @@ mod tests {
             // Where the plugin puts them: the raise must see every `Update`
             // flip, whoever made it, and the owner sweep writes its close for
             // the *next* frame's command pass (see `close_owned_floaters`).
-            .add_systems(PostUpdate, (raise_floaters_on_open, close_owned_floaters));
+            .add_systems(
+                PostUpdate,
+                (
+                    (raise_floaters_on_open, renumber_floater_z).chain(),
+                    close_owned_floaters,
+                ),
+            );
         let root = app.world_mut().spawn(Node::default()).id();
         let host = app.world_mut().spawn(Node::default()).id();
         app.insert_resource(UiRoot(root));
@@ -3111,6 +3183,85 @@ mod tests {
             first < second && second < third,
             "each raise must take a value above the last: {first}, {second}, {third}"
         );
+    }
+
+    /// The mark stops under the bars however many raises one frame hands out —
+    /// the backstop behind the renumbering, which only runs between frames.
+    #[test]
+    fn the_mark_never_climbs_over_the_bars() {
+        let mut top = FloaterZTop(FLOATER_Z_RENUMBER_AT);
+        let highest = core::iter::repeat_with(|| top.next())
+            .take(20_000)
+            .max()
+            .unwrap_or(0);
+        assert_eq!(highest, FLOATER_Z_CEILING);
+        assert!(
+            highest < BOTTOM_BAR_Z,
+            "a window at z {highest} paints over the bars at {BOTTOM_BAR_Z}"
+        );
+    }
+
+    /// **A whole session of raises leaves every window under the planes drawn
+    /// over them** ([[viewer-combo-stops-opening]]).
+    ///
+    /// Every press in a window raises it, so the mark climbs for the whole
+    /// session; once it passes the renumbering threshold the free windows are
+    /// packed back down to `1..=N`. What must survive the packing is the only
+    /// thing a z value means — which window is in front of which — and what must
+    /// not be touched is a window that was never raised (0) or a docked one
+    /// (its host's plane).
+    #[test]
+    fn a_long_session_of_raises_is_packed_back_down_in_order() -> Result<(), TestError> {
+        let (mut app, root, host) = floater_app();
+        let back = spawn_one(&mut app, root);
+        let middle = spawn_one(&mut app, root);
+        let front = spawn_one(&mut app, root);
+        let never_raised = spawn_one(&mut app, root);
+        let docked = spawn_one(&mut app, root);
+        command(&mut app, docked, FloaterOp::ToggleDock);
+        let host_z = 7;
+        app.world_mut()
+            .entity_mut(host)
+            .insert(GlobalZIndex(host_z));
+        app.world_mut()
+            .entity_mut(docked)
+            .insert(GlobalZIndex(host_z));
+
+        // A long session: the mark has just passed the threshold, and the three
+        // windows took their places on the way up, gaps and all.
+        for (window, z) in [(back, 12), (middle, 3_000), (front, FLOATER_Z_RENUMBER_AT)] {
+            app.world_mut().entity_mut(window).insert(GlobalZIndex(z));
+        }
+        app.world_mut().resource_mut::<FloaterZTop>().0 = FLOATER_Z_RENUMBER_AT.saturating_add(1);
+        app.update();
+
+        let z_of = |app: &App, entity: Entity| app.world().get::<GlobalZIndex>(entity).map(|z| z.0);
+        let packed = [z_of(&app, back), z_of(&app, middle), z_of(&app, front)];
+        assert_eq!(
+            packed,
+            [Some(1), Some(2), Some(3)],
+            "the raised windows are packed to 1..=N, back to front"
+        );
+        assert_eq!(
+            app.world().resource::<FloaterZTop>().0,
+            4,
+            "the mark follows"
+        );
+        assert_eq!(
+            z_of(&app, never_raised),
+            Some(0),
+            "an unraised window stays at 0"
+        );
+        assert_eq!(
+            z_of(&app, docked),
+            Some(host_z),
+            "a docked window keeps its host's plane"
+        );
+
+        // And raising after the packing still puts the raised window in front.
+        command(&mut app, back, FloaterOp::BringToFront);
+        assert!(z_of(&app, back) > z_of(&app, front));
+        Ok(())
     }
 
     /// **Opening a window raises it**, without the feature that opened it
@@ -4050,11 +4201,12 @@ mod tests {
         use bevy::prelude::*;
         use pretty_assertions::assert_eq;
 
-        use super::{Floater, TestError};
+        use super::{Floater, FloaterZTop, TestError};
         use crate::floater::{
             DefaultDockHost, FloaterCaps, FloaterCommand, FloaterOp, FloaterPlugin, FloaterSpec,
             spawn_floater,
         };
+        use crate::ui_combo::{ComboSelection, ComboSpec, ComboWidgetPlugin, spawn_combo};
         use crate::ui_test::interact::{self, InteractionTest, centre_of};
         use crate::ui_test::{find_by_name, settle};
         use sl_viewer_ui_core::ui::{UiPanelShown, UiRoot, UiScaffoldSystems};
@@ -4118,6 +4270,88 @@ mod tests {
             app.world()
                 .get::<Floater>(root)
                 .map(|state| (state.position, state.content_size))
+        }
+
+        /// The fixture window with a combo in its content area — a combo's list
+        /// is a child of its window, but paints on a fixed plane of its own.
+        fn combo_in_floater_app() -> App {
+            let mut app = InteractionTest::new().build();
+            app.add_plugins((FloaterPlugin, ComboWidgetPlugin));
+            app.add_systems(
+                Startup,
+                (|mut commands: Commands, root: Res<UiRoot>| {
+                    let handle = spawn_floater(
+                        &mut commands,
+                        root.0,
+                        FloaterSpec {
+                            id: "scenario",
+                            title: "Scenario".to_owned(),
+                            position: START_POSITION,
+                            default_size: Some(START_SIZE),
+                            min_size: None,
+                            dock_host: None,
+                            caps: FloaterCaps {
+                                resizable: true,
+                                minimizable: true,
+                                closable: true,
+                                dockable: false,
+                            },
+                        },
+                    );
+                    commands.entity(handle.root).insert(UiPanelShown(true));
+                    let labels = ["Low".to_owned(), "Medium".to_owned(), "High".to_owned()];
+                    spawn_combo(
+                        &mut commands,
+                        handle.content,
+                        &ComboSpec {
+                            element: "session-combo",
+                            labels: &labels,
+                            active: 0,
+                            tab_index: 1,
+                            font_size: 14.0,
+                            translate_labels: false,
+                        },
+                    );
+                })
+                .after(UiScaffoldSystems::SpawnRoot),
+            );
+            settle(&mut app);
+            app
+        }
+
+        /// **A combo in a window the whole session has been raising still drops
+        /// its list down over that window** ([[viewer-combo-stops-opening]]).
+        ///
+        /// Every press in a window raises it, and the mark used to climb without
+        /// end, while the list paints on a fixed plane. Past that plane the
+        /// window painted over its own combo's list: the press opened a list
+        /// nobody could see, the next press closed it, and the combo read as
+        /// dead for the rest of the session — and fine again after a restart.
+        /// The pick goes through hit-testing, so a list drawn under its window
+        /// fails here however it is laid out.
+        #[test]
+        fn a_combo_list_opens_over_a_window_raised_all_session() -> Result<(), TestError> {
+            let mut app = combo_in_floater_app();
+            // Where a long session of presses left the mark: above the combo
+            // lists' plane.
+            app.world_mut().resource_mut::<FloaterZTop>().0 = 9_600;
+            interact::click_node(&mut app, "floater-title-bar")?;
+            settle(&mut app);
+
+            interact::click_node(&mut app, "session-combo:combo")?;
+            settle(&mut app);
+            interact::click_node(&mut app, "combo-option:2")?;
+            settle(&mut app);
+
+            let anchor = find_by_name(&mut app, "session-combo:combo").ok_or("no combo")?;
+            assert_eq!(
+                app.world()
+                    .get::<ComboSelection>(anchor)
+                    .map(|selection| selection.active),
+                Some(2),
+                "the option under the pointer was the one picked"
+            );
+            Ok(())
         }
 
         /// Dragging the title bar moves the window by what the pointer

@@ -5,7 +5,8 @@ topic: viewer
 status: bugs
 origin: seen while live-checking [[viewer-contact-set-presence-extras]]
   (2026-08-20)
-refs: [viewer-contact-sets, viewer-ui-widget-scaffold]
+refs: [viewer-contact-sets, viewer-ui-widget-scaffold,
+  viewer-floater-z-climbs-over-fixed-planes]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -59,7 +60,7 @@ not just the `combo press` line.
 
 ## How to capture it next time
 
-Run with `RUST_LOG=sl_client_bevy_viewer::ui_combo=debug` and reproduce. The
+Run with `RUST_LOG=sl_viewer_ui_widgets::ui_combo=debug` and reproduce. The
 `combo press` line names the cause directly:
 
 - **no line at all** — the press never reached the combo. A hit-test or
@@ -76,5 +77,22 @@ Run with `RUST_LOG=sl_client_bevy_viewer::ui_combo=debug` and reproduce. The
   popover is being drawn somewhere the user cannot see it (placement /
   z-order).
 
+## Ruled out (2026-09-16): the floater z-order climbing over the list
+
+Investigating this turned up [[viewer-floater-z-climbs-over-fixed-planes]]: a
+window's z-order climbed by one per press for the whole session, and past
+9 500 a window painted over its own combo's list — the exact symptom (the
+list opens invisibly, the next press closes it, it lasts the session and is
+gone after a restart), reproduced headless and now fixed. It is **not** this
+bug, though: it needs thousands of presses, and both sightings were in
+debugging sessions of a few minutes. A live run with the raise logging on
+confirmed the rate — one raise in the first two minutes after login.
+
+Also found: the capture recipe below named the log target
+`sl_client_bevy_viewer::ui_combo`, which stopped existing when the widgets
+became their own crate (2026-08-22). Both sightings predate that, so neither
+capture was affected, but a run following the recipe since would have logged
+nothing. The recipe now names `sl_viewer_ui_widgets::ui_combo`.
+
 Reference (Firestorm, read-only): none — this is our own widget
-(`src/ui_combo.rs`).
+(`sl-viewer-ui-widgets/src/ui_combo.rs`).

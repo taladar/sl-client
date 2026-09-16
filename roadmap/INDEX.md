@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 41 |
 | in-progress | 22 |
 | bugs | 8 |
-| done | 1170 |
+| done | 1171 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1698** |
+| **total** | **1699** |
 
 ## ideas (100)
 
@@ -1188,7 +1188,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 
-## done (1170)
+## done (1171)
 
 ### protocol
 
@@ -1835,6 +1835,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-interaction-harness` (done), `viewer-floater-registry` (done))
 - [`viewer-floater-registry`](done/viewer-floater-registry.md) — A FLOATERS
   registry, so floaters can be swept at all
+- [`viewer-floater-z-climbs-over-fixed-planes`](done/viewer-floater-z-climbs-over-fixed-planes.md)
+  — A window's z-order climbed without end, over the lists, bars and menus
 - [`viewer-floaters-never-reread-after-a-push`](done/viewer-floaters-never-reread-after-a-push.md)
   — A floater seeds its draft once and reverts what it never saw
 - [`viewer-flycam-stop-button-overlaps-chat`](done/viewer-flycam-stop-button-overlaps-chat.md)

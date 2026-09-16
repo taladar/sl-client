@@ -374,7 +374,7 @@ fn toggle_combo_popover(
     // those and the popover is being built but not seen. Absent the line
     // entirely, the press never reached the combo at all. `debug!`, so it costs
     // nothing until asked for with
-    // `RUST_LOG=sl_client_bevy_viewer::ui_combo=debug`.
+    // `RUST_LOG=sl_viewer_ui_widgets::ui_combo=debug`.
     tracing::debug!(
         anchor = ?press.entity,
         disabled = disabled.contains(press.entity),
