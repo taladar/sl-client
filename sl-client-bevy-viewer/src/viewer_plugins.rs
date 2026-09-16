@@ -468,7 +468,6 @@ impl Plugin for ViewerWorldPlugins {
         app.init_world_scoped::<TerrainTextures>();
         app.init_resource::<PendingPatchRebuilds>();
         app.init_resource::<MeshUploadBudget>();
-        app.init_resource::<crate::terrain::CurrentTerrainLighting>();
         app.init_world_scoped::<ObjectState>();
         app.init_world_scoped::<PendingObjectEvents>();
         app.init_world_scoped::<RiggedBindSkipLog>();
@@ -752,10 +751,6 @@ impl Plugin for ViewerWorldPlugins {
                 drive_texture_animations,
                 restore_stopped_animations,
             ),
-        );
-        app.add_systems(
-            Update,
-            crate::terrain::drive_terrain_lighting.after(world_api::WorldPhase::CameraPositioned),
         );
         app.add_systems(Update, environment_asset_pipeline());
     }

@@ -1,6 +1,8 @@
 //! A custom Bevy material for Second Life / OpenSim **terrain texture
 //! splatting**: it blends a region's four ground ("detail") textures by a
-//! per-vertex four-component weight and applies a simple directional light.
+//! per-vertex four-component weight and lights the result from the sky the way
+//! the reference's deferred pass lights its legacy terrain
+//! ([`crate::sky_lighting`]).
 //!
 //! The per-vertex weights are computed on the CPU by the Bevy-free `sl-terrain`
 //! crate (elevation bilinear interpolation plus a Perlin transition band) and
@@ -17,36 +19,13 @@
 use bevy::app::{App, Plugin};
 use bevy::asset::{Asset, Handle, load_internal_asset, uuid_handle};
 use bevy::image::Image;
-use bevy::math::Vec3;
 use bevy::mesh::{Mesh, MeshVertexAttribute, MeshVertexBufferLayoutRef, VertexFormat};
 use bevy::pbr::{Material, MaterialPipeline, MaterialPipelineKey, MaterialPlugin};
 use bevy::reflect::TypePath;
 use bevy::render::render_resource::{
-    AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError,
+    AsBindGroup, RenderPipelineDescriptor, SpecializedMeshPipelineError,
 };
 use bevy::shader::{Shader, ShaderRef};
-
-/// The atmospheric lighting the terrain is lit by, updated per frame from the sky
-/// frame — the reference legacy terrain's `sunlit` (the sun's atmospheric diffuse
-/// colour, warm near dawn / dusk) and `amblit` (the sky's ambient colour). Using
-/// the *atmospheric* ambient rather than the raw reflection-probe irradiance is
-/// what keeps a sun-shaded slope reading the ground's own colour instead of going
-/// sky-blue at dawn / dusk — matching `softenLight`'s legacy branch.
-/// `PartialEq` (exact float equality) lets the driver skip the per-material
-/// update when the resolved lighting is unchanged: both sides of the compare
-/// are re-derived from the same sky inputs, so bit-equality is the correct
-/// "nothing changed" test (no epsilon needed).
-#[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
-#[expect(
-    clippy::module_name_repetitions,
-    reason = "re-exported at the crate root as `TerrainLighting`, where the name reads clearly"
-)]
-pub struct TerrainLighting {
-    /// The sun / moon atmospheric diffuse colour (the reference `sunlit`).
-    pub sun_color: Vec3,
-    /// The sky's ambient colour (the reference `amblit`).
-    pub ambient_color: Vec3,
-}
 
 /// The mesh vertex attribute carrying a terrain vertex's four detail-texture
 /// blend weights (one per detail texture, as produced by
@@ -93,10 +72,13 @@ pub struct TerrainMaterial {
     #[texture(6)]
     #[sampler(7)]
     pub detail3: Handle<Image>,
-    /// The atmospheric sun / ambient colours the ground is lit by (updated per
-    /// frame from the sky frame). See [`TerrainLighting`].
-    #[uniform(8)]
-    pub lighting: TerrainLighting,
+    /// The shared sky-lighting texture the ground is lit by — always
+    /// [`SKY_LIGHTING_IMAGE`](crate::SKY_LIGHTING_IMAGE), bound by handle so a new
+    /// sky reaches every region's material without rewriting any of them. See
+    /// [`crate::sky_lighting`].
+    #[texture(8)]
+    #[sampler(9)]
+    pub sky_lighting: Handle<Image>,
 }
 
 impl Material for TerrainMaterial {
@@ -144,6 +126,7 @@ pub struct TerrainMaterialPlugin;
 
 impl Plugin for TerrainMaterialPlugin {
     fn build(&self, app: &mut App) {
+        crate::sky_lighting::load_sky_lighting(app);
         load_internal_asset!(
             app,
             TERRAIN_SHADER_HANDLE,

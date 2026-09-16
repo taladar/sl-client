@@ -11,12 +11,17 @@
 //! glossiness + environment** highlight. [`SlFaceExt`] adds exactly those as an
 //! extension: extra uniform + specular-map bindings (indices 100+, clear of every
 //! `StandardMaterial` binding) plus a fragment shader that re-samples the base
-//! material's maps at their own UVs and, for a legacy face, adds a Blinn-Phong
-//! specular lobe on top of the reused `StandardMaterial` PBR lighting.
+//! material's maps at their own UVs, lights a **legacy** (non-PBR) face from the
+//! sky the way the reference's deferred pass does
+//! ([`sl_client_bevy::sky_lighting`]) rather than with Bevy's physically based
+//! sun, and adds the Blinn-Phong specular lobe to one that carries a legacy
+//! material.
 //!
-//! The extension is **inert** for a plain diffuse / avatar / not-yet-transformed
-//! PBR face ([`SlFaceExt::inert`]): `mode = 0`, no re-sample flags, identity
-//! transforms — so it renders bit-identically to a bare `StandardMaterial`. This
+//! The extension is **inert** for a plain diffuse / avatar face
+//! ([`SlFaceExt::inert`]): diffuse mode, no re-sample flags, identity transforms,
+//! and the shared sky-lighting texture. Until a sky has been resolved (and for
+//! good in an app with none) such a face renders exactly as a bare
+//! `StandardMaterial` would. This
 //! lets every face carry one stable [`FaceMaterial`] handle that the whole face
 //! pipeline mutates in place (writing `.base` for the `StandardMaterial` fields it
 //! always set, and `.extension` for the per-map transforms / legacy specular),
@@ -40,6 +45,7 @@ use bevy::render::render_resource::{
     AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError,
 };
 use bevy::shader::{Shader, ShaderRef};
+use sl_client_bevy::SKY_LIGHTING_IMAGE;
 
 /// The internal handle the face shader (`face_material.wgsl`) is loaded under, so
 /// the material references it without an on-disk asset path (the repo compiles
@@ -53,12 +59,20 @@ const FACE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("6b1f0a92-4c3d-4e18-9f27
 /// holds the per-map UV transforms and the legacy specular workflow.
 pub type FaceMaterial = ExtendedMaterial<StandardMaterial, SlFaceExt>;
 
-/// Legacy Blinn-Phong specular mode: the extension adds a specular highlight over
-/// the reused PBR lighting.
+/// Legacy Blinn-Phong specular mode: a legacy face lit from the sky the way the
+/// reference lights it ([`sl_client_bevy::sky_lighting`]), with the specular
+/// highlight added.
 pub const SL_FACE_MODE_LEGACY: u32 = 1;
-/// PBR / plain-diffuse mode: no added highlight (the base material is the whole
-/// surface); per-map UV transforms may still apply via [`SlFaceParams::map_flags`].
+/// PBR mode: the face is a glTF material and is lit by Bevy's physically based
+/// lighting; per-map UV transforms may apply via [`SlFaceParams::map_flags`].
 pub const SL_FACE_MODE_PBR: u32 = 0;
+/// Plain diffuse mode — every face that is neither of the above, and the inert
+/// default: lit from the sky like a legacy face, with no highlight.
+///
+/// Distinct from [`SL_FACE_MODE_PBR`] because the two are lit by different
+/// models: the reference sends a glTF face down its PBR branch and every other
+/// face down the legacy one.
+pub const SL_FACE_MODE_DIFFUSE: u32 = 2;
 
 /// [`SlFaceParams::map_flags`] bit: re-sample the normal map at [`uv_normal`](SlFaceParams::uv_normal_mat).
 pub const MAP_FLAG_NORMAL: u32 = 1 << 0;
@@ -110,7 +124,8 @@ pub struct SlFaceParams {
     /// Texture-animation flip-book grid + `scale_t`: `(size_x, size_y, scale_t,
     /// unused)`. A non-zero `size_x`/`size_y` pages a `size_x × size_y` sprite grid.
     pub anim_grid: Vec4,
-    /// Render mode ([`SL_FACE_MODE_PBR`] / [`SL_FACE_MODE_LEGACY`]).
+    /// Render mode ([`SL_FACE_MODE_PBR`] / [`SL_FACE_MODE_LEGACY`] /
+    /// [`SL_FACE_MODE_DIFFUSE`]).
     pub mode: u32,
     /// Which maps to re-sample at their own UV (the `MAP_FLAG_*` bitset).
     pub map_flags: u32,
@@ -181,8 +196,8 @@ pub struct SlFaceParams {
 }
 
 impl SlFaceParams {
-    /// The inert params: PBR mode, no re-sampling, identity transforms, no legacy
-    /// specular — an extension that changes nothing.
+    /// The inert params: plain diffuse mode, no re-sampling, identity transforms,
+    /// no legacy specular.
     #[must_use]
     pub const fn inert() -> Self {
         let identity_mat = Vec4::new(1.0, 0.0, 0.0, 1.0);
@@ -197,7 +212,7 @@ impl SlFaceParams {
             anim_params: Vec4::ZERO,
             anim_static: Vec4::ZERO,
             anim_grid: Vec4::ZERO,
-            mode: SL_FACE_MODE_PBR,
+            mode: SL_FACE_MODE_DIFFUSE,
             map_flags: 0,
             anim_mode: 0,
             glossiness: 0.0,
@@ -358,10 +373,11 @@ impl Default for SlFaceParams {
 /// bindless index-table slots start at **50** and the extension's own bindings at
 /// **100**, both clear of every `StandardMaterial` slot/binding. `#[data(50, …)]`
 /// packs the whole extension into the [`SlFaceParams`] data array (via the
-/// [`From`] below); the four maps take slots 51–58.
+/// [`From`] below); the four maps take slots 51–58 and the shared sky-lighting
+/// texture 59–60.
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
 #[data(50, SlFaceParams, binding_array(101))]
-#[bindless(index_table(range(50..59), binding(100)))]
+#[bindless(index_table(range(50..61), binding(100)))]
 pub struct SlFaceExt {
     /// The per-map transforms and legacy specular scalars (packed into the bindless
     /// data array at slot 50 via [`From<&SlFaceExt>`](SlFaceParams)).
@@ -391,6 +407,12 @@ pub struct SlFaceExt {
     #[texture(57)]
     #[sampler(58)]
     pub emissive_map: Handle<Image>,
+    /// The shared sky-lighting texture a legacy or plain diffuse face is lit by —
+    /// always [`SKY_LIGHTING_IMAGE`], which is why [`inert`](Self::inert) sets it
+    /// and no composition ever has to. See [`sl_client_bevy::sky_lighting`].
+    #[texture(59)]
+    #[sampler(60)]
+    pub sky_lighting: Handle<Image>,
 }
 
 impl From<&SlFaceExt> for SlFaceParams {
@@ -402,7 +424,8 @@ impl From<&SlFaceExt> for SlFaceParams {
 }
 
 impl SlFaceExt {
-    /// The inert extension — renders identically to a bare [`StandardMaterial`].
+    /// The inert extension: a plain diffuse face, lit from the sky, with none of
+    /// the extension's maps.
     #[must_use]
     pub fn inert() -> Self {
         Self {
@@ -411,6 +434,7 @@ impl SlFaceExt {
             normal_map: Handle::default(),
             metallic_roughness_map: Handle::default(),
             emissive_map: Handle::default(),
+            sky_lighting: SKY_LIGHTING_IMAGE,
         }
     }
 }
@@ -473,6 +497,8 @@ impl Plugin for SlFaceMaterialPlugin {
         // face applies to itself (the fullscreen haze pass cannot see a draw that
         // writes no depth).
         sl_client_bevy::load_water_fog_shader(app);
+        // And the sky-lighting module and texture every legacy face is lit by.
+        sl_client_bevy::load_sky_lighting(app);
         load_internal_asset!(
             app,
             FACE_SHADER_HANDLE,

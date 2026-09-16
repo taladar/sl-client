@@ -1,15 +1,13 @@
 // Terrain texture-splat material: blends a region's four ground ("detail")
 // textures by a per-vertex four-component weight (computed on the CPU from the
-// ground elevation by the `sl-terrain` crate) and applies a simple directional
-// plus ambient light so the ground reads with relief.
+// ground elevation by the `sl-terrain` crate) and lights the result from the sky
+// the way the reference's deferred `softenLight` lights its legacy terrain
+// (`sl_client_bevy::sky_lighting`), including the sun's cascaded shadow maps so
+// the ground receives shadows cast by avatars, prims and terrain relief.
 //
-// This is deliberately not a full PBR material: it binds only the four detail
-// textures and a single directional (sun / moon) term. It does, however, read
-// the shared view + light bind group (group 0) so it tracks the scene's real
-// sun/moon direction (the day cycle) and — for P24 — samples the directional
-// light's cascaded shadow maps so the ground receives shadows cast by avatars,
-// prims, and terrain relief. Advanced terrain materials (PBR / normal /
-// specular) remain a deferred non-goal of the minimum-viable viewer.
+// It reads the shared view + light bind group (group 0) for the sun's direction
+// and shadows, and the shared sky-lighting texture for the sky's colours. Advanced
+// terrain materials (PBR / normal / specular) remain a deferred non-goal.
 
 #import bevy_pbr::{
     mesh_functions,
@@ -17,6 +15,14 @@
     mesh_view_types,
     shadows,
     view_transformations::position_world_to_clip,
+}
+#import sl_client_bevy::sky_lighting::{
+    sky_legacy_diffuse,
+    sky_legacy_finish,
+    sky_legacy_irradiance,
+    sky_lighting_from_texels,
+    sky_lighting_is_resolved,
+    sky_surface_light,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var detail0_texture: texture_2d<f32>;
@@ -28,13 +34,19 @@
 @group(#{MATERIAL_BIND_GROUP}) @binding(6) var detail3_texture: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(7) var detail3_sampler: sampler;
 
-// The atmospheric sun / ambient colours the ground is lit by (the reference
-// `sunlit` / `amblit`), updated per frame from the sky frame.
-struct TerrainLighting {
-    sun_color: vec3<f32>,
-    ambient_color: vec3<f32>,
-};
-@group(#{MATERIAL_BIND_GROUP}) @binding(8) var<uniform> lighting: TerrainLighting;
+// The shared sky-lighting texture (`sl_client_bevy::sky_lighting`): texel 0 is
+// `(sunlit, mode)`, texel 1 `(amblit, probe_ambiance)`. Read with `textureLoad`, so
+// the sampler beside it is only there because a material texture binding comes
+// with one.
+@group(#{MATERIAL_BIND_GROUP}) @binding(8) var sky_lighting_texture: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(9) var sky_lighting_sampler: sampler;
+
+// The flat light the ground falls back to before any sky has been resolved (a test
+// scene with no environment): the texture's seed `sunlit` and `amblit` as a plain
+// sun term and ambient.
+fn fallback_light(sunlit: vec3<f32>, amblit: vec3<f32>, diffuse: f32, shadow: f32) -> vec3<f32> {
+    return amblit + sunlit * (diffuse * shadow);
+}
 
 struct Vertex {
     @builtin(instance_index) instance_index: u32,
@@ -116,19 +128,26 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
 
-    // Lighting, ported from the reference `softenLight` legacy branch: the sky's
-    // *atmospheric* ambient (`amblit`) plus the sun's atmospheric diffuse colour
-    // (`sunlit`) times N·L, both driven per frame from the sky frame. Using the
-    // atmospheric ambient rather than the raw reflection-probe irradiance is what
-    // keeps a sun-shaded slope reading the ground's own colour at dawn / dusk —
-    // the atmospheric ambient is a warm, low-saturation colour, where the raw blue
-    // sky the probe captures over-cools the ground (`viewer-clouds-sun-occlusion`).
-    // The reference's small additional reflection-probe term and its classic-mode
-    // gamma blend are not reproduced — a documented simplification.
-    let diffuse = max(dot(normal, sun_dir), 0.0);
-    let light = lighting.ambient_color + lighting.sun_color * (diffuse * shadow);
+    let lighting = sky_lighting_from_texels(
+        textureLoad(sky_lighting_texture, vec2<i32>(0, 0), 0),
+        textureLoad(sky_lighting_texture, vec2<i32>(1, 0), 0),
+    );
+    var color: vec3<f32>;
+    if (sky_lighting_is_resolved(lighting)) {
+        // The reference's legacy branch of `softenLight`: terrain writes its splat
+        // to the G-buffer like any other legacy surface and is lit there. The detail
+        // textures are uploaded sRGB, so `base` is already the linear albedo the
+        // branch converts its G-buffer colour to.
+        let light = sky_surface_light(lighting, normal, sun_dir);
+        let irradiance = sky_legacy_irradiance(lighting, light, normal);
+        let diffuse = sky_legacy_diffuse(lighting, light, irradiance, normal, sun_dir, shadow);
+        color = sky_legacy_finish(lighting, diffuse.light * base.rgb);
+    } else {
+        let diffuse = max(dot(normal, sun_dir), 0.0);
+        color = base.rgb * fallback_light(lighting.sunlit, lighting.amblit, diffuse, shadow);
+    }
     // Alpha carries the SL glow mask (the viewer's `glow` pass): terrain never
     // glows, so it writes 0. The surface is opaque, so this alpha is not a blend
     // factor.
-    return vec4<f32>(base.rgb * light, 0.0);
+    return vec4<f32>(color, 0.0);
 }

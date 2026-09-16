@@ -307,13 +307,15 @@ pub use crate::prims::{to_bevy_prim_mesh, to_bevy_prim_meshes};
 #[cfg(feature = "bevy_pbr")]
 pub use crate::sky::{SkyMaterial, SkyMaterialPlugin, SkyParams};
 #[cfg(feature = "bevy_pbr")]
+pub use crate::sky_lighting::{
+    SKY_LIGHTING_IMAGE, SkyLighting, SkyLightingMode, load_sky_lighting, write_sky_lighting,
+};
+#[cfg(feature = "bevy_pbr")]
 pub use crate::stars::{StarMaterial, StarMaterialPlugin, StarParams};
 #[cfg(feature = "bevy_pbr")]
 pub use crate::sun_disc::{SunDiscMaterial, SunDiscMaterialPlugin, SunDiscParams};
 #[cfg(feature = "bevy_pbr")]
-pub use crate::terrain::{
-    ATTRIBUTE_TERRAIN_WEIGHTS, TerrainLighting, TerrainMaterial, TerrainMaterialPlugin,
-};
+pub use crate::terrain::{ATTRIBUTE_TERRAIN_WEIGHTS, TerrainMaterial, TerrainMaterialPlugin};
 pub use crate::textures::{
     BevyTextureFetcher, planar_texgen_uv, texture_face_uv_transform, texture_uv_transform,
     to_bevy_image,
@@ -349,6 +351,8 @@ pub mod prims;
 mod retry;
 #[cfg(feature = "bevy_pbr")]
 pub mod sky;
+#[cfg(feature = "bevy_pbr")]
+pub mod sky_lighting;
 #[cfg(feature = "bevy_pbr")]
 pub mod stars;
 #[cfg(feature = "bevy_pbr")]

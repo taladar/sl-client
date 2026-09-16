@@ -16,6 +16,10 @@
 // mirroring how `bevy_pbr::pbr_bindings` / `pbr_fragment` are written.
 
 #import bevy_pbr::{
+    clustered_forward as clustering,
+    lighting,
+    mesh_types::MESH_FLAGS_SHADOW_RECEIVER_BIT,
+    mesh_view_types,
     pbr_fragment::pbr_input_from_standard_material,
     pbr_functions,
     pbr_functions::{apply_pbr_lighting, main_pass_post_lighting_processing},
@@ -24,8 +28,10 @@
     mesh_view_bindings::view,
     mesh_view_bindings::globals,
     mesh_view_bindings::lights,
+    mesh_view_bindings::clustered_lights,
     mesh_bindings::mesh,
     forward_io::{VertexOutput, FragmentOutput},
+    shadows,
 }
 #import bevy_render::bindless::{bindless_samplers_filtering, bindless_textures_2d}
 #import sl_client_bevy::water_fog::{
@@ -34,6 +40,15 @@
     water_fog_density,
     water_fog_ks,
     water_fog_no_clip,
+}
+#import sl_client_bevy::sky_lighting::{
+    SkyLighting,
+    sky_legacy_diffuse,
+    sky_legacy_finish,
+    sky_legacy_irradiance,
+    sky_lighting_from_texels,
+    sky_lighting_is_resolved,
+    sky_surface_light,
 }
 
 // Mirrors `SlFaceParams` (face_material.rs): only vec4 / vec2 / u32 / f32, so the
@@ -87,6 +102,7 @@ const MAP_FLAG_EMISSIVE: u32 = 4u;
 const MAP_FLAG_SPEC: u32 = 8u;
 
 // Must match the `SL_FACE_MODE_*` constants in face_material.rs.
+const SL_FACE_MODE_PBR: u32 = 0u;
 const SL_FACE_MODE_LEGACY: u32 = 1u;
 
 // The reference viewer's `RenderSpecularExponent` (settings.xml default): the scale
@@ -111,7 +127,7 @@ const ANIM_TIME_WRAP: f32 = 3600.0;
 #ifdef BINDLESS
 // The extension's bindless index table (slots 50..58, in field order): slot 50 is
 // the `#[data]` params array index, then the four map texture/sampler indices into
-// the global bindless arrays.
+// the global bindless arrays, then the shared sky-lighting texture (slots 59..60).
 struct SlFaceIndices {
     params: u32,
     specular_map: u32,
@@ -122,6 +138,8 @@ struct SlFaceIndices {
     metallic_roughness_map_sampler: u32,
     emissive_map: u32,
     emissive_map_sampler: u32,
+    sky_lighting: u32,
+    sky_lighting_sampler: u32,
 }
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<storage> sl_indices: array<SlFaceIndices>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(101) var<storage> sl_data: array<SlFaceParams>;
@@ -135,6 +153,8 @@ struct SlFaceIndices {
 @group(#{MATERIAL_BIND_GROUP}) @binding(56) var sl_mr_samp: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(57) var sl_emissive_tex: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(58) var sl_emissive_samp: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(59) var sl_sky_lighting_tex: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(60) var sl_sky_lighting_samp: sampler;
 #endif  // BINDLESS
 
 // Apply a packed 2x2 matrix (m = col0.xy, col1.xy) + translation to a UV.
@@ -329,6 +349,126 @@ fn sl_cotangent_frame(n: vec3<f32>, p: vec3<f32>, uv: vec2<f32>) -> mat3x3<f32> 
     return mat3x3<f32>(t * invmax, b * invmax, n);
 }
 
+// The shared sky-lighting texture's two texels (`sl_client_bevy::sky_lighting`),
+// loaded rather than sampled: they are values, not an image.
+fn sl_sky_lighting(slot: u32) -> SkyLighting {
+#ifdef BINDLESS
+    let index = sl_indices[slot].sky_lighting;
+    return sky_lighting_from_texels(
+        textureLoad(bindless_textures_2d[index], vec2<i32>(0, 0), 0),
+        textureLoad(bindless_textures_2d[index], vec2<i32>(1, 0), 0),
+    );
+#else   // BINDLESS
+    return sky_lighting_from_texels(
+        textureLoad(sl_sky_lighting_tex, vec2<i32>(0, 0), 0),
+        textureLoad(sl_sky_lighting_tex, vec2<i32>(1, 0), 0),
+    );
+#endif  // BINDLESS
+}
+
+// The sun's shadow term at this fragment (`scol`, 1 = fully lit), exactly as Bevy's
+// own directional-light loop fetches it for light 0.
+fn sl_sun_shadow(in: pbr_types::PbrInput) -> f32 {
+    if lights.n_directional_lights == 0u
+        || (in.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) == 0u
+        || (lights.directional_lights[0].flags
+            & mesh_view_types::DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) == 0u {
+        return 1.0;
+    }
+    let view_z = dot(vec4<f32>(
+        view.view_from_world[0].z,
+        view.view_from_world[1].z,
+        view.view_from_world[2].z,
+        view.view_from_world[3].z,
+    ), in.world_position);
+    return shadows::fetch_directional_shadow(
+        0u,
+        in.world_position,
+        in.world_normal,
+        view_z,
+        in.frag_coord.xy,
+    );
+}
+
+// Bevy's point and spot lights at this fragment, and nothing else — the local-light
+// half of `apply_pbr_lighting`, for a face whose sun and ambient come from the sky
+// instead. The loops are Bevy's own (`bevy_pbr::pbr_functions`), less the
+// transmission, lightmap and contact-shadow paths no face material enables, and
+// the result is at scene scale (exposure applied), as `apply_pbr_lighting` returns
+// it.
+fn sl_local_lights(in: pbr_types::PbrInput) -> vec3<f32> {
+    let base_color = in.material.base_color.rgb;
+    let metallic = in.material.metallic;
+    let perceptual_roughness = in.material.perceptual_roughness;
+    let NdotV = max(dot(in.N, in.V), 0.0001);
+
+    var lighting_input: lighting::LightingInput;
+    lighting_input.layers[lighting::LAYER_BASE].NdotV = NdotV;
+    lighting_input.layers[lighting::LAYER_BASE].N = in.N;
+    lighting_input.layers[lighting::LAYER_BASE].R = reflect(-in.V, in.N);
+    lighting_input.layers[lighting::LAYER_BASE].perceptual_roughness = perceptual_roughness;
+    lighting_input.layers[lighting::LAYER_BASE].roughness =
+        lighting::perceptualRoughnessToRoughness(perceptual_roughness);
+    lighting_input.P = in.world_position.xyz;
+    lighting_input.V = in.V;
+    lighting_input.diffuse_color = pbr_functions::calculate_diffuse_color(
+        base_color,
+        metallic,
+        in.material.specular_transmission,
+        in.material.diffuse_transmission,
+    );
+    lighting_input.metallic = metallic;
+    lighting_input.F0_dielectric = pbr_functions::calculate_F0_dielectric(in.material.reflectance);
+    lighting_input.F0_metallic = base_color;
+    lighting_input.F_ab = lighting::F_AB(perceptual_roughness, NdotV);
+
+    let view_z = dot(vec4<f32>(
+        view.view_from_world[0].z,
+        view.view_from_world[1].z,
+        view.view_from_world[2].z,
+        view.view_from_world[3].z,
+    ), in.world_position);
+    let cluster_index =
+        clustering::view_fragment_cluster_index(in.frag_coord.xy, view_z, in.is_orthographic);
+    let ranges = clustering::unpack_clusterable_object_index_ranges(cluster_index);
+    let receives_shadows = (in.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u;
+
+    var direct_light = vec3<f32>(0.0);
+    for (var i: u32 = ranges.first_point_light_index_offset;
+            i < ranges.first_spot_light_index_offset;
+            i = i + 1u) {
+        let light_id = clustering::get_clusterable_object_id(i);
+        var shadow = 1.0;
+        if receives_shadows
+            && (clustered_lights.data[light_id].flags
+                & mesh_view_types::POINT_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u {
+            shadow = shadows::fetch_point_shadow(
+                light_id, in.world_position, in.world_normal, in.frag_coord.xy,
+            );
+        }
+        direct_light += lighting::point_light(light_id, &lighting_input, true, true) * shadow;
+    }
+    for (var i: u32 = ranges.first_spot_light_index_offset;
+            i < ranges.first_reflection_probe_index_offset;
+            i = i + 1u) {
+        let light_id = clustering::get_clusterable_object_id(i);
+        var shadow = 1.0;
+        if receives_shadows
+            && (clustered_lights.data[light_id].flags
+                & mesh_view_types::POINT_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u {
+            shadow = shadows::fetch_spot_shadow(
+                light_id,
+                in.world_position,
+                in.world_normal,
+                clustered_lights.data[light_id].shadow_map_near_z,
+                in.frag_coord.xy,
+            );
+        }
+        direct_light += lighting::spot_light(light_id, &lighting_input, true) * shadow;
+    }
+    return direct_light * view.exposure;
+}
+
 // The legacy Blinn-Phong specular highlight (Phase 2): an **analytic normalized
 // Blinn-Phong** lobe added over the matte base of a legacy (pre-PBR) face, the
 // closed form the reference viewer bakes into its `lightFunc` LUT
@@ -341,9 +481,11 @@ fn sl_cotangent_frame(n: vec3<f32>, p: vec3<f32>, uv: vec2<f32>) -> mat3x3<f32> 
 // `n` = the perturbed surface normal (`pbr_input.N`, the normal map already folded
 // in where the face has tangents), `world_pos` the fragment world position,
 // `spec_rgb` the specular tint (map × `specular_color`), `glossiness` the exponent
-// scalar (`specular_exponent / 255`, already modulated by the normal-map alpha).
+// scalar (`specular_exponent / 255`, already modulated by the normal-map alpha),
+// and `sun` the colour of the light the highlight reflects — the sky's
+// `sunlit_linear` (shadowed) for a sky-lit face, the Bevy light's for the fallback.
 fn sl_blinn_phong_specular(
-    n: vec3<f32>, world_pos: vec3<f32>, spec_rgb: vec3<f32>, glossiness: f32,
+    n: vec3<f32>, world_pos: vec3<f32>, spec_rgb: vec3<f32>, glossiness: f32, sun: vec3<f32>,
 ) -> vec3<f32> {
     if glossiness <= 0.0 || lights.n_directional_lights == 0u {
         return vec3<f32>(0.0);
@@ -371,7 +513,7 @@ fn sl_blinn_phong_specular(
     let gt = max(0.0, min(gtdenom * nv / vh, gtdenom * nl / vh));
     let lit = min(nl * 6.0, 1.0);
     let scol = fres * d * gt / (nh * nl);
-    return lit * scol * light.color.rgb * spec_rgb;
+    return lit * scol * sun * spec_rgb;
 }
 
 @fragment
@@ -521,8 +663,46 @@ fn fragment(
     // fullbright face rendered black wherever no light reached it (a HUD is on its
     // own layer, which the world's sun does not light at all — the reported all-black
     // HUD, and dark fullbright prims at night).
+    let sky = sl_sky_lighting(slot);
     if (pbr_input.material.flags & pbr_types::STANDARD_MATERIAL_FLAGS_UNLIT_BIT) != 0u {
         out.color = pbr_input.material.base_color;
+    } else if sl.mode != SL_FACE_MODE_PBR
+        && sky_lighting_is_resolved(sky)
+        && lights.n_directional_lights != 0u {
+        // A legacy (non-PBR) face under a resolved sky: lit the way the reference's
+        // deferred `softenLight` lights it (`sl_client_bevy::sky_lighting`), not by
+        // Bevy's physically based sun. The reference's model is its own — a legacy
+        // sky combines in gamma space — and a Bevy sun calibrated to it lit a sunlit
+        // face about twice as brightly (`viewer-sunlit-face-clips-two-channels`).
+        //
+        // The direction toward the active body is still Bevy's directional light,
+        // which the sky aims (texel-snapped); only its colour and strength are
+        // ignored. `base_color` is the linear albedo: the texture is uploaded sRGB,
+        // which is the `srgb_to_linear` the reference applies to its G-buffer.
+        let n = pbr_input.N;
+        let light_dir = normalize(lights.directional_lights[0].direction_to_light);
+        let shadow = sl_sun_shadow(pbr_input);
+        let light = sky_surface_light(sky, n, light_dir);
+        let irradiance = sky_legacy_irradiance(sky, light, n);
+        let diffuse = sky_legacy_diffuse(sky, light, irradiance, n, light_dir, shadow);
+        var color = diffuse.light * pbr_input.material.base_color.rgb;
+        if sl.mode == SL_FACE_MODE_LEGACY {
+            let spec_rgb = sl.specular_color.rgb * spec_sample.rgb;
+            let glossiness = sl.glossiness * gloss_modulator;
+            // The reference's `scol` carries the shadow into the highlight.
+            color += sl_blinn_phong_specular(
+                n, pbr_input.world_position.xyz, spec_rgb, glossiness,
+                diffuse.sunlit_linear * shadow,
+            );
+        }
+        color = sky_legacy_finish(sky, color);
+        // The local lights are added after, as the reference's own light passes
+        // add theirs onto `softenLight`'s result, and the emissive term as Bevy
+        // adds it.
+        let emissive = pbr_input.material.emissive;
+        color += sl_local_lights(pbr_input)
+            + emissive.rgb * pbr_input.material.base_color.a * mix(1.0, view.exposure, emissive.a);
+        out.color = vec4<f32>(color, pbr_input.material.base_color.a);
     } else {
         // Reuse `StandardMaterial`'s metallic-roughness PBR lighting (a legacy face's
         // base is matte — metallic 0, roughness 1, reflectance 0 — so this is just its
@@ -538,8 +718,12 @@ fn fragment(
         if sl.mode == SL_FACE_MODE_LEGACY {
             let spec_rgb = sl.specular_color.rgb * spec_sample.rgb;
             let glossiness = sl.glossiness * gloss_modulator;
+            var sun = vec3<f32>(0.0);
+            if lights.n_directional_lights != 0u {
+                sun = lights.directional_lights[0].color.rgb;
+            }
             let highlight = sl_blinn_phong_specular(
-                pbr_input.N, pbr_input.world_position.xyz, spec_rgb, glossiness,
+                pbr_input.N, pbr_input.world_position.xyz, spec_rgb, glossiness, sun,
             );
             // Environment reflection: with no reflection probe headless, approximate
             // the reference's `applyLegacyEnv` as a spec-tinted ambient term scaled by

@@ -46,80 +46,10 @@ use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{
-    ATTRIBUTE_TERRAIN_WEIGHTS, RegionHandle, RegionIdentity, SlEvent, SlIdentity, SlSessionEvent,
-    TerrainLighting, TerrainMaterial, TerrainPatch, TextureKey, Vector, to_bevy_image,
+    ATTRIBUTE_TERRAIN_WEIGHTS, RegionHandle, RegionIdentity, SKY_LIGHTING_IMAGE, SlEvent,
+    SlIdentity, SlSessionEvent, TerrainMaterial, TerrainPatch, TextureKey, Vector, to_bevy_image,
 };
 
-/// The terrain lighting to seed a material with before the first
-/// [`drive_terrain_lighting`] update: a neutral sun and a mid-grey ambient (the
-/// old flat fallback), replaced every frame from the sky frame.
-const fn default_terrain_lighting() -> TerrainLighting {
-    TerrainLighting {
-        sun_color: Vec3::splat(0.8),
-        ambient_color: Vec3::splat(0.35),
-    }
-}
-
-/// The terrain lighting most recently applied to the region materials (and the
-/// value a newly created region material is seeded with), so
-/// [`drive_terrain_lighting`] can skip its `Assets::iter_mut` — which marks
-/// **every** terrain material modified, re-preparing each one's bind group —
-/// on the (typical) frame where the resolved sky lighting is unchanged.
-#[derive(Debug, Resource)]
-pub struct CurrentTerrainLighting(pub(crate) TerrainLighting);
-
-impl Default for CurrentTerrainLighting {
-    fn default() -> Self {
-        Self(default_terrain_lighting())
-    }
-}
-
-/// Drive every region's terrain material with the sky frame's atmospheric sun
-/// (`sunlit`) and ambient (`amblit`) colours, so the ground is lit like
-/// the reference legacy terrain — warm at dawn / dusk, cool at night — rather than
-/// by the raw (blue) reflection-probe irradiance. The colours are the same
-/// `resolve_sky` derives for the scene directional light
-/// and the sky ambient, so the terrain agrees with the rest of the scene lighting.
-///
-/// The materials are only touched when the resolved lighting differs from the
-/// last applied value ([`CurrentTerrainLighting`]): under a static sky this
-/// system does no ECS/asset writes at all, and under a *live* day cycle it does
-/// them once per day-cycle sampling step (`sky::DAY_POSITION_STEPS`) rather than
-/// once per frame — the guard is float equality on colours, so it only ever
-/// holds because the sampled day position is quantised.
-pub fn drive_terrain_lighting(
-    environment: Res<crate::environment::EnvironmentState>,
-    camera: Query<&GlobalTransform, With<ViewerCamera>>,
-    mut current: ResMut<CurrentTerrainLighting>,
-    mut materials: ResMut<Assets<TerrainMaterial>>,
-) {
-    let altitude = camera.single().map_or(0.0, |camera| camera.translation().y);
-    let position = crate::sky::day_position(&environment);
-    let Some(sky) = environment.sky_at(altitude, position) else {
-        return;
-    };
-    let lighting = terrain_lighting(&sky);
-    if current.0 == lighting {
-        return;
-    }
-    current.0 = lighting;
-    for (_id, material) in materials.iter_mut() {
-        material.lighting = lighting;
-    }
-}
-
-/// The terrain lighting a sky frame resolves to: the same atmospheric sun
-/// (`sunlit`) and ambient (`amblit`) colours `resolve_sky` hands the scene
-/// directional light and the sky ambient, so the ground agrees with the rest of
-/// the scene lighting. Split out of [`drive_terrain_lighting`] so the guard's
-/// input can be sampled without an app.
-fn terrain_lighting(sky: &sl_client_bevy::SkySettings) -> TerrainLighting {
-    let resolved = crate::sky::resolve_sky(sky);
-    TerrainLighting {
-        sun_color: Vec3::from_array(resolved.diffuse),
-        ambient_color: Vec3::from_array(resolved.ambient),
-    }
-}
 use sl_terrain::TerrainComposition;
 
 use crate::asset_budget::MeshUploadBudget;
@@ -304,7 +234,6 @@ pub fn update_terrain(
     mut mesh_budget: ResMut<MeshUploadBudget>,
     mut manager: ResMut<TextureManager>,
     store: Res<DecodedTextures>,
-    lighting: Res<CurrentTerrainLighting>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<TerrainMaterial>>,
     mut images: ResMut<Assets<Image>>,
@@ -318,7 +247,6 @@ pub fn update_terrain(
                     &mut state,
                     &mut textures,
                     patch.region_handle,
-                    lighting.0,
                     &mut images,
                     &mut materials,
                 );
@@ -383,15 +311,12 @@ pub fn update_terrain(
 /// placeholder) on the region's first patch and reconciling any already-decoded
 /// textures into it.
 ///
-/// A new material is seeded with the *current* resolved lighting, not the
-/// static default: [`drive_terrain_lighting`] only rewrites the materials when
-/// the lighting changes, so a material created under a stable sky would
-/// otherwise keep the default forever.
+/// The material binds the shared sky-lighting texture rather than carrying the
+/// sky itself, so a material created at any moment is lit by the current sky.
 fn ensure_region(
     state: &mut TerrainState,
     textures: &mut TerrainTextures,
     region: RegionHandle,
-    lighting: TerrainLighting,
     images: &mut Assets<Image>,
     materials: &mut Assets<TerrainMaterial>,
 ) {
@@ -408,7 +333,7 @@ fn ensure_region(
             detail1: placeholder.clone(),
             detail2: placeholder.clone(),
             detail3: placeholder,
-            lighting,
+            sky_lighting: SKY_LIGHTING_IMAGE,
         })
     });
     reconcile_region(state, textures, region, materials);
@@ -1005,91 +930,15 @@ fn patch_coord_f32(value: u32) -> f32 {
 mod tests {
     use std::collections::HashMap;
 
-    use super::{
-        DEFAULT_WEIGHTS, PatchKey, build_patch_mesh, metres_to_f32, patch_transform,
-        terrain_lighting,
-    };
+    use super::{DEFAULT_WEIGHTS, PatchKey, build_patch_mesh, metres_to_f32, patch_transform};
     use bevy::asset::RenderAssetUsages;
     use bevy::mesh::{Indices, Mesh, PrimitiveTopology, VertexAttributeValues};
-    use pretty_assertions::{assert_eq, assert_ne};
-    use sl_client_bevy::{
-        ATTRIBUTE_TERRAIN_WEIGHTS, EnvironmentSettings, RegionHandle, TerrainLayerType,
-        TerrainPatch,
-    };
+    use pretty_assertions::assert_eq;
+    use sl_client_bevy::{ATTRIBUTE_TERRAIN_WEIGHTS, RegionHandle, TerrainLayerType, TerrainPatch};
     use sl_terrain::TerrainComposition;
 
     /// The region and grid position the test patches use.
     const KEY: PatchKey = (RegionHandle(0), 1, 2);
-
-    /// A region on a live four-hour day cycle: the legacy WindLight default with
-    /// the four ported presets keyframed across the day, so the blended sky
-    /// actually moves as the day position advances (the shipped single-frame
-    /// default would return the same noon frame at every position and prove
-    /// nothing).
-    fn moving_day_cycle() -> EnvironmentSettings {
-        let mut settings = EnvironmentSettings::legacy_windlight_default();
-        settings.day_length = 14400;
-        settings.day_offset = 0;
-        crate::sky_presets::install_preset_day_cycle(&mut settings);
-        settings
-    }
-
-    /// The terrain lighting `drive_terrain_lighting` would resolve at `now`
-    /// (seconds since the Unix epoch) for a ground-level camera. `None` only if
-    /// the cycle defines no sky frame at all, which the assertions rule out.
-    fn lighting_at(
-        settings: &EnvironmentSettings,
-        now: f64,
-    ) -> Option<sl_client_bevy::TerrainLighting> {
-        let position =
-            crate::sky::quantised_day_position(now, settings.day_length, settings.day_offset);
-        let sky = settings.blended_sky_settings(0.0, position)?;
-        Some(terrain_lighting(&sky))
-    }
-
-    /// The guard in `drive_terrain_lighting` is float equality on colours, and
-    /// every miss re-prepares **every** region's terrain material. Under a live
-    /// day cycle sampled at the wall clock it missed on every frame; sampling the
-    /// quantised day position instead holds it for whole spans of frames.
-    ///
-    /// One second of 60 fps frames on a four-hour day covers two or three
-    /// sampling cells, so the lighting takes at most three distinct values —
-    /// against 60 (one per frame) when the position advances continuously.
-    #[test]
-    fn terrain_lighting_settles_between_day_cycle_steps() {
-        let settings = moving_day_cycle();
-        // Dawn: the fastest-changing part of the cycle, and so the worst case.
-        let start = f64::from(settings.day_length) * 0.25;
-        let mut distinct = Vec::new();
-        for frame in 0..60 {
-            let lighting = lighting_at(&settings, start + f64::from(frame) / 60.0);
-            if distinct.last() != Some(&lighting) {
-                distinct.push(lighting);
-            }
-        }
-        assert!(
-            distinct.len() <= 3,
-            "one second of frames resolved {} distinct terrain lightings",
-            distinct.len()
-        );
-        assert!(
-            distinct.iter().all(Option::is_some),
-            "the preset day cycle should resolve a sky frame at every sample"
-        );
-    }
-
-    /// …and the lighting still *tracks* the day: the sun that settles between
-    /// steps has plainly moved a few minutes later.
-    #[test]
-    fn terrain_lighting_still_follows_the_day_cycle() {
-        let settings = moving_day_cycle();
-        let start = f64::from(settings.day_length) * 0.25;
-        assert_ne!(
-            lighting_at(&settings, start),
-            lighting_at(&settings, start + 300.0),
-            "five minutes of a four-hour day should relight the ground"
-        );
-    }
 
     /// A single-patch map for the land patch of the given edge size whose height
     /// is `f(x, y)`, at [`KEY`].
@@ -1393,25 +1242,19 @@ mod tests {
         );
     }
 
-    /// A region material created after the sky lighting has moved on from the
-    /// default is seeded with the *current* lighting: `drive_terrain_lighting`
-    /// only rewrites materials when the lighting changes, so a stale default
-    /// seed would otherwise persist until the next sky change.
+    /// A region material binds the shared sky-lighting texture, so however late
+    /// in a session it is created it is lit by the sky of the moment — there is
+    /// no per-material copy of the sky for it to be seeded with, stale or not.
     #[test]
-    fn ensure_region_seeds_current_lighting() {
+    fn ensure_region_binds_the_shared_sky_lighting() {
         let mut state = sl_viewer_world_api::TerrainState::default();
         let mut textures = super::TerrainTextures::default();
         let mut images = bevy::asset::Assets::<bevy::image::Image>::default();
         let mut materials = bevy::asset::Assets::<sl_client_bevy::TerrainMaterial>::default();
-        let lighting = sl_client_bevy::TerrainLighting {
-            sun_color: bevy::math::Vec3::new(0.9, 0.5, 0.2),
-            ambient_color: bevy::math::Vec3::new(0.1, 0.2, 0.3),
-        };
         super::ensure_region(
             &mut state,
             &mut textures,
             RegionHandle(7),
-            lighting,
             &mut images,
             &mut materials,
         );
@@ -1420,8 +1263,10 @@ mod tests {
             .get(&RegionHandle(7))
             .and_then(|handle| materials.get(handle));
         assert!(
-            material.is_some_and(|material| material.lighting == lighting),
-            "the new region material should carry the passed-in lighting"
+            material.is_some_and(
+                |material| material.sky_lighting == sl_client_bevy::SKY_LIGHTING_IMAGE
+            ),
+            "the new region material should bind the shared sky-lighting texture"
         );
     }
 }

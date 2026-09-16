@@ -2,9 +2,9 @@
 id: viewer-terrain-ambient-probe-classic-fidelity
 title: Terrain lighting — add the reference probe term + classic-mode blend
 topic: viewer
-status: ideas
+status: done
 origin: viewer-clouds-sun-occlusion-horizon-contact terrain rework (2026-08-03)
-refs: [viewer-clouds-sun-occlusion-horizon-contact]
+refs: [viewer-clouds-sun-occlusion-horizon-contact, viewer-sunlit-face-clips-two-channels]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -34,3 +34,16 @@ pieces were left out:
 
 Low priority — the current result already matches Firestorm well; this is
 fidelity polish.
+
+## Done (2026-09-16), by viewer-sunlit-face-clips-two-channels
+
+Terrain now shares the full port of `softenLight`'s legacy branch with every
+other non-PBR surface ([[viewer-sunlit-face-clips-two-channels]]), classic
+blend included; the `TerrainLighting` uniform is gone.
+
+The probe half turned out to be the other way round from what this item
+assumed: under a **classic** sky `sampleReflectionProbesLegacy` sets
+`ambenv = amblit` and never samples the probes for the ambient, so the
+reference adds no probe term to legacy terrain there. Under an **EEP** sky the
+probe irradiance replaces `amblit` in proportion to the probe ambiance, which
+is what the port does.

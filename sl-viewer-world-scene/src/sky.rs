@@ -50,9 +50,10 @@
 //! `DAY_POSITION_STEPS` sampling cells. That is what every write-on-change
 //! guard in the scene rests on: those guards are float equality on values
 //! derived from the sky frame, so a position that advanced with the wall clock
-//! made each of them miss on every single frame — including
-//! `drive_terrain_lighting`, which then re-prepared every region's terrain
-//! material forever. The cell is finer than the shadow-caster direction snap,
+//! made each of them miss on every single frame — including the surface-lighting
+//! texture, which would then have re-uploaded every frame (and, when the
+//! terrain still carried the sky in its material, re-prepared every region's
+//! terrain material forever). The cell is finer than the shadow-caster direction snap,
 //! so nothing visible steps that was not already stepping.
 
 use std::sync::OnceLock;
@@ -65,9 +66,9 @@ use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{
-    CloudMaterial, CloudParams, Color as SlColor, ColorAlpha, DecodedTexture, Glow, SkyMaterial,
-    SkyParams, SkySettings, StarMaterial, StarParams, SunDiscMaterial, SunDiscParams, TextureKey,
-    to_bevy_image,
+    CloudMaterial, CloudParams, Color as SlColor, ColorAlpha, DecodedTexture, Glow, SkyLighting,
+    SkyLightingMode, SkyMaterial, SkyParams, SkySettings, StarMaterial, StarParams,
+    SunDiscMaterial, SunDiscParams, TextureKey, to_bevy_image, write_sky_lighting,
 };
 
 use crate::coords::sl_to_bevy_object_rotation;
@@ -528,6 +529,9 @@ pub(crate) struct ResolvedSky {
     /// The per-metre haze attenuation coefficient a surface shader reproduces
     /// `atten` from — see [`haze_attenuation_coefficient`].
     pub(crate) haze_atten_coef: Vec3,
+    /// What every lit legacy surface — prim faces, avatars, trees, terrain — is lit
+    /// by, as the shared sky-lighting texture carries it. See [`surface_sky_lighting`].
+    pub(crate) surface_lighting: SkyLighting,
 }
 
 /// The sun's and the moon's directions in Bevy space, the reference's own
@@ -645,10 +649,58 @@ fn srgb_to_linear(color: Vec3) -> Vec3 {
 /// `sunlit` with ("multiply to get similar colors as when the `scaleSoftClip`
 /// implementation was doubling color values").
 ///
-/// A saved setting on the reference, but `1.5` in both its HDR
-/// (`RenderHDRSkySunlightScale`) and non-HDR flavours, so there is no branch to
-/// port — only a number.
-const SKY_SUNLIGHT_SCALE: f32 = 1.5;
+/// `1.0`, in both its HDR (`RenderHDRSkySunlightScale`) and non-HDR flavours, so
+/// there is no branch to port — only a number. **Not** the `1.5` written beside
+/// each of them in `LLSettingsVOSky::applySpecial`: that is the fallback an
+/// `LLCachedControl` uses only when the setting does not exist, and `settings.xml`
+/// declares both at `1.0` and non-persistent, so no saved value can move them. The
+/// `1.5` was ported first, and lit every surface half as brightly again as the
+/// reference (`viewer-sunlit-face-clips-two-channels`).
+const SKY_SUNLIGHT_SCALE: f32 = 1.0;
+
+/// The reference `calcAtmosphericVars` `amblit`, before the per-fragment half of
+/// the calculation: the sky's ambient, lifted toward white by the cloud cover
+/// (`tmpAmbient`), then `pow(tmpAmbient, 0.9) * 0.57`.
+///
+/// Per-component `f32` arithmetic, as [`normalise_light_color`] above.
+fn atmospheric_amblit(params: &SkyParams) -> Vec3 {
+    let amblit = |ambient: f32| -> f32 {
+        let lifted = ambient + (1.0 - ambient) * params.cloud_shadow * 0.5;
+        lifted.max(0.0).powf(0.9) * 0.57
+    };
+    Vec3::new(
+        amblit(params.ambient_color.x),
+        amblit(params.ambient_color.y),
+        amblit(params.ambient_color.z),
+    )
+}
+
+/// The lighting every lit **legacy** surface is given: the reference's deferred
+/// `softenLight` inputs for a non-PBR surface, which `sky_lighting.wgsl` lights
+/// prim faces, avatars, trees and terrain with.
+///
+/// Those surfaces used to be lit by a Bevy directional light of fixed illuminance
+/// tinted with [`ResolvedSky::diffuse`], and an ambient at a hand-tuned scale —
+/// physically plausible, and about twice as bright as the reference on a sunlit
+/// face, which is what `viewer-sunlit-face-clips-two-channels` measured. The
+/// reference's model is not physical at all (a legacy sky combines in gamma
+/// space), so it is ported rather than calibrated.
+///
+/// A sky is classic exactly when [`shader_light_colors`] treats it as one — a
+/// frame with no `reflection_probe_ambiance` — so the sun a surface is lit by and
+/// the sun the sky is drawn with cannot disagree about which model is in force.
+fn surface_sky_lighting(sky: &SkySettings, params: &SkyParams, sunlit: Vec3) -> SkyLighting {
+    SkyLighting {
+        sunlit,
+        amblit: atmospheric_amblit(params),
+        probe_ambiance: sky.reflection_probe_ambiance,
+        mode: if sky.reflection_probe_ambiance == 0.0 {
+            SkyLightingMode::Classic
+        } else {
+            SkyLightingMode::Eep
+        },
+    }
+}
 
 /// The atmospheric sun colour a **surface** shader is lit by: the `sunlit` of
 /// `calcAtmosphericVarsLinear` (`class1/windlight/atmosphericsFuncs.glsl`), which
@@ -771,6 +823,7 @@ pub(crate) fn resolve_sky(sky: &SkySettings) -> ResolvedSky {
     let params = sky_params(sky, lightnorm, sun_up_factor, glow_factor);
     let sunlit = atmospheric_sunlit(sky, &params, lightnorm);
     let haze_atten_coef = haze_attenuation_coefficient(&params);
+    let surface_lighting = surface_sky_lighting(sky, &params, sunlit);
 
     ResolvedSky {
         params,
@@ -786,6 +839,7 @@ pub(crate) fn resolve_sky(sky: &SkySettings) -> ResolvedSky {
         ambient: lighting.total_ambient,
         sunlit,
         haze_atten_coef,
+        surface_lighting,
     }
 }
 
@@ -1049,7 +1103,8 @@ pub fn sun_shadows_enabled() -> bool {
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources / queries: the sky \
-              material, both suns, the ambient light, and the exposure inputs"
+              material, both suns, the ambient light, the exposure inputs, and the \
+              shared surface-lighting texture"
 )]
 pub(crate) fn drive_sky(
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
@@ -1067,6 +1122,7 @@ pub(crate) fn drive_sky(
     >,
     mut ambient: ResMut<GlobalAmbientLight>,
     mut exposure_range: ResMut<crate::exposure::ExposureRange>,
+    mut images: ResMut<Assets<Image>>,
 ) {
     let altitude = camera.single().map_or(0.0, |camera| camera.translation().y);
     let position = day_position(&environment);
@@ -1138,6 +1194,11 @@ pub(crate) fn drive_sky(
             light.color = sun_color;
         }
     }
+
+    // The lighting every legacy surface shades itself with, written in place and
+    // only when it changed (`write_sky_lighting` compares the texels), so the
+    // day-cycle quantisation holds here as it does for every other write.
+    write_sky_lighting(&mut images, &resolved.surface_lighting);
 
     // Ambient from the sky's total ambient, already carrying the reflection probe's
     // share of it — see `sky_ambient_light`.
@@ -2396,9 +2457,8 @@ fn calculate_light_settings(sky: &SkySettings, light_up: f32, moon_up: bool) -> 
 /// without a grid `blended_sky_settings` synthesises a slightly different frame
 /// every frame, every value derived from it differs in its last bits, and every
 /// float-equality guard below it — the sky / cloud / star / water material
-/// compare-then-`get_mut`, and above all `drive_terrain_lighting`'s
-/// `Assets::iter_mut` over *every* region's terrain material — fires on every
-/// frame forever. Rounding the position down to a grid holds the sampled frame
+/// compare-then-`get_mut`, and the surface-lighting texture's texel compare —
+/// fires on every frame forever. Rounding the position down to a grid holds the sampled frame
 /// **bit-identical** across the frames whose true position falls in one cell, so
 /// those guards hold between steps and the scene settles.
 ///
@@ -2502,7 +2562,7 @@ mod tests {
 
     use super::{
         AMBIENT_BRIGHTNESS_SCALE, CLOUD_DOME_RADIUS, CLOUD_DOME_SLICES, DAY_POSITION_STEPS,
-        SHADOW_MAP_SIZE, build_cloud_dome_mesh, disc_drawn, quantised_day_position,
+        SHADOW_MAP_SIZE, build_cloud_dome_mesh, disc_drawn, quantised_day_position, resolve_sky,
         shader_light_colors, sky_ambient_light, snap_shadow_direction,
     };
     use crate::sky_presets::{MIDDAY, MIDNIGHT, SUNRISE, SUNSET, sky_settings_from};
@@ -2512,6 +2572,122 @@ mod tests {
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_bevy::TextureKey;
     use sl_client_bevy::azimuth_altitude_to_rotation;
+    use sl_client_bevy::{EnvironmentSettings, SkyLighting, SkyLightingMode};
+
+    /// A region on a live four-hour day cycle: the legacy WindLight default with
+    /// the four ported presets keyframed across the day, so the blended sky
+    /// actually moves as the day position advances (the shipped single-frame
+    /// default would return the same noon frame at every position and prove
+    /// nothing). It is also the cycle `sl-crosscheck` dresses a region with when a
+    /// run pins the day position.
+    fn moving_day_cycle() -> EnvironmentSettings {
+        let mut settings = EnvironmentSettings::legacy_windlight_default();
+        settings.day_length = 14400;
+        settings.day_offset = 0;
+        crate::sky_presets::install_preset_day_cycle(&mut settings);
+        settings
+    }
+
+    /// The surface lighting `drive_sky` would write at `now` (seconds since the
+    /// Unix epoch) for a ground-level camera. `None` only if the cycle defines no
+    /// sky frame at all, which the assertions rule out.
+    fn lighting_at(settings: &EnvironmentSettings, now: f64) -> Option<SkyLighting> {
+        let position = quantised_day_position(now, settings.day_length, settings.day_offset);
+        let sky = settings.blended_sky_settings(0.0, position)?;
+        Some(resolve_sky(&sky).surface_lighting)
+    }
+
+    /// The texture write in `drive_sky` is guarded by texel equality, and every
+    /// miss re-uploads the texture every lit surface samples. Under a live day
+    /// cycle sampled at the wall clock it would miss on every frame; sampling the
+    /// quantised day position instead holds it for whole spans of frames.
+    ///
+    /// One second of 60 fps frames on a four-hour day covers two or three
+    /// sampling cells, so the lighting takes at most three distinct values —
+    /// against 60 (one per frame) when the position advances continuously.
+    #[test]
+    fn surface_lighting_settles_between_day_cycle_steps() {
+        let settings = moving_day_cycle();
+        // Dawn: the fastest-changing part of the cycle, and so the worst case.
+        let start = f64::from(settings.day_length) * 0.25;
+        let mut distinct = Vec::new();
+        for frame in 0..60 {
+            let lighting = lighting_at(&settings, start + f64::from(frame) / 60.0);
+            if distinct.last() != Some(&lighting) {
+                distinct.push(lighting);
+            }
+        }
+        assert!(
+            distinct.len() <= 3,
+            "one second of frames resolved {} distinct surface lightings",
+            distinct.len()
+        );
+        assert!(
+            distinct.iter().all(Option::is_some),
+            "the preset day cycle should resolve a sky frame at every sample"
+        );
+    }
+
+    /// …and the lighting still *tracks* the day: the sun that settles between
+    /// steps has plainly moved a few minutes later.
+    #[test]
+    fn surface_lighting_still_follows_the_day_cycle() {
+        let settings = moving_day_cycle();
+        let start = f64::from(settings.day_length) * 0.25;
+        assert_ne!(
+            lighting_at(&settings, start),
+            lighting_at(&settings, start + 300.0),
+            "five minutes of a four-hour day should relight the ground"
+        );
+    }
+
+    /// Whether every component of `actual` is within `1e-3` of `expected`.
+    fn close(actual: Vec3, expected: Vec3) -> bool {
+        (actual.x - expected.x).abs() < 1e-3
+            && (actual.y - expected.y).abs() < 1e-3
+            && (actual.z - expected.z).abs() < 1e-3
+    }
+
+    /// The legacy preset cycle at day position 0.35 — the sky of the
+    /// `viewer-sunlit-face-clips-two-channels` cross-check — resolves to the
+    /// `sunlit` and `amblit` worked by hand from the reference's own formulas and
+    /// the uniforms both viewers' scene dumps reported for that frame (sunlight
+    /// normalised to `(0.9628, 0.9734, 1.0)`, ambient `(0.906, 0.6977, 0.798)`,
+    /// cloud shadow 0.27, sun elevation sine 0.6325).
+    ///
+    /// Those numbers are not arbitrary: fed through `softenLight`'s classic
+    /// combine they predict the reference's sunless side of the plywood box at
+    /// sRGB `(92, 61, 48)`, and the reference drew it at `(88, 59, 46)`.
+    #[test]
+    fn surface_lighting_matches_the_reference_at_a_classic_morning() {
+        let settings = moving_day_cycle();
+        let sky = settings
+            .blended_sky_settings(0.0, 0.35)
+            .expect("the preset cycle resolves a sky at every position");
+        let lighting = resolve_sky(&sky).surface_lighting;
+        assert_eq!(lighting.mode, SkyLightingMode::Classic);
+        assert!(
+            close(lighting.sunlit, Vec3::new(0.7602, 0.6479, 0.5107)),
+            "sunlit {:?}",
+            lighting.sunlit
+        );
+        assert!(
+            close(lighting.amblit, Vec3::new(0.5281, 0.4339, 0.4796)),
+            "amblit {:?}",
+            lighting.amblit
+        );
+    }
+
+    /// A sky that authors a reflection-probe ambiance is an EEP sky, lit in linear
+    /// light with the probes' ambient, and carries its ambiance to the shader.
+    #[test]
+    fn a_sky_with_probe_ambiance_lights_surfaces_as_eep() {
+        let mut sky = sky_settings_from(&MIDDAY);
+        sky.reflection_probe_ambiance = 0.4;
+        let lighting = resolve_sky(&sky).surface_lighting;
+        assert_eq!(lighting.mode, SkyLightingMode::Eep);
+        assert_eq!(lighting.probe_ambiance.to_bits(), 0.4_f32.to_bits());
+    }
 
     /// A **legacy** sky's sunlight reaches the sky shader normalised to a maximum
     /// component of 1.0, because the reference's hardware-light sync overwrites

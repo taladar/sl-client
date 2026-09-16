@@ -675,7 +675,7 @@ pub fn apply_legacy_specular_maps(
 mod tests {
     use pretty_assertions::assert_eq;
 
-    use crate::face_material::{SL_FACE_MODE_LEGACY, SL_FACE_MODE_PBR, inert_face_material};
+    use crate::face_material::{SL_FACE_MODE_DIFFUSE, SL_FACE_MODE_LEGACY, inert_face_material};
 
     use super::*;
 
@@ -726,10 +726,15 @@ mod tests {
     }
 
     #[test]
-    fn a_face_with_no_material_stays_pbr_inert() {
-        // Sanity: the inert starting point is PBR mode (the legacy apply is the only
-        // thing that flips a face to the Blinn-Phong lobe).
-        assert_eq!(face_material(1.0).extension.params.mode, SL_FACE_MODE_PBR);
+    fn a_face_with_no_material_stays_plain_diffuse() {
+        // Sanity: the inert starting point is plain diffuse mode — sky-lit like a
+        // legacy face, but with no highlight (the legacy apply is the only thing
+        // that flips a face to the Blinn-Phong lobe, and a glTF material the only
+        // thing that makes it PBR).
+        assert_eq!(
+            face_material(1.0).extension.params.mode,
+            SL_FACE_MODE_DIFFUSE
+        );
     }
 
     #[test]

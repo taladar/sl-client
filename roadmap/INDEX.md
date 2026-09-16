@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 101 |
+| ideas | 100 |
 | ready | 314 |
 | blocked | 41 |
 | in-progress | 22 |
 | bugs | 10 |
-| done | 1164 |
+| done | 1166 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1694** |
+| **total** | **1695** |
 
-## ideas (101)
+## ideas (100)
 
 ### protocol
 
@@ -176,8 +176,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Linearize the star field like the sky / clouds
 - [`viewer-status-bar-toggle-options`](ideas/viewer-status-bar-toggle-options.md)
   — Status/menu-bar display toggles
-- [`viewer-terrain-ambient-probe-classic-fidelity`](ideas/viewer-terrain-ambient-probe-classic-fidelity.md)
-  — Terrain lighting — add the reference probe term + classic-mode blend
 - [`viewer-udp-connection-port`](ideas/viewer-udp-connection-port.md) — Fixed
   local UDP port option
 - [`viewer-ui-color-customization-extras`](ideas/viewer-ui-color-customization-extras.md)
@@ -1185,15 +1183,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A nearby avatar stays a coarse sphere even as the camera closes in
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
   — Own avatar looks broken after a teleport
+- [`viewer-pbr-face-sky-lighting-divergence`](bugs/viewer-pbr-face-sky-lighting-divergence.md)
+  — PBR (glTF) faces are still lit by Bevy's model, not the reference's
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
-- [`viewer-sunlit-face-clips-two-channels`](bugs/viewer-sunlit-face-clips-two-channels.md)
-  — A sunlit opaque face pins red and green rather than showing its texture
 - [`viewer-tree-species-all-rendered-as-trees`](bugs/viewer-tree-species-all-rendered-as-trees.md)
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)
 
-## done (1164)
+## done (1166)
 
 ### protocol
 
@@ -2810,6 +2808,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — World-frame stretch still grows the object along its local axis
 - [`viewer-sun-disc-grey-aditi-hdr-scale`](done/viewer-sun-disc-grey-aditi-hdr-scale.md)
   — Sun disc renders grey on aditi (EEP sky needs sky_hdr_scale)
+- [`viewer-sunlit-face-clips-two-channels`](done/viewer-sunlit-face-clips-two-channels.md)
+  — A sunlit opaque face pins red and green rather than showing its texture
 - [`viewer-table-cell-ellipsis`](done/viewer-table-cell-ellipsis.md) — Truncate
   overflowing table cells with a locale-aware ellipsis
 - [`viewer-table-scrollbar-overlays-last-column`](done/viewer-table-scrollbar-overlays-last-column.md)
@@ -2824,6 +2824,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-teleport-never-resets-the-world`](done/viewer-teleport-never-resets-the-world.md)
   — A teleport never set world_reset, because the fake grid announced the
   destination first
+- [`viewer-terrain-ambient-probe-classic-fidelity`](done/viewer-terrain-ambient-probe-classic-fidelity.md)
+  — Terrain lighting — add the reference probe term + classic-mode blend
 - [`viewer-terrain-region-edge-seam-slope`](done/viewer-terrain-region-edge-seam-slope.md)
   — Terrain seam / misalignment at region edges on slopes
 - [`viewer-test-baseline-format`](done/viewer-test-baseline-format.md) — One
