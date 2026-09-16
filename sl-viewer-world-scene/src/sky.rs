@@ -523,17 +523,101 @@ pub(crate) struct ResolvedSky {
     pub(crate) ambient: [f32; 3],
 }
 
-/// Resolve one sky frame into everything the scene needs from it. See
-/// [`ResolvedSky`].
-pub(crate) fn resolve_sky(sky: &SkySettings) -> ResolvedSky {
-    // Sun / moon directions in Bevy space, and which body is up (the reference
-    // tests the Second Life up component, which maps to Bevy `y`).
+/// The sun's and the moon's directions in Bevy space, the reference's own
+/// derivation (`LLSettingsSky::getSunDirection`): the body's orientation applied
+/// to the Second Life X axis.
+fn body_directions(sky: &SkySettings) -> (Vec3, Vec3) {
     let sun_dir = sl_to_bevy_object_rotation(&sky.sun_rotation)
         .mul_vec3(Vec3::X)
         .normalize();
     let moon_dir = sl_to_bevy_object_rotation(&sky.moon_rotation)
         .mul_vec3(Vec3::X)
         .normalize();
+    (sun_dir, moon_dir)
+}
+
+/// The sun and moon colours the sky and cloud shaders are actually bound with —
+/// which, for a **legacy (classic-mode)** sky, are not the frame's own.
+///
+/// `LLSettingsVOSky::applySpecial` pushes the frame's raw `sunlight_color`, and
+/// for an EEP sky that is the end of it. But the WL sky and cloud shaders declare
+/// `calculatesAtmospherics`, so every bind runs `LLRender::syncLightState`, and
+/// **in classic mode that overwrites `sunlight_color` and `moonlight_color` with
+/// the hardware light's colours** (`llrender.cpp`, guarded by
+/// `LLRender::sClassicMode`). Those come from `LLPipeline::setupHWLights`, which
+/// normalises each to a maximum component of `1.0` and then clamps it:
+///
+/// ```text
+/// mSunDiffuse = psky->getSunlightColor();
+/// if (max_color > 1.f) mSunDiffuse *= 1.f / max_color;
+/// mSunDiffuse.clamp();
+/// ```
+///
+/// and hands light 0 the *active* body's colour (`mHWLightColors[0] = sun_up ?
+/// mSunDiffuse : mMoonDiffuse`), with both black when neither body is up.
+///
+/// This is not a detail. Linden's legacy `A-6PM` authors `sunlight_color`
+/// `2.8386` and `A-6AM` `2.37` — well past 1 — so on those frames the sky the
+/// reference draws is lit by `1.0`, not by what the frame says, while `A-12PM`
+/// (`0.8999`) and `A-12AM` (`0.66`) are under the ceiling and pass through
+/// untouched. Feeding the raw value to the shader made our sunset three times as
+/// bright as the reference's with a glow twice as wide, and left noon and
+/// midnight matching perfectly — which is exactly the shape of a clamp nobody had
+/// ported (`viewer-sky-sunset-preset-glow-divergence`).
+///
+/// The water shader's `sunlight_color` is a different uniform with a different
+/// source (`lldrawpoolwater.cpp` binds the frame's raw colour as its specular),
+/// so it is deliberately not run through this.
+fn shader_light_colors(sky: &SkySettings) -> (Vec3, Vec3) {
+    let raw = Vec3::from_array(color_alpha_rgb(sky.sunlight_color));
+    // The reference shares one colour between the two bodies
+    // (`getMoonlightColor` *is* `getSunlightColor`).
+    if sky.reflection_probe_ambiance != 0.0 {
+        // An EEP sky: not classic mode, so nothing overwrites the uniforms.
+        return (raw, raw);
+    }
+    let (sun_dir, moon_dir) = body_directions(sky);
+    let (sun_up, moon_up) = (sun_dir.y >= 0.0, moon_dir.y >= 0.0);
+    if !sun_up && !moon_up {
+        // "prevent underlighting from having neither lightsource facing us".
+        return (Vec3::ZERO, Vec3::ZERO);
+    }
+    // Light 0 carries whichever body is up and the moon uniform carries the
+    // moon's — and both are the same colour here, because the reference's two
+    // bodies share one, so the "which body" branch cannot be observed. It is
+    // stated rather than written out for exactly that reason: the day a sky
+    // authors the moon a colour of its own, this is the line that has to grow a
+    // second normalisation, not a line that silently kept working.
+    let normalised = normalise_light_color(raw);
+    (normalised, normalised)
+}
+
+/// One hardware light colour, the reference's way: scaled so its largest
+/// component is at most `1.0`, then clamped per component. See
+/// [`shader_light_colors`].
+///
+/// Per-component `f32` arithmetic (the glam vector operators trip the workspace
+/// `arithmetic_side_effects` lint).
+fn normalise_light_color(color: Vec3) -> Vec3 {
+    let max_component = color.x.max(color.y).max(color.z);
+    let scale = if max_component > 1.0 {
+        1.0 / max_component
+    } else {
+        1.0
+    };
+    Vec3::new(
+        (color.x * scale).clamp(0.0, 1.0),
+        (color.y * scale).clamp(0.0, 1.0),
+        (color.z * scale).clamp(0.0, 1.0),
+    )
+}
+
+/// Resolve one sky frame into everything the scene needs from it. See
+/// [`ResolvedSky`].
+pub(crate) fn resolve_sky(sky: &SkySettings) -> ResolvedSky {
+    // Sun / moon directions in Bevy space, and which body is up (the reference
+    // tests the Second Life up component, which maps to Bevy `y`).
+    let (sun_dir, moon_dir) = body_directions(sky);
     let sun_up = sun_dir.y >= 0.0;
     let moon_up = moon_dir.y >= 0.0;
 
@@ -584,6 +668,104 @@ pub(crate) fn resolve_sky(sky: &SkySettings) -> ResolvedSky {
         light_dir,
         diffuse,
         ambient: lighting.total_ambient,
+    }
+}
+
+/// The atmospheric inputs the sky / cloud shaders are bound with for one sky
+/// frame — the `skyV.glsl` / `cloudsV.glsl` uniform block, as this crate's own
+/// sky resolution builds it.
+///
+/// Reported by the scene dump, and that is what it is for: two viewers can agree
+/// about a sky's name, its sun direction and everything else a dump carries and
+/// still draw very different skies, because what a shader runs on is this block.
+/// A dump without it can only say *that* they differ, never whether the
+/// divergence is in the numbers or in the maths.
+#[derive(Debug, Clone, Copy)]
+pub struct SkyShaderInputs {
+    /// The sun's colour (`sunlight_color`).
+    pub sunlight_color: [f32; 3],
+    /// The moon's colour — the reference shares the sun's.
+    pub moonlight_color: [f32; 3],
+    /// The sky's ambient (the reference's `getTotalAmbient`).
+    pub ambient_color: [f32; 3],
+    /// `blue_horizon`.
+    pub blue_horizon: [f32; 3],
+    /// `blue_density`.
+    pub blue_density: [f32; 3],
+    /// `haze_horizon`.
+    pub haze_horizon: f32,
+    /// `haze_density`.
+    pub haze_density: f32,
+    /// `density_multiplier`.
+    pub density_multiplier: f32,
+    /// `distance_multiplier`.
+    pub distance_multiplier: f32,
+    /// `max_y`, the altitude the sky ray is clamped to.
+    pub max_y: f32,
+    /// `gamma`.
+    pub gamma: f32,
+    /// The glow triple: size, an unused component, focus.
+    pub glow: [f32; 3],
+    /// `cloud_color`.
+    pub cloud_color: [f32; 3],
+    /// `cloud_shadow`.
+    pub cloud_shadow: f32,
+    /// `cloud_scale`.
+    pub cloud_scale: f32,
+    /// `cloud_variance`.
+    pub cloud_variance: f32,
+    /// `1.0` when the sun is up, `0.0` when it is not.
+    pub sun_up_factor: f32,
+    /// The anti-solar glow factor (`getSunMoonGlowFactor`).
+    pub sun_moon_glow_factor: f32,
+    /// `star_brightness`, already scaled the way the reference scales it.
+    pub star_brightness: f32,
+    /// `moisture_level` (the rainbow overlay).
+    pub moisture_level: f32,
+    /// `droplet_radius` (the rainbow overlay).
+    pub droplet_radius: f32,
+    /// `ice_level` (the halo overlay).
+    pub ice_level: f32,
+    /// The "fake HDR" scale the linearised sky colour is multiplied by.
+    pub sky_hdr_scale: f32,
+    /// `reflection_probe_ambiance` — zero for a legacy sky.
+    pub reflection_probe_ambiance: f32,
+    /// Whether this is a legacy / classic-mode sky (the reference's
+    /// `canAutoAdjust` with the auto-adjust setting off).
+    pub classic_mode: bool,
+}
+
+/// The shader inputs one sky frame resolves to — see [`SkyShaderInputs`].
+#[must_use]
+pub fn sky_shader_inputs(sky: &SkySettings) -> SkyShaderInputs {
+    let resolved = resolve_sky(sky);
+    let params = &resolved.params;
+    SkyShaderInputs {
+        sunlight_color: params.sunlight_color.to_array(),
+        moonlight_color: params.moonlight_color.to_array(),
+        ambient_color: params.ambient_color.to_array(),
+        blue_horizon: params.blue_horizon.to_array(),
+        blue_density: params.blue_density.to_array(),
+        haze_horizon: params.haze_horizon,
+        haze_density: params.haze_density,
+        density_multiplier: params.density_multiplier,
+        distance_multiplier: params.distance_multiplier,
+        max_y: params.max_y,
+        gamma: sky.gamma,
+        glow: params.glow.to_array(),
+        cloud_color: color_rgb(sky.cloud_color),
+        cloud_shadow: params.cloud_shadow,
+        cloud_scale: sky.cloud_scale,
+        cloud_variance: sky.cloud_variance,
+        sun_up_factor: params.sun_up_factor,
+        sun_moon_glow_factor: params.sun_moon_glow_factor,
+        star_brightness: sky.star_brightness,
+        moisture_level: params.moisture_level,
+        droplet_radius: params.droplet_radius,
+        ice_level: params.ice_level,
+        sky_hdr_scale: params.sky_hdr_scale,
+        reflection_probe_ambiance: sky.reflection_probe_ambiance,
+        classic_mode: sky.reflection_probe_ambiance == 0.0,
     }
 }
 
@@ -1932,14 +2114,13 @@ fn sky_params(
     sun_up_factor: f32,
     glow_factor: f32,
 ) -> SkyParams {
-    let sunlight = Vec3::from_array(color_alpha_rgb(sky.sunlight_color));
+    let (sunlight, moonlight) = shader_light_colors(sky);
     SkyParams {
         lightnorm,
         sun_up_factor,
         sunlight_color: sunlight,
         haze_horizon: sky.haze_horizon,
-        // The reference shares the sunlight colour for moonlight.
-        moonlight_color: sunlight,
+        moonlight_color: moonlight,
         haze_density: sky.haze_density,
         ambient_color: Vec3::from_array(color_rgb(sky.ambient)),
         cloud_shadow: sky.cloud_shadow,
@@ -1978,7 +2159,10 @@ pub(crate) fn cloud_params(
     scroll_rate: Vec2,
     scroll_base: Vec2,
 ) -> CloudParams {
-    let sunlight = Vec3::from_array(color_alpha_rgb(sky.sunlight_color));
+    // The cloud shader declares `calculatesAtmospherics` too, so a classic-mode
+    // sky overwrites its light colours exactly as it does the sky dome's — see
+    // [`shader_light_colors`].
+    let (sunlight, moonlight) = shader_light_colors(sky);
     let pd1 = sky.cloud_pos_density1;
     let pd2 = sky.cloud_pos_density2;
     CloudParams {
@@ -1986,8 +2170,7 @@ pub(crate) fn cloud_params(
         sun_up_factor,
         sunlight_color: sunlight,
         haze_horizon: sky.haze_horizon,
-        // The reference shares the sunlight colour for moonlight.
-        moonlight_color: sunlight,
+        moonlight_color: moonlight,
         haze_density: sky.haze_density,
         ambient_color: Vec3::from_array(color_rgb(sky.ambient)),
         cloud_shadow: sky.cloud_shadow,
@@ -2202,13 +2385,69 @@ mod tests {
     use super::{
         AMBIENT_BRIGHTNESS_SCALE, CLOUD_DOME_RADIUS, CLOUD_DOME_SLICES, DAY_POSITION_STEPS,
         SHADOW_MAP_SIZE, build_cloud_dome_mesh, disc_drawn, quantised_day_position,
-        sky_ambient_light, snap_shadow_direction,
+        shader_light_colors, sky_ambient_light, snap_shadow_direction,
     };
+    use crate::sky_presets::{MIDDAY, MIDNIGHT, SUNRISE, SUNSET, sky_settings_from};
     use bevy::camera::primitives::MeshAabb as _;
     use bevy::math::Vec3;
     use bevy::mesh::{Mesh, VertexAttributeValues};
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_bevy::TextureKey;
+    use sl_client_bevy::azimuth_altitude_to_rotation;
+
+    /// A **legacy** sky's sunlight reaches the sky shader normalised to a maximum
+    /// component of 1.0, because the reference's hardware-light sync overwrites
+    /// the uniform in classic mode (`shader_light_colors`). Linden's `A-6PM`
+    /// authors 2.8386 and `A-6AM` 2.37, and rendering either at its authored
+    /// brightness is what made our sunset three times too bright.
+    #[test]
+    fn a_legacy_sky_over_one_reaches_the_shader_normalised() {
+        for preset in [&SUNSET, &SUNRISE] {
+            let sky = sky_settings_from(preset);
+            let (sunlight, moonlight) = shader_light_colors(&sky);
+            assert_eq!(sunlight, Vec3::ONE, "{} sunlight", preset.label);
+            assert_eq!(moonlight, Vec3::ONE, "{} moonlight", preset.label);
+        }
+    }
+
+    /// A legacy sky whose sunlight is already inside the ceiling passes through
+    /// untouched — which is why midday and midnight matched the reference all
+    /// along, and why the divergence looked like a sunset-only bug.
+    #[test]
+    fn a_legacy_sky_under_one_passes_through() {
+        for preset in [&MIDDAY, &MIDNIGHT] {
+            let sky = sky_settings_from(preset);
+            let (sunlight, _moonlight) = shader_light_colors(&sky);
+            let raw = Vec3::from_array(super::color_alpha_rgb(sky.sunlight_color));
+            assert_eq!(sunlight, raw, "{} sunlight", preset.label);
+        }
+    }
+
+    /// An **EEP** sky (one that authors a reflection-probe ambiance) is not in
+    /// classic mode, so nothing overwrites its uniforms and its authored
+    /// brightness reaches the shader whole, over 1.0 included.
+    #[test]
+    fn an_eep_sky_keeps_its_authored_sunlight() {
+        let mut sky = sky_settings_from(&SUNSET);
+        sky.reflection_probe_ambiance = 0.5;
+        let (sunlight, _moonlight) = shader_light_colors(&sky);
+        let raw = Vec3::from_array(super::color_alpha_rgb(sky.sunlight_color));
+        assert_eq!(sunlight, raw);
+    }
+
+    /// With neither body above the horizon the reference gives light 0 no colour
+    /// at all ("prevent underlighting from having neither lightsource facing
+    /// us"), rather than the frame's.
+    #[test]
+    fn a_sky_with_no_body_up_is_unlit() {
+        let mut sky = sky_settings_from(&MIDDAY);
+        // Both bodies driven below the horizon: the sun straight down, and the
+        // moon with it rather than diametrically opposed to it.
+        let down = || azimuth_altitude_to_rotation(0.0, -core::f32::consts::FRAC_PI_2);
+        sky.sun_rotation = down();
+        sky.moon_rotation = down();
+        assert_eq!(shader_light_colors(&sky), (Vec3::ZERO, Vec3::ZERO));
+    }
 
     /// A sun or moon disc is drawn only above the horizon *and* only when the
     /// frame names a texture. A nil id is "no disc", as in the reference, and not

@@ -328,6 +328,71 @@ pub struct EnvironmentDump {
     pub sky_name: String,
     /// The name of the water settings in force.
     pub water_name: String,
+    /// The atmospheric inputs the sky shaders were bound with — absent only
+    /// when no sky frame is in force at all.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sky_params: Option<SkyParamsDump>,
+}
+
+/// The `skyV.glsl` / `cloudsV.glsl` uniform block, as both viewers resolve it.
+///
+/// The sky the shader runs on, rather than the sky the region named: two viewers
+/// can report the same `sky_name` and the same sun and still draw very different
+/// skies, and without these a comparison cannot say whether the divergence is in
+/// the numbers going in or in the maths they go through. Firestorm's dump emits
+/// the same keys, read back through the getters its own uniform pushes use.
+#[derive(Debug, Serialize)]
+pub struct SkyParamsDump {
+    /// The sun's colour.
+    pub sunlight_color: Point,
+    /// The moon's colour — the reference shares the sun's.
+    pub moonlight_color: Point,
+    /// The sky's ambient.
+    pub ambient_color: Point,
+    /// `blue_horizon`.
+    pub blue_horizon: Point,
+    /// `blue_density`.
+    pub blue_density: Point,
+    /// `haze_horizon`.
+    pub haze_horizon: f32,
+    /// `haze_density`.
+    pub haze_density: f32,
+    /// `density_multiplier`.
+    pub density_multiplier: f32,
+    /// `distance_multiplier`.
+    pub distance_multiplier: f32,
+    /// The altitude the sky ray is clamped to.
+    pub max_y: f32,
+    /// `gamma`.
+    pub gamma: f32,
+    /// The glow triple: size, an unused component, focus.
+    pub glow: Point,
+    /// `cloud_color`.
+    pub cloud_color: Point,
+    /// `cloud_shadow`.
+    pub cloud_shadow: f32,
+    /// `cloud_scale`.
+    pub cloud_scale: f32,
+    /// `cloud_variance`.
+    pub cloud_variance: f32,
+    /// `1.0` when the sun is up.
+    pub sun_up_factor: f32,
+    /// The anti-solar glow factor.
+    pub sun_moon_glow_factor: f32,
+    /// `star_brightness`, scaled as the reference scales it.
+    pub star_brightness: f32,
+    /// `moisture_level` (the rainbow overlay).
+    pub moisture_level: f32,
+    /// `droplet_radius` (the rainbow overlay).
+    pub droplet_radius: f32,
+    /// `ice_level` (the halo overlay).
+    pub ice_level: f32,
+    /// The "fake HDR" scale applied after linearisation.
+    pub sky_hdr_scale: f32,
+    /// `reflection_probe_ambiance` — zero for a legacy sky.
+    pub reflection_probe_ambiance: f32,
+    /// Whether this is a legacy / classic-mode sky.
+    pub classic_mode: bool,
 }
 
 /// The render settings in force.
@@ -784,8 +849,42 @@ fn build_environment(environment: &EnvironmentState) -> EnvironmentDump {
                 sky.sun_rotation.s,
             ]
         }),
+        sky_params: sky.as_ref().map(build_sky_params),
         sky_name: sky.map_or_else(String::new, |sky| sky.name),
         water_name: water.map_or_else(String::new, |water| water.name),
+    }
+}
+
+/// The `environment.sky_params` sub-section: the uniform block one sky frame
+/// resolves to. See [`SkyParamsDump`].
+fn build_sky_params(sky: &sl_client_bevy::SkySettings) -> SkyParamsDump {
+    let inputs = sl_viewer_world_scene::sky::sky_shader_inputs(sky);
+    SkyParamsDump {
+        sunlight_color: inputs.sunlight_color,
+        moonlight_color: inputs.moonlight_color,
+        ambient_color: inputs.ambient_color,
+        blue_horizon: inputs.blue_horizon,
+        blue_density: inputs.blue_density,
+        haze_horizon: inputs.haze_horizon,
+        haze_density: inputs.haze_density,
+        density_multiplier: inputs.density_multiplier,
+        distance_multiplier: inputs.distance_multiplier,
+        max_y: inputs.max_y,
+        gamma: inputs.gamma,
+        glow: inputs.glow,
+        cloud_color: inputs.cloud_color,
+        cloud_shadow: inputs.cloud_shadow,
+        cloud_scale: inputs.cloud_scale,
+        cloud_variance: inputs.cloud_variance,
+        sun_up_factor: inputs.sun_up_factor,
+        sun_moon_glow_factor: inputs.sun_moon_glow_factor,
+        star_brightness: inputs.star_brightness,
+        moisture_level: inputs.moisture_level,
+        droplet_radius: inputs.droplet_radius,
+        ice_level: inputs.ice_level,
+        sky_hdr_scale: inputs.sky_hdr_scale,
+        reflection_probe_ambiance: inputs.reflection_probe_ambiance,
+        classic_mode: inputs.classic_mode,
     }
 }
 

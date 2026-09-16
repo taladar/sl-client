@@ -1083,6 +1083,101 @@ fn environment(left: &SceneDump, right: &SceneDump, tolerances: Tolerances) -> V
     ] {
         findings.extend(text_finding("environment", field, ours, theirs, Rank::Flag));
     }
+    findings.extend(sky_params(left, right, tolerances));
+    findings
+}
+
+/// Compare the atmospheric uniforms the two skies resolved to.
+///
+/// This is the block the sky shaders actually run on, and a difference in it is
+/// the whole explanation of a sky that looks wrong — where a difference in the
+/// *rendered* sky alone leaves you guessing between the inputs and the maths.
+/// The first thing it caught was `sunlight_color` 2.8386 against 1.0 on Linden's
+/// legacy sunset: the reference's hardware-light sync normalises a classic-mode
+/// sky's light to a maximum component of 1, and this viewer was drawing the
+/// frame's authored value (`viewer-sky-sunset-preset-glow-divergence`).
+fn sky_params(left: &SceneDump, right: &SceneDump, tolerances: Tolerances) -> Vec<Finding> {
+    let (Some(ours), Some(theirs)) = (
+        left.environment.sky_params.as_ref(),
+        right.environment.sky_params.as_ref(),
+    ) else {
+        return Vec::new();
+    };
+    let mut findings = Vec::new();
+    for (field, ours, theirs) in [
+        ("sunlight_color", ours.sunlight_color, theirs.sunlight_color),
+        (
+            "moonlight_color",
+            ours.moonlight_color,
+            theirs.moonlight_color,
+        ),
+        ("ambient_color", ours.ambient_color, theirs.ambient_color),
+        ("blue_horizon", ours.blue_horizon, theirs.blue_horizon),
+        ("blue_density", ours.blue_density, theirs.blue_density),
+        ("glow", ours.glow, theirs.glow),
+        ("cloud_color", ours.cloud_color, theirs.cloud_color),
+    ] {
+        findings.extend(point_finding(
+            "sky_params",
+            field,
+            ours,
+            theirs,
+            tolerances.relative,
+        ));
+    }
+    for (field, ours, theirs) in [
+        ("haze_horizon", ours.haze_horizon, theirs.haze_horizon),
+        ("haze_density", ours.haze_density, theirs.haze_density),
+        (
+            "density_multiplier",
+            ours.density_multiplier,
+            theirs.density_multiplier,
+        ),
+        (
+            "distance_multiplier",
+            ours.distance_multiplier,
+            theirs.distance_multiplier,
+        ),
+        ("max_y", ours.max_y, theirs.max_y),
+        ("gamma", ours.gamma, theirs.gamma),
+        ("cloud_shadow", ours.cloud_shadow, theirs.cloud_shadow),
+        ("cloud_scale", ours.cloud_scale, theirs.cloud_scale),
+        ("cloud_variance", ours.cloud_variance, theirs.cloud_variance),
+        ("sun_up_factor", ours.sun_up_factor, theirs.sun_up_factor),
+        (
+            "sun_moon_glow_factor",
+            ours.sun_moon_glow_factor,
+            theirs.sun_moon_glow_factor,
+        ),
+        (
+            "star_brightness",
+            ours.star_brightness,
+            theirs.star_brightness,
+        ),
+        ("moisture_level", ours.moisture_level, theirs.moisture_level),
+        ("droplet_radius", ours.droplet_radius, theirs.droplet_radius),
+        ("ice_level", ours.ice_level, theirs.ice_level),
+        ("sky_hdr_scale", ours.sky_hdr_scale, theirs.sky_hdr_scale),
+        (
+            "reflection_probe_ambiance",
+            ours.reflection_probe_ambiance,
+            theirs.reflection_probe_ambiance,
+        ),
+    ] {
+        findings.extend(number_finding(
+            "sky_params",
+            field,
+            ours,
+            theirs,
+            tolerances.relative,
+        ));
+    }
+    findings.extend(flag_finding(
+        "sky_params",
+        "classic_mode",
+        ours.classic_mode,
+        theirs.classic_mode,
+    ));
     findings
 }
 
@@ -1296,6 +1391,59 @@ mod tests {
     /// Read a dump from JSON written inline.
     fn dump(json: &str) -> Result<SceneDump, TestError> {
         Ok(serde_json::from_str(json)?)
+    }
+
+    /// A sky whose uniforms differ is reported as a `sky_params` finding, per
+    /// field — the diff this ticket was solved without, and which would have
+    /// named the cause in one run. The pair here is the real one: Linden's
+    /// legacy sunset authors a `sunlight_color` of 2.8386, and the reference's
+    /// classic-mode light sync hands its shaders 1.0.
+    #[test]
+    fn a_sky_uniform_that_differs_is_a_finding() -> Result<(), TestError> {
+        let ours = dump(
+            r#"{ "schema_version": 1, "context": { "viewer": "sl-client" },
+                 "environment": { "sky_name": "sky-sunset", "sky_params": {
+                     "sunlight_color": [2.8386, 2.8386, 2.8386],
+                     "max_y": 562.5, "classic_mode": true } } }"#,
+        )?;
+        let theirs = dump(
+            r#"{ "schema_version": 1, "context": { "viewer": "firestorm" },
+                 "environment": { "sky_name": "sky-sunset", "sky_params": {
+                     "sunlight_color": [1.0, 1.0, 1.0],
+                     "max_y": 562.5, "classic_mode": true } } }"#,
+        )?;
+        let diff = SceneDiff::compare(&ours, &theirs, Tolerances::default());
+        let fields: Vec<&str> = diff
+            .findings
+            .iter()
+            .filter(|finding| finding.subject == "sky_params")
+            .map(|finding| finding.field.as_str())
+            .collect();
+        assert_eq!(fields, ["sunlight_color"]);
+        Ok(())
+    }
+
+    /// A dump from a viewer that does not write the block at all leaves the
+    /// comparison silent, rather than reporting every uniform as missing.
+    #[test]
+    fn a_missing_sky_params_block_is_absent_not_different() -> Result<(), TestError> {
+        let ours = dump(
+            r#"{ "schema_version": 1, "context": { "viewer": "sl-client" },
+                 "environment": { "sky_name": "sky-sunset", "sky_params": {
+                     "sunlight_color": [1.0, 1.0, 1.0] } } }"#,
+        )?;
+        let theirs = dump(
+            r#"{ "schema_version": 1, "context": { "viewer": "firestorm" },
+                 "environment": { "sky_name": "sky-sunset" } }"#,
+        )?;
+        let diff = SceneDiff::compare(&ours, &theirs, Tolerances::default());
+        assert!(
+            !diff
+                .findings
+                .iter()
+                .any(|finding| finding.subject == "sky_params")
+        );
+        Ok(())
     }
 
     /// A pair that differs only in the reference's own scenery: 256 terrain

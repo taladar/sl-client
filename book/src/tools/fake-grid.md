@@ -397,6 +397,19 @@ manufactures findings:
   distance of 512 m against 128 m, which *explain* the `lod` differences
   below them.
 
+Both dumps carry `environment.sky_params`: the `skyV.glsl` /
+`cloudsV.glsl` uniform block each viewer resolved — the sun and moon
+colours, the haze and blue terms, the glow triple, the multipliers, the
+HDR scale — and the report compares it field by field under the subject
+`sky_params`. It is there because a sky can only be wrong in two ways and
+a frame cannot tell them apart: the numbers going in differ, or the maths
+they go through does. Naming the sky frame is not enough to decide, and
+the first thing this block settled was a divergence that had been read off
+pixels for a day — `sunlight_color` 2.8386 here against 1.0 there on
+Linden's legacy sunset, because the reference's classic-mode light sync
+normalises a legacy sky's light and this viewer was drawing the authored
+value.
+
 A half whose `harness-status.json` is missing is a run that did not
 happen, and **nothing is diffed against it** — neither its frames, which
 are black and on schedule, nor its scene dump, which describes an empty

@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 41 |
 | in-progress | 22 |
 | bugs | 11 |
-| done | 1162 |
+| done | 1163 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1693** |
+| **total** | **1694** |
 
 ## ideas (101)
 
@@ -1187,15 +1187,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Own avatar looks broken after a teleport
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
-- [`viewer-sky-sunset-preset-glow-divergence`](bugs/viewer-sky-sunset-preset-glow-divergence.md)
-  — The legacy sunset sky is far brighter, with a much larger glow, than
 - [`viewer-sunlit-face-clips-two-channels`](bugs/viewer-sunlit-face-clips-two-channels.md)
   — A sunlit opaque face pins red and green rather than showing its texture
 - [`viewer-tree-species-all-rendered-as-trees`](bugs/viewer-tree-species-all-rendered-as-trees.md)
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)
+- [`viewer-water-sun-specular-streak-diverges`](bugs/viewer-water-sun-specular-streak-diverges.md)
+  — The sun's specular streak on the water is narrow and white, not wide
 
-## done (1162)
+## done (1163)
 
 ### protocol
 
@@ -2768,6 +2768,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-skinned-bind-group-quits-on-rez`](done/viewer-skinned-bind-group-quits-on-rez.md)
   — A skinned draw takes the non-skinned bind group and the render handler quits
   the viewer
+- [`viewer-sky-sunset-preset-glow-divergence`](done/viewer-sky-sunset-preset-glow-divergence.md)
+  — The legacy sunset sky is far brighter, with a much larger glow, than
 - [`viewer-slurl-parse-dispatch`](done/viewer-slurl-parse-dispatch.md) — SLURL
   parsing & action dispatch
 - [`viewer-snapshot-chat-overlay-not-hidden`](done/viewer-snapshot-chat-overlay-not-hidden.md)

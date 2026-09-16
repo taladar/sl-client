@@ -207,6 +207,96 @@ pub struct Environment {
     /// The name of the water settings in force.
     #[serde(default)]
     pub water_name: Option<String>,
+    /// The atmospheric uniforms the sky shaders were bound with.
+    #[serde(default)]
+    pub sky_params: Option<SkyParams>,
+}
+
+/// The `skyV.glsl` / `cloudsV.glsl` uniform block, as each viewer resolved it.
+///
+/// The sky the shader ran on, rather than the sky the region named. Two viewers
+/// can report the same `sky_name`, the same sun and the same everything else a
+/// dump carries and still draw very different skies — and then the only question
+/// worth asking is whether the numbers going in differ or the maths they go
+/// through does. This block answers the first half, so a sky finding no longer
+/// has to be inferred from pixels.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct SkyParams {
+    /// The sun's colour.
+    #[serde(default)]
+    pub sunlight_color: Option<Point>,
+    /// The moon's colour.
+    #[serde(default)]
+    pub moonlight_color: Option<Point>,
+    /// The sky's ambient.
+    #[serde(default)]
+    pub ambient_color: Option<Point>,
+    /// `blue_horizon`.
+    #[serde(default)]
+    pub blue_horizon: Option<Point>,
+    /// `blue_density`.
+    #[serde(default)]
+    pub blue_density: Option<Point>,
+    /// `haze_horizon`.
+    #[serde(default)]
+    pub haze_horizon: Option<f64>,
+    /// `haze_density`.
+    #[serde(default)]
+    pub haze_density: Option<f64>,
+    /// `density_multiplier`.
+    #[serde(default)]
+    pub density_multiplier: Option<f64>,
+    /// `distance_multiplier`.
+    #[serde(default)]
+    pub distance_multiplier: Option<f64>,
+    /// The altitude the sky ray is clamped to.
+    #[serde(default)]
+    pub max_y: Option<f64>,
+    /// `gamma`.
+    #[serde(default)]
+    pub gamma: Option<f64>,
+    /// The glow triple: size, an unused component, focus.
+    #[serde(default)]
+    pub glow: Option<Point>,
+    /// `cloud_color`.
+    #[serde(default)]
+    pub cloud_color: Option<Point>,
+    /// `cloud_shadow`.
+    #[serde(default)]
+    pub cloud_shadow: Option<f64>,
+    /// `cloud_scale`.
+    #[serde(default)]
+    pub cloud_scale: Option<f64>,
+    /// `cloud_variance`.
+    #[serde(default)]
+    pub cloud_variance: Option<f64>,
+    /// `1.0` when the sun is up.
+    #[serde(default)]
+    pub sun_up_factor: Option<f64>,
+    /// The anti-solar glow factor.
+    #[serde(default)]
+    pub sun_moon_glow_factor: Option<f64>,
+    /// `star_brightness`.
+    #[serde(default)]
+    pub star_brightness: Option<f64>,
+    /// `moisture_level` (the rainbow overlay).
+    #[serde(default)]
+    pub moisture_level: Option<f64>,
+    /// `droplet_radius` (the rainbow overlay).
+    #[serde(default)]
+    pub droplet_radius: Option<f64>,
+    /// `ice_level` (the halo overlay).
+    #[serde(default)]
+    pub ice_level: Option<f64>,
+    /// The "fake HDR" scale applied after linearisation.
+    #[serde(default)]
+    pub sky_hdr_scale: Option<f64>,
+    /// `reflection_probe_ambiance` — zero for a legacy sky.
+    #[serde(default)]
+    pub reflection_probe_ambiance: Option<f64>,
+    /// Whether this is a legacy / classic-mode sky.
+    #[serde(default)]
+    pub classic_mode: Option<bool>,
 }
 
 /// The render settings in force.
