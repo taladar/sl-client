@@ -54,7 +54,7 @@ use sl_client_bevy::{
 use crate::face_material::{FaceMaterial, MAP_FLAG_NORMAL, MAP_FLAG_SPEC};
 use crate::materials::ObjectRenderMaterials;
 use crate::objects::{FaceTextureDebug, PrimFaceEntity};
-use crate::textures::{TextureApplyBudget, TextureManager};
+use crate::textures::{DerivedImage, TextureApplyBudget, TextureManager, refresh_derived_images};
 use crate::world_api::TERRAIN_BOOST_PRIORITY;
 
 /// The fetch priority a legacy material's normal map is requested at — the same
@@ -95,13 +95,13 @@ pub struct LegacyMaterialManager {
     to_request: Vec<Uuid>,
     /// Uploaded (linear) normal-map images by texture id, so a map shared by
     /// several materials is uploaded once.
-    images: HashMap<TextureKey, Handle<Image>>,
+    images: HashMap<TextureKey, DerivedImage>,
     /// Face materials parked on a normal-map texture id, applied once it decodes.
     texture_pending: HashMap<TextureKey, Vec<Handle<FaceMaterial>>>,
     /// Uploaded (sRGB) specular-map images by texture id — the legacy specular map
     /// is a colour texture (its RGB tints the highlight, its alpha weights the
     /// environment), uploaded once per id.
-    spec_images: HashMap<TextureKey, Handle<Image>>,
+    spec_images: HashMap<TextureKey, DerivedImage>,
     /// Face materials parked on a specular-map texture id, applied once it decodes.
     spec_pending: HashMap<TextureKey, Vec<Handle<FaceMaterial>>>,
     /// Face materials whose `alpha_mode` a legacy material has **overridden**
@@ -182,11 +182,13 @@ impl LegacyMaterialManager {
         id: TextureKey,
         decoded: &Arc<DecodedTexture>,
     ) -> Handle<Image> {
-        if let Some(handle) = self.images.get(&id) {
-            return handle.clone();
+        if let Some(derived) = self.images.get(&id) {
+            return derived.handle.clone();
         }
         let handle = images.add(build_linear_image(decoded));
-        let _inserted = self.images.insert(id, handle.clone());
+        let _inserted = self
+            .images
+            .insert(id, DerivedImage::new(handle.clone(), decoded));
         handle
     }
 
@@ -198,11 +200,13 @@ impl LegacyMaterialManager {
         id: TextureKey,
         decoded: &Arc<DecodedTexture>,
     ) -> Handle<Image> {
-        if let Some(handle) = self.spec_images.get(&id) {
-            return handle.clone();
+        if let Some(derived) = self.spec_images.get(&id) {
+            return derived.handle.clone();
         }
         let handle = images.add(build_srgb_image(decoded));
-        let _inserted = self.spec_images.insert(id, handle.clone());
+        let _inserted = self
+            .spec_images
+            .insert(id, DerivedImage::new(handle.clone(), decoded));
         handle
     }
 }
@@ -669,6 +673,38 @@ pub fn apply_legacy_specular_maps(
             }
         }
     }
+}
+
+/// Rebuild each uploaded legacy normal and specular map whose texture has since
+/// decoded at another resolution, and re-prepare the materials sampling it — a map
+/// uploaded from the coarse decode an ordinary face had already fetched would
+/// otherwise stay coarse (see [`refresh_derived_images`]).
+pub fn refresh_legacy_map_images(
+    mut manager: ResMut<LegacyMaterialManager>,
+    store: Res<DecodedTextures>,
+    mut budget: ResMut<TextureApplyBudget>,
+    mut images: ResMut<Assets<Image>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
+) {
+    let manager = &mut *manager;
+    refresh_derived_images(
+        &mut manager.images,
+        |id| id,
+        |_id, decoded| build_linear_image(decoded),
+        &store,
+        &mut budget,
+        &mut images,
+        &mut materials,
+    );
+    refresh_derived_images(
+        &mut manager.spec_images,
+        |id| id,
+        |_id, decoded| build_srgb_image(decoded),
+        &store,
+        &mut budget,
+        &mut images,
+        &mut materials,
+    );
 }
 
 #[cfg(test)]

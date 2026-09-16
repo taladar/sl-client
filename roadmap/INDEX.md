@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 314 |
+| ready | 315 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 10 |
-| done | 1168 |
+| bugs | 9 |
+| done | 1169 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1697** |
+| **total** | **1698** |
 
 ## ideas (100)
 
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (314)
+## ready (315)
 
 ### protocol
 
@@ -898,6 +898,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-texture-drag-drop`](ready/viewer-texture-drag-drop.md) — Drag & drop
   a texture onto the build Texture tab / an object face (blocked by
   `viewer-prim-texture-editing` (done), `viewer-ui-texture-picker` (done))
+- [`viewer-texture-mip-chain-missing`](ready/viewer-texture-mip-chain-missing.md)
+  — Face textures are uploaded without a mip chain
 - [`viewer-texture-preview-floater`](ready/viewer-texture-preview-floater.md) —
   Texture preview floater — full reference feature set
 - [`viewer-texture-vram-budget`](ready/viewer-texture-vram-budget.md) — Texture
@@ -1165,7 +1167,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (10)
+## bugs (9)
 
 ### viewer
 
@@ -1185,13 +1187,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Own avatar looks broken after a teleport
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
-- [`viewer-texture-anisotropic-filtering-missing`](bugs/viewer-texture-anisotropic-filtering-missing.md)
-  — Face textures are filtered without anisotropy, so oblique texels blur
 - [`viewer-tree-species-all-rendered-as-trees`](bugs/viewer-tree-species-all-rendered-as-trees.md)
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)
 
-## done (1168)
+## done (1169)
 
 ### protocol
 
@@ -2839,6 +2839,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-text-node-padding-measure`](done/viewer-text-node-padding-measure.md)
   — Upstream bug — a text node was measured at its border box, and a hanging
   space counted as content
+- [`viewer-texture-anisotropic-filtering-missing`](done/viewer-texture-anisotropic-filtering-missing.md)
+  — A texture's level-of-detail change never reached the faces sampling it (seen
+  as soft checker edges, blamed on anisotropy)
 - [`viewer-texture-picker-inventory-tree`](done/viewer-texture-picker-inventory-tree.md)
   — Texture picker — inventory folder tree navigation (blocked by
   `viewer-ui-texture-picker` (done))

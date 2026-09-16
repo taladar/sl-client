@@ -25,5 +25,11 @@ behind the graphics settings. CAS runs after tone mapping and AA; anisotropy is
 set on the samplers the world material pipeline already builds.
 
 Reference (Firestorm, read-only): `RenderCASSharpness` / `RenderAnisotropic`.
+The stock `settings.xml` default is off, but the GPU feature table turns it on
+for every graphics level from Mid up, so a default Firestorm filters
+anisotropically.
+
+Anisotropy chooses among mip levels, and face textures have only one today:
+[[viewer-texture-mip-chain-missing]] comes first.
 
 Builds on: the deferred pipeline's final resolve.

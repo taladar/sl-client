@@ -28,6 +28,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use bevy::asset::AssetMut;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use sl_client_bevy::{
@@ -1485,9 +1486,137 @@ fn refresh_lod_image(
     let refreshed = build_prim_image(image);
     let _replaced = images.insert(&handle, refreshed);
     if let Some(material_ids) = prim_textures.materials.get_mut(&id) {
-        // Touch each live material (prune any whose face was despawned).
-        material_ids.retain(|&material_id| materials.get_mut(material_id).is_some());
+        // Touch each live material (prune any whose face was despawned). The touch
+        // is `into_inner`, not `get_mut` alone: an `AssetMut` raises
+        // `AssetEvent::Modified` only once it is mutably borrowed, and without that
+        // event the material keeps its bind group — and its face keeps sampling the
+        // resolution it was first draped with.
+        material_ids.retain(|&material_id| {
+            materials
+                .get_mut(material_id)
+                .map(AssetMut::into_inner)
+                .is_some()
+        });
     }
+}
+
+/// A GPU image a consumer built from a decoded texture and caches — a PBR map, a
+/// legacy normal or specular map, a generated bump map — with the size of the decode
+/// it was built from.
+///
+/// The decoded store holds one image per texture and replaces it whenever the
+/// texture's level of detail changes, but an image uploaded from the old decode goes
+/// on being sampled until it is rebuilt. The source size is how
+/// [`refresh_derived_images`] tells a stale entry from a current one: every level
+/// change changes it.
+#[derive(Debug, Clone)]
+pub struct DerivedImage {
+    /// The uploaded image, which every material using it samples.
+    pub handle: Handle<Image>,
+    /// The width and height of the decode the image was last built from.
+    source_size: (u32, u32),
+}
+
+impl DerivedImage {
+    /// Record `handle` as built from `decoded`.
+    #[must_use]
+    pub const fn new(handle: Handle<Image>, decoded: &DecodedTexture) -> Self {
+        Self {
+            handle,
+            source_size: (decoded.width, decoded.height),
+        }
+    }
+
+    /// Whether `decoded` — the texture's current decode — is not the one this image
+    /// was built from.
+    fn is_stale(&self, decoded: &DecodedTexture) -> bool {
+        self.source_size != (decoded.width, decoded.height)
+    }
+}
+
+/// Rebuild, in place, every image in `cache` whose source texture has decoded at
+/// another resolution since the image was built, and mark each material sampling
+/// one of them modified so its bind group picks up the new GPU texture.
+///
+/// `source` names the texture a cache key was built from and `build` makes the
+/// image again from that texture's current decode. Rebuilds spend the frame's
+/// shared image budget; whatever the budget does not cover stays stale and is
+/// picked up by a later frame's pass, so a burst of level changes spreads out.
+pub fn refresh_derived_images<K: Copy>(
+    cache: &mut HashMap<K, DerivedImage>,
+    source: impl Fn(K) -> TextureKey,
+    build: impl Fn(K, &Arc<DecodedTexture>) -> Image,
+    store: &DecodedTextures,
+    budget: &mut TextureApplyBudget,
+    images: &mut Assets<Image>,
+    materials: &mut Assets<FaceMaterial>,
+) {
+    let mut rebuilt: HashSet<AssetId<Image>> = HashSet::new();
+    for (&key, derived) in cache.iter_mut() {
+        let Some(decoded) = store.get(source(key)) else {
+            continue;
+        };
+        if !derived.is_stale(decoded) {
+            continue;
+        }
+        if !budget.take_image() {
+            break;
+        }
+        if let Err(error) = images.insert(&derived.handle, build(key, decoded)) {
+            warn!(
+                "rebuilding the image derived from texture {} failed: {error}",
+                source(key)
+            );
+            continue;
+        }
+        derived.source_size = (decoded.width, decoded.height);
+        let _new = rebuilt.insert(derived.handle.id());
+    }
+    touch_materials_sampling(materials, &rebuilt);
+}
+
+/// Mark every face material that samples one of `images` in any texture slot
+/// modified, so Bevy re-prepares it against the images' current GPU textures.
+///
+/// A material's bind group holds the texture view it was prepared with, and an image
+/// replaced behind the same handle by one of another size has a new one; nothing
+/// re-prepares the material but an `AssetEvent::Modified`, which `Assets::get_mut`
+/// raises only once the `AssetMut` is mutably borrowed — hence `into_inner`.
+fn touch_materials_sampling(
+    materials: &mut Assets<FaceMaterial>,
+    images: &HashSet<AssetId<Image>>,
+) {
+    if images.is_empty() {
+        return;
+    }
+    let sampling: Vec<AssetId<FaceMaterial>> = materials
+        .iter()
+        .filter(|(_id, material)| {
+            face_material_images(material).any(|handle| images.contains(&handle.id()))
+        })
+        .map(|(id, _material)| id)
+        .collect();
+    for id in sampling {
+        let _touched = materials.get_mut(id).map(AssetMut::into_inner);
+    }
+}
+
+/// Every image a face material samples: the base material's texture slots and the
+/// extension's per-map ones.
+fn face_material_images(material: &FaceMaterial) -> impl Iterator<Item = &Handle<Image>> {
+    [
+        material.base.base_color_texture.as_ref(),
+        material.base.normal_map_texture.as_ref(),
+        material.base.metallic_roughness_texture.as_ref(),
+        material.base.emissive_texture.as_ref(),
+        material.base.occlusion_texture.as_ref(),
+        Some(&material.extension.specular_map),
+        Some(&material.extension.normal_map),
+        Some(&material.extension.metallic_roughness_map),
+        Some(&material.extension.emissive_map),
+    ]
+    .into_iter()
+    .flatten()
 }
 
 /// Guard a level-of-detail re-upload against the per-frame image-build budget: with
@@ -1783,14 +1912,21 @@ pub fn tint_color(color: [u8; 4]) -> Color {
 #[cfg(test)]
 mod tests {
     use super::{
-        DecodedAlpha, DeferredFaceTexture, FACE_ALPHA_MASK_CUTOFF, FaceMaterial, PrimTextures,
-        TextureAlpha, TextureApplyBudget, defer_lod_reupload, drain_deferred, drape_parked_faces,
-        face_alpha_mode, reserve_image_build, resolve_texture_alpha_mode, texture_has_alpha,
+        DecodedAlpha, DeferredFaceTexture, DerivedImage, FACE_ALPHA_MASK_CUTOFF, FaceMaterial,
+        PrimTextures, TextureAlpha, TextureApplyBudget, defer_lod_reupload, drain_deferred,
+        drape_parked_faces, face_alpha_mode, refresh_derived_images, refresh_lod_image,
+        reserve_image_build, resolve_texture_alpha_mode, texture_has_alpha,
     };
     use crate::face_material::inert_face_material;
     use crate::legacy_materials::LegacyMaterialManager;
-    use bevy::asset::{Assets, Handle};
+    use bevy::app::App;
+    use bevy::asset::{AssetApp as _, AssetEvent, AssetPlugin, Assets, Handle};
+    use bevy::ecs::message::Messages;
     use bevy::image::Image;
+    use bevy::prelude::Mut;
+    use std::sync::Arc;
+
+    use crate::world_api::DecodedTextures;
     use bevy::pbr::StandardMaterial;
     use bevy::prelude::AlphaMode;
     use bytes::Bytes;
@@ -2022,6 +2158,208 @@ mod tests {
         // latest level, so one refresh suffices).
         assert!(defer_lod_reupload(&mut prim, &spent, id));
         assert_eq!(prim.pending_lod.len(), 1);
+    }
+
+    /// A level-of-detail refresh re-prepares every material sampling the texture.
+    ///
+    /// Replacing the image behind a handle with one of another size gives it a new
+    /// GPU texture, which a material only binds once it is re-prepared — and only
+    /// an `AssetEvent::Modified` does that. `Assets::get_mut` raises none by itself
+    /// (only a mutable borrow of the `AssetMut` does), so a touch that merely looked
+    /// the material up left every face on its first, coarse decode.
+    #[test]
+    fn a_lod_refresh_marks_every_live_material_modified() -> Result<(), Box<dyn core::error::Error>>
+    {
+        let mut app = App::new();
+        // The asset plugin registers the `AssetEvent` messages the check reads.
+        app.add_plugins(AssetPlugin::default())
+            .init_asset::<Image>()
+            .init_asset::<FaceMaterial>();
+        let id = TextureKey::from(Uuid::from_u128(0x10d_5ef));
+
+        let mut store = DecodedTextures::default();
+        let _previous = store.insert(id, Arc::new(decoded(4)));
+        let mut prim = PrimTextures::default();
+        let world = app.world_mut();
+        let image = world.resource_mut::<Assets<Image>>().add(Image::default());
+        let _previous = prim.images.insert(id, image);
+        let (live, dead) = {
+            let mut materials = world.resource_mut::<Assets<FaceMaterial>>();
+            (add_faces(&mut materials, 2), add_face(&mut materials))
+        };
+        prim.materials.insert(
+            id,
+            live.iter()
+                .chain(core::iter::once(&dead))
+                .map(Handle::id)
+                .collect(),
+        );
+        // Settle the `Added` events, then lose a face before the refresh.
+        app.update();
+        let world = app.world_mut();
+        let _removed = world
+            .resource_mut::<Assets<FaceMaterial>>()
+            .remove(dead.id());
+        app.update();
+        let world = app.world_mut();
+        world
+            .resource_mut::<Messages<AssetEvent<FaceMaterial>>>()
+            .clear();
+
+        world.resource_scope(|world, mut images: Mut<Assets<Image>>| {
+            let mut materials = world.resource_mut::<Assets<FaceMaterial>>();
+            refresh_lod_image(&store, &mut prim, &mut images, &mut materials, id);
+        });
+        app.update();
+
+        let mut modified: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<AssetEvent<FaceMaterial>>>()
+            .drain()
+            .filter_map(|event| match event {
+                AssetEvent::Modified { id } => Some(id),
+                _other => None,
+            })
+            .collect();
+        modified.sort();
+        let mut expected: Vec<_> = live.iter().map(Handle::id).collect();
+        expected.sort();
+        assert_eq!(modified, expected, "each live material is re-prepared");
+        assert_eq!(
+            prim.materials.get(&id).map(Vec::len),
+            Some(2),
+            "the despawned face's material is pruned"
+        );
+        Ok(())
+    }
+
+    /// A decoded texture of the given size (pixels unused by the refresh, which only
+    /// compares sizes and hands the decode to its builder).
+    fn decoded_sized(width: u32, height: u32) -> DecodedTexture {
+        DecodedTexture::new(
+            width,
+            height,
+            4,
+            DiscardLevel::FULL,
+            Bytes::from(vec![0xFF_u8; 4]),
+            None,
+        )
+    }
+
+    /// An image derived from a texture that has since re-decoded at another size is
+    /// rebuilt from the new decode and every material sampling it — in whichever
+    /// slot — is re-prepared; one still built from the current decode is left
+    /// alone, and a rebuild the image budget does not cover waits for a later pass.
+    #[test]
+    fn a_derived_image_follows_its_texture_to_a_new_resolution()
+    -> Result<(), Box<dyn core::error::Error>> {
+        let mut app = App::new();
+        app.add_plugins(AssetPlugin::default())
+            .init_asset::<Image>()
+            .init_asset::<FaceMaterial>();
+        let upgraded = TextureKey::from(Uuid::from_u128(0xd1_0001));
+        let current = TextureKey::from(Uuid::from_u128(0xd1_0002));
+        let coarse = decoded_sized(128, 128);
+        let fine = Arc::new(decoded_sized(512, 512));
+        let mut store = DecodedTextures::default();
+        let _previous = store.insert(upgraded, Arc::clone(&fine));
+        let _previous = store.insert(current, Arc::clone(&fine));
+
+        let world = app.world_mut();
+        let (stale_handle, current_handle) = {
+            let mut images = world.resource_mut::<Assets<Image>>();
+            (images.add(Image::default()), images.add(Image::default()))
+        };
+        let mut cache = std::collections::HashMap::new();
+        let _previous = cache.insert(upgraded, DerivedImage::new(stale_handle.clone(), &coarse));
+        let _previous = cache.insert(current, DerivedImage::new(current_handle.clone(), &fine));
+        let (on_stale, _on_current) = {
+            let mut materials = world.resource_mut::<Assets<FaceMaterial>>();
+            let mut on_stale = inert_face_material(StandardMaterial::default());
+            on_stale.extension.normal_map = stale_handle.clone();
+            let mut on_current = inert_face_material(StandardMaterial::default());
+            on_current.base.base_color_texture = Some(current_handle.clone());
+            (materials.add(on_stale), materials.add(on_current))
+        };
+        app.update();
+        let world = app.world_mut();
+        world
+            .resource_mut::<Messages<AssetEvent<FaceMaterial>>>()
+            .clear();
+
+        // No image budget: nothing is rebuilt yet, and the entry stays stale.
+        let mut spent = budget_with_image(0);
+        let refresh = |world: &mut bevy::ecs::world::World,
+                       cache: &mut std::collections::HashMap<TextureKey, DerivedImage>,
+                       budget: &mut TextureApplyBudget| {
+            world.resource_scope(|world, mut images: Mut<Assets<Image>>| {
+                let mut materials = world.resource_mut::<Assets<FaceMaterial>>();
+                refresh_derived_images(
+                    cache,
+                    |id| id,
+                    |_id, decoded| {
+                        Image::new_fill(
+                            bevy::render::render_resource::Extent3d {
+                                width: decoded.width,
+                                height: decoded.height,
+                                depth_or_array_layers: 1,
+                            },
+                            bevy::render::render_resource::TextureDimension::D2,
+                            &[0, 0, 0, 255],
+                            bevy::render::render_resource::TextureFormat::Rgba8Unorm,
+                            bevy::asset::RenderAssetUsages::default(),
+                        )
+                    },
+                    &store,
+                    budget,
+                    &mut images,
+                    &mut materials,
+                );
+            });
+        };
+        refresh(world, &mut cache, &mut spent);
+        let size = |app: &App, handle: &Handle<Image>| {
+            app.world()
+                .resource::<Assets<Image>>()
+                .get(handle)
+                .map(Image::width)
+        };
+        assert_eq!(size(&app, &stale_handle), Some(1), "no budget, no rebuild");
+
+        let mut budget = budget_with_image(8);
+        refresh(app.world_mut(), &mut cache, &mut budget);
+        app.update();
+        assert_eq!(
+            size(&app, &stale_handle),
+            Some(512),
+            "rebuilt from the new decode"
+        );
+        assert_eq!(
+            size(&app, &current_handle),
+            Some(1),
+            "a current image is left alone"
+        );
+        assert_eq!(budget.image_remaining, 7, "one rebuild spent one image");
+
+        let modified: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<AssetEvent<FaceMaterial>>>()
+            .drain()
+            .filter_map(|event| match event {
+                AssetEvent::Modified { id } => Some(id),
+                _other => None,
+            })
+            .collect();
+        assert_eq!(
+            modified,
+            vec![on_stale.id()],
+            "only the material sampling the rebuilt image is re-prepared"
+        );
+
+        // Once rebuilt, the entry is current: a further pass spends nothing.
+        refresh(app.world_mut(), &mut cache, &mut budget);
+        assert_eq!(budget.image_remaining, 7);
+        Ok(())
     }
 
     /// A deferred drape whose face despawned is dropped for free — it neither panics

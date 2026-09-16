@@ -58,7 +58,7 @@ use sl_client_bevy::{DecodedTexture, Priority, TextureFace, TextureKey, Uuid};
 use crate::face_material::FaceMaterial;
 use crate::materials::ObjectRenderMaterials;
 use crate::objects::{FaceTextureDebug, PrimFaceEntity};
-use crate::textures::{TextureApplyBudget, TextureManager};
+use crate::textures::{DerivedImage, TextureApplyBudget, TextureManager, refresh_derived_images};
 use crate::world_api::TERRAIN_BOOST_PRIORITY;
 
 /// The reference viewer's `SHININESS_TO_ALPHA` table (`llface.cpp`): the
@@ -189,7 +189,7 @@ pub struct BumpManager {
     /// Normal maps generated from each diffuse texture, keyed by the texture id and
     /// whether the height field was inverted (the darkness bump code), so a texture
     /// shared by many bumped faces is turned into a normal map once per polarity.
-    normals: HashMap<(TextureKey, bool), Handle<Image>>,
+    normals: HashMap<(TextureKey, bool), DerivedImage>,
     /// Face materials parked on a diffuse texture id, each with whether its bump
     /// code inverts the height field, applied once the texture decodes.
     pending: HashMap<TextureKey, Vec<(Handle<FaceMaterial>, bool)>>,
@@ -205,11 +205,13 @@ impl BumpManager {
         invert: bool,
         decoded: &Arc<DecodedTexture>,
     ) -> Handle<Image> {
-        if let Some(handle) = self.normals.get(&(id, invert)) {
-            return handle.clone();
+        if let Some(derived) = self.normals.get(&(id, invert)) {
+            return derived.handle.clone();
         }
         let handle = images.add(generate_normal_map(decoded, invert));
-        let _inserted = self.normals.insert((id, invert), handle.clone());
+        let _inserted = self
+            .normals
+            .insert((id, invert), DerivedImage::new(handle.clone(), decoded));
         handle
     }
 }
@@ -341,6 +343,30 @@ pub fn apply_bump_normals(
             manager.pending.entry(id).or_default().extend(deferred);
         }
     }
+}
+
+/// Regenerate each bump normal map whose diffuse texture has since decoded at
+/// another resolution, and re-prepare the materials sampling it.
+///
+/// The diffuse is an ordinary face texture, so its level of detail follows the
+/// face's size on screen in both directions; a normal map generated once from its
+/// first, coarse decode would never follow it (see [`refresh_derived_images`]).
+pub fn refresh_bump_normals(
+    mut manager: ResMut<BumpManager>,
+    store: Res<DecodedTextures>,
+    mut budget: ResMut<TextureApplyBudget>,
+    mut images: ResMut<Assets<Image>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
+) {
+    refresh_derived_images(
+        &mut manager.normals,
+        |(id, _invert)| id,
+        |(_id, invert), decoded| generate_normal_map(decoded, invert),
+        &store,
+        &mut budget,
+        &mut images,
+        &mut materials,
+    );
 }
 
 /// Build a tangent-space normal map [`Image`] from a decoded diffuse texture,

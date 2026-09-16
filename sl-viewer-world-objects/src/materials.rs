@@ -54,7 +54,8 @@ use crate::objects::{
     FaceTextureDebug, PrimFaceEntity, SceneObject, TransparencyCulled, is_fully_transparent,
 };
 use crate::textures::{
-    PrimTextures, TextureAlpha, TextureApplyBudget, TextureManager, compose_face_material,
+    DerivedImage, PrimTextures, TextureAlpha, TextureApplyBudget, TextureManager,
+    compose_face_material, refresh_derived_images,
 };
 use crate::world_api::DecodedTextures;
 use crate::world_api::ObjectState;
@@ -272,7 +273,7 @@ pub struct MaterialManager {
     /// Uploaded PBR-slot images by `(texture id, srgb)` — a texture used in two
     /// colour spaces (e.g. base colour on one material, a linear map on another)
     /// is uploaded once per space.
-    images: HashMap<(TextureKey, bool), Handle<Image>>,
+    images: HashMap<(TextureKey, bool), DerivedImage>,
     /// Material-slot patches parked on a texture id, applied once it decodes.
     texture_pending: HashMap<TextureKey, Vec<PbrTexturePatch>>,
     /// Face keys whose override was set locally by the build tool
@@ -707,11 +708,13 @@ impl MaterialManager {
         srgb: bool,
         decoded: &Arc<DecodedTexture>,
     ) -> Handle<Image> {
-        if let Some(handle) = self.images.get(&(id, srgb)) {
-            return handle.clone();
+        if let Some(derived) = self.images.get(&(id, srgb)) {
+            return derived.handle.clone();
         }
         let handle = images.add(build_pbr_image(decoded, srgb));
-        let _inserted = self.images.insert((id, srgb), handle.clone());
+        let _inserted = self
+            .images
+            .insert((id, srgb), DerivedImage::new(handle.clone(), decoded));
         handle
     }
 }
@@ -1699,6 +1702,31 @@ pub fn apply_pbr_textures(
                 .extend(deferred);
         }
     }
+}
+
+/// Rebuild each uploaded PBR map whose texture has since decoded at another
+/// resolution, and re-prepare the materials sampling it.
+///
+/// A map is uploaded from whatever decode the store holds when its first face
+/// wants it — for a texture an ordinary face is also showing, that can be the
+/// coarse level the face's first fetch asked for, before the map's own full-
+/// resolution request lands, and nothing else would ever upload it again.
+pub fn refresh_pbr_textures(
+    mut manager: ResMut<MaterialManager>,
+    store: Res<DecodedTextures>,
+    mut budget: ResMut<TextureApplyBudget>,
+    mut images: ResMut<Assets<Image>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
+) {
+    refresh_derived_images(
+        &mut manager.images,
+        |(id, _srgb)| id,
+        |(_id, srgb), decoded| build_pbr_image(decoded, srgb),
+        &store,
+        &mut budget,
+        &mut images,
+        &mut materials,
+    );
 }
 
 /// Convert a GLTF `KHR_texture_transform` into a Bevy UV [`Affine2`]. The

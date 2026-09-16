@@ -24,7 +24,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use bevy::asset::RenderAssetUsages;
+use bevy::asset::{AssetMut, RenderAssetUsages};
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
@@ -483,13 +483,18 @@ fn pump_media_engine(
             // A new GPU texture: rebuild the bind group of every material
             // sampling this image (see MediaSlot::touch_materials). With no
             // material store (a UI-only host), there are no faces to touch.
-            // `get_mut` *is* the touch, so the prune and the refresh are the
-            // same pass: a material still alive is marked changed and kept, one
-            // whose last strong handle (the face's `MeshMaterial3d`) is gone is
-            // dropped from the list.
+            // The touch and the prune are the same pass: a material still alive
+            // is marked changed and kept, one whose last strong handle (the
+            // face's `MeshMaterial3d`) is gone is dropped from the list. The
+            // mark is `into_inner`: `get_mut` alone raises no
+            // `AssetEvent::Modified` until the `AssetMut` is mutably borrowed.
             if let Some(materials) = materials.as_mut() {
-                slot.touch_materials
-                    .retain(|material| materials.get_mut(*material).is_some());
+                slot.touch_materials.retain(|material| {
+                    materials
+                        .get_mut(*material)
+                        .map(AssetMut::into_inner)
+                        .is_some()
+                });
             }
             debug!(
                 "media surface resized to {}x{} ({:?}, {} material(s) touched)",

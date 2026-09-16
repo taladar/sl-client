@@ -940,6 +940,9 @@ fn face_material_pipeline() -> ScheduleConfigs<ScheduleSystem> {
             apply_material_overrides,
             crate::materials::drive_local_overrides,
             apply_pbr_textures,
+            // A map uploaded from a coarser decode than the store now holds is
+            // rebuilt, after the first-use builds have had the image budget.
+            crate::materials::refresh_pbr_textures,
             // FIRE-35138: while the build tool's Texture tab is on the
             // Blinn-Phong mode, render each selected linkset's PBR faces as
             // Blinn-Phong so they can be judged as edited; restore PBR on
@@ -958,6 +961,7 @@ fn face_material_pipeline() -> ScheduleConfigs<ScheduleSystem> {
             apply_legacy_materials,
             apply_legacy_normal_maps,
             apply_legacy_specular_maps,
+            crate::legacy_materials::refresh_legacy_map_images,
             // The legacy per-face bump / shiny / glow / fullbright flags (P27.4):
             // register each newly-spawned bumped face and, once its diffuse
             // texture decodes, generate and assign its normal map (fullbright /
@@ -966,6 +970,7 @@ fn face_material_pipeline() -> ScheduleConfigs<ScheduleSystem> {
             // real `LLMaterial` normal map takes precedence over bump.
             register_bump_faces,
             apply_bump_normals,
+            crate::bump::refresh_bump_normals,
         )
             .chain(),
     )
