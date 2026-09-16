@@ -1,8 +1,8 @@
 ---
 id: viewer-tree-species-all-rendered-as-trees
-title: All SL trees render as one large evergreen — species read from `state` instead of the `Data` genome (fix landed, needs live verify)
+title: All SL trees render as one large evergreen — species read from `state` instead of the `Data` genome
 topic: viewer
-status: bugs
+status: done
 origin: noticed live on aditi comparing our render to Firestorm (2026-08-11)
 ---
 
@@ -54,7 +54,9 @@ reintroduce this bug (`state` is `0` on SL) or pick garbage. Used at both the
 initial build and the `PendingTree` LOD-rebuild inputs. Unit test
 `tree_species_reads_the_data_genome_not_state`.
 
-**Needs live verify on aditi:** confirm the region now shows varied species
-(ferns / autumn trees) instead of uniform evergreens.
+## Verified live on aditi (2026-09-16)
+
+At `93c14ce3` the user confirmed the region's Linden plants render as their
+real species (no longer uniform evergreens).
 
 Related: [[viewer-p26-1]] (the species table this fix feeds correctly at last).

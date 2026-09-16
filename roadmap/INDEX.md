@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 315 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 9 |
-| done | 1169 |
+| bugs | 8 |
+| done | 1170 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1698** |
@@ -1167,7 +1167,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (9)
+## bugs (8)
 
 ### viewer
 
@@ -1187,11 +1187,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Own avatar looks broken after a teleport
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
-- [`viewer-tree-species-all-rendered-as-trees`](bugs/viewer-tree-species-all-rendered-as-trees.md)
-  — All SL trees render as one large evergreen — species read from `state`
-  instead of the `Data` genome (fix landed, needs live verify)
 
-## done (1169)
+## done (1170)
 
 ### protocol
 
@@ -2859,6 +2856,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A translucent prim's top face reads as opaque from above
 - [`viewer-transparency-all-faces-skips-top`](done/viewer-transparency-all-faces-skips-top.md)
   — Changing transparency with no face selected leaves a cube's top face alone
+- [`viewer-tree-species-all-rendered-as-trees`](done/viewer-tree-species-all-rendered-as-trees.md)
+  — All SL trees render as one large evergreen — species read from `state`
+  instead of the `Data` genome
 - [`viewer-ui-bottom-toolbar`](done/viewer-ui-bottom-toolbar.md) — Bottom
   toolbar (button bar) (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-color-picker`](done/viewer-ui-color-picker.md) — Color picker
