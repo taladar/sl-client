@@ -274,7 +274,36 @@ impl Profile {
     /// the path caps and the open-ring profile edges.
     #[must_use]
     pub fn generate(shape: &PrimShape, lod: PrimLod, path_open: bool, split: u32) -> Self {
-        let split = usize_from_u32(split);
+        Self::generate_inner(shape, lod, path_open, usize_from_u32(split), None)
+    }
+
+    /// Generate the profile a **sculpted** prim's surface is laid over, asking a
+    /// circle profile for `sculpt_size` sides (Firestorm's `LLProfile::generate`
+    /// called from `LLVolume::sculpt` with `is_sculpted` and no split).
+    ///
+    /// Only a [`ProfileCurve::Circle`] honours the requested size; every other
+    /// curve keeps the ring its own parameters give it, as in the reference — so
+    /// a sculpt on a box's square profile is five points around, and gains the
+    /// box's six faces.
+    #[must_use]
+    pub fn generate_sculpted(
+        shape: &PrimShape,
+        lod: PrimLod,
+        path_open: bool,
+        sculpt_size: usize,
+    ) -> Self {
+        Self::generate_inner(shape, lod, path_open, 0, Some(sculpt_size))
+    }
+
+    /// The shared body of [`generate`](Self::generate) and
+    /// [`generate_sculpted`](Self::generate_sculpted).
+    fn generate_inner(
+        shape: &PrimShape,
+        lod: PrimLod,
+        path_open: bool,
+        split: usize,
+        sculpt_size: Option<usize>,
+    ) -> Self {
         let detail = lod.detail();
         let mut builder = Builder::new(shape, split);
 
@@ -283,7 +312,7 @@ impl Profile {
             ProfileCurve::IsoTriangle
             | ProfileCurve::EqualTriangle
             | ProfileCurve::RightTriangle => builder.build_triangle(shape, detail, path_open),
-            ProfileCurve::Circle => builder.build_circle(shape, detail, path_open),
+            ProfileCurve::Circle => builder.build_circle(shape, detail, path_open, sculpt_size),
             ProfileCurve::HalfCircle => builder.build_half_circle(shape, detail, path_open),
         }
 
@@ -549,13 +578,22 @@ impl Builder {
 
     /// Build a circle profile ring — one outer side face and an optional hollow
     /// (Firestorm's `LL_PCODE_PROFILE_CIRCLE` branch). A square hollow snaps the
-    /// side count to a multiple of four so the corners line up.
-    fn build_circle(&mut self, shape: &PrimShape, detail: f32, path_open: bool) {
+    /// side count to a multiple of four so the corners line up. A sculpted prim
+    /// replaces the outer ring's side count with its requested size (the hollow
+    /// keeps the detail-derived one, as in the reference).
+    fn build_circle(
+        &mut self,
+        shape: &PrimShape,
+        detail: f32,
+        path_open: bool,
+        sculpt_size: Option<usize>,
+    ) {
         let mut circle_detail = MIN_DETAIL_FACES * detail;
         if self.hollow > 0.0 && shape.hole_type == HoleType::Square {
             circle_detail = (circle_detail / 4.0).ceil() * 4.0;
         }
-        self.gen_ngon(circle_detail.floor(), 0.0, FULL_ANG_SCALE);
+        let sides = sculpt_size.map_or_else(|| circle_detail.floor(), usize_to_f32);
+        self.gen_ngon(sides, 0.0, FULL_ANG_SCALE);
         if path_open {
             self.add_cap(ProfileFaceId::PATH_BEGIN);
         }
@@ -834,6 +872,23 @@ mod tests {
         assert_eq!(outer_side_count(&high), 1);
         assert!(has_face(&high, ProfileFaceId::PATH_BEGIN));
         assert!(has_face(&high, ProfileFaceId::PATH_END));
+    }
+
+    /// A sculpt asks a circle profile for its grid's column count (one more
+    /// point than steps: the seam is two points); a square profile ignores the
+    /// request and keeps its five points and a box's faces.
+    #[test]
+    fn a_sculpt_sizes_a_circle_profile_but_not_a_square() {
+        let mut params = default_box_params();
+        params.profile_curve = 0x00;
+        let circle = PrimShape::from_params(&params);
+        let sized = Profile::generate_sculpted(&circle, PrimLod::High, false, 32);
+        assert_eq!(sized.point_count(), 33);
+        assert_eq!(sized.face_count(), 1, "one closed side, no caps");
+        let square = PrimShape::from_params(&default_box_params());
+        let boxed = Profile::generate_sculpted(&square, PrimLod::High, true, 32);
+        assert_eq!(boxed.point_count(), 5);
+        assert_eq!(boxed.face_count(), 6, "four sides and two caps");
     }
 
     #[test]

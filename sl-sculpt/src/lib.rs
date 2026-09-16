@@ -13,14 +13,15 @@
 //!
 //! - [`stitch`] — the [`SculptStitch`] topology and its [`SculptParams`] flags,
 //!   parsed from the wire `sculpt_type` byte.
-//! - [`tessellate`](mod@tessellate) — the resample-and-stitch that turns a
-//!   sculpt map into a single-face [`PrimMesh`], honouring the four sculpt
-//!   types (plane / cylinder / sphere / torus) and the mirror / invert flags,
-//!   following Firestorm's `LLVolume::sculpt` / `sculptGenerateMapVertices`,
-//!   reimplemented idiomatically. The grid it resamples onto is sized by
-//!   [`mesh_resolution`] from the map's dimensions and the requested
+//! - [`tessellate`](mod@tessellate) — reading the map into a vertex grid and
+//!   laying it over the prim's own path and profile (built by `sl-prim` at the
+//!   sizes the map asks for), following Firestorm's `LLVolume::sculpt` /
+//!   `sculptGenerateMapVertices`, reimplemented idiomatically. The grid is sized
+//!   by [`mesh_resolution`] from the map's dimensions and the requested
 //!   [`PrimLod`](sl_prim::PrimLod), as the reference sizes it from the volume's
-//!   detail — a distant sculpt is not tessellated at full rez.
+//!   detail — a distant sculpt is not tessellated at full rez. On the usual
+//!   circle-on-circle shape the result is one face; on another shape it is that
+//!   shape's faces, as in the reference.
 
 pub mod stitch;
 pub mod tessellate;

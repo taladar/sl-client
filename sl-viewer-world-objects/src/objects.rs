@@ -381,8 +381,11 @@ pub struct PendingSculpt {
     /// The sculpt type byte (plane / cylinder / sphere / torus topology + the
     /// invert / mirror flags), passed to [`tessellate_sculpt`].
     sculpt_type: u8,
+    /// The object's quantized prim shape: a sculpt's surface is laid over its
+    /// own path and profile, which decide its faces and texture coordinates.
+    shape: PrimShapeParams,
     /// The object's raw texture-entry bytes, decoded at build time to texture the
-    /// sculpt's single face.
+    /// sculpt's faces.
     texture_entry: Vec<u8>,
     /// The object's Second Life scale, needed to project planar-texgen faces.
     scale: [f32; 3],
@@ -2062,6 +2065,7 @@ fn build_object_geometry(
             let rebuild = PendingSculpt {
                 map,
                 sculpt_type,
+                shape: object.shape,
                 texture_entry: object.texture_entry.clone(),
                 scale: [object.scale.x, object.scale.y, object.scale.z],
                 priority,
@@ -2075,6 +2079,7 @@ fn build_object_geometry(
                         &map_image,
                         map,
                         sculpt_type,
+                        object.shape,
                         &object.texture_entry,
                         [object.scale.x, object.scale.y, object.scale.z],
                         entity,
@@ -2361,18 +2366,19 @@ fn apply_flexi_sim(
 }
 
 /// Stitch a sculpted prim's decoded sculpt map into geometry and spawn its face
-/// entity under `parent`, textured via the Phase 6 pipeline exactly as a plain
+/// entities under `parent`, textured via the Phase 6 pipeline exactly as a plain
 /// prim's faces are.
 ///
 /// The map pixels come from the shared [`TextureManager`] (the same fetch /
 /// off-thread-decode / disk-cache the Phase 6 texturing drives — the sculpt is
-/// not decoded on the render thread), and are stitched by [`tessellate_sculpt`]
-/// into a single-face [`PrimMesh`] honouring the object's `sculpt_type`
-/// (plane / cylinder / sphere / torus + invert / mirror flags). The resulting face
-/// is textured from the object's `TextureEntry` slot 0 and spawned as one child
-/// entity, kept in the prim's local Second Life space — the object entity's
-/// `Transform` carries its scale / rotation / position and the single basis
-/// change, like a plain prim.
+/// not decoded on the render thread), and are laid by [`tessellate_sculpt`] over
+/// the prim's own path and profile (`shape`), honouring the object's
+/// `sculpt_type` (plane / cylinder / sphere / torus + invert / mirror flags). On
+/// the usual circle-on-circle sculpt shape that is one face; on another shape it
+/// is that shape's faces, as in the reference. Each face is textured from its
+/// `TextureEntry` slot and spawned as a child entity, kept in the prim's local
+/// Second Life space — the object entity's `Transform` carries its scale /
+/// rotation / position and the single basis change, like a plain prim.
 ///
 /// `lod` is the pixel-area-selected tessellation level: a sculpt is grid-resampled
 /// at [`sl_client_bevy::mesh_resolution`] of its map size and that level, so a
@@ -2381,8 +2387,8 @@ fn apply_flexi_sim(
 /// it toward the level its on-screen size warrants, exactly as for a plain prim.
 ///
 /// The geometry is shared across identical instances through the
-/// [`GeometryCache`] keyed by the map asset (`map_key`), sculpt type, the decoded
-/// map's pixel size, and the level — copies of one sculpt stitch the map once, and
+/// [`GeometryCache`] keyed by the shape, the map asset (`map_key`), sculpt type,
+/// the decoded map's pixel size, and the level — copies of one sculpt stitch the map once, and
 /// a re-decode at another discard level (or a LOD swap) is a clean different key.
 #[expect(
     clippy::too_many_arguments,
@@ -2392,6 +2398,7 @@ fn build_sculpt_faces(
     map: &DecodedTexture,
     map_key: TextureKey,
     sculpt_type: u8,
+    shape: PrimShapeParams,
     texture_entry: &[u8],
     scale: [f32; 3],
     parent: Entity,
@@ -2410,13 +2417,14 @@ fn build_sculpt_faces(
 ) -> Vec<Entity> {
     spawn_cached_prim_faces(
         GeometryKey::Sculpt {
+            shape,
             map: map_key,
             sculpt_type,
             width: map.width,
             height: map.height,
             lod,
         },
-        || tessellate_sculpt(map, sculpt_type, lod),
+        || tessellate_sculpt(map, sculpt_type, &PrimShapeFloat::from_params(&shape), lod),
         texture_entry,
         scale,
         parent,
@@ -4273,6 +4281,7 @@ pub fn apply_prim_lod(
                         &map,
                         sculpt.map,
                         sculpt.sculpt_type,
+                        sculpt.shape,
                         &sculpt.texture_entry,
                         sculpt.scale,
                         geometry,
@@ -4463,6 +4472,7 @@ pub fn apply_object_sculpts(
                 &map,
                 pending.map,
                 pending.sculpt_type,
+                pending.shape,
                 &pending.texture_entry,
                 pending.scale,
                 geometry,

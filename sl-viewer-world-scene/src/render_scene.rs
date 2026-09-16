@@ -1375,10 +1375,10 @@ fn prim_twisted_torus(
 /// computes: `u` around, `v` from pole to pole.
 ///
 /// 64×64 because that is the smallest map that reproduces the class without
-/// making the stitcher's own subdivision the dominant error — at the finest
-/// level a sculpt is resampled onto `sl_sculpt::MAX_SUBDIVISIONS` cells per
-/// side, and a map smaller than that would be measuring interpolation rather
-/// than stitching.
+/// capping the grid — at the finest level a sculpt is sampled at
+/// `sl_sculpt::MAX_SUBDIVISIONS` steps per side, a budget of one vertex per
+/// four texels, and a smaller map would hold the finest level down to a coarser
+/// one.
 fn sculpt_sphere_map() -> DecodedTexture {
     const SIZE: u32 = 64;
     let extent = f32::from(u16::try_from(SIZE).unwrap_or(1));
@@ -1421,9 +1421,24 @@ fn sculpt_sphere(cx: SceneCx, root: Entity, commands: &mut Commands, assets: &mu
     // all four levels agreeing — which meant the LOD sweep had been walking a
     // sculpt four times and building the same mesh, while `objects.rs` stitches a
     // real sculpt at the level its screen size picks.
-    let prim = tessellate_sculpt(&map, 1, cx.lod);
+    //
+    // Over the shape a sculpt is given in-world — a circle profile on a circle
+    // path, what the build tool and `PRIM_TYPE_SCULPT` set — because the surface
+    // is laid over the prim's own path and profile, and a box's would collapse it.
+    let shape = PrimShapeFloat {
+        path_curve: PathCurve::Circle,
+        profile_curve: ProfileCurve::Circle,
+        path_scale_y: 0.5,
+        ..base_shape()
+    };
+    let prim = tessellate_sculpt(&map, 1, &shape, cx.lod);
+    // No `SymmetricAbout` declaration, though the map is a sphere: a sculpt
+    // vertex reads the texel *below* its fraction of the map, as the reference
+    // does, so a 64-row map is sampled at rows 0, 2, … 62 and then 63 — a set
+    // that does not mirror about the equator. The surface is a sphere sampled
+    // unevenly, which is what the reference draws.
     for (index, mesh) in to_bevy_prim_meshes(&prim).into_iter().enumerate() {
-        let face = spawn_geometry(
+        spawn_geometry(
             format!("sculpt-sphere/face-{index}"),
             mesh,
             matte(Color::srgb(0.8, 0.8, 0.75)),
@@ -1432,15 +1447,6 @@ fn sculpt_sphere(cx: SceneCx, root: Entity, commands: &mut Commands, assets: &mu
             commands,
             assets,
         );
-        commands.entity(face).insert(SymmetricAbout {
-            // Z only: `sculpt_sphere_map` walks `u` once around and `v` pole to
-            // pole, so the equator mirrors exactly — but the seam where `u`
-            // wraps puts the X/Y mirror of a vertex a fraction of a step away
-            // rather than on it, which is a property of the parameterization
-            // and not a defect.
-            axes: &[SymmetryAxis::Z],
-            reason: "sculpt_sphere_map computes a sphere, whose poles mirror about the equator",
-        });
     }
 }
 

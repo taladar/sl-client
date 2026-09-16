@@ -1,49 +1,69 @@
-//! The **sculpt sweep**: reading a decoded RGB sculpt map as a displacement
-//! grid and stitching it into a closed surface.
+//! The **sculpt surface**: reading a decoded RGB sculpt map as a grid of vertex
+//! positions and laying it over the prim's own path and profile.
 //!
-//! [`tessellate`] resamples the sculpt map onto a working grid sized by
-//! [`mesh_resolution`] with bilinear filtering, maps each sample's
-//! `(r, g, b) / 255 - 0.5` to a vertex position in Second Life's right-handed
-//! **Z-up** space, and stitches the grid per [`SculptStitch`]:
+//! A sculpt is not a shape of its own. The reference viewer builds a sculpted
+//! prim's volume from the prim's **path and profile** exactly as for a plain
+//! prim — only asking a circular path and a circle profile for as many steps as
+//! the map is worth — and then, instead of sweeping the profile along the path,
+//! reads every vertex position out of the map. The shape parameters therefore
+//! decide how deep and how wide the vertex grid is, how many faces the prim has
+//! and which of them are caps, and every texture coordinate; the map decides
+//! only where the vertices are.
 //!
-//! - **plane** — an open grid, neither edge shared;
-//! - **cylinder** — the U (around) seam is a single shared column;
-//! - **sphere** — the U seam is shared and the top / bottom rows collapse to a
-//!   single pole vertex each;
-//! - **torus** — both the U and V seams are shared.
+//! So [`tessellate`]:
 //!
-//! Sharing is structural: a seam or pole is *one* vertex the surrounding quads
-//! reference, never a duplicated pair, so per-vertex normals (accumulated from
-//! the incident triangles) are automatically smooth across it.
+//! 1. sizes the grid with [`mesh_resolution`] (Firestorm's
+//!    `sculpt_calc_mesh_resolution`) and generates the sculpt's path and profile
+//!    for it ([`Path::generate_sculpted`], [`Profile::generate_sculpted`]);
+//! 2. reads one map texel per grid vertex (`sculptGenerateMapVertices`) — the
+//!    nearest texel below the vertex's fraction of the map, the sphere type's
+//!    first and last rows pinched to the middle column, the wrapping types'
+//!    last column wrapping to the first — mapping `(r, g, b) / 255 - 0.5` to a
+//!    position in Second Life's right-handed **Z-up** space;
+//! 3. rejects a surface with too little or too much area in favour of a sphere
+//!    placeholder, and a map with no usable data in favour of an empty one
+//!    (`LLVolume::sculpt`);
+//! 4. hands the grid to [`tessellate_sculpted`], which builds the faces the
+//!    profile names and stitches the side normals the way the sculpt type asks.
 //!
-//! **The grid's V axis runs bottom-up through the visible map.** The reference
+//! A seam is two vertices, not one: the first and last column carry the same
+//! position but texture coordinates `0` and `1`, so the texture runs once around
+//! instead of squeezing a reversed copy into the last column. A pole is a whole
+//! row of coincident vertices whose normals are averaged.
+//!
+//! On the usual sculpt shape — circle profile, circle path, what the build tool
+//! and `PRIM_TYPE_SCULPT` both set — that is one closed side face. On any other
+//! shape it is whatever that shape's faces are: a box's line path is two rows
+//! deep whatever the map, so a sculpt left on a box collapses to its poles,
+//! fails the area test, and shows the placeholder's half-disc on a cap. That is
+//! what the reference draws, and what content made against it expects.
+//!
+//! **The grid's rows run bottom-up through the visible map.** The reference
 //! viewer's JPEG2000 decoder copies rows *bottom-up* into `LLImageRaw` (row 0 =
-//! the visible bottom), and both `sculptGenerateMapVertices` and the
-//! `createSide` triangle winding assume that order; a [`DecodedImage`] is
-//! top-down (row 0 = the visible top), so the grid row's V is flipped at
-//! position-sampling time. UVs keep the *unflipped* grid V — exactly the
-//! reference pairing, where the mesh row built from the visible-bottom map row
-//! carries texture V = 0. Sampling V top-down instead builds every sculpt as
-//! its own mirror image — winding inverted relative to the back-face cull, so
-//! real-convention sculpt content renders inside out (the aditi pillows bug).
+//! the visible bottom), and `sculptGenerateMapVertices` reads row `y` from there;
+//! a [`DecodedImage`] is top-down, so the row is flipped when the texel is read.
+//! Reading top-down instead builds every sculpt as its own mirror image —
+//! winding inverted relative to the back-face cull, so real-convention sculpt
+//! content renders inside out (the aditi pillows bug).
 //!
 //! It is a faithful, idiomatic re-implementation of Firestorm
-//! `indra/llmath/llvolume.cpp` — `LLVolume::sculpt` and
-//! `sculptGenerateMapVertices` — reworked to the workspace's restriction lints
-//! (no indexing, no `as` casts outside the bounded numeric helpers, no panics)
-//! and to a self-contained resample rather than reusing the prim path / profile
-//! generators. A degenerate map (zero-sized or short) falls back to a sphere
-//! placeholder so the function never panics and always yields drawable geometry.
+//! `indra/llmath/llvolume.cpp` — `LLVolume::sculpt`, `sculpt_calc_mesh_resolution`,
+//! `sculptGenerateMapVertices`, `sculptGetSurfaceArea` and the two placeholders —
+//! reworked to the workspace's restriction lints (no indexing, no `as` casts
+//! outside the bounded numeric helpers, no panics).
 
 use crate::stitch::{SculptParams, SculptStitch};
-use sl_prim::{PRIM_LOD_COUNT, PrimFace, PrimFaceId, PrimLod, PrimMesh};
+use sl_prim::{
+    PRIM_LOD_COUNT, Path, PrimLod, PrimMesh, PrimShape, Profile, SculptSeams, SculptStitching,
+    tessellate_sculpted,
+};
 use sl_texture::DecodedImage;
 
 /// The number of quad cells per side of the finest sculpt working grid
 /// (Firestorm's `SCULPT_REZ_4`), the ceiling [`mesh_resolution`] works down from.
 ///
-/// The vertex lattice at that level is `MAX_SUBDIVISIONS + 1` points per side
-/// before any seam sharing or pole collapse reduces it.
+/// A circle path or profile asked for that many steps has `MAX_SUBDIVISIONS + 1`
+/// points: the seam is two of them.
 pub const MAX_SUBDIVISIONS: usize = 32;
 
 /// The per-side cell counts of the four sculpt levels of detail, coarsest first —
@@ -134,6 +154,10 @@ pub fn mesh_resolution(width: u32, height: u32, lod: PrimLod) -> (usize, usize) 
 /// The number of bytes per pixel in a decoded [`DecodedImage`] (canonical RGBA8).
 const RGBA_CHANNELS: usize = 4;
 
+/// The fewest source components a sculpt map must have to carry a position per
+/// texel (Firestorm's `sculpt_components < 3` rejection): a grey map is no map.
+const MIN_COMPONENTS: u16 = 3;
+
 /// The inverse of the 8-bit channel range, mapping `0..=255` to `0.0..=1.0`.
 const INV_U8_MAX: f32 = 1.0 / 255.0;
 
@@ -141,79 +165,117 @@ const INV_U8_MAX: f32 = 1.0 / 255.0;
 /// the middle of the sculpt cube (Firestorm's `sub(0.5)`).
 const CHANNEL_CENTRE: f32 = 0.5;
 
-/// The radius of the sphere placeholder used for a degenerate map (Firestorm's
-/// `sculptGenerateSpherePlaceholder` uses `0.3`).
+/// The radius of the sphere placeholder a surface that fails the area test is
+/// replaced by (Firestorm's `sculptGenerateSpherePlaceholder`).
 const PLACEHOLDER_RADIUS: f32 = 0.3;
 
-/// The squared-length threshold below which an accumulated normal is treated as
-/// degenerate and replaced by a fallback up-vector.
-const NORMAL_EPSILON: f32 = 1.0e-12;
+/// The least surface area a sculpt may have before it is judged degenerate
+/// (Firestorm's `SCULPT_MIN_AREA`).
+const SCULPT_MIN_AREA: f32 = 0.002;
 
-/// Tessellate a decoded sculpt `map` into a single-face [`PrimMesh`] at `lod`,
-/// stitched according to the wire `sculpt_type` byte.
+/// The most surface area a sculpt may have before it is judged degenerate
+/// (Firestorm's `SCULPT_MAX_AREA`).
+const SCULPT_MAX_AREA: f32 = 384.0;
+
+/// The detail at or below which the area test is skipped, so the lowest level
+/// keeps legacy content that only works coarse (Firestorm's
+/// `SCULPT_MIN_AREA_DETAIL`, "don't test lowest LOD to support legacy content").
+const SCULPT_MIN_AREA_DETAIL: f32 = 1.0;
+
+/// Tessellate a sculpted prim at `lod`: its decoded sculpt `map`, stitched
+/// according to the wire `sculpt_type` byte, laid over the path and profile of
+/// its `shape`.
 ///
-/// The byte's low bits select the [`SculptStitch`] topology and its high bits
-/// the invert / mirror flags (see [`SculptParams`]). The grid the map is
-/// resampled onto is [`mesh_resolution`] of the map size and `lod`, so a small
-/// or distant sculpt costs a fraction of the triangles a near one does. A
-/// zero-sized or truncated map falls back to a sphere placeholder.
+/// The byte's low bits select the [`SculptStitch`] and its high bits the
+/// invert / mirror flags (see [`SculptParams`]). See the module docs for what
+/// the shape contributes; the result has one [`sl_prim::PrimFace`] per face the
+/// shape's profile names, in Linden face order.
 #[must_use]
-pub fn tessellate(map: &DecodedImage, sculpt_type: u8, lod: PrimLod) -> PrimMesh {
-    tessellate_with(map, SculptParams::from_sculpt_type(sculpt_type), lod)
+pub fn tessellate(
+    map: &DecodedImage,
+    sculpt_type: u8,
+    shape: &PrimShape,
+    lod: PrimLod,
+) -> PrimMesh {
+    tessellate_with(map, SculptParams::from_sculpt_type(sculpt_type), shape, lod)
 }
 
-/// Tessellate a decoded sculpt `map` at `lod` into a single-face [`PrimMesh`]
-/// using already-parsed [`SculptParams`].
+/// [`tessellate`] with the `sculpt_type` byte already parsed into
+/// [`SculptParams`].
 ///
-/// A zero-sized or truncated map falls back to a sphere placeholder (a sphere
-/// stitch of a procedural sphere), so the result is always drawable. The
-/// placeholder is built on the same grid the map would have used — as in the
-/// reference, where the resolution is chosen from the *declared* map size before
-/// the data is known to be usable.
+/// A map that carries no positions — zero-sized, fewer than three components,
+/// or shorter than its geometry — gives the reference's empty placeholder: a
+/// surface of coincident vertices that draws nothing. A surface whose area is
+/// implausible gives its visible sphere placeholder instead.
 #[must_use]
 #[expect(
     clippy::module_name_repetitions,
     reason = "re-exported at the crate root, where `tessellate_with` reads clearly"
 )]
-pub fn tessellate_with(map: &DecodedImage, params: SculptParams, lod: PrimLod) -> PrimMesh {
+pub fn tessellate_with(
+    map: &DecodedImage,
+    params: SculptParams,
+    shape: &PrimShape,
+    lod: PrimLod,
+) -> PrimMesh {
+    // The requested sizes come from the declared map size even when its data
+    // turns out unusable, as in the reference.
     let (rows, columns) = mesh_resolution(map.width, map.height, lod);
-    let mut mesh = match SculptMap::new(map) {
-        Some(sculpt) => build(params.stitch, rows, columns, |u, v| {
-            sculpt.sample(u, v, params)
-        }),
-        None => build(SculptStitch::Sphere, rows, columns, placeholder_position),
-    };
-    // The reference's `createSide` also reverses the horizontal *texture*
-    // coordinate when invert XOR mirror is set (`ss = 1.f - ss`), so the
-    // texture mirrors with the geometry instead of appearing flipped on it.
-    if params.reverse_u() {
-        for face in &mut mesh.faces {
-            for uv in &mut face.uvs {
-                uv[0] = 1.0 - uv[0];
+    let path = Path::generate_sculpted(shape, lod, rows);
+    let profile = Profile::generate_sculpted(shape, lod, path.is_open(), columns);
+    let size_s = path.point_count();
+    let size_t = profile.point_count();
+
+    let surface = match SculptMap::new(map) {
+        None => vec![[0.0; 3]; size_s.saturating_mul(size_t)],
+        Some(sculpt) => {
+            let surface = sculpt.surface(params, size_s, size_t);
+            let area = surface_area(&surface, size_s, size_t);
+            if lod.detail() > SCULPT_MIN_AREA_DETAIL
+                && !(SCULPT_MIN_AREA..=SCULPT_MAX_AREA).contains(&area)
+            {
+                sphere_placeholder(size_s, size_t)
+            } else {
+                surface
             }
         }
-    }
-    mesh
+    };
+    tessellate_sculpted(shape, &path, &profile, surface, stitching(params))
 }
 
-/// A borrowed view over a decoded sculpt map's RGBA8 pixels, offering bilinear
-/// position sampling.
+/// The side-face normal stitching and texture reversal a sculpt type asks for
+/// (the sculpt branch of Firestorm's `createSide`).
+const fn stitching(params: SculptParams) -> SculptStitching {
+    SculptStitching {
+        seams: match params.stitch {
+            SculptStitch::Plane => SculptSeams::Open,
+            SculptStitch::Cylinder => SculptSeams::Cylinder,
+            SculptStitch::Sphere => SculptSeams::Sphere,
+            SculptStitch::Torus => SculptSeams::Torus,
+        },
+        reverse_u: params.reverse_u(),
+    }
+}
+
+/// A borrowed view over a decoded sculpt map's RGBA8 pixels.
 struct SculptMap<'pixels> {
     /// The map width in pixels.
     width: usize,
     /// The map height in pixels.
     height: usize,
-    /// The tightly packed RGBA8 pixels, row-major (`(y * width + x) * 4`).
+    /// The tightly packed RGBA8 pixels, row-major and top-down
+    /// (`(y * width + x) * 4`).
     pixels: &'pixels [u8],
 }
 
 impl<'pixels> SculptMap<'pixels> {
-    /// View `image` as a sculpt map, or `None` when it is degenerate — zero
-    /// width or height, or fewer pixel bytes than its geometry requires.
+    /// View `image` as a sculpt map, or `None` when it carries no positions —
+    /// zero width or height, fewer than three source components, or fewer
+    /// pixel bytes than its geometry requires.
     fn new(image: &'pixels DecodedImage) -> Option<Self> {
         let width = usize::try_from(image.width).ok()?;
         let height = usize::try_from(image.height).ok()?;
-        if width == 0 || height == 0 {
+        if width == 0 || height == 0 || image.components < MIN_COMPONENTS {
             return None;
         }
         let needed = width
@@ -229,43 +291,72 @@ impl<'pixels> SculptMap<'pixels> {
         })
     }
 
-    /// The displacement position at normalised coordinates `(u, v)` (each in
-    /// `0.0..=1.0`), bilinearly filtered, with the [`SculptParams`] flags
-    /// applied: the U axis is reversed when [`SculptParams::reverse_u`] and the
-    /// X component negated when mirrored.
-    fn sample(&self, u: f32, v: f32, params: SculptParams) -> [f32; 3] {
-        let sample_u = if params.reverse_u() { 1.0 - u } else { u };
-        let position = self.bilinear(sample_u, v);
-        if params.mirror {
-            [-position[0], position[1], position[2]]
-        } else {
-            position
+    /// The `size_s × size_t` surface grid, row-major — path row outer, profile
+    /// column inner (Firestorm `sculptGenerateMapVertices`).
+    fn surface(&self, params: SculptParams, size_s: usize, size_t: usize) -> Vec<[f32; 3]> {
+        let mut surface = Vec::with_capacity(size_s.saturating_mul(size_t));
+        for s in 0..size_s {
+            for t in 0..size_t {
+                let column = if params.reverse_u() {
+                    size_t.saturating_sub(t).saturating_sub(1)
+                } else {
+                    t
+                };
+                let (x, y) = self.texel_for(params.stitch, column, size_t, s, size_s);
+                let position = self.texel(x, y);
+                surface.push(if params.mirror {
+                    [-position[0], position[1], position[2]]
+                } else {
+                    position
+                });
+            }
         }
+        surface
     }
 
-    /// Bilinearly sample the map at normalised `(u, v)` and map the RGB triple to
-    /// a position (`(r, g, b) / 255 - 0.5`).
-    fn bilinear(&self, u: f32, v: f32) -> [f32; 3] {
-        let max_x = self.width.saturating_sub(1);
-        let max_y = self.height.saturating_sub(1);
-        let fx = u.clamp(0.0, 1.0) * f32_from_usize(max_x);
-        let fy = v.clamp(0.0, 1.0) * f32_from_usize(max_y);
-        let x0 = usize_from_f32_floor(fx).min(max_x);
-        let y0 = usize_from_f32_floor(fy).min(max_y);
-        let x1 = x0.saturating_add(1).min(max_x);
-        let y1 = y0.saturating_add(1).min(max_y);
-        let tx = fx - f32_from_usize(x0);
-        let ty = fy - f32_from_usize(y0);
-
-        let top = lerp3(self.texel(x0, y0), self.texel(x1, y0), tx);
-        let bottom = lerp3(self.texel(x0, y1), self.texel(x1, y1), tx);
-        lerp3(top, bottom, ty)
+    /// The texel `(x, y)` — `y` counted from the visible bottom — that grid
+    /// vertex `(column, s)` reads: the texel below its fraction of the map, with
+    /// the stitch type's pinch and wrap applied to the map's far edges.
+    fn texel_for(
+        &self,
+        stitch: SculptStitch,
+        column: usize,
+        size_t: usize,
+        s: usize,
+        size_s: usize,
+    ) -> (usize, usize) {
+        let mut x = grid_to_texel(column, size_t, self.width);
+        let mut y = grid_to_texel(s, size_s, self.height);
+        let middle = self.width.checked_div(2).unwrap_or(0);
+        if y == 0 && stitch.has_poles() {
+            x = middle;
+        }
+        if y == self.height {
+            y = if stitch.wraps_v() {
+                0
+            } else {
+                self.height.saturating_sub(1)
+            };
+            if stitch.has_poles() {
+                x = middle;
+            }
+        }
+        if x == self.width {
+            x = if stitch.wraps_u() {
+                0
+            } else {
+                self.width.saturating_sub(1)
+            };
+        }
+        (x, y)
     }
 
-    /// The position encoded by the pixel at integer `(x, y)`
-    /// (`(r, g, b) / 255 - 0.5`); an out-of-range pixel reads as the cube centre.
+    /// The position encoded by the texel at `(x, y)`, `y` counted from the
+    /// visible bottom row (`(r, g, b) / 255 - 0.5`); an out-of-range texel reads
+    /// as the cube's corner, which the edge handling above never asks for.
     fn texel(&self, x: usize, y: usize) -> [f32; 3] {
-        let base = y
+        let row = self.height.saturating_sub(1).saturating_sub(y);
+        let base = row
             .saturating_mul(self.width)
             .saturating_add(x)
             .saturating_mul(RGBA_CHANNELS);
@@ -281,232 +372,62 @@ impl<'pixels> SculptMap<'pixels> {
     }
 }
 
-/// Build the stitched `rows`×`columns`-cell grid for `stitch`, taking each vertex
-/// position from `position` (the sculpt sampler, or the placeholder generator),
-/// evaluated at the vertex's normalised `(u, 1 - v)` coordinates — the V flip
-/// that maps the bottom-up grid row onto the top-down map (see the module docs);
-/// UVs keep the unflipped grid `(u, v)`.
-///
-/// Seam and pole vertices are stored once and referenced by every incident quad,
-/// so no seam or pole vertex is duplicated. The result is a single [`PrimFace`]
-/// (face index `0`) wrapped in a [`PrimMesh`].
-fn build(
-    stitch: SculptStitch,
-    rows: usize,
-    columns: usize,
-    position: impl Fn(f32, f32) -> [f32; 3],
-) -> PrimMesh {
-    let mut grid = GridBuilder::new(stitch, rows, columns);
-    for row in 0..=rows {
-        for col in 0..=columns {
-            grid.ensure_vertex(row, col, &position);
-        }
+/// The texel index grid step `index` of `count` lands on across `extent` texels:
+/// `floor(index / (count - 1) * extent)`, reaching `extent` itself on the last
+/// step — the far edge the stitch type resolves.
+fn grid_to_texel(index: usize, count: usize, extent: usize) -> usize {
+    let steps = count.saturating_sub(1);
+    if steps == 0 {
+        return 0;
     }
-    grid.stitch_indices();
-
-    let mut face = PrimFace::empty(PrimFaceId::new(0));
-    face.positions = grid.positions;
-    face.uvs = grid.uvs;
-    face.indices = grid.indices;
-    face.normals = smooth_normals(&face.positions, &face.indices);
-
-    let mut mesh = PrimMesh::new();
-    mesh.faces.push(face);
-    mesh
+    usize_from_f32_floor(f32_from_usize(index) / f32_from_usize(steps) * f32_from_usize(extent))
 }
 
-/// Accumulates the stitched grid: one vertex per canonical `(row, col)` lattice
-/// point (after wrap / pole aliasing), plus the triangle-list indices.
-struct GridBuilder {
-    /// The stitch topology, deciding which lattice points alias to a shared
-    /// vertex.
-    stitch: SculptStitch,
-    /// The number of quad cells down the grid's V axis (the lattice is
-    /// `rows + 1` points tall).
-    rows: usize,
-    /// The number of quad cells across the grid's U axis (the lattice is
-    /// `columns + 1` points wide).
-    columns: usize,
-    /// For each canonical lattice slot (`row * (columns + 1) + col`), the stored
-    /// vertex index once created.
-    slots: Vec<Option<u32>>,
-    /// The stored vertex positions.
-    positions: Vec<[f32; 3]>,
-    /// The stored per-vertex UVs, parallel to [`positions`](Self::positions).
-    uvs: Vec<[f32; 2]>,
-    /// The triangle-list indices into the stored vertices.
-    indices: Vec<u32>,
+/// The surface area of a `size_s × size_t` grid, each cell counted as its two
+/// triangles (Firestorm `sculptGetSurfaceArea`) — the test of whether a map
+/// varies enough to make real geometry.
+fn surface_area(surface: &[[f32; 3]], size_s: usize, size_t: usize) -> f32 {
+    let at = |s: usize, t: usize| {
+        surface
+            .get(s.saturating_mul(size_t).saturating_add(t))
+            .copied()
+            .unwrap_or([0.0; 3])
+    };
+    let mut area = 0.0_f32;
+    for s in 0..size_s.saturating_sub(1) {
+        for t in 0..size_t.saturating_sub(1) {
+            let p1 = at(s, t);
+            let p2 = at(s.saturating_add(1), t);
+            let p3 = at(s, t.saturating_add(1));
+            let p4 = at(s.saturating_add(1), t.saturating_add(1));
+            let first = length(cross(subtract(p1, p2), subtract(p1, p3)));
+            let second = length(cross(subtract(p4, p2), subtract(p4, p3)));
+            area += f32::midpoint(first, second);
+        }
+    }
+    area
 }
 
-impl GridBuilder {
-    /// A builder for a `rows × columns`-quad grid stitched per `stitch`.
-    fn new(stitch: SculptStitch, rows: usize, columns: usize) -> Self {
-        let slot_count = rows
-            .saturating_add(1)
-            .saturating_mul(columns.saturating_add(1));
-        Self {
-            stitch,
-            rows,
-            columns,
-            slots: vec![None; slot_count],
-            positions: Vec::new(),
-            uvs: Vec::new(),
-            indices: Vec::new(),
+/// The visible placeholder for a surface that failed the area test: a sphere of
+/// [`PLACEHOLDER_RADIUS`], its azimuth running along the path and its polar
+/// angle across the profile (Firestorm `sculptGenerateSpherePlaceholder`).
+fn sphere_placeholder(size_s: usize, size_t: usize) -> Vec<[f32; 3]> {
+    let fraction = |index: usize, count: usize| {
+        f32_from_usize(index) / f32_from_usize(count.saturating_sub(1).max(1))
+    };
+    let mut surface = Vec::with_capacity(size_s.saturating_mul(size_t));
+    for s in 0..size_s {
+        let azimuth = core::f32::consts::TAU * fraction(s, size_s);
+        for t in 0..size_t {
+            let polar = core::f32::consts::PI * fraction(t, size_t);
+            surface.push([
+                polar.sin() * azimuth.cos() * PLACEHOLDER_RADIUS,
+                polar.sin() * azimuth.sin() * PLACEHOLDER_RADIUS,
+                polar.cos() * PLACEHOLDER_RADIUS,
+            ]);
         }
     }
-
-    /// The canonical `(row, col)` a lattice point maps to after seam and pole
-    /// aliasing: a wrapped far edge folds back to `0`, and a pole row collapses
-    /// every column to `0`.
-    const fn canonical(&self, row: usize, col: usize) -> (usize, usize) {
-        let is_pole_row = self.stitch.has_poles() && (row == 0 || row == self.rows);
-        let wraps_far_col = self.stitch.wraps_u() && col == self.columns;
-        let ccol = if is_pole_row || wraps_far_col { 0 } else { col };
-        let crow = if self.stitch.wraps_v() && row == self.rows {
-            0
-        } else {
-            row
-        };
-        (crow, ccol)
-    }
-
-    /// The flat slot index for a canonical `(row, col)`.
-    const fn slot(&self, crow: usize, ccol: usize) -> usize {
-        crow.saturating_mul(self.columns.saturating_add(1))
-            .saturating_add(ccol)
-    }
-
-    /// The stored vertex index for the lattice point `(row, col)`, creating the
-    /// vertex from `position` the first time its canonical slot is touched.
-    fn ensure_vertex(
-        &mut self,
-        row: usize,
-        col: usize,
-        position: &impl Fn(f32, f32) -> [f32; 3],
-    ) -> u32 {
-        let (crow, ccol) = self.canonical(row, col);
-        let slot = self.slot(crow, ccol);
-        if let Some(Some(existing)) = self.slots.get(slot).copied() {
-            return existing;
-        }
-        let is_pole_row = self.stitch.has_poles() && (crow == 0 || crow == self.rows);
-        // A pole samples the middle of its map row (Firestorm's `x = width / 2`
-        // pinch); an ordinary vertex reads its own column.
-        let u = if is_pole_row {
-            CHANNEL_CENTRE
-        } else {
-            f32_from_usize(ccol) / f32_from_usize(self.columns)
-        };
-        let v = f32_from_usize(crow) / f32_from_usize(self.rows);
-        let index = u32_from_usize(self.positions.len());
-        // Positions sample at the *flipped* V (the module-level bottom-up
-        // convention: grid row 0 reads the visible bottom of the top-down
-        // map), while the UV keeps the unflipped grid V — the same pairing the
-        // reference's bottom-up `LLImageRaw` rows produce.
-        self.positions.push(position(u, 1.0 - v));
-        self.uvs.push([u, v]);
-        if let Some(cell) = self.slots.get_mut(slot) {
-            *cell = Some(index);
-        }
-        index
-    }
-
-    /// Emit the two triangles of every quad cell, sharing the canonical vertices
-    /// so seams and poles are single vertices; a triangle collapsed by a pole
-    /// (two equal corners) is skipped.
-    fn stitch_indices(&mut self) {
-        for row in 0..self.rows {
-            for col in 0..self.columns {
-                let a = self.vertex_index(row, col);
-                let b = self.vertex_index(row, col.saturating_add(1));
-                let c = self.vertex_index(row.saturating_add(1), col.saturating_add(1));
-                let d = self.vertex_index(row.saturating_add(1), col);
-                // Winding matches sl-prim's side strip (bottom-left origin):
-                // (a, c, d) then (a, b, c).
-                self.push_triangle(a, c, d);
-                self.push_triangle(a, b, c);
-            }
-        }
-    }
-
-    /// The already-stored vertex index for lattice point `(row, col)` (its
-    /// canonical slot is guaranteed filled by [`ensure_vertex`](Self::ensure_vertex)).
-    fn vertex_index(&self, row: usize, col: usize) -> u32 {
-        let (crow, ccol) = self.canonical(row, col);
-        let slot = self.slot(crow, ccol);
-        self.slots.get(slot).copied().flatten().unwrap_or(0)
-    }
-
-    /// Append a triangle, skipping it when a pole collapse has made two of its
-    /// corners the same vertex (a degenerate, zero-area triangle).
-    fn push_triangle(&mut self, i: u32, j: u32, k: u32) {
-        if i == j || j == k || k == i {
-            return;
-        }
-        self.indices.extend_from_slice(&[i, j, k]);
-    }
-}
-
-/// A procedural sphere position for the degenerate-map placeholder (Firestorm's
-/// `sculptGenerateSpherePlaceholder`), evaluated at the flipped-V sampling
-/// coordinates [`build`] passes — so with the fixed grid winding the
-/// placeholder ball faces outward, like every properly sampled sculpt.
-fn placeholder_position(u: f32, v: f32) -> [f32; 3] {
-    let theta = core::f32::consts::PI * v;
-    let phi = core::f32::consts::TAU * u;
-    [
-        theta.sin() * phi.cos() * PLACEHOLDER_RADIUS,
-        theta.sin() * phi.sin() * PLACEHOLDER_RADIUS,
-        theta.cos() * PLACEHOLDER_RADIUS,
-    ]
-}
-
-/// Per-vertex smooth normals: sum each incident triangle's face normal, then
-/// normalise (a degenerate near-zero normal becomes an up-vector). Shared seam /
-/// pole vertices are single entries, so this is smooth across them without any
-/// extra seam wrapping.
-fn smooth_normals(positions: &[[f32; 3]], indices: &[u32]) -> Vec<[f32; 3]> {
-    let mut normals = vec![[0.0_f32; 3]; positions.len()];
-    for &[i0, i1, i2] in indices.as_chunks::<3>().0 {
-        let [i0, i1, i2] = [usize_from_u32(i0), usize_from_u32(i1), usize_from_u32(i2)];
-        let (Some(p0), Some(p1), Some(p2)) = (
-            positions.get(i0).copied(),
-            positions.get(i1).copied(),
-            positions.get(i2).copied(),
-        ) else {
-            continue;
-        };
-        let face_normal = cross(subtract(p1, p0), subtract(p2, p0));
-        add_normal(&mut normals, i0, face_normal);
-        add_normal(&mut normals, i1, face_normal);
-        add_normal(&mut normals, i2, face_normal);
-    }
-    for normal in &mut normals {
-        if dot(*normal, *normal) > NORMAL_EPSILON {
-            *normal = normalize(*normal);
-        } else {
-            *normal = [0.0, 0.0, 1.0];
-        }
-    }
-    normals
-}
-
-/// Add `value` into the accumulated normal at `index` (a no-op if out of range).
-fn add_normal(normals: &mut [[f32; 3]], index: usize, value: [f32; 3]) {
-    if let Some(slot) = normals.get_mut(index) {
-        slot[0] += value[0];
-        slot[1] += value[1];
-        slot[2] += value[2];
-    }
-}
-
-/// Linearly interpolate two 3D points by `t` (`a + (b - a) * t`).
-fn lerp3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
-    [
-        a[0] + (b[0] - a[0]) * t,
-        a[1] + (b[1] - a[1]) * t,
-        a[2] + (b[2] - a[2]) * t,
-    ]
+    surface
 }
 
 /// The vector difference `a - b`.
@@ -523,20 +444,9 @@ fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
     ]
 }
 
-/// The dot product `a · b`.
-fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
-
-/// The unit vector in the direction of `v`; the caller guarantees `v` is
-/// non-degenerate.
-fn normalize(v: [f32; 3]) -> [f32; 3] {
-    let length = dot(v, v).sqrt();
-    if length > 0.0 {
-        [v[0] / length, v[1] / length, v[2] / length]
-    } else {
-        v
-    }
+/// The Euclidean length of `v`.
+fn length(v: [f32; 3]) -> f32 {
+    (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
 }
 
 /// Widen a small `usize` count to `f32`; grid and pixel counts are far below the
@@ -550,13 +460,13 @@ const fn f32_from_usize(value: usize) -> f32 {
     value as f32
 }
 
-/// Floor a non-negative `f32` to `usize`; a negative or non-finite value (which
-/// the clamped sampling coordinates cannot produce) maps to `0`.
+/// Floor a non-negative `f32` to `usize`, truncating like the reference's
+/// `(U32)` cast; a negative or non-finite value maps to `0`.
 #[expect(
     clippy::as_conversions,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
-    reason = "value is a clamped, non-negative pixel coordinate; its floor fits usize"
+    reason = "value is a non-negative texel coordinate no larger than the map; its floor fits usize"
 )]
 fn usize_from_f32_floor(value: f32) -> usize {
     if value.is_finite() && value >= 0.0 {
@@ -566,41 +476,65 @@ fn usize_from_f32_floor(value: f32) -> usize {
     }
 }
 
-/// Widen a `u32` index to `usize` (lossless on every supported target).
+/// Widen a `u32` to `usize` (lossless on every supported target).
 fn usize_from_u32(value: u32) -> usize {
     usize::try_from(value).unwrap_or(0)
-}
-
-/// Narrow a `usize` vertex index to `u32` for the index buffer; sculpt vertex
-/// counts are far below `u32::MAX`, so a saturating conversion never loses one.
-fn u32_from_usize(value: usize) -> u32 {
-    u32::try_from(value).unwrap_or(u32::MAX)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_SUBDIVISIONS, MIN_SUBDIVISIONS, mesh_resolution, tessellate, tessellate_with,
+        MAX_SUBDIVISIONS, MIN_SUBDIVISIONS, PLACEHOLDER_RADIUS, mesh_resolution, tessellate,
         usize_from_f32_floor,
     };
-    use crate::stitch::{SculptParams, SculptStitch};
     use bytes::Bytes;
     use pretty_assertions::assert_eq;
-    use sl_prim::{PrimLod, PrimMesh};
-    use sl_proto::DiscardLevel;
+    use sl_prim::{PrimFace, PrimLod, PrimMesh, PrimShape};
+    use sl_proto::{DiscardLevel, PrimShapeParams};
     use sl_texture::DecodedImage;
 
-    /// A synthetic sculpt map: `width × height` RGBA8 pixels whose RGB is a
-    /// smooth gradient (so no two grid samples coincide), fully opaque.
-    fn gradient_map(width: u32, height: u32) -> DecodedImage {
+    /// The finest level, which every test that is not about level of detail
+    /// tessellates at.
+    const FINE: PrimLod = PrimLod::High;
+
+    /// The side of the finest grid the tests' 64x64 maps ask for: their pixel
+    /// budget (`64 * 64 / 4`) is exactly the level's, so it is
+    /// [`MAX_SUBDIVISIONS`] steps each way, one more vertex than steps.
+    const SIDE: usize = MAX_SUBDIVISIONS + 1;
+
+    /// The shape a sculpt is normally given — a circle profile on a circle path
+    /// with a 1.0 × 0.5 top size — as `PRIM_TYPE_SCULPT` sets it (OpenSim's
+    /// `SetPrimitiveShapeParams`) and the build tool's sculpt type (circle on
+    /// circle) does.
+    fn sculpt_shape() -> PrimShape {
+        PrimShape::from_params(&PrimShapeParams {
+            path_curve: 0x20,
+            profile_curve: 0x00,
+            path_scale_x: 100,
+            path_scale_y: 150,
+            ..PrimShapeParams::default()
+        })
+    }
+
+    /// A plain box's shape — square profile, line path — which a sculpt block
+    /// can arrive on when nothing reset the shape.
+    fn box_shape() -> PrimShape {
+        PrimShape::from_params(&PrimShapeParams {
+            path_curve: 0x10,
+            profile_curve: 0x01,
+            path_scale_x: 100,
+            path_scale_y: 100,
+            ..PrimShapeParams::default()
+        })
+    }
+
+    /// A map of `width × height` opaque RGBA8 pixels whose RGB is `paint(x, y)`
+    /// (`y` top-down, as a decoded image stores it).
+    fn painted(width: u32, height: u32, paint: impl Fn(u32, u32) -> [u8; 3]) -> DecodedImage {
         let mut pixels = Vec::new();
         for y in 0..height {
             for x in 0..width {
-                let r = u8::try_from(x.saturating_mul(255).checked_div(width).unwrap_or(0))
-                    .unwrap_or(0);
-                let g = u8::try_from(y.saturating_mul(255).checked_div(height).unwrap_or(0))
-                    .unwrap_or(0);
-                let b = u8::try_from(x.wrapping_add(y) % 256).unwrap_or(0);
+                let [r, g, b] = paint(x, y);
                 pixels.extend_from_slice(&[r, g, b, 255]);
             }
         }
@@ -614,65 +548,49 @@ mod tests {
         )
     }
 
-    /// The number of quad cells per side the tests' 64x64 maps use at the
-    /// finest level: their pixel budget (`64 * 64 / 4`) is exactly the level's,
-    /// so the grid is square at [`MAX_SUBDIVISIONS`].
-    const N: usize = MAX_SUBDIVISIONS;
+    /// A smooth gradient, so no two texels coincide.
+    fn gradient_map(width: u32, height: u32) -> DecodedImage {
+        painted(width, height, |x, y| {
+            [
+                u8::try_from(x.saturating_mul(255).checked_div(width).unwrap_or(0)).unwrap_or(0),
+                u8::try_from(y.saturating_mul(255).checked_div(height).unwrap_or(0)).unwrap_or(0),
+                u8::try_from(x.wrapping_add(y) % 256).unwrap_or(0),
+            ]
+        })
+    }
 
-    /// The finest level, which every test that is not about level of detail
-    /// tessellates at.
-    const FINE: PrimLod = PrimLod::High;
-
-    /// A synthetic sphere sculpt map in the **real content convention**: the
-    /// north pole (`z = +0.5`, blue = 255) on the visible *top* row, longitude
+    /// A sphere sculpt map in the **real content convention**: the north pole
+    /// (`z = +0.5`, blue = 255) on the visible *top* row, longitude
     /// counter-clockwise (`+X` → `+Y`) across the columns. Real sculpt content
     /// (authored against the reference viewer) renders outward from exactly
     /// this orientation.
     fn sphere_map(width: u32, height: u32) -> DecodedImage {
-        let mut pixels = Vec::new();
-        for y in 0..height {
+        painted(width, height, |x, y| {
             let theta = core::f32::consts::PI * f32::from(u16::try_from(y).unwrap_or(0))
                 / f32::from(u16::try_from(height.saturating_sub(1)).unwrap_or(1));
-            for x in 0..width {
-                let phi = core::f32::consts::TAU * f32::from(u16::try_from(x).unwrap_or(0))
-                    / f32::from(u16::try_from(width).unwrap_or(1));
-                let channel = |value: f32| {
-                    let byte = ((0.5 + 0.5 * value) * 255.0).round().clamp(0.0, 255.0);
-                    u8::try_from(usize_from_f32_floor(byte)).unwrap_or(255)
-                };
-                pixels.extend_from_slice(&[
-                    channel(theta.sin() * phi.cos()),
-                    channel(theta.sin() * phi.sin()),
-                    channel(theta.cos()),
-                    255,
-                ]);
-            }
-        }
-        DecodedImage::new(
-            width,
-            height,
-            3,
-            DiscardLevel::FULL,
-            Bytes::from(pixels),
-            None,
-        )
+            let phi = core::f32::consts::TAU * f32::from(u16::try_from(x).unwrap_or(0))
+                / f32::from(u16::try_from(width).unwrap_or(1));
+            let channel = |value: f32| {
+                let byte = ((0.5 + 0.5 * value) * 255.0).round().clamp(0.0, 255.0);
+                u8::try_from(usize_from_f32_floor(byte)).unwrap_or(255)
+            };
+            [
+                channel(theta.sin() * phi.cos()),
+                channel(theta.sin() * phi.sin()),
+                channel(theta.cos()),
+            ]
+        })
     }
 
     /// The signed volume enclosed by a face's triangles (`Σ p0 · (p1 × p2) / 6`):
     /// positive when the winding faces outward from the origin, negative when
     /// the surface is inside out.
-    fn signed_volume(face: &sl_prim::PrimFace) -> f32 {
+    fn signed_volume(face: &PrimFace) -> f32 {
         let mut volume = 0.0_f32;
         for &[i0, i1, i2] in face.indices.as_chunks::<3>().0 {
-            let point = |index: u32| {
-                face.positions
-                    .get(usize::try_from(index).unwrap_or(usize::MAX))
-                    .copied()
-                    .unwrap_or([0.0; 3])
-            };
-            let p0 = point(i0);
-            let p1 = point(i1);
-            let p2 = point(i2);
+            let p0 = position(face, i0);
+            let p1 = position(face, i1);
+            let p2 = position(face, i2);
             let cross = [
                 p1[1] * p2[2] - p1[2] * p2[1],
                 p1[2] * p2[0] - p1[0] * p2[2],
@@ -683,56 +601,74 @@ mod tests {
         volume
     }
 
-    /// The single face of a tessellated sculpt (there is always exactly one).
-    fn single_face(mesh: &PrimMesh) -> &sl_prim::PrimFace {
-        assert_eq!(mesh.face_count(), 1, "a sculpt is a single face");
+    /// Vertex `index` of `face` (the origin if out of range).
+    fn position(face: &PrimFace, index: u32) -> [f32; 3] {
+        face.positions
+            .get(usize::try_from(index).unwrap_or(usize::MAX))
+            .copied()
+            .unwrap_or([0.0; 3])
+    }
+
+    /// The single face of a sculpt on its usual shape.
+    fn single_face(mesh: &PrimMesh) -> &PrimFace {
+        assert_eq!(
+            mesh.face_count(),
+            1,
+            "a sculpt on its usual shape is one face"
+        );
         match mesh.faces.first() {
             Some(face) => face,
             None => unreachable!("face_count of 1 guarantees a first face"),
         }
     }
 
-    /// The `(min, max)` of a face's X positions.
-    fn x_bounds(face: &sl_prim::PrimFace) -> (f32, f32) {
-        face.positions
-            .iter()
-            .fold((f32::MAX, f32::MIN), |(lo, hi), p| {
-                (lo.min(p[0]), hi.max(p[0]))
-            })
+    /// The vertex at path row `row`, profile column `column` of a side face
+    /// `width` columns wide.
+    fn vertex(face: &PrimFace, width: usize, row: usize, column: usize) -> ([f32; 3], [f32; 2]) {
+        let index = row.saturating_mul(width).saturating_add(column);
+        (
+            face.positions.get(index).copied().unwrap_or([f32::NAN; 3]),
+            face.uvs.get(index).copied().unwrap_or([f32::NAN; 2]),
+        )
     }
 
-    /// Assert a face is internally consistent: parallel vertex arrays, whole
-    /// in-range triangles, and unit-length normals.
-    fn assert_face_integrity(mesh: &PrimMesh) {
-        let face = single_face(mesh);
-        let count = face.positions.len();
-        assert!(count >= 3, "face has vertices");
-        assert_eq!(face.normals.len(), count, "normals parallel to positions");
-        assert_eq!(face.uvs.len(), count, "uvs parallel to positions");
-        assert!(!face.indices.is_empty(), "face carries triangles");
-        assert_eq!(face.indices.len() % 3, 0, "indices are whole triangles");
-        for &index in &face.indices {
-            assert!(
-                usize::try_from(index).unwrap_or(usize::MAX) < count,
-                "index {index} within {count} vertices"
-            );
-        }
-        for &[i, j, k] in face.indices.as_chunks::<3>().0 {
-            assert!(i != j && j != k && k != i, "no degenerate triangle");
-        }
-        for normal in &face.normals {
-            let length =
-                (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
-            assert!(
-                (length - 1.0).abs() < 1.0e-3,
-                "normal {normal:?} is unit length (was {length})"
-            );
-        }
-        for position in &face.positions {
-            for value in position {
-                assert!(value.is_finite(), "position {position:?} is finite");
+    /// Assert every face is internally consistent: parallel vertex arrays,
+    /// whole in-range triangles, unit-length normals, finite positions.
+    fn assert_mesh_integrity(mesh: &PrimMesh) {
+        assert!(mesh.face_count() > 0, "mesh has faces");
+        for face in &mesh.faces {
+            let count = face.positions.len();
+            assert!(count >= 3, "face has vertices");
+            assert_eq!(face.normals.len(), count, "normals parallel to positions");
+            assert_eq!(face.uvs.len(), count, "uvs parallel to positions");
+            assert!(!face.indices.is_empty(), "face carries triangles");
+            assert_eq!(face.indices.len() % 3, 0, "indices are whole triangles");
+            for &index in &face.indices {
+                assert!(
+                    usize::try_from(index).unwrap_or(usize::MAX) < count,
+                    "index {index} within {count} vertices"
+                );
+            }
+            for normal in &face.normals {
+                let length =
+                    (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
+                assert!(
+                    (length - 1.0).abs() < 1.0e-3,
+                    "normal {normal:?} is unit length (was {length})"
+                );
+            }
+            for position in &face.positions {
+                assert!(
+                    position.iter().all(|value| value.is_finite()),
+                    "position {position:?} is finite"
+                );
             }
         }
+    }
+
+    /// Whether two positions agree to within float noise.
+    fn same(a: [f32; 3], b: [f32; 3]) -> bool {
+        a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1.0e-5)
     }
 
     /// [`mesh_resolution`] reproduces Firestorm's `sculpt_calc_mesh_resolution`.
@@ -823,172 +759,139 @@ mod tests {
         }
     }
 
-    /// A coarser level really does tessellate less geometry — the point of the
-    /// whole exercise. A plane's lattice is `(rows + 1) * (columns + 1)`, so the
-    /// four levels of a 64x64 map step 7x7, 9x9, 17x17, 33x33.
+    /// On its usual shape a sculpt is one closed side face over the grid the map
+    /// asked for — one more vertex than steps each way, because the seam is two
+    /// columns and not one — and a coarser level really is less geometry.
     #[test]
-    fn coarser_levels_tessellate_fewer_vertices() {
+    fn the_usual_shape_is_one_face_over_the_requested_grid() {
         let map = gradient_map(64, 64);
-        let counts: Vec<usize> = PrimLod::ALL
-            .into_iter()
-            .map(|lod| tessellate(&map, 3, lod).vertex_count())
-            .collect();
-        assert_eq!(counts, vec![7 * 7, 9 * 9, 17 * 17, 33 * 33]);
-        // Each stitch topology stays sound at every level, not just the finest.
-        for lod in PrimLod::ALL {
+        for (lod, steps) in [
+            (PrimLod::Low, 8_usize),
+            (PrimLod::Medium, 16),
+            (PrimLod::High, 32),
+        ] {
             for sculpt_type in [1_u8, 2, 3, 4] {
-                assert_face_integrity(&tessellate(&map, sculpt_type, lod));
+                let mesh = tessellate(&map, sculpt_type, &sculpt_shape(), lod);
+                assert_mesh_integrity(&mesh);
+                assert_eq!(
+                    single_face(&mesh).positions.len(),
+                    (steps + 1) * (steps + 1),
+                    "type {sculpt_type} at {lod:?}"
+                );
+            }
+        }
+        let lowest = tessellate(&map, 1, &sculpt_shape(), PrimLod::Lowest);
+        assert!(
+            single_face(&lowest).positions.len() < SIDE * SIDE,
+            "the lowest level is coarser than the finest"
+        );
+    }
+
+    /// A non-square map lays its long side along the right axis: rows (the
+    /// path) follow the map's height, columns (the profile) its width.
+    #[test]
+    fn a_non_square_map_lays_out_rows_by_height_and_columns_by_width() {
+        let (rows, columns) = mesh_resolution(64, 32, FINE);
+        assert_eq!((rows, columns), (16, 32));
+        let mesh = tessellate(&gradient_map(64, 32), 3, &sculpt_shape(), FINE);
+        assert_mesh_integrity(&mesh);
+        assert_eq!(
+            single_face(&mesh).positions.len(),
+            (rows + 1) * (columns + 1)
+        );
+    }
+
+    /// Each vertex reads the texel below its fraction of the map — no filtering
+    /// — with rows counted from the visible bottom.
+    #[test]
+    fn a_vertex_reads_the_texel_below_its_fraction_of_the_map() {
+        let map = gradient_map(64, 64);
+        let mesh = tessellate(&map, 3, &sculpt_shape(), FINE);
+        let face = single_face(&mesh);
+        // Row 1, column 3 of a 33-wide grid: x = floor(3 / 32 * 64) = 6 and
+        // y = floor(1 / 32 * 64) = 2 from the bottom, the top-down row 61.
+        let (at, _uv) = vertex(face, SIDE, 1, 3);
+        let texel = |value: u32| f32::from(u8::try_from(value).unwrap_or(0)) / 255.0 - 0.5;
+        let expected = [texel(6 * 255 / 64), texel(61 * 255 / 64), texel(6 + 61)];
+        assert!(same(at, expected), "{at:?} reads texel {expected:?}");
+    }
+
+    /// A seam is two vertices at one position, the first with texture U 0 and
+    /// the last with U 1, so the texture runs once around. (Sharing one vertex
+    /// squeezed a reversed copy of the whole texture into the last column.)
+    #[test]
+    fn the_seam_is_two_vertices_and_the_texture_runs_once_around() {
+        let mesh = tessellate(&sphere_map(64, 64), 1, &sculpt_shape(), FINE);
+        let face = single_face(&mesh);
+        for row in 0..SIDE {
+            let (first, first_uv) = vertex(face, SIDE, row, 0);
+            let (last, last_uv) = vertex(face, SIDE, row, SIDE - 1);
+            assert!(same(first, last), "row {row}: {first:?} vs {last:?}");
+            assert!(first_uv[0].abs() < 1.0e-6, "row {row} starts at U 0");
+            assert!((last_uv[0] - 1.0).abs() < 1.0e-6, "row {row} ends at U 1");
+        }
+        for (index, uv) in face.uvs.iter().enumerate() {
+            let column = index % SIDE;
+            let expected = f32::from(u16::try_from(column).unwrap_or(0))
+                / f32::from(u16::try_from(SIDE - 1).unwrap_or(1));
+            assert!(
+                (uv[0] - expected).abs() < 1.0e-5,
+                "vertex {index}: U {} for column {column}",
+                uv[0]
+            );
+        }
+    }
+
+    /// A sphere pinches its first and last rows to the map's middle column, and
+    /// averages each pole row's normals into one.
+    #[test]
+    fn a_sphere_pinches_each_pole_row_to_one_point() {
+        let mesh = tessellate(&sphere_map(64, 64), 1, &sculpt_shape(), FINE);
+        let face = single_face(&mesh);
+        for row in [0, SIDE - 1] {
+            let (pole, _uv) = vertex(face, SIDE, row, 0);
+            let pole_normal = face.normals.get(row * SIDE).copied().unwrap_or_default();
+            for column in 1..SIDE {
+                let (at, _uv) = vertex(face, SIDE, row, column);
+                assert!(same(at, pole), "row {row} column {column} is the pole");
+                let normal = face
+                    .normals
+                    .get(row * SIDE + column)
+                    .copied()
+                    .unwrap_or_default();
+                assert!(same(normal, pole_normal), "row {row} shares one normal");
             }
         }
     }
 
-    /// A non-square map produces a non-square grid, and the stitching still folds
-    /// the right seams: a cylinder drops exactly one column, a torus one of each.
+    /// A torus wraps its last row back onto its first.
     #[test]
-    fn non_square_maps_stitch_on_the_right_axes() {
-        let map = gradient_map(64, 32);
-        let (rows, columns) = mesh_resolution(64, 32, FINE);
-        assert_eq!((rows, columns), (16, 32));
-        assert_eq!(
-            tessellate(&map, 3, FINE).vertex_count(),
-            (rows + 1) * (columns + 1)
-        );
-        assert_eq!(
-            tessellate(&map, 4, FINE).vertex_count(),
-            (rows + 1) * columns
-        );
-        assert_eq!(tessellate(&map, 2, FINE).vertex_count(), rows * columns);
-        assert_eq!(
-            tessellate(&map, 1, FINE).vertex_count(),
-            columns * (rows - 1) + 2
-        );
+    fn a_torus_wraps_its_last_row_onto_its_first() {
+        let mesh = tessellate(&gradient_map(64, 64), 2, &sculpt_shape(), FINE);
+        let face = single_face(&mesh);
+        for column in 0..SIDE {
+            let (first, _uv) = vertex(face, SIDE, 0, column);
+            let (last, _uv) = vertex(face, SIDE, SIDE - 1, column);
+            assert!(same(first, last), "column {column}");
+        }
     }
 
     #[test]
-    fn plane_shares_no_edges() {
-        // Sculpt type 3 = plane. An open grid has the full lattice of vertices.
-        let mesh = tessellate(&gradient_map(64, 64), 3, FINE);
-        assert_face_integrity(&mesh);
-        assert_eq!(mesh.vertex_count(), (N + 1) * (N + 1));
-    }
-
-    #[test]
-    fn cylinder_shares_the_u_seam() {
-        // Sculpt type 4 = cylinder: the U seam folds the far column onto the
-        // first, so one column fewer than a plane.
-        let mesh = tessellate(&gradient_map(64, 64), 4, FINE);
-        assert_face_integrity(&mesh);
-        assert_eq!(mesh.vertex_count(), N * (N + 1));
-        assert!(mesh.vertex_count() < (N + 1) * (N + 1), "seam is shared");
-    }
-
-    #[test]
-    fn sphere_shares_the_seam_and_collapses_poles() {
-        // Sculpt type 1 = sphere: U seam shared plus two single pole vertices.
-        let mesh = tessellate(&gradient_map(64, 64), 1, FINE);
-        assert_face_integrity(&mesh);
-        // Two poles + (N - 1) interior rows of N columns each.
-        assert_eq!(mesh.vertex_count(), N * (N - 1) + 2);
-    }
-
-    #[test]
-    fn torus_shares_both_seams() {
-        // Sculpt type 2 = torus: both seams folded, so an N × N lattice.
-        let mesh = tessellate(&gradient_map(64, 64), 2, FINE);
-        assert_face_integrity(&mesh);
-        assert_eq!(mesh.vertex_count(), N * N);
-        assert!(mesh.vertex_count() < N * (N + 1), "both seams are shared");
-    }
-
-    #[test]
-    fn stitch_types_produce_distinct_vertex_counts() {
-        let map = gradient_map(64, 64);
-        let plane = tessellate(&map, 3, FINE).vertex_count();
-        let cylinder = tessellate(&map, 4, FINE).vertex_count();
-        let sphere = tessellate(&map, 1, FINE).vertex_count();
-        let torus = tessellate(&map, 2, FINE).vertex_count();
-        // Each extra shared edge / pole removes vertices.
-        assert!(plane > cylinder);
-        assert!(cylinder > torus);
-        assert!(torus > sphere);
-    }
-
-    #[test]
-    fn degenerate_map_falls_back_to_a_sphere_placeholder() {
-        // A zero-sized map cannot be sampled; the placeholder is a sphere.
-        let empty = DecodedImage::new(0, 0, 3, DiscardLevel::FULL, Bytes::new(), None);
-        let mesh = tessellate(&empty, 3, FINE);
-        assert_face_integrity(&mesh);
-        // Sphere topology regardless of the requested (plane) stitch.
-        assert_eq!(mesh.vertex_count(), N * (N - 1) + 2);
-    }
-
-    #[test]
-    fn truncated_map_falls_back_without_panicking() {
-        // Claims 64×64 but carries a single pixel: too short, so placeholder.
-        let short = DecodedImage::new(
-            64,
-            64,
-            3,
-            DiscardLevel::FULL,
-            Bytes::from_static(&[10, 20, 30, 255]),
-            None,
-        );
-        let mesh = tessellate(&short, 2, FINE);
-        assert_face_integrity(&mesh);
-        assert_eq!(mesh.vertex_count(), N * (N - 1) + 2);
-    }
-
-    #[test]
-    fn mirror_flag_negates_x_without_changing_topology() {
-        let map = gradient_map(64, 64);
-        let plain = tessellate_with(
-            &map,
-            SculptParams {
-                stitch: SculptStitch::Plane,
-                invert: false,
-                mirror: false,
-            },
-            FINE,
-        );
-        let mirrored = tessellate_with(
-            &map,
-            SculptParams {
-                stitch: SculptStitch::Plane,
-                invert: false,
-                mirror: true,
-            },
-            FINE,
-        );
-        assert_eq!(plain.vertex_count(), mirrored.vertex_count());
-        assert_face_integrity(&mirrored);
-        // Mirroring negates X, so the mirrored X range is the plain X range
-        // reflected through zero: mirrored.min == -plain.max, mirrored.max ==
-        // -plain.min.
-        let (plain_min, plain_max) = x_bounds(single_face(&plain));
-        let (mirror_min, mirror_max) = x_bounds(single_face(&mirrored));
-        assert!((mirror_min + plain_max).abs() < 1.0e-4, "min reflects max");
-        assert!((mirror_max + plain_min).abs() < 1.0e-4, "max reflects min");
-    }
-
-    #[test]
-    fn reference_convention_sphere_renders_outward() {
+    fn a_real_convention_sphere_renders_outward() {
         // The viewer-pillows-inside-out-geometry regression: a sphere sculpt
         // map in the real content convention (north pole on the visible top
-        // row) must tessellate with outward-facing winding. Sampling the
-        // top-down map without the V flip builds this exact sphere inside out.
-        let mesh = tessellate(&sphere_map(64, 64), 1, FINE);
-        assert_face_integrity(&mesh);
+        // row) must tessellate with outward-facing winding. Reading the
+        // top-down map without the row flip builds this exact sphere inside out.
+        let mesh = tessellate(&sphere_map(64, 64), 1, &sculpt_shape(), FINE);
+        assert_mesh_integrity(&mesh);
         let volume = signed_volume(single_face(&mesh));
         assert!(volume > 0.05, "sphere faces outward (volume {volume})");
     }
 
     #[test]
-    fn invert_flag_turns_the_sphere_inside_out() {
-        // Sculpt type 1 | 64 = sphere with the invert flag: deliberately
-        // inside out, so the signed volume goes negative.
-        let mesh = tessellate(&sphere_map(64, 64), 1 | 64, FINE);
-        assert_face_integrity(&mesh);
+    fn the_invert_flag_turns_the_sphere_inside_out() {
+        let mesh = tessellate(&sphere_map(64, 64), 1 | 64, &sculpt_shape(), FINE);
+        assert_mesh_integrity(&mesh);
         let volume = signed_volume(single_face(&mesh));
         assert!(
             volume < -0.05,
@@ -997,11 +900,11 @@ mod tests {
     }
 
     #[test]
-    fn mirror_flag_keeps_the_sphere_outward() {
+    fn the_mirror_flag_keeps_the_sphere_outward() {
         // Mirror composes an X negation with a reversed U sweep — two
         // orientation flips, so the mirrored sphere still faces outward.
-        let mesh = tessellate(&sphere_map(64, 64), 1 | 128, FINE);
-        assert_face_integrity(&mesh);
+        let mesh = tessellate(&sphere_map(64, 64), 1 | 128, &sculpt_shape(), FINE);
+        assert_mesh_integrity(&mesh);
         let volume = signed_volume(single_face(&mesh));
         assert!(
             volume > 0.05,
@@ -1009,44 +912,144 @@ mod tests {
         );
     }
 
+    /// The mirror flag reads each row right to left and negates X, so a
+    /// mirrored vertex is its plain twin across the row with X flipped.
     #[test]
-    fn placeholder_sphere_renders_outward() {
-        // The degenerate-map placeholder ball must face outward too.
-        let empty = DecodedImage::new(0, 0, 3, DiscardLevel::FULL, Bytes::new(), None);
-        let mesh = tessellate(&empty, 1, FINE);
-        let volume = signed_volume(single_face(&mesh));
-        assert!(volume > 0.05, "placeholder faces outward (volume {volume})");
+    fn the_mirror_flag_reads_rows_backwards_and_negates_x() {
+        let map = gradient_map(64, 64);
+        let plain = tessellate(&map, 3, &sculpt_shape(), FINE);
+        let mirrored = tessellate(&map, 3 | 128, &sculpt_shape(), FINE);
+        let (plain, mirrored) = (single_face(&plain), single_face(&mirrored));
+        for row in 0..SIDE {
+            for column in 0..SIDE {
+                let (at, _uv) = vertex(mirrored, SIDE, row, column);
+                let (twin, _uv) = vertex(plain, SIDE, row, SIDE - 1 - column);
+                assert!(
+                    same(at, [-twin[0], twin[1], twin[2]]),
+                    "row {row} column {column}: {at:?} vs {twin:?}"
+                );
+            }
+        }
     }
 
+    /// The reference's `createSide` reverses the horizontal texture coordinate
+    /// when invert XOR mirror is set (`ss = 1.f - ss`).
     #[test]
-    fn reverse_u_mirrors_the_texture_coordinate() {
-        // The reference's `createSide` reverses the horizontal texture
-        // coordinate when invert XOR mirror is set (`ss = 1.f - ss`); the
-        // plain and inverted tessellations of the same map must carry
-        // mirrored U in their UVs.
+    fn the_invert_flag_reverses_the_texture_coordinate() {
         let map = gradient_map(64, 64);
-        let plain = tessellate(&map, 3, FINE);
-        let inverted = tessellate(&map, 3 | 64, FINE);
-        let plain_face = single_face(&plain);
-        let inverted_face = single_face(&inverted);
-        assert_eq!(plain_face.uvs.len(), inverted_face.uvs.len());
-        for (plain_uv, inverted_uv) in plain_face.uvs.iter().zip(&inverted_face.uvs) {
+        let plain = tessellate(&map, 3, &sculpt_shape(), FINE);
+        let inverted = tessellate(&map, 3 | 64, &sculpt_shape(), FINE);
+        let (plain, inverted) = (single_face(&plain), single_face(&inverted));
+        assert_eq!(plain.uvs.len(), inverted.uvs.len());
+        for (plain_uv, inverted_uv) in plain.uvs.iter().zip(&inverted.uvs) {
             assert!(
                 ((1.0 - plain_uv[0]) - inverted_uv[0]).abs() < 1.0e-6,
                 "U mirrored: plain {plain_uv:?} vs inverted {inverted_uv:?}"
             );
+            assert!((plain_uv[1] - inverted_uv[1]).abs() < 1.0e-6, "V unchanged");
+        }
+    }
+
+    /// A map with no positions in it — no pixels, or a grey one — is the
+    /// reference's empty placeholder: every vertex at the origin.
+    #[test]
+    fn a_map_without_positions_is_an_empty_surface() {
+        let empty = DecodedImage::new(0, 0, 3, DiscardLevel::FULL, Bytes::new(), None);
+        let mut grey = gradient_map(64, 64);
+        grey.components = 1;
+        let short = DecodedImage::new(
+            64,
+            64,
+            3,
+            DiscardLevel::FULL,
+            Bytes::from_static(&[10, 20, 30, 255]),
+            None,
+        );
+        for map in [empty, grey, short] {
+            let mesh = tessellate(&map, 1, &sculpt_shape(), FINE);
+            assert_mesh_integrity(&mesh);
             assert!(
-                (plain_uv[1] - inverted_uv[1]).abs() < 1.0e-6,
-                "V unchanged: plain {plain_uv:?} vs inverted {inverted_uv:?}"
+                single_face(&mesh)
+                    .positions
+                    .iter()
+                    .all(|at| same(*at, [0.0; 3])),
+                "{}x{} with {} components collapses to the origin",
+                map.width,
+                map.height,
+                map.components
             );
         }
     }
 
+    /// A map that does not vary has no area. Above the lowest level that fails
+    /// the area test and shows the sphere placeholder; the lowest level skips
+    /// the test and keeps the collapsed surface, as the reference does for
+    /// legacy content.
     #[test]
-    fn every_stitch_type_yields_finite_normalized_geometry() {
-        let map = gradient_map(48, 96);
-        for sculpt_type in [1_u8, 2, 3, 4] {
-            assert_face_integrity(&tessellate(&map, sculpt_type, FINE));
+    fn a_flat_map_shows_the_placeholder_above_the_lowest_level() {
+        let flat = painted(64, 64, |_x, _y| [40, 90, 200]);
+        let fine = tessellate(&flat, 1, &sculpt_shape(), FINE);
+        assert_mesh_integrity(&fine);
+        for at in &single_face(&fine).positions {
+            let radius = (at[0] * at[0] + at[1] * at[1] + at[2] * at[2]).sqrt();
+            assert!(
+                (radius - PLACEHOLDER_RADIUS).abs() < 1.0e-4,
+                "{at:?} is on the placeholder"
+            );
+        }
+        let lowest = tessellate(&flat, 1, &sculpt_shape(), PrimLod::Lowest);
+        let face = single_face(&lowest);
+        let first = face.positions.first().copied().unwrap_or_default();
+        assert!(
+            face.positions.iter().all(|at| same(*at, first)),
+            "the lowest level keeps the flat surface"
+        );
+    }
+
+    /// The fixture divergence this port was made for: a sculpt left on a box's
+    /// shape. The box's line path is two rows deep, both rows pinch to a pole,
+    /// the surface has no area and becomes the placeholder — whose two rows,
+    /// azimuth 0 and a full turn, are the same half circle. The box's six faces
+    /// stay: four collapsed sides and two caps, and it is the caps that show,
+    /// as a flat half-disc in the XZ plane.
+    #[test]
+    fn a_sculpt_on_a_box_is_the_references_half_disc() {
+        let mesh = tessellate(&sphere_map(64, 64), 1, &box_shape(), FINE);
+        assert_mesh_integrity(&mesh);
+        assert_eq!(mesh.face_count(), 6, "a box's faces");
+        let Some(cap) = mesh.faces.first() else {
+            unreachable!("six faces")
+        };
+        let (mut min_z, mut max_z, mut max_x) = (f32::MAX, f32::MIN, 0.0_f32);
+        for at in &cap.positions {
+            assert!(at[1].abs() < 1.0e-5, "{at:?} lies in the XZ plane");
+            min_z = min_z.min(at[2]);
+            max_z = max_z.max(at[2]);
+            max_x = max_x.max(at[0]);
+        }
+        assert!(
+            max_z - min_z > 0.5,
+            "the disc spans the placeholder's diameter"
+        );
+        assert!(max_x > 0.25, "and bulges out to its radius");
+    }
+
+    /// Every stitch type, with and without the flags, on a map of each aspect,
+    /// gives sound geometry.
+    #[test]
+    fn every_stitch_type_yields_sound_geometry() {
+        for map in [
+            gradient_map(48, 96),
+            sphere_map(64, 64),
+            gradient_map(128, 32),
+        ] {
+            for stitch in [1_u8, 2, 3, 4] {
+                for flags in [0_u8, 64, 128, 192] {
+                    for shape in [sculpt_shape(), box_shape()] {
+                        assert_mesh_integrity(&tessellate(&map, stitch | flags, &shape, FINE));
+                    }
+                }
+            }
         }
     }
 }

@@ -148,15 +148,38 @@ impl Path {
     /// finally forces the path open when its begin and end twist differ.
     #[must_use]
     pub fn generate(shape: &PrimShape, lod: PrimLod, split: u32) -> Self {
+        Self::generate_inner(shape, lod, usize_from_u32(split), None)
+    }
+
+    /// Generate the path a **sculpted** prim's surface is laid over, asking a
+    /// circular path for `sculpt_size` steps (Firestorm's `LLPath::generate`
+    /// called from `LLVolume::sculpt` with `is_sculpted` and no split).
+    ///
+    /// Only a [`PathCurve::Circle`] path honours the requested size; a line or a
+    /// sphere path keeps the frame count its own parameters give it, exactly as
+    /// in the reference — which is why a sculpt on a box's line path is two
+    /// rows deep however large its map.
+    #[must_use]
+    pub fn generate_sculpted(shape: &PrimShape, lod: PrimLod, sculpt_size: usize) -> Self {
+        Self::generate_inner(shape, lod, 0, Some(sculpt_size))
+    }
+
+    /// The shared body of [`generate`](Self::generate) and
+    /// [`generate_sculpted`](Self::generate_sculpted).
+    fn generate_inner(
+        shape: &PrimShape,
+        lod: PrimLod,
+        split: usize,
+        sculpt_size: Option<usize>,
+    ) -> Self {
         let detail = lod.detail();
-        let split = usize_from_u32(split);
 
         let mut builder = Builder::new(shape);
         match shape.path_curve {
             // A flexible path is tessellated as a straight line (softbody flex
             // is a non-goal), matching the crate's `PathCurve` documentation.
             PathCurve::Line | PathCurve::Flexible => builder.build_line(detail, split),
-            PathCurve::Circle => builder.build_circle(detail),
+            PathCurve::Circle => builder.build_circle(detail, sculpt_size),
             PathCurve::Circle2 => builder.build_circle2(detail),
         }
 
@@ -234,14 +257,18 @@ impl<'shape> Builder<'shape> {
 
     /// Build a circular path (Firestorm's `LL_PCODE_PATH_CIRCLE` branch, the
     /// torus / tube / ring). The step count grows with detail, twist, and the
-    /// number of revolutions; a positive count runs [`Self::gen_ngon`].
-    fn build_circle(&mut self, detail: f32) {
+    /// number of revolutions; a positive count runs [`Self::gen_ngon`]. A
+    /// sculpted prim replaces that count with its requested size (at least one).
+    fn build_circle(&mut self, detail: f32, sculpt_size: Option<usize>) {
         let shape = self.shape;
         let twist_mag = (shape.twist_begin - shape.twist_end).abs();
         let base = (MIN_DETAIL_FACES * detail
             + twist_mag * TWIST_DETAIL * (detail - DETAIL_OFFSET))
             .floor();
-        let sides = floor_to_usize(base * shape.revolutions);
+        let sides = sculpt_size.map_or_else(
+            || floor_to_usize(base * shape.revolutions),
+            |size| size.max(1),
+        );
         if sides > 0 {
             self.gen_ngon(sides);
         }
@@ -525,6 +552,30 @@ mod tests {
         assert_close(last.scale[1], 1.0);
         assert_close(first.tex_t, 0.0);
         assert_close(last.tex_t, 1.0);
+    }
+
+    /// A sculpt asks a circle path for its grid's row count (one more point
+    /// than steps: the seam is two frames), whatever the level's own count;
+    /// a line path ignores the request and stays two frames deep.
+    #[test]
+    fn a_sculpt_sizes_a_circle_path_but_not_a_line() {
+        let mut params = default_box_params();
+        params.path_curve = 0x20;
+        let circle = PrimShape::from_params(&params);
+        assert_eq!(
+            Path::generate_sculpted(&circle, PrimLod::High, 32).point_count(),
+            33
+        );
+        assert_eq!(
+            Path::generate_sculpted(&circle, PrimLod::Lowest, 16).point_count(),
+            17
+        );
+        assert!(!Path::generate_sculpted(&circle, PrimLod::High, 32).is_open());
+        let line = PrimShape::from_params(&default_box_params());
+        assert_eq!(
+            Path::generate_sculpted(&line, PrimLod::High, 32).point_count(),
+            2
+        );
     }
 
     #[test]

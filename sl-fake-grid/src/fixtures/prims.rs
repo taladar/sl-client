@@ -38,6 +38,12 @@ pub const DEFAULT_FACE_COUNT: usize = 6;
 /// sculpt block name a **mesh asset** rather than a sculpt texture.
 const SCULPT_TYPE_MESH: u8 = 5;
 
+/// `LL_PCODE_PATH_CIRCLE`: a path swept around a circle.
+const PATH_CURVE_CIRCLE: u8 = 0x20;
+
+/// `LL_PCODE_PROFILE_CIRCLE`: a circular profile.
+const PROFILE_CURVE_CIRCLE: u8 = 0x00;
+
 /// `LLExtendedMeshParams::ANIMATED_MESH_ENABLED_FLAG` (`llprimitive.h`): the
 /// extended-mesh flag that makes a rigged linkset an **animated object**.
 const ANIMATED_MESH_ENABLED_FLAG: u32 = 0x1;
@@ -69,6 +75,21 @@ impl SculptKind {
             Self::Plane => 3,
             Self::Cylinder => 4,
         }
+    }
+}
+
+/// The shape a simulator gives a sculpted prim: a circle profile on a circle
+/// path with a 1.0 × 0.5 top size — what `PRIM_TYPE_SCULPT` sets (OpenSim's
+/// `SetPrimitiveShapeParams`) and what the build tool's sculpt type (circle on
+/// circle) matches.
+#[must_use]
+pub fn sculpt_shape() -> PrimShapeParams {
+    PrimShapeParams {
+        path_curve: PATH_CURVE_CIRCLE,
+        profile_curve: PROFILE_CURVE_CIRCLE,
+        path_scale_x: 100,
+        path_scale_y: 150,
+        ..PrimShapeParams::default()
     }
 }
 
@@ -301,16 +322,22 @@ impl PrimFixture {
     }
 
     /// Makes the prim a **sculpty**: the `ExtraParams` sculpt block names the
-    /// sculpt map and how its edges stitch. The map itself is an ordinary
-    /// texture in the region's asset store.
+    /// sculpt map and how its edges stitch, and the shape becomes the one a
+    /// sculpt is given in-world. The map itself is an ordinary texture in the
+    /// region's asset store.
     ///
-    /// A sculpty has exactly one face, so the entry is narrowed to one.
+    /// The shape is not decoration. A viewer lays the map over the prim's own
+    /// path and profile, so a sculpt block on a box's shape is drawn as the
+    /// box's degenerate six faces — the reference shows a flat half-disc — and
+    /// only the circle-on-circle shape [`sculpt_shape`] is one closed surface.
+    /// That shape has exactly one face, so the entry is narrowed to one.
     #[must_use]
     pub fn sculpt(mut self, map: TextureKey, kind: SculptKind) -> Self {
         self.extra.sculpt = Some(SculptData {
             texture: SculptOrMeshKey::Sculpt(map),
             sculpt_type: kind.code(),
         });
+        self.object.shape = sculpt_shape();
         self.entry.faces.resize(1, neutral_face());
         self
     }
@@ -673,6 +700,7 @@ mod test {
     fn a_sculpt_prim_names_its_map_and_stitch() {
         let map = TextureKey::from(uuid::Uuid::from_u128(0x5C1));
         let object = prim(3).sculpt(map, SculptKind::Torus).build();
+        assert_eq!(object.shape, sculpt_shape(), "a sculpt's own shape");
         let extra = decode_extra_params(&object.extra_params);
         assert_eq!(
             extra

@@ -104,20 +104,103 @@ pub fn tessellate_with_path(shape: &PrimShape, lod: PrimLod, path: &Path) -> Pri
     let split = split_for(shape, lod);
     let profile = Profile::generate(shape, lod, path.is_open(), split);
     let grid = SweptGrid::new(path, &profile);
+    assemble(shape, path, &profile, &grid, SideStitch::Prim)
+}
 
+/// Which seams of a sculpted surface close, and how — the geometric meaning of
+/// a sculpt type for its side normals.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum SculptSeams {
+    /// Nothing closes (a plane).
+    #[default]
+    Open,
+    /// The profile seam closes around (a cylinder).
+    Cylinder,
+    /// The profile seam closes and each pole row is one point (a sphere).
+    Sphere,
+    /// The profile seam closes around and the path seam along (a torus).
+    Torus,
+}
+
+/// How a **sculpted** surface's side faces are stitched — the sculpt branch of
+/// Firestorm's `createSide`, which replaces the plain prim's path / profile
+/// seam wrapping with the sculpt type's own.
+///
+/// The fields are what the sculpt type byte decides, spelled out so this crate
+/// need not know the byte's encoding: `sl-sculpt` fills them in.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct SculptStitching {
+    /// Which seams close: a sphere replaces every normal of its first and of
+    /// its last path row with that row's sum, so a pinched pole shades as one
+    /// point; a sphere, torus or cylinder shares the normals of its first and
+    /// last profile column; a torus also those of its first and last path row.
+    pub seams: SculptSeams,
+    /// Reverse the horizontal texture coordinate (`ss = 1 - ss`), so the
+    /// texture follows a surface the invert or mirror flag reversed.
+    pub reverse_u: bool,
+}
+
+/// Assemble a **sculpted** prim's faces from its surface grid (Firestorm's
+/// `LLVolume::sculpt` → `createVolumeFaces`).
+///
+/// A sculpt does not sweep its profile along its path: `surface` holds its
+/// vertex positions already, row-major — `path.points.len()` rows of
+/// `profile.points.len()` points, as Firestorm's `mMesh` — read from the sculpt
+/// map (or a placeholder) by the caller. The path and the profile, generated
+/// for the sculpt with [`Path::generate_sculpted`] and
+/// [`Profile::generate_sculpted`], still decide everything else: how many faces
+/// there are and which of them are caps, the texture coordinates of the sides
+/// (the profile's sweep parameter across, the path's `tex_t` along) and the
+/// planar ones of the caps. A sculpt on the usual circle-on-circle shape is one
+/// closed side face; on a box's shape it is a box's six.
+#[must_use]
+pub fn tessellate_sculpted(
+    shape: &PrimShape,
+    path: &Path,
+    profile: &Profile,
+    surface: Vec<[f32; 3]>,
+    stitching: SculptStitching,
+) -> PrimMesh {
+    let grid = SweptGrid {
+        positions: surface,
+        max_s: profile.points.len(),
+        max_t: path.points.len(),
+    };
+    assemble(shape, path, profile, &grid, SideStitch::Sculpt(stitching))
+}
+
+/// Which normal stitching a side face gets: the plain prim's path / profile
+/// seam logic, or a sculpt's.
+#[derive(Clone, Copy, Debug)]
+enum SideStitch {
+    /// A plain (swept) prim.
+    Prim,
+    /// A sculpted surface.
+    Sculpt(SculptStitching),
+}
+
+/// Emit one [`PrimFace`] per profile face over `grid`, in Linden face order
+/// (Firestorm `createVolumeFaces`).
+fn assemble(
+    shape: &PrimShape,
+    path: &Path,
+    profile: &Profile,
+    grid: &SweptGrid,
+    stitch: SideStitch,
+) -> PrimMesh {
     let mut mesh = PrimMesh::new();
     for (index, face) in profile.faces.iter().enumerate() {
         let face_id = PrimFaceId::new(u16_from_usize(index));
         let prim_face = if face.cap {
             if profile.total_out > 0 {
-                build_hollow_cap(&grid, &profile, face, face_id)
+                build_hollow_cap(grid, profile, face, face_id)
             } else if is_uncut_cube(shape) {
-                build_uncut_cube_cap(&grid, &profile, face, face_id)
+                build_uncut_cube_cap(grid, profile, face, face_id)
             } else {
-                build_cap(&grid, &profile, face, face_id)
+                build_cap(grid, profile, face, face_id)
             }
         } else {
-            build_side(&grid, &profile, path, shape, face, face_id)
+            build_side(grid, profile, path, shape, face, face_id, stitch)
         };
         mesh.faces.push(prim_face);
     }
@@ -236,6 +319,7 @@ fn build_side(
     shape: &PrimShape,
     face: &ProfileFace,
     face_id: PrimFaceId,
+    stitch: SideStitch,
 ) -> PrimFace {
     let num_s = face.count;
     let num_t = grid.max_t;
@@ -251,6 +335,7 @@ fn build_side(
         .get(face.index)
         .map_or(0.0, |point| point.u.floor());
 
+    let reverse_u = matches!(stitch, SideStitch::Sculpt(sculpt) if sculpt.reverse_u);
     let mut positions: Vec<[f32; 3]> = Vec::with_capacity(num_s.saturating_mul(num_t));
     let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(num_s.saturating_mul(num_t));
     for t in 0..num_t {
@@ -258,13 +343,19 @@ fn build_side(
         for s in 0..num_s {
             let col = face.index.saturating_add(s);
             positions.push(grid.position(col, t));
-            uvs.push([side_u(profile, col, s, flat, is_end, begin_stex), tex_t]);
+            let u = side_u(profile, col, s, flat, is_end, begin_stex);
+            uvs.push([if reverse_u { 1.0 - u } else { u }, tex_t]);
         }
     }
 
     let indices = side_indices(num_s, num_t);
     let mut normals = accumulate_normals(&positions, &indices);
-    wrap_side_normals(&mut normals, grid, num_s, num_t, path, profile, shape);
+    match stitch {
+        SideStitch::Prim => {
+            wrap_side_normals(&mut normals, grid, num_s, num_t, path, profile, shape);
+        }
+        SideStitch::Sculpt(sculpt) => stitch_sculpt_normals(&mut normals, num_s, num_t, sculpt),
+    }
     normalize_all(&mut normals);
 
     PrimFace {
@@ -381,6 +472,46 @@ fn wrap_side_normals(
                     [-1.0, 0.0, 0.0],
                 );
             }
+        }
+    }
+}
+
+/// Stitch a sculpted side face's accumulated normals before normalizing
+/// (Firestorm `createSide`'s sculpt branch): average each pole row into one
+/// normal, then share the profile seam, then the path seam — in that order,
+/// because a sphere's pole vertices sit on its seam too.
+fn stitch_sculpt_normals(
+    normals: &mut [[f32; 3]],
+    num_s: usize,
+    num_t: usize,
+    stitching: SculptStitching,
+) {
+    let seams = stitching.seams;
+    if seams == SculptSeams::Sphere {
+        for row in [0, num_t.saturating_sub(1)] {
+            let mut sum = [0.0_f32; 3];
+            for s in 0..num_s {
+                if let Some(normal) = normals.get(grid_index(s, row, num_s)).copied() {
+                    sum = [sum[0] + normal[0], sum[1] + normal[1], sum[2] + normal[2]];
+                }
+            }
+            for s in 0..num_s {
+                set_normal(normals, grid_index(s, row, num_s), sum);
+            }
+        }
+    }
+    if seams != SculptSeams::Open {
+        for t in 0..num_t {
+            let start = grid_index(0, t, num_s);
+            let end = grid_index(num_s.saturating_sub(1), t, num_s);
+            share_normals(normals, start, end);
+        }
+    }
+    if seams == SculptSeams::Torus {
+        for s in 0..num_s {
+            let first = grid_index(s, 0, num_s);
+            let last = grid_index(s, num_t.saturating_sub(1), num_s);
+            share_normals(normals, first, last);
         }
     }
 }
@@ -820,9 +951,15 @@ fn first_triangle(
 /// Accumulate an (area-weighted) normal at each vertex by summing every incident
 /// triangle's un-normalized face normal (Firestorm `createSide`'s normal
 /// accumulation); the result is normalized by the caller.
+///
+/// Each triangle's normal is added a second time to one of its corners — the
+/// second of an even triangle, the third of an odd one — which is the
+/// reference's "even out quad contributions": a cell's two triangles meet at
+/// different corners, and the extra weight balances what each vertex collects
+/// from the cells around it.
 fn accumulate_normals(positions: &[[f32; 3]], indices: &[u32]) -> Vec<[f32; 3]> {
     let mut normals = vec![[0.0_f32; 3]; positions.len()];
-    for &[i0, i1, i2] in indices.as_chunks::<3>().0 {
+    for (triangle, &[i0, i1, i2]) in indices.as_chunks::<3>().0.iter().enumerate() {
         let (i0, i1, i2) = (usize_from_u32(i0), usize_from_u32(i1), usize_from_u32(i2));
         let (Some(p0), Some(p1), Some(p2)) = (
             positions.get(i0).copied(),
@@ -835,6 +972,11 @@ fn accumulate_normals(positions: &[[f32; 3]], indices: &[u32]) -> Vec<[f32; 3]> 
         add_normal(&mut normals, i0, face_normal);
         add_normal(&mut normals, i1, face_normal);
         add_normal(&mut normals, i2, face_normal);
+        add_normal(
+            &mut normals,
+            if triangle.is_multiple_of(2) { i1 } else { i2 },
+            face_normal,
+        );
     }
     normals
 }

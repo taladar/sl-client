@@ -1303,7 +1303,7 @@ PrimFixture::boxed(local_id, full_id, owner, position, scale)
     .face(i, &FaceStyle { texture, color, alpha, glow, fullbright, shiny,
                           bump, repeats, offset, rotation, material, media })
     .mesh(key, faces)       // ExtraParams sculpt block, LL_SCULPT_TYPE_MESH
-    .sculpt(map, kind)      // .. or a sculpt map with its stitch kind
+    .sculpt(map, kind)      // .. or a sculpt map, stitch kind, sculpt shape
     .pbr(face, material)    // ExtraParams RenderMaterial (GLTF)
     .light(..) .projector(..) .flexi(..) .reflection_probe(..)
     .particles(..) .texture_anim(..) .hover_text(..) .media_url(..)

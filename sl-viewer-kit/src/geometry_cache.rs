@@ -82,12 +82,17 @@ pub enum GeometryKey {
         lod: PrimLod,
     },
     /// A sculpted prim: its map asset, sculpt-type byte (including the
-    /// invert / mirror flags), the decoded map's pixel size, and the
+    /// invert / mirror flags), the decoded map's pixel size, its shape, and the
     /// tessellation level — a re-decode of the same map at another discard
     /// level produces different geometry, so the dimensions make it a clean
     /// different key (the stale-resolution entry dies by pruning once its
-    /// instances rebuild), and the level does the same for a LOD swap.
+    /// instances rebuild), and the level does the same for a LOD swap. The
+    /// shape is part of it because a sculpt is laid over its prim's own path
+    /// and profile: the same map on another shape is other faces.
     Sculpt {
+        /// The quantized path/profile shape parameters the surface is laid
+        /// over.
+        shape: PrimShapeParams,
         /// The sculpt map texture asset id.
         map: TextureKey,
         /// The raw sculpt-type byte (type + invert / mirror flags).

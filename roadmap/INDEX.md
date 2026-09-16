@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 41 |
 | in-progress | 22 |
 | bugs | 10 |
-| done | 1167 |
+| done | 1168 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1696** |
+| **total** | **1697** |
 
 ## ideas (100)
 
@@ -1185,13 +1185,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Own avatar looks broken after a teleport
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
-- [`viewer-sculpt-sphere-fixture-divergence`](bugs/viewer-sculpt-sphere-fixture-divergence.md)
-  — The catalogue's sculpt sphere is a sphere here and a flat sheet in Firestorm
+- [`viewer-texture-anisotropic-filtering-missing`](bugs/viewer-texture-anisotropic-filtering-missing.md)
+  — Face textures are filtered without anisotropy, so oblique texels blur
 - [`viewer-tree-species-all-rendered-as-trees`](bugs/viewer-tree-species-all-rendered-as-trees.md)
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)
 
-## done (1167)
+## done (1168)
 
 ### protocol
 
@@ -2732,6 +2732,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-script-permission-experience-card`](done/viewer-script-permission-experience-card.md)
   — Script permission-request experience card (ScriptQuestionExperience)
   (blocked by `viewer-experience-permission-dialog` (done))
+- [`viewer-sculpt-sphere-fixture-divergence`](done/viewer-sculpt-sphere-fixture-divergence.md)
+  — The catalogue's sculpt sphere is a sphere here and a flat sheet in Firestorm
 - [`viewer-sea-distance-band-hard-seam`](done/viewer-sea-distance-band-hard-seam.md)
   — The open sea has a hard ring at a fixed distance, light beyond it and dark
   inside

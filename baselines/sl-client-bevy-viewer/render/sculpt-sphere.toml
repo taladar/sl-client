@@ -1,16 +1,16 @@
 schema = 1
-blessed_describe = "d25bc90b-dirty"
-blessed_at_unix = 1788385347
+blessed_describe = "a8bc6d64-dirty"
+blessed_at_unix = 1789567037
 
 [facts]
-"lod.high.triangles" = 1984
-"lod.high.vertices" = 994
-"lod.low.triangles" = 112
-"lod.low.vertices" = 58
-"lod.lowest.triangles" = 60
-"lod.lowest.vertices" = 32
-"lod.medium.triangles" = 480
-"lod.medium.vertices" = 242
+"lod.high.triangles" = 2048
+"lod.high.vertices" = 1089
+"lod.low.triangles" = 128
+"lod.low.vertices" = 81
+"lod.lowest.triangles" = 72
+"lod.lowest.vertices" = 49
+"lod.medium.triangles" = 512
+"lod.medium.vertices" = 289
 renderables = 1
 
 [facts."bounds.max"]
