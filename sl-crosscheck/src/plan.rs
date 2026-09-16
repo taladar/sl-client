@@ -100,6 +100,15 @@ impl CameraSpec {
 /// between a frame interval and the frame it actually takes.
 const SLACK_SECS: f32 = 60.0;
 
+/// Whether a capture run may make sound.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaptureAudio {
+    /// Both viewers muted for the run — the default.
+    Muted,
+    /// Both viewers play sound as an ordinary session would.
+    Audible,
+}
+
 /// The pixel grid, the layers, the shutter and the sun: everything that decides
 /// what a captured frame holds, and the only thing both viewers are configured
 /// with by environment.
@@ -115,6 +124,10 @@ pub struct CaptureSpec {
     pub hud: bool,
     /// Whether the edit-tool gizmo overlay is in the frame.
     pub gizmos: bool,
+    /// Whether the viewers may make sound. Not a layer of the frame, but it
+    /// travels with them: muted by default, so a scene's looping sound sources
+    /// do not play through the machine's speakers for the length of a run.
+    pub audio: CaptureAudio,
     /// How many frames to capture.
     pub frames: usize,
     /// Seconds between successive frames.
@@ -153,6 +166,7 @@ impl Default for CaptureSpec {
             ui: false,
             hud: false,
             gizmos: false,
+            audio: CaptureAudio::Muted,
             frames: 30,
             interval: 0.5,
             settle_timeout: 25.0,
@@ -169,8 +183,8 @@ impl CaptureSpec {
     /// Every name here is read by this workspace's viewer and by the Firestorm
     /// harness, with the same meaning; that parity is the whole reason the
     /// capture settings travel by environment while everything else travels by
-    /// flag. The three layer switches are always emitted, including as `0`,
-    /// because both viewers treat `0` as off and an *absent* variable would let
+    /// flag. The three layer switches and the audio switch are always
+    /// emitted, including as `0`, because both viewers treat `0` as off and an *absent* variable would let
     /// a leftover one from the operator's shell reach one viewer and not the
     /// other.
     #[must_use]
@@ -184,6 +198,10 @@ impl CaptureSpec {
             ("SL_VIEWER_CAPTURE_UI".to_owned(), flag(self.ui)),
             ("SL_VIEWER_CAPTURE_HUD".to_owned(), flag(self.hud)),
             ("SL_VIEWER_CAPTURE_GIZMOS".to_owned(), flag(self.gizmos)),
+            (
+                "SL_VIEWER_CAPTURE_AUDIO".to_owned(),
+                flag(self.audio == CaptureAudio::Audible),
+            ),
             (
                 "SL_VIEWER_SCREENSHOT_FRAMES".to_owned(),
                 self.frames.to_string(),
@@ -323,6 +341,7 @@ mod tests {
             "SL_VIEWER_CAPTURE_UI",
             "SL_VIEWER_CAPTURE_HUD",
             "SL_VIEWER_CAPTURE_GIZMOS",
+            "SL_VIEWER_CAPTURE_AUDIO",
         ] {
             let value = env
                 .iter()

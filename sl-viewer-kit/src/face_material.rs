@@ -63,8 +63,10 @@ pub type FaceMaterial = ExtendedMaterial<StandardMaterial, SlFaceExt>;
 /// reference lights it ([`sl_client_bevy::sky_lighting`]), with the specular
 /// highlight added.
 pub const SL_FACE_MODE_LEGACY: u32 = 1;
-/// PBR mode: the face is a glTF material and is lit by Bevy's physically based
-/// lighting; per-map UV transforms may apply via [`SlFaceParams::map_flags`].
+/// PBR mode: the face is a glTF material, lit under a resolved sky by the
+/// reference's PBR branch (`pbrBaseLight`) and otherwise by Bevy's physically
+/// based lighting; per-map UV transforms may apply via
+/// [`SlFaceParams::map_flags`].
 pub const SL_FACE_MODE_PBR: u32 = 0;
 /// Plain diffuse mode — every face that is neither of the above, and the inert
 /// default: lit from the sky like a legacy face, with no highlight.

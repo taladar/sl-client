@@ -141,13 +141,23 @@ teleport between the regions from its map — see below.
 ### Named scenarios
 
 `--scenario <name>` picks the scene every region shows, from the registry
-in `fixtures::scenarios`. Three exist today: `stock` (the default — one
+in `fixtures::scenarios`. Four exist today: `stock` (the default — one
 region-wide parcel, one scripted box, an arrival greeting), `catalogue`
 (the named prim catalogue: one prim per rendering feature, plus two NPCs
 — one standing, one sitting on a bench — with every asset they reference
-served — see below), and `border` (one checkered marker pillar floating
-just inside the region's west edge, which with two adjacent `--region`s
-is a scene for looking across — and walking over — a border).
+served — see below), `catalogue-eep` (the same catalogue under an **EEP**
+sky, `sl_test_assets::environment::eep_sky`, with the sun fixed in the
+south-east), and `border` (one checkered marker pillar floating just
+inside the region's west edge, which with two adjacent `--region`s is a
+scene for looking across — and walking over — a border).
+
+`catalogue-eep` exists because every other fixture sky is a *classic* one
+— the reference decides `classic_mode` by whether a sky carries a
+`reflection_probe_ambiance` at all — and the surface lighting has an EEP
+half (linear light, probe irradiance faded over the sky ambient) that a
+classic sky never reaches. Its environment is one keyframe, so do **not**
+pass `--day-position` with it: that replaces a single-sky cycle with the
+four classic presets, and the run logs that it did.
 
 A scene may also say how it dresses a **pair** of regions
 (`NamedScenario::pair`), which is not the same as two copies of it: the
@@ -236,6 +246,12 @@ frames.
 A run leaves `run.json`, the two configuration files, and per viewer its
 `frame_NNN.png` sequence, `scene.json` (when that viewer writes one),
 `harness-status.json` and its own `viewer.log`.
+
+**Sound.** Both viewers are muted for a run — `SL_VIEWER_CAPTURE_AUDIO=0`
+in the capture block, which sl-client applies as a mixer-side master mute
+and the Firestorm harness as a non-persistent `MuteAudio` — because the
+catalogue's sound box loops for the whole run through whatever speakers
+the machine has. `--capture-audio` lets them make sound.
 
 **Choosing the sun.** `--day-position <0..1>` pins the time of day in
 both viewers, and any comparison involving light wants it: the two
@@ -1353,14 +1369,15 @@ So `looping_sound(..)` is a fixture for the first, and
 implements only the message half is silent in every region whose sounds
 started before it logged in, which is nearly all of them.
 
-The procedural assets it needs come from `sl-test-assets`:
-`RgbaImage::checker` / `solid` (as JPEG2000), `sculpt_sphere` (a sculpt
-map — geometry stored as a texture), `mesh::unit_cube_mesh_asset` (the
-LLSD-binary header plus zlib-compressed LOD blocks `sl-mesh` decodes),
-`gltf_material_asset` (the `AT_MATERIAL` LLSD envelope around a glTF 2.0
-document) and `sound::marker_tone` (a real Ogg Vorbis tone, which the
-`sound-box` loops at concert pitch — a decoder can measure it, and an ear
-can tell two of them apart).
+The procedural assets it needs come from `sl-test-assets`: `RgbaImage::checker`
+/ `solid` (as JPEG2000), `sculpt_sphere` (a sculpt map — geometry stored as a
+texture), `mesh::unit_cube_mesh_asset` (the LLSD-binary header plus
+zlib-compressed LOD blocks `sl-mesh` decodes), `gltf_material_asset` (the
+`AT_MATERIAL` LLSD envelope around a glTF 2.0 document, written by
+`sl-material`'s own encoder — an envelope the reference's `LLSDSerialize` cannot
+read makes Firestorm draw the face untextured) and `sound::marker_tone` (a real
+Ogg Vorbis tone, which the `sound-box` loops at concert pitch — a decoder can
+measure it, and an ear can tell two of them apart).
 
 ### Fixture textures: size it honestly, and mind the cache
 

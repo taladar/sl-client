@@ -1,10 +1,11 @@
-//! The **sky lighting** every lit legacy surface shares — the reference viewer's
-//! `sunlit` and `amblit` (`calcAtmosphericVars`), carried to the GPU in one small
-//! texture, plus the shader module (`sky_lighting.wgsl`) that lights a surface with
-//! them the way the reference's deferred `softenLight` does.
+//! The **sky lighting** every lit surface shares — the reference viewer's `sunlit`
+//! and `amblit` (`calcAtmosphericVars`), carried to the GPU in one small texture,
+//! plus the shader module (`sky_lighting.wgsl`) that lights a surface with them the
+//! way the reference's deferred `softenLight` does, in both its legacy branch and
+//! its PBR (glTF) one.
 //!
-//! **Why a texture.** The reference lights every non-PBR surface — prims, meshes,
-//! sculpts, avatars, trees, terrain — in one deferred pass, from one set of sky
+//! **Why a texture.** The reference lights every surface — prims, meshes, sculpts,
+//! avatars, trees, terrain, glTF faces — in one deferred pass, from one set of sky
 //! uniforms. This viewer lights each in its own material shader, and a material
 //! uniform is per material: writing the sky into thousands of face materials would
 //! re-prepare every one of their bind groups each time the day cycle steps (every
@@ -31,7 +32,7 @@ use bevy::shader::Shader;
 const SKY_LIGHTING_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("8e3b2f61-4d7a-4c19-b0e5-7a2c9d41f836");
 
-/// The one sky-lighting texture every lit legacy surface binds. See the module
+/// The one sky-lighting texture every lit surface binds. See the module
 /// docs for why this is a texture and not a uniform.
 pub const SKY_LIGHTING_IMAGE: Handle<Image> = uuid_handle!("c41a7e92-3b58-4f0d-8e6a-15d2b9c7f403");
 

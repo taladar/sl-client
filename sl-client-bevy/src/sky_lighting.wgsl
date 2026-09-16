@@ -1,10 +1,10 @@
-// The Second Life / Firestorm **legacy surface lighting**, as one importable module:
-// how the reference's deferred `softenLight` (`class3/deferred/softenLightF.glsl`,
-// its non-PBR branch) lights a diffuse surface from the sky's `sunlit` and
-// `amblit`.
+// The Second Life / Firestorm **surface lighting**, as one importable module: how
+// the reference's deferred `softenLight` (`class3/deferred/softenLightF.glsl`)
+// lights a surface from the sky's `sunlit` and `amblit` — its legacy branch for a
+// diffuse surface, and its PBR branch (below) for a glTF one.
 //
-// The reference lights every non-PBR surface — prims, meshes, sculpts, avatars,
-// trees, terrain — in that one pass. This viewer lights each in its own material
+// The reference lights every surface — prims, meshes, sculpts, avatars, trees,
+// terrain — in that one pass. This viewer lights each in its own material
 // shader, so the arithmetic lives here and every one of them imports it, rather
 // than each carrying a copy that could drift from the others.
 //
@@ -169,13 +169,14 @@ fn sky_probe_irradiance(n: vec3<f32>) -> SkyProbeIrradiance {
     return out;
 }
 
-// The diffuse irradiance a legacy surface is lit by
-// (`sampleReflectionProbesLegacy`'s `ambenv`): a classic sky's own ambient, and for
-// an EEP sky the reflection probes' irradiance faded in over that ambient by the
-// sky's probe ambiance (`tapIrradianceMap`'s `mix(amblit, col, min(ambiance, 1))`).
+// The diffuse irradiance a surface is lit by (the `ambenv` of both
+// `sampleReflectionProbesLegacy` and `sampleReflectionProbes`, which agree on it): a
+// classic sky's own ambient, and for an EEP sky the reflection probes' irradiance
+// faded in over that ambient by the sky's probe ambiance (`tapIrradianceMap`'s
+// `mix(amblit, col, min(ambiance, 1))`).
 //
 // With no probe to sample, the ambient stands alone. `n` is the shading normal.
-fn sky_legacy_irradiance(
+fn sky_irradiance(
     lighting: SkyLighting,
     light: SurfaceSkyLight,
     n: vec3<f32>,
@@ -200,7 +201,7 @@ struct LegacyDiffuse {
     sunlit_linear: vec3<f32>,
 }
 
-// `irradiance` from `sky_legacy_irradiance`; `shadow` the sun's shadow term (`scol`,
+// `irradiance` from `sky_irradiance`; `shadow` the sun's shadow term (`scol`,
 // 1 = fully lit); `n` the shading normal and `light_dir` the direction toward the
 // active body.
 fn sky_legacy_diffuse(
@@ -240,4 +241,198 @@ fn sky_legacy_finish(lighting: SkyLighting, color: vec3<f32>) -> vec3<f32> {
     let not_nan = select(vec3<f32>(0.0), scaled, scaled == scaled);
     let finite = select(not_nan, vec3<f32>(1.0), not_nan > vec3<f32>(3.4e38));
     return clamp(finite, vec3<f32>(0.0), vec3<f32>(11.2));
+}
+
+// ---------------------------------------------------------------------------
+// PBR (glTF) surfaces
+//
+// The reference lights a glTF face in the same deferred pass, through a branch of
+// its own: `pbrBaseLight` (`class1/deferred/deferredUtil.glsl`), fed the same
+// `sunlit`, `amblit` and probe irradiance as the legacy branch plus the probes'
+// radiance. It is a glTF metallic-roughness model for an EEP sky, and for a legacy
+// sky an explicit reconstruction of the Blinn-Phong look ("classic mode"), again
+// combined in gamma space.
+// ---------------------------------------------------------------------------
+
+const SKY_PI: f32 = 3.14159265;
+
+// A glTF surface's diffuse and specular colours (`calcDiffuseSpecular`): a
+// dielectric reflects 4 %, a metal reflects its base colour and diffuses nothing.
+struct SkyPbrColors {
+    diffuse: vec3<f32>,
+    specular: vec3<f32>,
+}
+
+fn sky_pbr_colors(base_color: vec3<f32>, metallic: f32) -> SkyPbrColors {
+    let f0 = vec3<f32>(0.04);
+    var colors: SkyPbrColors;
+    colors.diffuse = base_color * (vec3<f32>(1.0) - f0) * (1.0 - metallic);
+    colors.specular = mix(f0, base_color, metallic);
+    return colors;
+}
+
+// `pbrPunctual`'s outputs: the clamped `n·l`, and the diffuse and specular BRDF
+// terms *without* the `n·l` or the light's colour, which each caller applies its
+// own way.
+struct SkyPbrPunctual {
+    nl: f32,
+    diffuse: vec3<f32>,
+    specular: vec3<f32>,
+}
+
+// The reference `pbrPunctual`: Lambert diffuse over pi, a Schlick Fresnel whose
+// grazing reflectance fades out below 4 %, Smith-Schlick geometric occlusion and a
+// GGX distribution. `v` is toward the eye, `l` toward the light.
+fn sky_pbr_punctual(
+    colors: SkyPbrColors,
+    perceptual_roughness: f32,
+    n: vec3<f32>,
+    v: vec3<f32>,
+    l: vec3<f32>,
+) -> SkyPbrPunctual {
+    // "make sure specular highlights from punctual lights don't fall off of
+    // polished surfaces"
+    let rough = max(perceptual_roughness, 8.0 / 255.0);
+    let alpha_roughness = rough * rough;
+
+    let reflectance = max(max(colors.specular.r, colors.specular.g), colors.specular.b);
+    let reflectance90 = clamp(reflectance * 25.0, 0.0, 1.0);
+    let r0 = colors.specular;
+    let r90 = vec3<f32>(reflectance90);
+
+    let h = normalize(l + v);
+    let nl = clamp(dot(n, l), 0.001, 1.0);
+    let nv = clamp(abs(dot(n, v)), 0.001, 1.0);
+    let nh = clamp(dot(n, h), 0.0, 1.0);
+    let vh = clamp(dot(v, h), 0.0, 1.0);
+
+    let f = r0 + (r90 - r0) * pow(clamp(1.0 - vh, 0.0, 1.0), 5.0);
+
+    let r2 = alpha_roughness * alpha_roughness;
+    let attenuation_l = 2.0 * nl / (nl + sqrt(r2 + (1.0 - r2) * (nl * nl)));
+    let attenuation_v = 2.0 * nv / (nv + sqrt(r2 + (1.0 - r2) * (nv * nv)));
+    let g = attenuation_l * attenuation_v;
+
+    let d_denominator = (nh * r2 - nh) * nh + 1.0;
+    let d = r2 / (SKY_PI * d_denominator * d_denominator);
+
+    var out: SkyPbrPunctual;
+    out.nl = nl;
+    out.diffuse = (vec3<f32>(1.0) - f) * colors.diffuse / SKY_PI;
+    out.specular = f * g * d / (4.0 * nl * nv);
+    return out;
+}
+
+// The split-sum environment BRDF's scale and bias to F0 at `(n·v, roughness)`.
+//
+// The reference reads it from `brdfLut`, a table `genbrdflutF.glsl` integrates at
+// start-up (GGX importance sampling with Smith-Schlick visibility), indexed so that
+// `BRDF(nv, 1 - perceptualRoughness)` looks up the *perceptual* roughness. This is
+// Karis's analytic fit of that same integral ("Physically Based Shading on Mobile"),
+// the one Bevy's `F_AB` uses when it has no table either — copied rather than
+// imported, as `sky_quat_rotate` is.
+fn sky_env_brdf(nv: f32, perceptual_roughness: f32) -> vec2<f32> {
+    let c0 = vec4<f32>(-1.0, -0.0275, -0.572, 0.022);
+    let c1 = vec4<f32>(1.0, 0.0425, 1.04, -0.04);
+    let r = perceptual_roughness * c0 + c1;
+    let a004 = min(r.x * r.x, exp2(-9.28 * nv)) * r.x + r.y;
+    return vec2<f32>(-1.04, 1.04) * a004 + r.zw;
+}
+
+// The view's reflection probe radiance along the reflection of the eye ray about
+// `n` (`sampleProbes`), at the mip the roughness selects — the reference's
+// `(1 - glossiness) * max_probe_lod` is the same linear map from perceptual
+// roughness onto the probe's mip chain. Zero with no probe; at scene scale like
+// `sky_probe_irradiance`.
+fn sky_probe_radiance(n: vec3<f32>, v: vec3<f32>, perceptual_roughness: f32) -> vec3<f32> {
+#ifdef ENVIRONMENT_MAP
+    let probes = sky_view_bindings::light_probes;
+    if (probes.view_cubemap_index >= 0) {
+        var dir = sky_quat_rotate(probes.view_rotation, reflect(-v, n));
+        // Cube maps are left-handed, so negate z.
+        dir.z = -dir.z;
+#ifdef MULTIPLE_LIGHT_PROBES_IN_ARRAY
+        let map_index = u32(probes.view_cubemap_index);
+        let lod = perceptual_roughness * f32(
+            textureNumLevels(sky_view_bindings::specular_environment_maps[map_index]) - 1u
+        );
+        let probe_sample = textureSampleLevel(
+            sky_view_bindings::specular_environment_maps[map_index],
+            sky_view_bindings::environment_map_sampler,
+            dir,
+            lod,
+        ).rgb;
+#else
+        let lod = perceptual_roughness * f32(probes.smallest_specular_mip_level_for_view);
+        let probe_sample = textureSampleLevel(
+            sky_view_bindings::specular_environment_map,
+            sky_view_bindings::environment_map_sampler,
+            dir,
+            lod,
+        ).rgb;
+#endif
+        return probe_sample * probes.intensity_for_view * sky_view_bindings::view.exposure;
+    }
+#endif
+    return vec3<f32>(0.0);
+}
+
+// The reference `pbrBaseLight`, image-based and sun terms together, with the
+// emissive term added: what a glTF face is lit by before the local lights and
+// `sky_legacy_finish` (which applies the classic sky's 1.1 and the HDR clamp, as
+// `softenLight` does to both branches).
+//
+// `colors` from `sky_pbr_colors`; `v` toward the eye; `shadow` the sun's shadow
+// term; `irradiance` from `sky_irradiance`; `ao` the material's occlusion;
+// `emissive` linear.
+fn sky_pbr_base_light(
+    lighting: SkyLighting,
+    light: SurfaceSkyLight,
+    colors: SkyPbrColors,
+    perceptual_roughness: f32,
+    n: vec3<f32>,
+    v: vec3<f32>,
+    light_dir: vec3<f32>,
+    shadow: f32,
+    irradiance: vec3<f32>,
+    ao: vec3<f32>,
+    emissive: vec3<f32>,
+) -> vec3<f32> {
+    // `pbrIbl`: the probe's radiance through the split-sum BRDF, and (for an EEP
+    // sky) the irradiance through the diffuse colour, both occluded.
+    let nv = clamp(abs(dot(n, v)), 0.001, 1.0);
+    let brdf = sky_env_brdf(nv, perceptual_roughness);
+    let radiance = sky_probe_radiance(n, v, perceptual_roughness);
+    let ibl_specular = radiance * (colors.specular * brdf.x + brdf.y) * ao;
+
+    let punctual = sky_pbr_punctual(colors, perceptual_roughness, n, v, normalize(light_dir));
+
+    var color: vec3<f32>;
+    if sky_lighting_is_classic(lighting) {
+        // "Reconstruct the diffuse lighting that we do for blinn-phong materials
+        // here": the legacy branch's gamma-space sun, times pi to undo the Lambert
+        // divide inside `pbrPunctual`, recombined with an ambient that — unlike the
+        // EEP one — takes no occlusion.
+        let ambient = sky_srgb_to_linear(irradiance * 0.9) * colors.diffuse;
+        let da = pow(punctual.nl, 1.2);
+        let sun_contrib = sky_srgb_to_linear(
+            sky_linear_to_srgb(vec3<f32>(min(da, shadow))) * light.sunlit * 0.7,
+        ) * SKY_PI;
+        let sun = clamp(
+            sun_contrib * ((punctual.diffuse + punctual.specular) * shadow),
+            vec3<f32>(0.0),
+            vec3<f32>(10.0),
+        );
+        color = sky_srgb_to_linear(
+            sky_linear_to_srgb(ambient) + sky_linear_to_srgb(sun) * 1.1,
+        );
+    } else {
+        color = irradiance * colors.diffuse * ao
+            + clamp(
+                punctual.nl * (punctual.diffuse + punctual.specular),
+                vec3<f32>(0.0),
+                vec3<f32>(10.0),
+            ) * light.sunlit * 3.0 * shadow;
+    }
+    return color + ibl_specular + emissive;
 }

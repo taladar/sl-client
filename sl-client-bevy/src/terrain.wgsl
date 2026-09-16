@@ -17,9 +17,9 @@
     view_transformations::position_world_to_clip,
 }
 #import sl_client_bevy::sky_lighting::{
+    sky_irradiance,
     sky_legacy_diffuse,
     sky_legacy_finish,
-    sky_legacy_irradiance,
     sky_lighting_from_texels,
     sky_lighting_is_resolved,
     sky_surface_light,
@@ -139,7 +139,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         // textures are uploaded sRGB, so `base` is already the linear albedo the
         // branch converts its G-buffer colour to.
         let light = sky_surface_light(lighting, normal, sun_dir);
-        let irradiance = sky_legacy_irradiance(lighting, light, normal);
+        let irradiance = sky_irradiance(lighting, light, normal);
         let diffuse = sky_legacy_diffuse(lighting, light, irradiance, normal, sun_dir, shadow);
         color = sky_legacy_finish(lighting, diffuse.light * base.rgb);
     } else {

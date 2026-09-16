@@ -43,11 +43,13 @@
 }
 #import sl_client_bevy::sky_lighting::{
     SkyLighting,
+    sky_irradiance,
     sky_legacy_diffuse,
     sky_legacy_finish,
-    sky_legacy_irradiance,
     sky_lighting_from_texels,
     sky_lighting_is_resolved,
+    sky_pbr_base_light,
+    sky_pbr_colors,
     sky_surface_light,
 }
 
@@ -666,13 +668,11 @@ fn fragment(
     let sky = sl_sky_lighting(slot);
     if (pbr_input.material.flags & pbr_types::STANDARD_MATERIAL_FLAGS_UNLIT_BIT) != 0u {
         out.color = pbr_input.material.base_color;
-    } else if sl.mode != SL_FACE_MODE_PBR
-        && sky_lighting_is_resolved(sky)
-        && lights.n_directional_lights != 0u {
-        // A legacy (non-PBR) face under a resolved sky: lit the way the reference's
-        // deferred `softenLight` lights it (`sl_client_bevy::sky_lighting`), not by
-        // Bevy's physically based sun. The reference's model is its own — a legacy
-        // sky combines in gamma space — and a Bevy sun calibrated to it lit a sunlit
+    } else if sky_lighting_is_resolved(sky) && lights.n_directional_lights != 0u {
+        // A face under a resolved sky: lit the way the reference's deferred
+        // `softenLight` lights it (`sl_client_bevy::sky_lighting`), not by Bevy's
+        // physically based sun. The reference's model is its own — a legacy sky
+        // combines in gamma space — and a Bevy sun calibrated to it lit a sunlit
         // face about twice as brightly (`viewer-sunlit-face-clips-two-channels`).
         //
         // The direction toward the active body is still Bevy's directional light,
@@ -683,25 +683,41 @@ fn fragment(
         let light_dir = normalize(lights.directional_lights[0].direction_to_light);
         let shadow = sl_sun_shadow(pbr_input);
         let light = sky_surface_light(sky, n, light_dir);
-        let irradiance = sky_legacy_irradiance(sky, light, n);
-        let diffuse = sky_legacy_diffuse(sky, light, irradiance, n, light_dir, shadow);
-        var color = diffuse.light * pbr_input.material.base_color.rgb;
-        if sl.mode == SL_FACE_MODE_LEGACY {
-            let spec_rgb = sl.specular_color.rgb * spec_sample.rgb;
-            let glossiness = sl.glossiness * gloss_modulator;
-            // The reference's `scol` carries the shadow into the highlight.
-            color += sl_blinn_phong_specular(
-                n, pbr_input.world_position.xyz, spec_rgb, glossiness,
-                diffuse.sunlit_linear * shadow,
-            );
-        }
-        color = sky_legacy_finish(sky, color);
-        // The local lights are added after, as the reference's own light passes
-        // add theirs onto `softenLight`'s result, and the emissive term as Bevy
-        // adds it.
+        let irradiance = sky_irradiance(sky, light, n);
         let emissive = pbr_input.material.emissive;
-        color += sl_local_lights(pbr_input)
-            + emissive.rgb * pbr_input.material.base_color.a * mix(1.0, view.exposure, emissive.a);
+        let emissive_rgb = emissive.rgb * mix(1.0, view.exposure, emissive.a);
+        var color: vec3<f32>;
+        if sl.mode == SL_FACE_MODE_PBR {
+            // A glTF face: the reference's PBR branch (`pbrBaseLight`), whose
+            // emissive term is part of what `softenLight` scales and clamps.
+            let colors = sky_pbr_colors(
+                pbr_input.material.base_color.rgb,
+                pbr_input.material.metallic,
+            );
+            color = sky_legacy_finish(sky, sky_pbr_base_light(
+                sky, light, colors, pbr_input.material.perceptual_roughness, n, pbr_input.V,
+                light_dir, shadow, irradiance, pbr_input.diffuse_occlusion, emissive_rgb,
+            ));
+            color += sl_local_lights(pbr_input);
+        } else {
+            let diffuse = sky_legacy_diffuse(sky, light, irradiance, n, light_dir, shadow);
+            color = diffuse.light * pbr_input.material.base_color.rgb;
+            if sl.mode == SL_FACE_MODE_LEGACY {
+                let spec_rgb = sl.specular_color.rgb * spec_sample.rgb;
+                let glossiness = sl.glossiness * gloss_modulator;
+                // The reference's `scol` carries the shadow into the highlight.
+                color += sl_blinn_phong_specular(
+                    n, pbr_input.world_position.xyz, spec_rgb, glossiness,
+                    diffuse.sunlit_linear * shadow,
+                );
+            }
+            color = sky_legacy_finish(sky, color);
+            // The local lights are added after, as the reference's own light passes
+            // add theirs onto `softenLight`'s result, and the emissive term as Bevy
+            // adds it.
+            color += sl_local_lights(pbr_input)
+                + emissive_rgb * pbr_input.material.base_color.a;
+        }
         out.color = vec4<f32>(color, pbr_input.material.base_color.a);
     } else {
         // Reuse `StandardMaterial`'s metallic-roughness PBR lighting (a legacy face's

@@ -490,10 +490,22 @@ fn sync_mute_glyphs(
     }
 }
 
-/// Whether the master bus should be silenced for focus reasons: the
-/// mute-on-focus-loss setting is on and the window is unfocused.
-const fn master_silenced(mute_when_minimized: bool, focused: bool) -> bool {
-    mute_when_minimized && !focused
+/// Silences the master bus for the whole run, mixer-side only — the stored
+/// volume and mute settings are never written, so the next ordinary session
+/// sounds exactly as the last one did.
+///
+/// Inserted by the unattended capture harness unless the run asked for sound
+/// (`--capture-audio`): a capture run logs into a scene with looping sound
+/// sources, and nobody is listening to it — least of all the person at the
+/// desk the run is playing through.
+#[derive(Resource, Debug, Clone, Copy, Default)]
+pub struct SilenceAudioForRun;
+
+/// Whether the master bus should be silenced: for the whole run
+/// ([`SilenceAudioForRun`]), or for focus reasons — the mute-on-focus-loss
+/// setting is on and the window is unfocused.
+const fn master_silenced(silenced_for_run: bool, mute_when_minimized: bool, focused: bool) -> bool {
+    silenced_for_run || (mute_when_minimized && !focused)
 }
 
 /// Bridge: push every bus's persisted volume + mute into the mixer each frame.
@@ -503,13 +515,15 @@ const fn master_silenced(mute_when_minimized: bool, focused: bool) -> bool {
 /// settings change (panel, quick-prefs or preferences tab), a fresh login, or a
 /// device hot-plug that rebuilt the graph.
 ///
-/// [`SETTING_MUTE_WHEN_MINIMIZED`] overlays the **master** bus's mute here,
-/// mixer-side only: the stored `master_mute` setting is never written (see
-/// the constant's doc). A missing primary window reads as focused.
+/// [`SETTING_MUTE_WHEN_MINIMIZED`] and [`SilenceAudioForRun`] overlay the
+/// **master** bus's mute here, mixer-side only: the stored `master_mute` setting
+/// is never written (see the constant's doc). A missing primary window reads as
+/// focused.
 fn apply_volume_settings_to_mixer(
     settings: Option<Res<ViewerSettings>>,
     mixer: Option<NonSendMut<Mixer>>,
     windows: Query<&Window, With<PrimaryWindow>>,
+    silence_for_run: Option<Res<SilenceAudioForRun>>,
 ) {
     let (Some(settings), Some(mut mixer)) = (settings, mixer) else {
         return;
@@ -519,7 +533,7 @@ fn apply_volume_settings_to_mixer(
         .get_bool(SETTING_MUTE_WHEN_MINIMIZED)
         .unwrap_or(false);
     let focused = windows.iter().next().is_none_or(|window| window.focused);
-    let silenced = master_silenced(mute_when_minimized, focused);
+    let silenced = master_silenced(silence_for_run.is_some(), mute_when_minimized, focused);
     for bus in Bus::ALL {
         let gain = settings
             .store()
@@ -577,10 +591,13 @@ mod tests {
 
     #[test]
     fn master_silence_is_focus_and_setting() {
-        assert!(!master_silenced(false, true));
-        assert!(!master_silenced(false, false));
-        assert!(!master_silenced(true, true));
-        assert!(master_silenced(true, false));
+        assert!(!master_silenced(false, false, true));
+        assert!(!master_silenced(false, false, false));
+        assert!(!master_silenced(false, true, true));
+        assert!(master_silenced(false, true, false));
+        // A run silenced for capture is silent whatever the focus says.
+        assert!(master_silenced(true, false, true));
+        assert!(master_silenced(true, true, true));
         // The contract the feature rides: mute retains the bus gain. The
         // values are stored verbatim, so `Option` equality is exact.
         let mut level = BusLevel::from_linear(0.4);

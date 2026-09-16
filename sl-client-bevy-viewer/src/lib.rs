@@ -660,6 +660,20 @@ struct Options {
         value_parser = clap::builder::FalseyValueParser::new()
     )]
     capture_gizmos: bool,
+    /// Let a capture run make sound. Off by default: a run logs into a scene
+    /// whose sound sources loop for as long as it lasts, and plays them through
+    /// whatever speakers the machine has while nobody is listening. The master
+    /// bus is silenced in the mixer only, so no stored volume or mute setting
+    /// changes. Only means anything with `--screenshot-dir`.
+    #[clap(
+        long,
+        env = "SL_VIEWER_CAPTURE_AUDIO",
+        num_args = 0..=1,
+        default_value_t = false,
+        default_missing_value = "true",
+        value_parser = clap::builder::FalseyValueParser::new()
+    )]
+    capture_audio: bool,
     /// Write the structured scene dump — what the viewer was showing when it
     /// took its frames — to this path instead of `<screenshot-dir>/scene.json`.
     /// The document is the one the patched Firestorm writes
@@ -1007,6 +1021,8 @@ struct CaptureStartup<'a> {
     /// Where the structured scene dump goes (`--scene-dump`), or `None` for
     /// `<screenshot-dir>/scene.json`.
     scene_dump: Option<&'a Path>,
+    /// Whether the run may make sound (`--capture-audio`).
+    audio: bool,
 }
 
 /// The skin configuration for a viewer session: which skin / theme to wear and
@@ -1991,6 +2007,9 @@ fn run_session(
         // a `ScreenshotPlugin` that fails on every single capture, which buries
         // the one error that explains why under a run's worth of noise.
         fs_err::create_dir_all(dir).map_err(Error::ScreenshotDir)?;
+        if !capture.audio {
+            app.insert_resource(crate::volume_panel::SilenceAudioForRun);
+        }
         app.add_plugins(crate::screenshot::ScreenshotPlugin {
             dir: dir.to_path_buf(),
             content: capture.content,
@@ -2134,6 +2153,7 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
                 dir: options.screenshot_dir.as_deref(),
                 content: capture_content(options),
                 scene_dump: options.scene_dump.as_deref(),
+                audio: options.capture_audio,
             },
             CameraStartup {
                 start: camera_start,
@@ -2264,6 +2284,7 @@ fn run_replay(options: &Options, bundle_dir: &Path) -> Result<(), Error> {
             dir: options.screenshot_dir.as_deref(),
             content: capture_content(options),
             scene_dump: options.scene_dump.as_deref(),
+            audio: options.capture_audio,
         },
         CameraStartup {
             start: camera_start,

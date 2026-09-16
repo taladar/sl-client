@@ -34,6 +34,9 @@ pub const NIGHT_SKY_NAME: &str = "fixture-night";
 /// The name (and frame name) of the fixture water frame.
 pub const WATER_NAME: &str = "fixture-water";
 
+/// The name (and frame name) of the EEP fixture sky.
+pub const EEP_SKY_NAME: &str = "fixture-eep";
+
 /// The name of the fixture day cycle.
 pub const DAY_CYCLE_NAME: &str = "fixture-day-cycle";
 
@@ -89,6 +92,34 @@ pub fn night_sky() -> SkySettings {
         star_brightness: 250.0,
         ..SkySettings::legacy_windlight_default(NIGHT_SKY_NAME)
     }
+}
+
+/// An **EEP** fixture sky: the legacy WindLight default with a
+/// `reflection_probe_ambiance`, the one field that takes a sky out of the
+/// reference's "classic mode" (`LLSettingsSky::mCanAutoAdjust` is set exactly
+/// when a sky's LLSD lacks it). Every other fixture sky is classic, so without
+/// this one the EEP half of the surface lighting — linear light, probe
+/// irradiance faded in over the sky ambient — has nothing to be compared on.
+///
+/// The sun stands in the south-east at 45°, so a camera south of a prim sees a
+/// sunlit top and a sunlit side, and neither face is grazing.
+#[must_use]
+pub fn eep_sky() -> SkySettings {
+    let quarter_pi = core::f32::consts::FRAC_PI_4;
+    SkySettings {
+        // Azimuth −45°: +x east, −y south.
+        sun_rotation: azimuth_altitude_to_rotation(-quarter_pi, quarter_pi),
+        moon_rotation: azimuth_altitude_to_rotation(3.0 * quarter_pi, -quarter_pi),
+        star_brightness: 0.0,
+        reflection_probe_ambiance: 1.0,
+        ..SkySettings::legacy_windlight_default(EEP_SKY_NAME)
+    }
+}
+
+/// The EEP region environment: [`eep_sky`] held over [`water`].
+#[must_use]
+pub fn eep_environment() -> EnvironmentSettings {
+    single_sky_environment(eep_sky())
 }
 
 /// The fixture water frame: the reference's own default water, renamed.
@@ -211,9 +242,9 @@ mod tests {
     use sl_proto::{EnvironmentAsset, environment_asset_from_bytes};
 
     use super::{
-        DAY_CYCLE_NAME, NIGHT_SKY_NAME, NOON_SKY_NAME, WATER_NAME, day_cycle, day_cycle_asset,
-        night_environment, night_sky, night_sky_asset, noon_environment, noon_sky, noon_sky_asset,
-        water, water_asset,
+        DAY_CYCLE_NAME, EEP_SKY_NAME, NIGHT_SKY_NAME, NOON_SKY_NAME, WATER_NAME, day_cycle,
+        day_cycle_asset, eep_sky, night_environment, night_sky, night_sky_asset, noon_environment,
+        noon_sky, noon_sky_asset, water, water_asset,
     };
 
     type TestError = Box<dyn core::error::Error>;
@@ -240,6 +271,29 @@ mod tests {
         assert_eq!(
             decode(DAY_CYCLE_NAME, day_cycle_asset())?,
             EnvironmentAsset::DayCycle(Box::new(day_cycle()))
+        );
+        Ok(())
+    }
+
+    /// The EEP sky is EEP on the wire, and the classic ones are not: the
+    /// reference decides `classic_mode` by whether a sky's LLSD *has*
+    /// `reflection_probe_ambiance`, so a fixture that dropped the key would
+    /// quietly compare two classic skies.
+    #[test]
+    fn only_the_eep_sky_carries_a_probe_ambiance() -> Result<(), TestError> {
+        let has_ambiance = |sky| {
+            let bytes = sl_proto::environment_asset_to_bytes(&EnvironmentAsset::Sky(Box::new(sky)));
+            bytes
+                .windows(b"reflection_probe_ambiance".len())
+                .any(|window| window == b"reflection_probe_ambiance")
+        };
+        assert!(has_ambiance(eep_sky()), "the EEP sky reads as classic");
+        assert!(!has_ambiance(noon_sky()), "the noon sky reads as EEP");
+        let bytes =
+            sl_proto::environment_asset_to_bytes(&EnvironmentAsset::Sky(Box::new(eep_sky())));
+        assert_eq!(
+            environment_asset_from_bytes(EEP_SKY_NAME, &bytes).ok_or("not a settings asset")?,
+            EnvironmentAsset::Sky(Box::new(eep_sky()))
         );
         Ok(())
     }

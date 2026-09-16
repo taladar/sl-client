@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 41 |
 | in-progress | 22 |
 | bugs | 10 |
-| done | 1166 |
+| done | 1167 |
 | deferred | 26 |
 | wont-do | 16 |
-| **total** | **1695** |
+| **total** | **1696** |
 
 ## ideas (100)
 
@@ -1183,15 +1183,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A nearby avatar stays a coarse sphere even as the camera closes in
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
   — Own avatar looks broken after a teleport
-- [`viewer-pbr-face-sky-lighting-divergence`](bugs/viewer-pbr-face-sky-lighting-divergence.md)
-  — PBR (glTF) faces are still lit by Bevy's model, not the reference's
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
+- [`viewer-sculpt-sphere-fixture-divergence`](bugs/viewer-sculpt-sphere-fixture-divergence.md)
+  — The catalogue's sculpt sphere is a sphere here and a flat sheet in Firestorm
 - [`viewer-tree-species-all-rendered-as-trees`](bugs/viewer-tree-species-all-rendered-as-trees.md)
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)
 
-## done (1166)
+## done (1167)
 
 ### protocol
 
@@ -2397,6 +2397,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-pbr-blinn-phong-build-preview`](done/viewer-pbr-blinn-phong-build-preview.md)
   — PBR supersedes Blinn-Phong on a face; build tool previews Blinn-Phong
   (FIRE-35138)
+- [`viewer-pbr-face-sky-lighting-divergence`](done/viewer-pbr-face-sky-lighting-divergence.md)
+  — PBR (glTF) faces are still lit by Bevy's model, not the reference's
 - [`viewer-pbr-face-zero-alpha-not-culled`](done/viewer-pbr-face-zero-alpha-not-culled.md)
   — A PBR face at zero base-colour alpha is still built (the glTF half of the
   transparency cull)

@@ -27,7 +27,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use clap::Parser;
 use sl_crosscheck::launch::{Launch, RunDirs, Viewer};
-use sl_crosscheck::plan::{CameraSpec, CaptureSpec, RegionPoint, RunPlan, parse_region_point};
+use sl_crosscheck::plan::{
+    CameraSpec, CaptureAudio, CaptureSpec, RegionPoint, RunPlan, parse_region_point,
+};
 use sl_crosscheck::process::{self, Ending};
 use sl_crosscheck::status::Artefacts;
 use sl_crosscheck::summary::{RunSummary, ViewerRun};
@@ -134,6 +136,12 @@ struct Options {
     /// Put the edit-tool gizmo overlay in the frames.
     #[arg(long)]
     capture_gizmos: bool,
+
+    /// Let both viewers make sound. Off by default: a scene's looping sound
+    /// sources would otherwise play through this machine's speakers for the
+    /// whole run.
+    #[arg(long)]
+    capture_audio: bool,
 
     /// How many frames each viewer captures.
     #[arg(long, default_value_t = 30)]
@@ -578,6 +586,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ui: options.capture_ui,
             hud: options.capture_hud,
             gizmos: options.capture_gizmos,
+            audio: if options.capture_audio {
+                CaptureAudio::Audible
+            } else {
+                CaptureAudio::Muted
+            },
             frames: options.frames,
             interval: options.interval,
             settle_timeout: options.settle_timeout,

@@ -150,7 +150,7 @@ fn border_landmarks() -> Vec<Landmark> {
 }
 
 /// Every named scene, in the order the binary's help lists them.
-const ALL: [NamedScenario; 3] = [
+const ALL: [NamedScenario; 4] = [
     NamedScenario {
         name: "stock",
         summary: "the standard region: one region-wide parcel, one scripted box, \
@@ -164,6 +164,16 @@ const ALL: [NamedScenario; 3] = [
         summary: "the named prim catalogue: one prim per rendering feature in a \
                   west-to-east row, an NPC avatar, every asset they reference",
         dress: catalogue,
+        landmarks: catalogue_landmarks,
+        pair: None,
+    },
+    NamedScenario {
+        name: "catalogue-eep",
+        summary: "the prim catalogue under an EEP sky (one with a reflection-probe \
+                  ambiance) instead of the grid's classic default, the sun fixed \
+                  in the south-east — for the half of the surface lighting a \
+                  classic sky never reaches",
+        dress: catalogue_eep,
         landmarks: catalogue_landmarks,
         pair: None,
     },
@@ -200,6 +210,18 @@ fn stock_landmarks() -> Vec<Landmark> {
 /// [`super::catalogue()`].
 fn catalogue(region: RegionConfig) -> RegionConfig {
     super::catalogue().into_region(region)
+}
+
+/// The catalogue scene under [`sl_test_assets::environment::eep_environment`].
+///
+/// A single-keyframe cycle, so the sky is the same whatever the day position:
+/// the sun stands where the fixture put it.
+fn catalogue_eep(region: RegionConfig) -> RegionConfig {
+    super::RegionFixture {
+        environment: Some(sl_test_assets::environment::eep_environment()),
+        ..super::catalogue()
+    }
+    .into_region(region)
 }
 
 /// The catalogue's row of prims, west to east, its NPC standing at the west end
@@ -351,6 +373,36 @@ mod test {
                 .iter()
                 .any(|object| object.local_id == super::super::catalogue::SEAT_LOCAL_ID),
             "the dressed region does not hold the bench its NPC sits on"
+        );
+        Ok(())
+    }
+
+    /// The EEP catalogue is the catalogue, under a sky of its own rather than
+    /// the grid's classic default.
+    #[test]
+    fn the_eep_catalogue_is_the_catalogue_under_an_eep_sky() -> Result<(), TestError> {
+        let scene =
+            scenario("catalogue-eep").ok_or("the EEP catalogue scene is not in the registry")?;
+        let world = scene
+            .dress(RegionConfig::default())
+            .scenario
+            .ok_or("the EEP catalogue scene gave the region no scenario")?
+            .world;
+        for entry in super::super::catalogue::entries() {
+            assert!(
+                world
+                    .objects
+                    .iter()
+                    .any(|object| object.local_id == entry.local_id),
+                "the EEP catalogue does not hold the catalogue's {:?} prim",
+                entry.name
+            );
+        }
+        assert_eq!(
+            scene.landmarks(),
+            scenario("catalogue")
+                .ok_or("the catalogue scene is not in the registry")?
+                .landmarks()
         );
         Ok(())
     }

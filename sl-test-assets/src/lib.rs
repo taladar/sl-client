@@ -279,12 +279,6 @@ fn push_u16(out: &mut Vec<u8>, value: u16) {
     out.extend_from_slice(&value.to_le_bytes());
 }
 
-/// The `AT_MATERIAL` envelope fields a GLTF material asset is wrapped in
-/// (`LLGLTFMaterial::ASSET_TYPE` and its newest accepted version).
-const GLTF_ASSET_TYPE: &str = "GLTF 2.0";
-/// The asset-envelope version written below.
-const GLTF_ASSET_VERSION: &str = "1.1";
-
 /// A **GLTF (PBR) material asset** — what the `ViewerAsset` capability serves
 /// for the `material_id` an object's `RenderMaterial` extra-params block
 /// names: the LLSD envelope `{ version, type, data }` whose `data` is a glTF
@@ -293,39 +287,25 @@ const GLTF_ASSET_VERSION: &str = "1.1";
 /// `base_color` is the linear RGBA factor and `base_color_texture` the texture
 /// asset the material samples, if any. The material is fully rough and
 /// non-metallic, so what a fixture asserts about it is its colour.
+///
+/// Written by the viewer's own [`sl_material::encode_material_asset`], the
+/// encoding it saves a material to inventory in. This helper used to write its
+/// own envelope as *headerless* binary LLSD, which this workspace's decoder
+/// accepts and the reference's `LLSDSerialize::deserialize` does not: Firestorm
+/// logged "Failed to deserialize material LLSD" and drew the fake grid's PBR
+/// face untextured.
 #[must_use]
 pub fn gltf_material_asset(base_color: [f32; 4], base_color_texture: Option<Uuid>) -> Vec<u8> {
-    let factor = base_color
-        .iter()
-        .map(|component| component.to_string())
-        .collect::<Vec<String>>()
-        .join(", ");
-    let (texture_slot, indirection) = match base_color_texture {
-        Some(id) => (
-            r#", "baseColorTexture": { "index": 0 }"#.to_owned(),
-            format!(r#", "textures": [ {{ "source": 0 }} ], "images": [ {{ "uri": "{id}" }} ]"#),
-        ),
-        None => (String::new(), String::new()),
-    };
-    let document = format!(
-        r#"{{ "asset": {{ "version": "2.0" }}, "materials": [ {{ "pbrMetallicRoughness": {{ "baseColorFactor": [ {factor} ], "metallicFactor": 0.0, "roughnessFactor": 1.0{texture_slot} }} }} ]{indirection} }}"#
-    );
-    sl_llsd::Llsd::Map(
-        [
-            (
-                "version".to_owned(),
-                sl_llsd::Llsd::String(GLTF_ASSET_VERSION.to_owned()),
-            ),
-            (
-                "type".to_owned(),
-                sl_llsd::Llsd::String(GLTF_ASSET_TYPE.to_owned()),
-            ),
-            ("data".to_owned(), sl_llsd::Llsd::String(document)),
-        ]
-        .into_iter()
-        .collect(),
-    )
-    .to_llsd_binary()
+    sl_material::encode_material_asset(&sl_material::GltfMaterial {
+        base_color,
+        base_color_texture: base_color_texture.map(|id| sl_material::GltfTexture {
+            id: sl_types::key::TextureKey(sl_types::key::Key(id)),
+            transform: sl_material::GltfTextureTransform::default(),
+        }),
+        metallic_factor: 0.0,
+        roughness_factor: 1.0,
+        ..sl_material::GltfMaterial::default()
+    })
 }
 
 /// The side, in pixels, of the terrain detail textures below.
