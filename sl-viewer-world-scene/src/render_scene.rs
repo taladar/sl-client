@@ -3925,16 +3925,29 @@ fn spawn_sea(
         .images
         .add(water_normal_image(&water_wavelet_texture()));
     // Midday's sun, so the sea is lit from where the sky scenes put it.
-    let resolved = resolve_sky(&sky_settings_from(&MIDDAY));
+    let midday = sky_settings_from(&MIDDAY);
+    let resolved = resolve_sky(&midday);
     let material = assets.water_materials.add(WaterMaterial {
         params: water_params(
             &WaterSettings::legacy_default("Default"),
-            resolved.light_dir,
-            // The sky's own horizon colour would need the atmosphere resolved per
-            // pixel; `drive_water` uses a sampled reflection tint, and this is its
-            // pre-environment seed.
-            Vec3::new(0.5, 0.6, 0.8),
-            Vec3::from_array(resolved.diffuse),
+            crate::water::WaterLighting {
+                light_dir: resolved.light_dir,
+                specular_color: crate::water::water_specular_color(
+                    Vec3::new(
+                        midday.sunlight_color.red(),
+                        midday.sunlight_color.green(),
+                        midday.sunlight_color.blue(),
+                    ),
+                    resolved.light_dir,
+                    resolved.sun_up || resolved.moon_up,
+                ),
+                sunlit_color: resolved.sunlit,
+                haze_atten_coef: resolved.haze_atten_coef,
+                // The sky's own horizon colour would need the atmosphere resolved
+                // per pixel; `drive_water` uses a sampled reflection tint, and this
+                // is its pre-environment seed.
+                reflection_color: Vec3::new(0.5, 0.6, 0.8),
+            },
             // Not submerged: both water scenes look at the sea from above it, where
             // the fog fallback that density feeds is what colours it.
             false,

@@ -31,6 +31,7 @@
     apply_water_fog,
     water_fog_ks,
     water_fog_no_clip,
+    water_fog_srgb_to_linear,
 }
 
 // How far *in front of* the water surface a refraction sample may sit before it is
@@ -39,6 +40,24 @@
 // (`class3/environment/waterF.glsl`). View-space metres, so the comparison is made
 // in linear view Z rather than in non-linear depth.
 const REFRACTION_REJECT_SLACK: f32 = 0.05;
+
+// π, for the microfacet distribution's normalisation. WGSL has no built-in.
+const WATER_PI: f32 = 3.141592653589793;
+
+// The roughness floor `pbrPunctual` opens with — "make sure specular highlights
+// from punctual lights don't fall off of polished surfaces".
+const MIN_PERCEPTUAL_ROUGHNESS: f32 = 0.031372549; // 8/255
+
+// The ceiling the reference clamps its punctual lighting to before scaling it by
+// the atmospheric sun colour (`clamp(nl * (diffPunc + specPunc), vec3(0),
+// vec3(10))`). It is not a safety rail but a shape: a grazing view of near-flat
+// water drives the microfacet term far past it over a wide band of the frame, and
+// that saturated band *is* the sun's plume on the sea.
+const PUNCTUAL_CEILING: f32 = 10.0;
+
+// The distance at which the specular normal stops being flattened toward the
+// vertical (`max(dist, 32.0) / 32.0` in the reference).
+const SPECULAR_FLATTEN_DISTANCE: f32 = 32.0;
 
 // Rotate a direction by a quaternion — the reflection-probe view rotation applied
 // to an environment-map sample direction (a local copy of the reference
@@ -66,31 +85,40 @@ struct WaterParams {
     // The fresnel offset (`fresnelOffset`): the base reflectivity looking straight
     // down.
     fresnel_offset: f32,
-    // The sky's sunlight colour, tinting the sun specular highlight.
-    sunlight_color: vec3<f32>,
-    // The reflection blur multiplier (`blurMultiplier`) — the surface roughness,
-    // which broadens (blurs) the specular highlight.
+    // The specular base colour — the reference's `specular` uniform, which is
+    // `lldrawpoolwater.cpp`'s `light_diffuse`: the active body's colour normalised
+    // to unit length and scaled by `1.5 + 6·groundProj²`, so only its hue survives.
+    // An sRGB value, decoded below.
+    specular_color: vec3<f32>,
+    // The reflection blur multiplier as the reference binds it (`max(0,
+    // blurMultiplier) * 2`) — the surface's perceptual roughness, which broadens
+    // and dims the specular highlight and picks the reflection probe's mip.
     blur_multiplier: f32,
-    // The sky-reflection tint (the atmosphere colour the surface mirrors at
-    // grazing angles), supplied per frame from the sky settings.
-    reflection_color: vec3<f32>,
-    // The A/B normal-map blend factor during a day-cycle transition. 0.0 until the
-    // day cycle drives it (like the cloud / disc materials).
-    blend_factor: f32,
-    // Wave-layer 1 scroll direction (`waveDir1`).
-    wave1_dir: vec2<f32>,
-    // Wave-layer 2 scroll direction (`waveDir2`).
-    wave2_dir: vec2<f32>,
+    // The atmospheric sun colour the specular highlight is scaled by
+    // (`calcAtmosphericVarsLinear`'s `sunlit`), resolved CPU-side.
+    sunlit_color: vec3<f32>,
     // How far the wave normal displaces the refraction sample in screen space
     // (`refScale`): the water frame's `scaleAbove` above the surface, `scaleBelow`
     // under it, picked CPU-side as the reference picks it.
     ref_scale: f32,
-    // The authored (sRGB) water fog colour, for the surface's own underside — see
-    // the underwater branch in `fragment` below.
-    water_fog_color: vec3<f32>,
+    // The per-metre haze attenuation coefficient: `atten = exp(-coef * distance)`.
+    haze_atten_coef: vec3<f32>,
+    // The A/B normal-map blend factor during a day-cycle transition. 0.0 until the
+    // day cycle drives it (like the cloud / disc materials).
+    blend_factor: f32,
+    // The sky-reflection tint (the atmosphere colour the surface mirrors at
+    // grazing angles), supplied per frame from the sky settings.
+    reflection_color: vec3<f32>,
     // The water fog density for the current eye state
     // (`getModifiedWaterFogDensity`), resolved CPU-side like `ref_scale`.
     water_fog_density: f32,
+    // The authored (sRGB) water fog colour, for the surface's own underside — see
+    // the underwater branch in `fragment` below.
+    water_fog_color: vec3<f32>,
+    // Wave-layer 1 scroll direction (`waveDir1`).
+    wave1_dir: vec2<f32>,
+    // Wave-layer 2 scroll direction (`waveDir2`).
+    wave2_dir: vec2<f32>,
 };
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> water: WaterParams;
@@ -157,6 +185,60 @@ fn wave_normal(uv: vec2<f32>) -> vec3<f32> {
 // Bevy Z, tangent z(up) -> Bevy Y.
 fn tangent_to_world(t: vec3<f32>) -> vec3<f32> {
     return vec3<f32>(t.x, t.z, t.y);
+}
+
+// The specular half of the reference's `pbrPunctual` (`class1/deferred/
+// deferredUtil.glsl`), for a **metallic** surface: `calcDiffuseSpecular` with
+// `metallic = 1` hands it a zero diffuse colour and `specularColor = baseColor`,
+// so the diffuse lobe is identically zero and only this half is worth writing
+// out. Returns `nl * spec`, the product the caller clamps.
+//
+// The terms are the glTF reference BRDF the viewer uses everywhere: Schlick
+// fresnel, the Smith height-correlated geometric term, and a
+// Trowbridge-Reitz (GGX) distribution.
+fn punctual_specular(
+    specular_color: vec3<f32>,
+    perceptual_roughness: f32,
+    n: vec3<f32>,
+    v: vec3<f32>,
+    l: vec3<f32>,
+) -> vec3<f32> {
+    let roughness = max(perceptual_roughness, MIN_PERCEPTUAL_ROUGHNESS);
+    let alpha_roughness = roughness * roughness;
+
+    // "For typical incident reflectance range (between 4% to 100%) set the grazing
+    // reflectance to 100% for typical fresnel effect."
+    let reflectance = max(max(specular_color.r, specular_color.g), specular_color.b);
+    let reflectance90 = clamp(reflectance * 25.0, 0.0, 1.0);
+
+    let h = normalize(l + v);
+    let n_dot_l = clamp(dot(n, l), 0.001, 1.0);
+    let n_dot_v = clamp(abs(dot(n, v)), 0.001, 1.0);
+    let n_dot_h = clamp(dot(n, h), 0.0, 1.0);
+    let v_dot_h = clamp(dot(v, h), 0.0, 1.0);
+
+    // F: Schlick's approximation between the surface's reflectance and the grazing
+    // one.
+    let fresnel = specular_color
+        + (vec3<f32>(reflectance90) - specular_color) * pow(clamp(1.0 - v_dot_h, 0.0, 1.0), 5.0);
+
+    // G: the specular geometric attenuation — a rougher surface reflects less back
+    // to the viewer.
+    let r_sq = alpha_roughness * alpha_roughness;
+    let attenuation_l = 2.0 * n_dot_l
+        / (n_dot_l + sqrt(r_sq + (1.0 - r_sq) * (n_dot_l * n_dot_l)));
+    let attenuation_v = 2.0 * n_dot_v
+        / (n_dot_v + sqrt(r_sq + (1.0 - r_sq) * (n_dot_v * n_dot_v)));
+    let geometric = attenuation_l * attenuation_v;
+
+    // D: the distribution of microfacet normals across the area being drawn.
+    let f = (n_dot_h * r_sq - n_dot_h) * n_dot_h + 1.0;
+    let distribution = r_sq / (WATER_PI * f * f);
+
+    // The `1 / (4·N·L·N·V)` denominator is what makes this term run away at a
+    // grazing view of flat water — deliberately: it is the reference's shape, and
+    // the caller's ceiling is where it stops.
+    return n_dot_l * fresnel * geometric * distribution / (4.0 * n_dot_l * n_dot_v);
 }
 
 @fragment
@@ -304,7 +386,8 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // further the water fragment, the less its waves move the sample, so the ripple
     // stays a roughly constant size on screen. The wave normal's *tangent-space*
     // horizontal pair is what displaces it, which in Bevy's frame is (x, z).
-    let dmod = max(sqrt(distance(in.world_position, view_bindings::view.world_position)), 1.0);
+    let dist = distance(in.world_position, view_bindings::view.world_position);
+    let dmod = max(sqrt(dist), 1.0);
     let waver = wavef * 3.0;
     var distort = clamp(
         screen_uv + vec2<f32>(waver.x, waver.z) * water.ref_scale / dmod * 2.0,
@@ -364,7 +447,9 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         refl_dir = quat_rotate(view_bindings::light_probes.view_rotation, refl_dir);
         // Cube maps are left-handed, so negate z (matching the reference sampler).
         refl_dir.z = -refl_dir.z;
-        // A blurrier mip for rougher (windier) water.
+        // A blurrier mip for rougher (windier) water. `blur_multiplier` is the
+        // bound (doubled) value, which is the reference's own `perceptualRoughness`
+        // — `sampleReflectionProbesWater` picks its mip off `1 - roughness`.
         let level = clamp(water.blur_multiplier, 0.0, 1.0)
             * f32(view_bindings::light_probes.smallest_specular_mip_level_for_view);
 #ifdef MULTIPLE_LIGHT_PROBES_IN_ARRAY
@@ -396,14 +481,57 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let radiance = reflection * radiance_scale;
     var color = mix(fb, radiance, reflect_amount);
 
-    // --- The `punctual` sun specular (a Blinn-Phong stand-in for the reference's
-    // `pbrPunctual`, whose roughness is `blurMultiplier`). Rougher water gives a
-    // broader, dimmer highlight. ---
-    let half_vec = normalize(-vv + water.light_dir);
-    let spec_angle = max(dot(normal, half_vec), 0.0);
-    let shininess = mix(400.0, 20.0, clamp(water.blur_multiplier * 2.0, 0.0, 1.0));
-    let specular = pow(spec_angle, shininess) * max(water.light_dir.y, 0.0);
-    color += water.sunlight_color * specular;
+    // --- The sun's specular reflection: `waterF.glsl`'s
+    //
+    //     pbrPunctual(diffuseColor, specularColor, perceptualRoughness, metallic,
+    //                 normalize(wavef + up*max(dist, 32.0)/32.0*(1.0-vdu)),
+    //                 v, normalize(light_dir), nl, diffPunc, specPunc);
+    //     punctual = clamp(nl * (diffPunc + specPunc), vec3(0), vec3(10))
+    //              * sunlit_linear * shadow * atten;
+    //
+    // Three things in that make the streak below a low sun a **wide warm plume**
+    // rather than a thin white line, and this port had none of them:
+    //
+    // - the normal it shades with is not the wave normal. It is flattened toward
+    //   the vertical with distance, so far water mirrors the sun as a sheet
+    //   instead of scattering it off every wavelet;
+    // - the microfacet term's `1/(4·N·L·N·V)` runs away at a grazing view of that
+    //   near-flat sheet, and the ceiling it is clamped to spreads the highlight
+    //   into a plateau — the plume's width is the width of the saturated band;
+    // - its colour is the atmospheric `sunlit` (orange at dusk, because that is
+    //   the sun seen through a whole atmosphere's worth of air) times a base colour
+    //   the pool normalises to unit length — never the frame's raw sunlight, whose
+    //   magnitude at a legacy sunset is `2.8` and reads as white.
+    //
+    // No shadow term: the reference's `shadow` is `sampleDirectionalShadow`, which
+    // is its `HAS_SUN_SHADOW` permutation; the sea here is not a shadow receiver,
+    // so it is the constant 1 that permutation's absence gives.
+    let up = vec3<f32>(0.0, 1.0, 0.0);
+    let vdu = clamp(-dot(vv, up) * 2.0, 0.0, 1.0);
+    let specular_normal = normalize(
+        normalize(wavef)
+            + up * max(dist, SPECULAR_FLATTEN_DISTANCE) / SPECULAR_FLATTEN_DISTANCE * (1.0 - vdu),
+    );
+    // `specular` is bound as an sRGB colour and decoded before use
+    // (`vec3 specular_linear = srgb_to_linear(specular)`) — and it is routinely far
+    // brighter than 1, since the pool scales it by up to `7.5`, which the decode
+    // raises further still. That is the reference's own arithmetic, and the
+    // ceiling above is what bounds it.
+    let punctual = clamp(
+        punctual_specular(
+            water_fog_srgb_to_linear(water.specular_color),
+            water.blur_multiplier,
+            specular_normal,
+            -vv,
+            water.light_dir,
+        ),
+        vec3<f32>(0.0),
+        vec3<f32>(PUNCTUAL_CEILING),
+    );
+    // `atten`: the haze between the eye and this piece of sea, which the reference
+    // gets from `calcAtmosphericVarsLinear` and this port reproduces from the
+    // per-frame coefficient the sky resolves.
+    color += punctual * water.sunlit_color * exp(-water.haze_atten_coef * dist);
 
     // The surface is opaque — what shows through it is the refraction sample above,
     // not a blend — so the alpha channel is free to be what the rest of the scene

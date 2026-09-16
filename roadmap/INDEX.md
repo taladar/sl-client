@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 314 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 11 |
-| done | 1163 |
+| bugs | 10 |
+| done | 1164 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1694** |
@@ -1167,7 +1167,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (11)
+## bugs (10)
 
 ### viewer
 
@@ -1192,10 +1192,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-tree-species-all-rendered-as-trees`](bugs/viewer-tree-species-all-rendered-as-trees.md)
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)
-- [`viewer-water-sun-specular-streak-diverges`](bugs/viewer-water-sun-specular-streak-diverges.md)
-  — The sun's specular streak on the water is narrow and white, not wide
 
-## done (1163)
+## done (1164)
 
 ### protocol
 
@@ -2983,6 +2981,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   surfaces (invisiprim successor)
 - [`viewer-water-refraction-smears-avatar-silhouette`](done/viewer-water-refraction-smears-avatar-silhouette.md)
   — Water behind an avatar smears a skin-coloured fringe around its silhouette
+- [`viewer-water-sun-specular-streak-diverges`](done/viewer-water-sun-specular-streak-diverges.md)
+  — The sun's specular streak on the water is narrow and white, not wide
 - [`viewer-water-surface-alpha-not-refraction`](done/viewer-water-surface-alpha-not-refraction.md)
   — The water surface fakes refraction with alpha, so the sea cannot match the
   reference

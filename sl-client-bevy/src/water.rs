@@ -58,10 +58,13 @@ const WATER_SHADER_HANDLE: Handle<Shader> = uuid_handle!("2f8d6c14-9b3a-4e57-8c0
 /// and the view's `world_position` directly, so running waves and a moving
 /// camera never dirty the material.
 ///
-/// Laid out as `vec3` + trailing scalar pairs (and a `vec2` + `vec2` pair) so the
-/// std140 uniform layout matches the `water.wgsl` `WaterParams` (`ShaderType`)
-/// exactly: a `vec3` occupies 12 bytes with 16-byte alignment, and the following
-/// scalar fills the 4-byte remainder of that 16-byte slot.
+/// Laid out as `vec3` + trailing scalar pairs, closing with a `vec3` and a
+/// `vec2` + `vec2` pair, so the std140 uniform layout matches the `water.wgsl`
+/// `WaterParams` (`ShaderType`) exactly: a `vec3` occupies 12 bytes with 16-byte
+/// alignment, and the following scalar fills the 4-byte remainder of that 16-byte
+/// slot. The unpaired trailing `vec3` keeps those 4 bytes as padding on both
+/// sides, since the `vec2` that follows aligns to 8 — declare the two in this
+/// order on both sides and the layouts agree.
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
 #[expect(
     clippy::module_name_repetitions,
@@ -77,27 +80,43 @@ pub struct WaterParams {
     /// The fresnel offset (`fresnelOffset`): the base reflectivity looking straight
     /// down.
     pub fresnel_offset: f32,
-    /// The sky's sunlight colour, tinting the sun specular highlight.
-    pub sunlight_color: Vec3,
-    /// The reflection blur multiplier (`blurMultiplier`) — the surface roughness,
-    /// which broadens the specular highlight.
+    /// The specular base colour (the reference's `specular` uniform): **not** the
+    /// frame's sunlight colour, but `lldrawpoolwater.cpp`'s own `light_diffuse` —
+    /// the active body's colour normalised to unit length and then scaled by
+    /// `1.5 + 6·groundProj²`, so only its *hue* survives and its brightness is a
+    /// function of how low the sun sits. An sRGB value the shader decodes.
+    pub specular_color: Vec3,
+    /// The reflection blur multiplier, as the reference **binds** it:
+    /// `max(0, blurMultiplier) * 2` (`lldrawpoolwater.cpp`). It is the surface's
+    /// perceptual roughness, which broadens and dims the specular highlight and
+    /// picks the reflection probe's mip.
     pub blur_multiplier: f32,
-    /// The sky-reflection tint (the atmosphere colour the surface mirrors at
-    /// grazing angles), supplied per frame from the sky settings.
-    pub reflection_color: Vec3,
-    /// The A/B normal-map blend factor during a day-cycle transition. `0.0` until
-    /// the day cycle drives it, so only `normal_map` is used for now.
-    pub blend_factor: f32,
-    /// Wave-layer 1 scroll direction (`waveDir1`).
-    pub wave1_dir: Vec2,
-    /// Wave-layer 2 scroll direction (`waveDir2`).
-    pub wave2_dir: Vec2,
+    /// The atmospheric sun colour the specular highlight is scaled by — the
+    /// `sunlit` of `calcAtmosphericVarsLinear`, which is what makes the sun's
+    /// reflection on the sea take the colour of the sun *as seen through the
+    /// atmosphere* rather than the colour the frame authors.
+    pub sunlit_color: Vec3,
     /// How far the wave normal displaces the refraction sample in screen space
     /// (`refScale`): the reference binds the water frame's `scaleAbove` when the eye
     /// is above the surface and `scaleBelow` when it is under
     /// (`lldrawpoolwater.cpp:299`), so the eye state is resolved before this is
     /// filled.
     pub ref_scale: f32,
+    /// The per-metre haze attenuation coefficient the specular is dimmed by with
+    /// distance: the shader's `atten = exp(-haze_atten_coef * distance)`, the
+    /// reference's own `atten` with the line integral's distance factored out.
+    pub haze_atten_coef: Vec3,
+    /// The A/B normal-map blend factor during a day-cycle transition. `0.0` until
+    /// the day cycle drives it, so only `normal_map` is used for now.
+    pub blend_factor: f32,
+    /// The sky-reflection tint (the atmosphere colour the surface mirrors at
+    /// grazing angles), supplied per frame from the sky settings.
+    pub reflection_color: Vec3,
+    /// The water fog density for the current eye state
+    /// (`getModifiedWaterFogDensity`), resolved on the CPU like
+    /// [`ref_scale`](Self::ref_scale) above — there is one water material, so a
+    /// per-frame write costs nothing.
+    pub water_fog_density: f32,
     /// The **authored** (sRGB) water fog colour (`waterFogColor`), for the surface's
     /// own underside: seen from below, the surface shows the world *above* the
     /// water, which the haze pass leaves alone (it fogs only what is under the
@@ -105,11 +124,10 @@ pub struct WaterParams {
     /// applied here — `underWaterF.glsl`'s
     /// `fb = applyWaterFogViewLinearNoClip(vary_position, fb)`.
     pub water_fog_color: Vec3,
-    /// The water fog density for the current eye state
-    /// (`getModifiedWaterFogDensity`), resolved on the CPU like
-    /// [`ref_scale`](Self::ref_scale) above — there is one water material, so a
-    /// per-frame write costs nothing.
-    pub water_fog_density: f32,
+    /// Wave-layer 1 scroll direction (`waveDir1`).
+    pub wave1_dir: Vec2,
+    /// Wave-layer 2 scroll direction (`waveDir2`).
+    pub wave2_dir: Vec2,
 }
 
 /// The water-surface material: one [`WaterParams`] uniform block plus the current

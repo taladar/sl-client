@@ -53,7 +53,6 @@ use sl_client_bevy::{
     TextureKey, WaterMaterial, WaterParams, WaterSettings,
 };
 
-use crate::coords::sl_to_bevy_object_rotation;
 use crate::environment::EnvironmentState;
 use crate::probe_layers::environment_render_layers;
 use crate::sky::day_position;
@@ -242,7 +241,7 @@ pub(crate) fn setup_water(
     let water = environment.water_at(day_position(&environment));
     let params = water.map_or_else(default_water_params, |water| {
         let fog = WaterFogSettings::from_water(&water, DEFAULT_WATER_HEIGHT);
-        water_params(&water, Vec3::Y, default_reflection(), Vec3::ONE, false, fog)
+        water_params(&water, default_water_lighting(), false, fog)
     });
     let material = materials.add(WaterMaterial {
         params,
@@ -348,33 +347,32 @@ pub(crate) fn drive_water(
     };
     let sky = environment.sky_at(camera_pos.y, position);
 
-    // The sun direction (Bevy space) and a sky-reflection tint, both from the sky
-    // frame (as `drive_sky` computes the sun direction).
-    let (light_dir, sunlight, reflection) = sky.map_or_else(
-        || (Vec3::Y, Vec3::ONE, default_reflection()),
-        |sky| {
-            let sun_dir = sl_to_bevy_object_rotation(&sky.sun_rotation)
-                .mul_vec3(Vec3::X)
-                .normalize();
-            let moon_dir = sl_to_bevy_object_rotation(&sky.moon_rotation)
-                .mul_vec3(Vec3::X)
-                .normalize();
-            // The active light: sun if up, else moon if up, else straight down.
-            let light = if sun_dir.y >= 0.0 {
-                sun_dir
-            } else if moon_dir.y >= 0.0 {
-                moon_dir
-            } else {
-                Vec3::NEG_Y
-            };
-            let sunlight = Vec3::new(
-                sky.sunlight_color.red(),
-                sky.sunlight_color.green(),
-                sky.sunlight_color.blue(),
-            );
-            (light, sunlight, color_rgb(sky.blue_horizon))
-        },
-    );
+    // Everything the surface needs from the sky frame: where the active light is,
+    // what colour its specular highlight is, what the atmosphere does to that
+    // colour, and what tint the surface mirrors when no probe is bound. All of it
+    // through `resolve_sky`, so the sea's idea of where the sun is and the sky
+    // dome's are the same derivation rather than two copies of it.
+    let lighting = sky.as_ref().map_or_else(default_water_lighting, |sky| {
+        let resolved = crate::sky::resolve_sky(sky);
+        WaterLighting {
+            light_dir: resolved.light_dir,
+            specular_color: water_specular_color(
+                // The pool reads the frame's **raw** colour, not the (classic-mode
+                // normalised) one the shaders are bound with — and then discards
+                // its magnitude anyway, so only the hue it carries survives.
+                Vec3::new(
+                    sky.sunlight_color.red(),
+                    sky.sunlight_color.green(),
+                    sky.sunlight_color.blue(),
+                ),
+                resolved.light_dir,
+                resolved.sun_up || resolved.moon_up,
+            ),
+            sunlit_color: resolved.sunlit,
+            haze_atten_coef: resolved.haze_atten_coef,
+            reflection_color: color_rgb(sky.blue_horizon),
+        }
+    });
 
     // Compare-then-`get_mut` (the texture_anim idiom): under a static sky the
     // params are identical every frame — the waves animate GPU-side from
@@ -394,14 +392,7 @@ pub(crate) fn drive_water(
     // (`update_water_fog_settings` runs after this, since the level it publishes is
     // this system's own output), which costs nothing: what it carries changes when
     // the region or its environment does, not while anyone is looking.
-    let params = water_params(
-        &water,
-        light_dir,
-        reflection,
-        sunlight,
-        submerged,
-        *fog_settings,
-    );
+    let params = water_params(&water, lighting, submerged, *fog_settings);
     if materials
         .get(&state.material)
         .is_some_and(|material| material.params != params)
@@ -650,10 +641,95 @@ pub(crate) fn apply_water_textures(
     }
 }
 
-/// Build the water-shader uniform block from a water frame plus the per-frame sun
-/// direction, sky-reflection tint, and sunlight colour. (The wave-scroll clock
-/// and the camera position are read GPU-side — `globals.time` and the view's
-/// `world_position` — so they are not part of the uniform block.)
+/// What the **sky** frame contributes to the water surface, resolved once per
+/// frame: where the active light is, the specular highlight's base colour, the
+/// atmospheric sun colour that highlight is scaled by, the haze it is dimmed by,
+/// and the tint the surface mirrors when no reflection probe is bound.
+///
+/// Grouped rather than passed as five positional arguments because four of the
+/// five are colours of the same dimension — a call site that swapped two of them
+/// would compile and would be a rendering bug with no symptom but the wrong
+/// colour, which is exactly the class of bug this module has already paid for
+/// once.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct WaterLighting {
+    /// The direction toward the sun, or toward the moon at night, Bevy Y-up
+    /// (`getLightDirection`).
+    pub(crate) light_dir: Vec3,
+    /// The specular base colour — the pool's `light_diffuse`, see
+    /// [`water_specular_color`].
+    pub(crate) specular_color: Vec3,
+    /// The atmospheric sun colour the specular highlight is scaled by
+    /// (`calcAtmosphericVarsLinear`'s `sunlit`).
+    pub(crate) sunlit_color: Vec3,
+    /// The per-metre haze attenuation coefficient the highlight fades with over
+    /// distance.
+    pub(crate) haze_atten_coef: Vec3,
+    /// The sky-reflection tint (`blue_horizon`) the surface mirrors where no
+    /// reflection probe is bound.
+    pub(crate) reflection_color: Vec3,
+}
+
+/// The water lighting for a scene with no sky frame selected yet: a light
+/// overhead, a white highlight, no haze, and a pale horizon blue to mirror.
+const fn default_water_lighting() -> WaterLighting {
+    WaterLighting {
+        light_dir: Vec3::Y,
+        specular_color: Vec3::ONE,
+        sunlit_color: Vec3::ONE,
+        haze_atten_coef: Vec3::ZERO,
+        reflection_color: default_reflection(),
+    }
+}
+
+/// The base colour of the sun's specular highlight on the sea: the reference's
+/// `specular` uniform, which `lldrawpoolwater.cpp` builds as its own
+/// `light_diffuse` and **not** from the frame's sunlight colour directly.
+///
+/// ```cpp
+/// light_dir.normalize();
+/// F32 ground_proj_sq = light_dir.mV[0] * light_dir.mV[0] + light_dir.mV[1] * light_dir.mV[1];
+/// if (0.f < light_diffuse.normalize())  // Normalizing a color? Puzzling...
+/// {
+///     light_diffuse *= (1.5f + (6.f * ground_proj_sq));
+/// }
+/// ```
+///
+/// Two things follow, and both matter to how the streak looks. The colour is
+/// normalised to **unit length**, so the frame's authored brightness is discarded
+/// entirely and only its hue reaches the shader — feeding the raw colour instead
+/// puts a legacy sunset's `2.8` into a highlight that then clamps to white. And
+/// what replaces that brightness is a function of the sun's *elevation*:
+/// `ground_proj²` is the light direction's horizontal extent, so the factor runs
+/// from `1.5` with the sun overhead to `7.5` with it on the horizon. The sea's
+/// highlight is brightest exactly when the sun is lowest, which is the effect the
+/// comment calls magic numbers.
+///
+/// `lit` is whether either body is above the horizon: with neither, the pool's
+/// `light_diffuse` is never added to and stays black.
+///
+/// Per-component `f32` arithmetic (the glam vector operators trip the workspace
+/// `arithmetic_side_effects` lint).
+pub(crate) fn water_specular_color(sunlight: Vec3, light_dir: Vec3, lit: bool) -> Vec3 {
+    if !lit {
+        return Vec3::ZERO;
+    }
+    let magnitude =
+        (sunlight.x * sunlight.x + sunlight.y * sunlight.y + sunlight.z * sunlight.z).sqrt();
+    if magnitude <= 0.0 {
+        return Vec3::ZERO;
+    }
+    // The light direction's projection onto the ground plane — Second Life's `x`
+    // and `y`, which are Bevy's `x` and `z`. It arrives normalised.
+    let ground_proj_sq = light_dir.x * light_dir.x + light_dir.z * light_dir.z;
+    let scale = (1.5 + 6.0 * ground_proj_sq) / magnitude;
+    Vec3::new(sunlight.x * scale, sunlight.y * scale, sunlight.z * scale)
+}
+
+/// Build the water-shader uniform block from a water frame plus the sky's
+/// contribution ([`WaterLighting`]). (The wave-scroll clock and the camera
+/// position are read GPU-side — `globals.time` and the view's `world_position` —
+/// so they are not part of the uniform block.)
 ///
 /// `submerged` is whether the eye is under the surface, which the reference asks
 /// before binding this shader's fog density
@@ -662,16 +738,14 @@ pub(crate) fn apply_water_textures(
 /// here that follows the camera rather than the environment, and it is a step
 /// function of it — it changes only when the eye crosses the waterline, so it does
 /// not turn the material's compare-then-`get_mut` into a per-frame re-prepare.
-pub(crate) const fn water_params(
+pub(crate) fn water_params(
     water: &WaterSettings,
-    light_dir: Vec3,
-    reflection_color: Vec3,
-    sunlight_color: Vec3,
+    lighting: WaterLighting,
     submerged: bool,
     fog: WaterFogSettings,
 ) -> WaterParams {
     WaterParams {
-        light_dir,
+        light_dir: lighting.light_dir,
         fresnel_scale: water.fresnel_scale,
         normal_scale: Vec3::new(
             water.normal_scale.x(),
@@ -679,12 +753,14 @@ pub(crate) const fn water_params(
             water.normal_scale.z(),
         ),
         fresnel_offset: water.fresnel_offset,
-        sunlight_color,
-        blur_multiplier: water.blur_multiplier,
-        reflection_color,
-        blend_factor: 0.0,
-        wave1_dir: Vec2::from_array(water.wave1_direction),
-        wave2_dir: Vec2::from_array(water.wave2_direction),
+        specular_color: lighting.specular_color,
+        // The reference doubles it on the way to the shader
+        // (`uniform1f(WATER_BLUR_MULTIPLIER, fmaxf(0, getBlurMultiplier()) * 2)`),
+        // and what the shader then calls it is `perceptualRoughness` — so the
+        // doubling belongs here, where the binding is, rather than in the one place
+        // downstream that happened to remember it.
+        blur_multiplier: water.blur_multiplier.max(0.0) * 2.0,
+        sunlit_color: lighting.sunlit_color,
         // `refScale`, the reference's screen-space refraction displacement: the
         // frame's `scaleBelow` when the eye is under the surface, `scaleAbove` when
         // it is over it (`lldrawpoolwater.cpp:299`).
@@ -693,16 +769,21 @@ pub(crate) const fn water_params(
         } else {
             water.scale_above
         },
-        // The fog the surface applies to its own underside — from the scene's
-        // resolved [`WaterFogSettings`] rather than from `water` directly, so that
-        // it is the same fog the haze pass and the face materials use (and so that
-        // `SL_VIEWER_DISABLE_UNDERWATER_FOG` turns this half off too).
-        water_fog_color: fog.color,
+        haze_atten_coef: lighting.haze_atten_coef,
+        blend_factor: 0.0,
+        reflection_color: lighting.reflection_color,
         water_fog_density: if submerged {
             fog.density_submerged
         } else {
             fog.density_above
         },
+        // The fog the surface applies to its own underside — from the scene's
+        // resolved [`WaterFogSettings`] rather than from `water` directly, so that
+        // it is the same fog the haze pass and the face materials use (and so that
+        // `SL_VIEWER_DISABLE_UNDERWATER_FOG` turns this half off too).
+        water_fog_color: fog.color,
+        wave1_dir: Vec2::from_array(water.wave1_direction),
+        wave2_dir: Vec2::from_array(water.wave2_direction),
     }
 }
 
@@ -714,7 +795,7 @@ pub(crate) const fn water_params(
 pub(crate) fn default_water_params() -> WaterParams {
     let water = WaterSettings::legacy_default("Default");
     let fog = WaterFogSettings::from_water(&water, DEFAULT_WATER_HEIGHT);
-    water_params(&water, Vec3::Y, default_reflection(), Vec3::ONE, false, fog)
+    water_params(&water, default_water_lighting(), false, fog)
 }
 
 /// A neutral sky-reflection tint used before a sky frame is selected (a pale
@@ -810,7 +891,7 @@ pub(crate) fn flat_normal_image() -> Image {
 
 #[cfg(test)]
 mod tests {
-    use super::{WaterCell, WaterState, cell_height, default_reflection, water_params};
+    use super::{WaterCell, WaterState, cell_height, default_water_lighting, water_params};
     use crate::world_api::world_scoped::{WorldPurge, WorldScoped as _};
     use bevy::ecs::world::CommandQueue;
     use bevy::prelude::*;
@@ -937,8 +1018,8 @@ mod tests {
         let water = sl_client_bevy::WaterSettings::legacy_default("Default");
         let fog =
             crate::water_fog::WaterFogSettings::from_water(&water, super::DEFAULT_WATER_HEIGHT);
-        let above = water_params(&water, Vec3::Y, default_reflection(), Vec3::ONE, false, fog);
-        let below = water_params(&water, Vec3::Y, default_reflection(), Vec3::ONE, true, fog);
+        let above = water_params(&water, default_water_lighting(), false, fog);
+        let below = water_params(&water, default_water_lighting(), true, fog);
 
         assert!(
             (above.ref_scale - water.scale_above).abs() <= 1e-6,
@@ -955,6 +1036,96 @@ mod tests {
             (above.ref_scale - below.ref_scale).abs() > 1e-3,
             "the default water frame no longer distinguishes the two eye states",
         );
+    }
+
+    /// The specular base colour keeps the frame's **hue** and throws its brightness
+    /// away: `lldrawpoolwater.cpp` normalises the colour to unit length before it
+    /// scales it, so what a legacy sunset authors (`sunlight_color` well past 1) can
+    /// never reach the shader as a magnitude.
+    ///
+    /// This is the half of the fix the frames complained about as *white*: fed the
+    /// raw colour, the highlight ran so far over range that it clamped to white
+    /// wherever it was visible at all.
+    #[test]
+    fn the_specular_base_keeps_the_hue_and_discards_the_brightness() {
+        // A warm sunset colour, at a legacy sunset's brightness.
+        let authored = Vec3::new(2.8386, 1.9, 0.9);
+        let dim = Vec3::new(0.28386, 0.19, 0.09);
+        // Straight overhead, so both go through the same elevation factor.
+        let up = Vec3::Y;
+
+        let bright = super::water_specular_color(authored, up, true);
+        let faint = super::water_specular_color(dim, up, true);
+
+        assert!(
+            (bright - faint).length() < 1e-5,
+            "a ten-times brighter frame must give the same specular base: {bright:?} vs {faint:?}",
+        );
+        // Overhead: `1.5 + 6 * 0` — the whole magnitude is the elevation factor.
+        assert!(
+            (bright.length() - 1.5).abs() < 1e-4,
+            "expected a unit colour scaled by 1.5, got a length of {}",
+            bright.length(),
+        );
+    }
+
+    /// The lower the sun, the brighter the sea's highlight: the pool's "magic
+    /// numbers translating light direction into intensities" scale the specular base
+    /// by `1.5 + 6·groundProj²`, which is `1.5` overhead and `7.5` on the horizon.
+    ///
+    /// The horizon end of that curve is the frame the cross-check compares — a
+    /// setting sun — so the factor there is the one that carries the highlight.
+    #[test]
+    fn a_lower_sun_gives_a_brighter_specular_base() {
+        let authored = Vec3::new(1.0, 0.8, 0.6);
+        let overhead = super::water_specular_color(authored, Vec3::Y, true);
+        // Just above the horizon, in the Bevy frame where `y` is up and `x`/`z` are
+        // the ground plane the projection is taken on.
+        let horizon =
+            super::water_specular_color(authored, Vec3::new(1.0, 0.02, 0.0).normalize(), true);
+
+        assert!(
+            (overhead.length() - 1.5).abs() < 1e-3,
+            "overhead the factor is 1.5, got {}",
+            overhead.length(),
+        );
+        assert!(
+            (horizon.length() - 7.5).abs() < 1e-2,
+            "on the horizon the factor is 7.5, got {}",
+            horizon.length(),
+        );
+    }
+
+    /// With neither body above the horizon the pool never adds a colour to its
+    /// `light_diffuse`, so the sea carries no highlight at all — not a dim one, and
+    /// not the last one it had.
+    #[test]
+    fn an_unlit_sky_gives_no_specular_highlight() {
+        let unlit = super::water_specular_color(Vec3::new(1.0, 0.8, 0.6), Vec3::NEG_Y, false);
+        assert_eq!(unlit, Vec3::ZERO);
+    }
+
+    /// The blur multiplier reaches the shader **doubled**, as the reference binds it
+    /// (`uniform1f(WATER_BLUR_MULTIPLIER, fmaxf(0, getBlurMultiplier()) * 2)`). It is
+    /// the shader's `perceptualRoughness`, so a missing factor of two is a highlight
+    /// of the wrong width — and the doubling used to live in one of the two places
+    /// downstream that used it.
+    #[test]
+    fn the_blur_multiplier_is_bound_doubled() {
+        let water = sl_client_bevy::WaterSettings::legacy_default("Default");
+        let fog =
+            crate::water_fog::WaterFogSettings::from_water(&water, super::DEFAULT_WATER_HEIGHT);
+        let params = water_params(&water, default_water_lighting(), false, fog);
+
+        assert!(
+            (params.blur_multiplier - water.blur_multiplier * 2.0).abs() < 1e-6,
+            "expected {} (twice the frame's {}), got {}",
+            water.blur_multiplier * 2.0,
+            water.blur_multiplier,
+            params.blur_multiplier,
+        );
+        // The default frame's own value is non-zero, so this is not vacuous.
+        assert!(water.blur_multiplier > 0.0);
     }
 
     /// A height is the expected one, to within a tolerance far under the epsilon two

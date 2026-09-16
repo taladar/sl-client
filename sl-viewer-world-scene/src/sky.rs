@@ -521,6 +521,13 @@ pub(crate) struct ResolvedSky {
     pub(crate) diffuse: [f32; 3],
     /// The sky's total ambient colour.
     pub(crate) ambient: [f32; 3],
+    /// The atmospheric sun colour a *surface* shader is lit by
+    /// (`calcAtmosphericVarsLinear`'s `sunlit`) — see [`atmospheric_sunlit`], and
+    /// note that it is **not** [`diffuse`](Self::diffuse).
+    pub(crate) sunlit: Vec3,
+    /// The per-metre haze attenuation coefficient a surface shader reproduces
+    /// `atten` from — see [`haze_attenuation_coefficient`].
+    pub(crate) haze_atten_coef: Vec3,
 }
 
 /// The sun's and the moon's directions in Bevy space, the reference's own
@@ -565,9 +572,13 @@ fn body_directions(sky: &SkySettings) -> (Vec3, Vec3) {
 /// midnight matching perfectly — which is exactly the shape of a clamp nobody had
 /// ported (`viewer-sky-sunset-preset-glow-divergence`).
 ///
-/// The water shader's `sunlight_color` is a different uniform with a different
-/// source (`lldrawpoolwater.cpp` binds the frame's raw colour as its specular),
-/// so it is deliberately not run through this.
+/// The **water** program declares `calculatesAtmospherics` too
+/// (`llviewershadermgr.cpp`), so its `sunlight_color` is overwritten by the same
+/// `syncLightState` — which is why [`atmospheric_sunlit`] reads the colours off
+/// [`SkyParams`] rather than off the frame. That shader's *specular* colour is a
+/// separate uniform from a separate source: `lldrawpoolwater.cpp` builds its own
+/// `light_diffuse` from the frame's raw colour and binds that, and the water
+/// module ports it there.
 fn shader_light_colors(sky: &SkySettings) -> (Vec3, Vec3) {
     let raw = Vec3::from_array(color_alpha_rgb(sky.sunlight_color));
     // The reference shares one colour between the two bodies
@@ -609,6 +620,107 @@ fn normalise_light_color(color: Vec3) -> Vec3 {
         (color.x * scale).clamp(0.0, 1.0),
         (color.y * scale).clamp(0.0, 1.0),
         (color.z * scale).clamp(0.0, 1.0),
+    )
+}
+
+/// The reference `srgb_to_linear` (`class1/environment/srgbF.glsl`), per channel —
+/// the CPU twin of the function every one of this viewer's atmosphere shaders
+/// already carries, for the places where a shader's own decode has to be
+/// reproduced before the value is handed to a *different* shader.
+///
+/// Per-component `f32` arithmetic (the glam vector operators trip the workspace
+/// `arithmetic_side_effects` lint).
+fn srgb_to_linear(color: Vec3) -> Vec3 {
+    fn channel(value: f32) -> f32 {
+        if value <= 0.040_45 {
+            value / 12.92
+        } else {
+            ((value + 0.055) / 1.055).powf(2.4)
+        }
+    }
+    Vec3::new(channel(color.x), channel(color.y), channel(color.z))
+}
+
+/// `RenderSkySunlightScale` — the multiplier `calcAtmosphericVarsLinear` finishes
+/// `sunlit` with ("multiply to get similar colors as when the `scaleSoftClip`
+/// implementation was doubling color values").
+///
+/// A saved setting on the reference, but `1.5` in both its HDR
+/// (`RenderHDRSkySunlightScale`) and non-HDR flavours, so there is no branch to
+/// port — only a number.
+const SKY_SUNLIGHT_SCALE: f32 = 1.5;
+
+/// The atmospheric sun colour a **surface** shader is lit by: the `sunlit` of
+/// `calcAtmosphericVarsLinear` (`class1/windlight/atmosphericsFuncs.glsl`), which
+/// is the active body's bound colour attenuated by the slab of atmosphere its
+/// light crosses to reach the ground.
+///
+/// This is not [`ResolvedSky::diffuse`], though the two are close relatives.
+/// `diffuse` is `LLSettingsSky::calculateLightSettings`, the CPU-side scene light,
+/// and carries a second `transmittance` factor the shader's does not; `sunlit` is
+/// what a fragment shader actually multiplies its lighting by, and is what a port
+/// of one of those shaders has to be fed.
+///
+/// The attenuation term is "roughly cosecant(sun elevation)": a low sun's light
+/// crosses far more atmosphere than one overhead, which is the whole reason a
+/// sunset is orange — and, since this is what the water's specular highlight is
+/// scaled by, the reason the reference's sun streak on the sea is orange too.
+///
+/// Per-component `f32` arithmetic, as [`normalise_light_color`] above.
+fn atmospheric_sunlit(sky: &SkySettings, params: &SkyParams, lightnorm: Vec3) -> Vec3 {
+    // The bound colours, not the frame's own: a classic-mode sky has had these
+    // overwritten by the hardware light — see [`shader_light_colors`].
+    let sunlight = if params.sun_up_factor >= 1.0 {
+        params.sunlight_color
+    } else {
+        params.moonlight_color
+    };
+    let slab = params.density_multiplier * params.max_y;
+    let quarter_haze = params.haze_density * 0.25;
+    // The reference floors the divisor rather than the elevation, so a body exactly
+    // on the horizon attenuates by a very large but finite factor.
+    let above_horizon = 1.0 / lightnorm.y.max(1e-6);
+    let attenuated = |density: f32, channel: f32| -> f32 {
+        channel * (-(density + quarter_haze) * slab * above_horizon).exp()
+    };
+    let lit = Vec3::new(
+        attenuated(params.blue_density.x, sunlight.x),
+        attenuated(params.blue_density.y, sunlight.y),
+        attenuated(params.blue_density.z, sunlight.z),
+    );
+    // `if (classic_mode < 1) sunlit = srgb_to_linear(sunlit)`: a legacy sky's is
+    // left in sRGB and used as though it were linear, which is a deliberate part of
+    // how classic mode looks, not an oversight to correct.
+    let lit = if sky.reflection_probe_ambiance == 0.0 {
+        lit
+    } else {
+        srgb_to_linear(lit)
+    };
+    Vec3::new(
+        lit.x * SKY_SUNLIGHT_SCALE,
+        lit.y * SKY_SUNLIGHT_SCALE,
+        lit.z * SKY_SUNLIGHT_SCALE,
+    )
+}
+
+/// The per-metre haze attenuation coefficient: `atten = exp(-coef * distance)`,
+/// the `atten` output of `calcAtmosphericVars` with the line-integral's distance
+/// factored back out, so a shader that knows how far away its fragment is can
+/// reproduce it from one `vec3`.
+///
+/// The reference computes it as
+/// `exp(-combined_haze * (rel_pos_len * density_multiplier) * distance_multiplier)`
+/// with `combined_haze = max(blue_density + haze_density, 1e-6)` — everything but
+/// `rel_pos_len` is per-frame, which is what makes this a uniform.
+///
+/// Per-component `f32` arithmetic, as [`normalise_light_color`] above.
+fn haze_attenuation_coefficient(params: &SkyParams) -> Vec3 {
+    let scale = params.density_multiplier * params.distance_multiplier;
+    let coefficient = |density: f32| -> f32 { (density + params.haze_density).max(1e-6) * scale };
+    Vec3::new(
+        coefficient(params.blue_density.x),
+        coefficient(params.blue_density.y),
+        coefficient(params.blue_density.z),
     )
 }
 
@@ -656,8 +768,12 @@ pub(crate) fn resolve_sky(sky: &SkySettings) -> ResolvedSky {
         [1.0, 1.0, 1.0]
     };
 
+    let params = sky_params(sky, lightnorm, sun_up_factor, glow_factor);
+    let sunlit = atmospheric_sunlit(sky, &params, lightnorm);
+    let haze_atten_coef = haze_attenuation_coefficient(&params);
+
     ResolvedSky {
-        params: sky_params(sky, lightnorm, sun_up_factor, glow_factor),
+        params,
         lightnorm,
         sun_dir,
         moon_dir,
@@ -668,6 +784,8 @@ pub(crate) fn resolve_sky(sky: &SkySettings) -> ResolvedSky {
         light_dir,
         diffuse,
         ambient: lighting.total_ambient,
+        sunlit,
+        haze_atten_coef,
     }
 }
 
@@ -2447,6 +2565,61 @@ mod tests {
         sky.sun_rotation = down();
         sky.moon_rotation = down();
         assert_eq!(shader_light_colors(&sky), (Vec3::ZERO, Vec3::ZERO));
+    }
+
+    /// The atmospheric `sunlit` a surface is lit by reddens as the sun drops: it is
+    /// the body's colour attenuated by "roughly cosecant(sun elevation)" slabs of
+    /// air, and blue is attenuated hardest because `blue_density` is largest there.
+    ///
+    /// This is why the reference's specular streak on the water is *orange* and ours
+    /// was white — the highlight is scaled by this, and it was not being computed at
+    /// all.
+    #[test]
+    fn the_atmospheric_sunlit_reddens_as_the_sun_drops() {
+        let sky = sky_settings_from(&MIDDAY);
+
+        let at = |altitude: f32| {
+            let mut sky = sky.clone();
+            sky.sun_rotation = azimuth_altitude_to_rotation(0.0, altitude);
+            super::resolve_sky(&sky).sunlit
+        };
+        let high = at(core::f32::consts::FRAC_PI_2);
+        let low = at(0.05);
+
+        // A ratio, not a magnitude: what "warm" means is that blue has fallen
+        // further than red, whatever the two absolute levels are.
+        let high_ratio = high.z / high.x;
+        let low_ratio = low.z / low.x;
+        assert!(
+            low_ratio < high_ratio,
+            "a low sun must be warmer than a high one: blue/red {low_ratio} at the \
+             horizon against {high_ratio} overhead",
+        );
+        // And dimmer: the same air that reddens it also absorbs it.
+        assert!(
+            low.length() < high.length(),
+            "a low sun must be dimmer: {low:?} against {high:?}",
+        );
+    }
+
+    /// The haze attenuation coefficient is per-metre and positive, so a shader that
+    /// exponentiates it against a distance dims with range rather than brightening
+    /// — and it is small enough that the sea a few hundred metres out is dimmed by a
+    /// few percent, not extinguished.
+    #[test]
+    fn the_haze_attenuation_coefficient_dims_with_distance() {
+        let resolved = super::resolve_sky(&sky_settings_from(&MIDDAY));
+        let coefficient = resolved.haze_atten_coef;
+        assert!(
+            coefficient.min_element() > 0.0,
+            "expected a positive per-metre coefficient, got {coefficient:?}",
+        );
+        // 256 m — one region — should still leave most of the light.
+        let atten = (-coefficient * 256.0).exp();
+        assert!(
+            atten.min_element() > 0.5 && atten.max_element() < 1.0,
+            "over one region the haze should dim, not extinguish: {atten:?}",
+        );
     }
 
     /// A sun or moon disc is drawn only above the horizon *and* only when the
