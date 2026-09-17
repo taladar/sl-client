@@ -34,7 +34,7 @@ pub(crate) const SEED_CAPABILITIES_TAG: &str = "Seed/capabilities";
 /// fetchers' transient-error budget: the seed POST fails for the same reasons
 /// (a sim still spinning up the new region's cap handlers answers a transient
 /// error before it answers the map).
-const MAX_SEED_FETCH_RETRIES: u32 = MAX_TRANSIENT_RETRIES;
+pub(crate) const MAX_SEED_FETCH_RETRIES: u32 = MAX_TRANSIENT_RETRIES;
 
 /// The pause before re-polling `EventQueueGet` after a round that produced no
 /// usable reply — a transport error, an unreadable body, or a body that did not

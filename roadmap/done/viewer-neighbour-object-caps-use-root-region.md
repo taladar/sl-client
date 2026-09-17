@@ -2,7 +2,7 @@
 id: viewer-neighbour-object-caps-use-root-region
 title: Per-object capability requests ask the root region about a neighbour's objects
 topic: viewer
-status: bugs
+status: done
 origin: hover-tooltip neighbour-region "Loading…" investigation (2026-09-17)
 refs: [viewer-hover-tooltip-202ms-frame-spike]
 ---
@@ -35,3 +35,28 @@ is the old, wrong form).
 
 On aditi (neighbouring regions), hover an object across the border: the
 tooltip's `Land Impact` resolves to a number instead of staying `…`.
+
+## Resolution (2026-09-17)
+
+- `Session::object_region` says which region answers for an object (the root,
+  or a neighbour by its simulator address); `sl_proto::NeighbourCaps` holds
+  each neighbour's capability map and routes a request's objects by region.
+  A request whose neighbour map is still being fetched is parked for up to
+  `NEIGHBOUR_CAPS_WAIT`. A neighbour part that cannot be sent is logged and
+  reported as a failed capability request: its map failed, lacks the
+  capability, or never came.
+- Both runtimes now keep the map the neighbour seed POST answers with, retrying
+  a failed fetch like the root's. A `ResourceCostSelected` spanning regions asks
+  each region and sums the replies (`merge_selected_cost_replies`).
+- Live on aditi, the selection across the border also failed:
+  `RequestObjectProperties` and `DeselectObjects` were refused with "the scoped
+  ids belong to more than one circuit". Every batch object command naming
+  scoped ids refused a mixed batch. They now send one message per region, as
+  the reference's `LLSelectMgr::sendListToRegions` does. Every circuit is
+  checked before anything is sent. Derez and link still refuse objects in
+  several regions (the reference's `AcquireErrorObjectSpan`), now with a
+  readable message.
+
+Verified live on aditi: a neighbour object's tooltip resolves its land impact,
+and selecting and deselecting objects on both sides of the border raises no
+errors.

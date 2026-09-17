@@ -14,6 +14,7 @@ pub mod j2c;
 mod marketplace;
 pub mod mesh_lod;
 mod mute;
+mod neighbour_caps;
 mod object_update;
 mod particles;
 mod scoped_id;
@@ -57,6 +58,10 @@ pub use marketplace::{
 };
 pub use mesh_lod::{DEFAULT_LOD_FACTOR, MESH_LOD_COUNT, MeshLod};
 pub use mute::{MUTE_LIST_LIMIT, MuteList, chat_text_muted};
+pub use neighbour_caps::{
+    CapRequest, CapRoute, NEIGHBOUR_CAPS_WAIT, NeighbourCaps, ObjectCapsCommand, ObjectRegion,
+    Unroutable, UnroutableReason, merge_selected_cost_replies,
+};
 pub use object_update::{
     TerseUpdate, encode_compressed_object, encode_object_motion, encode_terse_object_data,
     encode_terse_texture_entry,

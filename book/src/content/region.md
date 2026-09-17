@@ -343,6 +343,21 @@ though OpenSim serves them too.
   `Event::LandStatReply { report_type, request_flags, total_object_count, items
   }`, each `LandStatItem` naming an object, its position, score, and owner.
 
+`GetObjectCost`, `GetObjectPhysicsData` and `ResourceCostSelected` name objects,
+and a simulator only answers for the objects in its own region. So the runtimes
+split each request by the region each object is in (`Session::object_region`):
+the agent's own region's objects go to the root capability map, and a
+neighbour's objects go to that neighbour's map, fetched from the seed its
+`Event::NeighborSeed` carries. This matches the reference's `fetchObjectCosts`,
+which groups objects by `getRegion()`. The shared, sans-I/O part is
+`sl_proto::NeighbourCaps`. A request whose neighbour map is still being fetched
+waits for it, for up to `NEIGHBOUR_CAPS_WAIT`. A neighbour part that cannot be
+sent is logged and reported as a failed capability request, never sent to the
+root simulator instead. The reasons are: the map failed, it lacks the
+capability, or it never came. A `ResourceCostSelected` over a selection that
+spans regions is asked of each region, and the replies are summed into one
+`Event::SelectedResourceCost`.
+
 ---
 
 > **In this codebase**

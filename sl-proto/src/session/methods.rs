@@ -63,6 +63,7 @@ use crate::bookkeeping_ids::{
 };
 use crate::error::Error;
 use crate::mute::MuteList;
+use crate::neighbour_caps::ObjectRegion;
 use crate::scoped_id::{CircuitId, ScopedObjectId, ScopedParcelId};
 use crate::terrain;
 use crate::types::EventId;
@@ -3031,6 +3032,35 @@ impl Session {
         self.circuit_or_root(scope)
     }
 
+    /// Which region's simulator answers for `object`: the region it is streamed
+    /// from — the reference's `objectp->getRegion()` — so a driver can send an
+    /// object-addressed **capability** request (`GetObjectCost`,
+    /// `GetObjectPhysicsData`, `ResourceCostSelected`) to that region's
+    /// capability map rather than the root's, as
+    /// the object-addressed UDP requests are. An object this session
+    /// has not streamed, or whose neighbour circuit has since gone, is
+    /// answered by the root region, the one the agent is in.
+    #[must_use]
+    pub fn object_region(&self, object: ObjectKey) -> ObjectRegion {
+        let Some(circuit) = self.object_by_full_id(object).map(|object| object.circuit) else {
+            return ObjectRegion::Root;
+        };
+        self.children
+            .values()
+            .find(|child| child.id == circuit)
+            .map_or(ObjectRegion::Root, |child| {
+                ObjectRegion::Neighbour(child.sim_addr)
+            })
+    }
+
+    /// Whether a child circuit to the neighbouring simulator at `sim` is still
+    /// established — lets a driver drop state it keeps per neighbour (such as
+    /// its capability map) once the neighbour is gone.
+    #[must_use]
+    pub fn has_neighbour(&self, sim: SocketAddr) -> bool {
+        self.children.contains_key(&sim)
+    }
+
     /// The circuit a **reply to a script's request** goes out on: the circuit
     /// the request (`ScriptDialog` / `ScriptQuestion`) arrived on — the
     /// reference's `LLHost(notification["payload"]["sender"])` — so a
@@ -3064,6 +3094,45 @@ impl Session {
             Some(id) => self.circuit_by_id_mut(id).ok_or(Error::UnknownCircuit),
             None => self.circuit.as_mut().ok_or(Error::NoCircuit),
         }
+    }
+
+    /// Groups a batch of [`ScopedObjectId`]s by the circuit each belongs to, in
+    /// first-seen order, so a batch request that spans a region border goes
+    /// out as one message per region — the reference's
+    /// `LLSelectMgr::sendListToRegions`. Every circuit is checked before any
+    /// message is sent, so a stale id fails the whole batch rather than half of
+    /// it. An empty batch is an empty list.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] when no circuit is established at all, or
+    /// [`Error::UnknownCircuit`] when an id names a circuit since torn down.
+    fn group_by_circuit(
+        &self,
+        scoped: &[ScopedObjectId],
+    ) -> Result<Vec<(CircuitId, Vec<RegionLocalObjectId>)>, Error> {
+        let mut groups: Vec<(CircuitId, Vec<RegionLocalObjectId>)> = Vec::new();
+        for entry in scoped {
+            match groups
+                .iter_mut()
+                .find(|(circuit, _)| *circuit == entry.circuit)
+            {
+                Some((_, ids)) => ids.push(entry.id),
+                None => groups.push((entry.circuit, vec![entry.id])),
+            }
+        }
+        if groups.is_empty() {
+            return Ok(groups);
+        }
+        let Some(root) = self.circuit.as_ref() else {
+            return Err(Error::NoCircuit);
+        };
+        for (circuit, _) in &groups {
+            if root.id != *circuit && !self.children.values().any(|child| child.id == *circuit) {
+                return Err(Error::UnknownCircuit);
+            }
+        }
+        Ok(groups)
     }
 
     /// Resolves the circuit a [`ScopedObjectId`] / [`ScopedParcelId`] is scoped
@@ -9300,11 +9369,10 @@ impl Session {
         local_ids: &[ScopedObjectId],
         now: Instant,
     ) -> Result<(), Error> {
-        let Some((scope, local_ids)) = split_scoped_object_ids(local_ids)? else {
-            return Ok(());
-        };
-        let circuit = self.circuit_for_scope(scope)?;
-        circuit.send_object_detach(&local_ids, now)?;
+        for (scope, local_ids) in self.group_by_circuit(local_ids)? {
+            let circuit = self.circuit_for_scope(scope)?;
+            circuit.send_object_detach(&local_ids, now)?;
+        }
         Ok(())
     }
 
@@ -9320,11 +9388,10 @@ impl Session {
         local_ids: &[ScopedObjectId],
         now: Instant,
     ) -> Result<(), Error> {
-        let Some((scope, local_ids)) = split_scoped_object_ids(local_ids)? else {
-            return Ok(());
-        };
-        let circuit = self.circuit_for_scope(scope)?;
-        circuit.send_object_drop(&local_ids, now)?;
+        for (scope, local_ids) in self.group_by_circuit(local_ids)? {
+            let circuit = self.circuit_for_scope(scope)?;
+            circuit.send_object_drop(&local_ids, now)?;
+        }
         Ok(())
     }
 
@@ -9770,23 +9837,22 @@ impl Session {
         duplicate_flags: u32,
         now: Instant,
     ) -> Result<(), Error> {
-        let Some((scope, local_ids)) = split_scoped_object_ids(local_ids)? else {
-            return Ok(());
-        };
-        let circuit = self.circuit_for_scope(scope)?;
-        circuit.send_object_duplicate_on_ray(
-            &local_ids,
-            group_id,
-            ray_start,
-            ray_end,
-            bypass_raycast,
-            ray_end_is_intersection,
-            copy_centers,
-            copy_rotates,
-            ray_target_id,
-            duplicate_flags,
-            now,
-        )?;
+        for (scope, local_ids) in self.group_by_circuit(local_ids)? {
+            let circuit = self.circuit_for_scope(scope)?;
+            circuit.send_object_duplicate_on_ray(
+                &local_ids,
+                group_id,
+                ray_start.clone(),
+                ray_end.clone(),
+                bypass_raycast,
+                ray_end_is_intersection,
+                copy_centers,
+                copy_rotates,
+                ray_target_id,
+                duplicate_flags,
+                now,
+            )?;
+        }
         Ok(())
     }
 
@@ -12741,11 +12807,10 @@ impl Session {
         local_ids: &[ScopedObjectId],
         now: Instant,
     ) -> Result<(), Error> {
-        let Some((scope, local_ids)) = split_scoped_object_ids(local_ids)? else {
-            return Ok(());
-        };
-        let circuit = self.circuit_for_scope(scope)?;
-        circuit.send_request_multiple_objects(&local_ids, now)?;
+        for (scope, local_ids) in self.group_by_circuit(local_ids)? {
+            let circuit = self.circuit_for_scope(scope)?;
+            circuit.send_request_multiple_objects(&local_ids, now)?;
+        }
         Ok(())
     }
 
@@ -12763,11 +12828,10 @@ impl Session {
         local_ids: &[ScopedObjectId],
         now: Instant,
     ) -> Result<(), Error> {
-        let Some((scope, local_ids)) = split_scoped_object_ids(local_ids)? else {
-            return Ok(());
-        };
-        let circuit = self.circuit_for_scope(scope)?;
-        circuit.send_object_select(&local_ids, now)?;
+        for (scope, local_ids) in self.group_by_circuit(local_ids)? {
+            let circuit = self.circuit_for_scope(scope)?;
+            circuit.send_object_select(&local_ids, now)?;
+        }
         Ok(())
     }
 
@@ -12783,11 +12847,10 @@ impl Session {
         local_ids: &[ScopedObjectId],
         now: Instant,
     ) -> Result<(), Error> {
-        let Some((scope, local_ids)) = split_scoped_object_ids(local_ids)? else {
-            return Ok(());
-        };
-        let circuit = self.circuit_for_scope(scope)?;
-        circuit.send_object_deselect(&local_ids, now)?;
+        for (scope, local_ids) in self.group_by_circuit(local_ids)? {
+            let circuit = self.circuit_for_scope(scope)?;
+            circuit.send_object_deselect(&local_ids, now)?;
+        }
         Ok(())
     }
 
@@ -12940,11 +13003,10 @@ impl Session {
         group_id: Option<GroupKey>,
         now: Instant,
     ) -> Result<(), Error> {
-        let Some((scope, local_ids)) = split_scoped_object_ids(local_ids)? else {
-            return Ok(());
-        };
-        let circuit = self.circuit_for_scope(scope)?;
-        circuit.send_object_duplicate(&local_ids, offset, group_id, now)?;
+        for (scope, local_ids) in self.group_by_circuit(local_ids)? {
+            let circuit = self.circuit_for_scope(scope)?;
+            circuit.send_object_duplicate(&local_ids, offset.clone(), group_id, now)?;
+        }
         Ok(())
     }
 
@@ -12966,11 +13028,10 @@ impl Session {
         local_ids: &[ScopedObjectId],
         now: Instant,
     ) -> Result<(), Error> {
-        let Some((scope, local_ids)) = split_scoped_object_ids(local_ids)? else {
-            return Ok(());
-        };
-        let circuit = self.circuit_for_scope(scope)?;
-        circuit.send_object_delete(&local_ids, now)?;
+        for (scope, local_ids) in self.group_by_circuit(local_ids)? {
+            let circuit = self.circuit_for_scope(scope)?;
+            circuit.send_object_delete(&local_ids, now)?;
+        }
         Ok(())
     }
 
@@ -12982,8 +13043,10 @@ impl Session {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
-    /// [`Error::Wire`] if the request fails to encode.
+    /// Returns [`Error::MixedCircuits`] if `local_ids` are in more than one
+    /// region (the simulator acts only on its own objects, and the reference
+    /// refuses the same way), [`Error::NoCircuit`] if no circuit is established
+    /// yet, or [`Error::Wire`] if the request fails to encode.
     pub fn derez_objects(
         &mut self,
         local_ids: &[ScopedObjectId],
@@ -13270,11 +13333,10 @@ impl Session {
         group_id: GroupKey,
         now: Instant,
     ) -> Result<(), Error> {
-        let Some((scope, local_ids)) = split_scoped_object_ids(local_ids)? else {
-            return Ok(());
-        };
-        let circuit = self.circuit_for_scope(scope)?;
-        circuit.send_object_group(&local_ids, group_id, now)?;
+        for (scope, local_ids) in self.group_by_circuit(local_ids)? {
+            let circuit = self.circuit_for_scope(scope)?;
+            circuit.send_object_group(&local_ids, group_id, now)?;
+        }
         Ok(())
     }
 
@@ -13295,11 +13357,10 @@ impl Session {
         group_id: GroupKey,
         now: Instant,
     ) -> Result<(), Error> {
-        let Some((scope, local_ids)) = split_scoped_object_ids(local_ids)? else {
-            return Ok(());
-        };
-        let circuit = self.circuit_for_scope(scope)?;
-        circuit.send_object_owner(&local_ids, group_id, now)?;
+        for (scope, local_ids) in self.group_by_circuit(local_ids)? {
+            let circuit = self.circuit_for_scope(scope)?;
+            circuit.send_object_owner(&local_ids, group_id, now)?;
+        }
         Ok(())
     }
 
@@ -13320,11 +13381,10 @@ impl Session {
         mask: Permissions,
         now: Instant,
     ) -> Result<(), Error> {
-        let Some((scope, local_ids)) = split_scoped_object_ids(local_ids)? else {
-            return Ok(());
-        };
-        let circuit = self.circuit_for_scope(scope)?;
-        circuit.send_object_permissions(&local_ids, field, set, mask, now)?;
+        for (scope, local_ids) in self.group_by_circuit(local_ids)? {
+            let circuit = self.circuit_for_scope(scope)?;
+            circuit.send_object_permissions(&local_ids, field, set, mask, now)?;
+        }
         Ok(())
     }
 
@@ -13392,8 +13452,10 @@ impl Session {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
-    /// [`Error::Wire`] if the request fails to encode.
+    /// Returns [`Error::MixedCircuits`] if `local_ids` are in more than one
+    /// region (the simulator acts only on its own objects, and the reference
+    /// refuses the same way), [`Error::NoCircuit`] if no circuit is established
+    /// yet, or [`Error::Wire`] if the request fails to encode.
     pub fn link_objects(
         &mut self,
         local_ids: &[ScopedObjectId],
@@ -13418,11 +13480,10 @@ impl Session {
         local_ids: &[ScopedObjectId],
         now: Instant,
     ) -> Result<(), Error> {
-        let Some((scope, local_ids)) = split_scoped_object_ids(local_ids)? else {
-            return Ok(());
-        };
-        let circuit = self.circuit_for_scope(scope)?;
-        circuit.send_object_delink(&local_ids, now)?;
+        for (scope, local_ids) in self.group_by_circuit(local_ids)? {
+            let circuit = self.circuit_for_scope(scope)?;
+            circuit.send_object_delink(&local_ids, now)?;
+        }
         Ok(())
     }
 
@@ -13448,23 +13509,23 @@ impl Session {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::MixedCircuits`] if `local_ids` span more than one
-    /// circuit, [`Error::NoCircuit`] if no circuit is established, or
-    /// [`Error::Wire`] if the request fails to encode.
+    /// Returns [`Error::NoCircuit`] if no circuit is established,
+    /// [`Error::UnknownCircuit`] if an id is stale, or [`Error::Wire`] if the
+    /// request fails to encode. Objects in several regions are sent one
+    /// message per region.
     pub fn undo_objects(
         &mut self,
         local_ids: &[ScopedObjectId],
         now: Instant,
     ) -> Result<(), Error> {
-        let Some((scope, ids)) = split_scoped_object_ids(local_ids)? else {
-            return Ok(());
-        };
-        let object_ids = self.resolve_full_ids(scope, &ids);
-        if object_ids.is_empty() {
-            return Ok(());
+        for (scope, ids) in self.group_by_circuit(local_ids)? {
+            let object_ids = self.resolve_full_ids(scope, &ids);
+            if object_ids.is_empty() {
+                continue;
+            }
+            let circuit = self.circuit_for_scope(scope)?;
+            circuit.send_undo(&object_ids, now)?;
         }
-        let circuit = self.circuit_for_scope(scope)?;
-        circuit.send_undo(&object_ids, now)?;
         Ok(())
     }
 
@@ -13474,23 +13535,23 @@ impl Session {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::MixedCircuits`] if `local_ids` span more than one
-    /// circuit, [`Error::NoCircuit`] if no circuit is established, or
-    /// [`Error::Wire`] if the request fails to encode.
+    /// Returns [`Error::NoCircuit`] if no circuit is established,
+    /// [`Error::UnknownCircuit`] if an id is stale, or [`Error::Wire`] if the
+    /// request fails to encode. Objects in several regions are sent one
+    /// message per region.
     pub fn redo_objects(
         &mut self,
         local_ids: &[ScopedObjectId],
         now: Instant,
     ) -> Result<(), Error> {
-        let Some((scope, ids)) = split_scoped_object_ids(local_ids)? else {
-            return Ok(());
-        };
-        let object_ids = self.resolve_full_ids(scope, &ids);
-        if object_ids.is_empty() {
-            return Ok(());
+        for (scope, ids) in self.group_by_circuit(local_ids)? {
+            let object_ids = self.resolve_full_ids(scope, &ids);
+            if object_ids.is_empty() {
+                continue;
+            }
+            let circuit = self.circuit_for_scope(scope)?;
+            circuit.send_redo(&object_ids, now)?;
         }
-        let circuit = self.circuit_for_scope(scope)?;
-        circuit.send_redo(&object_ids, now)?;
         Ok(())
     }
 

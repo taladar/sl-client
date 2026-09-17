@@ -24,6 +24,7 @@ use sl_proto::{
     parse_event_queue_response, parse_seed_response,
 };
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::time::Duration;
 
 /// The reserved `(message, body)` key a CAPS helper sends over the events
@@ -81,6 +82,7 @@ pub(crate) fn start_caps(session: &Session) -> Option<Caps> {
     let (asset_tx, asset_rx) = unbounded();
     let (map_tx, map_rx) = unbounded();
     let (command_tx, command_rx) = unbounded();
+    let (neighbour_map_tx, neighbour_map_rx) = unbounded();
     let thread_events = events_tx.clone();
     let initial = seed.clone();
     tracing::info!(%seed, "start_caps: event-queue worker starting for the root region");
@@ -92,6 +94,8 @@ pub(crate) fn start_caps(session: &Session) -> Option<Caps> {
         asset_tx,
         map_rx,
         map: HashMap::new(),
+        neighbour_map_rx,
+        neighbour_map_tx,
         command_tx,
     })
 }
@@ -119,23 +123,62 @@ impl Caps {
     }
 }
 
-/// POSTs a neighbour region's seed capability (in a detached thread, result
-/// ignored) so the simulator marks the agent's capabilities as sent and begins
-/// streaming that region's scene to the child circuit.
-pub(crate) fn post_neighbour_seed(seed_url: url::Url) {
+/// A neighbouring region's capability map, or why it could not be fetched,
+/// keyed by the neighbour's simulator address.
+pub(crate) type NeighbourMapOutcome = (SocketAddr, Result<HashMap<String, String>, String>);
+
+/// POSTs a neighbour region's seed capability on a detached thread, so the
+/// simulator marks the agent's capabilities as sent and begins streaming that
+/// region's scene to the child circuit, and reports the neighbour's capability
+/// map (or why it could not be had) over `map_tx`, keyed by the neighbour's
+/// simulator address — the map object-addressed capability requests about the
+/// neighbour's objects are sent to. A failed fetch is retried like the root
+/// region's.
+pub(crate) fn fetch_neighbour_caps(
+    sim: SocketAddr,
+    seed_url: url::Url,
+    map_tx: Sender<NeighbourMapOutcome>,
+) {
     std::thread::spawn(move || {
-        let Ok(http) = crate::http_proxy::blocking_client_builder()
+        let outcome = match crate::http_proxy::blocking_client_builder()
             .timeout(EVENT_QUEUE_TIMEOUT)
             .build()
-        else {
-            return;
+        {
+            Ok(http) => {
+                let mut outcome = post_seed(&http, &seed_url);
+                for attempt in 0..MAX_SEED_FETCH_RETRIES {
+                    let Err(reason) = &outcome else {
+                        break;
+                    };
+                    tracing::warn!(%sim, %seed_url, attempt, "neighbour seed-capabilities fetch failed: {reason}");
+                    std::thread::sleep(transient_backoff(attempt));
+                    outcome = post_seed(&http, &seed_url);
+                }
+                outcome
+            }
+            Err(error) => Err(format!("could not build the caps HTTP client: {error}")),
         };
-        let _ignored = http
-            .post(seed_url)
-            .header("Content-Type", "application/llsd+xml")
-            .body(build_seed_request(REQUESTED_CAPABILITIES))
-            .send();
+        deliver(&map_tx, (sim, outcome));
     });
+}
+
+/// POSTs `seed_url` and parses the capability map it answers with, or says
+/// readably which step failed.
+fn post_seed(
+    http: &ReqwestBlockingClient,
+    seed_url: &url::Url,
+) -> Result<HashMap<String, String>, String> {
+    let response = http
+        .post(seed_url.clone())
+        .header("Content-Type", "application/llsd+xml")
+        .body(build_seed_request(REQUESTED_CAPABILITIES))
+        .send()
+        .map_err(|error| format!("the seed-capabilities request failed: {error}"))?;
+    let text = response.text().map_err(|error| {
+        format!("the seed-capabilities response body could not be read: {error}")
+    })?;
+    parse_seed_response(&text)
+        .map_err(|error| format!("the seed-capabilities response did not parse: {error}"))
 }
 
 /// The outcome of one seed-capabilities fetch, distinguishing the two ways it
@@ -158,43 +201,11 @@ fn fetch_caps(
     seed_url: &url::Url,
     map_tx: &Sender<Result<HashMap<String, String>, String>>,
 ) -> SeedOutcome {
-    let response = match http
-        .post(seed_url.clone())
-        .header("Content-Type", "application/llsd+xml")
-        .body(build_seed_request(REQUESTED_CAPABILITIES))
-        .send()
-    {
-        Ok(response) => response,
-        Err(error) => {
-            tracing::warn!(%seed_url, %error, "event queue: seed-capabilities POST failed — no queue for this region");
-            deliver(
-                map_tx,
-                Err(format!("the seed-capabilities request failed: {error}")),
-            );
-            return SeedOutcome::Failed;
-        }
-    };
-    let text = match response.text() {
-        Ok(text) => text,
-        Err(error) => {
-            deliver(
-                map_tx,
-                Err(format!(
-                    "the seed-capabilities response body could not be read: {error}"
-                )),
-            );
-            return SeedOutcome::Failed;
-        }
-    };
-    let capabilities = match parse_seed_response(&text) {
+    let capabilities = match post_seed(http, seed_url) {
         Ok(capabilities) => capabilities,
-        Err(error) => {
-            deliver(
-                map_tx,
-                Err(format!(
-                    "the seed-capabilities response did not parse: {error}"
-                )),
-            );
+        Err(reason) => {
+            tracing::warn!(%seed_url, "event queue: {reason} — no queue for this region");
+            deliver(map_tx, Err(reason));
             return SeedOutcome::Failed;
         }
     };

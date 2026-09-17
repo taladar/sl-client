@@ -22,9 +22,10 @@ pub enum Error {
     /// `DisableSimulator`). The id is stale and cannot be acted upon.
     #[error("the scoped id refers to a circuit that is no longer established")]
     UnknownCircuit,
-    /// A batch object operation was given scoped ids belonging to more than one
-    /// circuit; a single request targets exactly one simulator.
-    #[error("the scoped ids belong to more than one circuit")]
+    /// An object operation that has to act within one region — taking objects
+    /// into inventory (a derez) or linking them — was given objects in more than
+    /// one region. Other batch operations are split per region instead.
+    #[error("the objects are in more than one region; move them onto one region first")]
     MixedCircuits,
     /// A login response was fed to a session that has already reached its
     /// terminal closed/disconnected state. A relogin must use a fresh

@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 41 |
 | in-progress | 22 |
 | bugs | 7 |
-| done | 1176 |
+| done | 1177 |
 | deferred | 27 |
 | wont-do | 16 |
-| **total** | **1704** |
+| **total** | **1705** |
 
 ## ideas (100)
 
@@ -1175,9 +1175,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Some worn mesh hair does not render (visible in Firestorm)
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
-- [`viewer-neighbour-object-caps-use-root-region`](bugs/viewer-neighbour-object-caps-use-root-region.md)
-  — Per-object capability requests ask the root region about a neighbour's
-  objects
+- [`viewer-objectupdate-truncated-block-drops-message`](bugs/viewer-objectupdate-truncated-block-drops-message.md)
+  — An ObjectUpdate from aditi fails to decode and every object in it is dropped
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
   — Own avatar looks broken after a teleport
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
@@ -1188,7 +1187,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-texture-rotation-offset-t-in-flipped-uv-space`](bugs/viewer-texture-rotation-offset-t-in-flipped-uv-space.md)
   — A rotated face texture turns the wrong way (upside down at 90°)
 
-## done (1176)
+## done (1177)
 
 ### protocol
 
@@ -2072,6 +2071,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Name tags render behind the cloud layer (near tag occluded by far clouds)
 - [`viewer-nametags-refracted-by-distant-water`](done/viewer-nametags-refracted-by-distant-water.md)
   — Water draws over a name tag that stands in front of it, smearing it
+- [`viewer-neighbour-object-caps-use-root-region`](done/viewer-neighbour-object-caps-use-root-region.md)
+  — Per-object capability requests ask the root region about a neighbour's
+  objects
 - [`viewer-new-notecard-unreadable-on-opensim`](done/viewer-new-notecard-unreadable-on-opensim.md)
   — A notecard created on OpenSim opened as "could not be read"
 - [`viewer-nonblocking-overlay-steals-focus`](done/viewer-nonblocking-overlay-steals-focus.md)

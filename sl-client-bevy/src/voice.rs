@@ -18,32 +18,29 @@ pub(crate) fn run_voice_cap(
     cap: &'static str,
     caps_tx: &Sender<(String, Llsd)>,
 ) {
-    let Ok(http) = crate::http_proxy::blocking_client_builder()
+    match post_cap_llsd(cap_url, body) {
+        Some(llsd) => deliver(caps_tx, (cap.to_owned(), llsd)),
+        None => report_caps_failure(caps_tx, cap),
+    }
+}
+
+/// POSTs an LLSD `body` to `cap_url` and parses the LLSD reply, or `None` when
+/// the client, the request, the body or its parse failed — which the caller
+/// reports as a failed capability request.
+pub(crate) fn post_cap_llsd(cap_url: &str, body: String) -> Option<Llsd> {
+    let http = crate::http_proxy::blocking_client_builder()
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()
-    else {
-        report_caps_failure(caps_tx, cap);
-        return;
-    };
-    let Ok(response) = http
+        .ok()?;
+    let text = http
         .post(cap_url)
         .header("Content-Type", "application/llsd+xml")
         .body(body)
         .send()
-    else {
-        report_caps_failure(caps_tx, cap);
-        return;
-    };
-    let Ok(text) = response.text() else {
-        report_caps_failure(caps_tx, cap);
-        return;
-    };
-    match parse_llsd_xml(&text) {
-        Ok(llsd) => {
-            deliver(caps_tx, (cap.to_owned(), llsd));
-        }
-        Err(_error) => report_caps_failure(caps_tx, cap),
-    }
+        .ok()?
+        .text()
+        .ok()?;
+    parse_llsd_xml(&text).ok()
 }
 
 /// POSTs a `VoiceSignalingRequest` (WebRTC ICE trickle). Fire-and-forget: the

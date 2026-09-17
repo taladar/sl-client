@@ -294,6 +294,14 @@ pub fn parse_resource_cost_selected(body: &Llsd) -> Result<SelectedResourceCost,
 /// side) — the inverse of [`parse_resource_cost_selected`].
 #[must_use]
 pub fn build_resource_cost_selected_response(cost: &SelectedResourceCost) -> String {
+    resource_cost_selected_llsd(cost).to_llsd_xml()
+}
+
+/// The LLSD body of a `ResourceCostSelected` reply carrying `cost` — the value
+/// [`build_resource_cost_selected_response`] serialises, for a client that
+/// combines several regions' replies into one before decoding it.
+#[must_use]
+pub fn resource_cost_selected_llsd(cost: &SelectedResourceCost) -> Llsd {
     Llsd::Map(HashMap::from([(
         "selected".to_owned(),
         Llsd::Map(HashMap::from([
@@ -308,7 +316,6 @@ pub fn build_resource_cost_selected_response(cost: &SelectedResourceCost) -> Str
             ),
         ])),
     )]))
-    .to_llsd_xml()
 }
 
 #[cfg(test)]

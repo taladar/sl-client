@@ -17,38 +17,35 @@ use sl_proto::{
     CAP_DIRECT_DELIVERY, CAP_EXPERIENCE_PREFERENCES, CAP_EXPERIENCE_QUERY, CAP_EXT_ENVIRONMENT,
     CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
     CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
-    CAP_GET_EXPERIENCES, CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA,
-    CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR,
-    CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY,
-    CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO,
-    CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
-    CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS, CAP_RESOURCE_COST_SELECTED,
+    CAP_GET_EXPERIENCES, CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3,
+    CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX,
+    CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
+    CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT,
+    CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
     CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SIMULATOR_FEATURES,
     CAP_UPDATE_EXPERIENCE, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_USER_INFO,
     CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
     CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE,
-    Event as SessionEvent, INVENTORY_FETCH_MAX_IN_FLIGHT, LoginResponse,
-    NewFileAgentInventoryRequest, RECV_BUFFER_SIZE, SelectedCostKind, Session, SessionMessage,
-    UserInfoUpdate, ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
+    Event as SessionEvent, INVENTORY_FETCH_MAX_IN_FLIGHT, LoginResponse, NeighbourCaps,
+    NewFileAgentInventoryRequest, RECV_BUFFER_SIZE, Session, SessionMessage, UserInfoUpdate,
+    ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
     ais_create_category_url, ais_item_url, associate_inventory_request, avatar_picker_search_query,
     build_agent_preferences_request, build_ais_create_category_body, build_ais_create_link_body,
     build_ais_move_body, build_ais_rename_category_body, build_ais_update_item_body,
     build_create_inventory_category_request, build_environment_update_request,
-    build_get_object_cost_request, build_get_object_physics_data_request,
     build_modify_material_params_request, build_object_media_navigate_request,
     build_object_media_update_request, build_parcel_voice_info_request,
     build_provision_voice_account_request, build_region_experiences_request,
-    build_render_materials_put_request, build_resource_cost_selected_request,
-    build_send_user_report, build_set_experience_permission_request,
-    build_update_experience_request, build_update_item_asset_request,
-    build_update_script_agent_request, build_update_script_task_request,
-    build_update_task_item_asset_request, build_upload_baked_texture_request,
-    build_user_info_update, build_voice_signaling_request, chat_session_agents_body,
-    chat_session_request_body, copy_inventory_from_notecard_body, create_listing_request,
-    delete_listing_request, display_names_query, environment_cap_url, experience_id_query,
-    experience_info_query, experience_query, find_experience_query, forget_experience_query,
-    group_experiences_query, group_invite_response_body, listing_request, listings_request,
-    merchant_status_request, parse_login_response, update_listing_request,
+    build_render_materials_put_request, build_send_user_report,
+    build_set_experience_permission_request, build_update_experience_request,
+    build_update_item_asset_request, build_update_script_agent_request,
+    build_update_script_task_request, build_update_task_item_asset_request,
+    build_upload_baked_texture_request, build_user_info_update, build_voice_signaling_request,
+    chat_session_agents_body, chat_session_request_body, copy_inventory_from_notecard_body,
+    create_listing_request, delete_listing_request, display_names_query, environment_cap_url,
+    experience_id_query, experience_info_query, experience_query, find_experience_query,
+    forget_experience_query, group_experiences_query, group_invite_response_body, listing_request,
+    listings_request, merchant_status_request, parse_login_response, update_listing_request,
 };
 
 // Re-export the core types a consumer needs to configure the plugin, drive the
@@ -351,6 +348,7 @@ mod marketplace;
 mod materials;
 mod media;
 pub mod meshes;
+mod object_caps;
 pub mod prims;
 mod retry;
 #[cfg(feature = "bevy_pbr")]
@@ -403,7 +401,7 @@ pub fn preserve_glow_mask_alpha(
     }
 }
 
-use crate::caps::{CAPS_FAILURE_PREFIX, post_neighbour_seed, start_caps};
+use crate::caps::{CAPS_FAILURE_PREFIX, fetch_neighbour_caps, start_caps};
 use crate::chat_log::ChatLog;
 use crate::experiences::{run_experience_status, run_group_experiences};
 use crate::fetch::{run_asset_fetch, run_generic_asset_fetch, run_texture_fetch};
@@ -765,6 +763,9 @@ struct RunningSession {
     /// The last agent parcel / fly / seat mirror sent to the app, so only a
     /// change crosses the channel.
     agent_parcel: SlAgentParcel,
+    /// The neighbouring regions' capability maps, and the object-addressed
+    /// capability requests waiting for one.
+    neighbours: Box<NeighbourCaps>,
 }
 
 /// The `LSLSyntax` state carried across ticks: the by-id disk cache plus the
@@ -801,6 +802,12 @@ pub(crate) struct Caps {
     pub(crate) map_rx: Receiver<Result<HashMap<String, String>, String>>,
     /// The cached capability map (cap name → URL), empty until discovered.
     pub(crate) map: HashMap<String, String>,
+    /// Receives each neighbouring region's capability map (or why it could not
+    /// be fetched), keyed by the neighbour's simulator address, for the
+    /// session's [`NeighbourCaps`].
+    pub(crate) neighbour_map_rx: Receiver<crate::caps::NeighbourMapOutcome>,
+    /// A sender clone for the neighbour seed fetches.
+    pub(crate) neighbour_map_tx: Sender<crate::caps::NeighbourMapOutcome>,
     /// Commands the single long-lived event-queue worker thread — a
     /// [`EqCommand::Switch`](crate::caps::EqCommand) on every region change
     /// re-targets it at the new root's seed instead of spawning a second poller.
@@ -1167,6 +1174,7 @@ fn login_phase(
                         inventory_cache,
                         lsl_syntax,
                         agent_parcel: SlAgentParcel::default(),
+                        neighbours: Box::default(),
                     })
                 }
                 Err(()) => {
@@ -1341,6 +1349,7 @@ fn advance_running(
         mut inventory_cache,
         mut lsl_syntax,
         mut agent_parcel,
+        mut neighbours,
     } = state;
     // Wait for inbound data with ONE blocking receive (its [`NET_TICK`] read
     // timeout is the thread's tick cadence — a datagram wakes the tick
@@ -1425,6 +1434,9 @@ fn advance_running(
                 tracing::warn!(capability = %message, "CAPS payload rejected: {error}");
             }
         }
+        // A neighbour's capability map arriving releases the object-addressed
+        // requests that were waiting for it.
+        object_caps::drain_neighbour_maps(&session, caps, &mut neighbours, now);
         // Binary asset fetches return fully-formed session events; surface them.
         while let Ok(event) = caps.asset_rx.try_recv() {
             // An upload that created an inventory item is the exception: file
@@ -1548,6 +1560,7 @@ fn advance_running(
             command,
             &mut session,
             caps.as_ref(),
+            &mut neighbours,
             &mut chat_log,
             now,
             outbound,
@@ -1596,9 +1609,28 @@ fn advance_running(
             // POST a neighbour's seed capability so the simulator streams that
             // region's scene to the child circuit (its `SendInitialData` is gated
             // on the seed having been requested). One-shot, off the ECS thread.
+            // The map it answers with is kept for object-addressed capability
+            // requests about that neighbour's objects.
             SessionEvent::NeighborSeed {
-                seed_capability, ..
-            } => post_neighbour_seed(seed_capability.clone()),
+                sim,
+                seed_capability,
+            } => match caps.as_ref() {
+                Some(caps) => {
+                    neighbours.fetch_started(*sim);
+                    fetch_neighbour_caps(
+                        *sim,
+                        seed_capability.clone(),
+                        caps.neighbour_map_tx.clone(),
+                    );
+                }
+                // No CAPS subsystem, so nothing sends a capability request that
+                // could use the map: POST the seed for the scene alone.
+                None => fetch_neighbour_caps(
+                    *sim,
+                    seed_capability.clone(),
+                    crossbeam_channel::unbounded().0,
+                ),
+            },
             // On the login inventory/library skeleton, load the disk cache (if
             // any) and reconcile it against the skeleton, so version-matching
             // folders skip the background refetch. A no-op when disabled.
@@ -1693,6 +1725,7 @@ fn advance_running(
         inventory_cache,
         lsl_syntax,
         agent_parcel,
+        neighbours,
     })
 }
 
@@ -1720,6 +1753,7 @@ fn apply_command(
     command: &Command,
     session: &mut Session,
     caps: Option<&Caps>,
+    neighbours: &mut NeighbourCaps,
     chat_log: &mut ChatLog,
     now: Instant,
     outbound: &Sender<NetOutbound>,
@@ -3758,42 +3792,13 @@ fn apply_command(
                 });
             }
         }
-        Command::RequestObjectCost { object_ids } => {
-            if let Some(caps) = caps
-                && let Some(url) = caps.map.get(CAP_GET_OBJECT_COST).cloned()
-            {
-                let body = build_get_object_cost_request(object_ids);
-                let events_tx = caps.events_tx.clone();
-                std::thread::spawn(move || {
-                    run_voice_cap(&url, body, CAP_GET_OBJECT_COST, &events_tx);
-                });
-            }
-        }
-        Command::RequestSelectedCost { object_ids, roots } => {
-            if let Some(caps) = caps
-                && let Some(url) = caps.map.get(CAP_RESOURCE_COST_SELECTED).cloned()
-            {
-                let kind = if *roots {
-                    SelectedCostKind::Roots
-                } else {
-                    SelectedCostKind::Prims
-                };
-                let body = build_resource_cost_selected_request(kind, object_ids);
-                let events_tx = caps.events_tx.clone();
-                std::thread::spawn(move || {
-                    run_voice_cap(&url, body, CAP_RESOURCE_COST_SELECTED, &events_tx);
-                });
-            }
-        }
-        Command::RequestObjectPhysicsData { object_ids } => {
-            if let Some(caps) = caps
-                && let Some(url) = caps.map.get(CAP_GET_OBJECT_PHYSICS_DATA).cloned()
-            {
-                let body = build_get_object_physics_data_request(object_ids);
-                let events_tx = caps.events_tx.clone();
-                std::thread::spawn(move || {
-                    run_voice_cap(&url, body, CAP_GET_OBJECT_PHYSICS_DATA, &events_tx);
-                });
+        // Split by the region each object is in: a neighbour's objects are
+        // asked of the neighbour's own capability.
+        Command::RequestObjectCost { .. }
+        | Command::RequestSelectedCost { .. }
+        | Command::RequestObjectPhysicsData { .. } => {
+            if let Some(caps) = caps {
+                object_caps::dispatch(command, now, session, caps, neighbours, now);
             }
         }
         Command::RequestAttachmentResources => {
@@ -4577,8 +4582,8 @@ mod tests {
     use crossbeam_channel::unbounded;
     use pretty_assertions::assert_eq;
     use sl_proto::{
-        ChatLogConfig, CircuitId, Command, LoginParams, LoginRequest, RegionLocalObjectId,
-        ScopedObjectId, Session, StartLocation,
+        ChatLogConfig, CircuitId, Command, LoginParams, LoginRequest, NeighbourCaps,
+        RegionLocalObjectId, ScopedObjectId, Session, StartLocation,
     };
 
     use super::{NetOutbound, SessionError, apply_command, report_command_failed};
@@ -4622,6 +4627,7 @@ mod tests {
             },
             &mut session,
             None,
+            &mut NeighbourCaps::default(),
             &mut chat_log,
             Instant::now(),
             &outbound,

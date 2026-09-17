@@ -17,39 +17,37 @@ use sl_proto::{
     CAP_DIRECT_DELIVERY, CAP_EXPERIENCE_PREFERENCES, CAP_EXPERIENCE_QUERY, CAP_EXT_ENVIRONMENT,
     CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
     CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
-    CAP_GET_EXPERIENCES, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_OBJECT_COST,
-    CAP_GET_OBJECT_PHYSICS_DATA, CAP_GET_TEXTURE, CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA,
-    CAP_INCREMENT_COF_VERSION, CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN,
-    CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS,
-    CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE,
-    CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
-    CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
-    CAP_RESOURCE_COST_SELECTED, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
-    CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
-    CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_UPLOAD_BAKED_TEXTURE, CAP_USER_INFO,
-    CAP_VIEWER_ASSET, CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
-    CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE,
-    CHAT_SESSION_START_CONFERENCE, INVENTORY_FETCH_MAX_IN_FLIGHT, NewFileAgentInventoryRequest,
-    RECV_BUFFER_SIZE, SelectedCostKind, Session, UserInfoUpdate, ais_category_children_fetch_url,
-    ais_category_children_url, ais_category_url, ais_create_category_url, ais_item_url,
-    associate_inventory_request, avatar_picker_search_query, build_agent_preferences_request,
-    build_ais_create_category_body, build_ais_create_link_body, build_ais_move_body,
-    build_ais_rename_category_body, build_ais_update_item_body,
-    build_create_inventory_category_request, build_environment_update_request,
-    build_get_object_cost_request, build_get_object_physics_data_request,
-    build_modify_material_params_request, build_new_file_agent_inventory_request,
-    build_object_media_navigate_request, build_object_media_update_request,
-    build_parcel_voice_info_request, build_provision_voice_account_request,
-    build_region_experiences_request, build_resource_cost_selected_request, build_send_user_report,
-    build_set_experience_permission_request, build_update_experience_request,
-    build_update_item_asset_request, build_update_script_agent_request,
-    build_update_script_task_request, build_update_task_item_asset_request,
-    build_upload_baked_texture_request, build_user_info_update, build_voice_signaling_request,
-    chat_session_agents_body, chat_session_request_body, copy_inventory_from_notecard_body,
-    create_listing_request, delete_listing_request, display_names_query, environment_cap_url,
-    experience_id_query, experience_info_query, experience_query, find_experience_query,
-    forget_experience_query, group_experiences_query, group_invite_response_body, listing_request,
-    listings_request, merchant_status_request, parse_login_response, update_listing_request,
+    CAP_GET_EXPERIENCES, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_TEXTURE, CAP_GROUP_EXPERIENCES,
+    CAP_GROUP_MEMBER_DATA, CAP_INCREMENT_COF_VERSION, CAP_INVENTORY_API_V3,
+    CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX,
+    CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
+    CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT,
+    CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
+    CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SIMULATOR_FEATURES,
+    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_UPDATE_SCRIPT_AGENT,
+    CAP_UPDATE_SCRIPT_TASK, CAP_UPLOAD_BAKED_TEXTURE, CAP_USER_INFO, CAP_VIEWER_ASSET,
+    CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
+    CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE,
+    INVENTORY_FETCH_MAX_IN_FLIGHT, NeighbourCaps, NewFileAgentInventoryRequest, RECV_BUFFER_SIZE,
+    Session, UserInfoUpdate, ais_category_children_fetch_url, ais_category_children_url,
+    ais_category_url, ais_create_category_url, ais_item_url, associate_inventory_request,
+    avatar_picker_search_query, build_agent_preferences_request, build_ais_create_category_body,
+    build_ais_create_link_body, build_ais_move_body, build_ais_rename_category_body,
+    build_ais_update_item_body, build_create_inventory_category_request,
+    build_environment_update_request, build_modify_material_params_request,
+    build_new_file_agent_inventory_request, build_object_media_navigate_request,
+    build_object_media_update_request, build_parcel_voice_info_request,
+    build_provision_voice_account_request, build_region_experiences_request,
+    build_send_user_report, build_set_experience_permission_request,
+    build_update_experience_request, build_update_item_asset_request,
+    build_update_script_agent_request, build_update_script_task_request,
+    build_update_task_item_asset_request, build_upload_baked_texture_request,
+    build_user_info_update, build_voice_signaling_request, chat_session_agents_body,
+    chat_session_request_body, copy_inventory_from_notecard_body, create_listing_request,
+    delete_listing_request, display_names_query, environment_cap_url, experience_id_query,
+    experience_info_query, experience_query, find_experience_query, forget_experience_query,
+    group_experiences_query, group_invite_response_body, listing_request, listings_request,
+    merchant_status_request, parse_login_response, update_listing_request,
 };
 
 // Re-export the core types a consumer needs so they can depend on this crate
@@ -183,6 +181,7 @@ mod marketplace;
 mod materials;
 mod media;
 pub mod meshes;
+mod object_caps;
 mod retry;
 pub mod textures;
 mod upload;
@@ -631,6 +630,11 @@ impl Client {
         // only, so for both this is the only chance there is. Everything read
         // here is forwarded to `events` unchanged.
         let (upload_events, mut upload_rx) = mpsc::channel::<Event>(16);
+        // Each neighbouring region's capability map, fetched when its seed
+        // arrives, for object-addressed capability requests about its objects.
+        let (neighbour_map_tx, mut neighbour_map_rx) =
+            mpsc::channel::<object_caps::NeighbourMapOutcome>(8);
+        let mut neighbours = NeighbourCaps::default();
         let mut caps_generation: u64 = 0;
         let mut caps_refetch_task: Option<tokio::task::JoinHandle<()>> = None;
         // The region must serve capabilities: fail login (propagating the readable
@@ -692,16 +696,21 @@ impl Client {
                 // POST a neighbour's seed capability so the simulator starts
                 // streaming that region's scene to the child circuit (its
                 // `SendInitialData` is gated on the seed having been requested).
-                // Detached: the POST must not block the main loop.
+                // Detached: the POST must not block the main loop. The map it
+                // answers with is kept for object-addressed capability requests
+                // about that neighbour's objects.
                 if let Event::NeighborSeed {
-                    seed_capability, ..
+                    sim,
+                    seed_capability,
                 } = &event
                 {
-                    let seed = seed_capability.clone();
-                    let http = http.clone();
-                    tokio::spawn(async move {
-                        let _ignored = fetch_capabilities(Some(&seed), &http).await;
-                    });
+                    neighbours.fetch_started(*sim);
+                    tokio::spawn(object_caps::fetch_neighbour_caps(
+                        *sim,
+                        seed_capability.clone(),
+                        http.clone(),
+                        neighbour_map_tx.clone(),
+                    ));
                 }
                 // Tap the event for the local chat log (best-effort, no-op when
                 // disabled) before forwarding it on.
@@ -883,6 +892,12 @@ impl Client {
                 }
             }
 
+            // Forget the maps of neighbours that are gone, and send the
+            // object-addressed requests whose neighbour map has since arrived
+            // (or whose wait ran out).
+            object_caps::dispatch_parked(&self.session, &caps, &mut neighbours, &http, &caps_tx)
+                .await;
+
             let sleep = make_sleep(self.session.poll_timeout());
             tokio::pin!(sleep);
 
@@ -922,6 +937,14 @@ impl Client {
                                 "the region advertises no EventQueueGet — no CrossedRegion / TeleportFinish will arrive"
                             );
                         }
+                    }
+                }
+                neighbour_map = neighbour_map_rx.recv() => {
+                    if let Some((sim, outcome)) = neighbour_map {
+                        if let Err(reason) = &outcome {
+                            tracing::warn!(%sim, "a neighbour region's capabilities could not be fetched: {reason}");
+                        }
+                        neighbours.fetched(sim, outcome);
                     }
                 }
                 upload_event = upload_rx.recv() => {
@@ -2206,24 +2229,14 @@ impl Client {
                                 tokio::spawn(post_voice_cap(url, body, CAP_AGENT_PREFERENCES, http.clone(), caps_tx.clone()));
                             }
                         }
-                        Some(Command::RequestObjectCost { object_ids }) => {
-                            if let Some(url) = caps.get(CAP_GET_OBJECT_COST).cloned() {
-                                let body = build_get_object_cost_request(&object_ids);
-                                tokio::spawn(post_voice_cap(url, body, CAP_GET_OBJECT_COST, http.clone(), caps_tx.clone()));
-                            }
-                        }
-                        Some(Command::RequestSelectedCost { object_ids, roots }) => {
-                            if let Some(url) = caps.get(CAP_RESOURCE_COST_SELECTED).cloned() {
-                                let kind = if roots { SelectedCostKind::Roots } else { SelectedCostKind::Prims };
-                                let body = build_resource_cost_selected_request(kind, &object_ids);
-                                tokio::spawn(post_voice_cap(url, body, CAP_RESOURCE_COST_SELECTED, http.clone(), caps_tx.clone()));
-                            }
-                        }
-                        Some(Command::RequestObjectPhysicsData { object_ids }) => {
-                            if let Some(url) = caps.get(CAP_GET_OBJECT_PHYSICS_DATA).cloned() {
-                                let body = build_get_object_physics_data_request(&object_ids);
-                                tokio::spawn(post_voice_cap(url, body, CAP_GET_OBJECT_PHYSICS_DATA, http.clone(), caps_tx.clone()));
-                            }
+                        // Split by the region each object is in: a neighbour's
+                        // objects are asked of the neighbour's own capability.
+                        Some(
+                            command @ (Command::RequestObjectCost { .. }
+                            | Command::RequestSelectedCost { .. }
+                            | Command::RequestObjectPhysicsData { .. }),
+                        ) => {
+                            object_caps::dispatch(command, Instant::now(), &self.session, &caps, &mut neighbours, &http, &caps_tx).await;
                         }
                         Some(Command::RequestAttachmentResources) => {
                             if let Some(url) = caps.get(CAP_ATTACHMENT_RESOURCES).cloned() {

@@ -19,26 +19,31 @@ pub(crate) async fn post_voice_cap(
     http: ReqwestClient,
     caps_tx: mpsc::Sender<(String, Llsd)>,
 ) {
-    let Ok(response) = http
-        .post(&cap_url)
+    match post_cap_llsd(&cap_url, body, &http).await {
+        Some(llsd) => deliver(&caps_tx, (cap.to_owned(), llsd)).await,
+        None => report_caps_failure(&caps_tx, cap).await,
+    }
+}
+
+/// POSTs an LLSD `body` to `cap_url` and parses the LLSD reply, or `None` when
+/// the request, the body or its parse failed — which the caller reports as a
+/// failed capability request.
+pub(crate) async fn post_cap_llsd(
+    cap_url: &str,
+    body: String,
+    http: &ReqwestClient,
+) -> Option<Llsd> {
+    let text = http
+        .post(cap_url)
         .header("Content-Type", "application/llsd+xml")
         .body(body)
         .send()
         .await
-    else {
-        report_caps_failure(&caps_tx, cap).await;
-        return;
-    };
-    let Ok(text) = response.text().await else {
-        report_caps_failure(&caps_tx, cap).await;
-        return;
-    };
-    match parse_llsd_xml(&text) {
-        Ok(llsd) => {
-            deliver(&caps_tx, (cap.to_owned(), llsd)).await;
-        }
-        Err(_error) => report_caps_failure(&caps_tx, cap).await,
-    }
+        .ok()?
+        .text()
+        .await
+        .ok()?;
+    parse_llsd_xml(&text).ok()
 }
 
 /// POSTs a `VoiceSignalingRequest` (WebRTC ICE trickle). Fire-and-forget: the

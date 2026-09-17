@@ -18173,6 +18173,282 @@ mod test {
 
     // Object interaction & editing (#17) -----------------------------------
 
+    /// A selection that spans a region border is sent the way the reference's
+    /// `LLSelectMgr::sendListToRegions` sends it: one `ObjectSelect` /
+    /// `ObjectDeselect` per region, each on that region's own circuit — a
+    /// mixed batch used to be refused outright, so selecting across the border
+    /// failed. Taking objects into inventory still has to stay within one
+    /// region (the reference's `AcquireErrorObjectSpan`), and a stale id fails
+    /// the whole batch before anything is sent.
+    #[test]
+    fn a_selection_across_a_region_border_is_sent_per_region() -> Result<(), TestError> {
+        use sl_proto::RegionLocalObjectId;
+
+        let now = Instant::now();
+        let mut session = established(now)?;
+        let root = session.root_circuit_id().ok_or("no circuit")?;
+        drain(&mut session)?;
+        enable_neighbour_b(&mut session, 9, now)?;
+        drain(&mut session)?;
+        let pos = Vector {
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+        };
+        let update = object_update_in(NB_REGION, 700, 0xBEEF, pos);
+        session.handle_datagram(sim_b(), &server_message(&update, 3, true)?, now)?;
+        drain(&mut session)?;
+        let neighbour = session
+            .objects_in_region(RegionHandle(NB_REGION))
+            .next()
+            .ok_or("the neighbour object was not cached")?
+            .circuit;
+        assert_ne!(neighbour, root);
+        let selection = [
+            ScopedObjectId::new(root, RegionLocalObjectId(21)),
+            ScopedObjectId::new(neighbour, RegionLocalObjectId(700)),
+            ScopedObjectId::new(root, RegionLocalObjectId(22)),
+        ];
+
+        let split =
+            |session: &mut Session| -> Result<(Vec<AnyMessage>, Vec<AnyMessage>), TestError> {
+                let mut to_root = Vec::new();
+                let mut to_neighbour = Vec::new();
+                while let Some(transmit) = session.poll_transmit() {
+                    if transmit.destination == sim_b() {
+                        to_neighbour.push(decode(&transmit)?);
+                    } else {
+                        to_root.push(decode(&transmit)?);
+                    }
+                }
+                Ok((to_root, to_neighbour))
+            };
+
+        session.request_object_properties(&selection, now)?;
+        let (to_root, to_neighbour) = split(&mut session)?;
+        let root_ids: Vec<u32> = to_root
+            .iter()
+            .filter_map(|m| match m {
+                AnyMessage::ObjectSelect(select) => {
+                    Some(select.object_data.iter().map(|o| o.object_local_id))
+                }
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        let neighbour_ids: Vec<u32> = to_neighbour
+            .iter()
+            .filter_map(|m| match m {
+                AnyMessage::ObjectSelect(select) => {
+                    Some(select.object_data.iter().map(|o| o.object_local_id))
+                }
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        assert_eq!(root_ids, vec![21, 22]);
+        assert_eq!(neighbour_ids, vec![700]);
+
+        session.deselect_objects(&selection, now)?;
+        let (to_root, to_neighbour) = split(&mut session)?;
+        assert!(
+            to_root
+                .iter()
+                .any(|m| matches!(m, AnyMessage::ObjectDeselect(_))),
+            "expected an ObjectDeselect to the root region, got {to_root:?}"
+        );
+        assert!(
+            to_neighbour
+                .iter()
+                .any(|m| matches!(m, AnyMessage::ObjectDeselect(_))),
+            "expected an ObjectDeselect to the neighbour, got {to_neighbour:?}"
+        );
+
+        // Taking into inventory has to stay within one region.
+        let taken = session.derez_objects(
+            &selection,
+            DeRezDestination::TakeIntoAgentInventory(InventoryFolderKey::from(
+                uuid::Uuid::from_u128(0xF0_1DE2),
+            )),
+            TransactionId::from(uuid::Uuid::from_u128(0x7)),
+            None,
+            now,
+        );
+        assert!(
+            matches!(taken, Err(sl_proto::Error::MixedCircuits)),
+            "a derez across regions must be refused, got {taken:?}"
+        );
+
+        // A stale id fails the batch before any region is sent anything.
+        let stale = [
+            ScopedObjectId::new(root, RegionLocalObjectId(21)),
+            ScopedObjectId::new(sl_proto::CircuitId::new(9_999), RegionLocalObjectId(1)),
+        ];
+        let outcome = session.request_object_properties(&stale, now);
+        assert!(
+            matches!(outcome, Err(sl_proto::Error::UnknownCircuit)),
+            "a stale id must fail the batch, got {outcome:?}"
+        );
+        let (to_root, to_neighbour) = split(&mut session)?;
+        assert!(
+            !to_root
+                .iter()
+                .chain(&to_neighbour)
+                .any(|m| matches!(m, AnyMessage::ObjectSelect(_))),
+            "nothing may be sent for a batch with a stale id"
+        );
+        Ok(())
+    }
+
+    /// An object-addressed **capability** request (`GetObjectCost` here) is
+    /// split by region like the UDP requests above: the root region's objects
+    /// go to the root map, a neighbour's to the neighbour's own map — which is
+    /// waited for while its seed fetch is in flight, and whose absence,
+    /// failure or lack of the capability is reported rather than sent to the
+    /// root simulator, which does not know the object.
+    #[test]
+    fn neighbour_object_capability_requests_use_its_own_map() -> Result<(), TestError> {
+        use sl_proto::{
+            CAP_GET_OBJECT_COST, CapRequest, CapRoute, Command, NEIGHBOUR_CAPS_WAIT, NeighbourCaps,
+            ObjectCapsCommand, ObjectRegion, Unroutable, UnroutableReason,
+        };
+
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        enable_neighbour_b(&mut session, 9, now)?;
+        drain(&mut session)?;
+        let pos = Vector {
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+        };
+        let root_object = ObjectKey::from(uuid::Uuid::from_u128(0xCAFE));
+        let root_update = object_update(600, 0xCAFE, pos.clone());
+        session.handle_datagram(sim_addr(), &server_message(&root_update, 20, true)?, now)?;
+        let neighbour_object = ObjectKey::from(uuid::Uuid::from_u128(0xBEEF));
+        let update = object_update_in(NB_REGION, 700, 0xBEEF, pos);
+        session.handle_datagram(sim_b(), &server_message(&update, 3, true)?, now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        assert_eq!(session.object_region(root_object), ObjectRegion::Root);
+        assert_eq!(
+            session.object_region(neighbour_object),
+            ObjectRegion::Neighbour(sim_b())
+        );
+        assert!(session.has_neighbour(sim_b()));
+        let stranger = ObjectKey::from(uuid::Uuid::from_u128(0xF00D));
+        assert_eq!(session.object_region(stranger), ObjectRegion::Root);
+
+        let command = Command::RequestObjectCost {
+            object_ids: vec![root_object, neighbour_object],
+        };
+        let request = ObjectCapsCommand::of(&command).ok_or("not an object capability")?;
+        let root_caps = HashMap::from([(
+            CAP_GET_OBJECT_COST.to_owned(),
+            "https://root.example/cost".to_owned(),
+        )]);
+        let root_part = CapRequest {
+            url: "https://root.example/cost".to_owned(),
+            objects: vec![root_object],
+        };
+
+        // No seed yet, then a fetch in flight: wait, and park.
+        let mut caps = NeighbourCaps::default();
+        assert_eq!(
+            caps.route(&session, &root_caps, request, now, now),
+            CapRoute::Wait
+        );
+        caps.fetch_started(sim_b());
+        assert_eq!(
+            caps.route(&session, &root_caps, request, now, now),
+            CapRoute::Wait
+        );
+        caps.park(command.clone(), now);
+        assert!(caps.has_parked());
+        let parked = caps.take_parked();
+        assert!(!caps.has_parked());
+        assert!(
+            matches!(
+                parked.as_slice(),
+                [(Command::RequestObjectCost { object_ids }, since)]
+                    if object_ids == &vec![root_object, neighbour_object] && *since == now
+            ),
+            "expected the parked request back with its first-routed time, got {parked:?}"
+        );
+
+        // A wait that runs out gives the neighbour's part up, but still asks the
+        // root about its own.
+        let later = now + NEIGHBOUR_CAPS_WAIT;
+        assert_eq!(
+            caps.route(&session, &root_caps, request, now, later),
+            CapRoute::Ready {
+                requests: vec![root_part.clone()],
+                unroutable: vec![Unroutable {
+                    sim: sim_b(),
+                    objects: vec![neighbour_object],
+                    reason: UnroutableReason::TimedOut,
+                }],
+            }
+        );
+
+        // The neighbour's map arrives: each part goes to its own region.
+        caps.fetched(
+            sim_b(),
+            Ok(HashMap::from([(
+                CAP_GET_OBJECT_COST.to_owned(),
+                "https://neighbour.example/cost".to_owned(),
+            )])),
+        );
+        assert_eq!(
+            caps.route(&session, &root_caps, request, now, now),
+            CapRoute::Ready {
+                requests: vec![
+                    root_part.clone(),
+                    CapRequest {
+                        url: "https://neighbour.example/cost".to_owned(),
+                        objects: vec![neighbour_object],
+                    },
+                ],
+                unroutable: Vec::new(),
+            }
+        );
+        // Pruning keeps a neighbour whose circuit is still up.
+        caps.prune(&session);
+        assert!(matches!(
+            caps.route(&session, &root_caps, request, now, now),
+            CapRoute::Ready { ref unroutable, .. } if unroutable.is_empty()
+        ));
+
+        // A map without the capability, or a failed fetch, is reported.
+        caps.fetched(sim_b(), Ok(HashMap::new()));
+        assert_eq!(
+            caps.route(&session, &root_caps, request, now, now),
+            CapRoute::Ready {
+                requests: vec![root_part.clone()],
+                unroutable: vec![Unroutable {
+                    sim: sim_b(),
+                    objects: vec![neighbour_object],
+                    reason: UnroutableReason::CapNotAdvertised,
+                }],
+            }
+        );
+        caps.fetched(sim_b(), Err("refused".to_owned()));
+        assert_eq!(
+            caps.route(&session, &root_caps, request, now, now),
+            CapRoute::Ready {
+                requests: vec![root_part],
+                unroutable: vec![Unroutable {
+                    sim: sim_b(),
+                    objects: vec![neighbour_object],
+                    reason: UnroutableReason::FetchFailed("refused".to_owned()),
+                }],
+            }
+        );
+        Ok(())
+    }
+
     #[test]
     fn rez_object_sends_object_add() -> Result<(), TestError> {
         let now = Instant::now();
