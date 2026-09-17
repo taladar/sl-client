@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 315 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 6 |
-| done | 1179 |
+| bugs | 5 |
+| done | 1180 |
 | deferred | 27 |
 | wont-do | 16 |
 | **total** | **1706** |
@@ -1167,7 +1167,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (6)
+## bugs (5)
 
 ### protocol
 
@@ -1184,10 +1184,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Own avatar looks broken after a teleport
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
-- [`viewer-texture-rotation-offset-t-in-flipped-uv-space`](bugs/viewer-texture-rotation-offset-t-in-flipped-uv-space.md)
-  — A rotated face texture turns the wrong way (upside down at 90°)
 
-## done (1179)
+## done (1180)
 
 ### protocol
 
@@ -2859,6 +2857,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-texture-picker-inventory-tree`](done/viewer-texture-picker-inventory-tree.md)
   — Texture picker — inventory folder tree navigation (blocked by
   `viewer-ui-texture-picker` (done))
+- [`viewer-texture-rotation-offset-t-in-flipped-uv-space`](done/viewer-texture-rotation-offset-t-in-flipped-uv-space.md)
+  — A rotated face texture turns the wrong way (upside down at 90°)
 - [`viewer-texture-stuck-low-lod`](done/viewer-texture-stuck-low-lod.md) — A
   texture can stay stuck at a low-res prefix and never upgrade to a finer level
   that exists

@@ -61,7 +61,7 @@ pub fn to_bevy_image(decoded: &DecodedImage) -> Image {
 /// [`Affine2`], ready to drop into a `StandardMaterial`'s `uv_transform` (which
 /// the PBR shader applies to `ATTRIBUTE_UV_0` before sampling).
 ///
-/// This is a faithful port of the reference viewer's `xform`
+/// The placement itself is the reference viewer's `xform`
 /// (`indra/newview/llface.cpp`), which maps each texture coordinate about the
 /// **centre of the face** `(0.5, 0.5)`: recentre, rotate by the face rotation,
 /// scale by the repeats (`scale_s` / `scale_t`), then offset (`offset_s` /
@@ -69,15 +69,23 @@ pub fn to_bevy_image(decoded: &DecodedImage) -> Image {
 /// spins it about the face centre; an offset slides it. The identity face
 /// (unit repeats, zero offset/rotation) yields [`Affine2::IDENTITY`].
 ///
-/// The transform is expressed directly as the affine that reproduces `xform`:
+/// `xform` works in Second Life's **bottom-up** texture space, but this affine
+/// acts on this viewer's **flipped** coordinates: every mesh stores `(s, 1 − t)`
+/// in `ATTRIBUTE_UV_0` and samples a top-down image, whose row `1 − t` is the
+/// reference's row `t`. So with `F(u, v) = (u, 1 − v)` the affine is `F ∘ xform
+/// ∘ F`, not `xform`. Written out:
 ///
 /// ```text
-/// s' = (ms·cos)·s + (ms·sin)·t + (offset_s + 0.5 − 0.5·ms·(cos + sin))
-/// t' = (−mt·sin)·s + (mt·cos)·t + (offset_t + 0.5 + 0.5·mt·(sin − cos))
+/// u' = (ms·cos)·u − (ms·sin)·v + (offset_s + 0.5 + 0.5·ms·(sin − cos))
+/// v' = (mt·sin)·u + (mt·cos)·v + (0.5 − offset_t − 0.5·mt·(sin + cos))
 /// ```
 ///
 /// where `ms = scale_s`, `mt = scale_t`, and `cos` / `sin` are of
-/// [`rotation`](TextureFace::rotation).
+/// [`rotation`](TextureFace::rotation). Against `xform` itself the rotation
+/// terms change sign and so does `offset_t`, which is why applying `xform`
+/// directly turned a rotated texture the wrong way (upside down at a quarter
+/// turn) and slid an offset one the wrong way, while unrotated, unoffset
+/// content — nearly everything — looked right.
 #[must_use]
 pub fn texture_face_uv_transform(face: &TextureFace) -> Affine2 {
     texture_uv_transform(
@@ -106,15 +114,15 @@ pub fn texture_uv_transform(
 ) -> Affine2 {
     let (sin, cos) = rotation.sin_cos();
     let (ms, mt) = (scale_s, scale_t);
-    // Columns of the linear part (glam `Mat2` is column-major): the `s` column
-    // is the response to the input `s`, the `t` column to the input `t`.
+    // Columns of the linear part (glam `Mat2` is column-major): the `u` column
+    // is the response to the input `u`, the `v` column to the input `v`.
     let matrix2 = Mat2::from_cols(
-        Vec2::new(ms * cos, -mt * sin),
-        Vec2::new(ms * sin, mt * cos),
+        Vec2::new(ms * cos, mt * sin),
+        Vec2::new(-ms * sin, mt * cos),
     );
     let translation = Vec2::new(
-        offset_s + 0.5 - 0.5 * ms * (cos + sin),
-        offset_t + 0.5 + 0.5 * mt * (sin - cos),
+        offset_s + 0.5 + 0.5 * ms * (sin - cos),
+        0.5 - offset_t - 0.5 * mt * (sin + cos),
     );
     Affine2 {
         matrix2,
@@ -384,38 +392,97 @@ mod tests {
         );
     }
 
-    /// A pure offset slides every UV by the same amount.
+    /// The reference viewer's `xform` (`llface.cpp`), verbatim, in Second
+    /// Life's bottom-up texture space.
+    fn reference_xform(st: Vec2, rotation: f32, offset: Vec2, scale: Vec2) -> Vec2 {
+        let (cos_ang, sin_ang) = (rotation.cos(), rotation.sin());
+        let mut s = st.x - 0.5;
+        let mut t = st.y - 0.5;
+        let temp = s;
+        s = s * cos_ang + t * sin_ang;
+        t = -temp * sin_ang + t * cos_ang;
+        s *= scale.x;
+        t *= scale.y;
+        Vec2::new(s + offset.x + 0.5, t + offset.y + 0.5)
+    }
+
+    /// This viewer's flip between Second Life's bottom-up texture space and the
+    /// top-down one its meshes store and its images are sampled in.
+    fn flip_v(uv: Vec2) -> Vec2 {
+        Vec2::new(uv.x, 1.0 - uv.y)
+    }
+
+    /// The transform samples exactly the texel the reference does: applied to a
+    /// mesh's flipped coordinate it lands on the flip of the reference `xform`
+    /// of the unflipped one — for rotations both ways, both offsets, uneven
+    /// repeats and all of them together.
     #[test]
-    fn offset_translates_every_uv() {
+    fn matches_the_reference_xform_through_the_v_flip() {
+        let placements = [
+            (core::f32::consts::FRAC_PI_2, Vec2::ZERO, Vec2::ONE),
+            (-0.7, Vec2::ZERO, Vec2::ONE),
+            (0.0, Vec2::new(0.25, 0.0), Vec2::ONE),
+            (0.0, Vec2::new(0.0, 0.25), Vec2::ONE),
+            (0.0, Vec2::ZERO, Vec2::new(-1.0, -1.0)),
+            (1.2, Vec2::new(-0.3, 0.4), Vec2::new(2.0, 0.5)),
+        ];
+        let points = [
+            Vec2::new(0.0, 0.0),
+            Vec2::new(1.0, 0.0),
+            Vec2::new(0.25, 0.9),
+            Vec2::new(0.5, 0.5),
+        ];
+        for (rotation, offset, scale) in placements {
+            let mut face = TextureFace::new(TextureKey::from(Uuid::nil()));
+            face.rotation = rotation;
+            face.offset_s = offset.x;
+            face.offset_t = offset.y;
+            face.scale_s = scale.x;
+            face.scale_t = scale.y;
+            let transform = texture_face_uv_transform(&face);
+            for st in points {
+                let sampled = transform.transform_point2(flip_v(st));
+                let expected = flip_v(reference_xform(st, rotation, offset, scale));
+                assert!(
+                    sampled.abs_diff_eq(expected, 1.0e-5),
+                    "placement {rotation} {offset} {scale} at {st}: {sampled} != {expected}"
+                );
+            }
+        }
+    }
+
+    /// The `sl-crosscheck` capture that confirmed the bug, as numbers: at a
+    /// quarter turn the face's bottom-left corner shows the image's **top-left**
+    /// (the top-down image's `(0, 0)`, red in the catalogue's quadrant texture),
+    /// as Firestorm drew it. The unflipped `xform` showed the bottom-right
+    /// there (yellow): the texture turned the other way.
+    #[test]
+    fn a_quarter_turn_turns_the_way_the_reference_does() {
+        let mut face = TextureFace::new(TextureKey::from(Uuid::nil()));
+        face.rotation = core::f32::consts::FRAC_PI_2;
+        let transform = texture_face_uv_transform(&face);
+        // The mesh's bottom-left corner is `(0, 1)` in the flipped space.
+        assert!(
+            transform
+                .transform_point2(Vec2::new(0.0, 1.0))
+                .abs_diff_eq(Vec2::new(0.0, 0.0), 1.0e-6),
+            "{}",
+            transform.transform_point2(Vec2::new(0.0, 1.0))
+        );
+    }
+
+    /// A positive `offset_t` slides the image the same way as the reference —
+    /// towards the top of the image, which is `−v` here.
+    #[test]
+    fn offset_t_slides_towards_the_top_of_the_image() {
         let mut face = TextureFace::new(TextureKey::from(Uuid::nil()));
         face.offset_s = 0.25;
-        face.offset_t = -0.1;
+        face.offset_t = 0.1;
         let transform = texture_face_uv_transform(&face);
         assert!(
             transform
                 .transform_point2(Vec2::new(0.3, 0.7))
                 .abs_diff_eq(Vec2::new(0.55, 0.6), 1.0e-6)
-        );
-    }
-
-    /// A quarter-turn rotation spins the texture about the face centre, leaving
-    /// the centre fixed and swapping the axes at a corner.
-    #[test]
-    fn rotation_spins_about_the_face_centre() {
-        let mut face = TextureFace::new(TextureKey::from(Uuid::nil()));
-        face.rotation = core::f32::consts::FRAC_PI_2;
-        let transform = texture_face_uv_transform(&face);
-        assert!(
-            transform
-                .transform_point2(Vec2::new(0.5, 0.5))
-                .abs_diff_eq(Vec2::new(0.5, 0.5), 1.0e-6)
-        );
-        // Firestorm's `xform` at 90°: s' = t (about the centre), t' = -s.
-        // A point 0.5 above the centre (0.5, 1.0) rotates to 0.5 right (1.0, 0.5).
-        assert!(
-            transform
-                .transform_point2(Vec2::new(0.5, 1.0))
-                .abs_diff_eq(Vec2::new(1.0, 0.5), 1.0e-6)
         );
     }
 

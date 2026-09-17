@@ -463,6 +463,39 @@ mod tests {
         Ok(())
     }
 
+    /// A flip-book's first frame shows the sprite sheet's **top-left** cell,
+    /// as the reference's does: the whole face, in the mesh's flipped
+    /// coordinates, samples the top-down image's `[0, 0.5]²`. Before the
+    /// placement was conjugated by the v flip it sampled the bottom-left cell,
+    /// and stepped rows upwards.
+    #[test]
+    fn a_flipbook_starts_at_the_top_left_cell_of_the_image() -> Result<(), String> {
+        use texture_anim_mode::{LOOP, ON};
+        let anim = flipbook(ON | LOOP, 2, 2, 1.0);
+        let face = sl_client_bevy::TextureFace::new(sl_client_bevy::TextureKey::from(
+            sl_client_bevy::Uuid::nil(),
+        ));
+        let cell = |elapsed: f32| -> Result<(Vec2, Vec2), String> {
+            let transform = placement_at(&anim, elapsed)?.uv_transform(&face);
+            let a = transform.transform_point2(Vec2::ZERO);
+            let b = transform.transform_point2(Vec2::ONE);
+            Ok((a.min(b), a.max(b)))
+        };
+        let (low, high) = cell(0.0)?;
+        assert!(
+            low.abs_diff_eq(Vec2::ZERO, 1e-5) && high.abs_diff_eq(Vec2::splat(0.5), 1e-5),
+            "frame 0 samples {low}..{high}"
+        );
+        // Frame 2 is the next row down the image.
+        let (low, high) = cell(2.0)?;
+        assert!(
+            low.abs_diff_eq(Vec2::new(0.0, 0.5), 1e-5)
+                && high.abs_diff_eq(Vec2::new(0.5, 1.0), 1e-5),
+            "frame 2 samples {low}..{high}"
+        );
+        Ok(())
+    }
+
     /// A non-looping animation clamps to its last frame rather than wrapping.
     #[test]
     fn non_loop_clamps_to_the_last_frame() -> Result<(), String> {

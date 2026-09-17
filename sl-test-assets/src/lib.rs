@@ -115,6 +115,23 @@ impl RgbaImage {
         })
     }
 
+    /// A `size`×`size` image split into four equal quadrants, coloured
+    /// `[top_left, top_right, bottom_left, bottom_right]` (row 0 is the top).
+    ///
+    /// Unlike [`checker`](Self::checker) it looks different rotated, mirrored or
+    /// shifted, so a capture can tell which way a texture placement turned it.
+    #[must_use]
+    pub fn quadrants(size: u32, colors: [[u8; 4]; 4]) -> Self {
+        let half = size / 2;
+        let [top_left, top_right, bottom_left, bottom_right] = colors;
+        Self::painted(size, |x, y| match (x < half, y < half) {
+            (true, true) => top_left,
+            (false, true) => top_right,
+            (true, false) => bottom_left,
+            (false, false) => bottom_right,
+        })
+    }
+
     /// A `size`×`size` horizontal gradient from `from` at the left edge to `to`
     /// at the right edge.
     #[must_use]

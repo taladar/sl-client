@@ -164,9 +164,11 @@ fn sl_uv(m: vec4<f32>, t: vec2<f32>, uv: vec2<f32>) -> vec2<f32> {
     return mat2x2<f32>(m.xy, m.zw) * uv + t;
 }
 
-// The face texture-placement transform (a port of `texture_uv_transform` /
-// `LLFace::xform`): map `uv` about the face centre (0.5, 0.5) by rotation, repeats
-// (scale_s/scale_t), then offset. See sl_client_bevy::texture_uv_transform.
+// The face texture-placement transform (a port of `texture_uv_transform`): the
+// reference `LLFace::xform` — map about the face centre (0.5, 0.5) by rotation,
+// repeats (scale_s/scale_t), then offset — conjugated by this viewer's v flip,
+// since `uv` is the mesh's flipped (s, 1 - t) sampling a top-down image. See
+// sl_client_bevy::texture_uv_transform.
 fn sl_texture_uv_transform(
     rotation: f32, offset_s: f32, offset_t: f32, scale_s: f32, scale_t: f32, uv: vec2<f32>,
 ) -> vec2<f32> {
@@ -174,11 +176,11 @@ fn sl_texture_uv_transform(
     let c = cos(rotation);
     let ms = scale_s;
     let mt = scale_t;
-    // Columns of the linear part: s-column (ms*c, -mt*s), t-column (ms*s, mt*c).
-    let m = mat2x2<f32>(ms * c, -mt * s, ms * s, mt * c);
+    // Columns of the linear part: u-column (ms*c, mt*s), v-column (-ms*s, mt*c).
+    let m = mat2x2<f32>(ms * c, mt * s, -ms * s, mt * c);
     let t = vec2<f32>(
-        offset_s + 0.5 - 0.5 * ms * (c + s),
-        offset_t + 0.5 + 0.5 * mt * (s - c),
+        offset_s + 0.5 + 0.5 * ms * (s - c),
+        0.5 - offset_t - 0.5 * mt * (s + c),
     );
     return m * uv + t;
 }

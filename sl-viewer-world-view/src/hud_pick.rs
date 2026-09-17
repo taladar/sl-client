@@ -379,6 +379,41 @@ mod tests {
         assert!((info.uv[1] - info.st[1]).abs() < 1e-6, "{:?}", info.uv);
     }
 
+    /// A rotated, offset placement reports the UV the reference does — its
+    /// `xform` (`llface.cpp`) of ST in Second Life space, which is what a script
+    /// reads as `llDetectedTouchUV`. The placement acts on this viewer's flipped
+    /// coordinates, so a UV built from the unflipped `xform` came out turned
+    /// and slid the wrong way.
+    #[test]
+    fn uv_is_the_reference_xform_of_st() {
+        let object = GlobalTransform::IDENTITY;
+        let mut face =
+            TextureFace::new(sl_client_bevy::TextureKey::from(sl_client_bevy::Uuid::nil()));
+        face.rotation = core::f32::consts::FRAC_PI_2;
+        face.offset_s = 0.1;
+        face.offset_t = 0.25;
+        let info = surface_info_from_hit(
+            &hit(Vec3::ZERO, Vec3::Z, Some(Vec2::new(0.2, 0.3))),
+            Some(PrimFaceId::new(0)),
+            Some(&face),
+            &object,
+        );
+        // The reference `xform` at a quarter turn: about the centre,
+        // s' = t and t' = -s, then offset.
+        let (s, t) = (info.st[0] - 0.5, info.st[1] - 0.5);
+        let expected = [t + 0.5 + 0.1, -s + 0.5 + 0.25];
+        assert!(
+            (info.uv[0] - expected[0]).abs() < 1e-5,
+            "{:?} vs {expected:?}",
+            info.uv
+        );
+        assert!(
+            (info.uv[1] - expected[1]).abs() < 1e-5,
+            "{:?} vs {expected:?}",
+            info.uv
+        );
+    }
+
     /// A doubled texture repeat tiles the sampled coordinate: UV moves twice as
     /// far from the face centre as ST does.
     #[test]

@@ -115,6 +115,37 @@ with no async runtime — build a `TextureStore` over it and drive `get`/`reques
 by `block_on`-ing on a task/thread (the decode still runs off-thread on the
 store's `rayon` pool). The store surface is re-exported from `sl-client-bevy`.
 
+## Texture placement, and the flip that goes with it
+
+A face does not simply show its texture: its texture entry carries **repeats**
+(`scale_s` / `scale_t`), an **offset** and a **rotation**, which the reference
+viewer applies to every texture coordinate in `xform` (`llface.cpp`) — recentre
+on `(0.5, 0.5)`, rotate, scale, offset, un-recentre. `texture_uv_transform`
+(`sl-client-bevy`) builds the same placement as a Bevy `Affine2`, and the same
+maths is in `face_material.wgsl` for the GPU texture-animation path.
+
+The catch is which space it acts in. The reference works in Second Life's
+**bottom-up** texture space, where row `t = 0` is the bottom of the image,
+because it flips the decoded rows on upload. This viewer keeps images
+**top-down** and flips the *coordinates* instead: every mesh stores `(s, 1 − t)`
+in `ATTRIBUTE_UV_0`. Sampling the same texel therefore needs the placement
+conjugated by that flip, `F ∘ xform ∘ F` with `F(u, v) = (u, 1 − v)`, not
+`xform` itself. Against `xform` the rotation terms change sign and so does
+`offset_t`.
+
+This is easy to get wrong and hard to notice: the identity placement, plain
+repeats and `offset_s` are all unaffected, which is nearly all content. Only a
+**rotated** or vertically **offset** face shows it — a quarter turn comes out
+180° from the reference, which reads as "upside down", and a sprite-sheet
+flip-book starts on the bottom row and steps upwards. The catalogue scene's
+`placement-identity` / `placement-rotated` / `placement-offset-t` prims wear a
+four-quadrant texture for exactly this comparison, since a checker looks the
+same whichever way it is turned.
+
+The same placement is what a touch reports as its UV (`llDetectedTouchUV`,
+`surface_info_from_hit`), which stays in Second Life's space: the flip applies
+on the way in and again on the way out.
+
 ---
 
 The store, decode, cache, and scheduler live in the `sl-texture` crate; the

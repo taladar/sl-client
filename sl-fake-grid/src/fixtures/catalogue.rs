@@ -149,6 +149,21 @@ pub const SOUND_GAIN: f32 = 1.0;
 /// wants its own prim with a small one.
 pub const SOUND_RADIUS_METRES: f32 = 100.0;
 
+/// The four-quadrant texture the `placement-*` prims wear:
+/// [`sl_test_assets::RgbaImage::quadrants`] with red top left, green top right,
+/// blue bottom left and yellow bottom right. It is not symmetric the way the
+/// checker is, so a turned, mirrored or shifted placement shows which way it
+/// went.
+pub const QUADRANT_TEXTURE: TextureKey = texture_key(0xCA7_000E);
+
+/// The texture rotation the `placement-rotated` prim's faces carry: a quarter
+/// turn, the smallest rotation whose direction a capture can read.
+pub const PLACEMENT_ROTATION: f32 = std::f32::consts::FRAC_PI_2;
+
+/// The vertical texture offset the `placement-offset-t` prim's faces carry: a
+/// quarter of the texture, so the quadrant boundary moves visibly up or down.
+pub const PLACEMENT_OFFSET_T: f32 = 0.25;
+
 /// The catalogue NPC's agent id.
 pub const NPC_AGENT: uuid::Uuid = uuid::Uuid::from_u128(0xCA7_0100);
 
@@ -280,7 +295,7 @@ fn slot_offset(local_id: RegionLocalObjectId) -> f32 {
 /// The names of the catalogue's prims, in the order they stand in the row.
 /// The index into this list is the prim's offset from the first catalogue
 /// local id, so the row order and the id order are the same thing.
-pub const NAMES: [&str; 19] = [
+pub const NAMES: [&str; 22] = [
     "plain-box",
     "checker-box",
     "sphere",
@@ -300,6 +315,9 @@ pub const NAMES: [&str; 19] = [
     "rigged-mesh",
     "animesh-cylinder",
     "sound-box",
+    "placement-identity",
+    "placement-rotated",
+    "placement-offset-t",
 ];
 
 /// Every catalogue entry, in row order.
@@ -578,6 +596,24 @@ fn objects(owner: AgentKey) -> Vec<sl_proto::Object> {
                     .looping_sound(AssetKey::from(SOUND_CLIP), SOUND_GAIN, SOUND_RADIUS_METRES)
                     .build(),
             ),
+            // The quadrant texture three ways: as authored, turned a quarter
+            // turn, and slid a quarter up — the placement a viewer applies on
+            // top of the face's own texture coordinates.
+            "placement-identity" => objects.push(placement_box(prim, &FaceStyle::default())),
+            "placement-rotated" => objects.push(placement_box(
+                prim,
+                &FaceStyle {
+                    rotation: PLACEMENT_ROTATION,
+                    ..FaceStyle::default()
+                },
+            )),
+            "placement-offset-t" => objects.push(placement_box(
+                prim,
+                &FaceStyle {
+                    offset: [0.0, PLACEMENT_OFFSET_T],
+                    ..FaceStyle::default()
+                },
+            )),
             _unknown => objects.push(prim.build()),
         }
     }
@@ -773,6 +809,16 @@ const fn unit() -> Vector {
     }
 }
 
+/// A box wearing [`QUADRANT_TEXTURE`] on every face with the placement in
+/// `style` (its texture is always the quadrant one).
+fn placement_box(prim: PrimFixture, style: &FaceStyle) -> sl_proto::Object {
+    prim.faces(&FaceStyle {
+        texture: Some(QUADRANT_TEXTURE),
+        ..style.clone()
+    })
+    .build()
+}
+
 /// The four-coloured box: one marker colour per face, the fifth glowing and
 /// the sixth half transparent, so a single prim exercises tint, glow,
 /// full-bright and alpha at once.
@@ -956,6 +1002,18 @@ fn assets() -> InMemoryAssetSource {
     );
     register(&mut assets, AssetKey::from(CHECKER_TEXTURE.uuid()), || {
         checker.j2c()
+    });
+    let quadrants = sl_test_assets::RgbaImage::quadrants(
+        TEXTURE_SIZE,
+        [
+            sl_test_assets::markers::RED,
+            sl_test_assets::markers::GREEN,
+            sl_test_assets::markers::BLUE,
+            sl_test_assets::markers::YELLOW,
+        ],
+    );
+    register(&mut assets, AssetKey::from(QUADRANT_TEXTURE.uuid()), || {
+        quadrants.j2c()
     });
     let sculpt = sl_test_assets::sculpt_sphere(SCULPT_MAP_SIZE);
     register(&mut assets, AssetKey::from(SCULPT_MAP.uuid()), || {
