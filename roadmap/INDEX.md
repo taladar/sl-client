@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 315 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 7 |
-| done | 1177 |
+| bugs | 6 |
+| done | 1178 |
 | deferred | 27 |
 | wont-do | 16 |
 | **total** | **1705** |
@@ -1167,7 +1167,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (7)
+## bugs (6)
 
 ### viewer
 
@@ -1175,8 +1175,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Some worn mesh hair does not render (visible in Firestorm)
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
-- [`viewer-objectupdate-truncated-block-drops-message`](bugs/viewer-objectupdate-truncated-block-drops-message.md)
-  — An ObjectUpdate from aditi fails to decode and every object in it is dropped
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
   — Own avatar looks broken after a teleport
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
@@ -1187,7 +1185,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-texture-rotation-offset-t-in-flipped-uv-space`](bugs/viewer-texture-rotation-offset-t-in-flipped-uv-space.md)
   — A rotated face texture turns the wrong way (upside down at 90°)
 
-## done (1177)
+## done (1178)
 
 ### protocol
 
@@ -2185,6 +2183,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-object-selection-core`](done/viewer-object-selection-core.md) —
   Object selection core (select set + protocol) (blocked by
   `viewer-ui-widget-scaffold` (done))
+- [`viewer-objectupdate-truncated-block-drops-message`](done/viewer-objectupdate-truncated-block-drops-message.md)
+  — An ObjectUpdate from aditi fails to decode and every object in it is dropped
 - [`viewer-ocean-covers-lower-region-water`](done/viewer-ocean-covers-lower-region-water.md)
   — The endless ocean is drawn through every region, so a lower sea level is
   hidden under it

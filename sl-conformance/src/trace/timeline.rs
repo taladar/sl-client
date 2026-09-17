@@ -8,8 +8,8 @@ use std::net::{AddrParseError, IpAddr, SocketAddr};
 use std::str::FromStr;
 
 use sl_wire::{
-    AnyMessage, MessageId, PacketFlags, ParsedDatagram, Reader, WireError, message_name,
-    parse_datagram, zero_decode,
+    AnyMessage, MessageId, PacketFlags, ParsedDatagram, Reader, WireError, ends_in_zero_run,
+    message_name, parse_datagram, zero_decode,
 };
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -354,7 +354,13 @@ fn decode(payload: &[u8]) -> Decoded {
     };
 
     let (name, message_result) = {
-        let mut reader = Reader::new(&decoded_body);
+        // Read the way the session does: a zero-coded body ending in a zero run
+        // may decode short, and its missing tail reads as zeros.
+        let mut reader = if zerocoded && ends_in_zero_run(parsed.body) {
+            Reader::with_zero_tail(&decoded_body)
+        } else {
+            Reader::new(&decoded_body)
+        };
         match MessageId::decode(&mut reader) {
             Ok(id) => (message_name(id), AnyMessage::decode(id, &mut reader)),
             Err(error) => (None, Err(error)),

@@ -38,6 +38,24 @@ pub fn decode(body: &[u8]) -> Result<Vec<u8>, WireError> {
     Ok(out)
 }
 
+/// Whether zero-coded `encoded` bytes end with a run of zeros (a final
+/// `0x00 count` pair).
+///
+/// In a well-formed zero-coded stream every `0x00` byte is a run marker —
+/// literal bytes and counts are never zero — so the pair is recognised from the
+/// last two bytes alone.
+///
+/// This is the shape of Second Life's short messages: its simulators encode a
+/// message's final run of zeros short (usually by one byte), so a message that
+/// ends in one decodes to fewer bytes than its template needs. A decoder reads
+/// such a body with [`Reader::with_zero_tail`](crate::Reader::with_zero_tail),
+/// as the reference viewer does; anything else that runs short is still an
+/// error.
+#[must_use]
+pub const fn ends_in_zero_run(encoded: &[u8]) -> bool {
+    matches!(encoded, [.., ZERO_MARKER, count] if *count != ZERO_MARKER)
+}
+
 /// Compresses `body` bytes by zero-run-length coding.
 ///
 /// This is the exact inverse of [`decode`]: runs of zero bytes longer than 255

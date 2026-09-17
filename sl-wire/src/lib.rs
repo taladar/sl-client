@@ -247,7 +247,7 @@ pub use xfer::{
     XFER_CHUNK_SIZE, XFER_EOF_FLAG, XferChunk, XferOutgoingPacket, XferPacketId, decode_xfer_chunk,
     encode_xfer_chunk, next_xfer_chunk,
 };
-pub use zerocode::{decode as zero_decode, encode as zero_encode};
+pub use zerocode::{decode as zero_decode, encode as zero_encode, ends_in_zero_run};
 
 /// Combines two UUIDs the way Second Life derives a legacy upload's asset id:
 /// `MD5(a's 16 bytes ++ b's 16 bytes)` (LL's `LLUUID::combine` /
@@ -276,12 +276,12 @@ mod test {
         build_object_media_update_request, build_update_avatar_appearance_request,
         build_update_item_asset_request, build_update_script_agent_request,
         build_update_script_task_request, build_update_task_item_asset_request, combine_uuids,
-        encode_datagram, message_name, parse_asset_upload_response, parse_datagram, parse_llsd_xml,
-        parse_new_file_agent_inventory_request, parse_object_media_navigate_request,
-        parse_object_media_request, parse_update_avatar_appearance_request,
-        parse_update_item_asset_request, parse_update_script_agent_request,
-        parse_update_script_task_request, parse_update_task_item_asset_request, zero_decode,
-        zero_encode,
+        encode_datagram, ends_in_zero_run, message_name, parse_asset_upload_response,
+        parse_datagram, parse_llsd_xml, parse_new_file_agent_inventory_request,
+        parse_object_media_navigate_request, parse_object_media_request,
+        parse_update_avatar_appearance_request, parse_update_item_asset_request,
+        parse_update_script_agent_request, parse_update_script_task_request,
+        parse_update_task_item_asset_request, zero_decode, zero_encode,
     };
 
     #[test]
@@ -353,6 +353,54 @@ mod test {
         assert!(matches!(r.u32(), Err(WireError::UnexpectedEof { .. })));
         assert_eq!(r.position(), 2);
         Ok(())
+    }
+
+    #[test]
+    fn zero_tail_reader_fills_what_is_missing_with_zeros() -> Result<(), WireError> {
+        // A `u32` with three of its four bytes, then a variable field whose
+        // declared length runs past the end, then reads wholly past the end.
+        let mut r = Reader::with_zero_tail(&[0x01, 0x02, 0x03]);
+        assert_eq!(r.u32()?, 0x0003_0201);
+        assert_eq!(r.zero_filled(), 1);
+        assert_eq!(r.variable1_owned()?, Vec::<u8>::new());
+        assert_eq!(r.f32()?.to_bits(), 0);
+        assert_eq!(r.zero_filled(), 1 + 1 + 4);
+
+        let mut r = Reader::with_zero_tail(&[0x03, 0xAA]);
+        assert_eq!(r.variable1_owned()?, vec![0xAA, 0x00, 0x00]);
+        assert_eq!(r.zero_filled(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn a_strict_reader_still_refuses_to_read_past_the_end() {
+        let mut r = Reader::new(&[0x03, 0xAA]);
+        assert!(matches!(
+            r.variable1_owned(),
+            Err(WireError::UnexpectedEof { .. })
+        ));
+        assert_eq!(r.zero_filled(), 0);
+    }
+
+    #[test]
+    fn a_missing_variable_block_count_is_zero_and_not_zero_filled() {
+        for mut r in [Reader::new(&[]), Reader::with_zero_tail(&[])] {
+            assert_eq!(r.variable_block_count(), 0);
+            assert_eq!(r.zero_filled(), 0);
+        }
+        assert_eq!(Reader::new(&[0x02]).variable_block_count(), 2);
+    }
+
+    #[test]
+    fn ends_in_zero_run_recognises_a_final_run_pair() {
+        assert!(ends_in_zero_run(&[0x05, 0x00, 0x42]));
+        assert!(ends_in_zero_run(&[0x00, 0x01]));
+        // Ends in a literal, or is too short to hold a pair.
+        assert!(!ends_in_zero_run(&[0x00, 0x03, 0x07]));
+        assert!(!ends_in_zero_run(&[0x00]));
+        assert!(!ends_in_zero_run(&[]));
+        // A dangling marker is malformed, not a run.
+        assert!(!ends_in_zero_run(&[0x07, 0x00]));
     }
 
     #[test]

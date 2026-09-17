@@ -18,13 +18,59 @@ pub struct Reader<'a> {
     buf: &'a [u8],
     /// The current read offset into `buf`.
     pos: usize,
+    /// Whether a fixed-size read (and a variable field's payload) past the end
+    /// of `buf` yields zero bytes instead of an error. See
+    /// [`Reader::with_zero_tail`].
+    zero_tail: bool,
+    /// How many bytes past the end of `buf` were read as zeros.
+    zero_filled: usize,
 }
 
 impl<'a> Reader<'a> {
     /// Creates a reader over `buf`, positioned at its start.
     #[must_use]
     pub const fn new(buf: &'a [u8]) -> Self {
-        Self { buf, pos: 0 }
+        Self {
+            buf,
+            pos: 0,
+            zero_tail: false,
+            zero_filled: 0,
+        }
+    }
+
+    /// Creates a reader over `buf` whose reads past its end yield **zero
+    /// bytes** rather than [`WireError::UnexpectedEof`].
+    ///
+    /// This is how the reference `LLTemplateMessageReader` decodes a message
+    /// that runs off the end of its packet: it logs "Ran off end of packet" and
+    /// zero-fills the field. Second Life's simulators depend on it — they send
+    /// zero-coded messages whose final run of zeros is encoded short (observed
+    /// on `ObjectUpdate`: usually an encoded body ending `00 42`, 66 zeros where
+    /// the block's trailing fields need 67, leaving its last `F32` three bytes
+    /// long; once a message came up 37 bytes short). Nothing follows that run,
+    /// so what it under-counts is zeros, and zero-filling decodes the message
+    /// just as the reference does.
+    ///
+    /// Callers enable it only where that cause applies (see
+    /// [`crate::ends_in_zero_run`]) and report
+    /// [`Reader::zero_filled`] when it is non-zero, so a message decoded this
+    /// way is never silent. [`Reader::take`] and the other slice-returning
+    /// reads stay strict: they cannot lend bytes that do not exist.
+    #[must_use]
+    pub const fn with_zero_tail(buf: &'a [u8]) -> Self {
+        Self {
+            buf,
+            pos: 0,
+            zero_tail: true,
+            zero_filled: 0,
+        }
+    }
+
+    /// How many bytes past the end of the buffer have been read as zeros (only
+    /// ever non-zero for a [`Reader::with_zero_tail`] reader).
+    #[must_use]
+    pub const fn zero_filled(&self) -> usize {
+        self.zero_filled
     }
 
     /// Returns the number of bytes not yet consumed.
@@ -94,6 +140,18 @@ impl<'a> Reader<'a> {
     ///
     /// Returns [`WireError::UnexpectedEof`] if fewer than `N` bytes remain.
     pub fn take_array<const N: usize>(&mut self) -> Result<[u8; N], WireError> {
+        if self.zero_tail && self.remaining() < N {
+            let mut array = [0u8; N];
+            let available = self.peek_rest();
+            for (slot, byte) in array.iter_mut().zip(available) {
+                *slot = *byte;
+            }
+            self.zero_filled = self
+                .zero_filled
+                .saturating_add(N.saturating_sub(available.len()));
+            self.pos = self.buf.len();
+            return Ok(array);
+        }
         let slice = self.take(N)?;
         slice
             .try_into()
@@ -101,6 +159,64 @@ impl<'a> Reader<'a> {
                 needed: N,
                 available: slice.len(),
             })
+    }
+
+    /// Reads the one-byte repeat count of a template `Variable` block, or `0`
+    /// when the data has already ended.
+    ///
+    /// A message may omit trailing `Variable` blocks entirely (OpenSim's shorter
+    /// `RegionInfo`; the reference reader calls it legal), so the missing count
+    /// is neither an error nor a [`Reader::zero_filled`] byte.
+    pub fn variable_block_count(&mut self) -> u8 {
+        if self.is_empty() {
+            return 0;
+        }
+        self.u8().unwrap_or(0)
+    }
+
+    /// Reads `len` bytes into an owned buffer, zero-filling whatever lies past
+    /// the end of the data for a [`Reader::with_zero_tail`] reader.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WireError::UnexpectedEof`] if fewer than `len` bytes remain
+    /// and the reader is not zero-tailed.
+    fn take_owned(&mut self, len: usize) -> Result<Vec<u8>, WireError> {
+        if self.zero_tail && self.remaining() < len {
+            let mut bytes = self.take_rest().to_vec();
+            self.zero_filled = self
+                .zero_filled
+                .saturating_add(len.saturating_sub(bytes.len()));
+            bytes.resize(len, 0);
+            return Ok(bytes);
+        }
+        Ok(self.take(len)?.to_vec())
+    }
+
+    /// Reads a one-byte-length-prefixed variable field into an owned buffer —
+    /// the template decoder's form of [`Reader::variable1`], which also honours
+    /// [`Reader::with_zero_tail`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WireError::UnexpectedEof`] if the prefix or payload is short
+    /// and the reader is not zero-tailed.
+    pub fn variable1_owned(&mut self) -> Result<Vec<u8>, WireError> {
+        let len = usize::from(self.u8()?);
+        self.take_owned(len)
+    }
+
+    /// Reads a two-byte-length-prefixed variable field into an owned buffer —
+    /// the template decoder's form of [`Reader::variable2`], which also honours
+    /// [`Reader::with_zero_tail`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WireError::UnexpectedEof`] if the prefix or payload is short
+    /// and the reader is not zero-tailed.
+    pub fn variable2_owned(&mut self) -> Result<Vec<u8>, WireError> {
+        let len = usize::from(self.u16()?);
+        self.take_owned(len)
     }
 
     /// Reads a `u8`.

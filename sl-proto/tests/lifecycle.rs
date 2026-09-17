@@ -170,7 +170,7 @@ mod test {
         AnyMessage, CircuitCode, HomeLocation, Llsd, LoginFailure, LoginRequest, LoginResponse,
         LoginSuccess, MessageId, PacketFlags, Reader, SequenceNumber, SkeletonFolder,
         StartLocation, WireError, Writer, XferPacketId, encode_datagram, encode_xfer_chunk,
-        parse_datagram, parse_llsd_xml,
+        parse_datagram, parse_llsd_xml, zero_encode,
     };
 
     /// A boxed test error.
@@ -16219,6 +16219,103 @@ mod test {
         extra.put_u16(param_type);
         extra.put_u32(u32::try_from(payload.len())?);
         extra.bytes(payload);
+        Ok(())
+    }
+
+    /// Builds a zero-coded `ObjectUpdate` datagram the way Second Life's
+    /// simulators send one: the body's final run of zeros encoded a byte short.
+    ///
+    /// Returns the datagram and the number of bytes it decodes short by (one).
+    fn short_zero_run_object_update(sequence: u32) -> Result<Vec<u8>, TestError> {
+        let update = object_update(100, 0xABCD, zero_vec());
+        let mut writer = Writer::new();
+        update.id().encode(&mut writer);
+        update.encode_body(&mut writer)?;
+        let mut encoded = zero_encode(&writer.into_bytes());
+        // The body ends in the zero joint vectors, so its encoding ends in a
+        // `00 count` pair; the simulator's count is one less than the run.
+        let count = encoded
+            .last_mut()
+            .ok_or("an encoded ObjectUpdate is never empty")?;
+        assert!(*count > 1, "the body must end in a run of zeros");
+        *count = count.saturating_sub(1);
+        Ok(encode_datagram(
+            PacketFlags::RELIABLE.with(PacketFlags::ZEROCODED),
+            SequenceNumber(sequence),
+            &encoded,
+        ))
+    }
+
+    /// Second Life's simulators encode a message's final run of zeros a byte
+    /// short (seen live on aditi: two `ObjectUpdate`s per login dropped whole,
+    /// "needed 4 more byte(s), had 3"). The reference reader zero-fills what is
+    /// missing, so the objects in that message must still arrive — and exactly
+    /// as encoded, since every byte the short run lost is a zero.
+    #[test]
+    fn object_update_with_a_short_trailing_zero_run_still_decodes() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        session.set_diagnostics(true);
+
+        session.handle_datagram(sim_addr(), &short_zero_run_object_update(5)?, now)?;
+
+        let diagnostics = drain_diagnostics(&mut session);
+        assert!(
+            !diagnostics
+                .iter()
+                .any(|d| matches!(d, Diagnostic::DecodeFailed { .. })),
+            "the short message decodes: {diagnostics:?}"
+        );
+        let events = drain_events(&mut session);
+        let Some(Event::ObjectAdded(object)) =
+            events.iter().find(|e| matches!(e, Event::ObjectAdded(_)))
+        else {
+            return Err(format!("expected ObjectAdded, got {events:?}").into());
+        };
+        assert_eq!(object.local_id, sl_proto::RegionLocalObjectId(100));
+        assert_eq!(object.material, 3);
+        Ok(())
+    }
+
+    /// The zero-fill is for that one shape only. A zero-coded message cut short
+    /// anywhere else — here, inside its literal bytes — is still undecodable.
+    #[test]
+    fn zero_coded_message_cut_outside_a_zero_run_still_fails() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        session.set_diagnostics(true);
+
+        let mut writer = Writer::new();
+        let update = object_update(100, 0xABCD, zero_vec());
+        update.id().encode(&mut writer);
+        update.encode_body(&mut writer)?;
+        let mut body = writer.into_bytes();
+        // Replace the trailing zero joint vectors with non-zero bytes, then cut
+        // the last one off, so the encoding ends in a literal.
+        for byte in body.iter_mut().rev().take(24) {
+            *byte = 0x11;
+        }
+        let _dropped = body.pop();
+        let datagram = encode_datagram(
+            PacketFlags::RELIABLE.with(PacketFlags::ZEROCODED),
+            SequenceNumber(5),
+            &zero_encode(&body),
+        );
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let diagnostics = drain_diagnostics(&mut session);
+        assert!(
+            diagnostics.iter().any(|d| matches!(
+                d,
+                Diagnostic::DecodeFailed {
+                    error: WireError::UnexpectedEof { .. },
+                    ..
+                }
+            )),
+            "a short message not ending in a zero run is still dropped: {diagnostics:?}"
+        );
         Ok(())
     }
 

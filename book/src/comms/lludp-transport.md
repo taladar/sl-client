@@ -102,6 +102,20 @@ mostly-zero (UUIDs that are unset, reserved fields, small integers in wide
 slots), this meaningfully shrinks typical traffic. The body must be expanded
 back out before the message is parsed.
 
+**Second Life sends zero-coded messages that expand too short.** Its simulators
+encode a message's *final* run of zeros short. The common case, seen on
+`ObjectUpdate` on aditi a few times per login, is an encoded body ending
+`00 42`: 66 zeros where the object block's trailing fields need 67. One
+message was 37 bytes short. The reference reader (`LLTemplateMessageReader`)
+copes because it reads past the end of a packet leniently: it logs "Ran off end
+of packet", zero-fills a fixed field, gives a variable field length 0, and a
+missing `Variable` block count means no blocks. A strict decoder instead fails
+the whole message and loses every object in it. sl-client zero-fills too, but
+only for a zero-coded body whose encoding ends in a zero run
+(`sl_wire::ends_in_zero_run`, then `Reader::with_zero_tail`), and logs a warning
+with the number of bytes filled. A message cut short anywhere else is still a
+decode failure.
+
 ## Byte order, a recurring trap
 
 LLUDP mixes endianness, which catches everyone at least once:

@@ -242,7 +242,7 @@ fn block_decode_expr(message_name: &str, block: &BlockDef) -> String {
         // an error, so messages that omit trailing optional `Variable` blocks
         // (e.g. OpenSim's shorter `RegionInfo`) still decode.
         Cardinality::Variable => format!(
-            "{{ let count = reader.u8().unwrap_or(0); let mut items = Vec::with_capacity(usize::from(count)); for _ in 0..count {{ items.push({construct}); }} items }}"
+            "{{ let count = reader.variable_block_count(); let mut items = Vec::with_capacity(usize::from(count)); for _ in 0..count {{ items.push({construct}); }} items }}"
         ),
     }
 }
@@ -442,8 +442,8 @@ fn field_read_expr(ty: &FieldType) -> String {
         FieldType::Quaternion => "reader.quaternion()?".to_owned(),
         FieldType::Bool => "reader.bool()?".to_owned(),
         FieldType::IpAddr => "reader.take_array::<4>()?".to_owned(),
-        FieldType::Variable { length_bytes: 2 } => "reader.variable2()?.to_vec()".to_owned(),
-        FieldType::Variable { .. } => "reader.variable1()?.to_vec()".to_owned(),
+        FieldType::Variable { length_bytes: 2 } => "reader.variable2_owned()?".to_owned(),
+        FieldType::Variable { .. } => "reader.variable1_owned()?".to_owned(),
         FieldType::Fixed { bytes } => format!("reader.take_array::<{bytes}>()?"),
     }
 }

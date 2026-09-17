@@ -110,8 +110,8 @@ use sl_wire::{
     AbuseReport, AnyMessage, CircuitCode, ControlFlags, GLTF_MATERIAL_OVERRIDE_METHOD, Llsd,
     MessageId, ObjectMediaResponse, PacketFlags, ParcelVoiceInfo, Permissions, Permissions5,
     Reader, RegionFlags, RegionHandle, RegionLocalObjectId, RegionLocalParcelId, SequenceNumber,
-    VoiceAccountInfo, WireError, build_group_notice_bucket, build_login_request, message_name,
-    parse_agent_preferences, parse_attachment_resources, parse_avatar_picker_search,
+    VoiceAccountInfo, WireError, build_group_notice_bucket, build_login_request, ends_in_zero_run,
+    message_name, parse_agent_preferences, parse_attachment_resources, parse_avatar_picker_search,
     parse_datagram, parse_display_names, parse_experience_ids, parse_experience_infos,
     parse_experience_permissions, parse_experience_query_reply, parse_experience_search_page,
     parse_get_object_cost, parse_get_object_physics_data, parse_gltf_material_override,
@@ -2088,14 +2088,23 @@ impl Session {
         }
 
         let decoded;
-        let body = if parsed.flags.contains(PacketFlags::ZEROCODED) {
+        let zerocoded = parsed.flags.contains(PacketFlags::ZEROCODED);
+        let body = if zerocoded {
             decoded = zero_decode(parsed.body)?;
             decoded.as_slice()
         } else {
             parsed.body
         };
 
-        let mut reader = Reader::new(body);
+        // A zero-coded body ending in a zero run may decode short: Second
+        // Life's simulators encode that final run short, and the
+        // reference reader zero-fills what is missing. Only that shape is read
+        // leniently; any other short message still fails to decode.
+        let mut reader = if zerocoded && ends_in_zero_run(parsed.body) {
+            Reader::with_zero_tail(body)
+        } else {
+            Reader::new(body)
+        };
         let id = MessageId::decode(&mut reader)?;
         // Unrecognized messages (and bodies that fail to decode) are dropped
         // rather than failing the datagram, but surfaced as a diagnostic.
@@ -2120,6 +2129,16 @@ impl Session {
                 return Ok(());
             }
         };
+        if reader.zero_filled() > 0 {
+            tracing::warn!(
+                ?id,
+                name = message.name(),
+                zero_filled = reader.zero_filled(),
+                body_len = body.len(),
+                "inbound message ran past the end of its data; read the missing \
+                 trailing bytes as zeros, as the reference viewer does"
+            );
+        }
         tracing::trace!(?id, name = message.name(), %from, "inbound message");
         if is_root {
             self.dispatch(from, &message, now)
